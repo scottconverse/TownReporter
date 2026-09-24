@@ -12,7 +12,8 @@
   rather than a button that visibly does nothing.
 */
 import { useEffect, useRef, useState } from "react";
-import { InkButton, announceToDesk } from "@/components/desk-chrome";
+import { InkButton } from "@/components/desk-chrome";
+import { announceToDesk } from "@/components/desk-chrome-utils";
 import {
   COPIED_LABEL_MS,
   COPY_FAILURE_MESSAGE,

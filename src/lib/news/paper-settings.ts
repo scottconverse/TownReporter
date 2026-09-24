@@ -19,7 +19,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
 import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES, EDITOR_EMAIL } from "../paper.ts";
-import type { PaperIdentity } from "../paper-context.tsx";
+import type { PaperIdentity } from "../paper-identity.ts";
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { writeWelcomeArticle } from "./welcome-article.ts";

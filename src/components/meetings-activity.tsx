@@ -67,6 +67,40 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
         </ul>
       )}
 
+      {/*
+        What the meeting produced for the desk.
+
+        A capture that transcribed perfectly and produced no story is a different
+        outcome from one that produced a draft waiting to be read. Showing only the
+        transcription state left the editor unable to tell those apart.
+      */}
+      {row.status === "captured" && (
+        <p className="mt-2 text-sm">
+          {row.draftId ? (
+            <>
+              Draft #{row.draftId} ready to review
+              {row.citationCount > 0 ? ` · ${row.citationCount} cited moment${row.citationCount === 1 ? "" : "s"}` : ""}
+              {" · "}
+              <a href={`/desk/story/${row.leadId}`}>Open the story</a>
+            </>
+          ) : row.leadId ? (
+            <>
+              Filed as a lead{row.leadStatus ? ` (${row.leadStatus})` : ""} · no draft yet
+              {" · "}
+              <a href={`/desk/story/${row.leadId}`}>Open the story</a>
+            </>
+          ) : row.aligned === false ? (
+            <span className="text-amber-800">
+              No story filed: the transcript could not be aligned to agenda items.
+            </span>
+          ) : row.aligned === true ? (
+            <span className="text-amber-800">
+              Aligned to agenda items but no story filed yet. The capture pass files a lead when it aligns.
+            </span>
+          ) : null}
+        </p>
+      )}
+
       {row.votes.some((v) => v.mover || v.tally) && (
         <ul className="mt-2 text-sm">
           {row.votes.filter((v) => v.mover || v.tally).map((v) => (

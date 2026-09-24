@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const capsPath = new URL("./meeting-capture-caps.ts", import.meta.url);
 const capturePath = new URL("./meeting-capture-ytdlp.ts", import.meta.url);
 const pipelinePath = new URL("./meeting-capture.ts", import.meta.url);
 

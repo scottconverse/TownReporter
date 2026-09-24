@@ -122,10 +122,11 @@ describe("daily scan refuses loudly, never silently", () => {
       await sql.query("insert into sources values(1,501,'https://example.test/source','Source','rss',1,'accepted',null,null,null)");
 
       const runtimeSnapshot = async () => ({
+        requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
         runtime: "codex-terra" as const,
-        modelChoice: "codex-balanced",
+        modelChoice: "codex-balanced" as const,
         model: "selected-terra",
-        transport: "codex",
+        transport: "codex" as const,
       });
 
       const result = await tickDailyScans(new Date("2026-09-04T14:00:00Z"), {
@@ -196,6 +197,7 @@ describe("scheduled tick and policy status", () => {
       "insert into sources values(1,501,'https://example.test/custom','Custom','rss',1,'accepted',null,null,null)",
     );
     const snapshot = {
+      requestedRuntime: "custom:11111111-1111-4111-8111-111111111111" as const, requestedEffort: null, resolvedRuntime: "custom:11111111-1111-4111-8111-111111111111" as const, switchReason: null, switchNote: null,
       runtime: "custom:11111111-1111-4111-8111-111111111111" as const,
       modelChoice: "custom:11111111-1111-4111-8111-111111111111" as const,
       transport: "custom" as const,
@@ -245,8 +247,9 @@ describe("scheduled tick and policy status", () => {
       const deps = {
         kick: false,
         runtimeSnapshot: async () => ({
-          runtime: "codex-terra" as const,
-          modelChoice: "codex-balanced",
+          requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
+        runtime: "codex-terra" as const,
+          modelChoice: "codex-balanced" as const,
           model: "fixture",
           transport: "codex" as const,
         }),
@@ -281,8 +284,9 @@ describe("scheduled tick and policy status", () => {
         runtimeSnapshot: async (room) => {
           probed.push(room);
           return {
-            runtime: "codex-terra" as const,
-            modelChoice: "codex-balanced",
+            requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
+        runtime: "codex-terra" as const,
+            modelChoice: "codex-balanced" as const,
             model: "fixture",
             transport: "codex" as const,
           };
@@ -315,10 +319,11 @@ describe("scheduled tick and policy status", () => {
     const runtimeSnapshot = async () => {
       probes += 1;
       return {
+        requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
         runtime: "codex-terra" as const,
-        modelChoice: "codex-balanced",
+        modelChoice: "codex-balanced" as const,
         model: "selected-terra",
-        transport: "codex",
+        transport: "codex" as const,
       };
     };
     assert.deepEqual(await tickDailyScans(now, { runtimeSnapshot, kick: false }), {
@@ -413,7 +418,7 @@ describe("scheduled runtime transport", () => {
               transport: runtime === "claude-cli" ? "claude-code" : "codex",
               model: `selected-${runtime}`,
             };
-      const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+      const result = await runForcedDailyChat(snapshot as any, "system", "user", 99, undefined, {
         claude: async () => (calls.push("claude"), "claude-result"),
         codex: async () => (calls.push("codex"), "codex-result"),
         local: async (_system, _user, _maxTokens, options) => {
@@ -443,7 +448,7 @@ describe("scheduled runtime transport", () => {
     } as const;
     assert.doesNotMatch(JSON.stringify(snapshot), /api.?key|secret|base.?url/i);
     const calls: string[] = [];
-    const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+    const result = await runForcedDailyChat(snapshot as any, "system", "user", 99, undefined, {
       claude: async () => { throw new Error("wrong transport"); },
       codex: async () => { throw new Error("wrong transport"); },
       local: async () => { throw new Error("wrong transport"); },
@@ -467,7 +472,7 @@ describe("scheduled runtime transport", () => {
       newsroomId: 501,
     } as const;
     const calls: string[] = [];
-    const result = await runForcedDailyChat(snapshot, "system", "user", 99, undefined, {
+    const result = await runForcedDailyChat(snapshot as any, "system", "user", 99, undefined, {
       claude: async () => { throw new Error("wrong transport"); },
       codex: async () => { throw new Error("wrong transport"); },
       local: async () => { throw new Error("wrong transport"); },

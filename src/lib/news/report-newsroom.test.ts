@@ -5,6 +5,7 @@ import { createServer, type ViteDevServer } from "vite";
 import type { ReportChat, reportAndDraft as ReportAndDraft } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 import type { DeskJob } from "./jobs.ts";
+import type { ReportedDraftResult } from "./desk-model-run.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -80,7 +81,8 @@ it("threads the claimed job newsroom into the actual report worker", async () =>
           unanswered: [],
           claims: [],
           research_memo: {},
-        };
+          citation_status: "complete" as const,
+        } as unknown as ReportedDraftResult;
       },
       setJobStage: async () => undefined,
     });

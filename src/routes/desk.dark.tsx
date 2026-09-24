@@ -53,7 +53,7 @@ import {
 } from "@/lib/news/desk-copy";
 
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
@@ -109,6 +109,7 @@ function DarkPage() {
   const redditStartRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const timerRef = phaseTimer;
     try {
       const raw = sessionStorage.getItem(OPEN_KEY);
       if (raw) setOpenId(Number(raw));
@@ -116,7 +117,7 @@ function DarkPage() {
       /* ignore */
     }
     return () => {
-      if (phaseTimer.current) clearTimeout(phaseTimer.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
@@ -594,7 +595,7 @@ function DarkPage() {
     } catch {
       /* ignore */
     }
-  }, [openId]);
+  }, [openId, digging, starting, advance]);
   const inv = detail.data?.investigation;
   // See `runLooksStalled` in `src/lib/news/jobs.ts`: true only when the
   // investigation claims to still be running but no live job is behind it,

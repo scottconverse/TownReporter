@@ -96,7 +96,20 @@ export async function guardedLookup(
   });
 }
 
-let guardedFetchImpl: FetchLike | null | undefined;
+let guardedFetchImpl: FetchLike | undefined;
+let undiciLoaderOverride: (() => Promise<typeof import("undici")>) | null = null;
+
+export class GuardedTransportUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("Guarded HTTP transport is unavailable; refusing an unprotected network request.", { cause });
+    this.name = "GuardedTransportUnavailableError";
+  }
+}
+
+export function setUndiciLoaderForTests(loader: (() => Promise<typeof import("undici")>) | null) {
+  undiciLoaderOverride = loader;
+  guardedFetchImpl = undefined;
+}
 
 /**
  * A fetch that re-checks the resolved address at connect time.
@@ -111,10 +124,12 @@ let guardedFetchImpl: FetchLike | null | undefined;
  * into the client bundle. `fetch-url` is reachable from client code, and a
  * `.server.ts` module is rejected outright by TanStack's import protection.
  */
-async function buildGuardedFetch(): Promise<FetchLike | null> {
+async function buildGuardedFetch(): Promise<FetchLike> {
   try {
     const spec = "undici";
-    const undici = (await import(/* @vite-ignore */ spec)) as typeof import("undici");
+    const undici = undiciLoaderOverride
+      ? await undiciLoaderOverride()
+      : (await import(/* @vite-ignore */ spec)) as typeof import("undici");
     const agent = new undici.Agent({
       connect: { lookup: guardedLookup as unknown as undefined },
       // Hops are re-validated one by one below; keep sockets short-lived so a
@@ -127,20 +142,21 @@ async function buildGuardedFetch(): Promise<FetchLike | null> {
         ...(init as Record<string, unknown>),
         dispatcher: agent,
       } as Parameters<typeof undici.fetch>[1])) as unknown as Response;
-  } catch {
-    return null;
+  } catch (error) {
+    throw new GuardedTransportUnavailableError(error);
   }
 }
 
 /**
- * The guarded fetch, or plain `fetch` when it cannot be built — still guarded
- * by `assertPublicHttpUrl`, just without the rebinding protection.
+ * The guarded fetch. Server-side callers fail closed when it cannot be built;
+ * silently falling back to global fetch would remove connect-time DNS-rebinding
+ * protection after the hostname preflight has already succeeded.
  */
 export async function resolveFetch(): Promise<FetchLike> {
   let transport = fetchOverride;
   if (!transport && typeof window === "undefined") {
     if (guardedFetchImpl === undefined) guardedFetchImpl = await buildGuardedFetch();
-    transport = guardedFetchImpl ?? null;
+    transport = guardedFetchImpl;
   }
   const send: FetchLike = transport ?? ((u, i) => fetch(u, i));
   return async (url, init) => capFetchResponse(await send(url, init), url);

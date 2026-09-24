@@ -172,8 +172,12 @@ export async function applyDraftRevision(
 ): Promise<DraftRevisionResult> {
   if (input.previousSha256 === input.nextSha256) return { draftsUpdated: 0, affected: [] };
   const links = await sql.query<{ draft_id: number; artifact_id: number; citation_snapshot: string }>(
-    "select draft_id,artifact_id,citation_snapshot from meeting_draft_transcript_links where newsroom_id=$1 and revision_notice is null",
-    [input.newsroomId],
+    `select l.draft_id,l.artifact_id,l.citation_snapshot
+       from meeting_draft_transcript_links l
+       join drafts d on d.id=l.draft_id and d.newsroom_id=l.newsroom_id
+       join meeting_transcript_artifacts a on a.id=l.artifact_id and a.newsroom_id=l.newsroom_id
+      where l.newsroom_id=$1 and a.video_id=$2 and l.is_current=true and l.revision_notice is null`,
+    [input.newsroomId, input.videoId],
   );
   let draftsUpdated = 0;
   const affected: AffectedClaim[] = [];

@@ -69,9 +69,10 @@ test("every job that runs a desk-claiming walk starts its own server", () => {
   assert.deepEqual(offenders, [], offenders.join("\n"));
 });
 
-test("the real-Postgres job runs the routine notice concurrency proof", () => {
+test("the real-Postgres job uses the explicit runner for every discovered test", () => {
   const postgresJob = jobs(ci)["postgres-integration"]?.join("\n") ?? "";
-  assert.match(postgresJob, /src\/lib\/news\/routine-notice-policy\.postgres\.test\.ts/);
-  assert.match(postgresJob, /src\/lib\/news\/routine-notice-automation\.postgres\.test\.ts/);
-  assert.match(postgresJob, /TEST_POSTGRES_ADMIN_URL/);
+  assert.match(postgresJob, /TOWNREPORTER_RUN_POSTGRES_INTEGRATION:\s*["']?1/);
+  assert.match(postgresJob, /TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL:/);
+  assert.match(postgresJob, /node scripts\/run-postgres-integration\.mjs/);
+  assert.doesNotMatch(postgresJob, /TEST_POSTGRES_ADMIN_URL:/);
 });

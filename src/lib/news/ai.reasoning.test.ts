@@ -89,6 +89,38 @@ describe("reasoning_effort on the OpenAI-compatible (local/gateway) path", () =>
     if (result.ok) assert.equal(result.text, "A publishable draft.");
   });
 
+  it("turns thinking off for the measured Qwen 3.8 LM Studio model", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const result = await withFetch(
+      (async (_url, init) => {
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ choices: [{ message: { content: "A Qwen draft." } }] }), { status: 200 });
+      }) as typeof fetch,
+      () => withEnvAsync(
+        { LLM_BASE_URL: "http://127.0.0.1:1234/v1", LLM_MODEL: "qwen3.8-27b" },
+        () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }),
+      ),
+    );
+    assert.equal(sentBody?.reasoning_effort, "none");
+    assert.equal(result.ok, true);
+  });
+
+  it("turns thinking off for Ollama Cloud Qwen 3.5 so answer tokens remain", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    const result = await withFetch(
+      (async (_url, init) => {
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ choices: [{ message: { content: "A Qwen answer." } }] }), { status: 200 });
+      }) as typeof fetch,
+      () => withEnvAsync(
+        { LLM_BASE_URL: "http://127.0.0.1:11434/v1", LLM_MODEL: "qwen3.5:397b-cloud" },
+        () => grokChat("write a draft", "story facts", 2_200, { choice: "local-model" }),
+      ),
+    );
+    assert.equal(sentBody?.reasoning_effort, "none");
+    assert.equal(result.ok, true);
+  });
+
   it("omits reasoning_effort for an ordinary (non-thinking) model", async () => {
     let sentBody: Record<string, unknown> | undefined;
     await withFetch(

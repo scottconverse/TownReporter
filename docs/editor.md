@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current release: [0.6.60](releases/0.6.60.md).** The release guide separates source changes from unverified GitHub publication, installation, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.61](releases/0.6.61.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -459,6 +459,52 @@ How they join: a council video titled like `08/25/2026` joins that day’s packe
 
 Dark Desk is told: search the whole tape; names may be wrong; quotes need a check. It will still guess. You are the check.
 
+### From a meeting recording to a story
+
+After channels and title keywords are saved in **Paper setup**, an owner can
+open **Server → Meeting capture**, enable meeting capture, and choose **Run
+meetings now**. This on-demand pass does not consume the scheduled daily run;
+you can start another pass when you need one. While it is running, **Stop**
+asks the active pass to stop. **Resume stopped captures** continues eligible
+partial captures already on disk; the result says how many resumed and how many
+had no partial file. **Force re-capture and retain revision** is for one
+specified video when you need to check whether its recording changed.
+
+Open **Scan → Captured meetings** to see what the pass found. Each row reports
+capture and alignment state. When the system filed a lead, use **Open the
+story** from that row: it opens the Queue/story workbench, where the generated
+draft can be reviewed, edited, or redrafted. A captured transcript is not a
+promise that a story was generated: a failed capture, unaligned agenda, or
+lead without a draft is shown as such. Alignment and citations help you locate
+the recording; they do not establish that every claim is true.
+
+Use **Story direction for AI** in the story workbench to name the decision or
+question you want the draft to cover, then choose **Draft with AI** or
+**Redraft**. An exact ordinance or resolution number is matched to the
+captured transcript; if that named measure is absent, the draft is refused
+instead of switching to a different meeting story. **Pulled notes** can give
+the writer leads to check, but they are not independent evidence and do not
+print. Review the saved story and its used citations before publication.
+
+In the story workbench, **Where this draft came from** shows the persisted
+transcript citations actually used by the current saved draft. **Transcript
+material considered** is a separate candidate list and is not proof that the
+draft used those passages. Click a timestamp to open the recording at that
+point. If a newer transcript exists, the workbench names the old and current
+artifacts, compares cited excerpts where a timestamp match is available, and
+offers **Redraft and reverify citations**. A missing comparison is labeled
+unavailable; it must not be treated as confirmation. Publishing remains
+blocked until the current transcript is used and its citations are verified.
+
+If a transcript changes after publication, open **Published**. The page puts
+pending transcript reviews first, shows the old published evidence beside the
+current recording, and requires a note plus checking every cited passage to
+mark it still accurate. That records the accepted artifact B evidence without
+rewriting the article's original artifact A provenance. If the story needs a
+change, choose **Needs correction**, write the correction, and use **Publish
+correction**. Completed review history remains with the published article; it
+does not silently edit the printed story.
+
 ---
 
 ## Dark Desk (`/desk/dark`)
@@ -600,10 +646,19 @@ login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
 nothing is queued or spent until the next readiness check succeeds.
 
-The Codex path uses the same native configuration and full machine capabilities
-as the signed-in Windows user, including search and every accessible `C:\`
-path; TownReporter does not replace them with a read-only or tool-disabled
-mode. Opinion gives the writer its full voice and research tools together; both subscription writers can open sources while writing.
+The Codex path uses the signed-in account for authentication, but the reporting
+call does not inherit the operator's full Codex setup. TownReporter launches it
+ephemerally from the system temporary directory with a read-only sandbox and
+disables shell, computer, browser, apps, plugins, multi-agent and hook features.
+Native web search is enabled only for an explicitly authorized research call.
+Opinion receives its configured voice separately. These are application-level
+CLI controls, not an operating-system security sandbox; the process still runs
+as the Windows account, and read-only mode alone does not restrict file reads.
+Claude Code separately omits the operator's `CLAUDE.md`, skills, plugins and MCP
+configuration and runs in restricted safe mode. Research calls allow only
+`WebSearch` and `WebFetch`; planning calls hide tools; OCR reads one generated
+temporary page. The reporting job has no shell, arbitrary file, browser or
+agent tools.
 
 What comes back:
 

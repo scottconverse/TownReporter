@@ -210,7 +210,10 @@ export function pickSisterMatch<T extends { title: string }>(title: string, othe
 export function isMeetingTitle(title: string, keywords = MEETING_KEYWORDS): boolean {
   const t = title.toLowerCase();
   if (SKIP_TITLES.test(t)) return false;
-  return keywords.some((k) => t.includes(k.toLowerCase()));
+  return keywords.some((keyword) => {
+    const term = keyword.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return Boolean(term) && new RegExp(`(^|[^a-z0-9])${term}(?=$|[^a-z0-9])`).test(t);
+  });
 }
 
 export function pickMeetingVideos<T extends { title: string; duration?: number }>(
@@ -275,6 +278,126 @@ async function fetchChannelTab(channelUrl: string, tab: "streams" | "videos"): P
   }
 }
 
+type YtDlpFlatEntry = {
+  id?: unknown;
+  title?: unknown;
+  duration?: unknown;
+  timestamp?: unknown;
+  upload_date?: unknown;
+  url?: unknown;
+  live_status?: unknown;
+};
+
+type YtDlpFlatPlaylist = { entries?: unknown };
+
+function ytdlpPublished(entry: YtDlpFlatEntry): string {
+  if (typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)) {
+    return new Date(entry.timestamp * 1000).toISOString();
+  }
+  if (typeof entry.upload_date === "string" && /^\d{8}$/.test(entry.upload_date)) {
+    return `${entry.upload_date.slice(0, 4)}-${entry.upload_date.slice(4, 6)}-${entry.upload_date.slice(6, 8)}`;
+  }
+  return "";
+}
+
+/** Parse bounded `yt-dlp --flat-playlist --dump-single-json` output. */
+export function parseYtDlpChannelJson(raw: string, tab: ListedVideo["tab"]): ListedVideo[] {
+  let parsed: YtDlpFlatPlaylist;
+  try {
+    parsed = JSON.parse(raw) as YtDlpFlatPlaylist;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed.entries)) return [];
+  const rows: ListedVideo[] = [];
+  const seen = new Set<string>();
+  for (const value of parsed.entries) {
+    if (!value || typeof value !== "object") continue;
+    const entry = value as YtDlpFlatEntry;
+    const id = typeof entry.id === "string" ? entry.id : "";
+    const title = typeof entry.title === "string" ? entry.title.trim() : "";
+    // The streams tab lists scheduled council sessions months in advance.
+    // Those are awareness items, not completed meeting records, and trying to
+    // capture them would turn an ordinary scan into a row of false failures.
+    if (entry.live_status === "is_upcoming" || entry.live_status === "is_live") continue;
+    if (!/^[\w-]{11}$/.test(id) || !title || seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id,
+      title,
+      published: ytdlpPublished(entry),
+      url: `https://www.youtube.com/watch?v=${id}`,
+      duration: typeof entry.duration === "number" && Number.isFinite(entry.duration)
+        ? Math.max(0, Math.round(entry.duration))
+        : 0,
+      tab,
+    });
+  }
+  return rows;
+}
+
+async function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos"): Promise<ListedVideo[]> {
+  const { spawn } = await import("node:child_process");
+  const base = channelUrl.replace(/\/(videos|streams|featured|playlists|about)\/?$/, "").replace(/\/$/, "");
+  const target = `${base}/${tab}`;
+  return new Promise((resolveRows) => {
+    const argv = [
+      "-m", "yt_dlp",
+      "--flat-playlist",
+      "--dump-single-json",
+      "--playlist-end", "50",
+      "--js-runtimes", "node",
+      target,
+    ];
+    const child = spawn("python", argv, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (rows: ListedVideo[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveRows(rows);
+    };
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      if (stdout.length < 8_000_000) stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      if (stderr.length < 64_000) stderr += chunk.toString();
+    });
+    child.on("error", () => finish([]));
+    child.on("close", (code) => {
+      if (code !== 0 || !stdout.trim()) return finish([]);
+      finish(parseYtDlpChannelJson(stdout, tab));
+    });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+      finish([]);
+    }, 60_000);
+    void stderr;
+  });
+}
+
+async function listChannelVideosWithYtDlp(channelUrl: string): Promise<ListedVideo[]> {
+  let url: URL;
+  try { url = new URL(channelUrl); } catch { return []; }
+  if (!isYoutubeChannel(url)) return [];
+  const rows: ListedVideo[] = [];
+  const seen = new Set<string>();
+  for (const tab of ["streams", "videos"] as const) {
+    for (const row of await runYtDlpChannelTab(channelUrl, tab)) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+export function needsYtDlpChannelFallback(rows: ListedVideo[]): boolean {
+  return !rows.some((row) => isMeetingTitle(row.title));
+}
+
 export async function listChannelVideos(channelUrl: string): Promise<ListedVideo[]> {
   const seen = new Map<string, ListedVideo>();
   const out: ListedVideo[] = [];
@@ -317,6 +440,14 @@ export async function listChannelVideos(channelUrl: string): Promise<ListedVideo
   for (const tab of ["streams", "videos"] as const) {
     for (const row of await fetchChannelTab(handleUrl, tab)) push(row);
   }
+  // YouTube regularly changes the server-rendered channel markup. When the
+  // bounded HTML/RSS path yields nothing useful, use the same installed
+  // yt-dlp runtime that meeting capture already requires. Without this
+  // fallback the desk can capture a video by explicit ID but its automatic and
+  // manual meeting sweep silently discovers zero meetings.
+  if (needsYtDlpChannelFallback(out)) {
+    for (const row of await listChannelVideosWithYtDlp(handleUrl)) push(row);
+  }
   return out;
 }
 
@@ -330,6 +461,53 @@ type PlayerSnapshot = {
   isLiveContent: boolean;
   captionTracks: { languageCode?: string; kind?: string; baseUrl?: string }[];
 };
+
+export type YoutubeCaptureReadiness = "ready" | "upcoming" | "live" | "unknown";
+
+export function buildYtDlpCaptureReadinessArgs(videoId: string): string[] {
+  return [
+    "-m", "yt_dlp", "--skip-download", "--dump-single-json", "--no-warnings", "--no-playlist",
+    "--js-runtimes", "node", `https://www.youtube.com/watch?v=${videoId}`,
+  ];
+}
+
+export function parseYtDlpCaptureReadiness(raw: string): YoutubeCaptureReadiness {
+  try {
+    const data = JSON.parse(raw) as { live_status?: unknown; duration?: unknown };
+    if (data.live_status === "is_upcoming") return "upcoming";
+    if (data.live_status === "is_live") return "live";
+    if (data.live_status === "was_live" || data.live_status === "not_live" || data.live_status === "post_live") return "ready";
+    return typeof data.duration === "number" && Number.isFinite(data.duration) && data.duration > 0
+      ? "ready"
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolveReadiness) => {
+    let stdout = "";
+    let settled = false;
+    const finish = (readiness: YoutubeCaptureReadiness) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveReadiness(readiness);
+    };
+    const child = spawn("python", buildYtDlpCaptureReadinessArgs(videoId), { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      if (stdout.length < 2_000_000) stdout += chunk.toString();
+    });
+    child.on("error", () => finish("unknown"));
+    child.on("close", (code) => finish(code === 0 ? parseYtDlpCaptureReadiness(stdout) : "unknown"));
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+      finish("unknown");
+    }, 20_000);
+  });
+}
 
 async function fetchPlayer(videoId: string): Promise<PlayerSnapshot | null> {
   const endpoint = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
@@ -384,6 +562,27 @@ async function fetchPlayer(videoId: string): Promise<PlayerSnapshot | null> {
     isLiveContent: Boolean(data.videoDetails?.isLiveContent),
     captionTracks: data.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [],
   };
+}
+
+/**
+ * Read only the player metadata needed to decide whether a stream can be
+ * captured yet. This does not fetch captions or media. A missing/failed player
+ * response is unknown, not evidence that the stream has ended.
+ */
+export async function youtubeCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+  let primary: YoutubeCaptureReadiness = "unknown";
+  try {
+    const player = await fetchPlayer(videoId);
+    if (player?.status === "LIVE_STREAM_OFFLINE") return "upcoming";
+    if (player?.isLiveNow) return "live";
+    // A completed live VOD has isLiveContent=true and isLiveNow=false, so it
+    // remains eligible. Only explicit upcoming/live signals block capture.
+    if (player?.status === "OK") primary = "ready";
+  } catch {
+    // Try yt-dlp's bounded metadata-only path below.
+  }
+  if (primary !== "unknown") return primary;
+  return readYtDlpCaptureReadiness(videoId);
 }
 
 export function parseTranscriptPanel(text: string): string {

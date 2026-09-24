@@ -28,7 +28,7 @@ import { normalizeProviderModelId } from "./provider-model-id.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
-  { ok: true; label: string; choice: EffectiveProviderChoice } | { ok: false; error: string };
+  { ok: true; label: string; choice: EffectiveProviderChoice; localModel?: LocalModelOverride } | { ok: false; error: string };
 
 /*
   What the desk says when no provider can answer. This used to be the v1-v4
@@ -458,8 +458,13 @@ async function probeOpenAi(
     if (!res.ok)
       return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
+    if (!Array.isArray(body?.data)) {
+      return {
+        ok: false,
+        error: `${provider.label} returned an invalid model list; TownReporter could not verify the selected model.`,
+      };
+    }
     if (
-      Array.isArray(body?.data) &&
       !body.data.some(
         (entry) =>
           typeof entry.id === "string" &&
@@ -516,6 +521,8 @@ export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
   adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
+  scope?: "story" | "scan" | "opinion" | "dark" | "forced",
+  exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
@@ -571,15 +578,19 @@ export async function probeProvider(
     return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
   }
   let provider = resolveProvider(choice);
-  if (!provider && choice === "local-model") {
-    let localOverride: LocalModelOverride | null = null;
-    localOverride = adapters?.resolveLocal
+  let localOverride: LocalModelOverride | null = null;
+  if (choice === "local-model" && (exactLocalModel || scope || !provider)) {
+    localOverride = exactLocalModel ?? (adapters?.resolveLocal
       ? await adapters.resolveLocal(newsroomId)
-      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId))
-          .override;
-    provider = resolveProvider(choice, localOverride);
+      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId, scope))
+          .override);
+    if (localOverride) provider = resolveProvider(choice, localOverride);
   }
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
+  if (choice === "local-model" && !localOverride && provider.kind === "openai") {
+    // Environment-configured local gateways also need an exact queue snapshot.
+    localOverride = { baseUrl: provider.baseUrl, id: provider.model };
+  }
   if (provider.kind === "codex") {
     const { probeCodex } = await import("./ai-codex.server.ts");
     const result = await probeCodex(provider.label);
@@ -587,9 +598,12 @@ export async function probeProvider(
   }
   if (provider.kind === "openai") {
     const result = await probeOpenAi(provider);
-    return result.ok
-      ? { ...result, choice: choice === "configured" ? "configured" : storyModelChoice(choice) }
-      : result;
+    if (!result.ok) return result;
+    return {
+      ...result,
+      choice: choice === "configured" ? "configured" : storyModelChoice(choice),
+      ...(choice === "local-model" && localOverride ? { localModel: localOverride } : {}),
+    };
   }
   if (provider.kind === "anthropic") {
     return probeAnthropic(provider, storyModelChoice(choice || "claude-frontier"));
@@ -885,10 +899,8 @@ export async function grokChat(
       };
     }
   }
-  if (!res.ok)
-    return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
   let body: {
-    error?: { message?: string } | string;
+    error?: { message?: string; type?: string; code?: string | number } | string;
     model?: string;
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
@@ -896,7 +908,36 @@ export async function grokChat(
   try {
     body = (await res.json()) as typeof body;
   } catch {
-    return { ok: false, error: `${llm.label} returned an unreadable response`, meta: openAiMeta() };
+    return {
+      ok: false,
+      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}`,
+      meta: openAiMeta(),
+    };
+  }
+  if (!res.ok) {
+    // Do not reflect arbitrary remote-provider bodies into a job or the desk.
+    // For the loopback local model, recognize the one actionable structured
+    // failure an editor can fix by choosing a larger-context model or reducing
+    // the supplied record. This also replaces the opaque "API error 400" that
+    // hid a measured 35k-token request against a 32k context.
+    const detail = typeof body.error === "string" ? body.error : body.error?.message;
+    const kind = typeof body.error === "object" ? body.error?.type : "";
+    let localEndpoint = false;
+    try {
+      localEndpoint = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(llm.baseUrl).hostname);
+    } catch {
+      localEndpoint = false;
+    }
+    const localContextFailure =
+      llm.label !== "Custom AI" && localEndpoint &&
+      (/context/i.test(kind ?? "") || /exceeds?.{0,30}context|context.{0,30}(?:size|window|length)/i.test(detail ?? ""));
+    return {
+      ok: false,
+      error: localContextFailure
+        ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
+        : `${llm.label} API error ${res.status}`,
+      meta: openAiMeta(body),
+    };
   }
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;

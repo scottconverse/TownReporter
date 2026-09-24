@@ -24,16 +24,16 @@ test("package.json, APP_VERSION, CHANGELOG, and doc headers name one version", (
   assert.equal(lock.packages[""].version, pkg, "package-lock.json package entry version");
   const claims = [
     ["src/lib/version.ts", /APP_VERSION = "([^"]+)"/],
-    ["CHANGELOG.md", /Current release: \*\*([^*]+)\*\*/],
-    ["README.md", /Current release: \[([^\]]+)\]/],
-    ["docs/setup.md", /Current release: \[([^\]]+)\]/],
-    ["docs/editor.md", /Current release: \[([^\]]+)\]/],
+    ["CHANGELOG.md", /Current (?:software version|release): \*\*([^*]+)\*\*/],
+    ["README.md", /Current (?:software version|release): \[([^\]]+)\]/],
+    ["docs/setup.md", /Current (?:software version|release): \[([^\]]+)\]/],
+    ["docs/editor.md", /Current (?:software version|release): \[([^\]]+)\]/],
     ["docs/manual.md", /\*\*Version ([0-9.]+) ·/],
     ["docs/editor-desk.md", /For \[TownReporter ([0-9.]+)\]/],
     ["docs/reader.md", /For TownReporter ([0-9.]+)\./],
     ["docs/windows-install.md", /Open \[TownReporter ([0-9.]+)\]/],
     ["SELF-HOSTING.md", /Repository documentation version: \*\*([0-9.]+)\*\*/],
-    ["docs/index.html", /Repository release: <b>([0-9.]+)<\/b>/],
+    ["docs/index.html", /Repository (?:software version|release): <b>([0-9.]+)<\/b>/],
   ];
   const offenders = [];
   for (const [file, re] of claims) {

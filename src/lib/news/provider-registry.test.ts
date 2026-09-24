@@ -75,6 +75,8 @@ describe("model-specific thinking effort", () => {
       modelEffortsFor("local-model", "deepseek-v4.1-flash:cloud"),
       ["none", "low", "high", "max"],
     );
+    assert.deepEqual(modelEffortsFor("local-model", "qwen3.8-27b"), ["none"]);
+    assert.deepEqual(modelEffortsFor("local-model", "qwen3.5:397b-cloud"), ["none"]);
     assert.deepEqual(
       modelEffortsFor("custom:11111111-1111-4111-8111-111111111111", "gemini-2.5-flash"),
       [],
@@ -92,6 +94,8 @@ describe("model-specific thinking effort", () => {
       "none",
       "the picker default must agree with its Off label",
     );
+    assert.equal(defaultModelEffort("local-model", "qwen3.8-27b"), "none");
+    assert.equal(defaultModelEffort("local-model", "qwen3.5:397b-cloud"), "none");
     assert.equal(
       defaultModelEffort(
         "custom:11111111-1111-4111-8111-111111111111",

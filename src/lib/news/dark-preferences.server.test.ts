@@ -39,8 +39,8 @@ test("room preferences preserve county/dials and a saved round snapshot survives
   assert.equal(snapshot.preferences.verificationLimit, 3);
   assert.equal(
     JSON.parse(
-      (await sql`select research_preferences_json from dark_runs where id=${run!.id}`)[0]!
-        .research_preferences_json,
+      String((await sql`select research_preferences_json from dark_runs where id=${run!.id}`)[0]!
+        .research_preferences_json),
     ).preferences.verificationLimit,
     3,
   );
@@ -148,8 +148,8 @@ test("the real continued-round worker keeps its snapshot when settings change mi
     assert.ok(packs[1]!.includes("2023-01-01 through 2023-12-31"));
     const [run] =
       await sql`select research_preferences_json,summary,error from dark_runs where newsroom_id=85 order by id desc limit 1`;
-    assert.equal(JSON.parse(run!.research_preferences_json).preferences.verificationLimit, 1);
-    assert.match(run!.summary, /2023-01-01 through 2023-12-31/);
+    assert.equal(JSON.parse(String(run!.research_preferences_json)).preferences.verificationLimit, 1);
+    assert.match(String(run!.summary), /2023-01-01 through 2023-12-31/);
     assert.equal(run!.error, null);
   } finally {
     globalThis.fetch = original;

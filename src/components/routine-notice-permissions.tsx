@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { InkButton, SecHead, announceToDesk } from "@/components/desk-chrome";
+import { InkButton, SecHead } from "@/components/desk-chrome";
+import { announceToDesk } from "@/components/desk-chrome-utils";
 import { ListSkeleton } from "@/components/states";
 import {
   isCurrentRoutineApproval,

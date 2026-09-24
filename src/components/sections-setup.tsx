@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { InkButton, inputClass } from "./desk-chrome";
+import { InkButton } from "./desk-chrome";
+import { inputClass } from "./desk-chrome-utils";
 import { editorSections, applySections } from "@/lib/news/sections";
 import { sectionPreviewChanges, type Section, type SectionConfig } from "@/lib/news/section-types";
 

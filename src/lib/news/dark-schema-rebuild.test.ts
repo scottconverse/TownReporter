@@ -83,7 +83,7 @@ if (dbProbe.ok) {
     ensureDarkSchema = dark.ensureDarkSchema;
     closePoolForTests = db.closePoolForTests;
     darkSchemaStatements = dark.DARK_SCHEMA_STATEMENTS;
-  }, 60_000);
+  }, { timeout: 60_000 });
 
   after(async () => {
     await closePoolForTests?.();
@@ -97,7 +97,7 @@ if (dbProbe.ok) {
       .catch(() => undefined);
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 /** Does the database at `url` (a fresh connection, never the app's own pool) have `dark_runs`? */

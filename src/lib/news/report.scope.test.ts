@@ -1,7 +1,7 @@
-import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
+import { NAME_EVIDENCE_SYSTEM, NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc } from "./report.ts";
+import { reportAndDraft, REPORT_RESEARCH_SYSTEM, REPORT_WRITE_SYSTEM, REPORT_EDIT_SYSTEM, linkOutletInBody, type FetchedDoc, type ReportDeps } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 import { runAbsenceGate } from "./absence-gate.ts";
 import { draftSourceInputs } from "./draft-input.ts";
@@ -66,6 +66,100 @@ it("labels research questions and unknowns as hypotheses that evidence can resol
   }
   assert.match(REPORT_EDIT_SYSTEM, /research questions and unknowns are hypotheses/i);
   assert.match(REPORT_EDIT_SYSTEM, /supplied evidence answers/i);
+});
+it("gives the reconciliation pass the captured meeting transcript, not only fetched web pages", async () => {
+  let editPacket = "";
+  let writePacket = "";
+  const deps = dependencies({ searches: [], fetched: [], packets: [] });
+  deps.chat = async (system, user) => {
+    if (system === REPORT_EDIT_SYSTEM) editPacket = user;
+    if (system === REPORT_WRITE_SYSTEM) writePacket = user;
+    if (system === REPORT_RESEARCH_SYSTEM) return { ok: true, text: JSON.stringify({ news: "Council reviewed the 2027 budget", form: "brief" }) };
+    return { ok: true, text: JSON.stringify({ headline: "Council reviewed the 2027 budget", body: "Council discussed the 2027 budget at its study session.", topic: "council", source_urls: [] }) };
+  };
+  const result = await reportAndDraft({
+    userId: "meeting-evidence-edit", lead: { ...lead, headline: "Council study session", topic: "council" },
+    urls: [], memory: [], researchScope: "supplied", modelChoice: "claude-frontier",
+    extraEvidenceMode: "meeting-transcript",
+    extraEvidence: "MEETING: Council Study Session\n[01:23:45; segment 1256] Council discussed the 2027 budget and a proposed capital plan.",
+  }, deps);
+  assert.match(editPacket, /MEETING TRANSCRIPT EVIDENCE MATCHED TO DRAFT/);
+  assert.match(editPacket, /segment 1256.*2027 budget/);
+  assert.match(writePacket, /MEETING STORY FOCUS.*Choose one consequential verified decision/);
+  assert.match(writePacket, /explicit carries\/fails outcome/);
+  assert.match(editPacket, /MEETING STORY FOCUS.*Remove unrelated votes/);
+  assert.ok(!("error" in result));
+  if (!("error" in result)) assert.doesNotMatch(result.integrity_notes, /could not connect.*saved public sources/i);
+});
+it("locks one meeting story subject through research, writing, and editing", async () => {
+  const calls: { system: string; user: string }[] = [];
+  const deps = dependencies({ searches: [], fetched: [], packets: [] });
+  deps.chat = async (system, user) => {
+    calls.push({ system, user });
+    if (system.includes("reporting pass for one sequential part")) {
+      return { ok: true, text: JSON.stringify({ findings: [
+        { summary: "Council directed staff to return with marijuana hospitality licensing amendments", why_newsworthy: "A carried motion changes licensing policy", segment_indexes: [10] },
+        { summary: "Council failed to extend the meeting", why_newsworthy: "The meeting ran late", segment_indexes: [100] },
+      ] }) };
+    }
+    if (system === REPORT_RESEARCH_SYSTEM) {
+      return { ok: true, text: JSON.stringify({ news: "The council extended its meeting", angle: "Meeting extension", why_it_matters: "Scheduling", form: "brief" }) };
+    }
+    return { ok: true, text: JSON.stringify({
+      headline: "Council Advances Marijuana Hospitality Licensing Work",
+      body: "The council directed staff to return with marijuana hospitality licensing amendments. The motion carried, according to the captured transcript.",
+      topic: "council", source_urls: [],
+    }) };
+  };
+  const transcript = [
+    "MEETING: City Council Regular Session (2026-09-22)",
+    "RECORDING: https://www.youtube.com/watch?v=test-meeting",
+    "This recording has ended and the transcript below was captured successfully.",
+    "--- ITEM 9: Marijuana hospitality licensing (from 00:00:00) ---",
+    ...Array.from({ length: 70 }, (_, index) => `[00:00:${String(index).padStart(2, "0")}; segment ${index}] ${index === 10 ? "Council directs staff to return with marijuana hospitality licensing amendments." : index === 12 ? "That motion carries four to three." : "Discussion of the licensing proposal."}`),
+    "--- ITEM 12: Closing business (from 00:01:10) ---",
+    ...Array.from({ length: 70 }, (_, index) => `[00:01:${String(index).padStart(2, "0")}; segment ${index + 70}] ${index === 30 ? "A motion to extend the meeting failed." : index === 60 ? "A council member mentioned a family scheduling conflict." : "Closing business."}`),
+    "--- VOTES, FROM THE STRUCTURED RECORD ---",
+    "No vote was established from the structured record for any item in this meeting.",
+  ].join("\n");
+  const result = await reportAndDraft({
+    userId: "meeting-focus", lead: { ...lead, headline: "City Council Regular Session", why: "Licensing, budget, announcements and meeting extension", topic: "council" },
+    urls: [], memory: [], researchScope: "supplied", modelChoice: "claude-frontier",
+    extraEvidenceMode: "meeting-transcript", extraEvidence: transcript,
+  }, deps);
+  assert.ok(!("error" in result));
+  const research = calls.find((call) => call.system === REPORT_RESEARCH_SYSTEM)?.user ?? "";
+  const writing = calls.find((call) => call.system === REPORT_WRITE_SYSTEM)?.user ?? "";
+  const editing = calls.find((call) => call.system === REPORT_EDIT_SYSTEM)?.user ?? "";
+  for (const packet of [research, writing, editing]) {
+    assert.match(packet, /marijuana hospitality licensing amendments/i);
+    assert.doesNotMatch(packet, /family scheduling conflict/i);
+  }
+  assert.match(writing, /NEWS ANGLE: Council directed staff to return with marijuana hospitality licensing amendments/);
+  assert.doesNotMatch(writing, /ACTUAL NEWS: The council extended its meeting/);
+  assert.match(editing, /selected subject is Council directed staff/);
+});
+it("masks unresolved transcript names and role claims only for meeting-transcript drafts", async()=>{
+  const deps=dependencies({searches:[],fetched:[],packets:[]});
+  const unresolvedNames=["Marcen","Kelkoffer","Crist","Popkin","Brito"];
+  const storyBody="The motion, made by Council Member Marcen and seconded by Council Member Kelkoffer, asks staff to return the ordinance. Marcen framed the change as a revenue question. Council members Crist, Popkin and Brito voted in opposition. Popkin asked where the item would fall on the city's work plan. Brito said she was not comfortable bringing cannabis consumption into a public space.";
+  deps.chat=async(system,_user)=>{
+    if(system===NAME_INVENTORY_SYSTEM) return {ok:true,text:JSON.stringify({complete:true,people:unresolvedNames.map(name=>({name,role:"Longmont City Council Member",context:`Council Member ${name} spoke.`}))})};
+    if(system===NAME_EVIDENCE_SYSTEM) return {ok:true,text:JSON.stringify({checks:unresolvedNames.map(name=>({name,status:"unresolved",reason:"The transcript cannot establish the speaker's identity or title."}))})};
+    if(system===REPORT_RESEARCH_SYSTEM) return {ok:true,text:JSON.stringify({news:"Council reviewed the project schedule",angle:"Project schedule",form:"brief"})};
+    return {ok:true,text:JSON.stringify({headline:"Council Takes Up Marijuana Hospitality Licenses",dek:"A 4-3 vote sends the proposal back to staff.",body:storyBody,topic:"council",source_urls:[]})};
+  };
+  const result=await reportAndDraft({userId:"meeting-name-mask",lead:{...lead,headline:"Council reviewed the project schedule",topic:"council"},urls:[],memory:[],researchScope:"supplied",modelChoice:"claude-frontier",extraEvidenceMode:"meeting-transcript",extraEvidence:`MEETING TRANSCRIPT: ${storyBody}`},deps);
+  assert.ok(!("error" in result));
+  if(!("error" in result)){
+    assert.match(result.body,/made by an unidentified speaker and seconded by an unidentified speaker, asks staff/);
+    assert.match(result.body,/an unidentified speaker framed the change/i);
+    assert.match(result.body,/three unidentified speakers voted in opposition/i);
+    assert.match(result.body,/an unidentified speaker asked where the item would fall/i);
+    assert.match(result.body,/an unidentified speaker said she was not comfortable/i);
+    assert.match(result.integrity_notes,/replaced with neutral wording/);
+    assert.doesNotMatch(`${result.headline} ${result.dek} ${result.body}`,/Marcen|Kelkoffer|Crist|Popkin|Brito|Council Member/i);
+  }
 });
 for (const outcome of ["success", "refusal", "unreadable", "exception"]) {
   it(`reconciles an ordinary draft against URL-labeled evidence and retains it on ${outcome}`, async () => {
@@ -252,7 +346,7 @@ it("keeps a useful overlong draft with an honest form and visible length warning
   }
   assert.equal(calls, 3);
 });
-function dependencies(log: { searches: string[]; fetched: string[]; packets: string[] }) {
+function dependencies(log: { searches: string[]; fetched: string[]; packets: string[] }): ReportDeps {
   return {
     paper: async () => ({ name: "TownReporter", city: "Longmont", state: "Colorado", officialDomains: [] }),
     search: async (q: string) => { log.searches.push(q); return [{ url: alien, title: "Test automation vendor raises money" }]; },

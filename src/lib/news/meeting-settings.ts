@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { resolve } from "node:path";
 import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { authMiddleware } from "../auth/middleware.ts";

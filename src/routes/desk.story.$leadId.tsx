@@ -1,6 +1,8 @@
 import { StoryBody } from "@/components/story-body";
 import { StoryDocumentList } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { MeetingSourceBlock } from "@/components/meeting-source-block";
+import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import {
   evidenceNeedsReview,
@@ -9,27 +11,23 @@ import {
 } from "@/lib/news/draft-evidence";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import {
-  Busy,
-  Chip,
-  DeskShell,
-  Field,
-  InkButton,
-  leadOrigin,
-  announceToDesk,
-} from "@/components/desk-chrome";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   createFollowUp,
   dropFollowUp,
   draftLead,
   getLead,
+  getDraftHistoryItem,
+  listDraftHistory,
   listPullJobs,
   listFollowUps,
   nudgeFollowUp,
   publishLead,
   pullTodo,
+  resolveDraftMeetingReview,
   continuePullJob,
   recordFollowUpReply,
   saveDraft,
@@ -41,7 +39,7 @@ import { FollowUpItem } from "@/components/follow-up-item";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
   mergeDraftEvidenceIntoNotes,
@@ -85,6 +83,7 @@ import {
   type EditableDraftFields,
 } from "@/lib/news/draft-reconcile-actions";
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
+import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -137,6 +136,7 @@ function StoryPage() {
   }, [body, headline, dek]);
   const [topic, setTopic] = useState("council");
   const [scratch, setScratch] = useState("");
+  const [storyDirection, setStoryDirection] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
@@ -319,8 +319,10 @@ function StoryPage() {
   */
 
   useEffect(() => {
-    setResearchScope(parseNotes(data?.lead.notes_json).researchScope ?? "public");
-    const s = parseNotes(data?.lead.notes_json).scratch ?? "";
+    const notes = parseNotes(data?.lead.notes_json);
+    setResearchScope(notes.researchScope ?? "public");
+    setStoryDirection(notes.editorialAssignment?.text ?? "");
+    const s = notes.scratch ?? "";
     if (s) setScratch(s);
   }, [data?.lead.notes_json]);
 
@@ -348,7 +350,7 @@ function StoryPage() {
   const draft = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
+        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope } });
     },
@@ -413,10 +415,39 @@ function StoryPage() {
     },
   });
 
+  const draftMeetingReview = useMutation({
+    mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string }) => {
+      if (!data?.draft?.id || !data.evidenceToken || !data.draftMeetingEvidence?.currentArtifactId) {
+        throw new Error("The current draft or transcript comparison is unavailable. Reload this story first.");
+      }
+      return resolveDraftMeetingReview({ data: {
+        leadId: id,
+        draftId: Number(data.draft.id),
+        evidenceToken: data.evidenceToken,
+        acceptedArtifactId: data.draftMeetingEvidence.currentArtifactId,
+        confirmedSegmentIndexes: input.confirmedSegmentIndexes,
+        note: input.note,
+      } });
+    },
+    onSuccess: async (res) => {
+      if (!answered(res)) {
+        setMsg(NO_ANSWER);
+        return;
+      }
+      if (!res.ok) {
+        setMsg(res.error);
+        return;
+      }
+      setMsg("Citation review saved against the current transcript. The draft text and original evidence remain unchanged.");
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+    },
+    onError: (error) => setMsg(error instanceof Error ? error.message : "Could not save the citation review."),
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
+        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
     },
@@ -450,7 +481,7 @@ function StoryPage() {
       setMsg(error instanceof Error ? error.message : "Evidence review could not be saved."),
   });
 
-  const applyCheckedDraft = async (
+  const applyCheckedDraft = useCallback(async (
     draftId: number,
     originalDraftId: number,
     expected?: EditableDraftFields,
@@ -554,7 +585,7 @@ function StoryPage() {
       );
     }
     return true;
-  };
+  }, [id, refetch]);
 
   const reconcile = useMutation({
     mutationFn: () => requestDraftReconciliationFn({ data: { leadId: id, modelChoice, modelEffort } }),
@@ -634,12 +665,12 @@ function StoryPage() {
         setReconcileNoteError(true);
         setReconcileNoteWarning(false);
       });
-  }, [reconcileStatus.data]);
+  }, [reconcileStatus.data, applyCheckedDraft]);
 
   const publish = useMutation({
     mutationFn: async () => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
+        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
       return publishLead({ data: id });
@@ -1008,6 +1039,18 @@ function StoryPage() {
           </p>
         ) : null}
       </div>
+      {!locked && !onPaper ? (
+        <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
+          <textarea
+            rows={2}
+            value={storyDirection}
+            onChange={(e) => setStoryDirection(e.target.value)}
+            maxLength={1000}
+            disabled={waiting}
+            placeholder="For example: Cover the vote on Ordinance 2026-57 and what changes for residents."
+          />
+        </Field>
+      ) : null}
       {modelResearchOpen && !locked && !onPaper ? (
         <section
           className="astra-model-research"
@@ -1222,8 +1265,15 @@ function StoryPage() {
               leadId={id}
               notes={notes}
               hasDraft={Boolean(data.draft)}
+              currentDraftId={data.draft ? Number(data.draft.id) : null}
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
+              draftMeetingEvidence={data.draftMeetingEvidence}
+              onMeetingRedraft={locked || onPaper ? undefined : () => draft.mutate()}
+              meetingRedrafting={draft.isPending || waiting}
+              evidenceToken={data.evidenceToken}
+              onReverifyMeetingCitations={locked || onPaper || !data.draft ? undefined : (review) => draftMeetingReview.mutate(review)}
+              reverifyingMeetingCitations={draftMeetingReview.isPending}
             />
           </section>
         </aside>
@@ -1488,12 +1538,120 @@ function usePhoneNotes() {
   return small;
 }
 
+function DraftHistoryPanel({ leadId, currentDraftId }: { leadId: number; currentDraftId: number | null }) {
+  const [open, setOpen] = useState(false);
+  const [selectedDraftId, setSelectedDraftId] = useState<number | null>(null);
+  const history = useQuery({
+    queryKey: ["draft-history", leadId],
+    queryFn: () => listDraftHistory({ data: leadId }),
+    enabled: open,
+  });
+  const detail = useQuery({
+    queryKey: ["draft-history-item", leadId, selectedDraftId],
+    queryFn: () => getDraftHistoryItem({ data: { leadId, draftId: selectedDraftId! } }),
+    enabled: open && selectedDraftId != null,
+  });
+  const drafts = history.data ?? [];
+  const selected = detail.data;
+
+  return (
+    <section className="note-sec draft-history">
+      <button type="button" className="btn" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        {open ? "Hide draft history" : "Draft history and transcript revisions"}
+      </button>
+      {open ? (
+        <div>
+          {history.isPending ? <p className="note-one">Loading saved drafts…</p> : null}
+          {history.isError ? <p className="note-gate">Draft history could not be loaded. Try again.</p> : null}
+          {!history.isPending && !history.isError && !drafts.length ? <p className="note-one">No saved draft history is available for this story.</p> : null}
+          {drafts.length ? (
+            <ul className="meeting-citations" aria-label="Saved draft history">
+              {drafts.map((draft) => (
+                <li key={draft.id}>
+                  <p><b>{draft.headline || "Untitled draft"}</b>{draft.id === currentDraftId ? " · Current draft" : " · Earlier draft"}</p>
+                  <p className="note-one">{new Date(draft.updatedAt).toLocaleString()} · {draft.topic || "Uncategorized"}</p>
+                  {draft.transcriptLinks.map((link) => (
+                    <p className="note-one" key={link.id}>
+                      Transcript artifact {link.artifactId} ({link.sha256.slice(0, 12)}…) · {link.citationCount} saved citation{link.citationCount === 1 ? "" : "s"}
+                      {link.revisionNotice ? ` · ${link.revisionNotice}` : ""}
+                    </p>
+                  ))}
+                  {draft.transcriptReviews.map((review, index) => (
+                    <p className="note-one" key={`${draft.id}-review-${review.acceptedArtifactId}-${index}`}>
+                      Citation review of artifact {review.acceptedArtifactId} ({review.acceptedArtifactSha256.slice(0, 12)}…) by {review.reviewedBy} on {new Date(review.reviewedAt).toLocaleString()}: {review.note}
+                    </p>
+                  ))}
+                  <button type="button" className="btn" onClick={() => setSelectedDraftId(draft.id)}>
+                    {selectedDraftId === draft.id ? "Showing this saved draft" : "View saved draft and evidence"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {detail.isPending && selectedDraftId != null ? <p className="note-one">Loading saved draft…</p> : null}
+          {detail.isError ? <p className="note-gate">The saved draft could not be loaded.</p> : null}
+          {selected ? (
+            <article className="note-sec" aria-label={`Saved draft ${selected.id}`}>
+              <h3>{selected.headline || "Untitled draft"}</h3>
+              {selected.dek ? <p>{selected.dek}</p> : null}
+              <pre className="draft-history-body">{selected.body}</pre>
+              {selected.transcriptLinks.map((link) => (
+                <section key={`history-link-${link.id}`}>
+                  <p><b>Original transcript artifact {link.artifactId}</b> · SHA-256 {link.sha256}</p>
+                  {link.revisionNotice ? <p className="note-gate">{link.revisionNotice}</p> : null}
+                  <ul className="meeting-citations">
+                    {link.citations.map((citation, index) => (
+                      <li key={`${link.id}-${citation.segmentIndex}-${index}`}>
+                        <p className="meeting-citation-head">Segment {citation.segmentIndex} · {citation.timestampSeconds == null ? "time unavailable" : meetingClock(citation.timestampSeconds)}</p>
+                        <p className="meeting-citation-excerpt">{citation.segmentAvailable ? citation.excerpt : "The saved citation no longer resolves to matching stored transcript text."}</p>
+                        {citation.captionSha256 ? <code>{citation.captionSha256}</code> : null}
+                      </li>
+                    ))}
+                    {!link.citations.length ? <li>Transcript citations are missing or malformed in this history record.</li> : null}
+                  </ul>
+                </section>
+              ))}
+              {selected.transcriptReviews.map((review) => (
+                <section key={`accepted-review-${review.id}`}>
+                  <p><b>Editor citation review</b> · artifact {review.acceptedArtifactId} · SHA-256 {review.acceptedArtifactSha256}</p>
+                  <p>{review.reviewedBy} · {new Date(review.reviewedAt).toLocaleString()}</p>
+                  <p>{review.note}</p>
+                  <ul className="meeting-citations">
+                    {review.citations.map((value, index) => {
+                      const citation = value as { sourceSegmentIndex?: number; acceptedSegmentIndex?: number; acceptedTimestampSeconds?: number; excerpt?: string; captionSha256?: string };
+                      return (
+                        <li key={`review-citation-${review.id}-${index}`}>
+                          <p>Original A segment {citation.sourceSegmentIndex ?? "unknown"} → accepted B segment {citation.acceptedSegmentIndex ?? "unknown"}
+                            {citation.acceptedTimestampSeconds != null && Number.isFinite(citation.acceptedTimestampSeconds) ? ` · ${meetingClock(citation.acceptedTimestampSeconds)}` : ""}</p>
+                          <p className="meeting-citation-excerpt">{citation.excerpt ?? "Accepted passage unavailable."}</p>
+                          {citation.captionSha256 ? <code>{citation.captionSha256}</code> : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </article>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ReportingNotesPane({
   leadId,
   notes,
   hasDraft,
   locked,
   openedExtractionByUrl,
+  draftMeetingEvidence,
+  onMeetingRedraft,
+  meetingRedrafting,
+  evidenceToken,
+  onReverifyMeetingCitations,
+  reverifyingMeetingCitations,
+  currentDraftId,
 }: {
   leadId: number;
   notes: ReportingNotes;
@@ -1501,6 +1659,13 @@ function ReportingNotesPane({
   locked: boolean;
   /** Capture-time extraction method for each `notes.opened` url, when known (see getLead). */
   openedExtractionByUrl: Record<string, string | null>;
+  draftMeetingEvidence: DraftMeetingEvidence | null;
+  onMeetingRedraft?: () => void;
+  meetingRedrafting: boolean;
+  evidenceToken: string;
+  onReverifyMeetingCitations?: (review: { confirmedSegmentIndexes: number[]; note: string }) => void;
+  reverifyingMeetingCitations: boolean;
+  currentDraftId: number | null;
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
@@ -1644,7 +1809,24 @@ function ReportingNotesPane({
     does not exist, and printing it unchecked is how the paper prints something
     false. The checkbox is the editor saying they opened the city's site.
   */
-  const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
+  /*
+    "Where this came from" sits at the top of the notes on a meeting story.
+
+    It renders nothing for a draft with no transcript citations, so every other
+    story in the paper is unchanged.
+  */
+  const meetingSourceBlock = (
+    <MeetingSourceBlock
+      notes={notes}
+      usedEvidence={draftMeetingEvidence}
+      onRedraft={onMeetingRedraft}
+      redrafting={meetingRedrafting}
+      onReverify={onReverifyMeetingCitations}
+      reverifying={reverifyingMeetingCitations}
+      evidenceToken={evidenceToken}
+    />
+  );
+    const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
   const absenceBlock = gateClaims.length ? (
     <div className="note-sec note-gate">
       <p className="side-label">Verify before print · Claims of absence</p>
@@ -1740,6 +1922,8 @@ function ReportingNotesPane({
           <span className="chip dnp">does not print</span>
         </div>
       ) : null}
+      {meetingSourceBlock}
+      {hasDraft ? <DraftHistoryPanel leadId={leadId} currentDraftId={currentDraftId} /> : null}
       {!filled ? (
         <>
           <p className="note-one" style={{ marginTop: small ? 0 : 8 }}>
@@ -1747,7 +1931,7 @@ function ReportingNotesPane({
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
               : "Draft with AI fills this. You can add a line."}
           </p>
-          {absenceBlock}
+      {absenceBlock}
           {todoList("empty")}
         </>
       ) : (
@@ -1880,11 +2064,13 @@ function ReportingNotesPane({
                 value={fuWho}
                 onChange={(e) => setFuWho(e.target.value)}
                 placeholder="Who — e.g. City Manager's office"
+                aria-label="Who owes a response"
               />
               <input
                 value={fuWhat}
                 onChange={(e) => setFuWhat(e.target.value)}
                 placeholder="For what — one line"
+                aria-label="What response is needed"
               />
               <input
                 type="date"
@@ -1923,6 +2109,7 @@ function ReportingNotesPane({
               }
             }}
             placeholder="Your own line — a call to make, a record to pull"
+            aria-label="Add a reporting note"
           />
           <InkButton
             small

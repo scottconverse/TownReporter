@@ -1,11 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import {
   CLAUDE_CLI_MISSING,
   claudeCliCandidates,
   claudeCodeChat,
+  findClaudeCli,
   parseCliEnvelope,
   resetClaudeCliCache,
 } from "./ai-claude-code.server.ts";
@@ -78,7 +81,7 @@ describe("parseCliEnvelope", () => {
         timedOut: false,
         inputTokens: 12,
       });
-      assert.equal(out.meta?.totalTokens, undefined);
+      assert.equal("totalTokens" in (out.meta ?? {}), false);
     }
   });
 
@@ -321,9 +324,13 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
       });
       assert.equal(result.ok, true);
       if (!result.ok) return;
-      const echoed = JSON.parse(result.text) as { flag: string; value: string };
+      const echoed = JSON.parse(result.text) as { flag: string; value: string; argv: string[] };
       assert.equal(echoed.flag, "--tools");
       assert.equal(echoed.value, "");
+      assert.ok(echoed.argv.includes("--restricted"));
+      assert.ok(echoed.argv.includes("--strict-mcp-config"));
+      assert.ok(echoed.argv.includes("--safe-mode"));
+      assert.ok(echoed.argv.includes("--no-session-persistence"));
     } finally {
       restore();
       resetClaudeCliCache();
@@ -402,6 +409,15 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
       resetClaudeCliCache();
     }
   });
+
+  it("refuses filesystem, command, browser, and agent tools at the reporting boundary", async () => {
+    for (const tool of ["Read", "Write", "Edit", "Bash", "PowerShell", "Agent", "mcp__anything"]) {
+      await assert.rejects(
+        claudeCodeChat({ system: "", user: "untrusted evidence", model: "claude-opus-5", timeoutMs: 1_000, allowedTools: [tool] }),
+        /outside the reporting boundary/i,
+      );
+    }
+  });
 });
 
 /**
@@ -418,26 +434,84 @@ describe("claudeCodeReadChat sends --tools Read and names exactly one file", () 
       FAKE_CLAUDE_ECHO_READ_CALL: "1",
     });
     resetClaudeCliCache();
+    const dir = await mkdtemp(join(tmpdir(), "trd-ocr-boundary-"));
+    const filePath = join(dir, "page.jpg");
+    await writeFile(filePath, "fixture");
     try {
       const { claudeCodeReadChat } = await import("./ai-claude-code.server.ts");
       const result = await claudeCodeReadChat({
         prompt: "Transcribe this page verbatim.",
-        filePath: "C:\\Users\\editor\\AppData\\Local\\Temp\\trd-ocr-abc123\\page.jpg",
+        filePath,
         model: "claude-opus-5",
         timeoutMs: 10_000,
       });
       assert.equal(result.ok, true);
       if (!result.ok) return;
-      const echoed = JSON.parse(result.text) as { tools: string; stdin: string };
+      const echoed = JSON.parse(result.text) as { tools: string; stdin: string; argv: string[]; cwd: string };
       assert.equal(echoed.tools, "Read");
-      assert.match(echoed.stdin, /trd-ocr-abc123[\\/]page\.jpg/);
+      assert.ok(echoed.stdin.includes(filePath));
+      assert.equal(echoed.cwd, dir);
+      assert.ok(echoed.argv.includes("--restricted"));
+      assert.ok(echoed.argv.includes("--strict-mcp-config"));
       // Exactly one path is named — the prompt does not also carry a second
       // temp file or a directory listing for the model to wander into.
-      const pathMentions = echoed.stdin.match(/trd-ocr-abc123[\\/]page\.jpg/g) ?? [];
-      assert.equal(pathMentions.length, 1);
+      const pathMentions = echoed.stdin.split(filePath).length - 1;
+      assert.equal(pathMentions, 1);
     } finally {
       restore();
       resetClaudeCliCache();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/*
+ * The same relative-path defect Unit B fixed in the Codex adapter. An operator
+ * writes `CLAUDE_CLI_PATH=scripts/fakes/fake-claude-cli.mjs`, the finder checks
+ * it with `access()` against the server's cwd, and every call is then spawned
+ * from TMPDIR/TEMP (so no stray CLAUDE.md is discovered). Node resolved the
+ * relative script against the temp folder, exited 1 with "Cannot find module",
+ * and the desk reported a provider failure for a CLI that never ran. The
+ * failover job lands on this adapter, so the fake has to start from either cwd.
+ */
+describe("claudeCodeChat runs a relative CLAUDE_CLI_PATH from the temp reporting cwd", () => {
+  it("resolves it to the file the finder vouched for, so the spawn finds it", async () => {
+    const spawnCwd = await mkdtemp(join(tmpdir(), "claude-relative-cli-cwd-"));
+    // Exactly the shape CI sets, relative to the checkout root.
+    const relativeToRoot = relative(ROOT, FAKE_CLAUDE);
+    const applicationCwd = process.cwd();
+    const restore = withEnv({
+      CLAUDE_CLI_PATH: relativeToRoot,
+      FAKE_CLAUDE_ECHO_TOOLS: "1",
+      TMPDIR: spawnCwd,
+      TEMP: spawnCwd,
+    });
+    resetClaudeCliCache();
+    try {
+      process.chdir(ROOT);
+      assert.equal(
+        await findClaudeCli(),
+        FAKE_CLAUDE,
+        "a relative CLAUDE_CLI_PATH must leave the finder absolute, or the spawn resolves it against TMPDIR",
+      );
+      const result = await claudeCodeChat({
+        system: "Return JSON only.",
+        user: "plan the next hop",
+        model: "claude-opus-5",
+        timeoutMs: 10_000,
+      });
+      assert.equal(result.ok, true, "the CLI must actually start, not merely exist");
+      if (!result.ok) return;
+      // The cwd really was the temp folder the adapter reports from, and the
+      // CLI still started -- which is the whole point: an absolute path is
+      // what makes those two facts compatible.
+      const echoed = JSON.parse(result.text) as { flag: string; value: string; cwd: string };
+      assert.equal(echoed.cwd, spawnCwd);
+    } finally {
+      process.chdir(applicationCwd);
+      restore();
+      resetClaudeCliCache();
+      await rm(spawnCwd, { recursive: true, force: true });
     }
   });
 });

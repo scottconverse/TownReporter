@@ -182,19 +182,19 @@ describe("model choice contract", () => {
     );
   });
 
-  it("names the local model in every picker with technical fallback", () => {
+  it("names the local model in every picker and says an unavailable selection stops", () => {
     assert.equal(modelChoiceLabel("local-model"), "Local model");
     assert.equal(
       modelChoiceHelp("local-model"),
-      "Prefers Local model for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
+      "Uses the selected Ollama or on-device model for this run. If it is unavailable, the run stops instead of silently switching providers.",
     );
     assert.equal(
       modelChoiceHelp("local-model", "opinion"),
-      "Prefers Local model for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
+      "Uses the selected Ollama or on-device model for this run. If it is unavailable, the run stops instead of silently switching providers.",
     );
     assert.equal(
       modelChoiceHelp("local-model", "dark"),
-      "Prefers Local model for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
+      "Uses the selected Ollama or on-device model for this run. If it is unavailable, the run stops instead of silently switching providers.",
     );
   });
 

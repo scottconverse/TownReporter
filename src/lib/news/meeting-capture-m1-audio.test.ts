@@ -1,8 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-const runnerPath = new URL("./meeting-capture-ytdlp.ts", import.meta.url);
-
 describe("meeting capture M-1 audio-required fallback", () => {
   it("builds an audio capture argv with -x, opus, and quality 5", async () => {
     const mod = await import("./meeting-capture-ytdlp.ts");

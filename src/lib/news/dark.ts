@@ -14,6 +14,7 @@ import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, sto
 import { planAutomaticFailover, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
+import { applyJobLocalModelSnapshot } from "./job-local-model.ts";
 import {
   modelEffort as validatedModelEffort,
   type ModelEffort,
@@ -402,17 +403,17 @@ const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, ru
  */
 async function probeDarkProvider(choice?: string, newsroomId?: number) {
   if (choice !== "auto") {
-    const first = await probeProvider(choice, newsroomId);
+    const first = await probeProvider(choice, newsroomId, undefined, "dark");
     if (first.ok) return first;
     const plan = await planAutomaticFailover({
       source: "editor",
       current: choice ?? "auto",
       error: first.error,
-      probe: (candidate) => probeProvider(candidate, newsroomId),
+      probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
       ladder: DARK_AUTOMATIC_LADDER,
     });
     if (!plan) return first;
-    const resolved = await probeProvider(plan.next, newsroomId);
+    const resolved = await probeProvider(plan.next, newsroomId, undefined, "dark");
     if (!resolved.ok) return first;
     const previousLabel = modelChoiceLabel(choice ?? "auto");
     return {
@@ -428,7 +429,7 @@ async function probeDarkProvider(choice?: string, newsroomId?: number) {
   }
   const failures: string[] = [];
   for (const rung of ["configured", ...DARK_AUTOMATIC_LADDER]) {
-    const result = await probeProvider(rung, newsroomId);
+    const result = await probeProvider(rung, newsroomId, undefined, "dark");
     if (result.ok) return result;
     failures.push(result.error);
   }
@@ -1739,7 +1740,7 @@ async function runVerificationStage(
         noTools: true,
         reasoningEffort: snapshot.modelEffort,
       }),
-      probe: (candidate) => probeProvider(candidate, newsroomId),
+      probe: (candidate) => probeProvider(candidate, newsroomId, undefined, "dark"),
       resolve: async (candidate) => ({
         modelChoice: candidate,
         modelEffort: effortForChoice(candidate, active.modelEffort),
@@ -1838,7 +1839,7 @@ async function executeDarkRun(
 ) {
   const sql = await getSql();
   const choice = opts.choice;
-  const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
+  const overrides = await readProviderOverrides(newsroomId, "dark").catch(() => ({}));
   const runRows = await sql<{ id: number }>`
     insert into dark_runs (user_id, newsroom_id, model_choice, model_effort)
     values (${userId}, ${newsroomId}, ${choice ?? null}, ${opts.modelEffort ?? null}) returning id
@@ -1932,7 +1933,7 @@ async function executeDarkRun(
           source: opts.automatic ? "auto" : "editor",
           current: activeChoice,
           error,
-          probe: (next) => probeProvider(next, newsroomId),
+          probe: (next) => probeProvider(next, newsroomId, undefined, "dark"),
           ladder: DARK_AUTOMATIC_LADDER,
         });
         if (!plan) return null;
@@ -2194,6 +2195,7 @@ export async function startDarkRound(
       requestedEffort: validatedModelEffort(asked, effortValue),
       actualRuntime: effectiveChoice,
       actualEffort: modelEffort,
+      localModel: probe.ok ? probe.localModel : undefined,
       preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
     })),
   });
@@ -2598,7 +2600,10 @@ export async function performDarkRound(job: DeskJob) {
   */
   let choice = effectiveStoryModelChoice(job.model_choice);
   const modelEffort = savedJobEffort(job);
-  const overrides = await readProviderOverrides(owned(context)).catch(() => ({}));
+  const overrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(owned(context), "dark").catch(() => ({})),
+  );
   const runRows = await sql<{ id: number }>`
     insert into dark_runs (user_id, newsroom_id, model_choice, model_effort, investigation_id)
     values (${context.userId}, ${owned(context)}, ${choice}, ${modelEffort}, ${id}) returning id
@@ -2791,7 +2796,7 @@ export async function sendDarkSignalToQueueFor(
   userId: string,
   newsroomId: number,
   id: number,
-  opts: { asTip?: boolean } = {},
+  _opts: { asTip?: boolean } = {},
 ): Promise<
   | { ok: true; leadId: number; asTip: boolean }
   | { ok: false; error: string; blocked?: "unverified" | "watch" }
@@ -2890,7 +2895,7 @@ export async function queueInvestigationFor(
   userId: string,
   newsroomId: number,
   id: number,
-  opts: { asTip?: boolean } = {},
+  _opts: { asTip?: boolean } = {},
 ) {
   await ensureDarkSchema();
   const sql = await getSql();
@@ -3533,6 +3538,7 @@ export async function startBriefJob(
       requestedEffort: validatedModelEffort(asked, effortValue),
       actualRuntime: effectiveChoice,
       actualEffort: modelEffort,
+      localModel: probe.ok ? probe.localModel : undefined,
       preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
     })),
   });
@@ -3551,7 +3557,10 @@ export async function startBriefJob(
 /** What the queue runs for a `brief` job. */
 export async function performBriefWork(job: DeskJob) {
   const newsroomId = job.newsroom_id;
-  const overrides = await readProviderOverrides(newsroomId).catch(() => ({}));
+  const overrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(newsroomId, "dark").catch(() => ({})),
+  );
   await setJobStage(job.id, "Writing editor brief");
   let active = {
     modelChoice: effectiveStoryModelChoice(job.model_choice),
@@ -3567,7 +3576,7 @@ export async function performBriefWork(job: DeskJob) {
         choice: snapshot.modelChoice,
         reasoningEffort: snapshot.modelEffort,
       }),
-      probe: (choice) => probeProvider(choice, newsroomId),
+      probe: (choice) => probeProvider(choice, newsroomId, undefined, "dark"),
       resolve: async (choice) => ({
         modelChoice: choice,
         modelEffort: effortForChoice(choice, active.modelEffort),

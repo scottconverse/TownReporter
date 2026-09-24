@@ -36,7 +36,6 @@ import {
 } from "./fetch-outcome.ts";
 import {
   ARCHIVE_TEXT_CAP,
-  PLANNER_TEXT_CAP,
   chunksFromEvidence,
   ingestDocument,
   type IngestOptions,
@@ -2105,11 +2104,6 @@ export async function retrievePack(
   const artifactBudget = Math.floor(excerptBudget / Math.max(1, picked.length));
   const excerpts = picked
         .map((a, index) => {
-          const rec = a as {
-            version_id?: number | null;
-            capture_event_id?: number | null;
-            content_hash?: string;
-          };
           if (artifactBudget <= 0) return "";
           if (a.full_text.length <= artifactBudget) return `[source:${index + 1}] ${a.full_text}`;
           const hits = retrieveRelevantChunks(

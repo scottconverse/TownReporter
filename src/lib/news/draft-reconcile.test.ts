@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
-import type { DeskJob } from "./jobs.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -31,7 +30,7 @@ test("queues the exact latest authorized draft version", async () => {
   const [lead] = await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,status,headline,why,topic,source_urls,evidence,newsworthiness) values('editor',88101,'drafted','Lead','Why','council','[]','',1) returning id");
   await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic) values('editor',88101,$1,'Old','','Old','council')",[lead.id]);
   const [latest] = await sql.query<{id:number}>("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic) values('editor',88101,$1,'Latest','','Latest','council') returning id",[lead.id]);
-  const job = await requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'local-model'},{probe:async()=>({ok:true as const,label:'Local',choice:'local-model'}),enqueue: opts => enqueueJob({...opts,kick:false})});
+  const job = await requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'local-model'},{probe:async()=>({ok:true as const,label:'Local',choice:'local-model',localModel:{baseUrl:'http://127.0.0.1:1234/v1',id:'test-model'}}),enqueue: opts => enqueueJob({...opts,kick:false})});
   assert.equal(job.kind,'reconcile');
   assert.equal(job.subject_id,latest.id);
   let codexChoice = "";

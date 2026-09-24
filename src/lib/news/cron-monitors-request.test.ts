@@ -89,6 +89,6 @@ describe("authenticated monitor cron wake", () => {
     assert.equal(response.status, 500);
     assert.deepEqual(calls, ["daily", "monitors"]);
     assert.deepEqual(await response.json(), monitorResult);
-    assert.equal(console.error.mock.callCount(), 1);
+    assert.equal((console.error as unknown as { mock: { callCount(): number } }).mock.callCount(), 1);
   });
 });

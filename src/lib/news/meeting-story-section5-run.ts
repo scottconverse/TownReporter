@@ -1,7 +1,7 @@
 import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
-import { fetchStructuredVotesForDate, voteSourceAvailability } from "./meeting-vote-sources.ts";
+import { fetchStructuredVotesForDate } from "./meeting-vote-sources.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -12,6 +12,7 @@ import {
   type TranscriptSegment,
 } from "./meeting-story-section5.ts";
 import { persistSection5, unalignedMeetingLead } from "./meeting-story-section5-persist.ts";
+import { meetingClock } from "./meeting-draft-input.ts";
 
 export type Section5Deps = {
   packetForTitle?: typeof primeGovDocumentsForTitle;
@@ -25,6 +26,14 @@ export type Section5Result = {
   voteCount: number;
   unalignedLead: ReturnType<typeof unalignedMeetingLead> | null;
   citations: ReturnType<typeof resolveItemCitation>[];
+  /*
+    What the lead and the drafting input need, carried out of this function
+    rather than re-queried. Section 5 already has the chunks and the votes in
+    hand; a caller that has to re-read them from the database is a second source
+    of truth for the same meeting, and the two can disagree.
+  */
+  items: { item: string; title: string; startSeconds: number; excerpt: string }[];
+  votes: StructuredVote[];
 };
 
 /**
@@ -79,7 +88,6 @@ export async function runSection5ForArtifact(
   const alignment = alignMeeting({ segments, chunks, packetItems });
 
   const structured = await fetchStructuredVotesForDate(input.meetingDate ?? "").catch(() => ({ found: false, reason: "structured vote lookup failed", records: [], url: "" }));
-  const availability = voteSourceAvailability({ structuredRecordFound: structured.found, minutesFound: false, packetFound: false, transcriptFound: segments.length > 0 });
   // Structured records are keyed by ordinance/resolution id (O-2026-46), while
   // chunks are keyed by agenda item number (9). Attach a record to the chunk
   // whose transcript span actually mentions that identifier or motion text.
@@ -123,13 +131,21 @@ export async function runSection5ForArtifact(
     });
   }
 
-  const citations = alignment.chunks.map((chunk) =>
-    resolveItemCitation({
-      item: chunk.item,
-      timestampSeconds: chunk.startSeconds,
-      segments,
-      captionSha256: artifact.sha256,
-      storagePath: artifact.storage_path,
+  const segmentByIndex = new Map(segments.map((segment) => [segment.segmentIndex, segment]));
+  const citations = alignment.chunks.flatMap((chunk) =>
+    chunk.segmentIndexes.flatMap((segmentIndex) => {
+      const segment = segmentByIndex.get(segmentIndex);
+      return segment
+        ? [{
+            item: chunk.item,
+            segmentIndex: segment.segmentIndex,
+            timestampSeconds: segment.startSeconds,
+            endSeconds: segment.endSeconds,
+            excerpt: segment.excerpt,
+            captionSha256: segment.captionSha256 || artifact.sha256,
+            storagePath: artifact.storage_path,
+          }]
+        : [];
     }),
   );
 
@@ -140,5 +156,20 @@ export async function runSection5ForArtifact(
     voteCount: votes.filter((v) => v.established).length,
     unalignedLead,
     citations,
+    items: alignment.chunks.map((chunk) => ({
+      item: chunk.item,
+      title: chunk.title,
+      startSeconds: chunk.startSeconds,
+      excerpt: chunk.segmentIndexes
+        .map((segmentIndex) => {
+          const segment = segmentByIndex.get(segmentIndex);
+          return segment
+            ? `[${meetingClock(segment.startSeconds)}; segment ${segment.segmentIndex}] ${segment.excerpt}`
+            : "";
+        })
+        .filter(Boolean)
+        .join("\n"),
+    })),
+    votes,
   };
 }

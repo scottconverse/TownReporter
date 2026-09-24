@@ -25,7 +25,7 @@ export type WriteStoryParsed = {
 };
 
 export type EditorialAssignment = {
-  origin: "write-box";
+  origin: "write-box" | "story-workspace";
   text: string;
   requestedForm?: "brief";
 };

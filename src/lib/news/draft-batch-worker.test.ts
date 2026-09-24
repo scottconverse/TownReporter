@@ -10,6 +10,7 @@ let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let setFetchImplForTests: typeof import("./fetch-url.ts").setFetchImplForTests;
+let ensureStoryDocuments: typeof import("./story-documents.server.ts").ensureStoryDocuments;
 
 before(async () => {
   vite = await createServer({
@@ -20,6 +21,7 @@ before(async () => {
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ performDraftWork } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
   ({ setFetchImplForTests } = await vite.ssrLoadModule("/src/lib/news/fetch-url.ts"));
+  ({ ensureStoryDocuments } = await vite.ssrLoadModule("/src/lib/news/story-documents.server.ts"));
 });
 after(async () => vite.close());
 
@@ -38,7 +40,7 @@ const reported = {
   unanswered: [],
   claims: [],
   research_memo: {},
-} as ReportedDraftResult;
+} as unknown as ReportedDraftResult;
 
 async function fixture(newsroomId: number) {
   const sql = await getSql();
@@ -109,17 +111,17 @@ it("actual draft worker uses only the persisted forced transport", async () => {
   const previousKey = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = "must-not-be-used";
   setFetchImplForTests(
-    async () => new Response(singleRenderedPdfFixture(), { headers: { "content-type": "application/pdf" } }),
+    async () => new Response(Buffer.from(singleRenderedPdfFixture()), { headers: { "content-type": "application/pdf" } }),
   );
   try {
     await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
-        const document = await deps.ingest?.("https://93.184.216.34/scan.pdf");
+        const document = await deps!.ingest?.("https://93.184.216.34/scan.pdf");
         assert.match(document?.text ?? "", /OCR passage/);
-        const capture = await deps.capture?.(userId, document!);
+        const capture = await deps!.capture?.(userId, document!);
         assert.ok(capture?.version_id);
         assert.ok(capture?.capture_event_id);
-        const answer = await deps.chat?.("system", "user", 100, "codex-frontier", { timeoutMs: 12_345 });
+        const answer = await deps!.chat?.("system", "user", 100, "codex-frontier", { timeoutMs: 12_345 });
         assert.equal(answer?.ok, true);
         return {
           ...reported,
@@ -184,6 +186,146 @@ it("actual draft worker uses only the persisted forced transport", async () => {
   assert.deepEqual(captureScope, { owned: 1, default_room: 0 });
 });
 
+it("actual Story worker keeps the preflighted local model after the saved preference changes", async () => {
+  const { sql, job } = await fixture(99208);
+  const selected = { baseUrl: "https://ollama-at-enqueue.example/v1", id: "qwen3.5:397b-cloud" };
+  const changed = { baseUrl: "http://127.0.0.1:1234/v1", id: "lm-studio-after-queue" };
+  await sql.query("update desk_jobs set draft_batch_id=null,model_choice='local-model',result_json=$1 where id=$2", [
+    JSON.stringify({ requestedRuntime: "local-model", actualRuntime: "local-model", localModelSnapshotVersion: 1, localModel: selected }),
+    job.id,
+  ]);
+  job.draft_batch_id = null;
+  job.model_choice = "local-model";
+  job.result_json = JSON.stringify({ requestedRuntime: "local-model", actualRuntime: "local-model", localModelSnapshotVersion: 1, localModel: selected });
+  await sql.query(`create table if not exists newsroom_local_model_choices (
+    newsroom_id integer not null, scope text not null, base_url text not null, model_id text not null,
+    updated_at timestamptz not null default now(), primary key(newsroom_id,scope)
+  )`);
+  await sql.query("insert into newsroom_local_model_choices(newsroom_id,scope,base_url,model_id) values($1,'story',$2,$3) on conflict(newsroom_id,scope) do update set base_url=excluded.base_url,model_id=excluded.model_id", [job.newsroom_id, changed.baseUrl, changed.id]);
+  const used: Array<{ baseUrl: string | undefined; id: string | undefined }> = [];
+  let documentProbeModel: unknown;
+  try {
+    await performDraftWork(job, {
+      readStoryDocuments: async (_room, _lead, _choice, _assignment, _stage, _urls, _user, _suppliedOnly, _requestId, routing) => {
+        assert.deepEqual(routing?.localModel, selected, "uploaded-document reading must keep the queued model");
+        const result = await routing?.probe?.("local-model");
+        assert.equal(result?.ok, true);
+        return "";
+      },
+      probe: async (choice, _room, _adapters, scope, exactLocalModel) => {
+        assert.equal(choice, "local-model");
+        assert.equal(scope, "story");
+        documentProbeModel = exactLocalModel;
+        return { ok: true as const, label: "Local model", choice: "local-model", localModel: exactLocalModel };
+      },
+      reportAndDraft: async (input, deps) => {
+        assert.deepEqual(input.providerOverrides?.["local-model"]?.localModel, selected,
+          "the queued snapshot must override the changed current preference before draft setup");
+        const answer = await deps!.chat?.("system", "user", 100, "local-model");
+        assert.equal(answer?.ok, true);
+        return reported;
+      },
+      chat: async (_system, _user, _tokens, options) => {
+        used.push({ baseUrl: options?.localModel?.baseUrl, id: options?.localModel?.id });
+        return { ok: true, text: "drafted with the queued model" };
+      },
+      setJobStage: async () => undefined,
+    });
+    assert.deepEqual(used, [selected], "the actual provider call must use the queued endpoint and model");
+    assert.deepEqual(documentProbeModel, selected, "the document-stage readiness check must verify the queued endpoint/model");
+  } finally {
+    await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='story'", [job.newsroom_id]);
+  }
+});
+
+it("forced Story batch reads uploaded documents and writes with its pinned local model after the preference changes", async () => {
+  const { sql, userId, job } = await fixture(99209);
+  await ensureStoryDocuments(sql);
+  const selected = { baseUrl: "http://127.0.0.1:11434/v1", id: "qwen3.5:397b-cloud" };
+  const changed = { baseUrl: "http://127.0.0.1:1234/v1", id: "lm-studio-after-queue" };
+  const batchSnapshot = {
+    runtime: "local",
+    modelChoice: "local-model",
+    transport: "local",
+    localModel: selected,
+    modelEffort: "none",
+  };
+  await sql.query("update draft_batches set runtime_snapshot=$1::jsonb where id=$2", [
+    JSON.stringify(batchSnapshot),
+    job.draft_batch_id,
+  ]);
+  await sql.query("update desk_jobs set model_choice='local-model',result_json='{}' where id=$1", [job.id]);
+  job.model_choice = "local-model";
+  job.result_json = "{}";
+  await sql.query(`create table if not exists newsroom_local_model_choices (
+    newsroom_id integer not null, scope text not null, base_url text not null, model_id text not null,
+    updated_at timestamptz not null default now(), primary key(newsroom_id,scope)
+  )`);
+  const [previousPreference] = await sql.query<{ base_url: string; model_id: string }>(
+    "select base_url,model_id from newsroom_local_model_choices where newsroom_id=$1 and scope='story'",
+    [job.newsroom_id],
+  );
+  const documentId = `batch-local-document-${job.newsroom_id}`;
+  await sql.query(
+    "insert into story_documents(id,newsroom_id,user_id,lead_id,filename,mime,original) values($1,$2,$3,$4,'packet.txt','text/plain',$5)",
+    [documentId, job.newsroom_id, userId, job.subject_id, Buffer.from("The packet records the selected local-model snapshot." )],
+  );
+  await sql.query(
+    "insert into newsroom_local_model_choices(newsroom_id,scope,base_url,model_id) values($1,'story',$2,$3) on conflict(newsroom_id,scope) do update set base_url=excluded.base_url,model_id=excluded.model_id",
+    [job.newsroom_id, changed.baseUrl, changed.id],
+  );
+
+  const documentCalls: Array<{ baseUrl?: string; id?: string }> = [];
+  const writerCalls: Array<{ baseUrl?: string; id?: string }> = [];
+  const preflightCalls: Array<{ baseUrl: string; id: string } | undefined> = [];
+  try {
+    await performDraftWork(job, {
+      probe: async (choice, newsroomId, _adapters, scope, exactLocalModel) => {
+        assert.equal(choice, "local-model");
+        assert.equal(newsroomId, job.newsroom_id);
+        assert.equal(scope, "story");
+        preflightCalls.push(exactLocalModel);
+        return { ok: true as const, label: "Local model", choice: "local-model", localModel: exactLocalModel };
+      },
+      chat: async (_system, _user, _tokens, options) => {
+        assert.ok(options?.localModel, "document reader must receive its resolved local model");
+        documentCalls.push(options.localModel);
+        return { ok: true as const, text: "The uploaded packet was read by the queued model." };
+      },
+      reportAndDraft: async (input, deps) => {
+        assert.ok(input.documentEvidence, "the uploaded packet must be read before writing");
+        assert.match(input.documentEvidence, /uploaded packet was read by the queued model/i);
+        assert.deepEqual(input.providerOverrides?.["local-model"]?.localModel, selected,
+          "the forced writer's budgets must also use the batch endpoint, not the changed Story preference");
+        const answer = await deps!.chat?.("system", "user", 100, "local-model");
+        assert.equal(answer?.ok, true);
+        return reported;
+      },
+      batchChatAdapters: {
+        local: async (_system, _user, _tokens, options) => {
+          assert.ok(options?.localModel, "batch writer must receive its resolved local model");
+          writerCalls.push(options.localModel);
+          return { ok: true as const, text: "The story was written by the queued model." };
+        },
+      },
+      setJobStage: async () => undefined,
+    });
+    assert.deepEqual(preflightCalls, [selected], "document preflight must verify the batch's saved endpoint/model");
+    assert.deepEqual(documentCalls, [selected], "document reading must call the batch's saved endpoint/model");
+    assert.deepEqual(writerCalls, [selected], "the writer and document reader must use the same batch endpoint/model");
+  } finally {
+    await sql.query("delete from story_documents where id=$1 and newsroom_id=$2", [documentId, job.newsroom_id]);
+    if (previousPreference) {
+      await sql.query(
+        "update newsroom_local_model_choices set base_url=$2,model_id=$3 where newsroom_id=$1 and scope='story'",
+        [job.newsroom_id, previousPreference.base_url, previousPreference.model_id],
+      );
+    } else {
+      await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='story'", [job.newsroom_id]);
+    }
+  }
+});
+
 it("withdrawn membership immediately before capture leaves no persisted capture", async () => {
   const { sql, userId, job } = await fixture(99205);
   await assert.rejects(
@@ -193,10 +335,11 @@ it("withdrawn membership immediately before capture leaves no persisted capture"
           job.newsroom_id,
           userId,
         ]);
-        await deps.capture?.(userId, {
+        await deps!.capture?.(userId, {
           url: "https://example.com/withdrawn-capture",
           title: "Withdrawn",
           text: "This captured passage is long enough to be useful to a draft.",
+          extras: [],
         });
         return reported;
       },
@@ -242,7 +385,7 @@ for (const selected of ["codex-terra", "codex-sol", "local"] as const) {
     const calls: string[] = [];
     await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
-        const answer = await deps.chat?.("system", "user", 100);
+        const answer = await deps!.chat?.("system", "user", 100);
         assert.equal(answer?.ok, true);
         return reported;
       },
@@ -256,7 +399,7 @@ for (const selected of ["codex-terra", "codex-sol", "local"] as const) {
           return { ok: true, text: "answer" };
         },
         local: async (_system, _user, _tokens, options) => {
-          calls.push("local:" + options.localModel?.id);
+          calls.push("local:" + options!.localModel?.id);
           return { ok: true, text: "answer" };
         },
       },
@@ -284,7 +427,7 @@ for (const boundary of ["membership", "lease"] as const) {
           } else {
             await sql.query("update desk_jobs set claim_token='replacement' where id=$1", [job.id]);
           }
-          await deps.chat?.("system", "user", 100);
+          await deps!.chat?.("system", "user", 100);
           return reported;
         },
         batchChatAdapters: {
@@ -314,7 +457,7 @@ it("fails over only after a technical selected-transport failure", async () => {
   const calls: string[] = [];
   await performDraftWork(job, {
       reportAndDraft: async (_input, deps) => {
-        const answer = await deps.chat?.("system", "user", 100);
+        const answer = await deps!.chat?.("system", "user", 100);
         return answer?.ok ? reported : { error: answer?.error ?? "failed" };
       },
       batchChatAdapters: {
@@ -341,7 +484,7 @@ it("fails over only after a technical selected-transport failure", async () => {
         transport: "codex" as const,
         model: "selected-terra",
         modelEffort: "medium" as const,
-      }),
+      }) as any,
       setJobStage: async () => undefined,
     });
   assert.deepEqual(calls, ["claude", "codex"]);

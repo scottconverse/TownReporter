@@ -29,15 +29,25 @@ describe("meeting transcript artifacts Slice 3 schema and integration", () => {
     assert.match(source, /caption_sha256/);
   });
 
-  it("wraps capture success plus artifact and segments in one transaction in runMeetingAwareness", () => {
+  it("routes capture success through the locked canonical transaction and records the immutable artifact path", () => {
     const source = readFileSync(new URL("./meeting-capture.ts", import.meta.url), "utf8");
-    assert.match(source, /withTransaction/);
-    assert.match(source, /const runTransaction = deps\.withTransaction \?\? withTransaction/);
-    const txIndex = source.indexOf("await runTransaction(async (tx) => {");
-    const successIndex = source.indexOf("await recordCaptureSuccess(tx,", txIndex);
-    const artifactIndex = source.indexOf("await storeTranscript(tx,", txIndex);
-    assert.ok(txIndex >= 0, "single transaction boundary exists");
-    assert.ok(successIndex > txIndex, "capture success writes on the transaction handle");
-    assert.ok(artifactIndex > successIndex, "artifact writes on the transaction handle after capture success");
+    const helperStart = source.indexOf("export async function applyCapturedMeetingTranscript");
+    const helperEnd = source.indexOf("export async function recheckProvisionalMeetings", helperStart);
+    const helper = source.slice(helperStart, helperEnd);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart, "canonical capture helper exists");
+    assert.match(helper, /return runTransaction\(async \(tx\) => \{/);
+    assert.match(helper, /await lockMeetingRevisionForCapture\(tx,/);
+    assert.match(helper, /const stored = await storeTranscript\(tx,/);
+    assert.match(helper, /caption_path=\$4/);
+    assert.match(helper, /stored\.storagePath/,
+      "capture record points at the immutable stored artifact, not the mutable downloader file");
+
+    const awarenessStart = source.indexOf("export async function runMeetingAwareness");
+    const awarenessEnd = source.indexOf("export function meetingCoverageJson", awarenessStart);
+    const awareness = source.slice(awarenessStart, awarenessEnd);
+    assert.match(awareness, /const applied = await applyCaptured\(sql,/,
+      "the ordinary first-capture path must use the same canonical helper as revisions and manual capture");
+    assert.doesNotMatch(awareness, /recordCaptureSuccess/,
+      "the old mutable-path capture writer must not return");
   });
 });

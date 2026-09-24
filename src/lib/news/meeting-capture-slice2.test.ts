@@ -17,6 +17,7 @@ describe("meeting capture Slice 2 captions-first parser", () => {
     assert.match(parsed.text, /Second line/);
     assert.equal(parsed.sha256.length, 64);
     assert.equal(parsed.sourcePath, "captions.en.srv3");
+    assert.deepEqual(parsed.segments?.map((segment) => [segment.startSeconds, segment.endSeconds]), [[0, 1], [1, 2]]);
   });
 
   it("falls back to VTT when srv3 is not present", async () => {
@@ -26,6 +27,7 @@ describe("meeting capture Slice 2 captions-first parser", () => {
     assert.equal(parsed.format, "vtt");
     assert.match(parsed.text, /Hello from VTT/);
     assert.match(parsed.text, /Second VTT line/);
+    assert.deepEqual(parsed.segments?.map((segment) => [segment.startSeconds, segment.endSeconds]), [[0, 1], [1, 2]]);
   });
 });
 

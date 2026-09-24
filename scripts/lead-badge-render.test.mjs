@@ -26,6 +26,11 @@ function moduleUrl(source, fileName, imports = {}) {
 }
 
 const REACT_URL = import.meta.resolve("react");
+const deskChromeUtils = moduleUrl(
+  await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
+  "desk-chrome-utils.ts",
+);
+const { leadOrigin } = await import(deskChromeUtils);
 
 function inlineModule(source) {
   const rewritten = source.replaceAll('"react"', JSON.stringify(REACT_URL));
@@ -98,8 +103,10 @@ const { LeadRowView } = await import(
     {
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
+      "@/components/desk-chrome-utils": deskChromeUtils,
       "@/lib/paper": paperStub,
       "@/lib/paper-context": paperContextStub,
+      "@/lib/paper-context-state": paperContextStub,
       "@/components/model-picker": modelPickerStub,
       "@/lib/news/model-choice": modelChoiceStub,
       "@/lib/news/provider-registry": providerRegistryStub,
@@ -357,7 +364,7 @@ const deskCopyStub = inlineModule(`
   export function createEditorCopy() { return {}; }
 `);
 
-const { Chip, leadOrigin } = await import(
+const { Chip } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
     "desk-chrome.tsx",
@@ -365,11 +372,13 @@ const { Chip, leadOrigin } = await import(
       "@tanstack/react-router": reactRouterStubForChrome,
       "@tanstack/react-query": reactQueryStub,
       "@/lib/paper-context": paperContextStubForChrome,
+      "@/lib/paper-context-state": paperContextStubForChrome,
       "@/lib/auth/gates": authGatesStub,
       "@/lib/auth/client": authClientStub,
       "@/lib/auth/use-current-user": currentUserStub,
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
+      "@/components/desk-chrome-utils": deskChromeUtils,
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),

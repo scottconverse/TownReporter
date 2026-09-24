@@ -24,6 +24,17 @@ import {
   sanitizePublicUrls,
 } from "./schema";
 import { reportAndDraft } from "./report";
+import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
+import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
+import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
+import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
+import {
+  listPublishedMeetingReviews as loadPublishedMeetingReviews,
+  recordPublishedMeetingEvidence,
+  resolvePublishedMeetingReview,
+  type PublishedMeetingReview,
+} from "./meeting-article-revision.ts";
+import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   evidenceNeedsReview,
@@ -31,7 +42,6 @@ import {
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
-import { namedSubjects } from "./extract";
 import { absenceClaims } from "./absence-gate";
 import {
   applyTodoPatch,
@@ -74,6 +84,7 @@ import {
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
+import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import {
   failoverNoteSentence,
@@ -378,6 +389,9 @@ export const getLead = createServerFn({ method: "GET" })
     `;
     const evidenceToken = drafts[0] ? evidenceReviewToken(drafts[0]) : "";
     const draft = drafts[0] ? unpackStoredDraft({ ...drafts[0] }) : null;
+    const draftMeetingEvidence = drafts[0]
+      ? await loadDraftMeetingEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
+      : null;
     if (draft?.body) draft.body = stripReporterNotebook(draft.body);
     let notes = parseNotes(lead.notes_json);
     if (!notes.todo.length && draft?.unanswered) {
@@ -421,6 +435,7 @@ export const getLead = createServerFn({ method: "GET" })
     return {
       lead,
       draft,
+      draftMeetingEvidence,
       evidenceToken,
       articleSlug: live[0]?.slug ?? null,
       openedExtractionByUrl: extractionByUrl,
@@ -910,9 +925,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   });
   const batches = buildScanBatches({ sources: batchSources });
 
-  const batchTimeoutMs = scanCallTimeoutFor(
-    await readProviderOverrides(job.newsroom_id).catch(() => ({})),
-  );
+  const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
+    applyJobLocalModelSnapshot(
+      job,
+      await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({})),
+    );
+  const scanLocalModel = scanOverrides["local-model"]?.localModel;
+  const batchTimeoutMs = scanCallTimeoutFor(scanOverrides);
   const batchResults: import("./schema.ts").ParsedScanResult[] = [];
   let batchesFailed = 0;
   let lastBatchError: string | null = null;
@@ -936,6 +955,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const ai = await runScanChatWithFailover({
       job,
       newsroomId: job.newsroom_id,
+      localModel: scanOverrides["local-model"]?.localModel,
       system: scanSystem({
         name: paperConfig.name,
         city: paperConfig.city,
@@ -946,7 +966,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       modelEffort: effortFromJob(job),
       timeoutMs: batchTimeoutMs,
       grokChat: runChat,
-      probe,
+      probe: (choice) => probe(choice, job.newsroom_id, undefined, "scan", choice === "local-model" ? scanLocalModel ?? undefined : undefined),
       setModelChoice,
       setStage,
       setFailoverNote: setJobFailoverNote,
@@ -1181,7 +1201,6 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     await import("./draft-order.server.ts");
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
-  const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
   const setModelRuntime = deps.setJobModelRuntime ?? setJobModelRuntime;
   const setStage = deps.setJobStage ?? setJobStage;
   const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;
@@ -1196,7 +1215,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     return current;
   };
   const leads = await sql<LeadRow>`
-    select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json
+    select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at, notes_json,
+           meeting_video_id,meeting_artifact_id,meeting_lead_purpose
     from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
   `;
   const lead = leads[0];
@@ -1228,6 +1248,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   `;
 
   const prevNotes = parseNotes(lead.notes_json);
+  const meetingMaterial =
+    lead.meeting_video_id && lead.meeting_artifact_id && lead.meeting_lead_purpose === "transcript-story"
+      ? await (await import("./meeting-draft-material.server.ts")).loadMeetingDraftMaterial(sql, {
+          newsroomId: owned(context),
+          artifactId: Number(lead.meeting_artifact_id),
+          videoId: lead.meeting_video_id,
+          fallbackTitle: lead.headline,
+          videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
+        })
+      : null;
   const researchScope = job.research_scope ?? prevNotes.researchScope ?? "public";
   const sourceInput = draftSourceInputs(urls, prevNotes, researchScope);
   const { retainedWatchSources } = await import("./retained-watch-source.server.ts");
@@ -1235,6 +1265,23 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     deps.readStoryDocuments ?? (await import("./story-documents.server.ts")).readStoryDocuments;
   const documentAssignment = prevNotes.editorialAssignment?.text || lead.headline;
   const initialDocumentChoice = effectiveStoryModelChoice(job.model_choice);
+  // Direct jobs keep this receipt on the job row. Forced batches keep the
+  // exact preflighted runtime on the batch row, so document reading must use
+  // that already-validated snapshot too instead of resolving a newer paper
+  // preference while the batch writer stays pinned to its original model.
+  const batchLocalModel = batchSnapshot?.runtime === "local" ? batchSnapshot.localModel : null;
+  const jobLocalModel = pinnedLocalModelForJob(job);
+  const queuedLocalModel = batchLocalModel ?? jobLocalModel;
+  const storyProviderOverrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(owned(context), "story").catch(() => ({})),
+  );
+  if (batchLocalModel) {
+    storyProviderOverrides["local-model"] = {
+      ...(storyProviderOverrides["local-model"] ?? {}),
+      localModel: batchLocalModel,
+    };
+  }
   const documentReadingEvidence = await storyDocumentReader(
       owned(context),
       leadId,
@@ -1248,7 +1295,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       {
         modelEffort: effortFromJob(job),
         source: job.model_choice_source ?? "editor",
-        probe: (choice) => probe(choice, owned(context)),
+        localModel: queuedLocalModel ?? undefined,
+        probe: (choice) => probe(choice, owned(context), undefined, "story", choice === "local-model" ? queuedLocalModel ?? undefined : undefined),
         chat: deps.chat,
         onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
           await setJobModelRuntime(job.id, nextChoice, nextEffort);
@@ -1301,10 +1349,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     userId: context.userId,
     newsroomId: context.newsroomId,
     lead,
-    urls: sourceInput.urls,
+    // The immutable captured transcript is the source for a meeting story.
+    // Re-fetching the YouTube watch page can return stale "upcoming" chrome and
+    // contradict a completed recording, which produced the exact false draft
+    // this path is designed to prevent.
+    urls: meetingMaterial ? [] : sourceInput.urls,
     retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
-    extraEvidence: prevNotes.scratch,
+    extraEvidence: meetingMaterial?.evidence ?? prevNotes.scratch,
+    editorNotes: meetingMaterial ? prevNotes.scratch : undefined,
+    extraEvidenceLimitChars: meetingMaterial ? 200_000 : undefined,
+    extraEvidenceMode: meetingMaterial ? "meeting-transcript" : undefined,
     editorialAssignment: prevNotes.editorialAssignment,
     researchScope,
     extraUrls: sourceInput.extraUrls,
@@ -1316,7 +1371,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       A failed read is not a reason to refuse to draft -- an empty object
       means "no overrides", which is what every paper had before this.
     */
-    providerOverrides: await readProviderOverrides(owned(context)).catch(() => ({})),
+    providerOverrides: storyProviderOverrides,
   };
   const reportDeps: Parameters<typeof reportAndDraft>[1] = {
     onStage: (stage) => setStage(job.id, stage),
@@ -1425,15 +1480,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     const { forcedOcrOptions, runForcedChat, validateForcedRuntime } = await import("./forced-runtime.server.ts");
     const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
     let activeBatchSnapshot = batchSnapshot;
-    const adapters =
-      deps.batchChatAdapters ??
-      ({
+    const adapters = {
         claude: async (input) => (await import("./ai-claude-code.server.ts")).claudeCodeChat(input),
         codex: async (input) => (await import("./ai-codex.server.ts")).codexChat(input),
         local: grokChat,
         custom: grokChat,
         xai: grokChat,
-      } satisfies NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>);
+        ...deps.batchChatAdapters,
+      } satisfies Required<NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>>;
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       await batchGuard();
       const switchState: { receipt: null | {
@@ -1579,6 +1633,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     ...reported.research_memo,
     citationPolicy: "explicit",
     researchScope: draftInput.researchScope,
+    // Publication must fail closed if a tape-derived draft somehow loses its
+    // persisted used-citation link. The lead's candidate list is not proof of
+    // what the final story actually used.
+    meetingEvidence: { used: meetingMaterial != null },
     reportedClaims: { version: 1, rows: reported.claims },
     reportedDocumentClaims: {
       version: 1,
@@ -1673,12 +1731,68 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     returning id
   `;
     if (savedDraft) {
+      let transcriptLinkCreated = false;
+      /*
+        Link a meeting draft to the transcript it drew from.
+
+        This is the call that makes the revision machinery do real work.
+        meeting_draft_transcript_links has held 0 rows since migration 0070
+        because nothing ever wrote to it, so recheckProvisionalMeetings ran on
+        every capture pass, found no links, and exited having done nothing. With
+        a link row, the re-check compares the citation hashes against the new
+        caption hash and records a revision notice when the tape moved.
+
+        The citations are DERIVED from what this draft says, never inherited from
+        the material it was given, so a redraft describes itself rather than the
+        previous draft. A draft that used no transcript material writes no row.
+      */
+      const meetingCitations = meetingMaterial?.citations ?? prevNotes.transcriptCitations ?? [];
+      const meeting = meetingMaterial?.meeting ?? prevNotes.meeting;
+      if (meeting && meetingCitations.length) {
+        const candidates = meetingCitations.map((c) => ({
+            item: c.item, segmentIndex: c.segmentIndex, captionSha256: c.captionSha256, excerpt: c.excerpt,
+          }));
+        const draftText = {
+          headline: reported.headline,
+          dek: reported.dek,
+          body: reported.body,
+        };
+        // A new meeting draft can only cite transcript segments the reporter
+        // actually saw. Older drafts with saved transcript notes retain their
+        // original derivation until they are redrafted through this path.
+        const focus = reported.research_memo.meetingFocus;
+        // A direction that named no item gave the writer the whole bounded
+        // meeting, so the focus visibility filter would cull every citation
+        // outside the one item it was never locked to. Derive over every
+        // candidate instead, exactly as a draft with no focus does.
+        const used = meetingMaterial
+          ? focus
+            ? deriveFocusedUsedCitations({
+                candidates,
+                visibleSegmentIndexes: focus.visibleSegmentIndexes,
+                anchorSegmentIndexes: focus.anchorSegmentIndexes,
+                ...draftText,
+              })
+            : reported.research_memo.meetingEvidenceWide
+              ? deriveUsedCitations({ candidates, ...draftText })
+              : []
+          : deriveUsedCitations({ candidates, ...draftText });
+        if (used.length) {
+          await linkDraftToTranscript(sql, {
+            newsroomId: owned(context),
+            draftId: Number(savedDraft.id),
+            artifactId: meeting.artifactId,
+            citations: used,
+          });
+          transcriptLinkCreated = true;
+        }
+      }
       const completion = JSON.stringify(
         buildDraftCompletionReceipt({
           checkpointDraftId,
           finalDraftId: Number(savedDraft.id),
           citationStatus:
-            reported.citation_status ??
+            transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
             (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
               ? "complete"
               : "review-required"),
@@ -1793,6 +1907,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add?: string;
       toggle?: number;
       scratch?: string;
+      storyDirection?: string;
       researchScope?: "public" | "supplied";
       todos?: NoteTodo[];
     }) => input,
@@ -1819,6 +1934,10 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       });
       if (data.researchScope === "supplied" || data.researchScope === "public")
         notes.researchScope = data.researchScope;
+      if (typeof data.storyDirection === "string") {
+        const direction = data.storyDirection.trim().slice(0, 1000);
+        notes.editorialAssignment = direction ? { origin: "story-workspace", text: direction } : undefined;
+      }
       if (typeof data.scratch === "string")
         notes.suppliedUrls = sanitizePublicUrls([
           ...(notes.suppliedUrls ?? []),
@@ -2216,6 +2335,22 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     leadId,
     row,
     async (sql) => {
+      /*
+        Publication and capture share the same lead -> meeting-record fence.
+        Once this lock is held, either this transaction observes the old tape
+        and publishes before a revision, or it observes the new tape and blocks
+        the old draft. A capture cannot commit between this check and insert.
+      */
+      await lockMeetingsForDraftPublish(sql, {
+        newsroomId: owned(context),
+        draftId: Number(row.id),
+      });
+      const stale = await staleMeetingCitations(sql, {
+        newsroomId: owned(context),
+        draftId: Number(row.id),
+      });
+      if (stale.length) return { blocked: true as const, error: staleCitationNotice(stale) };
+
       // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
       // appended the lead id without re-checking — so a second collision (a
       // headline that slugifies to an existing "<base>-<leadId>", or a
@@ -2240,6 +2375,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id}
       ) returning id
     `;
+      await recordPublishedMeetingEvidence(sql, {
+        newsroomId: owned(context),
+        articleId: printed.id,
+        draftId: Number(row.id),
+      });
       await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
@@ -2250,9 +2390,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)}, ${printed.id})
       `;
       }
-      return { slug, id: printed.id };
+      return { blocked: false as const, slug, id: printed.id };
     },
   );
+
+  if (published.blocked) return { ok: false as const, error: published.error };
 
   await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {
     kind: "articles",
@@ -2268,7 +2410,7 @@ export const publishLead = createServerFn({ method: "POST" })
 
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { articleSlug?: string; body: string }) => input)
+  .validator((input: { articleSlug?: string; body: string; meetingReviewId?: number }) => input)
   .handler(async ({ context, data }) => {
     const { performAddCorrection } = await import("./corrections.ts");
     return performAddCorrection({ userId: context.userId, newsroomId: owned(context) }, data);
@@ -2284,7 +2426,197 @@ export type DeskPublishedRow = {
   lead_id: number | null;
   lead_score: number | null;
   corrections: { date: string; body: string }[];
+  transcriptReviews: PublishedMeetingReview[];
 };
+
+export const resolveMeetingArticleReview = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: {
+    reviewId: number;
+    resolution: "still-accurate" | "correction-required";
+    acceptedArtifactId: number;
+    note: string;
+    confirmedSegmentIndices: number[];
+  }) => input)
+  .handler(async ({ context, data }) => {
+    if (!data.note.trim()) return { ok: false as const, error: "Record what you checked or what needs correction." };
+    await withTransaction((sql) => resolvePublishedMeetingReview(sql, {
+      newsroomId: owned(context),
+      reviewId: data.reviewId,
+      reviewerId: context.userId,
+      resolution: data.resolution,
+      acceptedArtifactId: data.acceptedArtifactId,
+      note: data.note.trim(),
+      confirmedSegmentIndices: data.confirmedSegmentIndices,
+    }));
+    return { ok: true as const };
+  });
+
+export const resolveDraftMeetingReview = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: {
+    leadId: number;
+    draftId: number;
+    evidenceToken: string;
+    acceptedArtifactId: number;
+    confirmedSegmentIndexes: number[];
+    note: string;
+  }) => input)
+  .handler(async ({ context, data }) => {
+    try {
+      const result = await withTransaction((sql) => recordDraftTranscriptRevisionReview(sql, {
+        newsroomId: owned(context),
+        leadId: data.leadId,
+        draftId: data.draftId,
+        reviewerId: context.userId,
+        expectedEvidenceToken: data.evidenceToken,
+        acceptedArtifactId: data.acceptedArtifactId,
+        confirmedSegmentIndexes: data.confirmedSegmentIndexes,
+        note: data.note,
+      }));
+      await audit(context.userId, "review", `Meeting draft ${data.draftId} transcript evidence`, owned(context), {
+        kind: "drafts", id: data.draftId,
+      });
+      return { ok: true as const, ...result };
+    } catch (cause) {
+      return { ok: false as const, error: cause instanceof Error ? cause.message : "Could not save the citation review." };
+    }
+  });
+
+export const listDraftHistory = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((leadId: number) => leadId)
+  .handler(async ({ context, data: leadId }) => {
+    const sql = await getSql();
+    const drafts = await sql<{
+      id: number; headline: string; dek: string; topic: string; updated_at: string;
+    }>`
+      select id,headline,dek,topic,updated_at from drafts
+       where lead_id=${leadId} and newsroom_id=${owned(context)}
+       order by updated_at desc,id desc
+    `;
+    if (!drafts.length) return [];
+    const ids = drafts.map((draft) => Number(draft.id));
+    const links = await sql<{
+      id: number; draft_id: number; artifact_id: number; citation_snapshot: string;
+      revision_notice: string | null; is_current: boolean; video_id: string; sha256: string;
+    }>`
+      select l.id,l.draft_id,l.artifact_id,l.citation_snapshot,l.revision_notice,l.is_current,
+             a.video_id,a.sha256
+        from meeting_draft_transcript_links l
+        join meeting_transcript_artifacts a on a.id=l.artifact_id and a.newsroom_id=l.newsroom_id
+       where l.newsroom_id=${owned(context)} and l.draft_id=any(${ids})
+       order by l.draft_id,l.created_at,l.id
+    `;
+    const reviews = await sql<{
+      draft_id: number; accepted_artifact_id: number; accepted_artifact_sha256: string;
+      reviewed_by: string; resolution_note: string; reviewed_at: string;
+    }>`
+      select draft_id,accepted_artifact_id,accepted_artifact_sha256,reviewed_by,resolution_note,reviewed_at
+        from meeting_draft_transcript_revision_reviews
+       where newsroom_id=${owned(context)} and draft_id=any(${ids})
+       order by draft_id,reviewed_at,id
+    `;
+    return drafts.map((draft) => ({
+      id: Number(draft.id), headline: draft.headline, dek: draft.dek, topic: draft.topic, updatedAt: draft.updated_at,
+      transcriptLinks: links.filter((link) => Number(link.draft_id) === Number(draft.id)).map((link) => ({
+        id: Number(link.id), artifactId: Number(link.artifact_id), sha256: link.sha256,
+        videoId: link.video_id, isCurrent: link.is_current, revisionNotice: link.revision_notice,
+        citationCount: (() => { try { const value = JSON.parse(link.citation_snapshot) as unknown; return Array.isArray(value) ? value.length : 0; } catch { return 0; } })(),
+      })),
+      transcriptReviews: reviews.filter((review) => Number(review.draft_id) === Number(draft.id)).map((review) => ({
+        acceptedArtifactId: Number(review.accepted_artifact_id), acceptedArtifactSha256: review.accepted_artifact_sha256,
+        reviewedBy: review.reviewed_by, note: review.resolution_note, reviewedAt: review.reviewed_at,
+      })),
+    }));
+  });
+
+export const getDraftHistoryItem = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: { leadId: number; draftId: number }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number; headline: string; dek: string; body: string; topic: string; updated_at: string;
+    }>`
+      select id,headline,dek,body,topic,updated_at from drafts
+       where id=${data.draftId} and lead_id=${data.leadId} and newsroom_id=${owned(context)} limit 1
+    `;
+    const draft = rows[0];
+    if (!draft) return null;
+    const links = await sql<{
+      id: number; artifact_id: number; citation_snapshot: string; revision_notice: string | null;
+      is_current: boolean; video_id: string; sha256: string;
+    }>`
+      select l.id,l.artifact_id,l.citation_snapshot,l.revision_notice,l.is_current,a.video_id,a.sha256
+        from meeting_draft_transcript_links l
+        join meeting_transcript_artifacts a on a.id=l.artifact_id and a.newsroom_id=l.newsroom_id
+       where l.newsroom_id=${owned(context)} and l.draft_id=${data.draftId}
+       order by l.created_at,l.id
+    `;
+    const details = [];
+    for (const link of links) {
+      let parsed: { segmentIndex: number; captionSha256?: string }[] = [];
+      try {
+        const value = JSON.parse(link.citation_snapshot) as unknown;
+        if (Array.isArray(value)) parsed = value as typeof parsed;
+      } catch { /* report malformed history without inventing citations */ }
+      const indices = parsed.map((citation) => Number(citation.segmentIndex)).filter(Number.isInteger);
+      const segments = indices.length ? await sql<{
+        segment_index: number; start_seconds: number; excerpt: string; caption_sha256: string;
+      }>`
+        select segment_index,start_seconds,excerpt,caption_sha256 from meeting_transcript_segments
+         where artifact_id=${link.artifact_id} and segment_index=any(${indices}) order by segment_index
+      ` : [];
+      details.push({
+        id: Number(link.id), artifactId: Number(link.artifact_id), sha256: link.sha256,
+        videoId: link.video_id, isCurrent: link.is_current, revisionNotice: link.revision_notice,
+        citations: parsed.map((citation) => {
+          const segment = segments.find((row) => Number(row.segment_index) === Number(citation.segmentIndex));
+          return {
+            segmentIndex: Number(citation.segmentIndex),
+            timestampSeconds: segment ? Number(segment.start_seconds) : null,
+            excerpt: segment?.excerpt ?? null,
+            captionSha256: citation.captionSha256 ?? null,
+            segmentAvailable: Boolean(segment && segment.caption_sha256 === citation.captionSha256),
+          };
+        }),
+      });
+    }
+    const reviews = await sql<{
+      id: number; accepted_artifact_id: number; accepted_artifact_sha256: string;
+      accepted_citation_snapshot: string; reviewed_by: string; resolution_note: string; reviewed_at: string;
+    }>`
+      select id,accepted_artifact_id,accepted_artifact_sha256,accepted_citation_snapshot,reviewed_by,resolution_note,reviewed_at
+        from meeting_draft_transcript_revision_reviews
+       where newsroom_id=${owned(context)} and draft_id=${data.draftId}
+       order by reviewed_at,id
+    `;
+    return {
+      id: Number(draft.id), headline: draft.headline, dek: draft.dek, body: draft.body, topic: draft.topic,
+      updatedAt: draft.updated_at, transcriptLinks: details,
+      transcriptReviews: reviews.map((review) => {
+        let raw: unknown = null;
+        try { raw = JSON.parse(review.accepted_citation_snapshot) as unknown; } catch { /* malformed record is displayed as unavailable */ }
+        const citations = Array.isArray(raw) ? raw.map((value) => {
+          const citation = value && typeof value === "object" ? value as Record<string, unknown> : {};
+          const numberOrNull = (field: unknown) => typeof field === "number" && Number.isFinite(field) ? field : null;
+          return {
+            sourceSegmentIndex: numberOrNull(citation.sourceSegmentIndex),
+            acceptedSegmentIndex: numberOrNull(citation.acceptedSegmentIndex),
+            acceptedTimestampSeconds: numberOrNull(citation.acceptedTimestampSeconds),
+            excerpt: typeof citation.excerpt === "string" ? citation.excerpt : null,
+            captionSha256: typeof citation.captionSha256 === "string" ? citation.captionSha256 : null,
+          };
+        }) : [];
+        return {
+          id: Number(review.id), acceptedArtifactId: Number(review.accepted_artifact_id),
+          acceptedArtifactSha256: review.accepted_artifact_sha256, reviewedBy: review.reviewed_by,
+          note: review.resolution_note, reviewedAt: review.reviewed_at, citations,
+        };
+      }),
+    };
+  });
 
 export const listPublishedDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
@@ -2321,10 +2653,18 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
       list.push({ date: c.created_at, body: c.body });
       byArt.set(c.article_id, list);
     }
+    const reviews = await loadPublishedMeetingReviews(sql, owned(context));
+    const reviewsByArticle = new Map<number, PublishedMeetingReview[]>();
+    for (const review of reviews) {
+      const list = reviewsByArticle.get(review.article.id) ?? [];
+      list.push(review);
+      reviewsByArticle.set(review.article.id, list);
+    }
     return arts.map((a) => ({
       ...a,
       lead_score: a.lead_score == null ? null : Number(a.lead_score),
       corrections: byArt.get(a.id) ?? [],
+      transcriptReviews: reviewsByArticle.get(a.id) ?? [],
     }));
   });
 

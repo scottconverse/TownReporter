@@ -3,19 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { StoryBody } from "@/components/story-body";
 import { EmptyState, StorySkeleton } from "@/components/states";
-import { inkGhost } from "@/components/desk-chrome";
+import { inkGhost } from "@/components/desk-chrome-utils";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
 import { parseUrlList, siteUrl } from "@/lib/paper";
-import { DEFAULT_PAPER_IDENTITY, usePaper, usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import { usePublicSections } from "@/lib/use-sections";
 import { ProvenanceBlock } from "@/components/provenance";
-import {
-  ReaderRow,
-  SaveStory,
-  ShareStory,
-  ReadingButton,
-  CopyButton,
-} from "@/components/reader-controls";
+import { ReaderRow, SaveStory, ShareStory, ReadingButton, CopyButton } from "@/components/reader-controls";
 import { readMinutes } from "@/lib/reader";
 import { ViewBeacon } from "@/components/view-beacon";
 

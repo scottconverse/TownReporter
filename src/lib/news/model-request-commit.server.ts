@@ -89,7 +89,8 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, deps.probeProvider ?? probeProvider);
+  const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
@@ -103,6 +104,15 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  if (effectiveChoice === "local-model" && (!providerProbe.ok || !providerProbe.localModel)) {
+    return {
+      ok: false as const,
+      kind: "not-ready" as const,
+      error: "The selected local model could not be pinned to its exact server and model before enqueueing.",
+      detail: "Refresh the Local model list and try again. No draft job was started.",
+      retryable: true,
+    };
+  }
   const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
@@ -141,6 +151,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
       requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
+      localModel: providerProbe.ok ? providerProbe.localModel : undefined,
       preflightFailover: preflight.switchReceipt,
     })),
   });
@@ -195,7 +206,8 @@ export async function commitScanForAuthenticatedEditor(
   },
   deps: ScanCommitDeps = {},
 ) {
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, deps.probeProvider ?? probeProvider);
+  const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "scan"));
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {
@@ -209,6 +221,15 @@ export async function commitScanForAuthenticatedEditor(
   }
 
   const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
+  if (effectiveChoice === "local-model" && (!providerProbe.ok || !providerProbe.localModel)) {
+    return {
+      ok: false as const,
+      kind: "not-ready" as const,
+      error: "The selected local model could not be pinned to its exact server and model before enqueueing.",
+      detail: "Refresh the Local model list and try again. No scan job was started.",
+      retryable: true,
+    };
+  }
   const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
   let sectionSnapshot;
   try {sectionSnapshot=await sectionScanSnapshot(input.context.newsroomId,input.sectionKey);}
@@ -293,6 +314,7 @@ export async function commitScanForAuthenticatedEditor(
       requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
+      localModel: providerProbe.ok ? providerProbe.localModel : undefined,
       preflightFailover: preflight.switchReceipt,
     })),
   });
@@ -400,6 +422,12 @@ export async function commitOpinionForAuthenticatedEditor(
     };
   }
   const effectiveChoice = readiness.effectiveChoice;
+  if (effectiveChoice === "local-model" && !readiness.localModel) {
+    return {
+      ok: false as const,
+      error: "The selected local model could not be pinned to its exact server and model before enqueueing. Refresh the Local model list and try again.",
+    };
+  }
   const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
 
   // OAuth is checked before schema setup or a database handle is requested.
@@ -521,6 +549,7 @@ export async function commitOpinionForAuthenticatedEditor(
         requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
         actualRuntime: effectiveChoice,
         actualEffort: effectiveEffort,
+        localModel: readiness.localModel,
         preflightFailover: opinionPreflight,
       })),
     });

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { Field, InkButton, inputClass } from "./desk-chrome";
+import { Field, InkButton } from "./desk-chrome";
+import { inputClass } from "./desk-chrome-utils";
 import type {
   CustomAiConnectionInput,
   PublicCustomAiConnection,

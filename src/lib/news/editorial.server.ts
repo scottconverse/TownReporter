@@ -26,11 +26,12 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
-import { modelEffort, plannerModelFor, providerEntry, providerModel, type ModelEffort } from "./provider-registry.ts";
+import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { nameCheckText, type NameCheck } from "./name-check.ts";
 import { officialDomains } from "./absence-gate.ts";
 import { opinionFallbackRuntimeReceipt } from "./opinion-runtime-receipt.ts";
+import { pinnedLocalModelForJob } from "./job-local-model.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
@@ -227,8 +228,8 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       // (no database, discovery unreachable) falls back to the env-only
       // resolution `localGateway()` already does, exactly as before this
       // wiring existed.
-      const localModel = await import("./provider-settings.ts")
-        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId))
+      const localModel = editorialInput.localModel ?? await import("./provider-settings.ts")
+        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
         .then((r) => r.override)
         .catch(() => undefined);
       return grokChat(
@@ -397,7 +398,7 @@ export async function fileEditorial(
           noTools: true,
           reasoningEffort: snapshot.modelEffort,
         }),
-        probe: (choice) => probeProvider(choice, input.newsroomId),
+        probe: (choice) => probeProvider(choice, input.newsroomId, undefined, "opinion"),
         resolve: async (choice) => ({
           modelChoice: choice as EffectiveOpinionModelChoice,
           modelEffort: modelEffort(choice, nameRuntime.modelEffort),
@@ -587,6 +588,10 @@ export async function performEditorialWork(
   deps: EditorialWorkDeps = {},
 ) {
   await ensureEditorialRequestSchema();
+  // Local jobs are bound to the exact endpoint/model checked before enqueue.
+  // Reading uploads and writing the editorial must use the same pinned choice,
+  // even if the newsroom preference changes while the job waits in the queue.
+  const queuedLocalModel = pinnedLocalModelForJob(job as Pick<import("./jobs.ts").DeskJob, "model_choice" | "result_json">);
   const sql = await getSql();
   const rows = await sql<{
     id: number;
@@ -691,7 +696,8 @@ export async function performEditorialWork(
           modelEffort: activeEffort,
           source: requestedChoice === "auto" ? "auto" : (job.model_choice_source ?? "editor"),
           ladder: OPINION_AUTOMATIC_LADDER,
-          probe: (choice) => (deps.documentProbe ?? probeProvider)(choice, job.newsroom_id),
+          probe: (choice) => (deps.documentProbe ?? probeProvider)(choice, job.newsroom_id, undefined, "opinion", queuedLocalModel ?? undefined),
+          localModel: queuedLocalModel ?? undefined,
           chat: deps.documentChat,
           onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
             activeChoice = nextChoice as EffectiveOpinionModelChoice;
@@ -733,6 +739,7 @@ export async function performEditorialWork(
     requestedModelChoice: requestedChoice,
     requestedModelEffort: requestedEffort,
     completion: { requestId: req.id, jobId: job.id },
+    localModel: queuedLocalModel ?? undefined,
   });
 
   if (!result.ok) {

@@ -36,19 +36,26 @@ export function isHistoryExhausted(loadedCount: number, total: number): boolean 
 }
 
 /**
- * Append a newly loaded page to the rows already on screen, de-duplicating by
- * `id` so an overlapping boundary row cannot appear twice or drop a row.
+ * Merge a newly loaded page into the rows already on screen.
+ *
+ * A row whose `id` is already present is NOT "already correct" -- it is
+ * "already present, and its latest values win". The Scan page refetches every
+ * 2 seconds while a run is in flight and merges each response through here, so
+ * dropping same-id rows meant the newest state could never reach the screen:
+ * the Run button stayed enabled, no busy indicator appeared, and a scan that
+ * was running to completion looked dead until the app was restarted.
+ *
+ * So: existing rows are seeded into a Map by `id`, incoming rows overwrite
+ * them, and the result is returned newest-first. Duplicates still cannot
+ * appear (one entry per `id`), and an overlapping boundary row now carries
+ * whatever the server said most recently.
  */
 export function accumulateScanPages<T extends { id: number }>(
   existing: T[],
   incoming: T[],
 ): T[] {
-  const out = existing.slice();
-  const seen = new Set(out.map((r) => r.id));
-  for (const row of incoming) {
-    if (seen.has(row.id)) continue;
-    seen.add(row.id);
-    out.push(row);
-  }
-  return out;
+  const byId = new Map<number, T>();
+  for (const row of existing) byId.set(row.id, row);
+  for (const row of incoming) byId.set(row.id, row);
+  return [...byId.values()].sort((a, b) => b.id - a.id);
 }

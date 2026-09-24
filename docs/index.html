@@ -653,9 +653,9 @@
               approved routine notices use fixed templates and approved sources.
             </p>
             <p class="cap">
-              Repository release: <b>0.6.60</b> — published on GitHub; the release note records the tag and source commit and names the `.sha256` sidecar as the hash authority. Its record separates published source and package from production deployment and provider-run evidence.
+              Repository software version: <b>0.6.61</b> — the release note names the expected tag and assets while the JSON metadata and `.sha256` sidecar remain the authorities for source commit and package hash. GitHub publication and production deployment remain separate facts.
               <a href="https://github.com/scottconverse/TownReporter/releases/latest">Download the latest published Windows release</a>.
-              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.60.md">0.6.60 release guide and evidence boundaries</a>.
+              <a href="https://github.com/scottconverse/TownReporter/blob/main/docs/releases/0.6.61.md">0.6.61 release guide and evidence boundaries</a>.
             </p>
             <div class="cta-row">
               <a class="btn" href="#start">Run it yourself</a>
@@ -1069,11 +1069,21 @@ npm run dev
                 automatically.
               </p>
               <p>
-                Claude Code strips its coding settings for news calls. Codex deliberately keeps the
-                signed-in Windows user&rsquo;s native configuration and full available access:
-                search, shell and files, browser/computer tools, apps, plugins, hooks, skills, rules
-                and multi-agent capabilities. TownReporter does not replace them with a read-only
-                sandbox.
+                Claude Code strips its coding settings for news calls. Codex uses the signed-in
+                account for authentication, but each reporting call ignores Codex user configuration,
+                starts in the system temporary directory, runs ephemerally with a read-only sandbox,
+                and disables shell, computer, browser, apps, plugins, multi-agent and hook features.
+                Native web search is enabled only for an explicitly authorized research call. These
+                are application-level CLI controls, not an operating-system security sandbox; the
+                process still runs as the Windows account, and read-only mode alone does not restrict
+                file reads.
+              </p>
+              <p>
+                Claude Code runs in restricted safe mode and strips the operator&rsquo;s
+                <code>CLAUDE.md</code>, skills, plugins and MCP configuration. Research calls allow only
+                <code>WebSearch</code> and
+                <code>WebFetch</code>; planning calls hide tools; OCR reads one generated temporary
+                page. Reporting calls have no shell, arbitrary file, browser or agent tools.
               </p>
               <p>
                 Zen MiMo and Local Qwen were removed from the picker (2026-09-02). 0.6.10

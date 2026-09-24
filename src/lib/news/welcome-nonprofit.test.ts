@@ -45,7 +45,7 @@ async function applyMigrations() {
 describe("migrations/0040_welcome_nonprofit.sql", () => {
   it("a fresh PGLite install's seeded welcome article reads non-profit, not civic", async () => {
     const sql = await applyMigrations();
-    const rows = await sql<{ headline: string; body: string }[]>`
+    const rows = await sql<{ headline: string; body: string }>`
       select headline, body from articles where slug = ${WELCOME_SLUG} and user_id = 'masthead'
     `;
     assert.equal(rows.length, 1, "expected the migration-seeded welcome article to exist");
@@ -86,11 +86,11 @@ describe("migrations/0040_welcome_nonprofit.sql", () => {
     );
     await pg.exec(migrationText);
 
-    const rows = await sql<{ headline: string; body: string }[]>`
+    const rows = await sql<{ headline: string; body: string }>`
       select headline, body from articles where slug = ${WELCOME_SLUG} and user_id = 'masthead'
     `;
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].headline, handEditedHeadline, "hand-edited headline must be untouched");
-    assert.equal(rows[0].body, handEditedBody, "hand-edited body must be untouched");
+    assert.equal(rows[0]!.headline, handEditedHeadline, "hand-edited headline must be untouched");
+    assert.equal(rows[0]!.body, handEditedBody, "hand-edited body must be untouched");
   });
 });

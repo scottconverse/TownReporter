@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current release: [0.6.60](docs/releases/0.6.60.md).** Meeting capture: the paper watches the configured city YouTube channels, captures captions locally with provenance, aligns them to agenda items and reads votes from the structured record. Published on GitHub with the Windows installer asset; the release record separates published source from production-deployment and live-model results. [0.6.50 release guide](docs/releases/0.6.50.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.61](docs/releases/0.6.61.md).** The Scan page now observes a running scan finish without a reload. Meeting recordings now reach the Queue and a draft with persisted used citations; immutable transcript revisions block stale publication and create editor review without rewriting published history. GitHub remains the authority for publication state. [0.6.60 release guide](docs/releases/0.6.60.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, installation checks and deployment evidence are recorded separately in the [release guide](docs/releases/0.6.60.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.61 release guide](docs/releases/0.6.61.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -52,7 +52,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.60 release adds meeting capture. Its package-internal note points to the `.sha256` sidecar as the hash authority, the rule introduced in 0.6.56. The exact v0.6.60 tag, source commit, Windows x64 ZIP name, and sidecar are recorded in the release note after publication.
+Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.61 package adds the complete transcript-to-editor path and the Scan-page refresh repair. Its package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first manual editorial workflow within an hour with working internet; that is a goal, not a measured fresh-machine result, and no fresh-machine human acceptance is documented. Release evidence records only the stated automated installer and package checks and their limits. Public hosting is separate from this local installation.
 
@@ -303,17 +303,23 @@ API key is required. Readiness is checked before enqueueing. If a login expires,
 the desk refuses and tells the editor which app to open and sign in to.
 `CODEX_CLI_PATH`, `CODEX_HOME`, and `CLAUDE_CLI_PATH` are available when normal
 discovery cannot find the binary or Codex state directory.
-Codex runs with the signed-in Windows user's native configuration and full
-available machine capabilities. TownReporter does not disable its search,
-shell/file access, browser/computer tools, apps, plugins, hooks, skills,
-multi-agent features, user rules, or repository instructions, and it does not
-replace them with a read-only sandbox. That includes every path on `C:\` the
-signed-in account can access. The requested newsroom job still comes from the
-prompt; available capability is not permission to perform an unrelated action.
+TownReporter uses the signed-in account only to authenticate its Codex CLI
+requests; a newsroom call does not inherit the operator's full Codex setup.
+Each call ignores Codex user configuration, starts from the system temporary
+directory, runs ephemerally with a read-only sandbox, and disables shell,
+computer, browser, apps, plugins, multi-agent and hook features. Built-in web
+search is added only when the trusted caller requests research. This is an
+application-level tool boundary, not an operating-system security sandbox: the
+reporting process still runs as the Windows account, and the read-only setting
+does not by itself restrict which files that account can read. Untrusted source
+material must therefore remain data, never an instruction to expand the task.
 
-Claude Code remains the separate CLI path: its own `CLAUDE.md`, skills and
-plugins are not loaded into news prompts because that adapter passes
-`--setting-sources ""`.
+Claude Code is separately constrained. TownReporter omits the operator's
+`CLAUDE.md`, skills, plugins and MCP configuration, starts the CLI outside the
+application tree in restricted safe mode, and allows only `WebSearch` and
+`WebFetch` for a caller-authorized research request. Planning calls hide all
+tools; OCR has a narrow exception that reads one generated temporary page.
+The reporting job does not receive shell, arbitrary file, browser or agent tools.
 
 For **Automatic**, a configured gateway is tried first; named choices in Story, Scan and Dark Desk become the recorded first runtime instead of this low-level configured-provider chain:
 

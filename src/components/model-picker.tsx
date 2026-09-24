@@ -125,11 +125,11 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   });
   const choice = useQuery({
     queryKey: ["local-model-choice", scope],
-    queryFn: () => getLocalModelChoice(),
+    queryFn: () => getLocalModelChoice({ data: { scope } }),
     staleTime: 15_000,
   });
   const save = useMutation({
-    mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: picked }),
+    mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: { ...picked, scope } }),
     onSuccess: (_result, picked) => {
       qc.invalidateQueries({ queryKey: ["local-model-choice"] });
       announceToDesk(`Local model set to ${picked.id}.`);
@@ -151,7 +151,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   const reachable = servers.filter((s) => s.reachable);
   const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
   const selectedModel = selected
-    ? reachable.flatMap((server) => server.models).find((model) => model.id === selected.id)
+    ? reachable.find((server) => server.baseUrl === selected.baseUrl)?.models.find((model) => model.id === selected.id)
     : null;
   const notice = choice.data?.notice;
 
@@ -178,6 +178,9 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
             }}
           >
             {!selected ? <option value="">Choose a model…</option> : null}
+            {selected && !reachable.some((server) => server.baseUrl === selected.baseUrl && server.models.some((model) => model.id === selected.id))
+              ? <option value={`${selected.baseUrl} ${selected.id}`}>{selected.id} (currently unavailable)</option>
+              : null}
             {reachable.map((server) => (
               <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
                 {server.models.map((model) => (
@@ -190,7 +193,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
           </select>
           <span className="model-picker-help">
             {selectedModel?.cloud
-              ? `This model runs on Ollama's hosted service, not on this computer${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. Reasoning is off by default for drafting so the output budget can go to the story.${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
+              ? `This model runs on Ollama's hosted service, not on this computer, and may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
               : `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.${selectedModel?.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`}
           </span>
           {notice ? <span className="model-picker-help">{notice}</span> : null}
@@ -218,7 +221,7 @@ export function ModelPicker(props: Props) {
   const localScope = props.scope ?? "story";
   const selectedLocalChoice = useQuery({
     queryKey: ["local-model-choice", localScope],
-    queryFn: () => getLocalModelChoice(),
+    queryFn: () => getLocalModelChoice({ data: { scope: localScope } }),
     staleTime: 15_000,
     enabled: props.value === "local-model",
   });

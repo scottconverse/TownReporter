@@ -79,8 +79,8 @@ describe("durable Pull pipeline", () => {
       search: async () => assert.fail("completed search checkpoint must not run again"),
       ingest: async (url) => document(url),
       stopRequested: async () => false,
-      saveDocument: async (doc) => events.push(`document:${doc.url}`),
-      saveReceipt: async (next) => events.push(`receipt:${next.status}:${next.stage}`),
+      saveDocument: async (doc) => { events.push(`document:${doc.url}`); },
+      saveReceipt: async (next) => { events.push(`receipt:${next.status}:${next.stage}`); },
     });
     assert.equal(result.status, "completed");
     assert.equal(result.counters.documentsOpened, 1);
@@ -213,7 +213,7 @@ describe("durable Pull pipeline", () => {
         ingest: async () => assert.fail("the timed-out search must stop the pipeline"),
         stopRequested: async () => false,
         saveDocument: async () => assert.fail("the timed-out search must save no document"),
-        saveReceipt: async (next) => saved.push(JSON.parse(JSON.stringify(next)) as PullReceipt),
+        saveReceipt: async (next) => { saved.push(JSON.parse(JSON.stringify(next)) as PullReceipt); },
       },
     );
     await new Promise((resolve) => setTimeout(resolve, 35));

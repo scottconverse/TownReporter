@@ -1,7 +1,13 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { BlockedAddressError, guardedLookup, resolveFetch } from "./fetch-url.ts";
+import {
+  BlockedAddressError,
+  GuardedTransportUnavailableError,
+  guardedLookup,
+  resolveFetch,
+  setUndiciLoaderForTests,
+} from "./fetch-url.ts";
 
 function lookupOnce(host: string): Promise<{ err: Error | null; address: unknown }> {
   return new Promise((resolve) => {
@@ -80,6 +86,23 @@ describe("the outbound fetch blocks at connect time", () => {
         return true;
       },
     );
+  });
+});
+
+describe("guarded transport initialization", () => {
+  after(() => setUndiciLoaderForTests(null));
+
+  it("fails closed when the undici module cannot load", async () => {
+    setUndiciLoaderForTests(async () => { throw new Error("module unavailable"); });
+    await assert.rejects(resolveFetch(), GuardedTransportUnavailableError);
+  });
+
+  it("fails closed when the guarded Agent cannot be constructed", async () => {
+    setUndiciLoaderForTests(async () => ({
+      Agent: class { constructor() { throw new Error("agent construction failed"); } },
+      fetch: globalThis.fetch,
+    }) as never);
+    await assert.rejects(resolveFetch(), GuardedTransportUnavailableError);
   });
 });
 

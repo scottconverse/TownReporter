@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   describeLiveStatus,
+  buildYtDlpCaptureReadinessArgs,
   extractChannelId,
   isMeetingTitle,
   isYoutubeChannel,
   MEETING_KEYWORDS,
+  needsYtDlpChannelFallback,
   parseChannelTabHtml,
+  parseYtDlpChannelJson,
+  parseYtDlpCaptureReadiness,
   parseTranscriptPanel,
   pickMeetingVideos,
   sameMeeting,
@@ -79,6 +83,8 @@ describe("meeting filter", () => {
     assert.equal(isMeetingTitle("206 S. Main Street Neighborhood Meeting"), true);
     assert.equal(isMeetingTitle("Water Board Meeting August 17, 2026"), true);
     assert.equal(isMeetingTitle("This Week in Council, Aug. 25, 2026"), false);
+    assert.equal(isMeetingTitle("Voices of Change: Councilwoman Conversation"), false,
+      "a public-affairs interview is not a council meeting just because its title contains councilwoman");
     const picked = pickMeetingVideos(
       [
         { title: "This Week in Council, Aug. 25, 2026", duration: 90 },
@@ -97,6 +103,52 @@ describe("meeting filter", () => {
     assert.equal(rows[0]?.id, "7OdoRvfRArI");
     assert.match(rows[0]?.title ?? "", /City Council/);
     assert.equal(rows[0]?.duration, 5 * 3600 + 30);
+  });
+
+  it("parses bounded yt-dlp channel fallback output", () => {
+    const rows = parseYtDlpChannelJson(JSON.stringify({ entries: [
+      { id: "xk9TiMKxOJQ", title: "Sustainability Advisory Board Meeting Sept. 16, 2026", duration: 4240 },
+      { id: "mJOf8rQS1Vc", title: "Planning and Zoning Commission 9/23/26", live_status: "is_upcoming" },
+      { id: "too-short", title: "ignored" },
+      { id: "xk9TiMKxOJQ", title: "duplicate" },
+    ] }), "videos");
+    assert.deepEqual(rows, [{
+      id: "xk9TiMKxOJQ",
+      title: "Sustainability Advisory Board Meeting Sept. 16, 2026",
+      published: "",
+      url: "https://www.youtube.com/watch?v=xk9TiMKxOJQ",
+      duration: 4240,
+      tab: "videos",
+    }]);
+  });
+
+  it("falls back when YouTube serves only membership chrome or no rows", () => {
+    assert.equal(needsYtDlpChannelFallback([]), true);
+    assert.equal(needsYtDlpChannelFallback([{
+      id: "wOKZ_KDzFUM", title: "Want to join this channel?", published: "",
+      url: "https://www.youtube.com/watch?v=wOKZ_KDzFUM", duration: 0, tab: "videos",
+    }]), true);
+    assert.equal(needsYtDlpChannelFallback([{
+      id: "xk9TiMKxOJQ", title: "Sustainability Advisory Board Meeting Sept. 16, 2026", published: "",
+      url: "https://www.youtube.com/watch?v=xk9TiMKxOJQ", duration: 4240, tab: "videos",
+    }]), false);
+  });
+});
+
+describe("meeting-capture metadata preflight", () => {
+  it("classifies yt-dlp metadata without downloading media", () => {
+    assert.equal(parseYtDlpCaptureReadiness('{"live_status":"is_upcoming"}'), "upcoming");
+    assert.equal(parseYtDlpCaptureReadiness('{"live_status":"is_live"}'), "live");
+    assert.equal(parseYtDlpCaptureReadiness('{"live_status":"was_live","duration":3600}'), "ready");
+    assert.equal(parseYtDlpCaptureReadiness('{"duration":3600}'), "ready");
+    assert.equal(parseYtDlpCaptureReadiness('{"duration":0}'), "unknown");
+    assert.equal(parseYtDlpCaptureReadiness("not json"), "unknown");
+    const args = buildYtDlpCaptureReadinessArgs("abc12345678");
+    assert.ok(args.includes("--skip-download"));
+    assert.ok(args.includes("--dump-single-json"));
+    assert.ok(args.includes("--js-runtimes") && args.includes("node"));
+    assert.ok(!args.includes("-x") && !args.some((arg) => /audio-format|audio-quality|write-subs|write-auto-subs/.test(arg)),
+      "preflight may inspect metadata only; it cannot download audio or captions");
   });
 });
 

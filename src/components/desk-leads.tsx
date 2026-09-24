@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Chip, InkButton, Score, leadOrigin } from "@/components/desk-chrome";
+import { Chip, InkButton, Score } from "@/components/desk-chrome";
+import { leadOrigin } from "@/components/desk-chrome-utils";
 import { formatAge } from "@/lib/paper";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { PrintedDup } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 import { ModelPicker } from "@/components/model-picker";

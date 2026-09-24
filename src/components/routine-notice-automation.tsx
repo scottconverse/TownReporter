@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { InkButton, SecHead, announceToDesk } from "./desk-chrome";
+import { InkButton, SecHead } from "./desk-chrome";
+import { announceToDesk } from "./desk-chrome-utils";
 import { editorSections } from "@/lib/news/sections";
 import {
   getRoutineNoticeAutomation,

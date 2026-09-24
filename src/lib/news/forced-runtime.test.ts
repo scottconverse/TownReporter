@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { getSql } from "../db.ts";
+import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import { productionOcr } from "./ocr.ts";
 import { singleRenderedPdfFixture } from "./pdf-test-fixture.ts";
 import {
   forcedOcrOptions,
   parseForcedRuntimeSnapshot,
   runForcedChat,
+  validateForcedRuntime,
   type ForcedRuntimeSnapshot,
 } from "./forced-runtime.server.ts";
+import { ensureProviderSettingsSchema } from "./provider-settings.ts";
 
 const claude = {
   runtime: "claude-cli",
@@ -201,5 +205,105 @@ describe("forced runtime snapshots", () => {
     });
     assert.equal(forcedOcrOptions(snapshot).provider, "grok-oauth");
     assert.equal(forcedOcrOptions(snapshot).newsroomId, "42");
+  });
+
+  it("preflights the exact saved Forced model and preserves the legacy LM Studio choice", async () => {
+    const newsroomId = 9063;
+    const globalBase = "http://127.0.0.1:1234/v1";
+    const scopedBase = "http://127.0.0.1:11434/v1";
+    const legacyModel = "legacy-lmstudio-model";
+    const forcedModel = "deepseek-v4.1-flash:cloud";
+    const sql = await getSql();
+    await ensureProviderSettingsSchema();
+    await sql.query(
+      "insert into newsrooms(id,name) values($1,'Forced scoped preflight test') on conflict(id) do nothing",
+      [newsroomId],
+    );
+    await sql.query(
+      "insert into provider_settings(newsroom_id,provider_id,local_model_base_url,local_model_id) values($1,'local-model',$2,$3) on conflict(newsroom_id,provider_id) do update set local_model_base_url=excluded.local_model_base_url,local_model_id=excluded.local_model_id",
+      [newsroomId, globalBase, legacyModel],
+    );
+    await sql.query(
+      "insert into newsroom_local_model_choices(newsroom_id,scope,base_url,model_id) values($1,'forced',$2,$3) on conflict(newsroom_id,scope) do update set base_url=excluded.base_url,model_id=excluded.model_id",
+      [newsroomId, scopedBase, forcedModel],
+    );
+
+    const originalFetch = globalThis.fetch;
+    const originalEnv = {
+      base: process.env.LLM_BASE_URL,
+      model: process.env.LLM_MODEL,
+      discovery: process.env.TOWNREPORTER_LOCAL_DISCOVERY,
+    };
+    const requests: string[] = [];
+    let forcedModels = [forcedModel];
+    process.env.LLM_BASE_URL = globalBase;
+    process.env.LLM_MODEL = legacyModel;
+    process.env.TOWNREPORTER_LOCAL_DISCOVERY = "0";
+    resetLocalCatalogCacheForTests();
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      requests.push(url);
+      const models = url.startsWith(`${scopedBase}/`)
+        ? forcedModels
+        : [legacyModel];
+      return new Response(JSON.stringify({ data: models.map((id) => ({ id })) }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      const scoped = await validateForcedRuntime(newsroomId, "local-model");
+      assert.deepEqual(scoped, {
+        runtime: "local",
+        modelChoice: "local-model",
+        transport: "local",
+        localModel: { baseUrl: scopedBase, id: forcedModel },
+        modelEffort: "none",
+      });
+      assert.equal(
+        requests.at(-1),
+        `${scopedBase}/models`,
+        "the selected Forced endpoint and model must be probed, not the global LM Studio model",
+      );
+
+      forcedModels = ["another-cloud-model"];
+      await assert.rejects(
+        validateForcedRuntime(newsroomId, "local-model"),
+        new RegExp(`model ${forcedModel} is not loaded`),
+        "a scoped model missing from its exact server must block forced-run enqueue",
+      );
+      assert.equal(requests.at(-1), `${scopedBase}/models`);
+
+      await sql.query(
+        "delete from newsroom_local_model_choices where newsroom_id=$1 and scope='forced'",
+        [newsroomId],
+      );
+      const legacy = await validateForcedRuntime(newsroomId, "local-model");
+      assert.deepEqual(legacy, {
+        runtime: "local",
+        modelChoice: "local-model",
+        transport: "local",
+        localModel: { baseUrl: globalBase, id: legacyModel },
+      });
+      assert.equal(
+        requests.at(-1),
+        `${globalBase}/models`,
+        "without a scoped choice, the existing LM Studio setting remains the selected model",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries({
+        LLM_BASE_URL: originalEnv.base,
+        LLM_MODEL: originalEnv.model,
+        TOWNREPORTER_LOCAL_DISCOVERY: originalEnv.discovery,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      resetLocalCatalogCacheForTests();
+      await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='forced'", [newsroomId]);
+      await sql.query("delete from provider_settings where newsroom_id=$1 and provider_id='local-model'", [newsroomId]);
+      await sql.query("delete from newsrooms where id=$1", [newsroomId]);
+    }
   });
 });

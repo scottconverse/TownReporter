@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
+import type { ReportedDraftResult } from "./desk-model-run.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -34,7 +35,7 @@ test("persists a writer checkpoint without completing the job when later reporti
   const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','public','default','running','Writing','checkpoint-claim') returning id",[user,room,lead.id]);
   const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"public",lane:"default",status:"running",stage:"Writing",claim_token:"checkpoint-claim"} as DeskJob;
   await assert.rejects(performDraftWork(job,{setJobStage:async()=>{},reportAndDraft:async(_input,deps)=>{
-    await deps.onWriterDraft?.({headline:"Saved writer",dek:"Saved dek",body:"Expensive writer output",topic:"council",source_urls:["https://records.example/item"],integrity_notes:"Prior warning",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[{url:"https://records.example/item",title:"Record",version_id:44,capture_event_id:55}]});
+    await deps!.onWriterDraft?.({headline:"Saved writer",dek:"Saved dek",body:"Expensive writer output",topic:"council",source_urls:["https://records.example/item"],integrity_notes:"Prior warning",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[{url:"https://records.example/item",title:"Record",version_id:44,capture_event_id:55}]});
     return {error:"Later gate failed"};
   }}),/Later gate failed/);
   const drafts=await sql.query<{headline:string;body:string;provenance_json:string;integrity_notes:string;research_json:string}>("select headline,body,provenance_json,integrity_notes,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
@@ -138,13 +139,13 @@ test("Story retries only the failed writer call and keeps completed research", a
     reportAndDraft: async (_input, deps) => {
       reportCalls += 1;
       upstreamResearchCalls += 1;
-      const written = await deps.chat?.("writer system", "assembled research packet", 2200);
+      const written = await deps!.chat?.("writer system", "assembled research packet", 2200);
       assert.equal(written?.ok, true);
       return {
         headline: "Writer failover lead", dek: "", body: "The completed research packet was reused.",
         topic: "council", source_urls: [], integrity_notes: "", memory_entities: [], form: "news",
         provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: {},
-      } as ReportedDraftResult;
+      } as unknown as ReportedDraftResult;
     },
     chat: async (_system, _user, _tokens, opts) => {
       providerCalls.push({ choice: opts?.choice, effort: opts?.reasoningEffort });
@@ -176,9 +177,9 @@ test("a later writer checkpoint cannot supersede an intervening editor draft",as
   const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"public",lane:"default",status:"running",stage:"Writing",claim_token:"race-claim"} as DeskJob;
   const checkpoint={headline:"Writer one",dek:"",body:"Writer one body",topic:"council",source_urls:[],integrity_notes:"",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[]};
   await assert.rejects(performDraftWork(job,{setJobStage:async()=>{},reportAndDraft:async(_input,deps)=>{
-    await deps.onWriterDraft?.(checkpoint);
+    await deps!.onWriterDraft?.(checkpoint);
     await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls) values($1,$2,$3,'Editor saved','','Editor newer body','council','[]')",[user,room,lead.id]);
-    await deps.onWriterDraft?.({...checkpoint,headline:"Writer two",body:"Writer two body"});
+    await deps!.onWriterDraft?.({...checkpoint,headline:"Writer two",body:"Writer two body"});
     return {error:"unreachable"};
   }}),/draft changed/i);
   const rows=await sql.query<{headline:string}>("select headline from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);

@@ -65,7 +65,7 @@ export async function validateForcedRuntime(
   effort?: ModelEffort | null,
 ): Promise<ForcedRuntimeSnapshot> {
   if (runtime === "local" || runtime === "local-model") {
-    const local = await resolveLocalModelChoice(newsroomId);
+    const local = await resolveLocalModelChoice(newsroomId, "forced");
     if (
       !local.override ||
       !/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:\/|$)/i.test(
@@ -76,6 +76,9 @@ export async function validateForcedRuntime(
         "Local model is unavailable. Select a model on a known local endpoint first.",
       );
     }
+    const { probeProvider } = await import("./ai.ts");
+    const ready = await probeProvider("local-model", newsroomId, undefined, "forced");
+    if (!ready.ok) throw new Error(ready.error);
     const exactEffort = modelEffort("local-model", effort, local.override.id);
     return {
       runtime: "local",
@@ -90,7 +93,7 @@ export async function validateForcedRuntime(
     const { resolveCustomAiChoice } = await import("./custom-ai-connections.server.ts");
     const connection = await resolveCustomAiChoice(newsroomId, id);
     const { probeProvider } = await import("./ai.ts");
-    const ready = await probeProvider(runtime, newsroomId);
+    const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
     if (!ready.ok) throw new Error(ready.error);
     const exactEffort = modelEffort(runtime, effort, connection.modelId);
     return {
@@ -108,7 +111,7 @@ export async function validateForcedRuntime(
       await import("./xai-oauth.server.ts")
     ).resolveXaiOauthConnection(newsroomId);
     const { probeProvider } = await import("./ai.ts");
-    const ready = await probeProvider(runtime, newsroomId);
+    const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
     if (!ready.ok) throw new Error(ready.error);
     const exactEffort = modelEffort(runtime, effort, connection.modelId);
     return {

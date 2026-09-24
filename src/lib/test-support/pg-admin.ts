@@ -19,7 +19,12 @@ import { Client } from "pg";
  * The admin connection used to CREATE and DROP each file's scratch database.
  *
  * `TEST_POSTGRES_ADMIN_URL` is how CI (and any contributor running these
- * integration tests) points them at a real server. There is deliberately NO
+ * integration tests) points them at a real server, but the normal safe test
+ * environment deliberately blanks that variable. For a manual run, set
+ * `TOWNREPORTER_RUN_POSTGRES_INTEGRATION=1` and `TEST_POSTGRES_ADMIN_URL`, then
+ * invoke `node scripts/run-postgres-integration.mjs [test-file]`; its late
+ * preload validates a loopback/CI target and restores the value only after
+ * the ordinary guard. There is deliberately NO
  * fallback: a previous version of this function defaulted to
  * `postgres://postgres@127.0.0.1:5433/postgres` -- the same shared dev
  * Postgres port implicated in a live-site outage, where a DB-heavy test
@@ -27,7 +32,8 @@ import { Client } from "pg";
  * default is exactly the failure mode this function must never reproduce.
  *
  * Callers must only invoke this function on a path already gated by
- * `integrationRequested()` (i.e. `TEST_POSTGRES_ADMIN_URL` is confirmed set),
+ * `integrationRequested()` (i.e. the explicit integration runner has restored
+ * `TEST_POSTGRES_ADMIN_URL`),
  * so this throw should never actually fire in a correctly wired caller -- it
  * exists as a hard backstop against a future call site that connects without
  * checking the gate first.
@@ -57,9 +63,9 @@ export function resolveAdminUrl(): string {
  * nothing, and a suite that fails for reasons unrelated to the code is worse
  * than a slower one.
  *
- * So they are opt-in, and TEST_POSTGRES_ADMIN_URL is the switch: set it and
- * they run, leave it and they skip with a reason. The default above stays for
- * anyone who sets the variable to something other than this machine's server.
+ * So they are opt-in, and the dedicated integration runner is the switch: its
+ * explicit flag plus TEST_POSTGRES_ADMIN_URL restores the admin URL after the
+ * ordinary safety guard. Direct/ordinary test runs clear it and skip.
  *
  * A skip is only honest if something guarantees they run somewhere. The
  * `postgres-integration` CI job sets the variable and names every one of these
@@ -301,7 +307,9 @@ export async function ensureBuilt(repoRoot: string): Promise<void> {
     if (buildIsCurrent(repoRoot)) return;
     rmSync(DONE_MARKER, { force: true });
     const buildEnv: NodeJS.ProcessEnv = { ...process.env };
-    delete buildEnv.DATABASE_URL;
+    // Keep an explicit empty override: with-app-env otherwise restores the
+    // checkout's .env URL and npm run build migrates that shared database.
+    buildEnv.DATABASE_URL = "";
     // npm on Windows is npm.cmd; shell:true resolves the .cmd shim.
     await new Promise<void>((resolve, reject) => {
       const child = spawn("npm", ["run", "build"], {

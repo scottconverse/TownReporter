@@ -210,6 +210,19 @@ describe("resolveProvider", () => {
     assert.ok(budget("codex-frontier").wallMs >= 420_000);
   });
 
+  it("gives a local model enough wall clock to draft from a long meeting", () => {
+    const budget = providerBudget as unknown as (
+      choice: string,
+    ) => ReturnType<typeof providerBudget>;
+    const local = budget("local-model");
+    // The real four-hour-meeting acceptance path took 1,209,024 ms across
+    // transcript retrieval, planning, writing, editing, and name checking.
+    // Keep a bounded cushion above that measured path while retaining the
+    // separate per-answer ceiling.
+    assert.ok(local.wallMs >= 2_400_000);
+    assert.equal(local.callMs, 600_000);
+  });
+
   it("keeps Automatic's configured gateway on the conservative pipeline budget", () => {
     withEnv(
       {
@@ -466,7 +479,7 @@ describe("grokChat", () => {
           calls.push(`resolve:${newsroomId}:${id}`);
           return { baseUrl: "https://custom.example/v1", modelId: "custom-model", apiKey: "test-secret" };
         },
-        openai: async (provider) => {
+        openai: async (provider: { baseUrl: string; model: string; label: string }) => {
           calls.push(`openai:${provider.baseUrl}:${provider.model}:${provider.label}`);
           return { ok: true as const, text: "custom answer" };
         },
@@ -538,6 +551,33 @@ describe("grokChat", () => {
         assert.equal(result.meta?.model, "manual-model");
       }
       assert.doesNotMatch(JSON.stringify(result), /test-only-key/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("turns a loopback model context rejection into an actionable desk error", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            type: "exceed_context_size_error",
+            message: "request (35018 tokens) exceeds the available context size (32768 tokens)",
+          },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    try {
+      const result = await grokChat("system", "user", 8, {
+        choice: "local-model",
+        localModel: { baseUrl: "http://127.0.0.1:1234/v1", id: "qwen3.8-27b" },
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.match(result.error, /context window/i);
+        assert.doesNotMatch(result.error, /35018|32768/);
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -707,7 +747,12 @@ describe("model-picker provider readiness", () => {
             id: "halo-brain-35b",
           }),
         });
-        assert.deepEqual(result, { ok: true, label: "LLM", choice: "local-model" });
+        assert.deepEqual(result, {
+          ok: true,
+          label: "LLM",
+          choice: "local-model",
+          localModel: { baseUrl: "http://127.0.0.1:1234/v1", id: "halo-brain-35b" },
+        });
       });
       assert.deepEqual(calls, ["http://127.0.0.1:1234/v1/models"]);
     } finally {
@@ -838,6 +883,26 @@ describe("model-picker provider readiness", () => {
           if (!result.ok) assert.match(result.error, /not loaded/i);
         },
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("fails closed when a successful model-list response cannot prove the selected model exists", async () => {
+    const originalFetch = globalThis.fetch;
+    const malformedBodies = ["<html>not a model catalog</html>", JSON.stringify({ models: [{ name: "desk-model" }] }), JSON.stringify({ data: "desk-model" })];
+    try {
+      for (const body of malformedBodies) {
+        globalThis.fetch = async () => new Response(body, { status: 200 });
+        await withEnvAsync(
+          { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+          async () => {
+            const result = await probeProvider("configured");
+            assert.equal(result.ok, false);
+            if (!result.ok) assert.match(result.error, /invalid model list.*could not verify/i);
+          },
+        );
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }

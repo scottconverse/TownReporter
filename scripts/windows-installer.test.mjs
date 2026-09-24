@@ -19,7 +19,7 @@ test("candidate packaging checks out the exact pull-request head", () => {
   const workflow = readFileSync(resolve(".github/workflows/windows-install.yml"), "utf8");
   assert.match(
     workflow,
-    /- uses: actions\/checkout@v4\s+with:\s+ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+    /- uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4\.4\.0\s+with:\s+ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
   );
 });
 test(

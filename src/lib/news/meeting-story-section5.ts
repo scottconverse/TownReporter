@@ -35,16 +35,21 @@ export type AlignmentResult = {
   identifiers, and explicit "next item" phrasing. Agenda titles are used only
   for ordering and labelling, never as the match key.
 */
-const SPOKEN_ITEM = /\b(?:agenda\s+)?item\s+(?:number\s+)?([0-9]{1,2}[A-Z]{0,3}[0-9]{0,2})\b/i;
+const SPOKEN_ITEM = /\b(?:agenda\s+)?item\s+(?:number\s+)?([0-9]{1,2}[A-Z]{0,3}[0-9]{0,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b/i;
 const SPOKEN_IDENTIFIER = /\b([OR]-\d{4}-\d{1,4})\b/i;
-const NEXT_ITEM = /\b(?:moving on|next item|the next agenda item|next agenda item)\b/i;
-
+const SPOKEN_NUMBER_WORDS = [
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+  "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+];
 export function spokenTransitionKey(excerpt: string): { kind: "item" | "identifier" | "next"; value: string } | null {
   const normalised = excerpt.replace(/\s+/g, " ");
   const identifier = normalised.match(SPOKEN_IDENTIFIER)?.[1];
   if (identifier) return { kind: "identifier", value: identifier.toUpperCase() };
   const item = normalised.match(SPOKEN_ITEM)?.[1];
-  if (item) return { kind: "item", value: item.toUpperCase() };
+  if (item) {
+    const word = SPOKEN_NUMBER_WORDS.indexOf(item.toLowerCase());
+    return { kind: "item", value: word >= 0 ? String(word + 1) : item.toUpperCase() };
+  }
   return null;
 }
 
@@ -80,9 +85,9 @@ export function chunkByAgendaItem(input: {
   segments: TranscriptSegment[];
   packetItems: PacketItem[];
 }): AgendaChunk[] {
-  const chunks: AgendaChunk[] = [];
+  const boundaries: { packetItem: PacketItem; segmentPosition: number }[] = [];
   for (const packetItem of input.packetItems) {
-    const matched = input.segments.filter((segment) => {
+    const segmentPosition = input.segments.findIndex((segment) => {
       const transition = spokenTransitionKey(segment.excerpt);
       if (transition) {
         if (transition.kind === "item" && itemNumbersMatch(transition.value, packetItem.itemNumber)) return true;
@@ -98,16 +103,23 @@ export function chunkByAgendaItem(input: {
       }
       return false;
     });
-    if (!matched.length) continue;
-    chunks.push({
-      item: packetItem.itemNumber,
-      title: packetItem.title,
-      segmentIndexes: matched.map((s) => s.segmentIndex),
-      startSeconds: Math.min(...matched.map((s) => s.startSeconds)),
-      endSeconds: Math.max(...matched.map((s) => s.endSeconds)),
-    });
+    if (segmentPosition >= 0) boundaries.push({ packetItem, segmentPosition });
   }
-  return chunks;
+  boundaries.sort((a, b) => a.segmentPosition - b.segmentPosition);
+  const uniqueBoundaries = boundaries.filter(
+    (boundary, index) => index === 0 || boundary.segmentPosition !== boundaries[index - 1]!.segmentPosition,
+  );
+  return uniqueBoundaries.map((boundary, index) => {
+    const next = uniqueBoundaries[index + 1]?.segmentPosition ?? input.segments.length;
+    const span = input.segments.slice(boundary.segmentPosition, next);
+    return {
+      item: boundary.packetItem.itemNumber,
+      title: boundary.packetItem.title,
+      segmentIndexes: span.map((segment) => segment.segmentIndex),
+      startSeconds: span[0]!.startSeconds,
+      endSeconds: span.at(-1)!.endSeconds,
+    };
+  });
 }
 
 export function alignMeeting(input: {

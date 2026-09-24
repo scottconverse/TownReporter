@@ -3,14 +3,17 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSy
 import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 import { withTransaction } from "../db.ts";
-import { listChannelVideos, pickMeetingVideos, type ListedVideo } from "./youtube.ts";
+import { listChannelVideos, pickMeetingVideos, youtubeCaptureReadiness, type ListedVideo, type YoutubeCaptureReadiness } from "./youtube.ts";
 import { captureMeetingCaptions, captureMeetingAudio, requiresAudioFallback, type CaptionCaptureFailure, type CaptionCaptureResult, type AudioCaptureResult } from "./meeting-capture-ytdlp.ts";
 import { storeMeetingAudioArtifact } from "./meeting-audio-artifacts.ts";
 import { computeEndedAt } from "./meeting-capture-info.ts";
 import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
+import { fileMeetingLead } from "./meeting-lead.ts";
 import { capsFromSettings, checkDurationCap, checkSizeCap, type CaptureCaps } from "./meeting-capture-caps.ts";
+import { lockMeetingRevisionForCapture } from "./meeting-revision-lock.ts";
+import { flagPublishedArticlesForTranscriptRevision } from "./meeting-article-revision.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
@@ -30,27 +33,58 @@ export type MeetingAwarenessResult = {
 };
 export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
+  /** Injectable to test the metadata-only preflight without contacting YouTube. */
+  captureReadiness?: (videoId: string) => Promise<YoutubeCaptureReadiness>;
+  /** Injectable path preparation keeps readiness tests away from real data roots. */
+  prepareCapturePaths?: typeof prepareMeetingCapturePaths;
   captureMeeting?: (input: { videoId: string; outputDir: string; archivePath: string; sleepSubtitles?: number; sleepRequests?: number; resume?: boolean }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
   captureAudio?: (input: { videoId: string; outputDir: string; archivePath: string; sleepRequests?: number; resume?: boolean }) => Promise<AudioCaptureResult>;
   storeMeetingAudioArtifact?: typeof storeMeetingAudioArtifact;
   storeMeetingTranscriptArtifact?: typeof storeMeetingTranscriptArtifact;
   runSection5?: typeof runSection5ForArtifact;
   withTransaction?: typeof withTransaction;
+  applyCapturedMeetingTranscript?: typeof applyCapturedMeetingTranscript;
   now?: () => Date;
 };
 
-const ARCHIVE_DIR = join(process.env.TOWNREPORTER_DATA_DIR || process.cwd(), "meeting-capture");
-const CAPTION_DIR = join(process.env.TOWNREPORTER_DATA_DIR || process.cwd(), "meeting-captions");
+export function namedMeetingFailures(
+  listingFailures: string[],
+  failedRecords: MeetingCaptureRecord[],
+): string[] {
+  return [...new Set([
+    ...listingFailures,
+    ...failedRecords.map((record) => `${record.title}: ${record.failureReason ?? "capture failed"}`),
+  ])];
+}
+
 const EMPTY_RESULT: MeetingAwarenessResult = {
   configured: false, found: [], uncaptured: [], captured: [], failed: [],
   coverageLine: "", failures: [], archivePath: null,
 };
 
-export function meetingArchivePath(newsroomId: number): string {
-  return join(ARCHIVE_DIR, `newsroom-${newsroomId}`, "yt-dlp-archive.txt");
+export function meetingRuntimeRoot(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
+  // The Windows installer owns TOWNREPORTER_DATA_ROOT. DATA_DIR is retained
+  // only for older source deployments that already set it.
+  return env.TOWNREPORTER_DATA_ROOT || env.TOWNREPORTER_DATA_DIR || cwd;
 }
-export function meetingCaptionDir(newsroomId: number): string {
-  return join(CAPTION_DIR, `newsroom-${newsroomId}`);
+export function meetingArchivePath(newsroomId: number, root = meetingRuntimeRoot()): string {
+  return join(root, "meeting-capture", `newsroom-${newsroomId}`, "yt-dlp-archive.txt");
+}
+export function meetingCaptionDir(newsroomId: number, root = meetingRuntimeRoot()): string {
+  return join(root, "meeting-captions", `newsroom-${newsroomId}`);
+}
+export function storedCaptureDisposition(
+  stored: "provisional" | "final" | null,
+  status: MeetingCaptureStatus,
+): "provisional" | "final" | undefined {
+  return stored ?? (status === "captured" ? "final" : undefined);
+}
+export function prepareMeetingCapturePaths(newsroomId: number, videoId: string): { archivePath: string; outputDir: string } {
+  const archivePath = meetingArchivePath(newsroomId);
+  const outputDir = join(meetingCaptionDir(newsroomId), videoId);
+  mkdirSync(dirname(archivePath), { recursive: true });
+  mkdirSync(outputDir, { recursive: true });
+  return { archivePath, outputDir };
 }
 export function parseArchive(text: string): Set<string> {
   const ids = new Set<string>();
@@ -118,6 +152,7 @@ async function recordAudioCaptureSuccess(
        audio_path,audio_format,audio_sha256,audio_bytes,audio_captured_at,audio_trigger_reason)
      values($1,$2,$3,$4,$5,'captured',now(),null,$6,$7,$8,$9,$10,$11,$12,now(),$13)
      on conflict(newsroom_id,video_id) do update set
+       channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,
        status='captured',captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
        capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
        audio_path=excluded.audio_path,audio_format=excluded.audio_format,audio_sha256=excluded.audio_sha256,
@@ -163,26 +198,6 @@ async function recordCaptureFailure(sql: Sql, newsroomId: number, video: ListedV
     [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
   );
 }
-async function recordCaptureSuccess(
-  sql: Sql, newsroomId: number, video: ListedVideo, channelUrl: string,
-  result: Extract<CaptionCaptureResult, { ok: true }>, endedAt: string | null, disposition: "provisional" | "final",
-): Promise<void> {
-  await sql.query(
-    `insert into meeting_capture_records(
-       newsroom_id,video_id,channel_url,title,published,status,captured_at,
-       caption_path,caption_format,caption_sha256,caption_captured_at,failure_reason,
-       ended_at,capture_disposition,duration_seconds,caption_revision_timestamp)
-     values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null,$9,$10,$11,$12)
-     on conflict(newsroom_id,video_id) do update set
-       status='captured',captured_at=now(),caption_path=excluded.caption_path,
-       caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,
-       caption_captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
-       capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
-       caption_revision_timestamp=excluded.caption_revision_timestamp,updated_at=now()`,
-    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", result.parsed.sourcePath, result.parsed.format, result.parsed.sha256, endedAt, disposition, result.info.durationSeconds, result.info.captionRevisionTimestamp],
-  );
-}
-
 /**
  * N-5 Continue: resume captures the operator stopped, in place.
  *
@@ -200,8 +215,8 @@ export async function resumeStoppedMeetings(
   newsroomId: number,
   deps: MeetingAwarenessDeps = {},
 ): Promise<{ resumed: number; skipped: number; failures: string[]; coverageLine: string }> {
-  const stopped = await sql<{ video_id: string; title: string; partial_path: string | null }>`
-    select video_id, title, partial_path
+  const stopped = await sql<{ video_id: string; channel_url: string; title: string; published: string; partial_path: string | null }>`
+    select video_id, channel_url, title, published, partial_path
       from meeting_capture_records
      where newsroom_id = ${newsroomId} and status = 'stopped'
      order by updated_at asc
@@ -209,6 +224,13 @@ export async function resumeStoppedMeetings(
   const failures: string[] = [];
   let resumed = 0;
   let skipped = 0;
+  const applyCaptured = deps.applyCapturedMeetingTranscript ?? applyCapturedMeetingTranscript;
+  const ownerUserId = stopped.length
+    ? (await sql.query<{ user_id: string }>(
+        "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",
+        [newsroomId],
+      ))[0]?.user_id ?? ""
+    : "";
   for (const record of stopped) {
     if (!record.partial_path || !existsSync(record.partial_path)) {
       skipped += 1;
@@ -216,14 +238,33 @@ export async function resumeStoppedMeetings(
       continue;
     }
     const capture = deps.captureMeeting ?? captureMeetingCaptions;
-    const outputDir = meetingCaptionDir(newsroomId);
+    // Resume in the directory that owns the recorded .part file. Initial
+    // captures use a per-video directory; pointing yt-dlp at the newsroom root
+    // would start a fresh file while the real partial sat one level below.
+    const outputDir = dirname(record.partial_path);
     const result = await capture({ videoId: record.video_id, outputDir, archivePath: meetingArchivePath(newsroomId), resume: true });
     if (result.ok) {
-      await sql.query(
-        "update meeting_capture_records set status = 'captured', failure_reason = null, partial_path = null, resumed_at = now(), updated_at = now() where newsroom_id = $1 and video_id = $2",
-        [newsroomId, record.video_id],
-      );
-      resumed += 1;
+      try {
+        const applied = await applyCaptured(sql, {
+          newsroomId,
+          userId: ownerUserId,
+          video: {
+            id: record.video_id,
+            channelUrl: record.channel_url,
+            title: record.title,
+            published: record.published,
+          },
+          result: result as Extract<CaptionCaptureResult, { ok: true }>,
+        }, deps);
+        await sql.query(
+          "update meeting_capture_records set partial_path = null, resumed_at = now(), updated_at = now() where newsroom_id = $1 and video_id = $2",
+          [newsroomId, record.video_id],
+        );
+        failures.push(...applied.warnings);
+        resumed += 1;
+      } catch (error) {
+        failures.push(`${record.title}: ${error instanceof Error ? error.message : String(error)}`);
+      }
       continue;
     }
     failures.push(`${record.title}: ${result.reason}`);
@@ -244,22 +285,31 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const channels = await loadMeetingPriority(sql, newsroomId);
   if (!channels.length) return EMPTY_RESULT;
   const list = deps.listChannelVideos ?? listChannelVideos;
+  const captureReadiness = deps.captureReadiness ?? youtubeCaptureReadiness;
+  const prepareCapturePaths = deps.prepareCapturePaths ?? prepareMeetingCapturePaths;
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
   const captureAudio = deps.captureAudio ?? captureMeetingAudio;
   const storeAudio = deps.storeMeetingAudioArtifact ?? storeMeetingAudioArtifact;
-  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
+  const applyCaptured = deps.applyCapturedMeetingTranscript ?? applyCapturedMeetingTranscript;
   const now = (deps.now ?? (() => new Date()))();
-  const found: ListedVideo[] = [];
+  type ListedMeetingVideo = ListedVideo & { channelUrl: string };
+  const foundById = new Map<string, ListedMeetingVideo>();
   const failures: string[] = [];
   for (const channel of channels) {
     try {
       const listed = await list(channel.url);
-      found.push(...pickMeetingVideos(listed, 50));
+      for (const video of pickMeetingVideos(listed, 50)) {
+        // Channel priority is authoritative when the same upload appears in
+        // more than one configured feed. Preserve the actual first source;
+        // never relabel every video as if it came from channels[0].
+        if (!foundById.has(video.id)) foundById.set(video.id, { ...video, channelUrl: channel.url });
+      }
     } catch (e) {
       failures.push(`${channel.url}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  const found = [...foundById.values()];
   const records = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
@@ -272,18 +322,45 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
-    endedAt: r.ended_at, captureDisposition: r.capture_disposition ?? r.status === "captured" ? "final" : undefined,
+    endedAt: r.ended_at, captureDisposition: storedCaptureDisposition(r.capture_disposition, r.status),
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
+  // The database is the capture source of truth. Reconcile the yt-dlp cache
+  // BEFORE asking yt-dlp to capture anything; doing this only after the pass
+  // lets a stale file suppress a meeting the database says is uncaptured.
+  const archivePath = meetingArchivePath(newsroomId);
+  const beforeCapture = reconcileArchive(await readArchive(archivePath), captured);
+  if (beforeCapture.changed) regenerateArchive(archivePath, captured);
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
   const uncaptured = found.filter((v) => !known.has(v.id));
+  const readyToCapture: ListedMeetingVideo[] = [];
+  let skippedLiveOrUpcoming = 0;
+  let waitingForMetadata = 0;
   for (const v of uncaptured) {
-    const archivePath = meetingArchivePath(newsroomId);
-    const outputDir = join(meetingCaptionDir(newsroomId), v.id);
+    // RSS and scheduled-stream listings often have no duration. Never start a
+    // caption download (or its audio fallback) for those ambiguous entries
+    // until player metadata or yt-dlp's metadata-only check confirms readiness.
+    // Positive-duration entries retain the existing path and avoid extra probes.
+    if (v.duration <= 0) {
+      let readiness: YoutubeCaptureReadiness = "unknown";
+      try { readiness = await captureReadiness(v.id); } catch { /* unknown is retryable below */ }
+      if (readiness === "upcoming" || readiness === "live") {
+        skippedLiveOrUpcoming += 1;
+        continue;
+      }
+      if (readiness !== "ready") {
+        waitingForMetadata += 1;
+        continue;
+      }
+    }
+    readyToCapture.push(v);
+  }
+  for (const v of readyToCapture) {
+    const { archivePath, outputDir } = prepareCapturePaths(newsroomId, v.id);
     await sql.query(
-      "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set title=excluded.title,published=excluded.published,updated_at=now()",
-      [newsroomId, v.id, channels[0]!.url, v.title, v.published ?? ""],
+      "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,updated_at=now()",
+      [newsroomId, v.id, v.channelUrl, v.title, v.published ?? ""],
     );
     let result: CaptionCaptureResult;
     try {
@@ -334,7 +411,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
               newsroomId, videoId: v.id, audioSourcePath: audio.audio.path,
               format: audio.audio.format, triggerReason, infoSourcePath: audio.infoPath,
             });
-            await recordAudioCaptureSuccess(tx, newsroomId, v, channels[0]!.url, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
+            await recordAudioCaptureSuccess(tx, newsroomId, v, v.channelUrl, audio, audioEndedAt, audioDisposition, stored.id, triggerReason, stored.storagePath);
           });
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -365,15 +442,19 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       failures.push(`${v.title}: ${captionSizeRefusal.reason}`);
       continue;
     }
-    const endedAt = computeEndedAt({ durationSeconds: result.info.durationSeconds, videoTimestamp: result.info.videoTimestamp });
-    const disposition = captureDisposition({ endedAt, now });
     try {
-      await runTransaction(async (tx) => {
-        await recordCaptureSuccess(tx, newsroomId, v, channels[0]!.url, result as Extract<CaptionCaptureResult, { ok: true }>, endedAt, disposition);
-        await storeTranscript(tx, { newsroomId, videoId: v.id, parsed: result.parsed, infoSourcePath: result.infoPath });
-        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: v.id, title: v.title, meetingDate: v.published, artifactId: Number((await tx.query<{ id: number }>("select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1", [newsroomId, v.id]))[0]?.id ?? 0) });
-        if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
-      });
+      const ownerUserId = (await sql.query<{ user_id: string }>(
+        "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",
+        [newsroomId],
+      ))[0]?.user_id ?? "";
+      const applied = await applyCaptured(sql, {
+        newsroomId,
+        userId: ownerUserId,
+        video: { id: v.id, channelUrl: v.channelUrl, title: v.title, published: v.published ?? "" },
+        result: result as Extract<CaptionCaptureResult, { ok: true }>,
+        now,
+      }, deps);
+      failures.push(...applied.warnings);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await recordCaptureFailure(sql, newsroomId, v, reason);
@@ -392,19 +473,18 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
-    endedAt: r.ended_at, captureDisposition: r.capture_disposition ?? (r.status === "captured" ? "final" : undefined),
+    endedAt: r.ended_at, captureDisposition: storedCaptureDisposition(r.capture_disposition, r.status),
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
   const failed = finalRecords.filter((r) => r.status === "failed");
-  const archivePath = meetingArchivePath(newsroomId);
   const archiveText = await readArchive(archivePath);
   const reconciled = reconcileArchive(archiveText, finalRecords);
   if (reconciled.changed) regenerateArchive(archivePath, finalRecords);
-  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed`;
+  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed${skippedLiveOrUpcoming ? `, ${skippedLiveOrUpcoming} live/upcoming skipped` : ""}${waitingForMetadata ? `, ${waitingForMetadata} waiting for status metadata (will retry)` : ""}`;
   return {
     configured: true, found, uncaptured, captured: finalRecords, failed, coverageLine,
-    failures: [...failures, ...failed.map((r) => `${r.title}: ${r.failureReason ?? "capture failed"}`)],
+    failures: namedMeetingFailures(failures, failed),
     archivePath,
   };
 }
@@ -426,6 +506,184 @@ export type ProvisionalRecheckResult = {
   failures: string[];
 };
 
+type ExistingMeetingCapture = {
+  video_id: string;
+  channel_url: string;
+  title: string;
+  published: string;
+  status: MeetingCaptureStatus;
+  caption_sha256: string | null;
+  capture_disposition: "provisional" | "final" | null;
+  consecutive_unchanged: number | null;
+  last_checked_at: string | null;
+  captured_at: string | null;
+  duration_seconds: number | null;
+  caption_revision_timestamp: number | null;
+  revision_count: number | null;
+};
+
+/**
+ * Persist one successful caption capture through the canonical revision path.
+ *
+ * Scheduled rechecks and the editor's explicit "Force re-capture" control use
+ * this same function. That is load-bearing: a manual button must not bypass the
+ * shared publication lock, immutable artifact storage, alignment, lead filing,
+ * draft notices, or post-publication review creation.
+ */
+export async function applyCapturedMeetingTranscript(
+  sql: Sql,
+  input: {
+    newsroomId: number;
+    userId: string;
+    video: { id: string; channelUrl: string; title: string; published: string };
+    result: Extract<CaptionCaptureResult, { ok: true }>;
+    forced?: boolean;
+    now?: Date;
+  },
+  deps: Pick<MeetingAwarenessDeps, "storeMeetingTranscriptArtifact" | "runSection5" | "withTransaction"> = {},
+): Promise<{ revised: boolean; settled: boolean; artifactId: number; warnings: string[] }> {
+  void sql; // The transaction owns the authoritative connection.
+  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
+  const runTransaction = deps.withTransaction ?? withTransaction;
+  const now = input.now ?? new Date();
+  const endedAt = computeEndedAt({
+    durationSeconds: input.result.info.durationSeconds,
+    videoTimestamp: input.result.info.videoTimestamp,
+  });
+  const initialDisposition = captureDisposition({ endedAt, now });
+
+  return runTransaction(async (tx) => {
+    await tx.query(
+      `insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status)
+       values($1,$2,$3,$4,$5,'not-captured')
+       on conflict(newsroom_id,video_id) do nothing`,
+      [input.newsroomId, input.video.id, input.video.channelUrl, input.video.title, input.video.published],
+    );
+    await lockMeetingRevisionForCapture(tx, { newsroomId: input.newsroomId, videoId: input.video.id });
+    const priorRows = await tx.query<ExistingMeetingCapture>(
+      `select video_id,channel_url,title,published,status,caption_sha256,capture_disposition,
+              consecutive_unchanged,last_checked_at,captured_at,duration_seconds,
+              caption_revision_timestamp,revision_count
+         from meeting_capture_records where newsroom_id=$1 and video_id=$2`,
+      [input.newsroomId, input.video.id],
+    );
+    const prior = priorRows[0]!;
+    const hadCapture = prior.status === "captured" && Boolean(prior.caption_sha256);
+    const signal = hadCapture
+      ? detectRevision({
+          priorSha256: prior.caption_sha256,
+          nextSha256: input.result.parsed.sha256,
+          priorRevisionTimestamp: prior.caption_revision_timestamp,
+          nextRevisionTimestamp: input.result.info.captionRevisionTimestamp,
+          priorDuration: prior.duration_seconds,
+          nextDuration: input.result.info.durationSeconds,
+        })
+      : null;
+    const state = hadCapture
+      ? nextCheckState({
+          status: prior.capture_disposition ?? initialDisposition,
+          consecutiveUnchanged: prior.consecutive_unchanged ?? 0,
+          lastCheckedAt: prior.last_checked_at,
+          firstCapturedAt: prior.captured_at ?? now.toISOString(),
+          now,
+          changed: signal != null,
+        })
+      : {
+          status: initialDisposition,
+          consecutiveUnchanged: 0,
+          settled: false,
+          settledUnderChurn: false,
+          revisionRecorded: false,
+        };
+    const priorArtifacts = await tx.query<{ id: number }>(
+      "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
+      [input.newsroomId, input.video.id],
+    );
+    const priorArtifactId = priorArtifacts[0]?.id ?? null;
+    const stored = await storeTranscript(tx, {
+      newsroomId: input.newsroomId,
+      videoId: input.video.id,
+      parsed: input.result.parsed,
+      infoSourcePath: input.result.infoPath,
+    });
+    const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, {
+      newsroomId: input.newsroomId,
+      videoId: input.video.id,
+      title: input.video.title,
+      meetingDate: input.video.published,
+      artifactId: stored.id,
+    });
+    const warnings = section5.aligned || !section5.unalignedLead ? [] : [section5.unalignedLead.leadWhy];
+    if ((!hadCapture || signal) && section5.aligned && section5.citations.length) {
+      await fileMeetingLead(tx, {
+        newsroomId: input.newsroomId,
+        userId: input.userId,
+        videoId: input.video.id,
+        title: input.video.title,
+        meetingDate: input.video.published || null,
+        topic: "council",
+        sourceUrls: [`https://www.youtube.com/watch?v=${input.video.id}`],
+        items: section5.items,
+        establishedVotes: section5.voteCount,
+        votes: section5.votes.map((vote) => ({
+          item: vote.item, established: vote.established, motion: vote.motion, mover: vote.mover,
+          seconder: vote.seconder, tally: vote.tally, result: vote.result, source: vote.source,
+        })),
+        citations: section5.citations.map((citation) => ({
+          item: citation.item, segmentIndex: citation.segmentIndex,
+          timestampSeconds: citation.timestampSeconds, excerpt: citation.excerpt,
+          captionSha256: citation.captionSha256,
+        })),
+        artifactId: stored.id,
+      });
+    }
+    if (signal) {
+      await tx.query(
+        "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
+        [input.newsroomId, input.video.id, stored.id, priorArtifactId, signal, prior.caption_sha256, input.result.parsed.sha256],
+      );
+      if (prior.caption_sha256) {
+        await applyDraftRevision(tx, {
+          newsroomId: input.newsroomId,
+          videoId: input.video.id,
+          previousSha256: prior.caption_sha256,
+          nextSha256: input.result.parsed.sha256,
+        });
+        if (priorArtifactId != null) {
+          await flagPublishedArticlesForTranscriptRevision(tx, {
+            newsroomId: input.newsroomId,
+            videoId: input.video.id,
+            priorArtifactId,
+            currentArtifactId: stored.id,
+            reason: signal,
+          });
+        }
+      }
+    }
+    await tx.query(
+      `update meeting_capture_records set
+       channel_url=$1,title=$2,published=$3,status='captured',failure_reason=null,
+         captured_at=coalesce(captured_at,$19),caption_path=$4,caption_format=$5,
+         caption_sha256=$6,caption_captured_at=$19,ended_at=$7,
+         caption_revision_timestamp=$8,duration_seconds=$9,capture_disposition=$10,
+         consecutive_unchanged=$11,last_checked_at=$19,settled_under_churn=$12,
+         revision_count=$13,last_revision_at=$14,
+         forced_recapture=$15,forced_recapture_at=case when $15 then $19 else forced_recapture_at end,
+         prior_caption_sha256=case when $15 then $16 else prior_caption_sha256 end,updated_at=$19
+       where newsroom_id=$17 and video_id=$18`,
+      [
+        input.video.channelUrl, input.video.title, input.video.published,
+        stored.storagePath, input.result.parsed.format, input.result.parsed.sha256, endedAt,
+        input.result.info.captionRevisionTimestamp, input.result.info.durationSeconds,
+        state.status, state.consecutiveUnchanged, state.settledUnderChurn,
+        (prior.revision_count ?? 0) + (signal ? 1 : 0), signal ? now.toISOString() : null,
+        input.forced === true, prior.caption_sha256, input.newsroomId, input.video.id, now.toISOString(),
+      ],
+    );
+    return { revised: signal != null, settled: state.settled, artifactId: stored.id, warnings };
+  });
+}
+
 /**
  * Provisional re-check (Slice 4 integration).
  *
@@ -442,18 +700,16 @@ export async function recheckProvisionalMeetings(
   deps: MeetingAwarenessDeps = {},
 ): Promise<ProvisionalRecheckResult> {
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
-  const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
-  const runTransaction = deps.withTransaction ?? withTransaction;
   const now = (deps.now ?? (() => new Date()))();
   const failures: string[] = [];
   const rows = await sql.query<{
-    video_id: string; title: string; published: string; caption_path: string | null;
+    video_id: string; channel_url: string; title: string; published: string; caption_path: string | null;
     caption_sha256: string | null; capture_disposition: "provisional" | "final" | null;
     consecutive_unchanged: number | null; last_checked_at: string | null;
     captured_at: string | null; duration_seconds: number | null;
     caption_revision_timestamp: number | null; revision_count: number | null;
   }>(
-    "select video_id,title,published,caption_path,caption_sha256,capture_disposition,consecutive_unchanged,last_checked_at,captured_at,duration_seconds,caption_revision_timestamp,revision_count from meeting_capture_records where newsroom_id=$1 and status='captured' and capture_disposition='provisional'",
+    "select video_id,channel_url,title,published,caption_path,caption_sha256,capture_disposition,consecutive_unchanged,last_checked_at,captured_at,duration_seconds,caption_revision_timestamp,revision_count from meeting_capture_records where newsroom_id=$1 and status='captured' and capture_disposition='provisional'",
     [newsroomId],
   );
   let checked = 0;
@@ -462,8 +718,7 @@ export async function recheckProvisionalMeetings(
   for (const row of rows) {
     if (!dueForRecheck({ status: row.capture_disposition ?? "final", lastCheckedAt: row.last_checked_at, now })) continue;
     checked += 1;
-    const archivePath = meetingArchivePath(newsroomId);
-    const outputDir = join(meetingCaptionDir(newsroomId), row.video_id);
+    const { archivePath, outputDir } = prepareMeetingCapturePaths(newsroomId, row.video_id);
     let result: CaptionCaptureResult;
     try {
       result = await capture({ videoId: row.video_id, outputDir, archivePath, sleepSubtitles: 2, sleepRequests: 1 });
@@ -475,63 +730,21 @@ export async function recheckProvisionalMeetings(
       failures.push(`${row.title}: ${result.reason}`);
       continue;
     }
-    const signal = detectRevision({
-      priorSha256: row.caption_sha256,
-      nextSha256: result.parsed.sha256,
-      priorRevisionTimestamp: row.caption_revision_timestamp,
-      nextRevisionTimestamp: result.info.captionRevisionTimestamp,
-      priorDuration: row.duration_seconds,
-      nextDuration: result.info.durationSeconds,
-    });
-    const state = nextCheckState({
-      status: row.capture_disposition ?? "final",
-      consecutiveUnchanged: row.consecutive_unchanged ?? 0,
-      lastCheckedAt: row.last_checked_at,
-      firstCapturedAt: row.captured_at ?? now.toISOString(),
-      now,
-      changed: signal != null,
-    });
-    if (signal) revised += 1;
-    if (state.settled) settled += 1;
     try {
-      await runTransaction(async (tx) => {
-        const priorArtifacts = await tx.query<{ id: number }>(
-          "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
-          [newsroomId, row.video_id],
-        );
-        const priorArtifactId = priorArtifacts[0]?.id ?? null;
-        const stored = await storeTranscript(tx, { newsroomId, videoId: row.video_id, parsed: result.parsed, infoSourcePath: result.infoPath });
-        const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, { newsroomId, videoId: row.video_id, title: row.title, meetingDate: row.published, artifactId: stored.id });
-        if (!section5.aligned && section5.unalignedLead) failures.push(section5.unalignedLead.leadWhy);
-        if (signal) {
-          await tx.query(
-            "insert into meeting_transcript_revisions(newsroom_id,video_id,artifact_id,prior_artifact_id,revision_signal,prior_sha256,new_sha256) values($1,$2,$3,$4,$5,$6,$7)",
-            [newsroomId, row.video_id, stored.id, priorArtifactId, signal, row.caption_sha256, result.parsed.sha256],
-          );
-        }
-        await tx.query(
-          `update meeting_capture_records set
-             caption_sha256=$1, caption_path=$2, caption_format=$3, caption_revision_timestamp=$4,
-             duration_seconds=$5, capture_disposition=$6, consecutive_unchanged=$7, last_checked_at=now(),
-             settled_under_churn=$8, revision_count=$9, last_revision_at=$10, updated_at=now()
-           where newsroom_id=$11 and video_id=$12`,
-          [
-            result.parsed.sha256, result.parsed.sourcePath, result.parsed.format,
-            result.info.captionRevisionTimestamp, result.info.durationSeconds,
-            state.status, state.consecutiveUnchanged, state.settledUnderChurn,
-            (row.revision_count ?? 0) + (signal ? 1 : 0),
-            signal ? now.toISOString() : null, newsroomId, row.video_id,
-          ],
-        );
-      });
-      if (signal && row.caption_sha256) {
-        await applyDraftRevision(sql, {
-          newsroomId,
-          videoId: row.video_id,
-          previousSha256: row.caption_sha256,
-          nextSha256: result.parsed.sha256,
-        });
-      }
+      const userId = (await sql.query<{ user_id: string }>(
+        "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",
+        [newsroomId],
+      ))[0]?.user_id ?? "";
+      const applied = await applyCapturedMeetingTranscript(sql, {
+        newsroomId,
+        userId,
+        video: { id: row.video_id, channelUrl: row.channel_url, title: row.title, published: row.published },
+        result: result as Extract<CaptionCaptureResult, { ok: true }>,
+        now,
+      }, deps);
+      if (applied.revised) revised += 1;
+      if (applied.settled) settled += 1;
+      failures.push(...applied.warnings);
     } catch (error) {
       failures.push(`${row.title}: ${error instanceof Error ? error.message : String(error)}`);
     }

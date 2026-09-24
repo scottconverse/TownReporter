@@ -24,10 +24,10 @@ jobs:
       source-sha: ${{ steps.identity.outputs.source-sha }}
       archive-sha256: ${{ steps.identity.outputs.archive-sha256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Create the downloadable source package
@@ -38,7 +38,7 @@ jobs:
         run: |
           echo "source-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           node --input-type=module -e 'import {readdirSync,readFileSync,appendFileSync} from "node:fs"; import {join} from "node:path"; import {createHash} from "node:crypto"; const dir=join(process.env.RUNNER_TEMP,"windows-package"); const names=readdirSync(dir).filter(n=>n.endsWith(".zip")); if(names.length!==1) throw Error("Expected one release ZIP"); appendFileSync(process.env.GITHUB_OUTPUT,"archive-sha256="+createHash("sha256").update(readFileSync(join(dir,names[0]))).digest("hex")+"\n");'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-source-package
           path: ${{ runner.temp }}/windows-package/*
@@ -62,7 +62,7 @@ jobs:
           "INSTALL_ACCEPTANCE_STARTED_AT=$([DateTime]::UtcNow.ToString('o'))" >> $env:GITHUB_ENV
           "INSTALL_EVIDENCE_DIR=$env:RUNNER_TEMP\install-evidence" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\install-evidence" | Out-Null
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: ${{ !inputs.release_tag }}
         with:
           name: windows-source-package
@@ -229,7 +229,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Owned installation cleanup failed.' }
           }
           if ($elapsed -ge 3600) { throw 'Installation acceptance exceeded one hour.' }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: windows-install-evidence

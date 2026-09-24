@@ -149,7 +149,7 @@ describe("packNotes", () => {
       t: big(400),
       done: false,
       src: "machine" as const,
-    }));
+    })) as unknown as typeof notes.todo;
     const packed = packNotes(notes, 600);
     assert.doesNotThrow(() => JSON.parse(packed));
   });

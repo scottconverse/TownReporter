@@ -27,7 +27,7 @@ describe("Longmont fall-leaf bulletin adapter", () => {
     const results = extractLongmontLeafCollection(html, { provenance, issuer: "City of Longmont" });
     const parsed = results.filter((result) => result.status === "parsed");
     assert.equal(parsed.length, 2);
-    const notices = parsed.map((result) => result.validation.notice);
+    const notices = parsed.map((result) => (result.validation as any).notice);
     assert.deepEqual(
       notices.map((notice) => ({
         area: notice.normalizedFields.area,
@@ -40,7 +40,7 @@ describe("Longmont fall-leaf bulletin adapter", () => {
       ],
     );
     for (const result of parsed) {
-      const notice = result.validation.notice;
+      const notice = (result.validation as any).notice;
       assert.match(result.locator, /content_area/i);
       assert.match(notice.fields.area.locator, /content_area/i);
       assert.match(notice.fields.serviceDate.locator, /content_area/i);

@@ -1,10 +1,21 @@
 # Changelog
 
-Current release: **0.6.60**.
+Current software version: **0.6.61**. Publication state is recorded by GitHub.
+
+## 0.6.61 — 2026-09-22
+
+- Fixed the Scan page so an already-open page replaces a running scan row with that same row's finished values instead of appearing stuck until reload.
+- Completed the meeting transcript-to-draft path with persisted used citations, immutable transcript revisions, revision-aware publication holds, and editor review when a recording changes after publication.
+- Added an editor story-direction control for drafts and redrafts. A named ordinance or resolution is anchored to the captured passage; a missing named measure refuses the draft rather than switching subjects. The default Ollama Cloud task choices use DeepSeek V4.1 Flash while other configured models remain selectable.
+- Serialized meeting capture and publication on the same database fence and made missing or malformed meeting provenance fail closed.
+- Added startup reconciliation for transcript files and database records, hardened reporting-agent tool boundaries, and made guarded HTTP fetching fail closed if its protected transport cannot initialize.
+- Added accessible meeting evidence controls, current security and model documentation, packaged font notices, strict test typechecking, pinned CI actions, disposable PostgreSQL/browser gates, and an explicit frozen-history policy for legacy audit artifacts.
+
+The packaged release note names `v0.6.61` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.60 — 2026-09-21
 
-This section records the source release. It does not assert a Git tag, GitHub release, packaged Windows installer, production deployment, or live-model result. A full per-change account with its evidence and limits is in the 0.6.60 release guide.
+Released on GitHub as `v0.6.60` from merge commit `e97db885364a09db6914371e53a7c3a961cd9c23`, with the Windows installer ZIP and checksum sidecar. Production deployment and live-model results remain separate facts. A full per-change account with its evidence and limits is in the 0.6.60 release guide.
 
 - Adds **meeting capture**: the paper watches the newsroom's configured city YouTube channels, captures captions first (`--skip-download --write-subs --write-auto-subs --write-info-json`), keeps the transcript as a local artifact with a SHA-256 and an `info.json` sidecar, and reads the result as which meeting, which agenda item, which timestamp and the verbatim words. Audio fallback exists for meetings with no caption track and records a mandatory trigger reason.
 - Adds **agenda alignment and structured votes**: the transcript is split into agenda items, aligned to the packet when one is available, and votes are read from the structured record rather than inferred from prose. Eleven structured votes on real meetings all reported `not established`, because advisory boards and study sessions have no ordinance roll-call record; none was inferred. Sixteen meetings recorded a named alignment failure rather than inventing item boundaries.

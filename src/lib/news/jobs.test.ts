@@ -26,6 +26,8 @@ function fakeJob(over: Partial<DeskJob>): DeskJob {
     user_id: "u",
     kind: "scan",
     subject_id: 1,
+    model_choice: "auto",
+    model_choice_source: "editor",
     lane: "default",
     status: "running",
     stage: "",

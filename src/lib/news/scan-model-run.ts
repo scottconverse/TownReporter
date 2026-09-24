@@ -9,7 +9,7 @@
  * comment on `performScanWork`), so a smaller, hermetic piece is easier to
  * reason about in isolation.
  */
-import type { EffectiveProviderChoice, ProviderProbe, grokChat } from "./ai.ts";
+import type { EffectiveProviderChoice, ProviderProbe, LocalModelOverride, grokChat } from "./ai.ts";
 import { providerBudget } from "./ai.ts";
 import {
   modelEffort as validatedModelEffort,
@@ -59,6 +59,7 @@ type GrokChatFn = (
     model?: string;
     choice?: EffectiveProviderChoice;
     newsroomId?: number;
+    localModel?: LocalModelOverride | null;
     reasoningEffort?: ModelEffort | null;
   },
 ) => Promise<GrokResult>;
@@ -73,6 +74,7 @@ export type RunScanChatWithFailoverInput = {
   job: ScanJobForFailover;
   /** Authenticated scope used only when the pinned choice is custom:<UUID>. */
   newsroomId?: number;
+  localModel?: LocalModelOverride | null;
   system: string;
   user: string;
   maxTokens: number;
@@ -132,6 +134,7 @@ export async function runScanChatWithFailover(
     timeoutMs: timeoutMs(firstChoice),
     choice: firstChoice,
     newsroomId: input.newsroomId,
+    ...(input.localModel ? { localModel: input.localModel } : {}),
     ...(firstEffort ? { reasoningEffort: firstEffort } : {}),
   });
   if (ai.ok) return ai;
@@ -167,6 +170,7 @@ export async function runScanChatWithFailover(
     timeoutMs: timeoutMs(plan.next),
     choice: plan.next,
     newsroomId: input.newsroomId,
+    ...(input.localModel ? { localModel: input.localModel } : {}),
     ...(nextEffort ? { reasoningEffort: nextEffort } : {}),
   });
 }

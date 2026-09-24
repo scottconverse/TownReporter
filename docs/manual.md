@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.60 · deployment is recorded separately**
+**Version 0.6.61 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.60 release guide and evidence boundaries](releases/0.6.60.md). A source release and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.61 release guide and evidence boundaries](releases/0.6.61.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -561,6 +561,19 @@ existing Codex/Claude login. Signed-in Codex and
 [Claude Code](https://code.claude.com) CLIs supply the frontier Story and
 Opinion choices.
 
+TownReporter uses those signed-in accounts for CLI authentication; reporting
+calls do not inherit the operator's full agent setup. Codex calls run from the
+system temporary directory with a read-only sandbox, and disables shell,
+computer, browser, apps, plugins, multi-agent and hook features. Native web
+search is enabled only for a research call authorized by the application.
+These are application-level CLI controls, not an operating-system security
+sandbox; the process still runs as the Windows account, and read-only mode
+alone does not restrict file reads.
+Claude Code calls separately omit the operator's `CLAUDE.md`, skills, plugins
+and MCP configuration and run in restricted safe mode. Research calls allow only `WebSearch` and `WebFetch`;
+planning calls hide tools; OCR reads one generated temporary page. The
+reporting job has no shell, arbitrary file, browser or agent tools.
+
 ```bash
 git clone https://github.com/scottconverse/TownReporter.git
 cd TownReporter
@@ -893,7 +906,7 @@ flowchart TB
 
     subgraph models["Whichever model you point it at"]
         CC["Claude Code CLI<br/>(no API key)"]
-        CX["Codex CLI<br/>(OAuth, native full access)"]
+        CX["Codex CLI<br/>(OAuth, restricted reporting tools)"]
         API["Anthropic API"]
         OAI["Any OpenAI-compatible URL<br/>incl. a local model"]
     end

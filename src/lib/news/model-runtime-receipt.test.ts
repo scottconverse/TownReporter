@@ -47,6 +47,24 @@ test("Opinion enqueue retains the original effort when the destination revalidat
   assert.equal(receipt.modelEffort, "medium");
 });
 
+test("a local-model job receipt pins the endpoint and model that preflight approved", () => {
+  assert.deepEqual(initialModelRuntimeReceipt({
+    requestedRuntime: "local-model",
+    requestedEffort: "none",
+    actualRuntime: "local-model",
+    actualEffort: "none",
+    localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "glm-5.2:cloud" },
+  }), {
+    requestedRuntime: "local-model",
+    requestedEffort: "none",
+    actualRuntime: "local-model",
+    modelEffort: "none",
+    localModelSnapshotVersion: 1,
+    localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "glm-5.2:cloud" },
+    preflightFailover: null,
+  });
+});
+
 test("Opinion's first document-stage switch records the immutable request and document attribution", () => {
   assert.match(
     editorialSource,

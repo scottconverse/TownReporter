@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Sql } from "../db.ts";
 
 const modulePath = new URL("./meeting-transcript-artifacts.ts", import.meta.url);
 
@@ -24,6 +28,45 @@ describe("meeting transcript artifacts Slice 3", () => {
     assert.equal(typeof segments[0]?.startSeconds, "number");
     assert.equal(typeof segments[1]?.startSeconds, "number");
     assert.ok(segments[1]!.startSeconds >= segments[0]!.startSeconds);
+  });
+
+  it("persists the real caption cue times when the parser provides them", async () => {
+    const { parseCaptionFile } = await import("./caption-parse.ts");
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-real-caption-times-"));
+    try {
+      const raw = '<?xml version="1.0"?><timedtext><body><p t="1250" d="2750">Opening</p><p t="8500" d="1500">Vote called</p></body></timedtext>';
+      const sourcePath = join(root, "timed.srv3");
+      writeFileSync(sourcePath, raw, "utf8");
+      const insertedSegments: unknown[][] = [];
+      let artifactParams: unknown[] = [];
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(text)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(text)) {
+          artifactParams = params;
+          return [{ id: 1, captured_at: "2026-09-23T00:00:00Z" }] as T[];
+        }
+        if (/insert into meeting_transcript_segments/i.test(text)) { insertedSegments.push(params); return [] as T[]; }
+        throw new Error(`unexpected query: ${text}`);
+      };
+
+      await storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 1,
+        videoId: "timed-video",
+        parsed: parseCaptionFile(raw, sourcePath),
+      });
+
+      assert.deepEqual(insertedSegments.map((params) => [params[2], params[3], params[5]]), [
+        [1.25, 4, "Opening"],
+        [8.5, 10, "Vote called"],
+      ]);
+      assert.equal(artifactParams[12], "valid", "an absent optional info sidecar must not block a verified caption artifact");
+      assert.match(String(artifactParams[11]), /did not write an info sidecar/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("resolves a citation by segment index and by timestamp to item, timestamp, excerpt, hash, path", async () => {
@@ -54,6 +97,199 @@ describe("meeting transcript artifacts Slice 3", () => {
     }
     assert.deepEqual(retentionPlan("media").allows, ["media", "audio-only", "transcript-only"]);
     assert.deepEqual(retentionPlan("transcript-only").allows, ["transcript-only"]);
+  });
+
+  it("preserves different caption and info revisions as separately hash-addressed files", async () => {
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-artifacts-"));
+    try {
+      const captionA = "WEBVTT\n\n00:00.000 --> 00:04.000\nOriginal words\n";
+      const captionB = "WEBVTT\n\n00:00.000 --> 00:04.000\nCorrected words\n";
+      const infoA = JSON.stringify({ id: "meeting-1", duration: 60, revision: 1 });
+      const infoB = JSON.stringify({ id: "meeting-1", duration: 61, revision: 2 });
+      const captionAPath = join(root, "capture-a.vtt");
+      const captionBPath = join(root, "capture-b.vtt");
+      const infoAPath = join(root, "capture-a.info.json");
+      const infoBPath = join(root, "capture-b.info.json");
+      writeFileSync(captionAPath, captionA, "utf8");
+      writeFileSync(captionBPath, captionB, "utf8");
+      writeFileSync(infoAPath, infoA, "utf8");
+      writeFileSync(infoBPath, infoB, "utf8");
+
+      const inserted: Array<{ storagePath: string; byteSize: number; infoPath: string | null; sha256: string; infoSha256: string | null }> = [];
+      let nextId = 1;
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(text)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(text)) {
+          inserted.push({
+            storagePath: String(params[2]),
+            sha256: String(params[4]),
+            byteSize: Number(params[7]),
+            infoPath: params[8] == null ? null : String(params[8]),
+            infoSha256: params[9] == null ? null : String(params[9]),
+          });
+          return [{ id: nextId++, captured_at: "2026-09-22T00:00:00.000Z" }] as T[];
+        }
+        if (/insert into meeting_transcript_segments/i.test(text)) return [] as T[];
+        throw new Error(`unexpected query: ${text}`);
+      };
+
+      const shaA = createHash("sha256").update(captionA).digest("hex");
+      const shaB = createHash("sha256").update(captionB).digest("hex");
+      const storedA = await storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 7,
+        videoId: "meeting-1",
+        parsed: { text: "Original words", format: "vtt", sha256: shaA, sourcePath: captionAPath },
+        infoSourcePath: infoAPath,
+      });
+      const storedB = await storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 7,
+        videoId: "meeting-1",
+        parsed: { text: "Corrected words", format: "vtt", sha256: shaB, sourcePath: captionBPath },
+        infoSourcePath: infoBPath,
+      });
+
+      assert.notEqual(storedA.storagePath, storedB.storagePath, "different caption hashes must never share a path");
+      assert.equal(readFileSync(storedA.storagePath, "utf8"), captionA, "storing B must not change A's bytes");
+      assert.equal(readFileSync(storedB.storagePath, "utf8"), captionB);
+      assert.equal(createHash("sha256").update(readFileSync(storedA.storagePath)).digest("hex"), shaA);
+      assert.equal(createHash("sha256").update(readFileSync(storedB.storagePath)).digest("hex"), shaB);
+
+      assert.equal(inserted.length, 2);
+      assert.equal(inserted[0]!.byteSize, Buffer.byteLength(captionA), "the transcript size is recorded with its hash and path");
+      assert.equal(inserted[1]!.byteSize, Buffer.byteLength(captionB), "each immutable revision records its own exact size");
+      assert.notEqual(inserted[0]!.infoPath, inserted[1]!.infoPath, "different info hashes must never share a path");
+      assert.equal(readFileSync(inserted[0]!.infoPath!, "utf8"), infoA, "storing B must not change A's sidecar");
+      assert.equal(readFileSync(inserted[1]!.infoPath!, "utf8"), infoB);
+      assert.match(storedA.storagePath, new RegExp(shaA));
+      assert.match(storedB.storagePath, new RegExp(shaB));
+      assert.match(inserted[0]!.infoPath!, new RegExp(inserted[0]!.infoSha256!));
+      assert.match(inserted[1]!.infoPath!, new RegExp(inserted[1]!.infoSha256!));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("quarantines the real verified temp file when storage is interrupted before atomic rename", async () => {
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const { reconcileMeetingArtifactStorage } = await import("./meeting-artifact-reconciliation.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-temp-crash-"));
+    try {
+      const sourcePath = join(root, "capture.vtt");
+      const text = "WEBVTT\n\n00:00.000 --> 00:04.000\nVerified bytes before rename.\n";
+      const digest = createHash("sha256").update(text).digest("hex");
+      writeFileSync(sourcePath, text, "utf8");
+      let artifactInsertAttempts = 0;
+      let interruptedTemp = "";
+      let targetPath = "";
+      const findings: Array<{ kind: string; originalPath: string; quarantinePath: string | null }> = [];
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(query: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(query)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(query)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(query)) { artifactInsertAttempts += 1; throw new Error("the interrupted writer must not reach artifact insert"); }
+        if (/select id,storage_path,sha256,info_path,info_sha256,info_missing_reason/i.test(query)) return [] as T[];
+        if (/insert into meeting_artifact_storage_findings/i.test(query)) {
+          findings.push({ kind: String(params[2]), originalPath: String(params[3]), quarantinePath: params[4] == null ? null : String(params[4]) });
+          return [] as T[];
+        }
+        throw new Error(`unexpected query: ${query}`);
+      };
+
+      await assert.rejects(storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 82,
+        videoId: "interrupted-before-rename",
+        parsed: { text, format: "vtt", sha256: digest, sourcePath },
+      }, {
+        preserveTempOnInjectedInterruption: true,
+        beforeAtomicRename: (temporary, target) => {
+          interruptedTemp = temporary;
+          targetPath = target;
+          assert.equal(readFileSync(temporary, "utf8"), text, "the writer fsynced the complete temp before this interruption point");
+          assert.equal(createHash("sha256").update(readFileSync(temporary)).digest("hex"), digest);
+          throw new Error("simulated process stop after temp fsync and hash verification");
+        },
+      }), /simulated process stop/);
+
+      assert.equal(artifactInsertAttempts, 0, "the DB must not reference bytes until atomic rename succeeds");
+      assert.equal(existsSync(targetPath), false, "the final content-addressed path is not visible before rename");
+      assert.equal(existsSync(interruptedTemp), true, "the injected process stop leaves the real temp for recovery");
+      const reconciled = await reconcileMeetingArtifactStorage(sql, 82, {
+        orphanGraceMs: 0,
+        now: () => new Date("2026-09-23T12:00:00.000Z"),
+      });
+      assert.equal(reconciled.quarantined, 1);
+      assert.equal(existsSync(interruptedTemp), false);
+      assert.equal(findings.length, 1);
+      assert.equal(findings[0]!.kind, "stale-temporary-file");
+      assert.equal(findings[0]!.originalPath, interruptedTemp);
+      assert.ok(findings[0]!.quarantinePath);
+      assert.equal(readFileSync(findings[0]!.quarantinePath!, "utf8"), text, "recovery preserves the exact verified bytes");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers an atomic transcript file left behind when the database insert fails", async () => {
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const { reconcileMeetingArtifactStorage } = await import("./meeting-artifact-reconciliation.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-db-crash-"));
+    try {
+      const sourcePath = join(root, "capture.vtt");
+      const text = "WEBVTT\n\n00:00.000 --> 00:04.000\nA complete verified capture.\n";
+      const digest = createHash("sha256").update(text).digest("hex");
+      writeFileSync(sourcePath, text, "utf8");
+      const attemptedArtifactPaths: string[] = [];
+      const findings: Array<{ newsroom_id: number; finding_kind: string; original_path: string; quarantine_path: string | null }> = [];
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(query: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(query)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(query)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(query)) {
+          attemptedArtifactPaths.push(String(params[2]));
+          throw new Error("simulated process/database failure after atomic file publication");
+        }
+        if (/select id,storage_path,sha256,info_path,info_sha256,info_missing_reason/i.test(query)) return [] as T[];
+        if (/insert into meeting_artifact_storage_findings/i.test(query)) {
+          findings.push({ newsroom_id: Number(params[0]), finding_kind: String(params[2]), original_path: String(params[3]), quarantine_path: params[4] == null ? null : String(params[4]) });
+          return [] as T[];
+        }
+        throw new Error(`unexpected query: ${query}`);
+      };
+
+      await assert.rejects(storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 81,
+        videoId: "crash-boundary-video",
+        parsed: { text, format: "vtt", sha256: digest, sourcePath },
+      }), /simulated process\/database failure/);
+
+      assert.equal(attemptedArtifactPaths.length, 1, "the SQL failure happens after the immutable file is complete");
+      const orphanPath = attemptedArtifactPaths[0]!;
+      assert.equal(readFileSync(orphanPath, "utf8"), text);
+      assert.equal(createHash("sha256").update(readFileSync(orphanPath)).digest("hex"), digest);
+
+      const reconciled = await reconcileMeetingArtifactStorage(sql, 81, {
+        orphanGraceMs: 0,
+        now: () => new Date("2026-09-23T12:00:00.000Z"),
+      });
+      assert.equal(reconciled.quarantined, 1, "reconciliation must find the complete but unregistered transcript");
+      assert.equal(existsSync(orphanPath), false, "unowned bytes leave the active artifact tree only after quarantine");
+      assert.equal(findings.length, 1);
+      assert.equal(findings[0]!.newsroom_id, 81);
+      assert.equal(findings[0]!.finding_kind, "orphan-final-file");
+      assert.equal(findings[0]!.original_path, orphanPath);
+      assert.ok(findings[0]!.quarantine_path);
+      const quarantineRoot = join(root, ".quarantine", "newsroom-81");
+      const { readdirSync } = await import("node:fs");
+      const quarantined = readdirSync(quarantineRoot);
+      assert.equal(quarantined.length, 1);
+      assert.equal(readFileSync(join(quarantineRoot, quarantined[0]!), "utf8"), text);
+      assert.ok(findings[0]!.quarantine_path!.endsWith(quarantined[0]!));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   /*
@@ -107,17 +343,17 @@ describe("meeting transcript artifacts Slice 3", () => {
       },
     };
 
-    const byTime = await loadTranscriptCitation(sql, { artifactId: 13, timestampSeconds: 18450 });
+    const byTime = await loadTranscriptCitation(sql as unknown as import("../db.ts").Sql, { artifactId: 13, timestampSeconds: 18450 });
     assert.equal(byTime.item, "8", "a citation must name the agenda item it sits under");
     assert.equal(byTime.segmentIndex, 1);
     assert.equal(byTime.excerpt, "And that is all uh city manager remarks.");
     assert.equal(byTime.captionSha256, "abc123");
 
-    const byIndex = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 0 });
+    const byIndex = await loadTranscriptCitation(sql as unknown as import("../db.ts").Sql, { artifactId: 13, segmentIndex: 0 });
     assert.equal(byIndex.item, "5");
 
     // The second index of a multi-index chunk must also resolve.
-    const seg2 = await loadTranscriptCitation(sql, { artifactId: 13, segmentIndex: 2 });
+    const seg2 = await loadTranscriptCitation(sql as unknown as import("../db.ts").Sql, { artifactId: 13, segmentIndex: 2 });
     assert.equal(seg2.item, "8", "every index in a chunk must resolve, not just the first");
 
     assert.ok(calls.some((q) => /meeting_agenda_chunks/.test(q)), "the item must come from the chunk table");

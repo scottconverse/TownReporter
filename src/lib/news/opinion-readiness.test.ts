@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { getSql } from "../db.ts";
+import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
+import { ensureProviderSettingsSchema } from "./provider-settings.ts";
 
 async function withEnv<T>(changes: Record<string, string | undefined>, run: () => Promise<T>) {
   const saved = new Map<string, string | undefined>();
@@ -160,5 +163,78 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
       /Start LM Studio's local server or Ollama.*click Refresh/,
       "the guidance for an unavailable local-model pick must explain how to make it reachable",
     );
+  });
+
+  it("preflights the saved Opinion model itself when a different global local model is configured", async () => {
+    const newsroomId = 9062;
+    const scopedBase = "http://127.0.0.1:11434/v1";
+    const globalBase = "http://127.0.0.1:1234/v1";
+    const selectedModel = "glm-5.2:cloud";
+    const sql = await getSql();
+    await ensureProviderSettingsSchema();
+    await sql.query(
+      "insert into newsrooms(id,name) values($1,'Opinion scoped preflight test') on conflict(id) do nothing",
+      [newsroomId],
+    );
+    await sql.query(
+      "insert into provider_settings(newsroom_id,provider_id,local_model_base_url,local_model_id) values($1,'local-model',$2,'global-lmstudio-model') on conflict(newsroom_id,provider_id) do update set local_model_base_url=excluded.local_model_base_url,local_model_id=excluded.local_model_id",
+      [newsroomId, globalBase],
+    );
+    await sql.query(
+      "insert into newsroom_local_model_choices(newsroom_id,scope,base_url,model_id) values($1,'opinion',$2,$3) on conflict(newsroom_id,scope) do update set base_url=excluded.base_url,model_id=excluded.model_id",
+      [newsroomId, scopedBase, selectedModel],
+    );
+
+    const originalFetch = globalThis.fetch;
+    const originalEnv = {
+      base: process.env.LLM_BASE_URL,
+      model: process.env.LLM_MODEL,
+      discovery: process.env.TOWNREPORTER_LOCAL_DISCOVERY,
+    };
+    const requests: string[] = [];
+    process.env.LLM_BASE_URL = globalBase;
+    process.env.LLM_MODEL = "global-lmstudio-model";
+    process.env.TOWNREPORTER_LOCAL_DISCOVERY = "0";
+    resetLocalCatalogCacheForTests();
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      requests.push(url);
+      const models = url.startsWith(`${scopedBase}/`)
+        ? [{ id: selectedModel }]
+        : [{ id: "global-lmstudio-model" }];
+      return new Response(JSON.stringify({ data: models }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    try {
+      const readiness = await checkOpinionReadiness("local-model", {
+        findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+      }, newsroomId);
+      assert.equal(readiness.ready, true, readiness.why);
+      assert.ok(
+        requests.includes(`${scopedBase}/models`),
+        `readiness must query the saved Opinion endpoint; observed ${requests.join(", ")}`,
+      );
+      assert.equal(
+        requests.at(-1),
+        `${scopedBase}/models`,
+        "the final readiness probe must target the scoped Ollama model, not global LM Studio",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [key, value] of Object.entries({
+        LLM_BASE_URL: originalEnv.base,
+        LLM_MODEL: originalEnv.model,
+        TOWNREPORTER_LOCAL_DISCOVERY: originalEnv.discovery,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      resetLocalCatalogCacheForTests();
+      await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='opinion'", [newsroomId]);
+      await sql.query("delete from provider_settings where newsroom_id=$1 and provider_id='local-model'", [newsroomId]);
+      await sql.query("delete from newsrooms where id=$1", [newsroomId]);
+    }
   });
 });

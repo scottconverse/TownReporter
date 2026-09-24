@@ -201,7 +201,7 @@ if (dbProbe.ok) {
       "/desk",
       "the desk bounced back to setup after saving",
     );
-  }, 300_000);
+  }, { timeout: 300_000 });
 
   after(async () => {
     await page?.close().catch(() => undefined);
@@ -216,7 +216,7 @@ if (dbProbe.ok) {
     );
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("release-walkthrough Blocker fix: before anyone has claimed the desk or run setup", () => {

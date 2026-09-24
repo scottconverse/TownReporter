@@ -280,7 +280,7 @@ export async function checkPageWatchFor(
           full_text: string;
         }>`select full_text from artifact_versions where id=${m.watch_last_readable_version_id} and newsroom_id=${who.newsroomId} and url=${m.url}`
       : [];
-    const overrides = opts.fetch ? null : await readProviderOverrides(who.newsroomId);
+    const overrides = opts.fetch ? null : await readProviderOverrides(who.newsroomId, "dark");
     let got: IngestDocument,
       failure = "";
     try {

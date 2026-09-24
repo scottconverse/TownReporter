@@ -146,7 +146,7 @@ if (dbProbe.ok) {
     // The seat must exist before the editor's next desk request.
     const seated = await db.query(`select count(*)::int as c from newsroom_members`);
     assert.equal(seated.rows[0].c, 2, "both seats must exist before the races start");
-  }, 300_000);
+  }, { timeout: 300_000 });
 
   after(async () => {
     await ownerPage?.close().catch(() => undefined);
@@ -164,7 +164,7 @@ if (dbProbe.ok) {
     );
     await admin.query(`DROP DATABASE IF EXISTS ${dbName}`);
     await admin.end();
-  }, 30_000);
+  }, { timeout: 30_000 });
 }
 
 describe("two editors on one story", () => {

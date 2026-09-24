@@ -16,8 +16,26 @@ describe("meeting Slice 1 configuration and honest coverage", () => {
   it("names meetings as their own coverage class with failures named", () => {
     assert.match(source, /meetings: \$\{found\.length\} found/);
     assert.match(source, /captured, \$\{failed\.length\} failed/);
-    assert.match(source, /failures: \[\.\.\.failures, \.\.\.failed\.map/);
     assert.match(desk, /meeting_failures/);
+  });
+
+  it("keeps both channel-listing and capture failures, named and deduplicated", async () => {
+    const { namedMeetingFailures } = await import("./meeting-capture.ts");
+    const failures = namedMeetingFailures(
+      ["City channel: listing timed out", "City channel: listing timed out"],
+      [{
+        videoId: "abcdefghijk",
+        channelUrl: "https://www.youtube.com/@CityofLongmont",
+        title: "Planning and Zoning Commission",
+        published: "2026-09-16",
+        status: "failed",
+        failureReason: "captions unavailable",
+      }],
+    );
+    assert.deepEqual(failures, [
+      "City channel: listing timed out",
+      "Planning and Zoning Commission: captions unavailable",
+    ]);
   });
 
   it("uses kind meeting-video semantics rather than a page-hash path", () => {

@@ -27,8 +27,10 @@
  * This stays deliberately narrow. A content refusal or an error this desk
  * does not recognise remains terminal. An explicit or scheduled choice is a
  * preferred model, and a technical failure may move the unfinished call to a
- * ready rung. The caller records that switch for the editor. A hop only ever
- * goes one rung -- each caller owns a single retry.
+ * ready rung unless the editor pinned a local/Ollama model. That choice fails
+ * closed rather than silently handing the work to another provider. The
+ * caller records any permitted switch for the editor. A hop only ever goes
+ * one rung -- each caller owns a single retry.
  */
 
 import { AUTOMATIC_LADDER, type ProviderProbe } from "./ai.ts";
@@ -36,7 +38,7 @@ import { looksLikeProviderAuthFailure, looksLikeTimeoutText } from "./preflight.
 import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 
 export type AutomaticFailoverInput = {
-  /** How the preferred model was chosen. All sources share technical fallback. */
+  /** How the preferred model was chosen. Explicit local/Ollama choices do not fail over. */
   source: "editor" | "auto" | "scheduled";
   /** The concrete choice the job is currently running (or just failed) on. */
   current: string;
@@ -136,6 +138,9 @@ export function automaticFailoverReason(
 export async function planAutomaticFailover(
   input: AutomaticFailoverInput,
 ): Promise<AutomaticFailoverPlan | null> {
+  // A newsroom that explicitly chose a local/Ollama model must not have its
+  // work silently handed to a different provider after a technical failure.
+  if (input.current === "local-model" && input.source !== "auto") return null;
   const reason = automaticFailoverReason(input.error);
   if (!reason) return null;
 

@@ -10,13 +10,11 @@ export function requestStopMeetingPass(newsroomId: number): boolean {
 }
 export function isMeetingPassRunning(newsroomId: number): boolean { return runningPasses.has(newsroomId); }
 import { authMiddleware } from "../auth/middleware.ts";
-import { getSql, withTransaction, type Sql } from "../db.ts";
+import { getSql, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
-import { runMeetingAwareness, recheckProvisionalMeetings, resumeStoppedMeetings, type MeetingAwarenessResult } from "./meeting-capture.ts";
-import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
-import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
+import { applyCapturedMeetingTranscript, runMeetingAwareness, recheckProvisionalMeetings, resumeStoppedMeetings, type MeetingAwarenessResult } from "./meeting-capture.ts";
 import { captureMeetingCaptions } from "./meeting-capture-ytdlp.ts";
-import { meetingCaptionDir, meetingArchivePath } from "./meeting-capture.ts";
+import { prepareMeetingCapturePaths } from "./meeting-capture.ts";
 
 export type MeetingManualRunResult =
   | {
@@ -163,9 +161,11 @@ export const resumeStoppedMeetingsNow = createServerFn({ method: "POST" })
   });
 
 /**
- * N-2: force a re-capture of ONE specific meeting. This overwrites the stored
- * transcript; the prior caption hash is preserved on the record so the overwrite
- * is visible, and forced_recapture is recorded on both the run and the record.
+ * N-2: force a re-capture of ONE specific meeting. This uses the canonical
+ * immutable revision path: prior bytes and provenance remain available, the
+ * current artifact moves under the shared publication lock, and affected drafts
+ * or published stories receive review work. The forced action is recorded on
+ * both the run and the capture record.
  */
 export const forceRecaptureMeeting = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -192,43 +192,27 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
     );
     const runId = rows[0]!.id;
 
-    const prior = await sql.query<{ caption_sha256: string | null }>(
-      "select caption_sha256 from meeting_capture_records where newsroom_id=$1 and video_id=$2",
-      [newsroomId, data.videoId],
-    );
-    const priorSha = prior[0]?.caption_sha256 ?? null;
-
-    const outputDir = meetingCaptionDir(newsroomId);
-    const archivePath = meetingArchivePath(newsroomId);
+    const { outputDir, archivePath } = prepareMeetingCapturePaths(newsroomId, data.videoId);
     try {
-      const result = await captureMeetingCaptions({ videoId: data.videoId, outputDir: `${outputDir}/${data.videoId}`, archivePath });
+      const result = await captureMeetingCaptions({ videoId: data.videoId, outputDir, archivePath });
       if (!result.ok) {
         await sql.query("update scan_runs set finished_at=now(), error=$1, meetings_found=1, meetings_failed=1, meeting_failures=$2 where id=$3",
           [result.reason, JSON.stringify([`${data.title}: ${result.reason}`]), runId]);
         return { ok: false, error: result.reason };
       }
-      await withTransaction(async (tx) => {
-        await tx.query(
-          `insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,captured_at,
-             caption_path,caption_format,caption_sha256,caption_captured_at,failure_reason,
-             forced_recapture,forced_recapture_at,prior_caption_sha256)
-           values($1,$2,$3,$4,$5,'captured',now(),$6,$7,$8,now(),null,true,now(),$9)
-           on conflict(newsroom_id,video_id) do update set
-             status='captured',captured_at=now(),caption_path=excluded.caption_path,
-             caption_format=excluded.caption_format,caption_sha256=excluded.caption_sha256,
-             caption_captured_at=now(),failure_reason=null,
-             forced_recapture=true,forced_recapture_at=now(),
-             prior_caption_sha256=$9,updated_at=now()`,
-          [newsroomId, data.videoId, data.channelUrl, data.title, data.published,
-           result.parsed.sourcePath, result.parsed.format, result.parsed.sha256, priorSha],
-        );
-        await storeMeetingTranscriptArtifact(tx, { newsroomId, videoId: data.videoId, parsed: result.parsed, infoSourcePath: result.infoPath });
-        await tx.query(
-          "update scan_runs set finished_at=now(), meetings_found=1, meetings_captured=1, meetings_failed=0, meeting_failures='[]', summary=$1 where id=$2",
-          [`meetings: 1 found, 1 captured, 0 failed (forced re-capture)`, runId],
-        );
+      const applied = await applyCapturedMeetingTranscript(sql, {
+        newsroomId,
+        userId: context.userId,
+        video: { id: data.videoId, channelUrl: data.channelUrl, title: data.title, published: data.published },
+        result,
+        forced: true,
       });
-      return { ok: true, scanRunId: runId, found: 1, captured: 1, failed: 0, failures: [], coverageLine: "meetings: 1 found, 1 captured, 0 failed", forced: true };
+      const coverageLine = `meetings: 1 found, 1 captured, 0 failed (forced re-capture${applied.revised ? ", revision recorded" : ""})`;
+      await sql.query(
+        "update scan_runs set finished_at=now(), meetings_found=1, meetings_captured=1, meetings_failed=0, meeting_failures=$1, summary=$2 where id=$3",
+        [JSON.stringify(applied.warnings), coverageLine, runId],
+      );
+      return { ok: true, scanRunId: runId, found: 1, captured: 1, failed: 0, failures: applied.warnings, coverageLine, forced: true };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       await sql.query("update scan_runs set finished_at=now(), error=$1 where id=$2", [error, runId]);

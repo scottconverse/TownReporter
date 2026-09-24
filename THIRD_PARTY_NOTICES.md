@@ -1,5 +1,22 @@
 # Third-party notices
 
+## Fraunces webfont
+
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of Fraunces.
+Fraunces is licensed under the SIL Open Font License 1.1. Copyright 2018
+The Fraunces Project Authors (<https://github.com/undercasetype/Fraunces>).
+The complete license text is included at
+[`licenses/fonts/Fraunces-OFL.txt`](licenses/fonts/Fraunces-OFL.txt).
+
+## Source Serif 4 webfont
+
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of Source Serif 4.
+Source Serif 4 is licensed under the SIL Open Font License 1.1. Copyright 2014
+The Source Serif 4 Project Authors
+(<https://github.com/adobe-fonts/source-serif>). The complete license text is
+included at
+[`licenses/fonts/Source-Serif-4-OFL.txt`](licenses/fonts/Source-Serif-4-OFL.txt).
+
 ## dsh-xai reference
 
 TownReporter’s direct Grok Build OAuth adapter was informed by the public

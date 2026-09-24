@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
+import type { DeskJob } from "./jobs.ts";
 
 let vite: ViteDevServer;
 let getPglite: typeof import("../db.ts").getPglite;
@@ -99,7 +100,7 @@ it("the scheduled worker persists actual scan outputs through its fenced commit"
     started_at: null,
     finished_at: null,
     claim_token: "worker-lease",
-  };
+  } as DeskJob;
 
   let codexCalls = 0;
   const oldOpenAi = process.env.OPENAI_API_KEY;

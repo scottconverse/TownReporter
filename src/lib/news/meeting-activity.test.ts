@@ -40,6 +40,25 @@ describe("N-3 activity surface reads the real columns", () => {
     assert.match(src, /meeting_alignments/);
   });
 
+  it("reports what a captured meeting produced for the desk", () => {
+    /*
+      A capture that transcribed perfectly and produced no story is a different
+      outcome from one that produced a draft waiting to be read, and the surface
+      could not tell them apart: it showed the transcription state and stopped.
+    */
+    const src = readFileSync(activityPath, "utf8");
+    for (const field of ["leadId", "leadStatus", "draftId", "citationCount"]) {
+      assert.ok(src.includes(field), `meeting-activity must report ${field}`);
+    }
+    assert.match(src, /from leads/, "the meeting lead must be read, not guessed");
+    assert.match(src, /transcriptCitations/, "the citation count comes from the recorded citations");
+  });
+
+  it("guards the jsonb cast so one unreadable row cannot break the Scan desk", () => {
+    const src = readFileSync(activityPath, "utf8");
+    assert.match(src, /notes_json ~/, "the cast must be restricted to rows that can survive it");
+  });
+
   it("renders the fail reason, chunks, and votes, and the provisional label", () => {
     const src = readFileSync(labelPath, "utf8");
     assert.match(src, /role="alert"/);

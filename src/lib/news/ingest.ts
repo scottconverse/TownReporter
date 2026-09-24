@@ -180,6 +180,10 @@ export type OcrOptions = {
       (
         image: { bytes: Uint8Array; mime: "image/jpeg" | "image/png" },
         timeoutMs: number,
+        selected?: {
+          transport: "anthropic" | "codex" | "claude-code" | "openai" | "local";
+          model: string;
+        },
       ) => Promise<string>
     >
   >;

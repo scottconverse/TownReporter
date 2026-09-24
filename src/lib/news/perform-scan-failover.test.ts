@@ -5,7 +5,6 @@ import { runScanChatWithFailover, scanCallTimeoutMs } from "./scan-model-run.ts"
 const LIVE_401 =
   "Claude Code error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 
-const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
 const CODEX_AUTH_FAILURE =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 const CODEX_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
@@ -20,6 +19,28 @@ const CODEX_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out
  * never a second fetch pass over the watch list.
  */
 describe("runScanChatWithFailover", () => {
+  it("passes the selected Ollama model to the scan call", async () => {
+    const localModel = { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" };
+    const seen: unknown[] = [];
+    const result = await runScanChatWithFailover({
+      job: { id: 7, model_choice: "local-model", model_choice_source: "editor" },
+      newsroomId: 1,
+      localModel,
+      system: "system",
+      user: "source evidence",
+      maxTokens: 3500,
+      timeoutMs: () => 90_000,
+      grokChat: async (_system, _user, _maxTokens, options) => {
+        seen.push(options?.localModel);
+        return { ok: true, text: '{"leads":[]}' };
+      },
+      probe: async () => { throw new Error("unexpected probe"); },
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(seen, [localModel]);
+  });
   it("passes the authenticated newsroom to an explicit custom connection without failover", async () => {
     const calls: Array<{ choice?: string; newsroomId?: number }> = [];
     const result = await runScanChatWithFailover({
