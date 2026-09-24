@@ -1015,6 +1015,106 @@
         </div>
       </section>
 
+      <section id="oneperson" class="wrap">
+        <p class="eyebrow">One desk</p>
+        <h2>One editor. A whole town.</h2>
+        <div class="grid-2x2">
+          <div class="panel">
+            <h3>The list keeps watch</h3>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              A watch list of civic sources is scanned on a schedule, and the scan files leads &mdash;
+              it does not draft and it does not publish.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Leads wait in the Queue</h3>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              Everything the scan finds arrives in one Queue as a lead, with the page or the
+              transcript that produced it.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>You set the direction first</h3>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              A story takes the direction you give it before any draft is written, and Redraft keeps
+              the saved draft until the new one lands.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>The draft shows its evidence</h3>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              The citations a draft used, and the material it considered but did not use, are both
+              listed beside the text, and a name the desk cannot resolve is masked instead of
+              guessed.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>A person publishes</h3>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              Scan does not publish, Draft does not publish, and Dark Desk does not publish &mdash;
+              that button is yours.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Corrections stay public</h3>
+            <p style="font-size: 15px; color: var(--ink-2); margin: 0">
+              A correction attaches to a published story and stays on the public corrections page
+              for whoever reads it later.
+            </p>
+          </div>
+        </div>
+        <p class="cap" style="margin-top: 18px">
+          Routine notices an owner has approved can print from fixed templates and approved sources;
+          ordinary reporting still goes through you.
+        </p>
+      </section>
+
+      <section id="meeting" class="wrap">
+        <p class="eyebrow">Tape to page</p>
+        <h2>How a meeting becomes a story</h2>
+        <div class="prose">
+          <p>
+            A recording from the city channel or a PrimeGov portal is captured with a full
+            timestamped transcript and saved as an immutable revision. Capture files a lead in the
+            Queue with the transcript passages it used. You give the story a direction, then ask for
+            a draft, and the draft keeps the citations it used.
+          </p>
+          <p>
+            Publishing is blocked if the used citations are malformed or the transcript hash no
+            longer matches. If the transcript is revised after the story is published, the printed
+            article is not rewritten &mdash; one high-priority editor review is created instead.
+          </p>
+        </div>
+        <figure style="margin: 24px 0 0">
+          <img
+            src="diagrams/meeting-to-story.svg"
+            alt="Flowchart: a meeting recording is captured, becomes a Queue lead, takes a direction and a bounded draft with used citations, passes the publication gate and reaches the paper."
+            style="width: 100%; max-width: 757px; margin: 0 auto; border: 1px solid var(--rule); display: block"
+          />
+        </figure>
+        <ul class="limits" style="max-width: 64ch; margin-top: 22px">
+          <li>
+            <b>Pulled notes are leads, not evidence.</b> What capture files is something to check,
+            not something proven.
+          </li>
+          <li>
+            <b>A vote tally or a mover can appear with no citation.</b> Structured vote extraction
+            reports &ldquo;not established&rdquo; rather than guess a tally from prose.
+          </li>
+          <li>
+            <b>A masked name reads stiffly.</b> An unresolved identity becomes &ldquo;an
+            unidentified speaker&rdquo;, including a two-word office such as Mayor Pro Tem.
+          </li>
+          <li>
+            <b>YouTube can rate-limit a capture (HTTP 429).</b> A later pass picks the meeting up.
+          </li>
+          <li>
+            <b>Captions are not minutes.</b> Names may be wrong and quotes need a check. A person
+            approves every ordinary story.
+          </li>
+        </ul>
+      </section>
+
       <section id="start" class="wrap">
         <p class="eyebrow">Install</p>
         <h2>Install on Windows. Create your paper. Choose a writing model.</h2>
