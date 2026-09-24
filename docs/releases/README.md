@@ -1,7 +1,7 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.61](0.6.61.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.62](0.6.62.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
 

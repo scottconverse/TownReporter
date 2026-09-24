@@ -16,9 +16,11 @@ function samePublicUrl(left: string, right: string): boolean {
   catch { return false; }
 }
 
-export function publicArticle(
-  row: ArticleRow,
-): ArticleRow & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
+/* Generic in the row so a caller that already selected extra columns (the
+   routine-notice marker on getPublishedArticle) keeps them in the type. */
+export function publicArticle<T extends ArticleRow>(
+  row: T,
+): T & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
   const u = unpackStoredDraft({
     headline: row.headline,
     dek: row.dek,
@@ -78,9 +80,17 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
     try {
       const sql = await getSql();
-      const rows = await sql<ArticleRow>`
+      const rows = await sql<ArticleRow & { routine_notice: boolean }>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
-             provenance_json, form, found_note, unanswered
+             provenance_json, form, found_note, unanswered,
+             /* Whether a fixed-template routine notice printed this row. The
+                reader-facing disclosure line depends on it, and it cannot be
+                inferred from the article's own columns: a routine notice is
+                published with the same form as a reported story. */
+             exists(
+               select 1 from routine_notice_publications r
+               where r.article_id = articles.id and r.newsroom_id = articles.newsroom_id
+             ) as routine_notice
       from articles
       where slug = ${slug} and status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
       limit 1

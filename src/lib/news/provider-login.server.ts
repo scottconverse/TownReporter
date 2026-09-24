@@ -35,6 +35,7 @@ import { spawn } from "node:child_process";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
+import { claudeChildEnv, codexChildEnv } from "./cli-child-env.server.ts";
 
 export type ProviderId = "claude" | "codex";
 
@@ -471,23 +472,18 @@ function loginArgs(provider: ProviderId): string[] {
 }
 
 /**
- * The Codex adapter's env handling, kept identical here.
+ * The environment a login child gets: the same allow-list the drafting calls
+ * use, per provider.
  *
  * A login spawned with a different HOME or CODEX_HOME than the drafting calls
  * use would write its credentials somewhere the desk never looks — a sign-in
- * that reports success and changes nothing.
+ * that reports success and changes nothing. And a sign-in child is no more
+ * entitled to this server's secrets than a drafting one: it was previously
+ * handed `{...process.env}`, i.e. `BETTER_AUTH_SECRET` and `DATABASE_URL` as
+ * well. See cli-child-env.server.ts.
  */
-function childEnv(): NodeJS.ProcessEnv {
-  const appData = process.env.APPDATA?.trim();
-  const userRoot =
-    process.env.USERPROFILE?.trim() ||
-    (appData ? appData.replace(/[\\/]AppData[\\/]Roaming[\\/]?$/i, "") : undefined);
-  return {
-    ...process.env,
-    ...(userRoot && !process.env.USERPROFILE ? { USERPROFILE: userRoot } : {}),
-    ...(userRoot && !process.env.HOME ? { HOME: userRoot } : {}),
-    ...(userRoot && !process.env.CODEX_HOME ? { CODEX_HOME: `${userRoot}\\.codex` } : {}),
-  };
+function childEnv(provider: ProviderId): NodeJS.ProcessEnv {
+  return provider === "claude" ? claudeChildEnv() : codexChildEnv();
 }
 
 export async function probeProviderLogin(provider: ProviderId): Promise<boolean> {
@@ -558,7 +554,7 @@ export async function startProviderLogin(
       detached: true,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: childEnv(),
+      env: childEnv(provider),
     });
   } catch {
     await patch(id, { status: "failed", detail: "That command would not start." }, true);
@@ -752,6 +748,7 @@ async function claudeAccount(bin: string): Promise<{ signedIn: boolean; account:
       child = spawn(plan.command, plan.args, {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
+        env: claudeChildEnv(),
       });
     } catch {
       resolve("");

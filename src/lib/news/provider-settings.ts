@@ -40,6 +40,11 @@ import {
 import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 import { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
 export { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
+import {
+  cleanLocalModelInput,
+  cleanModelScope,
+  type LocalModelScope,
+} from "./request-input.ts";
 
 /**
  * Idempotent runtime ensure for the PGLite preview and unit-test paths,
@@ -92,8 +97,13 @@ type ProviderSettingRow = {
 };
 
 const LOCAL_MODEL_PROVIDER_ID = "local-model";
-export type LocalModelScope = "story" | "scan" | "opinion" | "dark" | "forced";
-const LOCAL_MODEL_SCOPES: readonly string[] = ["story", "scan", "opinion", "dark", "forced"];
+/*
+  The scope allow-list and its cleaner moved to request-input.ts, where they
+  can be tested without opening a database. Re-exported here so every existing
+  importer of `LocalModelScope` (and of the type on `resolveLocalModelChoice`,
+  `saveLocalModel` and the rest) is unchanged.
+*/
+export type { LocalModelScope } from "./request-input.ts";
 
 /** First-run model candidates; a newsroom's saved pick always takes precedence. */
 const PREFERRED_CLOUD_MODEL_BY_SCOPE: Readonly<Record<LocalModelScope, string>> = {
@@ -103,12 +113,6 @@ const PREFERRED_CLOUD_MODEL_BY_SCOPE: Readonly<Record<LocalModelScope, string>> 
   dark: "deepseek-v4.1-flash:cloud",
   forced: "deepseek-v4.1-flash:cloud",
 };
-
-function cleanScope(value: unknown): LocalModelScope | undefined {
-  return typeof value === "string" && LOCAL_MODEL_SCOPES.includes(value)
-    ? value as LocalModelScope
-    : undefined;
-}
 
 /** Is a stored `{baseUrl,id}` still on that server's current model list? */
 function stillListed(
@@ -319,7 +323,7 @@ export async function saveLocalModel(
 
 export const getLocalModelChoice = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
-  .validator((raw: unknown) => cleanScope((raw as { scope?: unknown } | null)?.scope))
+  .validator((raw: unknown) => cleanModelScope((raw as { scope?: unknown } | null)?.scope))
   .handler(async ({ context, data }): Promise<LocalModelChoice> => {
     const me = await requireEditor(context.userId);
     return resolveLocalModelChoice(me.newsroomId, data);
@@ -327,18 +331,13 @@ export const getLocalModelChoice = createServerFn({ method: "GET" })
 
 export const saveLocalModelFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((raw: unknown) => {
-    const v = (raw ?? {}) as { baseUrl?: unknown; id?: unknown; scope?: unknown };
-    const scope = cleanScope(v.scope);
-    const invalidScope = v.scope !== undefined && !scope;
-    if (typeof v.baseUrl === "string" && typeof v.id === "string" && v.baseUrl && v.id) {
-      return { choice: { baseUrl: v.baseUrl, id: v.id }, scope, invalidScope };
-    }
-    return { choice: null, scope, invalidScope };
-  })
+  .validator((raw: unknown) => cleanLocalModelInput(raw))
   .handler(async ({ context, data }): Promise<SaveLocalModelResult> => {
     try {
       if (data.invalidScope) return { ok: false, error: "Choose a valid model-use scope." };
+      if (data.invalidInput) {
+        return { ok: false, error: "That model address or model id is too long to store." };
+      }
       return await saveLocalModel(context.userId, data.choice, data.scope);
     } catch (err) {
       if (err instanceof ForbiddenError) return { ok: false, error: err.message };

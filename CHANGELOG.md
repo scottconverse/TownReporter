@@ -1,6 +1,21 @@
 # Changelog
 
-Current software version: **0.6.61**. Publication state is recorded by GitHub.
+Current software version: **0.6.62**. Publication state is recorded by GitHub.
+
+## 0.6.62 — 2026-09-24
+
+- Every published article and the reporting page now carry the required statement of how the story was made. Template-assembled routine notices get their own sentence, chosen from the publication record, so a roundup no longer reads as person-reviewed AI writing.
+- Made the section an explicit editor decision. The confirm action saves the draft first, publication is refused when the section or body has changed since that confirmation, and the decision is recorded with the draft's evidence review.
+- `*italic*` and `_italic_` now render as italics in story bodies; bold, bullets and multiplication signs are unchanged.
+- Refuses publication when a story names a news outlet that its Sources do not cover, and lets an editor clear one outlet at a time, recorded append-only in `0086_named_outlet_overrides.sql` and shown on the desk rather than on the public page.
+- Fixed the development `/desk/ops` page, which crashed on fifteen `node:` builtins reached through its static import closure. The built-server smoke walk now asserts in the browser that the error boundary did not render; a 200 was never sufficient, because the crash shipped a 200.
+- Spawned provider CLIs receive a named environment allow-list instead of a copy of the server environment, and the sign-in path that spawns both CLIs was rewired to match.
+- The URL guard now blocks the IPv4 transition and translation ranges (`198.18.0.0/15`, `192.0.0.0/24`, `64:ff9b::/96`, `64:ff9b:1::/48`, `2002::/16`, `::ffff:0:0/96`).
+- Grok federation is opt-in only: the committed preview client is reachable under `TOWNREPORTER_GROK_PREVIEW=1`, an explicit `GROK_AUTH_*` wins, and email sign-in is unaffected.
+- Bounded the input checks on publish, authentication, paper settings and provider connections, including a content-length cap on auth bodies that returns 413.
+- The first-owner claim is one locked transaction, and a desk whose owner index is not verified refuses rather than trusting the re-check alone.
+
+The packaged release note names `v0.6.62` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.61 — 2026-09-22
 

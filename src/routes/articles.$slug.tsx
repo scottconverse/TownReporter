@@ -2,6 +2,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { StoryBody } from "@/components/story-body";
+import { AiDisclosure } from "@/components/ai-disclosure";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome-utils";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
@@ -208,6 +209,7 @@ function ArticlePage() {
           <div className="articlebody" id="story-body">
             <StoryBody body={article.body} publicReading />
             <section className="sources" id="sources">
+              <AiDisclosure routine={article.routine_notice} />
               <span className="eyebrow">FOLLOW THE EVIDENCE</span>
               {provenance.length ? (
                 <ProvenanceBlock

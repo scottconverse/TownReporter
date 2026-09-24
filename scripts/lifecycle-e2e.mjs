@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { fromCrossJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 const base = checkedUrl(process.env.LIFECYCLE_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -99,6 +100,14 @@ async function main() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Dek").fill(why);
   await page.getByLabel("Body").fill(body);
+  /*
+    The editor confirms the section before printing. The section the drafter
+    picked is a claim about the story the same way its sources are, and since
+    0.6.62 the desk will not print one nobody read -- clicking "Confirm this
+    section" saves what is in the editor and confirms that version. See
+    confirm-section-step.mjs.
+  */
+  await confirmSectionAndWaitForPublishable(page);
   /*
     Publishing asks once now, and that is the point of these two lines.
 

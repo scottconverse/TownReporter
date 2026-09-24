@@ -21,6 +21,8 @@ import { getSql } from "../db.ts";
 import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES, EDITOR_EMAIL } from "../paper.ts";
 import type { PaperIdentity } from "../paper-identity.ts";
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
+/* Pure zod + constants, no database: safe to load from a plain node test. */
+import { LIMITS } from "./request-input.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { writeWelcomeArticle } from "./welcome-article.ts";
 
@@ -467,6 +469,25 @@ export type FirstRunSetupInput = {
 
 export function cleanSetupInput(raw: unknown): FirstRunSetupInput {
   const v = (raw ?? {}) as Partial<FirstRunSetupInput>;
+  /*
+    Every field below is unbounded otherwise, and this is the only thing in
+    front of `savePaperConfig` on the setup path -- which writes whatever it is
+    handed into a text column with no length check of its own
+    (paper-settings.ts:359-399). So a setup post could put megabytes into the
+    paper's own row, and every later read of that row (the reader-facing
+    config, the editor page, the welcome article) would carry it forward.
+  */
+  const cut = (value: unknown, max: number) => String(value ?? "").trim().slice(0, max);
+  /*
+    Two fields are not display text: half a URL and half an address are both
+    worse than none, and blank is already a documented real answer for each
+    (see the type above). Those two go blank past the ceiling instead of being
+    cut to a value that would be printed as if it were real.
+  */
+  const cutOrBlank = (value: unknown, max: number) => {
+    const text = String(value ?? "").trim();
+    return text.length > max ? "" : text;
+  };
   const watchlist = Array.isArray(v.watchlist)
     ? v.watchlist
         .filter(
@@ -479,26 +500,38 @@ export function cleanSetupInput(raw: unknown): FirstRunSetupInput {
           kind: s.kind ?? "official",
           tier: s.tier ?? "A",
         }))
-        .filter((s) => s.url.length > 0)
+        .filter((s) => s.url.length > 0 && s.url.length <= LIMITS.url)
+        .slice(0, LIMITS.watchlistEntries)
+        .map((s) => ({ ...s, title: s.title.slice(0, LIMITS.seedTitle) }))
     : [];
-  const cleanStringList = (value: unknown) =>
+  const cleanStringList = (value: unknown, entries: number, itemMax: number) =>
     Array.isArray(value)
       ? value
           .filter((item): item is string => typeof item === "string")
           .map((item) => item.trim())
           .filter(Boolean)
+          .slice(0, entries)
+          .map((item) => item.slice(0, itemMax))
       : [];
   return {
-    name: String(v.name ?? "").trim(),
-    city: String(v.city ?? "").trim(),
-    state: String(v.state ?? "").trim(),
-    timezone: String(v.timezone ?? "").trim(),
-    tagline: String(v.tagline ?? "").trim(),
-    councilVotesUrl: String(v.councilVotesUrl ?? "").trim(),
-    editorEmail: String(v.editorEmail ?? "").trim(),
+    name: cut(v.name, LIMITS.paperName),
+    city: cut(v.city, LIMITS.paperCity),
+    state: cut(v.state, LIMITS.paperState),
+    timezone: cut(v.timezone, LIMITS.timezone),
+    tagline: cut(v.tagline, LIMITS.tagline),
+    councilVotesUrl: cutOrBlank(v.councilVotesUrl, LIMITS.url),
+    editorEmail: cutOrBlank(v.editorEmail, LIMITS.email),
     watchlist,
-    youtubeChannels: cleanStringList(v.youtubeChannels),
-    meetingKeywords: cleanStringList(v.meetingKeywords),
+    youtubeChannels: cleanStringList(
+      v.youtubeChannels,
+      LIMITS.channelOrKeywordEntries,
+      LIMITS.listItem,
+    ),
+    meetingKeywords: cleanStringList(
+      v.meetingKeywords,
+      LIMITS.meetingKeywordEntries,
+      LIMITS.meetingKeyword,
+    ),
   };
 }
 

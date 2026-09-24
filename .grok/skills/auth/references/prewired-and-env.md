@@ -47,8 +47,16 @@ these in a file you create):
 | `BETTER_AUTH_URL` | server | app's own public origin; unset in preview (origin is derived per-request) |
 | `BETTER_AUTH_SECRET` | server | signs this app's own sessions (process-stable fallback in preview; survives HMR) |
 | `GROK_AUTH_ISSUER` | server | the shared broker (defaults to `https://auth.grok.me`) |
-| `GROK_AUTH_CLIENT_ID` / `GROK_AUTH_CLIENT_SECRET` | server | per-app client (falls back to the preview client) |
+| `GROK_AUTH_CLIENT_ID` / `GROK_AUTH_CLIENT_SECRET` | server | per-app client. **Both** are required to register the broker; there is no fallback. Set neither for a self-hosted paper — email/password is unaffected |
+| `TOWNREPORTER_GROK_PREVIEW` | server | `1` opts into the shared preview client in `src/lib/auth/preview.ts` (sandbox only — its secret is committed to the repository). Ignored when the pair above is set |
 | `DATABASE_URL` | server | when deployed, Better Auth persists here (preview persists to the embedded PGLite — same DB as app data) |
 
 Never expose a non-`VITE_` var to the client. The preview client id/secret live
-server-only in `src/lib/auth/preview.ts`.
+server-only in `src/lib/auth/preview.ts`, and are only reached with
+`TOWNREPORTER_GROK_PREVIEW=1` — the sandbox image must set that flag for the
+live preview to keep signing in through the broker.
+
+Auth being enforced is a separate question from the broker being configured:
+`VITE_AUTH_ENABLED=false` is the only off-switch, and a paper with no
+`GROK_AUTH_*` at all still enforces its own email/password sign-in. Both rules
+live in `src/lib/auth/grok-federation.ts`.

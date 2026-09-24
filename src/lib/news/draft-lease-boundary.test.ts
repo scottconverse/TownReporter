@@ -9,6 +9,7 @@ let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let performPublish: typeof import("./desk.ts").performPublish;
+let performConfirmDraftTopic: typeof import("./desk.ts").performConfirmDraftTopic;
 
 before(async () => {
   vite = await createServer({
@@ -17,8 +18,22 @@ before(async () => {
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
-  ({ performDraftWork, performPublish } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ performDraftWork, performPublish, performConfirmDraftTopic } = await vite.ssrLoadModule(
+    "/src/lib/news/desk.ts",
+  ));
 });
+
+/*
+  Printing also requires a person to confirm the section the draft files
+  under -- the gate is in topic-confirmation-gate.test.ts. These tests are
+  about leases and evidence, so they take that step instead of asserting
+  around it; a fixture that could not confirm would mean the gate itself
+  broke, hence the assertion.
+*/
+async function confirmSection(userId: string, newsroomId: number, leadId: number) {
+  const confirmed = await performConfirmDraftTopic({ userId, newsroomId }, leadId);
+  assert.equal(confirmed.ok, true, "fixture: the section should confirm");
+}
 
 after(async () => vite.close());
 
@@ -223,6 +238,7 @@ for (const cites of [true, false]) {
     });
     const [draft] = await sql.query<{ source_urls: string }>("select source_urls from drafts where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);
     assert.deepEqual(JSON.parse(draft.source_urls), cited);
+    await confirmSection(userId, job.newsroom_id, leadId);
     const published = await performPublish({ userId, newsroomId: job.newsroom_id }, leadId);
     assert.equal(published.ok, true);
     const [article] = await sql.query<{ source_urls: string }>("select source_urls from articles where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);
@@ -235,6 +251,7 @@ it("legacy manual drafts still inherit their lead citations at publication", asy
   const seeds = ["https://records.example.gov/meeting"];
   await sql.query("update leads set source_urls=$1 where id=$2", [JSON.stringify(seeds), leadId]);
   await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,source_urls,research_json) values($1,$2,$3,'Manual draft','The meeting is Tuesday.','council','[]','{}')", [userId, job.newsroom_id, leadId]);
+  await confirmSection(userId, job.newsroom_id, leadId);
   const published = await performPublish({ userId, newsroomId: job.newsroom_id }, leadId);
   assert.equal(published.ok, true);
   const [article] = await sql.query<{ source_urls: string }>("select source_urls from articles where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);

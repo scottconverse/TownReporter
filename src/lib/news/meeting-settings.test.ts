@@ -39,20 +39,20 @@ describe("N-1 meeting channel URL validation", () => {
 
 describe("N-1 storage root validation", () => {
   it("rejects a relative path with a stated absolute-path error", async () => {
-    const { storageRootRejectionReason } = await import("./meeting-settings.ts");
+    const { storageRootRejectionReason } = await import("./storage-root.server.ts");
     const reason = storageRootRejectionReason("meetings/root");
     assert.ok(reason);
     assert.match(reason!, /absolute/i);
   });
 
   it("accepts an absolute path (including a different drive)", async () => {
-    const { storageRootRejectionReason } = await import("./meeting-settings.ts");
+    const { storageRootRejectionReason } = await import("./storage-root.server.ts");
     assert.equal(storageRootRejectionReason("D:\\TownReporter\\meetings"), null);
     assert.equal(storageRootRejectionReason("/mnt/data/meetings"), null);
   });
 
   it("verifies writability by an actual write and reports the failure path", async () => {
-    const { assertStorageRootWritable } = await import("./meeting-settings.ts");
+    const { assertStorageRootWritable } = await import("./storage-root.server.ts");
     const good = mkdtempSync(join(tmpdir(), "n1-writable-"));
     assert.equal(assertStorageRootWritable(good).ok, true);
     // An impossible path under a file (not a directory) must fail and name the path.

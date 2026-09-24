@@ -8,6 +8,7 @@ import { dirname, isAbsolute, relative, resolve, sep, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { verifyBuild } from "./install-build-manifest.mjs";
 
 const execute = promisify(execFile);
@@ -221,6 +222,9 @@ async function main() {
     await page.getByLabel("Headline").fill(headline);
     await page.getByLabel("Dek").fill("Local fixture for persistence verification.");
     await page.getByLabel("Body").fill(body);
+    // The editor confirms the section before printing; the install is accepted
+    // on the same path a person takes. See confirm-section-step.mjs.
+    await confirmSectionAndWaitForPublishable(page);
     await page.getByRole("button", { name: "Publish to the paper" }).click();
     await page.getByRole("button", { name: "Yes, print it" }).click();
     await page.getByText("On the paper").waitFor();

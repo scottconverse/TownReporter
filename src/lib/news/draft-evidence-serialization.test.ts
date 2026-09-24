@@ -11,6 +11,7 @@ let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let performPublish: typeof import("./desk.ts").performPublish;
 let parseFindings: typeof import("./findings.ts").parseFindings;
 let saveDraftForEditor: typeof import("./draft-edit.server.ts").saveDraftForEditor;
+let performConfirmDraftTopic: typeof import("./desk.ts").performConfirmDraftTopic;
 
 before(async () => {
   vite = await createServer({
@@ -19,12 +20,25 @@ before(async () => {
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
-  ({ performDraftWork, performPublish } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ performDraftWork, performPublish, performConfirmDraftTopic } = await vite.ssrLoadModule(
+    "/src/lib/news/desk.ts",
+  ));
   ({ parseFindings } = await vite.ssrLoadModule("/src/lib/news/findings.ts"));
   ({ saveDraftForEditor } = await vite.ssrLoadModule("/src/lib/news/draft-edit.server.ts"));
 });
 
 after(async () => vite.close());
+
+/*
+  Printing also requires a person to confirm the section the draft files
+  under -- the gate is in topic-confirmation-gate.test.ts. These tests are
+  about evidence surviving the round trip, so they take that step instead of
+  asserting around it.
+*/
+async function confirmSection(userId: string, newsroomId: number, leadId: number) {
+  const confirmed = await performConfirmDraftTopic({ userId, newsroomId }, leadId);
+  assert.equal(confirmed.ok, true, "fixture: the section should confirm");
+}
 
 it("keeps bounded multi-source evidence as valid JSON through draft and publication", async () => {
   const sql = await getSql();
@@ -143,6 +157,7 @@ it("keeps bounded multi-source evidence as valid JSON through draft and publicat
   assert.deepEqual(JSON.parse(draft.found_note), findings);
   assert.deepEqual(JSON.parse(draft.unanswered), unanswered);
 
+  await confirmSection(userId, newsroomId, lead.id);
   const published = await performPublish({ userId, newsroomId }, lead.id);
   assert.equal(published.ok, true);
   const [article] = await sql.query<{
@@ -236,6 +251,7 @@ it("keeps an explicit empty citation list empty through draft save and publicati
   assert.equal(draft.source_urls, "[]", "saving must not restore the lead discovery URL");
   assert.equal(JSON.parse(draft.research_json).citationPolicy, "explicit");
 
+  await confirmSection(userId, newsroomId, lead.id);
   const published = await performPublish({ userId, newsroomId }, lead.id);
   assert.equal(published.ok, true);
   const [article] = await sql.query<{

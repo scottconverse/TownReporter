@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { AI_DISCLOSURE } from "@/components/ai-disclosure";
 import { PaperShell } from "@/components/paper-chrome";
 import { usePaper } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
@@ -22,6 +23,7 @@ function How() {
       <div className="infopage">
         <h1 className="enter-fade font-display text-4xl font-semibold">How we report</h1>
         <div className="stagger-in mt-6 max-w-2xl space-y-4 text-lg leading-7 text-ink-2">
+          <p className="ai-disclosure">{AI_DISCLOSURE}</p>
           <p>
             <strong className="text-ink">Watch.</strong> The desk keeps a list of {PAPER.city} civic
             sources — the city, its council, planning, the schools, the county, the local utility.
