@@ -1185,8 +1185,8 @@ flowchart TB
 ![How a meeting becomes a story](diagrams/meeting-to-story.svg)
 
 Pulled notes are leads, not evidence. A vote tally or a mover can appear with no citation. A
-masked name reads stiffly ("an unidentified speaker"). Captions are not minutes. A person
-approves every ordinary story.
+masked name reads stiffly ("an unidentified speaker"). YouTube can rate-limit a capture (HTTP
+429); a later pass picks it up. Captions are not minutes. A person approves every ordinary story.
 
 ---
 
