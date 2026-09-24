@@ -126,17 +126,24 @@ export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     child agree on CODEX_HOME instead of each resolving the same implicit
     fallback separately and only looking agreed.
   */
-  const userRoot =
+  const windowsRoot =
     process.env.USERPROFILE?.trim() ||
-    (appData ? path.resolve(appData, "..", "..") : undefined) ||
-    process.env.HOME?.trim();
+    (appData ? path.resolve(appData, "..", "..") : undefined);
+  const userRoot = windowsRoot || process.env.HOME?.trim();
   return {
     ...env,
-    // A Windows name for a Windows root: POSIX is given HOME below and nothing
-    // there reads USERPROFILE.
-    ...(userRoot && process.platform === "win32" && !process.env.USERPROFILE
-      ? { USERPROFILE: userRoot }
-      : {}),
+    /*
+      A WINDOWS-shaped root is named the Windows way wherever this runs, which is
+      the case the installer creates: the desk is handing a child the environment
+      of a server that has an APPDATA and no USERPROFILE, and a child left to
+      resolve that for itself picks a different home than the drafts do. The
+      source decides, not `process.platform` -- a host running POSIX with a
+      Windows environment in front of it still deserves the Windows name in it.
+      A root taken from HOME is named only as HOME, because nothing on POSIX
+      reads USERPROFILE and putting one there would be a Windows name on a POSIX
+      host.
+    */
+    ...(windowsRoot && !process.env.USERPROFILE ? { USERPROFILE: windowsRoot } : {}),
     ...(userRoot && !process.env.HOME ? { HOME: userRoot } : {}),
     ...(userRoot && !process.env.CODEX_HOME ? { CODEX_HOME: path.join(userRoot, ".codex") } : {}),
   };
