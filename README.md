@@ -76,7 +76,7 @@ Corrections are public (`/corrections`). We would rather look careful than look 
 
 A council meeting arrives as a recording, not as an article. Nothing on this path prints on its own.
 
-1. **Capture.** **Run meetings now** reads the YouTube channel or the PrimeGov portal and stores a transcript revision. Each revision is content-addressed and immutable: a new recording is a new revision, never an edit of the old one.
+1. **Capture.** **Run meetings now** reads the meeting video channels and stores a transcript revision. Each revision is content-addressed and immutable: a new recording is a new revision, never an edit of the old one.
 2. **A lead in the Queue.** Capture files an ordinary lead, the same kind a scan files, carrying the transcript citations it drew from.
 3. **Direction, then draft.** The editor says which decision or question to cover. The draft is written from a bounded slice of the transcript, not the whole tape.
 4. **The draft shows its evidence.** The citations it actually used are saved and read off what the draft says. They are never inherited from the material it was given.

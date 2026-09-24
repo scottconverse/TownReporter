@@ -1142,8 +1142,8 @@ are still current. Nothing on this path prints on its own.
 flowchart TB
     subgraph where["Where the recording comes from"]
         CH["YouTube channel<br/>public-access TV"]
-        PG["PrimeGov portal"]
     end
+    PG["PrimeGov portal<br/>agenda and packet"]
 
     subgraph capturing["Capture · Run meetings now"]
         CAP["Capture the recording"]
@@ -1167,7 +1167,7 @@ flowchart TB
     REVIEW["One editor review<br/>published article unchanged"]
 
     CH --> CAP
-    PG --> CAP
+    PG -.->|"agenda items join the story"| DRAFT
     CAP --> REV
     REV --> LEAD
     LEAD --> DIR
