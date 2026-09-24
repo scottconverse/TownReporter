@@ -40,7 +40,7 @@ export type ReportingNotes = {
   researchScope?: "public" | "supplied";
   /** URLs explicitly filed/pasted by the editor, never discovery history. */
   suppliedUrls?: string[];
-  /** Explicit editor command captured at the authenticated Write box, not from source text. */
+  /** Explicit editor direction from an authenticated control, never from source text. */
   editorialAssignment?: EditorialAssignment;
   /**
    * A captured meeting, when this lead came from one.
@@ -153,6 +153,8 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       scratch: String(o.scratch ?? "").slice(0, 8000),
       ...((o.editorialAssignment as EditorialAssignment | undefined)?.origin === "write-box" && typeof (o.editorialAssignment as EditorialAssignment).text === "string"
         ? { editorialAssignment: editorialAssignmentFromText((o.editorialAssignment as EditorialAssignment).text) } : {}),
+      ...((o.editorialAssignment as EditorialAssignment | undefined)?.origin === "story-workspace" && typeof (o.editorialAssignment as EditorialAssignment).text === "string" && (o.editorialAssignment as EditorialAssignment).text.trim()
+        ? { editorialAssignment: { origin: "story-workspace" as const, text: (o.editorialAssignment as EditorialAssignment).text.trim().slice(0, 1000) } } : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
       ...meetingFromRaw(o),

@@ -303,17 +303,23 @@ API key is required. Readiness is checked before enqueueing. If a login expires,
 the desk refuses and tells the editor which app to open and sign in to.
 `CODEX_CLI_PATH`, `CODEX_HOME`, and `CLAUDE_CLI_PATH` are available when normal
 discovery cannot find the binary or Codex state directory.
-Codex runs with the signed-in Windows user's native configuration and full
-available machine capabilities. TownReporter does not disable its search,
-shell/file access, browser/computer tools, apps, plugins, hooks, skills,
-multi-agent features, user rules, or repository instructions, and it does not
-replace them with a read-only sandbox. That includes every path on `C:\` the
-signed-in account can access. The requested newsroom job still comes from the
-prompt; available capability is not permission to perform an unrelated action.
+TownReporter uses the signed-in account only to authenticate its Codex CLI
+requests; a newsroom call does not inherit the operator's full Codex setup.
+Each call ignores Codex user configuration, starts from the system temporary
+directory, runs ephemerally with a read-only sandbox, and disables shell,
+computer, browser, apps, plugins, multi-agent and hook features. Built-in web
+search is added only when the trusted caller requests research. This is an
+application-level tool boundary, not an operating-system security sandbox: the
+reporting process still runs as the Windows account, and the read-only setting
+does not by itself restrict which files that account can read. Untrusted source
+material must therefore remain data, never an instruction to expand the task.
 
-Claude Code remains the separate CLI path: its own `CLAUDE.md`, skills and
-plugins are not loaded into news prompts because that adapter passes
-`--setting-sources ""`.
+Claude Code is separately constrained. TownReporter omits the operator's
+`CLAUDE.md`, skills, plugins and MCP configuration, starts the CLI outside the
+application tree in restricted safe mode, and allows only `WebSearch` and
+`WebFetch` for a caller-authorized research request. Planning calls hide all
+tools; OCR has a narrow exception that reads one generated temporary page.
+The reporting job does not receive shell, arbitrary file, browser or agent tools.
 
 For **Automatic**, a configured gateway is tried first; named choices in Story, Scan and Dark Desk become the recorded first runtime instead of this low-level configured-provider chain:
 

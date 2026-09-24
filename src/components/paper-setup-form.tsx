@@ -6,7 +6,8 @@
 */
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { InkButton, inputClass } from "@/components/desk-chrome";
+import { InkButton } from "@/components/desk-chrome";
+import { inputClass } from "@/components/desk-chrome-utils";
 import { completeFirstRunSetup } from "@/lib/news/paper-settings";
 import type { PaperConfig } from "@/lib/news/paper-settings";
 

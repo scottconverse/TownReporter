@@ -175,7 +175,7 @@ codex login     # for Codex
 
 Two things worth knowing:
 
-- **Your personal config is kept out of the newsroom.** Every call passes `--setting-sources ""`, so your own `CLAUDE.md`, skills and plugins are not loaded. Without that, your developer instructions get prepended to every news prompt.
+- **Claude Code is constrained too.** TownReporter omits the operator's `CLAUDE.md`, skills, plugins and MCP configuration, starts the CLI outside the application tree in restricted safe mode, and allows only `WebSearch` and `WebFetch` for a caller-authorized research request. Planning calls hide tools; OCR reads one generated temporary page. Reporting does not receive shell, arbitrary file, browser or agent tools.
 - **It is slower than an API.** The CLI spawns a process and reloads a fixed preamble per call — a couple of seconds at best, longer for a real prompt. A draft takes minutes rather than seconds. Time budgets adjust automatically; you do not need to tune anything.
 
 #### Claude by API key
@@ -287,13 +287,18 @@ TOWNREPORTER_CODEX_SOL_MODEL=gpt-5.6-sol
 ```
 
 Set `CODEX_CLI_PATH` or `CODEX_HOME` only if normal discovery cannot find the
-binary or OAuth state. Codex calls run ephemerally but otherwise use the native
-signed-in Windows configuration: user and repository rules, search, local
-shell/file access, browser/computer tools, apps, plugins, hooks, skills and
-multi-agent capabilities remain available. TownReporter launches Codex with
-`danger-full-access`, not a read-only sandbox, so it can reach every `C:\` path
-the signed-in account can reach. The assignment still travels over stdin; Opinion loads the full voice separately through the native instruction-file setting,
-and its task remains the scope of the requested run.
+binary or OAuth state. TownReporter reuses the signed-in account for CLI
+authentication, but does not pass the operator's Codex setup into reporting
+calls. Each call ignores Codex user configuration, starts from the system
+temporary directory, runs ephemerally with a read-only sandbox, and disables
+shell, computer, browser, apps, plugins, multi-agent and hook features. Native
+web search is added only for a caller-authorized research call. Opinion's full
+voice is supplied separately through Codex's instruction-file setting. These
+are application-level CLI controls, not an operating-system security sandbox:
+the reporting process still runs as the Windows account, and read-only mode
+does not by itself restrict which files that account can read. Treat fetched
+pages, transcripts and documents as evidence, never as instructions to expand
+the reporting task.
 
 Opinion displays Automatic, all named Codex and Claude models, Local model,
 plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
@@ -602,6 +607,17 @@ in your channels — for example `city council`, `planning commission`, or
 `zoning appeals`. These saved values drive both meeting filtering and
 sister-channel transcript matching. A blank channel list means TownReporter
 uses none; it never falls back to Longmont after setup.
+
+After saving setup, an owner can enable the **Meeting capture** panel at
+**Server → Meeting capture** and choose **Run meetings now** for an on-demand
+pass. This does not consume the scheduled daily run. While a pass is active,
+**Stop** requests a stop; **Resume stopped captures** continues partial files
+that remain on disk. The **Captured meetings** section at **Scan → Captured
+meetings** reports capture/alignment outcomes and links a filed lead or draft
+with **Open the story**. For the complete editor workflow—including used
+citations, redrafting against a newer transcript, publication review, and the
+limits of captions—see [From a meeting recording to a story in the editor’s
+manual](editor.md#from-a-meeting-recording-to-a-story).
 
 ### 4. PrimeGov
 

@@ -17,13 +17,20 @@ import ts from "typescript";
   do it, so this exercises the real component source rather than a copy.
 */
 const source = await readFile(new URL("../src/components/meeting-source-block.tsx", import.meta.url), "utf8");
+const utilities = await readFile(new URL("../src/components/meeting-source-block-utils.ts", import.meta.url), "utf8");
+const utilityOutput = ts.transpileModule(utilities, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const utilityStub = "data:text/javascript;base64," + Buffer.from(utilityOutput).toString("base64");
+const reactStub = "data:text/javascript;base64," + Buffer.from("export const useState=(value)=>[value,()=>{}]; export const useEffect=()=>{};").toString("base64");
 let output = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext } }).outputText;
 const notesStub = "data:text/javascript;base64," + Buffer.from("export const emptyNotes=()=>({news:\"\",why:\"\",angle:\"\",todo:[],found:[],verify:[],opened:[],scratch:\"\"})").toString("base64");
 output = output
   .replaceAll(JSON.stringify("@/lib/news/notes"), JSON.stringify(notesStub))
+  .replaceAll(JSON.stringify("react"), JSON.stringify(reactStub))
+  .replaceAll(JSON.stringify("@/components/meeting-source-block-utils"), JSON.stringify(utilityStub))
   .replaceAll(JSON.stringify("react/jsx-runtime"), JSON.stringify(import.meta.resolve("react/jsx-runtime")));
 const mod = await import("data:text/javascript;base64," + Buffer.from(output).toString("base64"));
-const { MeetingSourceBlock, meetingClock, meetingCitationsFor } = mod;
+const { MeetingSourceBlock } = mod;
+const { meetingClock, meetingCitationsFor } = await import(utilityStub);
 
 const empty = { news: "", why: "", angle: "", todo: [], found: [], verify: [], opened: [], scratch: "" };
 const full = {
@@ -63,6 +70,60 @@ test("renders nothing when a meeting has no transcript material", () => {
   const notes = { ...empty, meeting: { videoId: "v", title: "T", date: null, artifactId: 1 } };
   assert.equal(renderToStaticMarkup(createElement(MeetingSourceBlock, { notes })), "");
   assert.deepEqual(meetingCitationsFor(notes), []);
+});
+
+test("shows a separate citation-only review of A against B without hiding the redraft path", () => {
+  const revised = {
+    ...usedEvidence,
+    currentArtifactId: 5,
+    currentSha256: "b".repeat(64),
+    newerTranscriptExists: true,
+    revisionNotice: "Affected claims: segment 4612.",
+    citations: [{
+      ...usedEvidence.citations[0],
+      currentEvidence: {
+        artifactId: 5, artifactSha256: "b".repeat(64), segmentIndex: 18,
+        timestampSeconds: 18455, excerpt: "the motion passed six to one", captionSha256: "c".repeat(64),
+      },
+    }],
+  };
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, {
+    notes: full, usedEvidence: revised, evidenceToken: "draft-1",
+    onReverify: () => {}, onRedraft: () => {},
+  }));
+  assert.match(html, /Used by this draft \(artifact A\)/);
+  assert.match(html, /Current transcript \(artifact 5/);
+  assert.match(html, /I compared segment 4612 in A with its current passage in B/);
+  assert.match(html, /What did you verify\?/);
+  assert.match(html, /Save review against current transcript/);
+  assert.match(html, /Redraft from current transcript/);
+  assert.match(html, /disabled=""/, "the editor cannot save until every citation is checked and a note is entered");
+});
+
+test("shows the saved reviewer and B hash after citation-only acceptance", () => {
+  const reviewed = {
+    ...usedEvidence,
+    currentArtifactId: 5,
+    currentSha256: "b".repeat(64),
+    newerTranscriptExists: true,
+    revisionNotice: "Affected claims: segment 4612.",
+    acceptedReview: {
+      artifactId: 5, artifactSha256: "b".repeat(64), reviewedBy: "editor-1",
+      reviewedAt: "2026-09-23T20:00:00.000Z", note: "Compared the vote quote with B.", citationCount: 1,
+    },
+    citations: [{
+      ...usedEvidence.citations[0],
+      currentEvidence: {
+        artifactId: 5, artifactSha256: "b".repeat(64), segmentIndex: 18,
+        timestampSeconds: 18455, excerpt: "the motion passed six to one", captionSha256: "c".repeat(64),
+      },
+    }],
+  };
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full, usedEvidence: reviewed, onRedraft: () => {} }));
+  assert.match(html, /Citation review saved against artifact 5/);
+  assert.match(html, /editor-1/);
+  assert.match(html, /Compared the vote quote with B\./);
+  assert.doesNotMatch(html, /Save review against current transcript/);
 });
 
 test("separates the draft's persisted used subset from candidate material", () => {

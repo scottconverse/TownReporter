@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkStoryNames, replaceName, validateNameEvidence } from "./name-check-work.ts";
+import { checkStoryNames, maskUnverifiedMeetingIdentity, polishMaskedMeetingIdentities, replaceName, validateNameEvidence } from "./name-check-work.ts";
 import { nameCheckText, readNameCheck } from "./name-check.ts";
 
 const person = { name: "Eugene May", role: "Longmont City Attorney", context: "City Attorney Eugene May spoke." };
@@ -70,6 +70,49 @@ test("supplied-only name checking performs no search and leaves an unsupported c
   assert.equal(result.check.checkedText,nameCheckText(result.draft));
   assert.notEqual(result.check.checkedText,nameCheckText({...result.draft,body:result.draft.body+" New Name spoke."}));
   assert.equal(readNameCheck(JSON.stringify({nameCheck:result.check}))?.rows.length,2);
+});
+test("meeting drafts mask unresolved speaker identities and adjacent roles while preserving quoted transcript words", async()=>{
+  const draft={headline:"City Manager Eugene Mei briefs council",dek:"Eugene Mei, city manager, presented the forecast.",body:'City Manager Eugene Mei said the budget was delayed. "Eugene Mei said the budget was delayed," the transcript reads.'};
+  const result=await checkStoryNames({draft,city:"Longmont",domains:[],docs:[],searchAllowed:false,maskUnverifiedMeetingIdentities:true,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async(_system,user)=>{
+    if(user===nameCheckText(draft)) return {ok:true,text:JSON.stringify({complete:true,people:[{name:"Eugene Mei",role:"Longmont City Manager",context:"City Manager Eugene Mei said the budget was delayed."}]})};
+    return {ok:true,text:JSON.stringify({checks:[{name:"Eugene Mei",status:"unresolved",reason:"No written roster confirmed this role or identity."}]})};
+  }});
+  assert.equal(result.check.rows[0]?.status,"unresolved");
+  assert.match(result.draft.headline,/^an unidentified speaker briefs council$/i);
+  assert.match(result.draft.dek,/^an unidentified speaker presented the forecast\.$/i);
+  assert.match(result.draft.body,/^an unidentified speaker said the budget was delayed\./i);
+  assert.match(result.draft.body,/"Eugene Mei said the budget was delayed,"/);
+  assert.doesNotMatch(`${result.draft.headline} ${result.draft.dek} ${result.draft.body.split('"')[0]}`,/Eugene Mei|City Manager/i);
+  assert.match(result.check.note,/replaced with neutral wording/);
+  assert.match(result.check.note,/inside direct quotations or links were preserved verbatim/);
+  assert.equal(result.check.checkedText,nameCheckText(result.draft));
+});
+test("meeting identity masker leaves quoted text, markdown links, and longer names untouched",()=>{
+  const text='City Manager Eugene Mei spoke. "Eugene Mei" appears in the quote. [Eugene Mei](https://example.test) Eugene Meier spoke.';
+  const result=maskUnverifiedMeetingIdentity(text,"Eugene Mei");
+  assert.equal(result,'An unidentified speaker spoke. "Eugene Mei" appears in the quote. [Eugene Mei](https://example.test) Eugene Meier spoke.');
+});
+test("meeting identity masking handles the unsupported council names in the observed saved draft",()=>{
+  const text="The motion, made by Council Member Marcen and seconded by Council Member Kelkoffer, asks staff to return the ordinance. Marcen framed the change as a revenue question. Council members Crist, Popkin and Brito voted in opposition. Popkin asked where the item would fall on the city's work plan. Brito said she was not comfortable bringing cannabis consumption into a public space.";
+  let masked=text;
+  for(const name of ["Marcen","Kelkoffer","Crist","Popkin","Brito"]) masked=maskUnverifiedMeetingIdentity(masked,name);
+  assert.doesNotMatch(masked,/Marcen|Kelkoffer|Crist|Popkin|Brito|Council Member/i);
+  assert.match(masked,/made by an unidentified speaker and seconded by an unidentified speaker/);
+  assert.match(masked,/an unidentified speaker framed the change/i);
+  assert.match(masked,/an unidentified speaker, an unidentified speaker and an unidentified speaker voted in opposition/i);
+  assert.match(masked,/an unidentified speaker asked where the item would fall/i);
+  assert.match(masked,/an unidentified speaker said she was not comfortable/i);
+});
+test("meeting identity masking leaves the observed board story grammatical without changing quotes",()=>{
+  const line='The staffer was addressing a task force member by the name an unidentified speaker. An unidentified speaker and an unidentified speaker opposed it. "by the name an unidentified speaker" remains a quote.';
+  assert.equal(polishMaskedMeetingIdentities(line),
+    'The staffer was addressing a task force member whose name was not verified. Two unidentified speakers opposed it. "by the name an unidentified speaker" remains a quote.');
+});
+test("non-meeting name checks keep their existing visible wording",async()=>{
+  const draft={headline:"City Manager Eugene Mei",dek:"",body:"City Manager Eugene Mei spoke."};
+  const result=await checkStoryNames({draft,city:"Longmont",domains:[],docs:[],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async(_system,user)=>({ok:true,text:JSON.stringify(user===nameCheckText(draft)?{complete:true,people:[{name:"Eugene Mei",role:"City Manager",context:"City Manager Eugene Mei spoke."}]}:{checks:[{name:"Eugene Mei",status:"unresolved",reason:"No saved written identity evidence."}]})})});
+  assert.equal(result.draft.headline,draft.headline);
+  assert.equal(result.draft.body,draft.body);
 });
 test("timeout or malformed inventory never claims that names were checked", async()=>{
   const opts={draft:{headline:"",dek:"",body:person.context},city:"Longmont",domains:[],docs:[],searchAllowed:true,search:async()=>[],open:async()=>{},chat:async()=>({ok:true as const,text:"not JSON"})};

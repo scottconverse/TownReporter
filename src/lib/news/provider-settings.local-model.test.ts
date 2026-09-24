@@ -37,6 +37,12 @@ function withFetch<T>(handler: typeof fetch, fn: () => Promise<T>): Promise<T> {
 
 const OLLAMA_BASE = "http://127.0.0.1:11434/v1";
 const CURRENT_MODELS = { data: [{ id: "gemma4:12b" }, { id: "gemma4:e4b" }] };
+const CLOUD_MODELS = [
+  "deepseek-v4.1-flash:cloud",
+  "glm-5.2:cloud",
+  "glm-5.3-flash:cloud",
+  "qwen3.5:397b-cloud",
+];
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -50,6 +56,18 @@ function fetchWithOllamaOnly(): typeof fetch {
     const url = String(input);
     if (url === `${OLLAMA_BASE}/models`) return jsonResponse(CURRENT_MODELS);
     if (url === `${OLLAMA_BASE.replace("/v1", "")}/api/ps`) return jsonResponse({ models: [] });
+    throw new Error(`unreachable: ${url}`);
+  }) as typeof fetch;
+}
+
+function fetchWithModels(ids: string[]): typeof fetch {
+  return (async (input, init) => {
+    const url = String(input);
+    if (url === `${OLLAMA_BASE}/models`) return jsonResponse({ data: ids.map((id) => ({ id })) });
+    if (url === `${OLLAMA_BASE.replace("/v1", "")}/api/ps`) return jsonResponse({ models: [] });
+    if (url === `${OLLAMA_BASE.replace("/v1", "")}/api/show` && init?.method === "POST") {
+      return jsonResponse({ capabilities: ["completion"] });
+    }
     throw new Error(`unreachable: ${url}`);
   }) as typeof fetch;
 }
@@ -73,7 +91,7 @@ describe("the per-newsroom local-model override resolves against the live catalo
     await sql.query(`insert into newsroom_members (user_id, role, newsroom_id) values ('scoped-model-editor', 'editor', $1) on conflict (user_id) do update set newsroom_id = excluded.newsroom_id`, [NEWSROOM_ID]);
     await storeRawLocalModel(OLLAMA_BASE, "gemma4:12b");
     assert.deepEqual(await saveLocalModel("scoped-model-editor", { baseUrl: OLLAMA_BASE, id: "gemma4:e4b" }, "scan"), { ok: true });
-    const result = await withFetch(fetchWithOllamaOnly(), async () => ({
+    const result = await withFetch(fetchWithModels([...CLOUD_MODELS, "gemma4:12b", "gemma4:e4b"]), async () => ({
       scan: await readProviderOverrides(NEWSROOM_ID, "scan"),
       story: await readProviderOverrides(NEWSROOM_ID, "story"),
       picker: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
@@ -81,6 +99,37 @@ describe("the per-newsroom local-model override resolves against the live catalo
     assert.equal(result.scan["local-model"]?.localModel?.id, "gemma4:e4b");
     assert.equal(result.story["local-model"]?.localModel?.id, "gemma4:12b");
     assert.equal(result.picker.override?.id, "gemma4:e4b");
+  });
+
+  it("prefers DeepSeek across scopes while every requested cloud model remains selectable", async () => {
+    const sql = await getSql();
+    await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
+    await sql.query(`insert into newsroom_members (user_id, role, newsroom_id) values ('scoped-model-editor', 'editor', $1) on conflict (user_id) do update set newsroom_id = excluded.newsroom_id`, [NEWSROOM_ID]);
+    const scopes = ["story", "scan", "opinion", "dark", "forced"] as const;
+    const expectedDefault: Record<(typeof scopes)[number], string> = {
+      story: "deepseek-v4.1-flash:cloud",
+      scan: "deepseek-v4.1-flash:cloud",
+      opinion: "deepseek-v4.1-flash:cloud",
+      dark: "deepseek-v4.1-flash:cloud",
+      forced: "deepseek-v4.1-flash:cloud",
+    };
+
+    await withFetch(fetchWithModels(CLOUD_MODELS), async () => {
+      for (const scope of scopes) {
+        const firstRun = await resolveLocalModelChoice(NEWSROOM_ID, scope);
+        assert.equal(firstRun.override?.id, expectedDefault[scope], `${scope} first-run preference`);
+      }
+
+      for (const scope of scopes) {
+        for (const id of CLOUD_MODELS) {
+          assert.deepEqual(await saveLocalModel("scoped-model-editor", { baseUrl: OLLAMA_BASE, id }, scope), { ok: true });
+          const saved = await resolveLocalModelChoice(NEWSROOM_ID, scope);
+          assert.deepEqual(saved.override, { baseUrl: OLLAMA_BASE, id }, `${scope} must retain ${id}`);
+          const ready = await probeProvider("local-model", NEWSROOM_ID, undefined, scope);
+          assert.equal(ready.ok, true, `${scope} must preflight exact selected model ${id}`);
+        }
+      }
+    });
   });
 
   it("does not replace an unavailable scoped cloud choice with the catalog default", async () => {
@@ -115,6 +164,24 @@ describe("the per-newsroom local-model override resolves against the live catalo
     }
   });
 
+  it("fails a saved scoped Ollama pick closed when /models returns malformed data", async () => {
+    const sql = await getSql();
+    await sql.query(`insert into newsrooms (id, name) values ($1, 'Scoped model test') on conflict (id) do nothing`, [NEWSROOM_ID]);
+    await sql.query(`insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id) values ($1, 'scan', $2, 'deepseek-v4.1-flash:cloud')`, [NEWSROOM_ID, OLLAMA_BASE]);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ models: [{ name: "deepseek-v4.1-flash:cloud" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    try {
+      const result = await probeProvider("local-model", NEWSROOM_ID, undefined, "scan");
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.error, /invalid model list.*could not verify/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("keeps the stored pick when it is still on the server's model list", async () => {
     await storeRawLocalModel(OLLAMA_BASE, "gemma4:e4b");
     const result = await withFetch(fetchWithOllamaOnly(), () => resolveLocalModelChoice(NEWSROOM_ID));
@@ -137,8 +204,12 @@ describe("the per-newsroom local-model override resolves against the live catalo
   });
 
   it("uses the discovered default when nothing has ever been stored", async () => {
-    const result = await withFetch(fetchWithOllamaOnly(), () => resolveLocalModelChoice(NEWSROOM_ID));
-    assert.deepEqual(result.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
-    assert.equal(result.notice, null);
+    const result = await withFetch(fetchWithOllamaOnly(), async () => ({
+      global: await resolveLocalModelChoice(NEWSROOM_ID),
+      scan: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
+    }));
+    assert.deepEqual(result.global.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
+    assert.equal(result.global.notice, null);
+    assert.deepEqual(result.scan.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" }, "when the preferred cloud model is absent, keep the normal discovered fallback");
   });
 });

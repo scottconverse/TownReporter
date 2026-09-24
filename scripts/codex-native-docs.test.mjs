@@ -13,14 +13,14 @@ const LIVE_DOCS = [
   "docs/index.html",
 ];
 
-test("live documentation cannot reinstate the removed Codex capability restriction", () => {
+test("live documentation does not claim TownReporter Codex calls inherit full operator access", () => {
   const offenders = [];
   const stale = [
-    /Codex[\s\S]{0,100}\btool-free\b/i,
-    /Codex[\s\S]{0,100}\b(?:capabilit\w*|tools?)\s+disabled\b/i,
-    /Codex[\s\S]{0,100}\b(?:runs?|uses?|with)\s+(?:a\s+)?read-only\b/i,
-    /Codex Sol[\s\S]{0,80}\b(?:refuses|fails closed)\b/i,
-    /every local\/tool capability disabled/i,
+    /Codex.{0,300}native configuration and full available access/i,
+    /Codex.{0,300}full machine capabilities/i,
+    /Codex.{0,300}does not disable its search/i,
+    /Codex.{0,300}does not replace them with a read-only sandbox/i,
+    /danger-full-access.{0,160}Codex/i,
   ];
 
   for (const rel of LIVE_DOCS) {
@@ -37,13 +37,14 @@ test("live documentation cannot reinstate the removed Codex capability restricti
   );
 });
 
-test("operator docs state the native full-access Codex boundary", () => {
-  for (const rel of ["README.md", "docs/editor.md", "docs/manual.md", "docs/setup.md"]) {
+test("operator docs describe the actual scoped Codex and Claude reporting calls", () => {
+  for (const rel of ["README.md", "docs/editor.md", "docs/manual.md", "docs/setup.md", "docs/index.html"]) {
     const text = readFileSync(join(ROOT, rel), "utf8");
-    assert.match(
-      text,
-      /Codex[\s\S]{0,700}(?:native|signed-in Windows)[\s\S]{0,500}(?:full|danger-full-access)/i,
-      rel,
-    );
+    assert.match(text, /signed-in\s+account(?:s)?[\s\S]{0,100}authenticat(?:e|ion)|Codex[\s\S]{0,160}authenticat(?:e|ion)[\s\S]{0,100}signed-in\s+account/i, rel);
+    assert.match(text, /read-only sandbox/i, rel);
+    assert.match(text, /disables\s+shell[\s\S]{0,100}computer[\s\S]{0,100}browser/i, rel);
+    assert.match(text, /not an operating-system security[\s\S]{0,30}sandbox/i, rel);
+    assert.match(text, /Claude Code[\s\S]{0,500}restricted safe mode/i, rel);
+    assert.match(text, /only[\s\S]{0,40}WebSearch[\s\S]{0,40}WebFetch/i, rel);
   }
 });

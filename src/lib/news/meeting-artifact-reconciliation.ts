@@ -10,6 +10,7 @@ type ArtifactRow = {
   sha256: string;
   info_path: string | null;
   info_sha256: string | null;
+  info_missing_reason: string | null;
 };
 
 type IntegrityStatus =
@@ -95,7 +96,7 @@ export async function reconcileMeetingArtifactStorage(
   const storageRoot = resolveMeetingStorageRoot(roots[0]?.storage_root ?? null);
   const newsroomRoot = join(storageRoot, `newsroom-${newsroomId}`);
   const artifacts = await sql.query<ArtifactRow>(
-    "select id,storage_path,sha256,info_path,info_sha256 from meeting_transcript_artifacts where newsroom_id=$1 order by id",
+    "select id,storage_path,sha256,info_path,info_sha256,info_missing_reason from meeting_transcript_artifacts where newsroom_id=$1 order by id",
     [newsroomId],
   );
   const pathOwners = new Map<string, number[]>();
@@ -111,7 +112,7 @@ export async function reconcileMeetingArtifactStorage(
   const totals: MeetingArtifactReconciliation = { valid: 0, missing: 0, mismatched: 0, ambiguous: 0, quarantined: 0 };
   for (const artifact of artifacts) {
     let status: IntegrityStatus = "valid";
-    let detail = "Caption and optional sidecar match their immutable recorded hashes.";
+    let detail = artifact.info_missing_reason ?? "Caption and optional sidecar match their immutable recorded hashes.";
     const owners = pathOwners.get(resolve(artifact.storage_path)) ?? [];
     if (owners.length > 1) {
       status = "ambiguous-path";
@@ -129,6 +130,10 @@ export async function reconcileMeetingArtifactStorage(
       status = "hash-mismatch";
       detail = "Recorded transcript hash does not match the stored bytes.";
       totals.mismatched += 1;
+    } else if (!artifact.info_path && artifact.info_missing_reason?.startsWith("info sidecar missing at storage time:")) {
+      status = "sidecar-missing";
+      detail = artifact.info_missing_reason;
+      totals.missing += 1;
     } else if (artifact.info_path && !existsSync(artifact.info_path)) {
       status = "sidecar-missing";
       detail = "Recorded information sidecar is absent.";

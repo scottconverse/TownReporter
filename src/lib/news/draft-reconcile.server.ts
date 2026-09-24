@@ -15,6 +15,7 @@ import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
 import type { DraftRow } from "./types.ts";
 import { checkStoryNames } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText } from "./name-check.ts";
@@ -95,7 +96,10 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   try { savedEffort = modelEffort(choice, (JSON.parse(job.result_json || "{}") as {modelEffort?: unknown}).modelEffort); }
   catch { savedEffort = modelEffort(choice, null); }
   let active = { modelChoice: choice, modelEffort: savedEffort };
-  const overrides: ProviderOverrides = await readProviderOverrides(job.newsroom_id, "story").catch(() => ({}));
+  const overrides: ProviderOverrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(job.newsroom_id, "story").catch(() => ({})),
+  );
   const budget = providerBudget(choice, overrides);
   const runChat: ReportChat = async (system,user,maxTokens,_modelChoice,options) => {
     const attempted = await runPinnedCallWithFailover({
@@ -107,7 +111,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
           ? deps.chat(system,user,maxTokens,snapshot.modelChoice,{ timeoutMs })
           : grokChat(system,user,maxTokens,{choice:snapshot.modelChoice,newsroomId:job.newsroom_id,timeoutMs,noTools:true,localModel:overrides["local-model"]?.localModel,reasoningEffort:snapshot.modelEffort});
       },
-      probe: (candidate) => (deps.probe ?? probeProvider)(candidate, job.newsroom_id),
+      probe: (candidate) => (deps.probe ?? probeProvider)(candidate, job.newsroom_id, undefined, "story", pinnedLocalModelForJob(job) ?? undefined),
       resolve: async (candidate) => ({ modelChoice: candidate, modelEffort: modelEffort(candidate, active.modelEffort) }),
       onSwitch: async ({previousLabel,nextLabel,nextChoice,reason}) => {
         const nextEffort = modelEffort(nextChoice, active.modelEffort);
@@ -210,7 +214,7 @@ export async function requestDraftReconciliation(
   const requested = storyModelChoice(input.modelChoice);
   if (input.modelChoice && requested === "auto" && input.modelChoice !== "auto") throw new Error("The selected model is not available for Story work.");
   const probe = deps.probe ?? probeProvider;
-  let provider = await probe(requested, context.newsroomId);
+  let provider = await probe(requested, context.newsroomId, undefined, "story");
   let preflight: null | { stage: string; note: string; requested: string; resolved: string } = null;
   let ready = scanPreflight(provider, requested);
   if (!ready.ok) {
@@ -219,10 +223,10 @@ export async function requestDraftReconciliation(
       source: requested === "auto" ? "auto" : "editor",
       current: requested,
       error: firstError,
-      probe: (candidate) => probe(candidate, context.newsroomId),
+      probe: (candidate) => probe(candidate, context.newsroomId, undefined, "story"),
     });
     if (!plan) throw new Error(ready.guidance);
-    provider = await probe(plan.next, context.newsroomId);
+    provider = await probe(plan.next, context.newsroomId, undefined, "story");
     ready = scanPreflight(provider, plan.next);
     if (!ready.ok || !provider.ok) {
       throw new Error(!ready.ok ? ready.guidance : provider.ok ? firstError : provider.error);
@@ -236,7 +240,11 @@ export async function requestDraftReconciliation(
     };
   }
   const choice = provider.ok ? provider.choice : requested;
-  const job = await (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor",resultJson:JSON.stringify(initialModelRuntimeReceipt({requestedRuntime:requested,requestedEffort:modelEffort(requested,input.modelEffort),actualRuntime:choice,actualEffort:modelEffort(choice,input.modelEffort),preflightFailover:preflight}))});
+  const localModel = provider.ok ? provider.localModel : undefined;
+  if (choice === "local-model" && !localModel) {
+    throw new Error("The selected local model could not be pinned to its exact server and model before enqueueing.");
+  }
+  const job = await (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor",resultJson:JSON.stringify(initialModelRuntimeReceipt({requestedRuntime:requested,requestedEffort:modelEffort(requested,input.modelEffort),actualRuntime:choice,actualEffort:modelEffort(choice,input.modelEffort),localModel,preflightFailover:preflight}))});
   if (preflight) {
     await setJobStage(job.id, preflight.stage);
     await setJobFailoverNote(job.id, preflight.note);

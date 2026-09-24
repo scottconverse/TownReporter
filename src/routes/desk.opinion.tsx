@@ -1,14 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Busy,
-  DeskShell,
-  InkButton,
-  SecHead,
-  areaClass,
-  inputClass,
-} from "@/components/desk-chrome";
+import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { CopyButton } from "@/components/copy-button";
 import {
@@ -24,7 +18,7 @@ import {
 } from "@/lib/news/opinion";
 import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";

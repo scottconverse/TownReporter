@@ -5,7 +5,7 @@ import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
 import { editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { SourceRow } from "@/lib/news/types";
 
 export const Route = createFileRoute("/desk/sources")({ component: SourcesPage });

@@ -6,7 +6,7 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { addCorrection, deleteArticle, listMemory, listPublishedDesk, resolveMeetingArticleReview } from "@/lib/news/desk";
 import { myDesk } from "@/lib/news/claim";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 export const Route = createFileRoute("/desk/published")({ component: PublishedPage });
 
@@ -148,6 +148,11 @@ function PublishedPage() {
   });
 
   const rows = published.data ?? [];
+  const transcriptReviews = rows.flatMap((article) => article.transcriptReviews.map((review) => ({
+    id: review.id,
+    headline: article.headline,
+    status: review.status,
+  })).filter((review) => review.status === "pending" || review.status === "correction-required"));
 
   return (
     <DeskShell title="Published" kicker="The record">
@@ -166,6 +171,19 @@ function PublishedPage() {
       <p className="lede">
         What is live on the paper, with its corrections. Corrections are public.
       </p>
+      {transcriptReviews.length > 0 ? (
+        <Notice kind="err">
+          <b>Priority: {transcriptReviews.length} published transcript {transcriptReviews.length === 1 ? "review needs" : "reviews need"} attention.</b>{" "}
+          {transcriptReviews.map((review, index) => (
+            <span key={review.id}>
+              {index > 0 ? " · " : ""}
+              <a href={`#transcript-review-${review.id}`} className="inline-link">
+                {review.headline}{review.status === "correction-required" ? " — correction required" : " — review evidence"}
+              </a>
+            </span>
+          ))}
+        </Notice>
+      ) : null}
       {note ? (
         <Notice kind={note.kind}>
           {note.text}
@@ -219,10 +237,44 @@ function PublishedPage() {
                   </p>
                 ))}
                 {p.transcriptReviews.map((review) => {
+                  if (review.status === "verified" || review.status === "corrected") {
+                    return (
+                      <section id={`transcript-review-${review.id}`} key={review.id} className="pub-corr" aria-labelledby={`transcript-review-title-${review.id}`}>
+                        <h3 id={`transcript-review-title-${review.id}`}>
+                          Transcript review history — {review.status === "verified" ? "marked still accurate" : "correction published"}
+                        </h3>
+                        <p>
+                          The published article remains tied to artifact A ({review.priorArtifact.sha256.slice(0, 12)}…).
+                          The review concerned artifact B ({review.currentArtifact.sha256.slice(0, 12)}…).
+                        </p>
+                        <p>
+                          Completed {review.resolvedAt ? formatShortDate(review.resolvedAt) : "at an unrecorded time"}
+                          {review.resolvedBy ? ` by editor account ${review.resolvedBy}` : "; reviewer not recorded"}.
+                        </p>
+                        {review.resolutionNote ? <p><b>Editor note:</b> {review.resolutionNote}</p> : null}
+                        {review.status === "verified" ? (
+                          review.acceptedEvidence ? (
+                            <details>
+                              <summary>Accepted artifact B evidence ({review.acceptedEvidence.citations.length} citations · SHA-256 {review.acceptedEvidence.artifactSha256.slice(0, 12)}…)</summary>
+                              <ul className="meeting-citations">
+                                {review.acceptedEvidence.citations.map((citation) => (
+                                  <li key={citation.segmentIndex}>
+                                    <p><b>Segment {citation.segmentIndex}</b> · {Math.floor(citation.timestampSeconds / 60)}:{String(Math.floor(citation.timestampSeconds % 60)).padStart(2, "0")}</p>
+                                    <p>{citation.excerpt}</p>
+                                    <p className="meta">Caption segment SHA-256 {citation.captionSha256}</p>
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          ) : <p role="alert">Accepted artifact B evidence is unavailable or malformed; consult the review record before relying on this history.</p>
+                        ) : null}
+                      </section>
+                    );
+                  }
                   const checked = reviewChecks[review.id] ?? [];
-                  const allChecked = review.citations.length > 0 && review.citations.every((c) => checked.includes(c.segmentIndex));
+                  const allChecked = review.citations.length > 0 && review.citations.every((c) => c.currentSegmentIndex != null && checked.includes(c.segmentIndex));
                   return (
-                    <section key={review.id} className="pub-corr" aria-labelledby={`transcript-review-${review.id}`}>
+                    <section id={`transcript-review-${review.id}`} key={review.id} className="pub-corr" aria-labelledby={`transcript-review-${review.id}`}>
                       <h3 id={`transcript-review-${review.id}`}>Transcript changed — evidence review required</h3>
                       <p>
                         This story was published from artifact {review.priorArtifact.id} ({review.priorArtifact.sha256.slice(0, 12)}…).
@@ -233,10 +285,14 @@ function PublishedPage() {
                         <div key={citation.segmentIndex} className="meeting-review-citation">
                           <p><b>Segment {citation.segmentIndex}</b>{citation.timestampSeconds == null ? "" : ` · ${Math.floor(citation.timestampSeconds / 60)}:${String(Math.floor(citation.timestampSeconds % 60)).padStart(2, "0")}`}</p>
                           <p><b>Published evidence:</b> {citation.oldExcerpt ?? "The original excerpt is unavailable; inspect artifact A directly."}</p>
-                          <p><b>Current evidence:</b> {citation.currentExcerpt ?? "A direct segment comparison is unavailable; inspect artifact B directly."}</p>
+                          <p>
+                            <b>Current evidence{citation.currentSegmentIndex == null ? " comparison unavailable" : ` (artifact ${review.currentArtifact.id}, segment ${citation.currentSegmentIndex}${citation.currentTimestampSeconds == null ? "" : ` · ${Math.floor(citation.currentTimestampSeconds / 60)}:${String(Math.floor(citation.currentTimestampSeconds % 60)).padStart(2, "0")}`})`}:</b>{" "}
+                            {citation.currentExcerpt ?? "No segment was found near the published citation timestamp. Inspect artifact B directly; this citation cannot be confirmed as still accurate yet."}
+                          </p>
                           <label>
                             <input
                               type="checkbox"
+                              disabled={citation.currentSegmentIndex == null}
                               checked={checked.includes(citation.segmentIndex)}
                               onChange={(event) => setReviewChecks((previous) => ({
                                 ...previous,

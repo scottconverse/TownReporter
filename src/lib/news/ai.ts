@@ -28,7 +28,7 @@ import { normalizeProviderModelId } from "./provider-model-id.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
-  { ok: true; label: string; choice: EffectiveProviderChoice } | { ok: false; error: string };
+  { ok: true; label: string; choice: EffectiveProviderChoice; localModel?: LocalModelOverride } | { ok: false; error: string };
 
 /*
   What the desk says when no provider can answer. This used to be the v1-v4
@@ -458,8 +458,13 @@ async function probeOpenAi(
     if (!res.ok)
       return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
+    if (!Array.isArray(body?.data)) {
+      return {
+        ok: false,
+        error: `${provider.label} returned an invalid model list; TownReporter could not verify the selected model.`,
+      };
+    }
     if (
-      Array.isArray(body?.data) &&
       !body.data.some(
         (entry) =>
           typeof entry.id === "string" &&
@@ -517,6 +522,7 @@ export async function probeProvider(
   newsroomId?: number,
   adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
   scope?: "story" | "scan" | "opinion" | "dark" | "forced",
+  exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
@@ -572,15 +578,19 @@ export async function probeProvider(
     return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
   }
   let provider = resolveProvider(choice);
-  if (choice === "local-model" && (scope || !provider)) {
-    let localOverride: LocalModelOverride | null = null;
-    localOverride = adapters?.resolveLocal
+  let localOverride: LocalModelOverride | null = null;
+  if (choice === "local-model" && (exactLocalModel || scope || !provider)) {
+    localOverride = exactLocalModel ?? (adapters?.resolveLocal
       ? await adapters.resolveLocal(newsroomId)
       : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId, scope))
-          .override;
+          .override);
     if (localOverride) provider = resolveProvider(choice, localOverride);
   }
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
+  if (choice === "local-model" && !localOverride && provider.kind === "openai") {
+    // Environment-configured local gateways also need an exact queue snapshot.
+    localOverride = { baseUrl: provider.baseUrl, id: provider.model };
+  }
   if (provider.kind === "codex") {
     const { probeCodex } = await import("./ai-codex.server.ts");
     const result = await probeCodex(provider.label);
@@ -588,9 +598,12 @@ export async function probeProvider(
   }
   if (provider.kind === "openai") {
     const result = await probeOpenAi(provider);
-    return result.ok
-      ? { ...result, choice: choice === "configured" ? "configured" : storyModelChoice(choice) }
-      : result;
+    if (!result.ok) return result;
+    return {
+      ...result,
+      choice: choice === "configured" ? "configured" : storyModelChoice(choice),
+      ...(choice === "local-model" && localOverride ? { localModel: localOverride } : {}),
+    };
   }
   if (provider.kind === "anthropic") {
     return probeAnthropic(provider, storyModelChoice(choice || "claude-frontier"));

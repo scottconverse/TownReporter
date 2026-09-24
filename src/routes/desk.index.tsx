@@ -5,7 +5,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, InkButton, SecHead, areaClass, announceToDesk } from "@/components/desk-chrome";
+import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
+import { areaClass, announceToDesk } from "@/components/desk-chrome-utils";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
@@ -45,7 +46,7 @@ import {
   workingQueueEmptyCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";

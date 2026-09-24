@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { CorrectionForm } from "@/components/correction-form";
 import { listPublicCorrections } from "@/lib/news/public";
-import { DEFAULT_PAPER_IDENTITY, usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 export const Route = createFileRoute("/corrections")({
   validateSearch: (s: Record<string, unknown>): { article?: string } => ({
     article: typeof s.article === "string" ? s.article.slice(0, 2000) : undefined,

@@ -4,12 +4,13 @@ import {
   opinionProviderProblem,
   type OpinionModelChoice,
 } from "./model-choice.ts";
+import type { LocalModelOverride } from "./ai.ts";
 
 type VoiceProbe = { ok: true; voice: { path: string } } | { ok: false; error: string };
 
 type CandidateChoice = Exclude<OpinionModelChoice, "auto">;
 type CandidateProbe =
-  | { ok: true; label: string; choice: CandidateChoice | "configured" }
+  | { ok: true; label: string; choice: CandidateChoice | "configured"; localModel?: LocalModelOverride }
   | { ok: false; error: string };
 
 export type OpinionReadinessDeps = {
@@ -56,7 +57,7 @@ async function defaultCandidateProbe(
 ): Promise<CandidateProbe> {
   if (choice === "claude-frontier") return probeClaudeFrontier();
   const { probeProvider } = await import("./ai.ts");
-  const result = await probeProvider(choice, newsroomId);
+  const result = await probeProvider(choice, newsroomId, undefined, "opinion");
   if (!result.ok) return result;
   // `probeProvider` can answer "configured" for Automatic's internal gateway
   // pin; an explicit named pick never goes through that path, so normalise
@@ -99,5 +100,11 @@ export async function checkOpinionReadiness(
       : selected?.ok && selected.choice !== "configured"
         ? opinionModelChoice(selected.choice)
         : choice;
-  return { ready: problems.length === 0, why: problems.join(" "), problems, effectiveChoice };
+  return {
+    ready: problems.length === 0,
+    why: problems.join(" "),
+    problems,
+    effectiveChoice,
+    ...(selected?.ok && selected.localModel ? { localModel: selected.localModel } : {}),
+  };
 }

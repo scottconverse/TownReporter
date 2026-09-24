@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { InkButton, inputClass } from "./desk-chrome";
+import { InkButton } from "./desk-chrome";
+import { inputClass } from "./desk-chrome-utils";
 import {
   cancelXaiOauthLoginFn,
   disconnectXaiOauthFn,

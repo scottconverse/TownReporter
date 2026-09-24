@@ -527,6 +527,7 @@ describe("authenticated Codex commit boundary", () => {
   it("persists and enqueues an explicit local-model pick, not claude-frontier", async () => {
     const sql = await ensureCommitBoundarySchema();
     const userId = `opinion-local-model-${Date.now()}-${Math.random()}`;
+    const selected = { baseUrl: "https://ollama.example/v1", id: "glm-5.2:cloud" };
     let enqueuedChoice: string | undefined;
     const result = await commitOpinionForAuthenticatedEditor(
       {
@@ -542,6 +543,7 @@ describe("authenticated Codex commit boundary", () => {
               ok: true as const,
               label: "Local model",
               choice: candidate,
+              localModel: selected,
             }),
           }),
         ensureEditorialRequestSchema: async () => undefined,
@@ -565,14 +567,16 @@ describe("authenticated Codex commit boundary", () => {
     `;
     assert.equal(request?.model_choice, "local-model");
 
-    const [job] = await sql<{ model_choice: string }>`
-      select model_choice from desk_jobs where kind = 'editorial' and user_id = ${userId}
+    const [job] = await sql<{ model_choice: string; result_json: string }>`
+      select model_choice, result_json from desk_jobs where kind = 'editorial' and user_id = ${userId}
     `;
     assert.equal(
       job?.model_choice,
       "local-model",
       "the queued job must run the picked local model, not fall back to Claude",
     );
+    assert.deepEqual(JSON.parse(job?.result_json ?? "{}").localModel, selected,
+      "the queued job must retain the exact endpoint/model that Opinion preflight approved");
     await sql`delete from editorial_requests where user_id = ${userId}`;
   });
 

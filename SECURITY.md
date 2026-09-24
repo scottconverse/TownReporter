@@ -115,6 +115,34 @@ Context, so a report can aim at what is not yet covered:
 - CI boots both the dev server and a real production build and exercises
   them in a browser (`.github/workflows/ci.yml`).
 
+## Reporting agents and untrusted records
+
+Pages, PDFs, captions, transcripts, packets and other fetched records are
+evidence. Text inside them does not grant an agent additional tools or change
+the reporting job's machine permissions. TownReporter selects the tool surface
+in application code before sending the prompt.
+
+- The Codex CLI runs with its user configuration ignored, shell, computer,
+  browser, apps, plugins, multi-agent and hooks disabled, a read-only sandbox,
+  and ephemeral session state. Web search is enabled only by a code-selected
+  research path; source text cannot turn it on.
+- Claude Code runs restricted with strict MCP configuration, no inherited
+  settings or session persistence, and a fixed allow-list. The allow-list
+  rejects tools outside `WebSearch` and `WebFetch`; calls that need no tools
+  hide the tool surface entirely. OCR is the narrow exception: it exposes only
+  `Read` for the single temporary page image TownReporter created for that
+  OCR call.
+- OpenAI-compatible and Anthropic API calls, including local-model calls,
+  receive text prompts without tool or function definitions. TownReporter
+  performs source search and fetching itself through its guarded application
+  paths.
+
+These controls prevent a source instruction from granting shell, file-write,
+browser, MCP, plugin or agent access. They do not make generated reporting
+factually correct; editors must still review evidence and claims. Research
+paths that explicitly enable provider web search or fetch can make those
+research requests and consume the selected provider's usage allowance.
+
 ## If you operate a TownReporter
 
 You are the publisher and you are also the sysadmin. The settings that matter

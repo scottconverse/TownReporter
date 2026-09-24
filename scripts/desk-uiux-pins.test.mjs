@@ -68,3 +68,10 @@ test("both source registry import controls have accessible names", async () => {
   );
 });
 
+test("the story editor's own-note and follow-up inputs have accessible names", async () => {
+  const story = await readFile(new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
+  assert.match(story, /placeholder="Who — e\.g\. City Manager's office"[\s\S]{0,100}aria-label="Who owes a response"/);
+  assert.match(story, /placeholder="For what — one line"[\s\S]{0,100}aria-label="What response is needed"/);
+  assert.match(story, /placeholder="Your own line — a call to make, a record to pull"[\s\S]{0,100}aria-label="Add a reporting note"/);
+});
+

@@ -25,6 +25,7 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
+import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
 import {
@@ -33,7 +34,7 @@ import {
   resolvePublishedMeetingReview,
   type PublishedMeetingReview,
 } from "./meeting-article-revision.ts";
-import { deriveUsedCitations } from "./meeting-draft-citations.ts";
+import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   evidenceNeedsReview,
@@ -83,6 +84,7 @@ import {
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
+import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import {
   failoverNoteSentence,
@@ -924,7 +926,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const batches = buildScanBatches({ sources: batchSources });
 
   const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
-    await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({}));
+    applyJobLocalModelSnapshot(
+      job,
+      await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({})),
+    );
+  const scanLocalModel = scanOverrides["local-model"]?.localModel;
   const batchTimeoutMs = scanCallTimeoutFor(scanOverrides);
   const batchResults: import("./schema.ts").ParsedScanResult[] = [];
   let batchesFailed = 0;
@@ -960,7 +966,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       modelEffort: effortFromJob(job),
       timeoutMs: batchTimeoutMs,
       grokChat: runChat,
-      probe,
+      probe: (choice) => probe(choice, job.newsroom_id, undefined, "scan", choice === "local-model" ? scanLocalModel ?? undefined : undefined),
       setModelChoice,
       setStage,
       setFailoverNote: setJobFailoverNote,
@@ -1259,6 +1265,23 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     deps.readStoryDocuments ?? (await import("./story-documents.server.ts")).readStoryDocuments;
   const documentAssignment = prevNotes.editorialAssignment?.text || lead.headline;
   const initialDocumentChoice = effectiveStoryModelChoice(job.model_choice);
+  // Direct jobs keep this receipt on the job row. Forced batches keep the
+  // exact preflighted runtime on the batch row, so document reading must use
+  // that already-validated snapshot too instead of resolving a newer paper
+  // preference while the batch writer stays pinned to its original model.
+  const batchLocalModel = batchSnapshot?.runtime === "local" ? batchSnapshot.localModel : null;
+  const jobLocalModel = pinnedLocalModelForJob(job);
+  const queuedLocalModel = batchLocalModel ?? jobLocalModel;
+  const storyProviderOverrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(owned(context), "story").catch(() => ({})),
+  );
+  if (batchLocalModel) {
+    storyProviderOverrides["local-model"] = {
+      ...(storyProviderOverrides["local-model"] ?? {}),
+      localModel: batchLocalModel,
+    };
+  }
   const documentReadingEvidence = await storyDocumentReader(
       owned(context),
       leadId,
@@ -1272,7 +1295,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       {
         modelEffort: effortFromJob(job),
         source: job.model_choice_source ?? "editor",
-        probe: (choice) => probe(choice, owned(context)),
+        localModel: queuedLocalModel ?? undefined,
+        probe: (choice) => probe(choice, owned(context), undefined, "story", choice === "local-model" ? queuedLocalModel ?? undefined : undefined),
         chat: deps.chat,
         onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
           await setJobModelRuntime(job.id, nextChoice, nextEffort);
@@ -1333,6 +1357,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
     extraEvidence: meetingMaterial?.evidence ?? prevNotes.scratch,
+    editorNotes: meetingMaterial ? prevNotes.scratch : undefined,
     extraEvidenceLimitChars: meetingMaterial ? 200_000 : undefined,
     extraEvidenceMode: meetingMaterial ? "meeting-transcript" : undefined,
     editorialAssignment: prevNotes.editorialAssignment,
@@ -1346,7 +1371,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       A failed read is not a reason to refuse to draft -- an empty object
       means "no overrides", which is what every paper had before this.
     */
-    providerOverrides: await readProviderOverrides(owned(context), "story").catch(() => ({})),
+    providerOverrides: storyProviderOverrides,
   };
   const reportDeps: Parameters<typeof reportAndDraft>[1] = {
     onStage: (stage) => setStage(job.id, stage),
@@ -1608,6 +1633,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     ...reported.research_memo,
     citationPolicy: "explicit",
     researchScope: draftInput.researchScope,
+    // Publication must fail closed if a tape-derived draft somehow loses its
+    // persisted used-citation link. The lead's candidate list is not proof of
+    // what the final story actually used.
+    meetingEvidence: { used: meetingMaterial != null },
     reportedClaims: { version: 1, rows: reported.claims },
     reportedDocumentClaims: {
       version: 1,
@@ -1702,6 +1731,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     returning id
   `;
     if (savedDraft) {
+      let transcriptLinkCreated = false;
       /*
         Link a meeting draft to the transcript it drew from.
 
@@ -1719,14 +1749,28 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       const meetingCitations = meetingMaterial?.citations ?? prevNotes.transcriptCitations ?? [];
       const meeting = meetingMaterial?.meeting ?? prevNotes.meeting;
       if (meeting && meetingCitations.length) {
-        const used = deriveUsedCitations({
-          candidates: meetingCitations.map((c) => ({
+        const candidates = meetingCitations.map((c) => ({
             item: c.item, segmentIndex: c.segmentIndex, captionSha256: c.captionSha256, excerpt: c.excerpt,
-          })),
+          }));
+        const draftText = {
           headline: reported.headline,
           dek: reported.dek,
           body: reported.body,
-        });
+        };
+        // A new meeting draft can only cite transcript segments the reporter
+        // actually saw. Older drafts with saved transcript notes retain their
+        // original derivation until they are redrafted through this path.
+        const focus = reported.research_memo.meetingFocus;
+        const used = meetingMaterial
+          ? focus
+            ? deriveFocusedUsedCitations({
+                candidates,
+                visibleSegmentIndexes: focus.visibleSegmentIndexes,
+                anchorSegmentIndexes: focus.anchorSegmentIndexes,
+                ...draftText,
+              })
+            : []
+          : deriveUsedCitations({ candidates, ...draftText });
         if (used.length) {
           await linkDraftToTranscript(sql, {
             newsroomId: owned(context),
@@ -1734,6 +1778,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             artifactId: meeting.artifactId,
             citations: used,
           });
+          transcriptLinkCreated = true;
         }
       }
       const completion = JSON.stringify(
@@ -1741,7 +1786,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           checkpointDraftId,
           finalDraftId: Number(savedDraft.id),
           citationStatus:
-            reported.citation_status ??
+            transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
             (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
               ? "complete"
               : "review-required"),
@@ -1856,6 +1901,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       add?: string;
       toggle?: number;
       scratch?: string;
+      storyDirection?: string;
       researchScope?: "public" | "supplied";
       todos?: NoteTodo[];
     }) => input,
@@ -1882,6 +1928,10 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       });
       if (data.researchScope === "supplied" || data.researchScope === "public")
         notes.researchScope = data.researchScope;
+      if (typeof data.storyDirection === "string") {
+        const direction = data.storyDirection.trim().slice(0, 1000);
+        notes.editorialAssignment = direction ? { origin: "story-workspace", text: direction } : undefined;
+      }
       if (typeof data.scratch === "string")
         notes.suppliedUrls = sanitizePublicUrls([
           ...(notes.suppliedUrls ?? []),
@@ -2394,6 +2444,172 @@ export const resolveMeetingArticleReview = createServerFn({ method: "POST" })
       confirmedSegmentIndices: data.confirmedSegmentIndices,
     }));
     return { ok: true as const };
+  });
+
+export const resolveDraftMeetingReview = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: {
+    leadId: number;
+    draftId: number;
+    evidenceToken: string;
+    acceptedArtifactId: number;
+    confirmedSegmentIndexes: number[];
+    note: string;
+  }) => input)
+  .handler(async ({ context, data }) => {
+    try {
+      const result = await withTransaction((sql) => recordDraftTranscriptRevisionReview(sql, {
+        newsroomId: owned(context),
+        leadId: data.leadId,
+        draftId: data.draftId,
+        reviewerId: context.userId,
+        expectedEvidenceToken: data.evidenceToken,
+        acceptedArtifactId: data.acceptedArtifactId,
+        confirmedSegmentIndexes: data.confirmedSegmentIndexes,
+        note: data.note,
+      }));
+      await audit(context.userId, "review", `Meeting draft ${data.draftId} transcript evidence`, owned(context), {
+        kind: "drafts", id: data.draftId,
+      });
+      return { ok: true as const, ...result };
+    } catch (cause) {
+      return { ok: false as const, error: cause instanceof Error ? cause.message : "Could not save the citation review." };
+    }
+  });
+
+export const listDraftHistory = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((leadId: number) => leadId)
+  .handler(async ({ context, data: leadId }) => {
+    const sql = await getSql();
+    const drafts = await sql<{
+      id: number; headline: string; dek: string; topic: string; updated_at: string;
+    }>`
+      select id,headline,dek,topic,updated_at from drafts
+       where lead_id=${leadId} and newsroom_id=${owned(context)}
+       order by updated_at desc,id desc
+    `;
+    if (!drafts.length) return [];
+    const ids = drafts.map((draft) => Number(draft.id));
+    const links = await sql<{
+      id: number; draft_id: number; artifact_id: number; citation_snapshot: string;
+      revision_notice: string | null; is_current: boolean; video_id: string; sha256: string;
+    }>`
+      select l.id,l.draft_id,l.artifact_id,l.citation_snapshot,l.revision_notice,l.is_current,
+             a.video_id,a.sha256
+        from meeting_draft_transcript_links l
+        join meeting_transcript_artifacts a on a.id=l.artifact_id and a.newsroom_id=l.newsroom_id
+       where l.newsroom_id=${owned(context)} and l.draft_id=any(${ids})
+       order by l.draft_id,l.created_at,l.id
+    `;
+    const reviews = await sql<{
+      draft_id: number; accepted_artifact_id: number; accepted_artifact_sha256: string;
+      reviewed_by: string; resolution_note: string; reviewed_at: string;
+    }>`
+      select draft_id,accepted_artifact_id,accepted_artifact_sha256,reviewed_by,resolution_note,reviewed_at
+        from meeting_draft_transcript_revision_reviews
+       where newsroom_id=${owned(context)} and draft_id=any(${ids})
+       order by draft_id,reviewed_at,id
+    `;
+    return drafts.map((draft) => ({
+      id: Number(draft.id), headline: draft.headline, dek: draft.dek, topic: draft.topic, updatedAt: draft.updated_at,
+      transcriptLinks: links.filter((link) => Number(link.draft_id) === Number(draft.id)).map((link) => ({
+        id: Number(link.id), artifactId: Number(link.artifact_id), sha256: link.sha256,
+        videoId: link.video_id, isCurrent: link.is_current, revisionNotice: link.revision_notice,
+        citationCount: (() => { try { const value = JSON.parse(link.citation_snapshot) as unknown; return Array.isArray(value) ? value.length : 0; } catch { return 0; } })(),
+      })),
+      transcriptReviews: reviews.filter((review) => Number(review.draft_id) === Number(draft.id)).map((review) => ({
+        acceptedArtifactId: Number(review.accepted_artifact_id), acceptedArtifactSha256: review.accepted_artifact_sha256,
+        reviewedBy: review.reviewed_by, note: review.resolution_note, reviewedAt: review.reviewed_at,
+      })),
+    }));
+  });
+
+export const getDraftHistoryItem = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: { leadId: number; draftId: number }) => input)
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const rows = await sql<{
+      id: number; headline: string; dek: string; body: string; topic: string; updated_at: string;
+    }>`
+      select id,headline,dek,body,topic,updated_at from drafts
+       where id=${data.draftId} and lead_id=${data.leadId} and newsroom_id=${owned(context)} limit 1
+    `;
+    const draft = rows[0];
+    if (!draft) return null;
+    const links = await sql<{
+      id: number; artifact_id: number; citation_snapshot: string; revision_notice: string | null;
+      is_current: boolean; video_id: string; sha256: string;
+    }>`
+      select l.id,l.artifact_id,l.citation_snapshot,l.revision_notice,l.is_current,a.video_id,a.sha256
+        from meeting_draft_transcript_links l
+        join meeting_transcript_artifacts a on a.id=l.artifact_id and a.newsroom_id=l.newsroom_id
+       where l.newsroom_id=${owned(context)} and l.draft_id=${data.draftId}
+       order by l.created_at,l.id
+    `;
+    const details = [];
+    for (const link of links) {
+      let parsed: { segmentIndex: number; captionSha256?: string }[] = [];
+      try {
+        const value = JSON.parse(link.citation_snapshot) as unknown;
+        if (Array.isArray(value)) parsed = value as typeof parsed;
+      } catch { /* report malformed history without inventing citations */ }
+      const indices = parsed.map((citation) => Number(citation.segmentIndex)).filter(Number.isInteger);
+      const segments = indices.length ? await sql<{
+        segment_index: number; start_seconds: number; excerpt: string; caption_sha256: string;
+      }>`
+        select segment_index,start_seconds,excerpt,caption_sha256 from meeting_transcript_segments
+         where artifact_id=${link.artifact_id} and segment_index=any(${indices}) order by segment_index
+      ` : [];
+      details.push({
+        id: Number(link.id), artifactId: Number(link.artifact_id), sha256: link.sha256,
+        videoId: link.video_id, isCurrent: link.is_current, revisionNotice: link.revision_notice,
+        citations: parsed.map((citation) => {
+          const segment = segments.find((row) => Number(row.segment_index) === Number(citation.segmentIndex));
+          return {
+            segmentIndex: Number(citation.segmentIndex),
+            timestampSeconds: segment ? Number(segment.start_seconds) : null,
+            excerpt: segment?.excerpt ?? null,
+            captionSha256: citation.captionSha256 ?? null,
+            segmentAvailable: Boolean(segment && segment.caption_sha256 === citation.captionSha256),
+          };
+        }),
+      });
+    }
+    const reviews = await sql<{
+      id: number; accepted_artifact_id: number; accepted_artifact_sha256: string;
+      accepted_citation_snapshot: string; reviewed_by: string; resolution_note: string; reviewed_at: string;
+    }>`
+      select id,accepted_artifact_id,accepted_artifact_sha256,accepted_citation_snapshot,reviewed_by,resolution_note,reviewed_at
+        from meeting_draft_transcript_revision_reviews
+       where newsroom_id=${owned(context)} and draft_id=${data.draftId}
+       order by reviewed_at,id
+    `;
+    return {
+      id: Number(draft.id), headline: draft.headline, dek: draft.dek, body: draft.body, topic: draft.topic,
+      updatedAt: draft.updated_at, transcriptLinks: details,
+      transcriptReviews: reviews.map((review) => {
+        let raw: unknown = null;
+        try { raw = JSON.parse(review.accepted_citation_snapshot) as unknown; } catch { /* malformed record is displayed as unavailable */ }
+        const citations = Array.isArray(raw) ? raw.map((value) => {
+          const citation = value && typeof value === "object" ? value as Record<string, unknown> : {};
+          const numberOrNull = (field: unknown) => typeof field === "number" && Number.isFinite(field) ? field : null;
+          return {
+            sourceSegmentIndex: numberOrNull(citation.sourceSegmentIndex),
+            acceptedSegmentIndex: numberOrNull(citation.acceptedSegmentIndex),
+            acceptedTimestampSeconds: numberOrNull(citation.acceptedTimestampSeconds),
+            excerpt: typeof citation.excerpt === "string" ? citation.excerpt : null,
+            captionSha256: typeof citation.captionSha256 === "string" ? citation.captionSha256 : null,
+          };
+        }) : [];
+        return {
+          id: Number(review.id), acceptedArtifactId: Number(review.accepted_artifact_id),
+          acceptedArtifactSha256: review.accepted_artifact_sha256, reviewedBy: review.reviewed_by,
+          note: review.resolution_note, reviewedAt: review.reviewed_at, citations,
+        };
+      }),
+    };
   });
 
 export const listPublishedDesk = createServerFn({ method: "GET" })

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Busy, Field, InkButton, SecHead, inputClass } from "@/components/desk-chrome";
+import { Busy, Field, InkButton, SecHead } from "@/components/desk-chrome";
+import { inputClass } from "@/components/desk-chrome-utils";
 import {
   getMeetingSettingsFn,
   saveMeetingSettingsFn,

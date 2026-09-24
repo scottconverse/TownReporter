@@ -18,6 +18,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run typecheck:test
       # ESLint was red with nine errors and had never run in CI. One of them
       # was `no-control-regex` -- the rule that flags a literal backspace in a
       # regular expression, which is exactly how the outside-hosts check on
@@ -162,7 +163,7 @@ jobs:
   # 20,000-story search benchmark from scratch, failing if the index does not
   # help -- a property no single test file above measures.
   postgres-integration:
-    name: The three Postgres-only properties, on a real Postgres
+    name: Every discovered PostgreSQL-capable test, on a real Postgres
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -177,7 +178,8 @@ jobs:
           --health-timeout 5s --health-retries 20
     env:
       DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_ci
-      TEST_POSTGRES_ADMIN_URL: postgres://postgres:ci@127.0.0.1:5432/postgres
+      TOWNREPORTER_RUN_POSTGRES_INTEGRATION: "1"
+      TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL: postgres://postgres:ci@127.0.0.1:5432/postgres
       BETTER_AUTH_SECRET: ci-search-secret-not-for-production
       TOWNREPORTER_CLAUDE_CODE: "0"
       # Stream each spawned server's own stdout/stderr into the job log. A
@@ -194,32 +196,10 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: node scripts/migrate.mjs
-      - name: Sign-in throttling, giving up the desk, the search index, the reader-facing leak guard, a dead run recovering, and the configured paper identity, and the per-paper writing-model time budgets -- each against its own scratch database
-        run: node --experimental-strip-types --test src/lib/auth/sign-in-throttle.test.ts src/lib/news/leave-desk.test.ts src/lib/news/search-index.test.ts src/lib/news/public-surfaces.no-leak.test.ts src/lib/news/stalled-run.e2e.test.ts src/lib/news/two-editors.e2e.test.ts src/lib/news/uncredited-source-warning.e2e.test.ts src/lib/news/paper-identity.e2e.test.ts src/lib/news/provider-settings.e2e.test.ts src/lib/news/job-reattach.postgres.test.ts
       - name: The index actually makes the search cheaper
         run: node scripts/search-index-proof.mjs
-      - name: ensureDarkSchema survives a database rebuilt underneath the running process (ENG-104)
-        run: node --experimental-strip-types --test src/lib/news/dark-schema-rebuild.test.ts
-      - name: Every runtime ensure* schema agrees with migrations/*.sql (ENG-03 capstone)
-        run: node --experimental-strip-types --test src/lib/news/schema-parity.test.ts
-      - name: A killed lead the scanner rediscovers is stamped, not refiled
-        run: node --experimental-strip-types --test src/lib/news/lead-resurface.e2e.test.ts
-      - name: Publication fences replacement drafts on independent Postgres connections
-        run: node --experimental-strip-types --test src/lib/news/draft-order.postgres.test.ts
-      - name: Daily scan ticks reserve one atomic job on real PostgreSQL
-        run: node --experimental-strip-types --test src/lib/news/daily-scan.postgres.test.ts
-      - name: Editor-selected draft batches serialize on real PostgreSQL
-        run: node --experimental-strip-types --test src/lib/news/draft-batch.postgres.test.ts
-      - name: Routine notice policy CAS and owner withdrawal hold on real PostgreSQL
-        run: node --experimental-strip-types --test src/lib/news/routine-notice-policy.postgres.test.ts
-      - name: Routine notice check replay and final authorization hold on real PostgreSQL
-        run: node --experimental-strip-types --test src/lib/news/routine-notice-checks.postgres.test.ts
-      - name: Routine edition scheduling reserves one atomic job on real PostgreSQL
-        run: node --experimental-strip-types --test src/lib/news/routine-notice-automation.postgres.test.ts
-      - name: Meeting capture, draft provenance, and transcript revision hold across real PostgreSQL transactions
-        run: node --experimental-strip-types --test src/lib/news/meeting-chain.postgres.test.ts
-      - name: Meeting capture and publication serialize on one real PostgreSQL fence
-        run: node --experimental-strip-types --test src/lib/news/meeting-revision-concurrency.postgres.test.ts
+      - name: Run every discovered database-capable test with per-file nonzero execution proof
+        run: node scripts/run-postgres-integration.mjs
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
   # at /login, and the first account in owns the newsroom.
@@ -349,6 +329,7 @@ jobs:
       PORT: "8080"
       HOST: 127.0.0.1
       SCANFIX_BASE_URL: http://127.0.0.1:8080
+      SCANFIX_ARTIFACT_DIR: "${{ runner.temp }}/scan-refresh-evidence"
       TOWNREPORTER_CLAUDE_CODE: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -358,6 +339,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Prove the scan refresh regression test rejects the old merge
+        run: node scripts/scan-refresh-old-merge-falsification.mjs
       - run: npm run build
       - name: Keep the open page synchronized with the same scan row
         run: |
@@ -370,6 +353,11 @@ jobs:
             echo "built server did not come up"; tail -n 80 /tmp/scan-refresh.log; exit 1;
           }
           node scripts/scan-refresh-runtime-proof.mjs
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scan-refresh-browser-evidence
+          path: ${{ runner.temp }}/scan-refresh-evidence
 
   # The Writing models panel: the screen an operator reaches on the worst day,
   # when a writing-model login has lapsed and every draft is failing. All of it

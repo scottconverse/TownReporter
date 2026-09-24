@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SourceZipBackupLink, SourceZipButton, SourceZipUrl } from "@/components/source-zip";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
 import { APP_VERSION } from "@/lib/version";
 
 export const Route = createFileRoute("/get-the-code")({

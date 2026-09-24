@@ -50,6 +50,28 @@ describe("meeting section 5 agenda-item chunking", () => {
     assert.equal(alignment.aligned, false);
     assert.match(alignment.reason ?? "", /align|transition/i);
   });
+
+  it("stops a previous item's span when the clerk announces a numbered item in words", async () => {
+    const { chunkByAgendaItem, spokenTransitionKey } = await import("./meeting-story-section5.ts");
+    assert.deepEqual(spokenTransitionKey("we are now on to item six, study session"), { kind: "item", value: "6" });
+    const segments = [
+      { segmentIndex: 314, startSeconds: 1256, endSeconds: 1260, captionSha256: "fixture-sha", excerpt: "no special reports and presentations" },
+      { segmentIndex: 315, startSeconds: 1260, endSeconds: 1264, captionSha256: "fixture-sha", excerpt: "we are now on to item six, study session" },
+      { segmentIndex: 316, startSeconds: 1264, endSeconds: 1268, captionSha256: "fixture-sha", excerpt: "Council discussed the proposed utility budget." },
+      { segmentIndex: 317, startSeconds: 1268, endSeconds: 1272, captionSha256: "fixture-sha", excerpt: "Item seven, mayor and council comments." },
+    ];
+    const chunks = chunkByAgendaItem({
+      segments,
+      packetItems: [
+        { itemNumber: "5", title: "SPECIAL REPORTS AND PRESENTATIONS" },
+        { itemNumber: "6", title: "STUDY SESSION ITEMS" },
+        { itemNumber: "7", title: "MAYOR AND COUNCIL COMMENTS" },
+      ],
+    });
+    assert.deepEqual(chunks.map((chunk) => [chunk.item, chunk.segmentIndexes]), [
+      ["5", [314]], ["6", [315, 316]], ["7", [317]],
+    ]);
+  });
 });
 
 describe("meeting section 5 structured vote extraction", () => {

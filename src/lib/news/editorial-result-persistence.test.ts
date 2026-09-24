@@ -9,9 +9,10 @@ import {
   fileEditorial,
   performEditorialWork,
 } from "./editorial.server.ts";
-import { enqueueJob, ensureJobsSchema } from "./jobs.ts";
+import { enqueueJob, ensureJobsSchema, findOpenJob } from "./jobs.ts";
 import { persistEditorialSuccess } from "./editorial-result-persistence.ts";
 import { ensureStoryDocuments, readEditorialDocuments } from "./story-documents.server.ts";
+import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 
 const TEST_EDITORIAL: Editorial = {
   headline: "Keep local history public",
@@ -62,12 +63,12 @@ async function ensureCompletionSchema() {
 
 async function insertRequest(
   sql: Sql,
-  input: { userId: string; modelChoice?: string; draftId?: number | null },
+  input: { userId: string; newsroomId?: number; modelChoice?: string; draftId?: number | null },
 ) {
   const [request] = await sql<{ id: number }>`
     insert into editorial_requests
       (user_id, newsroom_id, subject, source_kind, source_ref, model_choice, draft_id)
-    values (${input.userId}, ${1}, ${"Keep local history public"}, ${"paste"}, ${"desk"},
+    values (${input.userId}, ${input.newsroomId ?? 1}, ${"Keep local history public"}, ${"paste"}, ${"desk"},
             ${input.modelChoice ?? "auto"}, ${input.draftId ?? null})
     returning id
   `;
@@ -87,6 +88,64 @@ async function cleanCompletionFixture(sql: Sql, userId: string) {
 }
 
 describe("Automatic Opinion provider persistence", () => {
+  it("keeps the queued local model for both Opinion document reading and writing after preference changes", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    await ensureStoryDocuments(sql);
+    const userId = uniqueUser("opinion-local-snapshot");
+    const newsroomId = 88100 + Math.floor(Math.random() * 1000000);
+    const selected = { baseUrl: "https://ollama-at-enqueue.example/v1", id: "qwen3.5:397b-cloud" };
+    const changed = { baseUrl: "http://127.0.0.1:1234/v1", id: "lm-studio-after-queue" };
+    const request = await insertRequest(sql, { userId, newsroomId, modelChoice: "local-model" });
+    await sql.query(`create table if not exists newsroom_local_model_choices (
+      newsroom_id integer not null, scope text not null, base_url text not null, model_id text not null,
+      updated_at timestamptz not null default now(), primary key(newsroom_id,scope)
+    )`);
+    await sql.query("insert into newsroom_local_model_choices(newsroom_id,scope,base_url,model_id) values($1,'opinion',$2,$3)", [newsroomId, changed.baseUrl, changed.id]);
+    await enqueueJob({
+      userId,
+      newsroomId,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "local-model",
+      resultJson: JSON.stringify(initialModelRuntimeReceipt({
+        requestedRuntime: "local-model", requestedEffort: null,
+        actualRuntime: "local-model", actualEffort: null, localModel: selected,
+      })),
+      kick: false,
+    });
+    const job = await findOpenJob({ newsroomId, kind: "editorial", subjectId: request.id });
+    assert.ok(job);
+    let probed: unknown;
+    let writerModel: unknown;
+    try {
+      await assert.rejects(performEditorialWork(job, {
+        documentProbe: async (choice, newsroomId, _adapters, scope, exactLocalModel) => {
+          assert.equal(choice, "local-model");
+          assert.equal(newsroomId, job.newsroom_id);
+          assert.equal(scope, "opinion");
+          probed = exactLocalModel;
+          return { ok: true as const, label: "Local model", choice: "local-model" };
+        },
+        readEditorialDocuments: async (_room, _request, _choice, _assignment, _stage, _user, routing) => {
+          assert.deepEqual(routing?.localModel, selected,
+            "document extraction must receive the queued model, not the current preference");
+          await routing?.probe?.("local-model");
+          return "saved document evidence";
+        },
+        writeEditorial: async (input) => {
+          writerModel = input.localModel;
+          return { ok: false as const, error: "injected stop after snapshot assertions" };
+        },
+      }), /injected stop after snapshot assertions/);
+      assert.deepEqual(probed, selected, "document preflight must verify the queued endpoint/model");
+      assert.deepEqual(writerModel, selected, "the Opinion writer must keep the same queued endpoint/model");
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+      await sql.query("delete from newsroom_local_model_choices where newsroom_id=$1 and scope='opinion'", [newsroomId]);
+    }
+  });
+
   it("makes an all-provider document-reading failure terminal while retaining the request", async () => {
     const sql = await getSql();
     await ensureCompletionSchema();

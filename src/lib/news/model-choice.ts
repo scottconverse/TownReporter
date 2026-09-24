@@ -165,6 +165,9 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
       : "auto";
   const selected = options.find((choice) => choice.value === normalized) ?? options[0];
   if (!selected) return "No model is available for this surface.";
+  if (selected.value === "local-model") {
+    return "Uses the selected Ollama or on-device model for this run. If it is unavailable, the run stops instead of silently switching providers.";
+  }
   if (selected.value !== "auto") {
     return `Prefers ${selected.label} for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
   }

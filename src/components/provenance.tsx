@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { ProvenanceItem, StoryFinding } from "@/lib/news/findings";
 
 export function ProvenanceBlock({

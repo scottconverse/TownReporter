@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Field, InkButton, SecHead, announceToDesk, inputClass } from "@/components/desk-chrome";
+import { Field, InkButton, SecHead } from "@/components/desk-chrome";
+import { announceToDesk, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton } from "@/components/states";
 import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";

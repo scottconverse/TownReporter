@@ -7,7 +7,8 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ScreenPending, EmptyState } from "@/components/states";
 import { myDesk } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
-import { PaperProvider, type PaperIdentity } from "@/lib/paper-context";
+import { type PaperIdentity } from "@/lib/paper-identity";
+import { PaperProvider } from "@/lib/paper-context";
 import { getPaperConfigForEditor, type PaperConfig } from "@/lib/news/paper-settings";
 
 export const Route = createFileRoute("/desk")({

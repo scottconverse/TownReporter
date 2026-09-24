@@ -2,9 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, StorySkeleton } from "@/components/states";
-import { inkGhost } from "@/components/desk-chrome";
+import { inkGhost } from "@/components/desk-chrome-utils";
 import { getPublicEvidence } from "@/lib/news/evidence";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 export const Route = createFileRoute("/evidence/$versionId")({
   loader: ({ params }) => getPublicEvidence({ data: Number(params.versionId) }),

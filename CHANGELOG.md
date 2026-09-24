@@ -6,6 +6,7 @@ Current software version: **0.6.61**. Publication state is recorded by GitHub.
 
 - Fixed the Scan page so an already-open page replaces a running scan row with that same row's finished values instead of appearing stuck until reload.
 - Completed the meeting transcript-to-draft path with persisted used citations, immutable transcript revisions, revision-aware publication holds, and editor review when a recording changes after publication.
+- Added an editor story-direction control for drafts and redrafts. A named ordinance or resolution is anchored to the captured passage; a missing named measure refuses the draft rather than switching subjects. The default Ollama Cloud task choices use DeepSeek V4.1 Flash while other configured models remain selectable.
 - Serialized meeting capture and publication on the same database fence and made missing or malformed meeting provenance fail closed.
 - Added startup reconciliation for transcript files and database records, hardened reporting-agent tool boundaries, and made guarded HTTP fetching fail closed if its protected transport cannot initialize.
 - Added accessible meeting evidence controls, current security and model documentation, packaged font notices, strict test typechecking, pinned CI actions, disposable PostgreSQL/browser gates, and an explicit frozen-history policy for legacy audit artifacts.

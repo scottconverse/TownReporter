@@ -16,6 +16,7 @@ import {
   automaticFailoverReason,
   type AutomaticFailoverReason,
 } from "./automatic-failover.ts";
+import type { LocalModelOverride } from "./ai.ts";
 
 export type WriteEditorialInput = {
   userId: string;
@@ -34,6 +35,8 @@ export type WriteEditorialInput = {
   paper?: NewsroomIdentity;
   modelChoice?: OpinionModelChoice;
   modelEffort?: ModelEffort | null;
+  /** Exact local endpoint/model preflighted when this queued request was created. */
+  localModel?: LocalModelOverride;
   /** Immutable editor selection retained when an earlier Opinion stage switched. */
   requestedModelChoice?: OpinionModelChoice;
   requestedModelEffort?: ModelEffort | null;

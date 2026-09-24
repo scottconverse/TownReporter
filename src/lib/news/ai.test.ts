@@ -747,7 +747,12 @@ describe("model-picker provider readiness", () => {
             id: "halo-brain-35b",
           }),
         });
-        assert.deepEqual(result, { ok: true, label: "LLM", choice: "local-model" });
+        assert.deepEqual(result, {
+          ok: true,
+          label: "LLM",
+          choice: "local-model",
+          localModel: { baseUrl: "http://127.0.0.1:1234/v1", id: "halo-brain-35b" },
+        });
       });
       assert.deepEqual(calls, ["http://127.0.0.1:1234/v1/models"]);
     } finally {
@@ -878,6 +883,26 @@ describe("model-picker provider readiness", () => {
           if (!result.ok) assert.match(result.error, /not loaded/i);
         },
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("fails closed when a successful model-list response cannot prove the selected model exists", async () => {
+    const originalFetch = globalThis.fetch;
+    const malformedBodies = ["<html>not a model catalog</html>", JSON.stringify({ models: [{ name: "desk-model" }] }), JSON.stringify({ data: "desk-model" })];
+    try {
+      for (const body of malformedBodies) {
+        globalThis.fetch = async () => new Response(body, { status: 200 });
+        await withEnvAsync(
+          { ...BARE, LLM_BASE_URL: "http://gateway.test/v1", LLM_MODEL: "desk-model" },
+          async () => {
+            const result = await probeProvider("configured");
+            assert.equal(result.ok, false);
+            if (!result.ok) assert.match(result.error, /invalid model list.*could not verify/i);
+          },
+        );
+      }
     } finally {
       globalThis.fetch = originalFetch;
     }

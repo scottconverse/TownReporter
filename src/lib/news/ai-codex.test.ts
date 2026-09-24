@@ -18,7 +18,6 @@ import {
 const EXPECTED_NATIVE_ARGS = [
   "--ask-for-approval",
   "never",
-  "--ignore-user-config",
   "--disable", "shell_tool",
   "--disable", "computer_use",
   "--disable", "browser_use",
@@ -27,6 +26,7 @@ const EXPECTED_NATIVE_ARGS = [
   "--disable", "multi_agent",
   "--disable", "hooks",
   "exec",
+  "--ignore-user-config",
   "--skip-git-repo-check",
   "--model",
   "gpt-5.6-sol",
@@ -93,22 +93,27 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     });
   });
 
-  it("returns JSONL result metadata from a completed Codex call without calculating a total", async () => {
+  it("returns JSONL metadata and starts even a normal draft outside the application cwd", async () => {
+    const expectedCwd = tmpdir();
+    const childAnswer = JSON.stringify({ cwd: expectedCwd });
     const jsonl = [
-      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "reported answer" } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: childAnswer } }),
       JSON.stringify({ type: "turn.completed", usage: { input_tokens: 210, output_tokens: 33 } }),
     ].join("\n") + "\n";
     const dir = await mkdtemp(path.join(tmpdir(), "codex-jsonl-test-"));
     const fakePath = path.join(dir, "jsonl-cli.mjs");
+    const applicationCwd = process.cwd();
     await writeFile(fakePath, `process.stdout.write(${JSON.stringify(jsonl)});`);
     try {
+      process.chdir(dir);
       const result = await withEnv(
         { CODEX_CLI_PATH: fakePath },
         () => codexChat({ system: "System", user: "User", model: "gpt-5.6-terra", timeoutMs: 1_000 }),
       );
       assert.equal(result.ok, true);
       if (!result.ok) return;
-      assert.equal(result.text, "reported answer");
+      assert.deepEqual(JSON.parse(result.text), { cwd: expectedCwd });
+      assert.notEqual(expectedCwd, dir);
       assert.equal(result.meta?.provider, "codex");
       assert.equal(result.meta?.model, "gpt-5.6-terra");
       assert.equal(result.meta?.timedOut, false);
@@ -117,6 +122,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       assert.equal(result.meta?.totalTokens, undefined);
       assert.ok((result.meta?.durationMs ?? -1) >= 0);
     } finally {
+      process.chdir(applicationCwd);
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -249,7 +255,9 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
       ...EXPECTED_NATIVE_ARGS,
     ]);
     const researched = buildCodexArgs({ model: "gpt-5.6-sol", webSearch: true });
-    assert.equal(researched.includes("--search"), true);
+    const searchFlag = researched.indexOf("--enable");
+    assert.ok(searchFlag >= 0);
+    assert.equal(researched[searchFlag + 1], "standalone_web_search");
   });
 
   it("attaches page images via the verified `codex exec -i/--image <FILE>...` flag, after `exec`", () => {
@@ -258,7 +266,8 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     const imageIdx = args.indexOf("--image");
     assert.ok(execIdx >= 0, "exec subcommand must be present");
     assert.ok(imageIdx > execIdx, "--image must come after the exec subcommand");
-    assert.equal(args[execIdx + 1], "--skip-git-repo-check");
+    assert.equal(args[execIdx + 1], "--ignore-user-config");
+    assert.ok(args.indexOf("--skip-git-repo-check") > execIdx);
     assert.equal(args[imageIdx + 1], "C:\\tmp\\page.jpg");
     assert.equal(args.includes("--model"), true);
   });
@@ -337,6 +346,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     );
     assert.equal(args.includes("read-only"), true, "the host filesystem must not be writable");
     assert.equal(args.includes("--search"), false, "an ordinary draft must not gain network research from source text");
+    assert.ok(args.indexOf("exec") < args.indexOf("--ignore-user-config"), "exec-scoped CLI flags must follow exec");
     for (const feature of ["shell_tool", "computer_use", "browser_use", "apps", "plugins", "multi_agent", "hooks"]) {
       const index = args.indexOf(feature);
       assert.ok(index > 0 && args[index - 1] === "--disable", `${feature} must be disabled at the CLI boundary`);

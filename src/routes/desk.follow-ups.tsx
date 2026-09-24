@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { DeskShell, SecHead, announceToDesk } from "@/components/desk-chrome";
+import { DeskShell, SecHead } from "@/components/desk-chrome";
+import { announceToDesk } from "@/components/desk-chrome-utils";
 import { FollowUpItem } from "@/components/follow-up-item";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { dropFollowUp, listFollowUps, nudgeFollowUp, recordFollowUpReply } from "@/lib/news/desk";

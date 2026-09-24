@@ -108,15 +108,70 @@ describe("meeting draft to transcript link", () => {
         ]), revision_notice: null, video_id: "meeting-1", artifact_sha256: "used-hash",
         current_artifact_id: 10, current_sha256: "new-hash", title: "Council", published: "2026-09-22",
       }] as T[];
-      if (call === 2) return [{ segment_index: 2, start_seconds: 65, excerpt: "used words" }] as T[];
+      if (call === 2) return [{ segment_index: 2, start_seconds: 65, excerpt: "used words", caption_sha256: "used-caption-hash" }] as T[];
+      if (call === 3) return [{
+        source_segment_index: 2, segment_index: 8, start_seconds: 69,
+        excerpt: "revised words from B", caption_sha256: "current-caption-hash",
+      }] as T[];
       return [{ item: "7", segment_indexes: "[2]" }] as T[];
     };
     const evidence = await loadDraftMeetingEvidence(sql, { newsroomId: 3, draftId: 41 });
     assert.equal(evidence?.citations.length, 1);
     assert.deepEqual(evidence?.citations[0], {
       item: "7", segmentIndex: 2, timestampSeconds: 65, excerpt: "used words", captionSha256: "used-hash",
+      currentEvidence: {
+        artifactId: 10, artifactSha256: "new-hash", segmentIndex: 8, timestampSeconds: 69,
+        excerpt: "revised words from B", captionSha256: "current-caption-hash",
+      },
     });
     assert.equal(evidence?.newerTranscriptExists, true);
+  });
+
+  it("marks the B comparison unavailable when no current segment is near the used A timestamp", async () => {
+    let call = 0;
+    const sql = (async () => [] as never[]) as unknown as Sql;
+    sql.query = async <T = Record<string, unknown>>() => {
+      call += 1;
+      if (call === 1) return [{
+        artifact_id: 9, citation_snapshot: JSON.stringify([
+          { artifactId: 9, segmentIndex: 2, captionSha256: "used-hash" },
+        ]), revision_notice: "Transcript revision detected.", video_id: "meeting-1", artifact_sha256: "used-hash",
+        current_artifact_id: 10, current_sha256: "new-hash", title: "Council", published: "2026-09-22",
+      }] as T[];
+      if (call === 2) return [{ segment_index: 2, start_seconds: 65, excerpt: "used words", caption_sha256: "used-caption-hash" }] as T[];
+      if (call === 3) return [{
+        source_segment_index: 2, segment_index: null, start_seconds: null,
+        excerpt: null, caption_sha256: null,
+      }] as T[];
+      return [{ item: "7", segment_indexes: "[2]" }] as T[];
+    };
+    const evidence = await loadDraftMeetingEvidence(sql, { newsroomId: 3, draftId: 41 });
+    assert.equal(evidence?.newerTranscriptExists, true);
+    assert.equal(evidence?.citations[0]?.excerpt, "used words", "the persisted A text remains the draft's used evidence");
+    assert.equal(evidence?.citations[0]?.currentEvidence, null, "unmatched excerpts must not be presented as B");
+  });
+
+  it("shows tape time and excerpt without a false packet item for an off-agenda focus", async () => {
+    let call = 0;
+    const sql = (async () => [] as never[]) as unknown as Sql;
+    sql.query = async <T = Record<string, unknown>>(text: string) => {
+      call += 1;
+      if (call === 1) {
+        assert.match(text, /join drafts d/);
+        return [{
+          artifact_id: 9, citation_snapshot: JSON.stringify([{ artifactId: 9, segmentIndex: 197, captionSha256: "used-hash" }]),
+          revision_notice: null, video_id: "meeting-1", artifact_sha256: "used-hash",
+          current_artifact_id: 9, current_sha256: "used-hash", title: "Council", published: "2026-09-22",
+          research_json: JSON.stringify({ meetingFocus: { summary: "Off-agenda motion", visibleSegmentIndexes: [197] } }),
+        }] as T[];
+      }
+      if (call === 2) return [{ segment_index: 197, start_seconds: 1400, excerpt: "Marijuana hospitality motion", caption_sha256: "used-hash" }] as T[];
+      return [{ item: "4", segment_indexes: "[197]" }] as T[];
+    };
+    const evidence = await loadDraftMeetingEvidence(sql, { newsroomId: 3, draftId: 41 });
+    assert.equal(evidence?.citations[0]?.item, "");
+    assert.equal(evidence?.citations[0]?.timestampSeconds, 1400);
+    assert.equal(evidence?.citations[0]?.excerpt, "Marijuana hospitality motion");
   });
 
   it("migrates historical links while enforcing exactly one current link per draft", () => {

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { InkButton, SecHead, announceToDesk } from "@/components/desk-chrome";
+import { InkButton, SecHead } from "@/components/desk-chrome";
+import { announceToDesk } from "@/components/desk-chrome-utils";
 import {
   ROUTINE_NOTICE_FORMATS,
   type RoutineNoticeApproval,

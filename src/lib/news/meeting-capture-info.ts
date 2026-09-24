@@ -1,6 +1,8 @@
 export type ParsedInfoSidecar = {
   durationSeconds: number | null;
+  /** Stream/video start used to compute ended_at; distinct from YouTube upload time. */
   videoTimestamp: number | null;
+  uploadTimestamp?: number | null;
   captionRevisionTimestamp: number | null;
 };
 
@@ -12,9 +14,18 @@ function asFiniteNumber(value: unknown): number | null {
 
 export function parseInfoSidecar(raw: unknown): ParsedInfoSidecar {
   const info = (raw ?? {}) as Record<string, unknown>;
+  const timestamp = asFiniteNumber(info.timestamp);
+  const releaseTimestamp = asFiniteNumber(info.release_timestamp);
+  const liveStatus = typeof info.live_status === "string" ? info.live_status : "";
   return {
     durationSeconds: asFiniteNumber(info.duration),
-    videoTimestamp: asFiniteNumber(info.timestamp) ?? asFiniteNumber(info.release_timestamp),
+    // For a completed live stream yt-dlp's `timestamp` is when the upload was
+    // published, while `release_timestamp` is the scheduled stream start. Use
+    // the start plus duration to derive ended_at; preserve upload time separately.
+    videoTimestamp: liveStatus === "was_live"
+      ? releaseTimestamp ?? timestamp
+      : timestamp ?? releaseTimestamp,
+    uploadTimestamp: timestamp,
     captionRevisionTimestamp:
       asFiniteNumber(info.caption_revision_timestamp) ??
       asFiniteNumber(info.revision_timestamp),

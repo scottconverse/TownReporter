@@ -35,14 +35,21 @@ export type AlignmentResult = {
   identifiers, and explicit "next item" phrasing. Agenda titles are used only
   for ordering and labelling, never as the match key.
 */
-const SPOKEN_ITEM = /\b(?:agenda\s+)?item\s+(?:number\s+)?([0-9]{1,2}[A-Z]{0,3}[0-9]{0,2})\b/i;
+const SPOKEN_ITEM = /\b(?:agenda\s+)?item\s+(?:number\s+)?([0-9]{1,2}[A-Z]{0,3}[0-9]{0,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b/i;
 const SPOKEN_IDENTIFIER = /\b([OR]-\d{4}-\d{1,4})\b/i;
+const SPOKEN_NUMBER_WORDS = [
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+  "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+];
 export function spokenTransitionKey(excerpt: string): { kind: "item" | "identifier" | "next"; value: string } | null {
   const normalised = excerpt.replace(/\s+/g, " ");
   const identifier = normalised.match(SPOKEN_IDENTIFIER)?.[1];
   if (identifier) return { kind: "identifier", value: identifier.toUpperCase() };
   const item = normalised.match(SPOKEN_ITEM)?.[1];
-  if (item) return { kind: "item", value: item.toUpperCase() };
+  if (item) {
+    const word = SPOKEN_NUMBER_WORDS.indexOf(item.toLowerCase());
+    return { kind: "item", value: word >= 0 ? String(word + 1) : item.toUpperCase() };
+  }
   return null;
 }
 

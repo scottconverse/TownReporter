@@ -39,11 +39,15 @@ describe("meeting transcript artifacts Slice 3", () => {
       const sourcePath = join(root, "timed.srv3");
       writeFileSync(sourcePath, raw, "utf8");
       const insertedSegments: unknown[][] = [];
+      let artifactParams: unknown[] = [];
       const sql = (async () => [] as never[]) as unknown as Sql;
       sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
         if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
         if (/select retention_mode/i.test(text)) return [{ retention_mode: "transcript-only" }] as T[];
-        if (/insert into meeting_transcript_artifacts/i.test(text)) return [{ id: 1, captured_at: "2026-09-23T00:00:00Z" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(text)) {
+          artifactParams = params;
+          return [{ id: 1, captured_at: "2026-09-23T00:00:00Z" }] as T[];
+        }
         if (/insert into meeting_transcript_segments/i.test(text)) { insertedSegments.push(params); return [] as T[]; }
         throw new Error(`unexpected query: ${text}`);
       };
@@ -58,6 +62,8 @@ describe("meeting transcript artifacts Slice 3", () => {
         [1.25, 4, "Opening"],
         [8.5, 10, "Vote called"],
       ]);
+      assert.equal(artifactParams[12], "valid", "an absent optional info sidecar must not block a verified caption artifact");
+      assert.match(String(artifactParams[11]), /did not write an info sidecar/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -161,6 +167,126 @@ describe("meeting transcript artifacts Slice 3", () => {
       assert.match(storedB.storagePath, new RegExp(shaB));
       assert.match(inserted[0]!.infoPath!, new RegExp(inserted[0]!.infoSha256!));
       assert.match(inserted[1]!.infoPath!, new RegExp(inserted[1]!.infoSha256!));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("quarantines the real verified temp file when storage is interrupted before atomic rename", async () => {
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const { reconcileMeetingArtifactStorage } = await import("./meeting-artifact-reconciliation.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-temp-crash-"));
+    try {
+      const sourcePath = join(root, "capture.vtt");
+      const text = "WEBVTT\n\n00:00.000 --> 00:04.000\nVerified bytes before rename.\n";
+      const digest = createHash("sha256").update(text).digest("hex");
+      writeFileSync(sourcePath, text, "utf8");
+      let artifactInsertAttempts = 0;
+      let interruptedTemp = "";
+      let targetPath = "";
+      const findings: Array<{ kind: string; originalPath: string; quarantinePath: string | null }> = [];
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(query: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(query)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(query)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(query)) { artifactInsertAttempts += 1; throw new Error("the interrupted writer must not reach artifact insert"); }
+        if (/select id,storage_path,sha256,info_path,info_sha256,info_missing_reason/i.test(query)) return [] as T[];
+        if (/insert into meeting_artifact_storage_findings/i.test(query)) {
+          findings.push({ kind: String(params[2]), originalPath: String(params[3]), quarantinePath: params[4] == null ? null : String(params[4]) });
+          return [] as T[];
+        }
+        throw new Error(`unexpected query: ${query}`);
+      };
+
+      await assert.rejects(storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 82,
+        videoId: "interrupted-before-rename",
+        parsed: { text, format: "vtt", sha256: digest, sourcePath },
+      }, {
+        preserveTempOnInjectedInterruption: true,
+        beforeAtomicRename: (temporary, target) => {
+          interruptedTemp = temporary;
+          targetPath = target;
+          assert.equal(readFileSync(temporary, "utf8"), text, "the writer fsynced the complete temp before this interruption point");
+          assert.equal(createHash("sha256").update(readFileSync(temporary)).digest("hex"), digest);
+          throw new Error("simulated process stop after temp fsync and hash verification");
+        },
+      }), /simulated process stop/);
+
+      assert.equal(artifactInsertAttempts, 0, "the DB must not reference bytes until atomic rename succeeds");
+      assert.equal(existsSync(targetPath), false, "the final content-addressed path is not visible before rename");
+      assert.equal(existsSync(interruptedTemp), true, "the injected process stop leaves the real temp for recovery");
+      const reconciled = await reconcileMeetingArtifactStorage(sql, 82, {
+        orphanGraceMs: 0,
+        now: () => new Date("2026-09-23T12:00:00.000Z"),
+      });
+      assert.equal(reconciled.quarantined, 1);
+      assert.equal(existsSync(interruptedTemp), false);
+      assert.equal(findings.length, 1);
+      assert.equal(findings[0]!.kind, "stale-temporary-file");
+      assert.equal(findings[0]!.originalPath, interruptedTemp);
+      assert.ok(findings[0]!.quarantinePath);
+      assert.equal(readFileSync(findings[0]!.quarantinePath!, "utf8"), text, "recovery preserves the exact verified bytes");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers an atomic transcript file left behind when the database insert fails", async () => {
+    const { storeMeetingTranscriptArtifact } = await import("./meeting-transcript-artifacts.ts");
+    const { reconcileMeetingArtifactStorage } = await import("./meeting-artifact-reconciliation.ts");
+    const root = mkdtempSync(join(tmpdir(), "townreporter-meeting-db-crash-"));
+    try {
+      const sourcePath = join(root, "capture.vtt");
+      const text = "WEBVTT\n\n00:00.000 --> 00:04.000\nA complete verified capture.\n";
+      const digest = createHash("sha256").update(text).digest("hex");
+      writeFileSync(sourcePath, text, "utf8");
+      const attemptedArtifactPaths: string[] = [];
+      const findings: Array<{ newsroom_id: number; finding_kind: string; original_path: string; quarantine_path: string | null }> = [];
+      const sql = (async () => [] as never[]) as unknown as Sql;
+      sql.query = async <T = Record<string, unknown>>(query: string, params: unknown[] = []) => {
+        if (/select storage_root/i.test(query)) return [{ storage_root: root }] as T[];
+        if (/select retention_mode/i.test(query)) return [{ retention_mode: "transcript-only" }] as T[];
+        if (/insert into meeting_transcript_artifacts/i.test(query)) {
+          attemptedArtifactPaths.push(String(params[2]));
+          throw new Error("simulated process/database failure after atomic file publication");
+        }
+        if (/select id,storage_path,sha256,info_path,info_sha256,info_missing_reason/i.test(query)) return [] as T[];
+        if (/insert into meeting_artifact_storage_findings/i.test(query)) {
+          findings.push({ newsroom_id: Number(params[0]), finding_kind: String(params[2]), original_path: String(params[3]), quarantine_path: params[4] == null ? null : String(params[4]) });
+          return [] as T[];
+        }
+        throw new Error(`unexpected query: ${query}`);
+      };
+
+      await assert.rejects(storeMeetingTranscriptArtifact(sql, {
+        newsroomId: 81,
+        videoId: "crash-boundary-video",
+        parsed: { text, format: "vtt", sha256: digest, sourcePath },
+      }), /simulated process\/database failure/);
+
+      assert.equal(attemptedArtifactPaths.length, 1, "the SQL failure happens after the immutable file is complete");
+      const orphanPath = attemptedArtifactPaths[0]!;
+      assert.equal(readFileSync(orphanPath, "utf8"), text);
+      assert.equal(createHash("sha256").update(readFileSync(orphanPath)).digest("hex"), digest);
+
+      const reconciled = await reconcileMeetingArtifactStorage(sql, 81, {
+        orphanGraceMs: 0,
+        now: () => new Date("2026-09-23T12:00:00.000Z"),
+      });
+      assert.equal(reconciled.quarantined, 1, "reconciliation must find the complete but unregistered transcript");
+      assert.equal(existsSync(orphanPath), false, "unowned bytes leave the active artifact tree only after quarantine");
+      assert.equal(findings.length, 1);
+      assert.equal(findings[0]!.newsroom_id, 81);
+      assert.equal(findings[0]!.finding_kind, "orphan-final-file");
+      assert.equal(findings[0]!.original_path, orphanPath);
+      assert.ok(findings[0]!.quarantine_path);
+      const quarantineRoot = join(root, ".quarantine", "newsroom-81");
+      const { readdirSync } = await import("node:fs");
+      const quarantined = readdirSync(quarantineRoot);
+      assert.equal(quarantined.length, 1);
+      assert.equal(readFileSync(join(quarantineRoot, quarantined[0]!), "utf8"), text);
+      assert.ok(findings[0]!.quarantine_path!.endsWith(quarantined[0]!));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

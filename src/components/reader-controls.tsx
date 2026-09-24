@@ -1,6 +1,4 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useRef,
   useState,
@@ -9,23 +7,15 @@ import {
 } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Bookmark, Check, ExternalLink, Sun, X } from "lucide-react";
-import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
 
-type Prefs = { dark: boolean; size: number; saved: string[] };
-const defaults: Prefs = { dark: false, size: 21, saved: [] };
-const Context = createContext({
-  ...defaults,
-  ready: false,
-  update: (_value: Partial<Prefs>) => {},
-  notify: (_message: string) => {},
-});
-export const useReader = () => useContext(Context);
 export function ReaderProvider({ children }: { children: ReactNode }) {
   const paper = usePaper();
   const key = readerStorageKey(paper.name, paper.city);
-  const [prefs, setPrefs] = useState(defaults);
+  const [prefs, setPrefs] = useState(readerDefaults);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
@@ -39,7 +29,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
           : [],
       });
     } catch {
-      setPrefs(defaults);
+      setPrefs(readerDefaults);
     }
     setReady(true);
   }, [key]);
@@ -48,7 +38,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     const id = setTimeout(() => setMessage(""), 3500);
     return () => clearTimeout(id);
   }, [message]);
-  function update(value: Partial<Prefs>) {
+  function update(value: Partial<ReaderPrefs>) {
     setPrefs((prev) => {
       const next = { ...prev, ...value };
       try {
@@ -60,7 +50,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     });
   }
   return (
-    <Context.Provider value={{ ...prefs, ready, update, notify: setMessage }}>
+    <ReaderContext.Provider value={{ ...prefs, ready, update, notify: setMessage }}>
       <div
         className={`reader${prefs.dark ? " mode-dark" : ""}`}
         style={{ "--reading": `${prefs.size}px` } as CSSProperties}
@@ -72,7 +62,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
           </div>
         )}
       </div>
-    </Context.Provider>
+    </ReaderContext.Provider>
   );
 }
 export function ReaderDialog({

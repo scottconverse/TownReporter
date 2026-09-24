@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowRight, Bookmark, ExternalLink, Menu, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
 import { APP_VERSION } from "@/lib/version";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
@@ -13,10 +13,10 @@ import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
 import {
   ReaderProvider,
   ReadingButton,
-  useReader,
   ReaderDialog,
   CopyButton,
 } from "./reader-controls";
+import { useReader } from "./reader-context";
 
 export function Masthead() {
   const paper = usePaper();

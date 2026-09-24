@@ -15,11 +15,15 @@ test("reconciliation verifies rows and quarantines unowned files without deletin
     const videoDir = join(root, "newsroom-7", "video-1");
     mkdirSync(videoDir, { recursive: true });
     const validPath = join(videoDir, `transcript-${hash("valid")}.vtt`);
+    const optionalPath = join(videoDir, `transcript-${hash("optional")}.vtt`);
+    const missingSidecarPath = join(videoDir, `transcript-${hash("sidecar-missing")}.vtt`);
     const mismatchPath = join(videoDir, `transcript-${hash("expected")}.vtt`);
     const missingPath = join(videoDir, `transcript-${hash("missing")}.vtt`);
     const orphanPath = join(videoDir, `transcript-${hash("orphan")}.vtt`);
     const tempPath = join(videoDir, `transcript-${hash("temp")}.vtt.tmp-crash`);
     writeFileSync(validPath, "valid");
+    writeFileSync(optionalPath, "optional");
+    writeFileSync(missingSidecarPath, "sidecar-missing");
     writeFileSync(mismatchPath, "different");
     writeFileSync(orphanPath, "orphan");
     writeFileSync(tempPath, "partial");
@@ -35,6 +39,8 @@ test("reconciliation verifies rows and quarantines unowned files without deletin
           { id: 2, storage_path: missingPath, sha256: hash("missing"), info_path: null, info_sha256: null },
           { id: 3, storage_path: mismatchPath, sha256: hash("expected"), info_path: null, info_sha256: null },
           { id: 4, storage_path: validPath, sha256: hash("valid"), info_path: null, info_sha256: null },
+          { id: 5, storage_path: optionalPath, sha256: hash("optional"), info_path: null, info_sha256: null, info_missing_reason: "yt-dlp did not write an info sidecar for this capture" },
+          { id: 6, storage_path: missingSidecarPath, sha256: hash("sidecar-missing"), info_path: null, info_sha256: null, info_missing_reason: "info sidecar missing at storage time: C:/capture/info.json" },
         ] as T[];
       }
       if (/update meeting_transcript_artifacts/i.test(text)) {
@@ -54,8 +60,10 @@ test("reconciliation verifies rows and quarantines unowned files without deletin
     assert.equal(status.get(4), "ambiguous-path");
     assert.equal(status.get(2), "missing");
     assert.equal(status.get(3), "hash-mismatch");
-    assert.equal(result.valid, 0);
-    assert.equal(result.missing, 1);
+    assert.equal(status.get(5), "valid", "reconciliation must keep an optional sidecar absence publishable");
+    assert.equal(status.get(6), "sidecar-missing", "a sidecar that was expected but missing must stay blocked");
+    assert.equal(result.valid, 1);
+    assert.equal(result.missing, 2);
     assert.equal(result.mismatched, 1);
     assert.equal(result.ambiguous, 2);
     assert.equal(existsSync(orphanPath), false, "an unowned final file must leave the live artifact tree");

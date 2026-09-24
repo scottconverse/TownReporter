@@ -2,8 +2,9 @@ import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-ro
 import { useEffect, useState } from "react";
 import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { inkGhost, inkSolid, inputClass } from "@/components/desk-chrome";
-import { usePaper } from "@/lib/paper-context";
+import { inputClass } from "@/components/desk-chrome-utils";
+import { inkGhost, inkSolid } from "@/components/desk-chrome-utils";
+import { usePaper } from "@/lib/paper-context-state";
 import { acceptEditorInvite, deskClaimState, inviteState } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery, useQueryClient } from "@tanstack/react-query";

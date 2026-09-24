@@ -1,7 +1,7 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { ScreenPending } from "@/components/states";
-import { inkGhost, inkSolid } from "@/components/desk-chrome";
+import { inkGhost, inkSolid } from "@/components/desk-chrome-utils";
 
 export function AppErrorComponent({ error }: ErrorComponentProps) {
   return (

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSy
 import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 import { withTransaction } from "../db.ts";
-import { listChannelVideos, pickMeetingVideos, type ListedVideo } from "./youtube.ts";
+import { listChannelVideos, pickMeetingVideos, youtubeCaptureReadiness, type ListedVideo, type YoutubeCaptureReadiness } from "./youtube.ts";
 import { captureMeetingCaptions, captureMeetingAudio, requiresAudioFallback, type CaptionCaptureFailure, type CaptionCaptureResult, type AudioCaptureResult } from "./meeting-capture-ytdlp.ts";
 import { storeMeetingAudioArtifact } from "./meeting-audio-artifacts.ts";
 import { computeEndedAt } from "./meeting-capture-info.ts";
@@ -33,6 +33,10 @@ export type MeetingAwarenessResult = {
 };
 export type MeetingAwarenessDeps = {
   listChannelVideos?: typeof listChannelVideos;
+  /** Injectable to test the metadata-only preflight without contacting YouTube. */
+  captureReadiness?: (videoId: string) => Promise<YoutubeCaptureReadiness>;
+  /** Injectable path preparation keeps readiness tests away from real data roots. */
+  prepareCapturePaths?: typeof prepareMeetingCapturePaths;
   captureMeeting?: (input: { videoId: string; outputDir: string; archivePath: string; sleepSubtitles?: number; sleepRequests?: number; resume?: boolean }) => Promise<CaptionCaptureResult | CaptionCaptureFailure>;
   captureAudio?: (input: { videoId: string; outputDir: string; archivePath: string; sleepRequests?: number; resume?: boolean }) => Promise<AudioCaptureResult>;
   storeMeetingAudioArtifact?: typeof storeMeetingAudioArtifact;
@@ -281,6 +285,8 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const channels = await loadMeetingPriority(sql, newsroomId);
   if (!channels.length) return EMPTY_RESULT;
   const list = deps.listChannelVideos ?? listChannelVideos;
+  const captureReadiness = deps.captureReadiness ?? youtubeCaptureReadiness;
+  const prepareCapturePaths = deps.prepareCapturePaths ?? prepareMeetingCapturePaths;
   const capture = deps.captureMeeting ?? captureMeetingCaptions;
   const captureAudio = deps.captureAudio ?? captureMeetingAudio;
   const storeAudio = deps.storeMeetingAudioArtifact ?? storeMeetingAudioArtifact;
@@ -328,8 +334,30 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   if (beforeCapture.changed) regenerateArchive(archivePath, captured);
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
   const uncaptured = found.filter((v) => !known.has(v.id));
+  const readyToCapture: ListedMeetingVideo[] = [];
+  let skippedLiveOrUpcoming = 0;
+  let waitingForMetadata = 0;
   for (const v of uncaptured) {
-    const { archivePath, outputDir } = prepareMeetingCapturePaths(newsroomId, v.id);
+    // RSS and scheduled-stream listings often have no duration. Never start a
+    // caption download (or its audio fallback) for those ambiguous entries
+    // until player metadata or yt-dlp's metadata-only check confirms readiness.
+    // Positive-duration entries retain the existing path and avoid extra probes.
+    if (v.duration <= 0) {
+      let readiness: YoutubeCaptureReadiness = "unknown";
+      try { readiness = await captureReadiness(v.id); } catch { /* unknown is retryable below */ }
+      if (readiness === "upcoming" || readiness === "live") {
+        skippedLiveOrUpcoming += 1;
+        continue;
+      }
+      if (readiness !== "ready") {
+        waitingForMetadata += 1;
+        continue;
+      }
+    }
+    readyToCapture.push(v);
+  }
+  for (const v of readyToCapture) {
+    const { archivePath, outputDir } = prepareCapturePaths(newsroomId, v.id);
     await sql.query(
       "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,updated_at=now()",
       [newsroomId, v.id, v.channelUrl, v.title, v.published ?? ""],
@@ -453,7 +481,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const archiveText = await readArchive(archivePath);
   const reconciled = reconcileArchive(archiveText, finalRecords);
   if (reconciled.changed) regenerateArchive(archivePath, finalRecords);
-  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed`;
+  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed${skippedLiveOrUpcoming ? `, ${skippedLiveOrUpcoming} live/upcoming skipped` : ""}${waitingForMetadata ? `, ${waitingForMetadata} waiting for status metadata (will retry)` : ""}`;
   return {
     configured: true, found, uncaptured, captured: finalRecords, failed, coverageLine,
     failures: namedMeetingFailures(failures, failed),

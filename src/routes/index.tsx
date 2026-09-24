@@ -3,12 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ArrowRight, FileText, Search } from "lucide-react";
 import { PaperShell, ReaderResources } from "@/components/paper-chrome";
-import { ReaderRow, SaveStory, ReadingButton, useReader } from "@/components/reader-controls";
+import { ReaderRow, SaveStory, ReadingButton } from "@/components/reader-controls";
+import { useReader } from "@/components/reader-context";
 import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
 import { readerSearch, readMinutes } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
-import { usePaper, usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 
 export const Route = createFileRoute("/")({
   validateSearch: readerSearch,

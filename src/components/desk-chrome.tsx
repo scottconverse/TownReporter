@@ -1,12 +1,13 @@
 import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { leaveEditor } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
+import { deskShellClassName } from "@/components/desk-chrome-utils";
 
 import {
   LayoutDashboard,
@@ -53,11 +54,6 @@ const LINKS = [
 
 const MODE_KEY = "townreporter.desk.mode";
 const TEXT_SIZE_KEY = "townreporter.desk.textsize";
-
-export const inkSolid =
-  "pressable inline-flex min-h-11 items-center justify-center bg-ink px-4 text-sm font-medium text-paper hover:bg-ink-2 disabled:cursor-not-allowed disabled:opacity-50";
-export const inkGhost =
-  "pressable inline-flex min-h-11 items-center justify-center border border-ink px-4 text-sm font-medium hover:bg-paper-2 disabled:cursor-not-allowed disabled:opacity-50";
 
 function useDeskMode() {
   const [mode, setMode] = useState<"light" | "dark">("light");
@@ -107,26 +103,6 @@ function useDeskTextSize() {
     }
   }
   return { size, choose };
-}
-
-/**
- * Pure, exported for scripts/desk-text-size-render.test.mjs: the "light"
- * class the theme has always applied plus the "large" class this pass adds,
- * computed the same way DeskShell computes it. Kept as a named function
- * rather than inlined so a render test can assert the class list without
- * mounting a real DOM (no jsdom in this repo's test toolchain).
- */
-export function deskShellClassName({
-  night,
-  mode,
-  size,
-}: {
-  night?: boolean;
-  mode: "light" | "dark";
-  size: "normal" | "large";
-}) {
-  const nightPage = Boolean(night) || mode === "dark";
-  return "desk-ltr" + (nightPage ? " night" : "") + (size === "large" ? " large" : "");
 }
 
 export function DeskShell({
@@ -338,7 +314,6 @@ export function DeskShell({
     </div>
   );
 }
-
 function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -673,11 +648,6 @@ export function Field({
   );
 }
 
-export const inputClass =
-  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-2 focus:outline-offset-2 focus:outline-[var(--fg,var(--color-ink))] min-h-11";
-export const areaClass =
-  "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-2 focus:outline-offset-2 focus:outline-[var(--fg,var(--color-ink))] min-h-11";
-
 export function Score({ v }: { v: number }) {
   return (
     <span
@@ -744,31 +714,4 @@ export function Busy({ label }: { label: string }) {
       <p className="busy-label">{label}</p>
     </div>
   );
-}
-
-/**
- * Speaks through the always-mounted `#desk-announcer` live region above
- * (see the docstring on it): writing into text that's already in the
- * document, rather than mounting a notice together with its message, is
- * what makes a screen reader announce it reliably (UIUX-03). Model-picker.tsx
- * has its own private copy of the same function; this export exists so
- * newer call sites (the Follow-ups object) share one implementation.
- */
-export function announceToDesk(text: string): void {
-  if (typeof document === "undefined") return;
-  const el = document.getElementById("desk-announcer");
-  if (el) el.textContent = text;
-}
-
-export function leadOrigin(lead: {
-  investigation_id?: number | null;
-  scan_run_id?: number | null;
-  why?: string;
-  newsworthiness?: number | null;
-}) {
-  if (lead.investigation_id) return "from Dark Desk";
-  if (/DARK DESK/i.test(lead.why ?? "")) return "from Dark Desk";
-  if (lead.scan_run_id != null) return "from the scanner";
-  if ((lead.newsworthiness ?? 0) > 0) return "from the scanner";
-  return "filed by you";
 }

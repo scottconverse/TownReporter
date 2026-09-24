@@ -10,7 +10,7 @@ import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScan
 import { restoreTrashItem } from "@/lib/news/trash";
 import { mergeFocusSelection, nearDuplicate, openLeads, suggestFocusLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";

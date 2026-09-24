@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
 
 function Ornament({
   busy = false,

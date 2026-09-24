@@ -22,21 +22,71 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import pg from "pg";
-import { checkedUrl } from "./browser-guard.mjs";
 
 const { Client } = pg;
 
-const base = checkedUrl(
-  process.env.SCANFIX_BASE_URL || "http://127.0.0.1:3491",
-).replace(/\/$/, "");
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+function checkedLoopbackUrl(value, label, protocols = ["http:", "https:"]) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${label} must be a valid URL`);
+  }
+  if (!protocols.includes(parsed.protocol) || !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+    throw new Error(`${label} must use an allowed protocol and loopback host; refused ${parsed.hostname || "(none)"}`);
+  }
+  return parsed;
+}
+
+let baseUrl;
+try {
+  baseUrl = checkedLoopbackUrl(
+    process.env.SCANFIX_BASE_URL || "http://127.0.0.1:3491",
+    "SCANFIX_BASE_URL",
+  );
+} catch (err) {
+  console.error(`${err.message}. This proof only opens a disposable loopback server.`);
+  process.exit(2);
+}
+const base = baseUrl.toString().replace(/\/$/, "");
 
 const dbUrl = process.env.SCANFIX_DATABASE_URL;
 if (!dbUrl) {
   console.error("SCANFIX_DATABASE_URL is required (disposable database only).");
   process.exit(2);
 }
-const databaseName = new URL(dbUrl).pathname.replace(/^\//, "").toLowerCase();
-if (!databaseName || ["postgres", "townreporter", "townreporter_dev"].includes(databaseName)) {
+let databaseUrl;
+try {
+  databaseUrl = checkedLoopbackUrl(dbUrl, "SCANFIX_DATABASE_URL", ["postgres:", "postgresql:"]);
+} catch (err) {
+  console.error(`${err.message}. This proof must use a disposable local PostgreSQL database.`);
+  process.exit(2);
+}
+if (!["postgres:", "postgresql:"].includes(databaseUrl.protocol)) {
+  console.error("SCANFIX_DATABASE_URL must use PostgreSQL.");
+  process.exit(2);
+}
+if (["host", "hostaddr", "service"].some((key) => databaseUrl.searchParams.has(key))) {
+  console.error("SCANFIX_DATABASE_URL may not override its loopback host through query parameters.");
+  process.exit(2);
+}
+const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\//, "")).toLowerCase();
+const disposableName = /(?:^|[_-])(ci|test|scratch|disposable|accept|scan[_-]?refresh)(?:$|[_-])/.test(databaseName);
+const forbiddenDatabase = new Set([
+  "postgres",
+  "townreporter",
+  "townreporter_prod",
+  "townreporter_production",
+  "townreporter_dev",
+  "production",
+]);
+if (
+  !databaseName ||
+  forbiddenDatabase.has(databaseName) ||
+  databaseName.startsWith("townreporter_dev") ||
+  !disposableName
+) {
   console.error(`SCANFIX_DATABASE_URL must name a disposable database; refused ${databaseName || "(none)"}.`);
   process.exit(2);
 }
@@ -48,6 +98,15 @@ mkdirSync(evidenceDir, { recursive: true });
 
 const database = new Client({ connectionString: dbUrl });
 await database.connect();
+
+// Defense in depth: verify the connected server reports the requested scratch
+// database before writing any proof rows. This catches URL/connection defaults
+// and makes the target explicit in CI logs without printing credentials.
+const connectedDatabase = await database.query("select current_database() as name");
+if (String(connectedDatabase.rows[0]?.name || "").toLowerCase() !== databaseName) {
+  await database.end();
+  throw new Error(`connected to an unexpected database; expected ${databaseName}`);
+}
 
 async function sqlScalar(statement) {
   const result = await database.query(statement);
@@ -93,7 +152,8 @@ try {
 
   // (the Scan desk is opened below, after the open run exists)
 
-  const newsroomId = (await sqlScalar("select newsroom_id from newsroom_members order by newsroom_id limit 1;")) || "1";
+  const newsroomId = await sqlScalar("select newsroom_id from newsroom_members order by newsroom_id limit 1;");
+  if (!/^\d+$/.test(newsroomId)) throw new Error(`could not resolve a newsroom_id, got: ${newsroomId}`);
   const userId = await sqlScalar("select user_id from newsroom_members order by created_at limit 1;");
   if (!userId || !/^[0-9a-zA-Z-]+$/.test(userId)) throw new Error(`could not resolve a user_id, got: ${userId}`);
 

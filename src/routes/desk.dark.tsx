@@ -53,7 +53,7 @@ import {
 } from "@/lib/news/desk-copy";
 
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";

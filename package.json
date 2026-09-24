@@ -30,7 +30,7 @@
     "smoke": "node scripts/smoke-built-server.mjs",
     "test:flows": "node scripts/desk-flows-e2e.mjs",
     "test:sources": "node scripts/sources-reach-the-reader.mjs",
-    "lint": "eslint . --max-warnings 10",
+    "lint": "eslint . --max-warnings 0",
     "test:paste": "node scripts/paste-editorial-e2e.mjs",
     "test:headers": "node scripts/security-headers-e2e.mjs",
     "test:opinion": "node scripts/opinion-desk-e2e.mjs"

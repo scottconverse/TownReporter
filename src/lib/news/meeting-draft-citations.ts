@@ -17,6 +17,17 @@ export type CandidateCitation = {
   excerpt: string;
 };
 
+export type FocusedCitationInput = {
+  candidates: CandidateCitation[];
+  /** Segment IDs present in the exact focused evidence supplied to the writer. */
+  visibleSegmentIndexes: number[];
+  /** Validated focus/outcome anchors; ignored unless also visible to the writer. */
+  anchorSegmentIndexes: number[];
+  headline: string;
+  dek: string;
+  body: string;
+};
+
 /**
  * Words that carry no evidential weight on their own. Matching on these would
  * make every citation look used, which is the same as keeping all of them.
@@ -165,5 +176,170 @@ export function deriveUsedCitations(input: {
       segmentIndex: candidate.segmentIndex,
       captionSha256: candidate.captionSha256,
     }));
+}
+
+function voteOutcome(text: string): "carried" | "failed" | null {
+  if (/\b(fails|failed|rejected|denied)\b/i.test(text) || /\bvoted\s+(?:\d{1,2}\s*(?:-|to)\s*\d{1,2}\s+)?(?:to\s+)?(?:reject|deny|kill)\b/i.test(text)) return "failed";
+  if (/\b(carries|carried|passed|passes|approved|adopted)\b/i.test(text) || /\bvoted\s+\d{1,2}\s*(?:-|to)\s*\d{1,2}[^\n]{0,90}?\bto\s+(?:direct|approve|adopt|advance|revive|authorize|refer|send|return)\b/i.test(text)) return "carried";
+  return null;
+}
+
+function voteTally(text: string): string | null {
+  const digits = text.toLowerCase()
+    .replace(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => String(
+      ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"].indexOf(word),
+    ));
+  const match = digits.match(/\b(\d{1,2})\s*(?:-|to)\s*(\d{1,2})\b/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function anchorClaimAppears(candidate: CandidateCitation, draftText: string): boolean {
+  if (citationWasUsed(candidate, draftText)) return true;
+  const citedDockets = docketIdentifiers(candidate.excerpt);
+  if (citedDockets.some((identifier) => docketIdentifiers(draftText).includes(identifier))) return true;
+  const evidenceOutcome = voteOutcome(candidate.excerpt);
+  const draftOutcome = voteOutcome(draftText);
+  if (!evidenceOutcome || evidenceOutcome !== draftOutcome) return false;
+  const evidenceTally = voteTally(candidate.excerpt);
+  return evidenceTally ? voteTally(draftText) === evidenceTally : true;
+}
+
+function strongDirectMatchLength(candidate: CandidateCitation, draftText: string): number {
+  const longestRun = (source: string[], draft: string[]): number => {
+    let longest = 0;
+    for (let start = 0; start < source.length; start += 1) {
+      for (let draftStart = 0; draftStart < draft.length; draftStart += 1) {
+        let matched = 0;
+        while (start + matched < source.length && draftStart + matched < draft.length && source[start + matched] === draft[draftStart + matched]) matched += 1;
+        longest = Math.max(longest, matched);
+      }
+    }
+    return longest;
+  };
+  const meaningfulRun = longestRun(meaningfulWords(candidate.excerpt), meaningfulWords(draftText));
+  const rawSource = candidate.excerpt.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const rawDraft = draftText.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const exactRun = longestRun(rawSource, rawDraft);
+  // A verbatim phrase containing stopwords can still be conclusive, but require
+  // five contiguous words; semantic matching alone must offer three strong words.
+  if (exactRun >= 5) return exactRun;
+  // Shared topic words scattered across paragraphs are not a direct citation.
+  return meaningfulRun >= 3 ? meaningfulRun : 0;
+}
+
+function docketIdentifiers(text: string): string[] {
+  const identifiers: string[] = [];
+  const expression = /\b(?:ordinance|ord\.?|resolution|bill)\s+(?:(?:um|uh|no\.?)\s+)*((?:o\s*)?20\d{2}\s*[-–]?\s*\d{1,3})\b/gi;
+  for (const match of text.matchAll(expression)) {
+    const normalized = match[1]!.replace(/^o\s*/i, "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    if (normalized) identifiers.push(normalized);
+  }
+  return [...new Set(identifiers)];
+}
+
+function nextDocketBoundary(input: {
+  candidates: CandidateCitation[];
+  earliestAnchorIndex: number;
+  headline: string;
+  dek: string;
+  body: string;
+}): number | null {
+  // Prefer the docket named in the headline/dek, then the first docket named in
+  // the story. If the story omits it, infer the target from the earliest visible
+  // focused passage that names a docket. Never guess from a later agenda item.
+  const target = docketIdentifiers(`${input.headline}\n${input.dek}`)[0]
+    ?? docketIdentifiers(input.body)[0]
+    ?? input.candidates
+      .filter((candidate) => candidate.segmentIndex >= input.earliestAnchorIndex)
+      .sort((a, b) => a.segmentIndex - b.segmentIndex)
+      .flatMap((candidate) => docketIdentifiers(candidate.excerpt))[0];
+  if (!target) return null;
+
+  const ordered = [...input.candidates].sort((a, b) => a.segmentIndex - b.segmentIndex);
+  const targetPassage = ordered.find((candidate) =>
+    candidate.segmentIndex >= input.earliestAnchorIndex && docketIdentifiers(candidate.excerpt).includes(target),
+  );
+  if (!targetPassage) return null;
+
+  const boundary = ordered.find((candidate) =>
+    candidate.segmentIndex > targetPassage.segmentIndex &&
+    docketIdentifiers(candidate.excerpt).some((identifier) => identifier !== target),
+  );
+  return boundary?.segmentIndex ?? null;
+}
+
+/**
+ * Derive links only from transcript positions present in the writer's focused
+ * packet. Caller-supplied focus/outcome anchors are gated by visibility and by
+ * the draft asserting the claim/result. This is separate from broad-meeting
+ * derivation used by older flows.
+ */
+export function deriveFocusedUsedCitations(input: FocusedCitationInput): { segmentIndex: number; captionSha256: string }[] {
+  const visible = new Set(input.visibleSegmentIndexes.filter(Number.isInteger));
+  const visibleCandidates = input.candidates.filter((candidate) => visible.has(candidate.segmentIndex));
+  if (!visibleCandidates.length) return [];
+  const visibleAnchors = input.anchorSegmentIndexes.filter((index) => visible.has(index));
+  const earliestVisibleAnchor = visibleAnchors.length ? Math.min(...visibleAnchors) : Math.min(...visibleCandidates.map((candidate) => candidate.segmentIndex));
+  const boundary = nextDocketBoundary({
+    candidates: visibleCandidates,
+    earliestAnchorIndex: earliestVisibleAnchor,
+    headline: input.headline,
+    dek: input.dek,
+    body: input.body,
+  });
+  const eligible = visibleCandidates.filter((candidate) => boundary === null || candidate.segmentIndex < boundary);
+  if (!eligible.length) return [];
+  const text = [input.headline, input.dek, input.body].join("\n");
+  const byIndex = new Map(eligible.map((candidate) => [candidate.segmentIndex, candidate]));
+  const selected = new Map<number, CandidateCitation>();
+
+  const assertedAnchorIndexes = new Set<number>();
+  for (const index of new Set(input.anchorSegmentIndexes)) {
+    const candidate = byIndex.get(index);
+    if (candidate && anchorClaimAppears(candidate, text)) {
+      selected.set(index, candidate);
+      assertedAnchorIndexes.add(index);
+    }
+  }
+
+  // Ordinary links must sit close to a validated focus/outcome anchor and in
+  // the same agenda item. This stops broad, same-section fuzzy windows from
+  // attributing minutes or procedural chatter to a later policy action.
+  const anchorCandidates = [...assertedAnchorIndexes].map((index) => byIndex.get(index)!).filter(Boolean);
+  const anchorItems = new Set(anchorCandidates.map((candidate) => candidate.item));
+  const centerIndexes = [...assertedAnchorIndexes];
+  const earliestAnchorIndex = Math.min(...centerIndexes);
+  const localCandidates = eligible.filter((candidate) =>
+    anchorItems.has(candidate.item) && candidate.segmentIndex >= earliestAnchorIndex - 2 && centerIndexes.some((index) => Math.abs(candidate.segmentIndex - index) <= 20),
+  );
+  const distantDirectCandidates = eligible.filter((candidate) =>
+    anchorItems.has(candidate.item) && candidate.segmentIndex >= earliestAnchorIndex - 2 && strongDirectMatchLength(candidate, text) > 0,
+  );
+  const directIndexes = new Set([...localCandidates, ...distantDirectCandidates].filter((candidate) => citationWasUsed(candidate, text)).map((candidate) => candidate.segmentIndex));
+  const usedIndexes = new Set(deriveUsedCitations({
+    candidates: [...new Map([...localCandidates, ...distantDirectCandidates].map((candidate) => [candidate.segmentIndex, candidate])).values()],
+    headline: input.headline,
+    dek: input.dek,
+    body: input.body,
+  }).map((citation) => citation.segmentIndex));
+  const regularCandidates = [...new Map([...localCandidates, ...distantDirectCandidates].map((candidate) => [candidate.segmentIndex, candidate])).values()];
+  const regular = regularCandidates.filter((candidate) =>
+    (usedIndexes.has(candidate.segmentIndex) || strongDirectMatchLength(candidate, text) > 0) && !assertedAnchorIndexes.has(candidate.segmentIndex),
+  ).sort((a, b) => {
+    const directA = strongDirectMatchLength(a, text);
+    const directB = strongDirectMatchLength(b, text);
+    if (directA !== directB) return directB - directA;
+    const distanceA = Math.min(...centerIndexes.map((index) => Math.abs(a.segmentIndex - index)));
+    const distanceB = Math.min(...centerIndexes.map((index) => Math.abs(b.segmentIndex - index)));
+    return distanceA - distanceB || Number(directIndexes.has(b.segmentIndex)) - Number(directIndexes.has(a.segmentIndex)) || a.segmentIndex - b.segmentIndex;
+  });
+  const anchors = anchorCandidates.sort((a, b) =>
+    Number(Boolean(voteOutcome(b.excerpt))) - Number(Boolean(voteOutcome(a.excerpt))) || a.segmentIndex - b.segmentIndex,
+  );
+  const bounded = [...anchors, ...regular].slice(0, 20);
+  return bounded.sort((a, b) => a.segmentIndex - b.segmentIndex).map((candidate) => ({
+    segmentIndex: candidate.segmentIndex,
+    captionSha256: candidate.captionSha256,
+  }));
 }
 

@@ -9,7 +9,7 @@ import {
   withDatabase,
 } from "../test-support/pg-admin.ts";
 import { KIND_BUDGETS, effectiveBudget } from "./provider-registry.ts";
-import { cleanProviderTimeInput as pureCleanProviderTimeInput } from "./provider-settings.ts";
+import { cleanProviderTimeInput as pureCleanProviderTimeInput } from "./provider-settings-input.ts";
 
 /**
  * QA-2 (2026-09-02): a pure unit test on `cleanProviderTimeInput`'s
@@ -147,7 +147,19 @@ if (dbProbe.ok) {
 
 describe("provider_settings round-trips on a real Postgres", { skip }, () => {
   it("starts with the shipped defaults and no rows at all", async () => {
-    assert.deepEqual(await readProviderOverrides(NEWSROOM_ID), {});
+    const sql = await getSql();
+    const stored = await sql<{ count: number }>`
+      select count(*)::int as count from provider_settings where newsroom_id = ${NEWSROOM_ID}
+    `;
+    assert.equal(stored[0]?.count, 0, "a fresh newsroom must have no saved overrides");
+    const { "local-model": discoveredLocalModel, ...savedOverrides } = await readProviderOverrides(NEWSROOM_ID);
+    // A running LM Studio or Ollama server may supply a synthetic default;
+    // that is discovery, not a persisted override.
+    assert.deepEqual(savedOverrides, {});
+    if (discoveredLocalModel) {
+      assert.ok(discoveredLocalModel.localModel?.baseUrl);
+      assert.ok(discoveredLocalModel.localModel?.id);
+    }
     const rows = await providerTimeSettings(NEWSROOM_ID);
     const codex = rows.find((row) => row.providerId === "codex-balanced")!;
     assert.equal(codex.callSeconds, KIND_BUDGETS.codex.callMs / 1000);

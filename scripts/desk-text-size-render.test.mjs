@@ -101,14 +101,19 @@ const deskCopyStub = inlineModule(`
   }
 `);
 
-const { DeskShell, deskShellClassName } = await import(
+const deskChromeUtilsUrl = moduleUrl(
+  await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
+  "desk-chrome-utils.ts",
+);
+
+const { DeskShell } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
     "desk-chrome.tsx",
     {
       "@tanstack/react-router": routerStub,
       "@tanstack/react-query": reactQueryStub,
-      "@/lib/paper-context": paperContextStub,
+      "@/lib/paper-context-state": paperContextStub,
       "@/lib/auth/gates": authGatesStub,
       "@/lib/auth/client": authClientStub,
       "@/lib/auth/use-current-user": useCurrentUserStub,
@@ -117,11 +122,14 @@ const { DeskShell, deskShellClassName } = await import(
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
+      "@/components/desk-chrome-utils": deskChromeUtilsUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
   )
 );
+
+const { deskShellClassName } = await import(deskChromeUtilsUrl);
 
 test("the desk exposes accessible appearance and text size controls alongside every section", () => {
   const html = renderToStaticMarkup(

@@ -76,6 +76,9 @@ export async function validateForcedRuntime(
         "Local model is unavailable. Select a model on a known local endpoint first.",
       );
     }
+    const { probeProvider } = await import("./ai.ts");
+    const ready = await probeProvider("local-model", newsroomId, undefined, "forced");
+    if (!ready.ok) throw new Error(ready.error);
     const exactEffort = modelEffort("local-model", effort, local.override.id);
     return {
       runtime: "local",

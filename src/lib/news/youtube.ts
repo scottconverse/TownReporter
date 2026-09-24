@@ -211,7 +211,10 @@ export function pickSisterMatch<T extends { title: string }>(title: string, othe
 export function isMeetingTitle(title: string, keywords = MEETING_KEYWORDS): boolean {
   const t = title.toLowerCase();
   if (SKIP_TITLES.test(t)) return false;
-  return keywords.some((k) => t.includes(k.toLowerCase()));
+  return keywords.some((keyword) => {
+    const term = keyword.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return Boolean(term) && new RegExp(`(^|[^a-z0-9])${term}(?=$|[^a-z0-9])`).test(t);
+  });
 }
 
 export function pickMeetingVideos<T extends { title: string; duration?: number }>(
@@ -459,6 +462,52 @@ type PlayerSnapshot = {
   captionTracks: { languageCode?: string; kind?: string; baseUrl?: string }[];
 };
 
+export type YoutubeCaptureReadiness = "ready" | "upcoming" | "live" | "unknown";
+
+export function buildYtDlpCaptureReadinessArgs(videoId: string): string[] {
+  return [
+    "-m", "yt_dlp", "--skip-download", "--dump-single-json", "--no-warnings", "--no-playlist",
+    "--js-runtimes", "node", `https://www.youtube.com/watch?v=${videoId}`,
+  ];
+}
+
+export function parseYtDlpCaptureReadiness(raw: string): YoutubeCaptureReadiness {
+  try {
+    const data = JSON.parse(raw) as { live_status?: unknown; duration?: unknown };
+    if (data.live_status === "is_upcoming") return "upcoming";
+    if (data.live_status === "is_live") return "live";
+    if (data.live_status === "was_live" || data.live_status === "not_live" || data.live_status === "post_live") return "ready";
+    return typeof data.duration === "number" && Number.isFinite(data.duration) && data.duration > 0
+      ? "ready"
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+  return new Promise((resolveReadiness) => {
+    let stdout = "";
+    let settled = false;
+    const finish = (readiness: YoutubeCaptureReadiness) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveReadiness(readiness);
+    };
+    const child = spawn("python", buildYtDlpCaptureReadinessArgs(videoId), { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      if (stdout.length < 2_000_000) stdout += chunk.toString();
+    });
+    child.on("error", () => finish("unknown"));
+    child.on("close", (code) => finish(code === 0 ? parseYtDlpCaptureReadiness(stdout) : "unknown"));
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+      finish("unknown");
+    }, 20_000);
+  });
+}
+
 async function fetchPlayer(videoId: string): Promise<PlayerSnapshot | null> {
   const endpoint = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
   await assertPublicHttpUrl(endpoint);
@@ -512,6 +561,27 @@ async function fetchPlayer(videoId: string): Promise<PlayerSnapshot | null> {
     isLiveContent: Boolean(data.videoDetails?.isLiveContent),
     captionTracks: data.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [],
   };
+}
+
+/**
+ * Read only the player metadata needed to decide whether a stream can be
+ * captured yet. This does not fetch captions or media. A missing/failed player
+ * response is unknown, not evidence that the stream has ended.
+ */
+export async function youtubeCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+  let primary: YoutubeCaptureReadiness = "unknown";
+  try {
+    const player = await fetchPlayer(videoId);
+    if (player?.status === "LIVE_STREAM_OFFLINE") return "upcoming";
+    if (player?.isLiveNow) return "live";
+    // A completed live VOD has isLiveContent=true and isLiveNow=false, so it
+    // remains eligible. Only explicit upcoming/live signals block capture.
+    if (player?.status === "OK") primary = "ready";
+  } catch {
+    // Try yt-dlp's bounded metadata-only path below.
+  }
+  if (primary !== "unknown") return primary;
+  return readYtDlpCaptureReadiness(videoId);
 }
 
 export function parseTranscriptPanel(text: string): string {

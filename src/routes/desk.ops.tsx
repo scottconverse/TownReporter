@@ -1,15 +1,8 @@
 import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  DeskShell,
-  Field,
-  InkButton,
-  LeaveEditorControl,
-  SecHead,
-  announceToDesk,
-  inputClass,
-} from "@/components/desk-chrome";
+import { DeskShell, Field, InkButton, LeaveEditorControl, SecHead } from "@/components/desk-chrome";
+import { announceToDesk, inputClass } from "@/components/desk-chrome-utils";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ListSkeleton } from "@/components/states";
 import { getOpsHealth, runOpsAction } from "@/lib/ops/dashboard";
@@ -18,7 +11,7 @@ import { installAction } from "@/lib/ops/install-display";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
 import { inviteEditor, myDesk } from "@/lib/news/claim";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
 import { SectionsSetup } from "@/components/sections-setup";
 import { getPaperConfigForEditor } from "@/lib/news/paper-settings";

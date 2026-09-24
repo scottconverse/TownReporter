@@ -311,6 +311,28 @@ describe("local model discovery", () => {
     assert.equal(model?.vision, true);
   });
 
+  it("exposes each requested Ollama Cloud model from the live catalog for the picker", async () => {
+    const expected = [
+      "deepseek-v4.1-flash:cloud",
+      "glm-5.2:cloud",
+      "glm-5.3-flash:cloud",
+      "qwen3.5:397b-cloud",
+    ];
+    globalThis.fetch = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": "timeout",
+      "http://127.0.0.1:11434/v1/models": { data: expected.map((id) => ({ id })) },
+      "http://127.0.0.1:8080/v1/models": "timeout",
+      "http://127.0.0.1:11434/api/ps": { models: [] },
+      "http://127.0.0.1:11434/api/show": { capabilities: ["completion"] },
+    }) as typeof fetch;
+
+    const catalog = await withEnv({}, () => discoverLocalModels(true));
+    const ollama = catalog.servers.find((server) => server.kind === "ollama");
+    assert.ok(ollama?.reachable);
+    assert.deepEqual(ollama!.models.map((model) => model.id), expected);
+    assert.ok(ollama!.models.every((model) => model.cloud));
+  });
+
   it("marks an unknown OpenAI-compatible server's models as not vision-capable", async () => {
     globalThis.fetch = fakeFetch({
       "http://127.0.0.1:1234/v1/models": "timeout",

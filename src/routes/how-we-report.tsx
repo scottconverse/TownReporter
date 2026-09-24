@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
-import { DEFAULT_PAPER_IDENTITY, usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
+import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 
 export const Route = createFileRoute("/how-we-report")({
   /*

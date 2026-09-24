@@ -13,9 +13,11 @@ import { planAutomaticFailover, type AutomaticFailoverReason } from "./automatic
 import { modelChoiceLabel } from "./model-choice.ts";
 import type { OcrOptions } from "./ingest.ts";
 import { OCR_BATCH_PAGE_LIMIT } from "./ocr-batches.ts";
+import type { LocalModelOverride } from "./ai.ts";
 
 export type DocumentReadingRouting = {
   modelEffort?: ModelEffort | null;
+  localModel?: LocalModelOverride;
   source?: "editor" | "auto" | "scheduled";
   /** Surface-specific provider order. Opinion starts on Codex Sol and may
    * move only to Claude Sonnet; Story uses the shared Automatic ladder. */
@@ -465,7 +467,7 @@ export async function readStoryDocuments(
     [room, association[1]],
   ) as StoredDocument[];
   if (!rows.length) return "";
-  const probe: typeof probeProvider = routing.probe ?? ((next?: string) => probeProvider(next, room));
+  const probe: typeof probeProvider = routing.probe ?? ((next?: string) => probeProvider(next, room, undefined, undefined, routing.localModel));
   let activeChoice = choice;
   const ready = await probe(choice);
   if (!ready.ok) {
@@ -497,7 +499,7 @@ export async function readStoryDocuments(
     userText: string,
     maxTokens: number,
   ): Promise<Awaited<ReturnType<typeof grokChat>>> => {
-    const attempt = await runPinnedCallWithFailover({
+      const attempt = await runPinnedCallWithFailover({
       snapshot: active,
       source: routing.source ?? "editor",
       run: (snapshot) => chat(system, userText, maxTokens, {
@@ -506,6 +508,7 @@ export async function readStoryDocuments(
         timeoutMs: 180000,
         noTools: suppliedOnly,
         reasoningEffort: snapshot.modelEffort,
+        localModel: routing.localModel,
       }),
       probe,
       ladder: routing.ladder,

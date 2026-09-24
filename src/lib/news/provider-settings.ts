@@ -38,6 +38,8 @@ import {
   type ProviderOverrides,
 } from "./provider-registry.ts";
 import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
+import { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
+export { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
 
 /**
  * Idempotent runtime ensure for the PGLite preview and unit-test paths,
@@ -93,6 +95,15 @@ const LOCAL_MODEL_PROVIDER_ID = "local-model";
 export type LocalModelScope = "story" | "scan" | "opinion" | "dark" | "forced";
 const LOCAL_MODEL_SCOPES: readonly string[] = ["story", "scan", "opinion", "dark", "forced"];
 
+/** First-run model candidates; a newsroom's saved pick always takes precedence. */
+const PREFERRED_CLOUD_MODEL_BY_SCOPE: Readonly<Record<LocalModelScope, string>> = {
+  story: "deepseek-v4.1-flash:cloud",
+  scan: "deepseek-v4.1-flash:cloud",
+  opinion: "deepseek-v4.1-flash:cloud",
+  dark: "deepseek-v4.1-flash:cloud",
+  forced: "deepseek-v4.1-flash:cloud",
+};
+
 function cleanScope(value: unknown): LocalModelScope | undefined {
   return typeof value === "string" && LOCAL_MODEL_SCOPES.includes(value)
     ? value as LocalModelScope
@@ -107,6 +118,19 @@ function stillListed(
   if (!pick) return false;
   const server = catalog.servers.find((s) => s.baseUrl === pick.baseUrl);
   return Boolean(server?.models.some((m) => m.id === pick.id));
+}
+
+function preferredLocalModel(
+  scope: LocalModelScope | undefined,
+  catalog: LocalCatalog,
+): { baseUrl: string; id: string } | null {
+  if (!scope) return catalog.defaultModel;
+  const preferredId = PREFERRED_CLOUD_MODEL_BY_SCOPE[scope];
+  const server = catalog.servers.find(
+    (candidate) => candidate.kind === "ollama" && candidate.reachable &&
+      candidate.models.some((model) => model.id === preferredId),
+  );
+  return server ? { baseUrl: server.baseUrl, id: preferredId } : catalog.defaultModel;
 }
 
 /**
@@ -167,7 +191,7 @@ export async function readProviderOverrides(
   }
   try {
     const catalog = await refreshLocalCatalog();
-    const resolved = stillListed(stored, catalog) ? stored : catalog.defaultModel;
+    const resolved = stillListed(stored, catalog) ? stored : preferredLocalModel(scope, catalog);
     // "No rows at all" must mean exactly that -- an empty object, the same
     // shipped-defaults contract every other provider id already has. A
     // newsroom with no stored row and no discovered local server (the
@@ -239,15 +263,16 @@ export async function resolveLocalModelChoice(
     rawStoredLocalModel(newsroomId, scope),
     refreshLocalCatalog(),
   ]);
-  if (!stored) return { override: catalog.defaultModel, notice: null, catalog };
+  if (!stored) return { override: preferredLocalModel(scope, catalog), notice: null, catalog };
   if (stillListed(stored, catalog)) return { override: stored, notice: null, catalog };
   if (scope && await rawScopedLocalModel(newsroomId, scope)) {
     return { override: stored, notice: `${stored.id} is not reachable or listed right now. This job will keep your choice and report an error if it cannot connect.`, catalog };
   }
-  if (catalog.defaultModel) {
+  const fallback = preferredLocalModel(scope, catalog);
+  if (fallback) {
     return {
-      override: catalog.defaultModel,
-      notice: `${stored.id} is no longer on the server; using ${catalog.defaultModel.id}.`,
+      override: fallback,
+      notice: `${stored.id} is no longer on the server; using ${fallback.id}.`,
       catalog,
     };
   }
@@ -380,42 +405,6 @@ export async function providerTimeSettings(
       availableOnThisMachine: entry.enabled(),
     };
   });
-}
-
-export type SaveProviderTimeInput = {
-  providerId: string;
-  /**
-   * Seconds, as typed. `null` means "put it back to the shipped default" --
-   * that is what the Reset button sends, and it deletes the stored number
-   * rather than writing today's default into the row, so a later change to
-   * the default reaches a paper that never made a decision.
-   */
-  callSeconds: number | null;
-  /**
-   * QA-2 (2026-09-02): true when `raw.callSeconds` was present but is not a
-   * finite number (NaN, +/-Infinity, a string, an object...). Before this
-   * field existed, `cleanProviderTimeInput` collapsed every such value to
-   * `null` -- the exact same shape the Reset button sends -- so a malformed
-   * request silently wiped a stored override back to the shipped default
-   * instead of being refused. `saveProviderTime` checks this BEFORE treating
-   * `callSeconds === null` as a reset, so "field omitted / explicitly null"
-   * and "field present but garbage" are no longer the same code path.
-   */
-  invalid: boolean;
-};
-
-export function cleanProviderTimeInput(raw: unknown): SaveProviderTimeInput {
-  const v = (raw ?? {}) as Partial<SaveProviderTimeInput>;
-  const seconds = v.callSeconds;
-  const isFiniteNumber = typeof seconds === "number" && Number.isFinite(seconds);
-  return {
-    providerId: String(v.providerId ?? ""),
-    callSeconds: isFiniteNumber ? Math.round(seconds) : null,
-    // `undefined` and `null` are the Reset button's own shape, not garbage --
-    // only a PRESENT-but-not-finite value (NaN, Infinity, a string, ...) is
-    // invalid input.
-    invalid: seconds !== undefined && seconds !== null && !isFiniteNumber,
-  };
 }
 
 export type SaveProviderTimeResult =

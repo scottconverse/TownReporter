@@ -2,9 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { EmptyState, StorySkeleton } from "@/components/states";
-import { inkGhost } from "@/components/desk-chrome";
+import { inkGhost } from "@/components/desk-chrome-utils";
 import { comparePublicEvidence } from "@/lib/news/evidence";
-import { usePaperDateFormatters } from "@/lib/paper-context";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 
 type Search = { url?: string; a?: number; b?: number };
 

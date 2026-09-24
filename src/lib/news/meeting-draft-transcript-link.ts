@@ -1,4 +1,5 @@
 import type { Sql } from "../db.ts";
+import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
 
 /**
  * The writer that connects a meeting transcript to a draft.
@@ -29,20 +30,47 @@ export type DraftMeetingEvidence = {
   currentSha256: string | null;
   newerTranscriptExists: boolean;
   revisionNotice: string | null;
-  citations: { item: string; segmentIndex: number; timestampSeconds: number; excerpt: string; captionSha256: string }[];
+  acceptedReview: {
+    artifactId: number;
+    artifactSha256: string;
+    reviewedBy: string;
+    reviewedAt: string;
+    note: string;
+    citationCount: number;
+  } | null;
+  citations: {
+    item: string;
+    segmentIndex: number;
+    timestampSeconds: number;
+    excerpt: string;
+    captionSha256: string;
+    currentEvidence: {
+      artifactId: number;
+      artifactSha256: string;
+      segmentIndex: number;
+      timestampSeconds: number;
+      excerpt: string;
+      captionSha256: string;
+    } | null;
+  }[];
 };
+
+const CURRENT_SEGMENT_MATCH_TOLERANCE_SECONDS = 30;
 
 export async function loadDraftMeetingEvidence(
   sql: Sql,
   input: { newsroomId: number; draftId: number },
 ): Promise<DraftMeetingEvidence | null> {
   const [row] = await sql.query<{
-    artifact_id: number; citation_snapshot: string; revision_notice: string | null;
+    link_id: number; artifact_id: number; citation_snapshot: string; revision_notice: string | null;
     video_id: string; artifact_sha256: string; current_artifact_id: number | null; current_sha256: string | null;
-    title: string | null; published: string | null;
+    id: number; headline: string; dek: string; topic: string; body: string; source_urls: string;
+    provenance_json: string; found_note: string; unanswered: string;
+    title: string | null; published: string | null; research_json: string | null;
   }>(
-    `select l.artifact_id,l.citation_snapshot,l.revision_notice,a.video_id,a.sha256 as artifact_sha256,
-            c.title,c.published,
+    `select d.id,d.headline,d.dek,d.topic,d.body,d.source_urls,d.provenance_json,d.found_note,d.unanswered,
+            l.id as link_id,l.artifact_id,l.citation_snapshot,l.revision_notice,a.video_id,a.sha256 as artifact_sha256,
+            c.title,c.published,d.research_json,
             (select current.id from meeting_transcript_artifacts current
               where current.newsroom_id=l.newsroom_id and current.video_id=a.video_id
                 and current.artifact_type='transcript'
@@ -53,6 +81,7 @@ export async function loadDraftMeetingEvidence(
               order by current.captured_at desc,current.id desc limit 1) as current_sha256
       from meeting_draft_transcript_links l
       join meeting_transcript_artifacts a on a.id=l.artifact_id
+      join drafts d on d.newsroom_id=l.newsroom_id and d.id=l.draft_id
       left join meeting_capture_records c on c.newsroom_id=l.newsroom_id and c.video_id=a.video_id
       where l.newsroom_id=$1 and l.draft_id=$2 and l.is_current=true
       order by l.updated_at desc,l.id desc limit 1`,
@@ -68,13 +97,43 @@ export async function loadDraftMeetingEvidence(
   }
   const indices = [...new Set(snapshot.map((citation) => Number(citation.segmentIndex)).filter(Number.isInteger))];
   const segments = indices.length
-    ? await sql.query<{ segment_index: number; start_seconds: number; excerpt: string }>(
-        `select segment_index,start_seconds,excerpt from meeting_transcript_segments
+    ? await sql.query<{ segment_index: number; start_seconds: number; excerpt: string; caption_sha256: string }>(
+        `select segment_index,start_seconds,excerpt,caption_sha256 from meeting_transcript_segments
           where artifact_id=$1 and segment_index=any($2::int[])
           order by segment_index`,
         [row.artifact_id, indices],
       )
     : [];
+  const newerTranscriptExists = row.current_artifact_id != null && Number(row.current_artifact_id) !== Number(row.artifact_id);
+  const currentEvidenceRows = newerTranscriptExists && segments.length
+    ? await sql.query<{
+        source_segment_index: number;
+        segment_index: number | null;
+        start_seconds: number | null;
+        excerpt: string | null;
+        caption_sha256: string | null;
+      }>(
+        `select used.segment_index as source_segment_index,current.segment_index,current.start_seconds,
+                current.excerpt,current.caption_sha256
+           from unnest($2::int[],$3::numeric[]) as used(segment_index,timestamp_seconds)
+           left join lateral (
+             select segment_index,start_seconds,excerpt,caption_sha256
+               from meeting_transcript_segments
+              where artifact_id=$1
+                and abs(start_seconds-used.timestamp_seconds) <= $4
+              order by abs(start_seconds-used.timestamp_seconds),segment_index
+              limit 1
+           ) current on true
+          order by used.segment_index`,
+        [
+          Number(row.current_artifact_id),
+          segments.map((segment) => Number(segment.segment_index)),
+          segments.map((segment) => Number(segment.start_seconds)),
+          CURRENT_SEGMENT_MATCH_TOLERANCE_SECONDS,
+        ],
+      )
+    : [];
+  const currentBySourceSegment = new Map(currentEvidenceRows.map((evidence) => [Number(evidence.source_segment_index), evidence]));
   const chunks = await sql.query<{ item: string; segment_indexes: string }>(
     `select item,segment_indexes from meeting_agenda_chunks
       where newsroom_id=$1 and video_id=$2 and artifact_id=$3
@@ -90,21 +149,84 @@ export async function loadDraftMeetingEvidence(
       // A malformed chunk cannot invent provenance; the citation remains unlabelled.
     }
   }
+  // When the reporter could not connect an off-agenda passage to the packet
+  // title, retain its exact tape location but do not invent an item label in
+  // the editor's source block. Historical drafts have no focus metadata.
+  let focusedItem: string | null | undefined;
+  try {
+    const focus = JSON.parse(row.research_json ?? "{}").meetingFocus as { agendaItem?: unknown } | undefined;
+    if (focus && typeof focus === "object") focusedItem = typeof focus.agendaItem === "string" ? focus.agendaItem : null;
+  } catch {
+    // Malformed focus metadata cannot vouch for any agenda-item label.
+    focusedItem = null;
+  }
   const snapshotByIndex = new Map(snapshot.map((citation) => [Number(citation.segmentIndex), citation]));
+  let acceptedReview: DraftMeetingEvidence["acceptedReview"] = null;
+  if (newerTranscriptExists && row.current_artifact_id != null && row.current_sha256) {
+    const [review] = await sql.query<{
+      accepted_artifact_id: number; accepted_artifact_sha256: string; accepted_citation_snapshot: string;
+      draft_evidence_sha256: string; reviewed_by: string; resolution_note: string; reviewed_at: string;
+    }>(
+      `select accepted_artifact_id,accepted_artifact_sha256,accepted_citation_snapshot,draft_evidence_sha256,reviewed_by,resolution_note,reviewed_at
+         from meeting_draft_transcript_revision_reviews
+        where newsroom_id=$1 and draft_id=$2 and draft_link_id=$3
+          and prior_artifact_id=$4 and accepted_artifact_id=$5 and accepted_artifact_sha256=$6
+        order by reviewed_at desc,id desc limit 1`,
+      [input.newsroomId,input.draftId,row.link_id,row.artifact_id,row.current_artifact_id,row.current_sha256],
+    );
+    if (review?.reviewed_by?.trim() && review.resolution_note?.trim()
+      && review.draft_evidence_sha256 === draftEvidenceSha256(row)) {
+      const expected = snapshot.map((citation) => ({
+        artifactId: Number(citation.artifactId),
+        segmentIndex: Number(citation.segmentIndex),
+        captionSha256: String(citation.captionSha256),
+      }));
+      if (acceptedSnapshotMatchesCurrent({
+        acceptedArtifactId: Number(row.current_artifact_id),
+        acceptedArtifactSha256: row.current_sha256,
+        acceptedSnapshot: review.accepted_citation_snapshot,
+        expected,
+      })) {
+        acceptedReview = {
+          artifactId: Number(review.accepted_artifact_id),
+          artifactSha256: review.accepted_artifact_sha256,
+          reviewedBy: review.reviewed_by,
+          reviewedAt: review.reviewed_at,
+          note: review.resolution_note,
+          citationCount: expected.length,
+        };
+      }
+    }
+  }
   return {
     meeting: { videoId: row.video_id, title: row.title ?? "Meeting", date: row.published ?? "" },
     artifactId: Number(row.artifact_id),
     artifactSha256: row.artifact_sha256,
     currentArtifactId: row.current_artifact_id == null ? null : Number(row.current_artifact_id),
     currentSha256: row.current_sha256,
-    newerTranscriptExists: row.current_artifact_id != null && Number(row.current_artifact_id) !== Number(row.artifact_id),
+    newerTranscriptExists,
     revisionNotice: row.revision_notice,
+    acceptedReview,
     citations: segments.map((segment) => ({
-      item: itemBySegment.get(Number(segment.segment_index)) ?? "",
+      item: focusedItem === undefined
+        ? itemBySegment.get(Number(segment.segment_index)) ?? ""
+        : focusedItem && itemBySegment.get(Number(segment.segment_index)) === focusedItem ? focusedItem : "",
       segmentIndex: Number(segment.segment_index),
       timestampSeconds: Number(segment.start_seconds),
       excerpt: segment.excerpt,
-      captionSha256: snapshotByIndex.get(Number(segment.segment_index))?.captionSha256 ?? row.artifact_sha256,
+      captionSha256: snapshotByIndex.get(Number(segment.segment_index))?.captionSha256 ?? segment.caption_sha256 ?? row.artifact_sha256,
+      currentEvidence: (() => {
+        const current = currentBySourceSegment.get(Number(segment.segment_index));
+        if (current?.segment_index == null || current.start_seconds == null || current.excerpt == null || current.caption_sha256 == null || row.current_artifact_id == null || row.current_sha256 == null) return null;
+        return {
+          artifactId: Number(row.current_artifact_id),
+          artifactSha256: row.current_sha256,
+          segmentIndex: Number(current.segment_index),
+          timestampSeconds: Number(current.start_seconds),
+          excerpt: current.excerpt,
+          captionSha256: current.caption_sha256,
+        };
+      })(),
     })),
   };
 }

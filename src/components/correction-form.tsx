@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { usePaper } from "@/lib/paper-context";
+import { usePaper } from "@/lib/paper-context-state";
 import { correctionMailto, readerStorageKey, type CorrectionDraft } from "@/lib/reader";
 
 const blank: CorrectionDraft = { article: "", details: "", evidence: "", name: "", email: "" };
