@@ -37,6 +37,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -433,6 +434,10 @@ async function main() {
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Dek").fill("Revised fee schedule");
   await page.getByLabel("Body").fill(body);
+  // The section is a claim a person confirms, like the sources above it; the
+  // desk's Publish button stays disabled until an editor reads it and says so.
+  // See confirm-section-step.mjs.
+  await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: "Publish to the paper" }).click();
   await page.getByRole("button", { name: "Yes, print it" }).click();
   await page.getByText("On the paper").waitFor({ timeout: 30_000 });

@@ -61,6 +61,22 @@ const dbProbe = integrationRequested()
     };
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
+/**
+ * A person reading the section and confirming it, through the desk's control.
+ *
+ * Neither editor can arm Publish until the section is confirmed: since 0.6.62
+ * the server refuses an unconfirmed draft and the desk disables the button.
+ * The confirmation is recorded against the draft version on screen, so it
+ * comes after the edit the test means to publish -- and it is one newsroom's
+ * record for one draft, so a single editor's confirmation is what both
+ * contexts read back.
+ */
+async function confirmSection(page: Page) {
+  const block = page.locator("#story-topic");
+  await block.getByRole("button", { name: "Confirm this section" }).click();
+  await block.getByText(/Section confirmed for this saved draft/).waitFor({ timeout: 30_000 });
+}
+
 async function signUpAndEnter(page: Page, name: string, email: string) {
   await page.goto(`${BASE_URL}/login`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /Create the desk|Editor sign-in/ }).waitFor();
@@ -257,6 +273,13 @@ describe("two editors on one story", () => {
         .fill("A body long enough to publish, written for the race.");
       await ownerPage.getByRole("button", { name: "Save edits" }).click();
       await ownerPage.waitForTimeout(1200);
+      /*
+        The section, confirmed once, before either editor arms Publish. It is
+        the owner's confirmation because the owner wrote the body the race is
+        about, and it covers the draft version both contexts are looking at --
+        the desk shows the record rather than the button on both pages after.
+      */
+      await confirmSection(ownerPage);
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
       await editorPage.getByLabel("Body").waitFor();

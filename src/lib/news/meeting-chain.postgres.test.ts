@@ -33,6 +33,7 @@ let recheckProvisionalMeetings: typeof import("./meeting-capture.ts").recheckPro
 let applyCapturedMeetingTranscript: typeof import("./meeting-capture.ts").applyCapturedMeetingTranscript;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let performPublish: typeof import("./desk.ts").performPublish;
+let performConfirmDraftTopic: typeof import("./desk.ts").performConfirmDraftTopic;
 let closePoolForTests: typeof import("../db.ts").closePoolForTests;
 
 function capturedCaption(label: "a" | "b", captureVideoId = videoId) {
@@ -86,6 +87,23 @@ function section5For(caption: ReturnType<typeof capturedCaption>) {
   };
 }
 
+/**
+ * An editor confirming the section for the draft the desk is showing.
+ *
+ * Publication refuses while the section is unconfirmed (desk.ts), and the
+ * desk's Publish button is disabled until a person reads the section and says
+ * yes. A walkthrough that publishes has to do what the person does, so this
+ * calls the real entrypoint behind the desk's "Confirm this section" control --
+ * it reads the lead's current draft, takes the section that draft carries and
+ * records the confirmation against that exact draft version. Confirming, then
+ * rewriting the story, does not carry; see the publish gate's own tests.
+ */
+async function confirmSectionForCurrentDraft(leadId: number) {
+  const confirmed = await performConfirmDraftTopic({ userId, newsroomId }, leadId);
+  assert.equal(confirmed.ok, true, "the editor's section confirmation must be recorded");
+  return confirmed.ok ? confirmed.topic : "";
+}
+
 const housingStoryFocus = {
   candidateId: "housing-plan",
   summary: "Council approves the housing plan.",
@@ -112,7 +130,7 @@ if (probe.ok) {
     sql = await db.getSql();
     closePoolForTests = db.closePoolForTests;
     ({ runMeetingAwareness, recheckProvisionalMeetings, applyCapturedMeetingTranscript } = await vite.ssrLoadModule("/src/lib/news/meeting-capture.ts"));
-    ({ performDraftWork, performPublish } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+    ({ performDraftWork, performPublish, performConfirmDraftTopic } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
     await sql.query("insert into newsrooms(id,name) values($1,'Meeting chain')", [newsroomId]);
     await sql.query("insert into newsroom_members(newsroom_id,user_id,role) values($1,$2,'owner')", [newsroomId, userId]);
     await sql.query("insert into meeting_capture_settings(newsroom_id,storage_root,retention_mode,enabled) values($1,$2,'transcript-only',true)", [newsroomId, storageRoot]);
@@ -167,6 +185,9 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     await sql.query("alter table meeting_draft_transcript_links add constraint meeting_draft_transcript_links_draft_id_fkey foreign key(draft_id) references drafts(id) on delete cascade not valid");
     const [receipt] = await sql.query<{ result_json: string }>("select result_json from desk_jobs where id=$1", [job.id]);
     assert.equal(JSON.parse(receipt!.result_json).quality?.citationStatus, "complete", "the saved transcript link must count as a real citation");
+    // The desk will not print a section nobody read. The editor confirms the
+    // section the workbench is showing for this draft, then prints it.
+    await confirmSectionForCurrentDraft(lead.id);
     const published = await performPublish({ userId, newsroomId }, lead.id);
     assert.equal(published.ok, true);
     const [articleA] = await sql.query<{ id: number; body: string }>("select id,body from articles where newsroom_id=$1 and lead_id=$2", [newsroomId, lead.id]);
@@ -317,6 +338,11 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     };
 
     const draftA = await draftFrom("a", captionA);
+    // Draft A is the draft on screen, so this is the section the editor reads
+    // and confirms. The stale publish below must therefore reach the meeting
+    // fence -- it is refused for quoting a superseded recording, not for an
+    // unread section.
+    await confirmSectionForCurrentDraft(lead!.id);
     let enterSection5!: () => void;
     let releaseSection5!: () => void;
     const section5Entered = new Promise<void>((resolve) => { enterSection5 = resolve; });
@@ -404,6 +430,9 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     const draftB = await draftFrom("b", captionB);
     assert.notEqual(draftB.draftId, draftA.draftId);
     assert.notEqual(draftB.artifactId, draftA.artifactId);
+    // The redraft is a different version, so A's confirmation does not cover
+    // it: the editor reads B's section and confirms that one before printing.
+    await confirmSectionForCurrentDraft(lead!.id);
     const publishedB = await performPublish({ userId, newsroomId }, lead!.id);
     assert.equal(publishedB.ok, true);
     const [article] = await sql.query<{ id: number; body: string }>(
@@ -479,6 +508,10 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     );
     assert.ok(draftEvidence?.artifact_id);
     assert.ok(JSON.parse(draftEvidence!.citation_snapshot).length > 0);
+    // The editor confirms this draft's section before printing. Without it the
+    // publish returns at the section gate instead of holding the meeting lock,
+    // and the fence this test exists to prove would never be reached.
+    await confirmSectionForCurrentDraft(lead!.id);
 
     const triggerSuffix = `${process.pid}_${Date.now()}`;
     const triggerName = `tr_pause_publish_${triggerSuffix}`;

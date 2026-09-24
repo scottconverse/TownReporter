@@ -140,6 +140,25 @@ if (dbProbe.ok) {
   }, { timeout: 30_000 });
 }
 
+/**
+ * The editor's section confirmation, taken through the desk's own control.
+ *
+ * Since 0.6.62 the server refuses to print a draft whose section nobody has
+ * read (desk.ts, performPublish), and the desk disables the Publish button
+ * while it is unconfirmed. Clicking "Confirm this section" saves what is in
+ * the editor and then records the confirmation against the version it just
+ * saved, so it has to come after every edit the test means to publish --
+ * editing the body or the section afterwards puts the gate straight back.
+ */
+async function confirmSection(page: Page) {
+  const block = page.locator("#story-topic");
+  await block.getByRole("button", { name: "Confirm this section" }).click();
+  // The button is replaced by the record of what was confirmed. Waiting for
+  // that text is the proof the server accepted it, and the desk's own report
+  // that this draft version is the one covered.
+  await block.getByText(/Section confirmed for this saved draft/).waitFor({ timeout: 30_000 });
+}
+
 describe("the uncredited-source publish warning, rendered", () => {
   it("appears when a sourced outlet is never named in the body, and clears when the body names it", { skip, timeout: 120_000 }, async () => {
     if (!page) throw new Error("no browser page");
@@ -183,6 +202,10 @@ describe("the uncredited-source publish warning, rendered", () => {
       "the seeded draft body never loaded into the workbench",
     );
 
+    // The section first: the desk will not arm Publish for a draft whose
+    // section nobody has read, and the warning under test only appears once
+    // Publish is armed.
+    await confirmSection(page);
     await page.getByRole("button", { name: "Publish to the paper" }).click();
     try {
       await page

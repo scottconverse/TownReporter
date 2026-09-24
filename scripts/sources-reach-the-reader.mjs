@@ -17,6 +17,7 @@
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 const base = checkedUrl(process.env.SOURCES_BASE_URL || "http://127.0.0.1:3200").replace(/\/$/, "");
 const stamp = Date.now();
@@ -88,8 +89,24 @@ try {
   ) throw new Error("the evidence-review link did not target the original reporting notes");
   if (originalViewport) await page.setViewportSize(originalViewport);
   await confirmEvidence.click();
-  await page.waitForFunction(() => [...document.querySelectorAll("button")].some(button => button.textContent?.trim() === "Publish to the paper" && !button.disabled));
+  /*
+    The review above rewrote the draft's research notes, and the desk still
+    refuses to print -- but now for the other reason. Waiting for the desk's
+    own sentence is what proves the evidence gate cleared: this walk used to
+    wait for the Publish button itself to come alive, and since 0.6.62 the
+    section gate holds it down after the evidence one lets go, so that wait
+    could never end (CI run 36042635212). The story-changed note pointing at
+    the sources has to be gone, and "Confirm the section first" is what is
+    left.
+  */
+  await page
+    .getByText(/The story changed after its evidence was gathered/)
+    .waitFor({ state: "detached", timeout: 30_000 });
+  await page.getByText("Confirm the section first").waitFor({ timeout: 30_000 });
   step("confirmed retained evidence after body edit; publication was blocked until review");
+  // The evidence decision is part of what a section confirmation is recorded
+  // against, so the editor reads the section after it. See confirm-section-step.mjs.
+  await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: "Publish to the paper" }).first().click();
   // Publishing confirms before it prints; see lifecycle-e2e.mjs for why.
   await page.getByRole("button", { name: "Yes, print it" }).click();
