@@ -14,11 +14,20 @@
   What still holds: two people cannot both own the desk. That is a unique
   partial index in migrations/0012_newsroom_appliance.sql, not a secret.
 
+  Two things that index needs in front of it, both of which this file now does:
+  it is created at boot and then **verified against the catalog** (`create
+  index if not exists` cannot tell you whether the index is there), and a desk
+  whose index is missing refuses to hand out an owner rather than fall back on
+  a check two requests can pass at the same time. The claim itself is one
+  transaction that locks the newsroom row, re-checks for an owner, then
+  inserts, so two requests arriving together cannot both read an empty desk.
+
   The trade, stated in the README: on a fresh public deployment the first
   person to reach /login owns the desk. Sign in first.
 */
 
-import { getSql } from "../db.ts";
+import { getSql, withTransaction } from "../db.ts";
+import type { Sql } from "../db.ts";
 import { deskTakenLoginCopy } from "./desk-copy.ts";
 
 export const DEFAULT_NEWSROOM_ID = 1;
@@ -43,7 +52,47 @@ export function isGrokPreviewHost(host: string | undefined | null): boolean {
   return h === "grok.me" || h.endsWith(".grok.me") || h.endsWith(".grok-sandbox.com");
 }
 
-export async function ensureNewsroomSchema() {
+export const ONE_OWNER_INDEX = "newsroom_members_one_owner";
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Is the one-owner partial unique index really in place?
+ *
+ * Asked of the catalog rather than inferred from the DDL: `create unique index
+ * if not exists` is a silent no-op when the index is already there and equally
+ * silent when it is not -- `catch {}` around it used to be read as "PGlite may
+ * not allow the partial unique index", which was simply false (measured: PGlite
+ * accepts it and enforces it). Both backends answer `pg_indexes`. An
+ * unanswerable question is not a yes, so a failed read returns false.
+ */
+async function ownerIndexPresent(sql: Sql): Promise<boolean> {
+  try {
+    const rows = await sql.query<{ indexname: string }>(
+      `select indexname from pg_indexes where indexname = $1`,
+      [ONE_OWNER_INDEX],
+    );
+    return rows.length > 0;
+  } catch (err) {
+    console.error(`[membership] could not read pg_indexes to check ${ONE_OWNER_INDEX}: ${errText(err)}`);
+    return false;
+  }
+}
+
+/** So a broken install says so once, not once per request. */
+let saidMissingIndex = false;
+
+/**
+ * Ensure the newsroom tables, and prove the one-owner index is in place.
+ *
+ * Returns whether that index is there, because the answer decides whether an
+ * owner may be created at all (see requireEditor). A false answer is a broken
+ * install: four concurrent check-then-insert claims on an unindexed desk
+ * produced four owners (measured), so there is no safe fallback.
+ */
+export async function ensureNewsroomSchema(): Promise<boolean> {
   const sql = await getSql();
   await sql.query(`
     create table if not exists newsrooms (
@@ -79,17 +128,69 @@ export async function ensureNewsroomSchema() {
   );
   try {
     await sql.query(`
-      create unique index if not exists newsroom_members_one_owner
+      create unique index if not exists ${ONE_OWNER_INDEX}
       on newsroom_members (newsroom_id) where role = 'owner'
     `);
-  } catch {
-    /* PGLite may not allow the partial unique index; owner race is still checked in JS */
+  } catch (err) {
+    // Not swallowed and not papered over: this is the difference between one
+    // owner and four. Say what failed, then verify below whether the index is
+    // there anyway (an install can carry it from migrations/0012 while this
+    // statement fails for an unrelated reason).
+    console.error(
+      `[membership] creating ${ONE_OWNER_INDEX} failed (it may still exist from migrations/0012): ${errText(err)}`,
+    );
   }
+  const present = await ownerIndexPresent(sql);
+  if (!present && !saidMissingIndex) {
+    saidMissingIndex = true;
+    console.error(
+      `[membership] ${ONE_OWNER_INDEX} is NOT present, so this desk refuses to hand out an owner ` +
+        `(a plain check cannot stop two requests passing it at once). Repair it from ` +
+        `migrations/0012_newsroom_appliance.sql, then restart.`,
+    );
+  }
+  return present;
+}
+
+/**
+ * Take an unclaimed desk. The claim itself, with no schema step in front of it.
+ *
+ * One transaction on one connection: lock the newsroom row, re-check for an
+ * existing owner, then insert. Both halves are load-bearing. The re-check is
+ * what makes the answer right on both backends -- PGlite serialises concurrent
+ * transactions on its single connection, Postgres serialises them on this row
+ * lock -- and the lock is what makes the re-check mean anything, since without
+ * it two requests read "no owner" at the same instant and both insert.
+ *
+ * Answers null when this request did not take the desk: it was already taken,
+ * or there was no newsroom row to serialise on. A failed INSERT is deliberately
+ * NOT caught here: `withTransaction` has rolled back by then, and only the
+ * caller knows whether that was a lost race (see requireEditor).
+ *
+ * Exported so the race can be measured without the schema step -- the behavior
+ * test drops the one-owner index to show that the lock alone holds.
+ */
+export async function claimFirstOwner(userId: string): Promise<EditorContext | null> {
+  return withTransaction<EditorContext | null>(async (tx) => {
+    const locked = await tx<{ id: number }>`
+      select id from newsrooms where id = ${DEFAULT_NEWSROOM_ID} for update
+    `;
+    if (!locked[0]) return null;
+    const taken = await tx<{ c: number }>`
+      select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
+    `;
+    if ((taken[0]?.c ?? 0) > 0) return null;
+    await tx`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${userId}, 'owner', ${DEFAULT_NEWSROOM_ID})
+    `;
+    return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
+  });
 }
 
 /** First signed-in user on an empty desk becomes owner. Later identities are 403. */
 export async function requireEditor(userId: string): Promise<EditorContext> {
-  await ensureNewsroomSchema();
+  const oneOwnerIndex = await ensureNewsroomSchema();
   const sql = await getSql();
   const mine = await sql<{ role: string; newsroom_id: number }>`
     select role, newsroom_id from newsroom_members where user_id = ${userId} limit 1
@@ -97,19 +198,21 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
   if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
     return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
-  const n = await sql<{ c: number }>`
-    select count(*)::int as c from newsroom_members where newsroom_id = ${DEFAULT_NEWSROOM_ID}
-  `;
-  if ((n[0]?.c ?? 0) === 0) {
+  if (oneOwnerIndex) {
     try {
-      await sql`
-        insert into newsroom_members (user_id, role, newsroom_id)
-        values (${userId}, 'owner', ${DEFAULT_NEWSROOM_ID})
+      const claimed = await claimFirstOwner(userId);
+      if (claimed) return claimed;
+    } catch (err) {
+      // The claim's INSERT was refused. With the one-owner index in place that
+      // means the desk was taken while this request waited for the lock -- but
+      // only a real owner makes it that. Ask the database who holds the desk:
+      // if nobody does, this is a genuine failure and it is rethrown rather
+      // than turned into a polite refusal.
+      const held = await sql<{ c: number }>`
+        select count(*)::int as c from newsroom_members
+        where newsroom_id = ${DEFAULT_NEWSROOM_ID} and role = 'owner'
       `;
-      return { role: "owner", newsroomId: DEFAULT_NEWSROOM_ID };
-    } catch {
-      // Another request may have claimed the same owner, or a different owner.
-      // The database uniqueness constraint decides; re-read this identity below.
+      if ((held[0]?.c ?? 0) === 0) throw err;
     }
   }
   const again = await sql<{ role: string; newsroom_id: number }>`
@@ -117,6 +220,14 @@ export async function requireEditor(userId: string): Promise<EditorContext> {
   `;
   if (again[0]?.role === "owner" || again[0]?.role === "editor") {
     return { role: again[0].role, newsroomId: again[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
+  }
+  if (!oneOwnerIndex) {
+    // Fail closed. Falling back to the old count-then-insert would hand the desk
+    // to two simultaneous requests, which is the exact hole the index closes.
+    throw new ForbiddenError(
+      "This desk cannot hand out an owner right now: its one-owner index is missing. " +
+        "The server log names what to repair.",
+    );
   }
   throw new ForbiddenError();
 }
@@ -290,8 +401,11 @@ export async function leaveAsEditor(userId: string): Promise<void> {
 /**
  * Claim an unclaimed desk. First account in owns it.
  *
- * The uniqueness guarantee lives in the database, not here: a unique partial
- * index on the owner row means a concurrent second claim loses.
+ * The guarantee lives in the database on two levels, not here: the claim is one
+ * transaction holding the newsroom row's lock (so a concurrent claimant re-reads
+ * the desk after the first one commits), and a unique partial index on the owner
+ * row backstops any writer that does not go through this path. An install whose
+ * index is missing refuses the claim instead of trusting the re-check alone.
  */
 export async function claimOwner(userId: string): Promise<EditorContext> {
   return requireEditor(userId);
