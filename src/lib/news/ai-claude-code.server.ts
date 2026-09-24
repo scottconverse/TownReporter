@@ -32,7 +32,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assertNotAnArgument } from "./voice.server.ts";
-import { spawnPlan } from "./cli-spawn.server.ts";
+import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { CLAUDE_CLI_EFFORTS, type ModelEffort } from "./provider-registry.ts";
 
@@ -117,7 +117,10 @@ export async function findClaudeCli(): Promise<string | null> {
   for (const candidate of claudeCliCandidates()) {
     try {
       await access(candidate);
-      resolvedBin = candidate;
+      // `access()` resolves a relative CLAUDE_CLI_PATH against this process's
+      // cwd, but every call below is spawned from TMPDIR/TEMP. Absolute here,
+      // or the path that was found and the path that is executed differ.
+      resolvedBin = resolveCliPath(candidate);
       return resolvedBin;
     } catch {
       /* try the next one */

@@ -2,7 +2,7 @@ import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { spawnPlan } from "./cli-spawn.server.ts";
+import { resolveCliPath, spawnPlan } from "./cli-spawn.server.ts";
 import type { ChatResult, ChatResultMetadata } from "./ai-result-metadata.ts";
 import { modelEffortsForModel, type ModelEffort } from "./provider-registry.ts";
 
@@ -93,7 +93,10 @@ async function exists(file: string): Promise<boolean> {
 
 export async function findCodexCli(): Promise<string | null> {
   const named = process.env.CODEX_CLI_PATH?.trim();
-  if (named && (await exists(named))) return named;
+  // `exists()` resolves a relative path against this process's cwd; every
+  // draft call is spawned with `cwd: tmpdir()`. Absolute before it leaves
+  // here, or the two disagree and the CLI is never actually started.
+  if (named && (await exists(named))) return resolveCliPath(named);
   const appData = process.env.APPDATA?.trim();
   if (appData) {
     const vendor = path.join(
