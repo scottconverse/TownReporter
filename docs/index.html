@@ -480,6 +480,16 @@
         color: var(--muted);
         margin: 10px 0 0;
       }
+      /* A wide diagram is unreadable at phone width. The caption is the way out
+         to the SVG itself; on a wide screen the picture is already legible. */
+      .diagram-open {
+        display: none;
+      }
+      @media (max-width: 860px) {
+        .diagram-open {
+          display: block;
+        }
+      }
 
       .steps {
         counter-reset: s;
@@ -1087,11 +1097,18 @@
           </p>
         </div>
         <figure style="margin: 24px 0 0">
-          <img
-            src="diagrams/meeting-to-story.svg"
-            alt="Flowchart: a meeting recording is captured, becomes a Queue lead, takes a direction and a bounded draft with used citations, passes the publication gate and reaches the paper."
-            style="width: 100%; max-width: 757px; margin: 0 auto; border: 1px solid var(--rule); display: block"
-          />
+          <a href="diagrams/meeting-to-story.svg" style="display: block">
+            <img
+              src="diagrams/meeting-to-story.svg"
+              alt="Flowchart: a meeting recording is captured, becomes a Queue lead, takes a direction and a bounded draft with used citations, passes the publication gate and reaches the paper."
+              style="width: 100%; max-width: 757px; margin: 0 auto; border: 1px solid var(--rule); display: block"
+            />
+          </a>
+          <figcaption class="cap diagram-open" style="text-align: center">
+            <a href="diagrams/meeting-to-story.svg" style="color: var(--rust)"
+              >Open the diagram full size</a
+            >
+          </figcaption>
         </figure>
         <ul class="limits" style="max-width: 64ch; margin-top: 22px">
           <li>
@@ -1126,7 +1143,7 @@
           The installation target is under an hour; the release records measured timings and limits.
         </p>
         <p>
-          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.54">Windows download · 0.6.54</a>
+          <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/tag/v0.6.61">Windows download · 0.6.61</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/releases/latest">Latest stable Windows</a>
           <a class="btn" href="https://github.com/scottconverse/TownReporter/blob/main/docs/windows-install.md">Installation guide</a>
         </p>
@@ -1283,7 +1300,9 @@ npm run dev
             meeting channels or local title vocabulary from a city name. The owner supplies them.
           </li>
           <li><b>Dark Desk has no publish button.</b> Its speculative signals and structured verification still require editorial judgment. The travel-local five-topic exercise was executed in the isolated 0.6.52+ candidate: eight bounded runs, including the September 3-8 replay. That is not a Halo-local or production acceptance exercise.</li>
-              <li><b>0.6.54:</b> custom scan source selection; saved reusable source packs; honest per-run coverage accounting (selected, attempted, fetched, failed, analysed, batches) with failed sources named; bounded batch analysis replacing a single truncated pass; real paged scan history with a true total; and section source counts with manual bulk assignment.</li>
+          <li><b>0.6.61:</b> a running Scan page row finishes without a reload; meeting recordings file transcript evidence into the Queue, generate a bounded draft, and persist only the citations the draft actually used, shown separately from the broader material it considered; an editor sets a story direction before drafting or redrafting, and a named ordinance or resolution is anchored to its recorded passage. Transcript revisions are immutable and content-addressed, and a draft tied to an older recording, a missing link, malformed used citations or a hash mismatch blocks publication rather than guessing. If a revised transcript arrives after publication, the printed article and its original evidence stay unchanged and one high-priority review shows the old and current artifacts. Pulled notes stay leads to verify, not independent evidence, and the editor still decides what prints.</li>
+          <li><b>0.6.60:</b> the paper watches city YouTube channels, captures captions for governance meetings, keeps the transcript as a local artifact with a SHA-256 and sidecar provenance, and reads the result the way an editor needs it &mdash; which meeting, which agenda item, which timestamp, and the verbatim words &mdash; with citations that carry the agenda item. Capture is captions-first, with an audio fallback that records its trigger reason. Vote extraction refuses to guess and reports &ldquo;not established&rdquo;, and alignment fails honestly with a named reason instead of inventing item boundaries. The unattended clock can run the whole chain, and a second pass leaves existing captures byte-identical.</li>
+          <li><b>0.6.54:</b> custom scan source selection; saved reusable source packs; honest per-run coverage accounting (selected, attempted, fetched, failed, analysed, batches) with failed sources named; bounded batch analysis replacing a single truncated pass; real paged scan history with a true total; and section source counts with manual bulk assignment.</li>
           <li><b>0.6.52:</b> effort controls; preferred-first model routing with requested/actual model and effort receipts; terminal refusals; no automatic Opus; editable Daily scan settings; existing-Gemini migration; Grok repair; batch Redraft; job-history health copy; and direct readable-PDF intake are in source. Generic/Dark image OCR checkpoints bounded 12-page calls and resumes only unread pages when the editor selects <b>Read entire PDF</b>; the Windows lifecycle repair still cannot safely clean detached children after a root crash. The release record does not assert GitHub publication, deployment, a fresh Windows packaged-install result, or live-model proof.</li>
           <li><b>0.6.50:</b> Ollama Cloud models are labeled as hosted inference with their reported context window, and DeepSeek V4 Story drafting preserves the output budget for the actual draft.</li>
           <li><b>0.6.49:</b> Direct SuperGrok OAuth and newsroom Gemini connections join the shared model picker; Dark Desk develops leads within explicit run budgets, reporting Pull persists progress and partial documents, and Automatic can recover uploaded-document work after a technical provider failure.</li>
