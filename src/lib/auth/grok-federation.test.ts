@@ -50,9 +50,9 @@ import {
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 /** A server with no Grok configuration of any kind. */
-const PORT_PLAIN = 3862;
+const PORT_PLAIN = 3868;
 /** The same build, the sandbox preview's explicit opt-in. */
-const PORT_PREVIEW = 3863;
+const PORT_PREVIEW = 3870;
 
 /**
  * Every Grok variable, explicitly emptied.
