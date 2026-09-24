@@ -8,12 +8,31 @@ const records = [
   { videoId: "bbbbbbbbbbb", channelUrl: "https://youtube.com/@city", title: "Board 1", published: "2026-01-02", status: "not-captured" as const },
 ];
 
+/**
+ * The path segments `full` sits at, below `root`.
+ *
+ * `meetingArchivePath` and `meetingCaptionDir` build a real filesystem path
+ * with `path.join`, so the separator is the host's: `\` on Windows, `/` on
+ * Linux. Asserting one literal string therefore only passed on Windows, and CI
+ * runs Linux. Compare what the path actually means -- the segments under the
+ * resolved root -- so the invariant holds on both.
+ */
+function segmentsBelow(root: string, full: string): string[] {
+  return full.slice(root.length).split(/[\\/]+/).filter(Boolean);
+}
+
 describe("meeting capture archive is a regenerable cache", () => {
   it("uses the installer-owned data root for runtime capture files", () => {
     const root = meetingRuntimeRoot({ TOWNREPORTER_DATA_ROOT: "C:\\TownReporterData", TOWNREPORTER_DATA_DIR: "C:\\Legacy" }, "C:\\App");
     assert.equal(root, "C:\\TownReporterData");
-    assert.equal(meetingArchivePath(7, root), "C:\\TownReporterData\\meeting-capture\\newsroom-7\\yt-dlp-archive.txt");
-    assert.equal(meetingCaptionDir(7, root), "C:\\TownReporterData\\meeting-captions\\newsroom-7");
+    // Both files must land under the installer-owned root -- not under the
+    // source-run fallback (`C:\App`) -- and in the documented layout.
+    const archive = meetingArchivePath(7, root);
+    assert.equal(archive.startsWith(root), true, `archive must live under the data root: ${archive}`);
+    assert.deepEqual(segmentsBelow(root, archive), ["meeting-capture", "newsroom-7", "yt-dlp-archive.txt"]);
+    const captions = meetingCaptionDir(7, root);
+    assert.equal(captions.startsWith(root), true, `caption folder must live under the data root: ${captions}`);
+    assert.deepEqual(segmentsBelow(root, captions), ["meeting-captions", "newsroom-7"]);
   });
 
   it("keeps legacy and source-run fallbacks explicit", () => {
