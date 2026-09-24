@@ -1,5 +1,4 @@
 import { assertPublicHttpUrl, fetchPublicHttp } from "./fetch-url.ts";
-import { spawn } from "node:child_process";
 import { htmlToPlainText } from "./html-text.ts";
 
 /** Same ceiling as ingest ARCHIVE_TEXT_CAP. Retrieval slices; storage does not. */
@@ -337,7 +336,8 @@ export function parseYtDlpChannelJson(raw: string, tab: ListedVideo["tab"]): Lis
   return rows;
 }
 
-function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos"): Promise<ListedVideo[]> {
+async function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos"): Promise<ListedVideo[]> {
+  const { spawn } = await import("node:child_process");
   const base = channelUrl.replace(/\/(videos|streams|featured|playlists|about)\/?$/, "").replace(/\/$/, "");
   const target = `${base}/${tab}`;
   return new Promise((resolveRows) => {
@@ -485,7 +485,8 @@ export function parseYtDlpCaptureReadiness(raw: string): YoutubeCaptureReadiness
   }
 }
 
-function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+async function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+  const { spawn } = await import("node:child_process");
   return new Promise((resolveReadiness) => {
     let stdout = "";
     let settled = false;

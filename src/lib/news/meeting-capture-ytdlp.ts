@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -240,6 +239,7 @@ async function runYtdlp(
   cwd: string,
   control: CaptureControl = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }> {
+  const { spawn } = await import("node:child_process");
   return await new Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }>((resolvePromise, reject) => {
     const child = spawn("python", argv, {
       cwd,
