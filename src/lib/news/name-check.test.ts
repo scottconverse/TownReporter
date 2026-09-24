@@ -172,6 +172,67 @@ test("a surname shared by two full names remains unresolved and visible", async 
   assert.match(surname.reason,/ambiguous/i);
 });
 
+// The real text of lead 206's redraft (drafts 161/162, longmont council
+// zREvH6v072E). The saved copy replaced "Daryl Han" once, left bare "Han" in
+// five later paragraphs, and left "introduced himself on the recording as an
+// unidentified speaker, electric utility director at Longmont Power, said" —
+// a speaker who introduces himself as unidentified. Verbatim pre-mask body.
+const redraft162Body = [
+  "Longmont Power has replaced a little over 5,000 feet of underground cable so far this year against an annual goal of about 100,000 feet, the utility's electric director told the City Council at its Sept. 22, 2026 regular session.",
+  "",
+  "The director, who introduced himself on the recording as Daryl Han, electric utility director at Longmont Power, said the work is being done with one maintenance crew. \"So by the end of the year, we'll be about 10% of our goal for the year, which means next year we're already 90% behind, if you will,\" he said. \"And that just continues to compound year after year.\"",
+  "",
+  "That compounding is the reason the number matters to ratepayers. Han tied the shortfall directly to future budget requests: \"as we come to you each year asking for additional budget, it's going to be thrown at this maintenance crew um predominantly.\" He said other priorities would also be funded, but that maintenance is where the added money would mainly go.",
+  "",
+  "Han framed the cable work as one piece of a reliability push the council has already funded. He said the council previously helped the utility add a maintenance crew whose focus is upgrading equipment and improving reliability, and that the 2027 budget request continues the maintenance program. He described the utility's goals as a \"three-legged stool\" balanced across reliability, affordability and sustainability, with safety embedded in the work.",
+  "",
+  "On reliability metrics, Han said the 2026 figures looked lower in the first two quarters but that the summer quarter would push outage frequency and duration up significantly. \"So you may have experienced outages yourself this summer or have heard about them,\" he said. \"That is something that we are aware of.\"",
+  "",
+  "He also placed the electric work alongside council priorities, citing increased system capacity tied to Vance Brand airport and future aviation development, a planned microgrid with Front Range Community College centered on its downtown campus, and transmission and substation upgrades with Flat River.",
+  "",
+  "Han said Longmont Power has been operating for about 125 years and serves more than 50,000 meters, most of them advanced metering infrastructure meters with some legacy meters remaining.",
+  "",
+  "No council member asked a question after the presentation. The presiding comment on the recording was that no one was in the queue, and the council moved on to the next budget presentation.",
+  "",
+  "The council took no vote on the cable figures or the maintenance program during this item; the presentation was part of the city's budget overview. The recording does not state a dollar amount for the 2027 electric budget request, a target date for closing the cable backlog, or how many additional crews would be needed to reach 100,000 feet a year.",
+  "",
+  "What happens next: the maintenance figures are part of the budget material the council is reviewing, and Han said the utility would return in future years asking for additional budget aimed predominantly at the maintenance crew.",
+].join("\n");
+test("the real redraft-162 speaker text masks the full name, its later surname mentions and the introduced-as clause", () => {
+  const masked = polishMaskedMeetingIdentities(maskUnverifiedMeetingIdentity(redraft162Body, "Daryl Han"));
+  assert.doesNotMatch(masked, /Daryl|\bHan\b/);
+  assert.match(masked, /^Longmont Power has replaced a little over 5,000 feet of underground cable so far this year/);
+  assert.match(masked, /The director, who introduced himself on the recording, said the work is being done with one maintenance crew\./);
+  assert.doesNotMatch(masked, /electric utility director at Longmont Power/);
+  // Five later bare-surname references; the introduction's own mask is absorbed
+  // by the readable "introduced himself on the recording" clause.
+  assert.equal((masked.match(/unidentified speaker/gi) ?? []).length, 5);
+  assert.match(masked, /"as we come to you each year asking for additional budget, it's going to be thrown at this maintenance crew um predominantly\."/);
+  assert.match(masked, /"That is something that we are aware of\."/);
+});
+test("a bare surname another reviewed person also uses stays visible while the full name is masked", () => {
+  const text = 'Daryl Han reported the cable figures. Maria Han seconded the motion. Han said the count continued. Han wrote "Han said so". [Han](https://example.test) Daryl added a chart.';
+  const masked = polishMaskedMeetingIdentities(maskUnverifiedMeetingIdentity(text, "Daryl Han", { otherNames: ["Maria Han"] }));
+  assert.equal(masked, 'An unidentified speaker reported the cable figures. Maria Han seconded the motion. Han said the count continued. Han wrote "Han said so". [Han](https://example.test) an unidentified speaker added a chart.');
+});
+test("meeting masking keeps a surname a written source verified for another person", async () => {
+  const draft={headline:"Daryl Han reports cable figures",dek:"",body:"Daryl Han reported the cable figures. Maria Han seconded the motion."};
+  const source={...doc,url:"https://longmontcolorado.gov/uploads/council-agenda.pdf",title:"City Council Agenda",text:"Maria Han, Longmont City Council",version_id:133};
+  const result=await checkStoryNames({draft,city:"Longmont",domains:["longmontcolorado.gov"],docs:[source],searchAllowed:false,maskUnverifiedMeetingIdentities:true,timeLeft:()=>100000,search:async()=>[],open:async()=>{},chat:async(_system,user)=>{
+    if(user===nameCheckText(draft)) return {ok:true,text:JSON.stringify({complete:true,people:[
+      {name:"Daryl Han",role:"electric utility director",context:"Daryl Han reported the cable figures."},
+      {name:"Maria Han",role:"Longmont City Council",context:"Maria Han seconded the motion."},
+    ]})};
+    return {ok:true,text:JSON.stringify({checks:[
+      {name:"Daryl Han",status:"unresolved",reason:"No written roster confirms this name."},
+      {name:"Maria Han",status:"matched",spelling:"Maria Han",url:source.url,excerpt:source.text,authority:"official-record",samePerson:true,reason:"The official agenda names the same council member."},
+    ]})};
+  }});
+  assert.deepEqual(result.check.rows.map(row=>row.status),["unresolved","matched"]);
+  assert.equal(result.draft.body,"An unidentified speaker reported the cable figures. Maria Han seconded the motion.");
+  assert.equal(result.draft.headline,"An unidentified speaker reports cable figures");
+});
+
 test("unexpected resolver failures return a safe diagnostic and invoke the editor hook", async () => {
   const diagnostics: unknown[]=[];
   const result=await checkStoryNames({draft:{headline:"Harold Dominguez",dek:"",body:"Harold Dominguez spoke."},city:"Longmont",domains:[],docs:[],searchAllowed:false,timeLeft:()=>100000,search:async()=>[],open:async()=>{},onDiagnostic:async diagnostic=>{diagnostics.push(diagnostic);},chat:async()=>{throw new Error("private document text must not escape");}});

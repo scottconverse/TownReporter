@@ -114,27 +114,83 @@ export function replaceName(text: string, from: string, to: string): string {
     part.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped(from)}(?![\\p{L}\\p{N}])`, "gu"), () => to),
   ).join("");
 }
+export type MaskIdentityOptions = {
+  /**
+   * Full names of the other people this check reviewed. A bare surname or given
+   * name that another reviewed person also uses is left visible, because the
+   * mention cannot be attributed to one of them safely.
+   */
+  otherNames?: string[];
+};
+const QUOTES_AND_LINKS = /("[^"\n]*"|“[^”]*”|\[[^\]]*\]\([^)]*\))/g;
+const CAPITALIZED_WORD = /(?:^|[^\p{L}\p{N}])[\p{Lu}][\p{L}'-]*\s+$/u;
+const TITLE_BEFORE = new RegExp(`(?:^|[^\\p{L}\\p{N}])${IDENTITY_TITLE}\\s+$`, "iu");
+const STARTS_FULL_NAME = /^\s+[\p{Lu}][\p{L}'-]*/u;
+/** Tokens this person shares with somebody else the check reviewed. */
+function sharedBareTokens(parts: string[], otherNames: string[]): Set<string> {
+  const others = new Set<string>();
+  for (const other of otherNames) {
+    const otherParts = other.trim().split(/\s+/).filter(Boolean);
+    if (!otherParts.length) continue;
+    others.add(otherParts[0]!.toLocaleLowerCase());
+    others.add(otherParts.at(-1)!.toLocaleLowerCase());
+  }
+  return new Set([parts[0]!, parts.at(-1)!].map(token => token.toLocaleLowerCase()).filter(token => others.has(token)));
+}
+function identityPattern(value: string): RegExp {
+  const identity = String.raw`(?:(?:${IDENTITY_TITLE})\s+){0,5}`;
+  const suffix = String.raw`(?:\s*,?\s*(?:the\s+)?(?:(?:${IDENTITY_TITLE})\s*){1,5}(?:,\s*)?)?`;
+  return new RegExp(`(?<![\\p{L}\\p{N}])${identity}${escaped(value)}${suffix}(?![\\p{L}\\p{N}])`, "giu");
+}
+function maskOccurrences(part: string, pattern: RegExp, bare: boolean): string {
+  const speaker = (before: string) => /(?:^|[.!?]\s+)$/.test(before) ? "An unidentified speaker" : "an unidentified speaker";
+  return part.replace(pattern, (match: string, offset: number) => {
+    if (bare) {
+      const before = part.slice(0, offset);
+      const after = part.slice(offset + match.length);
+      // Never mask one word of somebody else's full name: "Eugene" in "Eugene
+      // Meier", or "Han" left over inside "Daryl Han". A title immediately in
+      // front ("Council Member Han") is part of this person's reference, not of
+      // another name, and is consumed with the mask.
+      if (CAPITALIZED_WORD.test(before) && !TITLE_BEFORE.test(before)) return match;
+      if (STARTS_FULL_NAME.test(after)) return match;
+    }
+    return speaker(part.slice(0, offset));
+  });
+}
 /**
  * Keep the draft readable without presenting transcript-derived identities as
  * established facts. Role words are removed only when directly attached to the
- * unresolved name. Quoted words and links remain byte-for-byte intact; the
- * editor-facing note explains that quoted names still need identity review.
+ * unresolved name. A full name masks its later bare surname and given-name
+ * references too, so the unverified name does not survive in a shorter form;
+ * a bare token somebody else in the draft also uses is left visible. Quoted
+ * words and links remain byte-for-byte intact; the editor-facing note explains
+ * that quoted names still need identity review.
  */
-export function maskUnverifiedMeetingIdentity(text: string, name: string): string {
-  if (!name.trim()) return text;
-  const identity = String.raw`(?:(?:${IDENTITY_TITLE})\s+){0,5}`;
-  const suffix = String.raw`(?:\s*,?\s*(?:the\s+)?(?:(?:${IDENTITY_TITLE})\s*){1,5}(?:,\s*)?)?`;
-  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${identity}${escaped(name)}${suffix}(?![\\p{L}\\p{N}])`, "giu");
-  return text.split(/("[^"\n]*"|“[^”]*”|\[[^\]]*\]\([^)]*\))/g).map((part, index) => index % 2 ? part :
-    part.replace(pattern, (_match, offset: number) => /(?:^|[.!?]\s+)$/.test(part.slice(0, offset)) ? "An unidentified speaker" : "an unidentified speaker"),
-  ).join("");
+export function maskUnverifiedMeetingIdentity(text: string, name: string, options: MaskIdentityOptions = {}): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return text;
+  const shared = parts.length > 1 ? sharedBareTokens(parts, options.otherNames ?? []) : new Set<string>();
+  const patterns: { pattern: RegExp; bare: boolean }[] = [{ pattern: identityPattern(parts.join(" ")), bare: false }];
+  for (const token of parts.length > 1 ? [...new Set([parts.at(-1)!, parts[0]!])] : []) {
+    if (!shared.has(token.toLocaleLowerCase())) patterns.push({ pattern: identityPattern(token), bare: true });
+  }
+  return text.split(QUOTES_AND_LINKS)
+    .map((part, index) => index % 2 ? part : patterns.reduce((current, step) => maskOccurrences(current, step.pattern, step.bare), part))
+    .join("");
 }
 /** Repair only mechanical grammar created by identity masking, outside quotes. */
 export function polishMaskedMeetingIdentities(text: string): string {
-  return text.split(/("[^"\n]*"|“[^”]*”|\[[^\]]*\]\([^)]*\))/g).map((part, index) => {
+  return text.split(QUOTES_AND_LINKS).map((part, index) => {
     if (index % 2) return part;
     return part
       .replace(/\bby the name an unidentified speaker\b/gi, "whose name was not verified")
+      // "introduced himself on the recording as Daryl Han, electric utility
+      // director at Longmont Power, said" masks its name and leaves the role
+      // hanging in an appositive that reads as a second person. The name and
+      // the role attached to it go together, so the clause goes with them.
+      .replace(/\s+(?:as|named)\s+an unidentified speaker\s*,\s*([^,.;:!?]{1,80})\s*,/gi,
+        (match, role: string) => IDENTITY_WORDS.test(role) ? "," : match)
       .replace(/\ban unidentified speaker, an unidentified speaker and an unidentified speaker\b/gi, (match) =>
         /^[A-Z]/.test(match) ? "Three unidentified speakers" : "three unidentified speakers")
       .replace(/\ban unidentified speaker and an unidentified speaker\b/gi, (match) =>
@@ -330,7 +386,8 @@ export async function checkStoryNames(opts: Options): Promise<{ draft: Draft; ch
     if (opts.maskUnverifiedMeetingIdentities) {
       for (const row of [...check.rows].sort((a, b) => b.name.length - a.name.length)) {
         if (row.status !== "unresolved") continue;
-        for (const key of ["headline", "dek", "body"] as const) draft[key] = maskUnverifiedMeetingIdentity(draft[key], row.name);
+        const otherNames = check.rows.filter(other => other !== row).map(other => other.name);
+        for (const key of ["headline", "dek", "body"] as const) draft[key] = maskUnverifiedMeetingIdentity(draft[key], row.name, { otherNames });
       }
       for (const key of ["headline", "dek", "body"] as const) draft[key] = polishMaskedMeetingIdentities(draft[key]);
       if (pending || !check.complete) {
