@@ -45,9 +45,14 @@ try {
   source = source.replace(functionPattern, oldFunction);
   writeFileSync(moduleCopy, source, "utf8");
 
+  // Pin the child's reporter. Node's default is chosen from the TTY: a pipe
+  // gets TAP ("not ok 4", "# fail 4"), a terminal gets spec ("✖ ...",
+  // "ℹ fail 4"). CI pipes the output, so the spec-shaped assertions below
+  // passed on a dev machine and failed on the runner. Asking for spec
+  // explicitly makes the format identical everywhere.
   const result = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", "--test", testCopy],
+    ["--experimental-strip-types", "--test", "--test-reporter=spec", testCopy],
     { cwd: repo, encoding: "utf8", timeout: 30_000 },
   );
   const output = `${result.stdout || ""}\n${result.stderr || ""}`;
