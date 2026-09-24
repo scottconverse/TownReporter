@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexChat } from "./ai-codex.server.ts";
 import { probeClaudeCode, claudeCodeChat } from "./ai-claude-code.server.ts";
+import { codexChildEnv } from "./cli-child-env.server.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FAKE_ENV_CLI = join(ROOT, "scripts", "fakes", "fake-env-cli.mjs");
@@ -175,6 +176,35 @@ describe("a spawned provider CLI gets an allow-list, not this server's environme
     assert.ok(env.USERPROFILE || env.HOME);
   });
 
+  it("derives CODEX_HOME from a POSIX HOME too, so a login child and a draft child agree", async () => {
+    /*
+      The desk's promise is that the sign-in and the drafting calls are handed
+      the SAME Codex home. On Windows that root is USERPROFILE (or APPDATA);
+      on POSIX it is HOME, and the desk has to name it there as well, or
+      neither child is handed a CODEX_HOME at all and the agreement is left to
+      Codex's own fallback. Pinned to the POSIX arm here so it is exercised on
+      every host, Windows included -- CI cannot fail this one quietly.
+    */
+    await withEnv(
+      {
+        // A host that has named no Codex home yet, and names its home the POSIX
+        // way only. The parent here does carry a CODEX_HOME, so it is cleared
+        // for this case rather than left to mask the derivation.
+        USERPROFILE: undefined,
+        APPDATA: undefined,
+        CODEX_HOME: undefined,
+        HOME: "/tmp/probe-home",
+      },
+      async () => {
+        // The real composition, not a hand-built one: the allow-list carries
+        // HOME through, and the Codex home is then named from it.
+        const env = codexChildEnv();
+        assert.equal(env.HOME, "/tmp/probe-home");
+        assert.equal(env.CODEX_HOME, join("/tmp/probe-home", ".codex"));
+      },
+    );
+  });
+
   it("a Claude login child is allowed its own credential and nothing else", async () => {
     const env = await childEnvOf(() =>
       withEnv({ CLAUDE_CLI_PATH: FAKE_ENV_CLI, ANTHROPIC_API_KEY: "k-test-anthropic-key" }, () =>
@@ -191,27 +221,42 @@ describe("a spawned provider CLI gets an allow-list, not this server's environme
   });
 
   it("a Claude draft child is allowed through with its credential and no other secret", async () => {
-    const env = await childEnvOf(
-      () =>
-        withEnv({ CLAUDE_CLI_PATH: FAKE_ENV_CLI, ANTHROPIC_API_KEY: "k-test-anthropic-key" }, () =>
-          claudeCodeChat({
-            system: "System",
-            user: "User",
-            model: "claude-opus-5",
-            timeoutMs: 20_000,
-          }).catch(() => undefined),
-        ),
-      { ...SECRETS, ...DATABASE_URL_SECRET },
-    );
+    /*
+      Scratch space, pinned rather than inherited. The allow-list hands the
+      child whichever name this host uses for its temp directory, and the
+      Ubuntu runner names none -- which is not a CLI without scratch space, but
+      a host where Node resolves the OS default (/tmp) instead, so that is what
+      the child gets there. That name is also the child's spawn cwd
+      (ai-claude-code.server.ts), so it has to be a directory that exists.
+      Pinning it keeps the pass-through assertion true on every host instead of
+      asserting a Windows-shaped environment.
+    */
+    const scratch = await mkdtemp(join(tmpdir(), "tr-child-scratch-"));
+    try {
+      const env = await childEnvOf(
+        () =>
+          withEnv({ CLAUDE_CLI_PATH: FAKE_ENV_CLI, ANTHROPIC_API_KEY: "k-test-anthropic-key" }, () =>
+            claudeCodeChat({
+              system: "System",
+              user: "User",
+              model: "claude-opus-5",
+              timeoutMs: 20_000,
+            }).catch(() => undefined),
+          ),
+        { ...SECRETS, ...DATABASE_URL_SECRET, TMPDIR: scratch },
+      );
 
-    assert.ok(Object.keys(env).length > 0, "the fake CLI should have dumped its environment");
-    assert.equal(env.ANTHROPIC_API_KEY, "k-test-anthropic-key");
-    assertNoSecrets(env, "Claude draft", CLAUDE_OWN_CREDENTIAL, [
-      ...Object.keys(SECRETS),
-      ...Object.keys(DATABASE_URL_SECRET),
-    ]);
-    assert.ok(env.PATH);
-    assert.ok(env.TEMP || env.TMP || env.TMPDIR, "a CLI needs scratch space");
+      assert.ok(Object.keys(env).length > 0, "the fake CLI should have dumped its environment");
+      assert.equal(env.ANTHROPIC_API_KEY, "k-test-anthropic-key");
+      assertNoSecrets(env, "Claude draft", CLAUDE_OWN_CREDENTIAL, [
+        ...Object.keys(SECRETS),
+        ...Object.keys(DATABASE_URL_SECRET),
+      ]);
+      assert.ok(env.PATH);
+      assert.equal(env.TMPDIR, scratch, "a CLI must be handed the scratch space this host names");
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it("passes NODE_OPTIONS through, which the CI harness drives the spawn path with", async () => {

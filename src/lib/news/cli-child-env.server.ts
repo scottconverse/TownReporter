@@ -108,19 +108,35 @@ export function cliChildEnv(extra: readonly string[] = []): NodeJS.ProcessEnv {
 /**
  * Add the home directory a Codex-family CLI needs, the way the desk derives it.
  *
- * A server launched by the Windows installer has no USERPROFILE of its own.
- * Without these defaults Codex cannot find the sign-in it already has, and a
- * login spawned with a different CODEX_HOME than the drafting calls use writes
- * its credentials somewhere the desk never looks -- a sign-in that reports
- * success and changes nothing.
+ * A server launched by the Windows installer has no USERPROFILE of its own, and
+ * a POSIX server can be started with no HOME either (systemd units and
+ * containers routinely are). Without these defaults Codex cannot find the
+ * sign-in it already has, and a login spawned with a different CODEX_HOME than
+ * the drafting calls use writes its credentials somewhere the desk never looks
+ * -- a sign-in that reports success and changes nothing. So the desk names the
+ * home itself, on every host, rather than leaving it to the CLI's own fallback.
  */
 export function withCodexHome(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const appData = process.env.APPDATA?.trim();
+  /*
+    The user root, named the way this host names it: USERPROFILE on Windows (or
+    the grandparent of APPDATA, for an installer-launched server), HOME on
+    POSIX. `$HOME/.codex` is Codex's own default on POSIX, so naming it does not
+    move a real CLI's state -- what it does is make a login child and a draft
+    child agree on CODEX_HOME instead of each resolving the same implicit
+    fallback separately and only looking agreed.
+  */
   const userRoot =
-    process.env.USERPROFILE?.trim() || (appData ? path.resolve(appData, "..", "..") : undefined);
+    process.env.USERPROFILE?.trim() ||
+    (appData ? path.resolve(appData, "..", "..") : undefined) ||
+    process.env.HOME?.trim();
   return {
     ...env,
-    ...(userRoot && !process.env.USERPROFILE ? { USERPROFILE: userRoot } : {}),
+    // A Windows name for a Windows root: POSIX is given HOME below and nothing
+    // there reads USERPROFILE.
+    ...(userRoot && process.platform === "win32" && !process.env.USERPROFILE
+      ? { USERPROFILE: userRoot }
+      : {}),
     ...(userRoot && !process.env.HOME ? { HOME: userRoot } : {}),
     ...(userRoot && !process.env.CODEX_HOME ? { CODEX_HOME: path.join(userRoot, ".codex") } : {}),
   };
