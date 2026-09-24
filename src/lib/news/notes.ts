@@ -28,6 +28,18 @@ export type NoteFound = { t: string; src?: string };
 /** `for` names the memo ask this document was pulled to answer, when it was. */
 export type NoteOpened = { url: string; title: string; for?: string };
 
+/**
+ * The section (topic) an editor confirmed, and the exact draft version they
+ * confirmed it for.
+ *
+ * `token` is `evidenceReviewToken(draft)` -- the codebase's existing identity
+ * for "this draft" (see draft-order.server.ts and draft-edit.server.ts), so a
+ * confirmation read three versions ago cannot authorize the version about to
+ * print. The classifier picks the section and nothing in the desk used to make
+ * a person read it; this is the record that someone did.
+ */
+export type TopicConfirmation = { topic: string; token: string; at: string };
+
 export type ReportingNotes = {
   news: string;
   why: string;
@@ -52,6 +64,13 @@ export type ReportingNotes = {
    * none, which is the silent-loss shape this codebase keeps finding.
    */
   meeting?: { videoId: string; title: string; date: string | null; artifactId: number };
+  /**
+   * The section an editor confirmed by hand for one exact draft version.
+   * Named explicitly in parseNotes below: the parser builds an object field by
+   * field, so a field it does not name is dropped on the next read and the
+   * editor's confirmation would silently stop counting.
+   */
+  topicConfirmation?: TopicConfirmation;
   transcriptCitations?: {
     item: string;
     segmentIndex: number;
@@ -157,6 +176,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
         ? { editorialAssignment: { origin: "story-workspace" as const, text: (o.editorialAssignment as EditorialAssignment).text.trim().slice(0, 1000) } } : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
+      ...topicConfirmationFromRaw(o),
       ...meetingFromRaw(o),
     };
   } catch {
@@ -210,6 +230,53 @@ function meetingFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "meeti
     if (citations.length) out.transcriptCitations = citations;
   }
   return out;
+}
+
+/**
+ * A short, stable fingerprint of a draft's evidence token.
+ *
+ * The token itself is a JSON array containing the whole body, so storing it in
+ * `notes_json` would double the size of every lead's notes and push `packNotes`
+ * over its limit -- which sheds opened/found/verify to make room. The gate only
+ * needs to tell "same draft version" from "a different one", so a 64-bit hash
+ * of the token does the job at a fixed 17 characters.
+ *
+ * Not a security boundary and not cryptographic: the value is computed on the
+ * server from the draft row, and a collision would need a draft rewritten to
+ * match. Deterministic, so client and server agree without sharing a key.
+ */
+export function topicConfirmationFingerprint(token: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (let i = 0; i < token.length; i += 1) {
+    const c = token.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619) >>> 0;
+    b = Math.imul(b + c, 2246822519) >>> 0;
+  }
+  return `${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+}
+
+/**
+ * The confirmed-section record, read defensively.
+ *
+ * A confirmation without a token or without a section is not a confirmation --
+ * it would match every draft whose section happens to be blank -- so a partial
+ * record is dropped rather than stored as a gate that never fires.
+ */
+function topicConfirmationFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "topicConfirmation"> {
+  const raw = o.topicConfirmation;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const topic = String(r.topic ?? "").trim();
+  const token = String(r.token ?? "").trim();
+  if (!topic || !token) return {};
+  return {
+    topicConfirmation: {
+      topic: topic.slice(0, 60),
+      token: token.slice(0, 64),
+      at: String(r.at ?? "").slice(0, 40),
+    },
+  };
 }
 
 export function notesHaveMemo(n: ReportingNotes): boolean {
@@ -596,6 +663,9 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     researchScope: work.researchScope,
     suppliedUrls: work.suppliedUrls,
     editorialAssignment: work.editorialAssignment,
+    // Kept, not shed: it is a gate on publishing, and losing it silently would
+    // look to the editor exactly like a confirmation that never took.
+    topicConfirmation: work.topicConfirmation,
     news: work.news,
     why: work.why,
     angle: work.angle,

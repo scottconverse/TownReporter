@@ -16,9 +16,11 @@ function samePublicUrl(left: string, right: string): boolean {
   catch { return false; }
 }
 
-export function publicArticle(
-  row: ArticleRow,
-): ArticleRow & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
+/* Generic in the row so a caller that already selected extra columns (the
+   routine-notice marker on getPublishedArticle) keeps them in the type. */
+export function publicArticle<T extends ArticleRow>(
+  row: T,
+): T & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
   const u = unpackStoredDraft({
     headline: row.headline,
     dek: row.dek,

@@ -49,6 +49,7 @@ import {
   machineTodosFrom,
   packNotes,
   parseNotes,
+  topicConfirmationFingerprint,
   uncheckedGateTodos,
   type NoteTodo,
 } from "./notes";
@@ -432,11 +433,25 @@ export const getLead = createServerFn({ method: "GET" })
       `;
       for (const r of rows) extractionByUrl[r.url] = r.extraction_method;
     }
+    /*
+      The section this exact draft version was confirmed under, if any.
+
+      Compared here rather than in the browser so the client never has to know
+      how the draft's identity is computed -- and so a stale tab cannot decide
+      for itself that a confirmation still counts.
+    */
+    const topicConfirmed =
+      evidenceToken &&
+      notes.topicConfirmation?.token === topicConfirmationFingerprint(evidenceToken) &&
+      notes.topicConfirmation.topic === String(drafts[0]?.topic ?? "").trim()
+        ? notes.topicConfirmation.topic
+        : null;
     return {
       lead,
       draft,
       draftMeetingEvidence,
       evidenceToken,
+      topicConfirmed,
       articleSlug: live[0]?.slug ?? null,
       openedExtractionByUrl: extractionByUrl,
       job,
@@ -2220,6 +2235,64 @@ export const dropFollowUp = createServerFn({ method: "POST" })
   .validator((input: { id: number }) => input)
   .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
 
+/**
+ * The section the story files under, confirmed by a person for this draft.
+ *
+ * The classifier picks a section while nobody is looking, the workbench shows
+ * it as a select, and publishing used to print whatever the select happened to
+ * say. Two live stories filed a cat-rescue fundraiser under Budget and an LPM
+ * staffing change under Schools that way. The desk now makes an editor read the
+ * section and say yes to it, and this is where that yes is recorded.
+ *
+ * It is recorded against `evidenceReviewToken(draft)` -- the same identity the
+ * publish transaction uses to mean "this exact draft" -- so confirming a
+ * section and then rewriting the story does not carry: the confirmation is for
+ * the version that was read.
+ */
+export async function performConfirmDraftTopic(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+): Promise<{ ok: true; topic: string } | { ok: false; error: string }> {
+  return withTransaction(async (sql) => {
+    const rows = await sql<{ notes_json: string | null }>`
+      select notes_json from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)} for update
+    `;
+    if (!rows[0]) return { ok: false as const, error: "Lead not found" };
+    const drafts = await sql<DraftRow>`
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered, research_json
+      from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+      order by updated_at desc, id desc limit 1
+    `;
+    const row = drafts[0];
+    if (!row) return { ok: false as const, error: "Draft this lead before confirming its section." };
+    const topic = String(row.topic ?? "").trim();
+    if (!topic) {
+      return {
+        ok: false as const,
+        error: "This draft has no section yet. Choose one, save the draft, then confirm it.",
+      };
+    }
+    const notes = parseNotes(rows[0].notes_json);
+    notes.topicConfirmation = {
+      topic,
+      token: topicConfirmationFingerprint(evidenceReviewToken(row)),
+      at: new Date().toISOString(),
+    };
+    await sql`
+      update leads set notes_json = ${packNotes(notes)}
+      where id = ${leadId} and newsroom_id = ${owned(context)}
+    `;
+    return { ok: true as const, topic };
+  });
+}
+
+export const confirmDraftTopic = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((leadId: number) => leadId)
+  .handler(async ({ context, data: leadId }) => performConfirmDraftTopic(context, leadId));
+
 export const performPublish = createServerOnlyFn(async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
@@ -2297,6 +2370,31 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       error:
         "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing.",
     };
+  /*
+    THE SECTION IS A CLAIM TOO (0.6.62).
+
+    Every other machine-made decision on this story passes a person before it
+    prints: the claims of absence above, the evidence review before that. The
+    section did not, and two published stories filed under a section nobody
+    chose -- a cat-rescue fundraiser under Budget, a staffing change at LPM
+    under Schools. A reader looking for either in its section would not find it.
+
+    The desk's button is disabled while the section is unconfirmed, and a
+    disabled button is a suggestion: this is the check that holds.
+  */
+  const confirmedTopic = parseNotes(notesRows[0]?.notes_json).topicConfirmation;
+  const draftTopic = String(row.topic ?? "").trim();
+  if (
+    !confirmedTopic ||
+    confirmedTopic.topic !== draftTopic ||
+    confirmedTopic.token !== topicConfirmationFingerprint(evidenceReviewToken(row))
+  ) {
+    return {
+      ok: false as const,
+      error: `Confirm the section before publishing — this draft files under "${draftTopic || "no section"}", and no editor has confirmed that for the version being printed. Open the story, check the section, and confirm it.`,
+    };
+  }
+
   const draft = unpackStoredDraft({ ...row });
   draft.body = stripReporterNotebook(draft.body);
 
