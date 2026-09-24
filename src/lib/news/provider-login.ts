@@ -20,6 +20,7 @@ import type {
   ProviderStatus,
   ProviderTest,
 } from "./provider-login.server.ts";
+import { cleanLoginId, cleanWriteProvider } from "./request-input.ts";
 
 export type { ProviderId, ProviderLogin, ProviderStatus, ProviderTest };
 
@@ -45,7 +46,7 @@ export const getProviderStatuses = createServerFn({ method: "GET" })
 
 export const startProviderLogin = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((provider: string) => provider)
+  .validator((raw: unknown) => cleanWriteProvider(raw))
   .handler(async ({ context, data }): Promise<ProviderLogin | { error: string }> => {
     assertOwner(context.role);
     if (!isProviderId(data)) return { error: "There is no such writing model." };
@@ -63,20 +64,23 @@ export const startProviderLogin = createServerFn({ method: "POST" })
 
 export const pollProviderLogin = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((raw: unknown) => cleanLoginId(raw))
   .handler(async ({ context, data }): Promise<ProviderLogin | null> => {
     assertOwner(context.role);
-    if (!Number.isInteger(data)) return null;
+    // `data` is `number | null` -- the validator's answer for a non-integer is
+    // `null`, and the null check is what tells TypeScript so. The integer check
+    // stays as well: the validator is the only thing that made it redundant.
+    if (data === null || !Number.isInteger(data)) return null;
     const { pollProviderLogin: poll } = await import("./provider-login.server.ts");
     return poll(data, context.newsroomId);
   });
 
 export const cancelProviderLogin = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((raw: unknown) => cleanLoginId(raw))
   .handler(async ({ context, data }): Promise<ProviderLogin | null> => {
     assertOwner(context.role);
-    if (!Number.isInteger(data)) return null;
+    if (data === null || !Number.isInteger(data)) return null;
     const { cancelProviderLogin: cancel } = await import("./provider-login.server.ts");
     const row = await cancel(data, context.newsroomId);
     await audit(context.userId, "provider-login", `cancel ${data}`, context.newsroomId);
@@ -85,7 +89,7 @@ export const cancelProviderLogin = createServerFn({ method: "POST" })
 
 export const testProvider = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((provider: string) => provider)
+  .validator((raw: unknown) => cleanWriteProvider(raw))
   .handler(async ({ context, data }): Promise<ProviderTest | { error: string }> => {
     assertOwner(context.role);
     if (!isProviderId(data)) return { error: "There is no such writing model." };

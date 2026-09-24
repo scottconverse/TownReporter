@@ -1,5 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "../auth/middleware.ts";
+import {
+  cleanConnectionEnabled,
+  cleanConnectionId,
+  cleanConnectionInput,
+} from "./request-input.ts";
 import type {
   CustomAiConnectionInput,
   PublicCustomAiConnection,
@@ -74,16 +79,13 @@ export function capabilityStatus(value: boolean | null): "yes" | "no" | "not tes
 export function managementActionsLocked(saving: boolean, action: string | null): boolean {
   return saving || action !== null;
 }
-function record(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    throw new Error("Invalid connection request.");
-  return raw as Record<string, unknown>;
-}
-function idInput(raw: unknown) {
-  const id = record(raw).id;
-  if (typeof id !== "string" || !id.trim()) throw new Error("Connection id is required.");
-  return { id: id.trim() };
-}
+/*
+  `record` / `idInput` moved to request-input.ts as `cleanConnectionInput`,
+  `cleanConnectionId` and `cleanConnectionEnabled`. They still throw the same
+  Errors for the same bodies -- what is new is the string ceilings, and that
+  the save call now returns the six keys its type names instead of the raw
+  object cast to that type. See request-input.ts for why.
+*/
 
 export const getCustomAiConnectionsFn = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
@@ -92,27 +94,13 @@ export const getCustomAiConnectionsFn = createServerFn({ method: "GET" })
   );
 export const saveCustomAiConnectionFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((raw: unknown) => {
-    const v = record(raw);
-    for (const key of ["name", "baseUrl"] as const)
-      if (typeof v[key] !== "string") throw new Error(`${key} is required.`);
-    for (const key of ["id", "apiKey", "modelId"] as const)
-      if (v[key] !== undefined && typeof v[key] !== "string")
-        throw new Error(`${key} must be text.`);
-    if (v.removeApiKey !== undefined && typeof v.removeApiKey !== "boolean")
-      throw new Error("removeApiKey must be true or false.");
-    return v as import("./custom-ai-connections.server").CustomAiConnectionInput & { id?: string };
-  })
+  .validator((raw: unknown) => cleanConnectionInput(raw))
   .handler(async ({ context, data }) =>
     (await import("./custom-ai-connections.server")).saveCustomAiConnection(context.userId, data),
   );
 export const enableCustomAiConnectionFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((raw: unknown) => {
-    const v = record(raw);
-    if (typeof v.enabled !== "boolean") throw new Error("Enabled must be true or false.");
-    return { ...idInput(raw), enabled: v.enabled };
-  })
+  .validator((raw: unknown) => cleanConnectionEnabled(raw))
   .handler(async ({ context, data }) => {
     await (
       await import("./custom-ai-connections.server")
@@ -121,7 +109,7 @@ export const enableCustomAiConnectionFn = createServerFn({ method: "POST" })
   });
 export const deleteCustomAiConnectionFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator(idInput)
+  .validator((raw: unknown) => cleanConnectionId(raw))
   .handler(async ({ context, data }) => {
     await (
       await import("./custom-ai-connections.server")
@@ -130,7 +118,7 @@ export const deleteCustomAiConnectionFn = createServerFn({ method: "POST" })
   });
 export const discoverCustomAiModelsFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator(idInput)
+  .validator((raw: unknown) => cleanConnectionId(raw))
   .handler(async ({ context, data }) =>
     (await import("./custom-ai-connections.server")).discoverCustomAiModels(
       context.userId,
@@ -139,7 +127,7 @@ export const discoverCustomAiModelsFn = createServerFn({ method: "POST" })
   );
 export const testCustomAiConnectionFn = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator(idInput)
+  .validator((raw: unknown) => cleanConnectionId(raw))
   .handler(async ({ context, data }) =>
     (await import("./custom-ai-connections.server")).testCustomAiConnection(
       context.userId,

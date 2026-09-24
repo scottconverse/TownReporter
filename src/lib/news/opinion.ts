@@ -8,6 +8,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { opinionModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
+import { cleanPublishId } from "./request-input.ts";
 
 /**
  * The Opinion desk.
@@ -245,8 +246,10 @@ export const saveEditorialDraft = createServerFn({ method: "POST" })
  */
 export const publishEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((draftId: number) => draftId)
+  // Same annotation-not-a-check as publishLead: see request-input.ts.
+  .validator((raw: unknown) => cleanPublishId(raw))
   .handler(async ({ context, data: draftId }) => {
+    if (draftId === null) return { ok: false as const, error: "There is no such draft." };
     const { slugify } = await import("@/lib/paper");
     const { withEditorialDraft, assertOpinionEvidenceReady } = await import("./opinion-draft.server.ts");
     const result = await withEditorialDraft(owned(context), draftId, async (sql, d) => {

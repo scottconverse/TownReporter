@@ -36,6 +36,7 @@ import {
 } from "./meeting-article-revision.ts";
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
+import { cleanPublishId } from "./request-input.ts";
 import {
   evidenceNeedsReview,
   evidenceReviewToken,
@@ -2731,8 +2732,19 @@ export const performPublish = createServerOnlyFn(async function performPublish(
 
 export const publishLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((leadId: number) => leadId)
-  .handler(async ({ context, data: leadId }) => performPublish(context, leadId));
+  /*
+    `(leadId: number) => leadId` was an annotation, not a check: the body
+    arrived as whatever the client sent and went into `where id = $1` as
+    itself. The query is parameterised, so this was never injection -- it was a
+    declared type that nothing enforced. `cleanPublishId` answers `null` for
+    anything that is not a positive 32-bit integer, and the handler refuses.
+  */
+  .validator((raw: unknown) => cleanPublishId(raw))
+  .handler(async ({ context, data: leadId }) =>
+    leadId === null
+      ? { ok: false as const, error: "There is no such story." }
+      : performPublish(context, leadId),
+  );
 
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
