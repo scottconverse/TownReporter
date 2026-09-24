@@ -12,9 +12,26 @@ export function isMeetingPassRunning(newsroomId: number): boolean { return runni
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
-import { applyCapturedMeetingTranscript, runMeetingAwareness, recheckProvisionalMeetings, resumeStoppedMeetings, type MeetingAwarenessResult } from "./meeting-capture.ts";
-import { captureMeetingCaptions } from "./meeting-capture-ytdlp.ts";
-import { prepareMeetingCapturePaths } from "./meeting-capture.ts";
+import type { MeetingAwarenessResult } from "./meeting-capture.ts";
+
+/*
+  No `node:` import may reach this module's top level.
+
+  `components/meeting-capture-settings.tsx` is a client component and imports
+  the four `createServerFn` handles below, so this module is in the browser
+  graph. The meeting engine (`./meeting-capture.ts`, `./meeting-capture-ytdlp.ts`)
+  is Node-only -- it reads and writes files and hashes bytes -- and importing it
+  statically here dragged seven modules and fifteen `node:` builtins into the
+  client, where Vite externalizes them and the first property read throws while
+  `/desk/ops` is loading:
+
+    Module "node:path" has been externalized for browser compatibility.
+    Cannot access "node:path.isAbsolute" in client code.
+
+  A server function's handler body becomes an RPC stub in the client build, so
+  `await import()` inside one never pulls the engine into the browser. Same
+  repair as the 0.6.61 `node:child_process` fix.
+*/
 
 export type MeetingManualRunResult =
   | {
@@ -45,6 +62,9 @@ export async function runMeetingPassWritesRow(
   let awareness: MeetingAwarenessResult;
   const failures: string[] = [];
   try {
+    // Loaded here, not at module scope: see the note at the top of this file.
+    const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
+    const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
     awareness = await runMeetingAwareness(sql, input.newsroomId, { captureMeeting: (ci) => captureMeetingCaptions({ ...ci, signal: input.signal }) });
     const recheck = await recheckProvisionalMeetings(sql, input.newsroomId);
     if (recheck.failures.length) {
@@ -156,6 +176,7 @@ export const resumeStoppedMeetingsNow = createServerFn({ method: "POST" })
   .handler(async ({ context }): Promise<{ ok: boolean; resumed: number; skipped: number; failures: string[]; coverageLine: string }> => {
     const newsroomId = await ownedNewsroomId(context.userId);
     const sql = await getSql();
+    const { resumeStoppedMeetings } = await import("./meeting-capture.ts");
     const result = await resumeStoppedMeetings(sql, newsroomId);
     return { ok: true, ...result };
   });
@@ -191,6 +212,10 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
       [context.userId, newsroomId],
     );
     const runId = rows[0]!.id;
+
+    // Loaded here, not at module scope: see the note at the top of this file.
+    const { prepareMeetingCapturePaths, applyCapturedMeetingTranscript } = await import("./meeting-capture.ts");
+    const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
 
     const { outputDir, archivePath } = prepareMeetingCapturePaths(newsroomId, data.videoId);
     try {

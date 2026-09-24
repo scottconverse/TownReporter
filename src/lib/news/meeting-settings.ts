@@ -1,12 +1,22 @@
 import { createServerFn } from "@tanstack/react-start";
-import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
-import { loadMeetingPriority, saveMeetingPriority, type MeetingChannel } from "./meeting-capture.ts";
+import type { MeetingChannel } from "./meeting-capture.ts";
 import { DEFAULT_CAPTURE_CAPS } from "./meeting-capture-caps.ts";
-import { isAbsolutePathAnyPlatform, normalizeAbsolutePath } from "./absolute-path.ts";
+
+/*
+  No `node:` import may reach this module's top level.
+
+  `components/meeting-capture-settings.tsx` is a client component and imports
+  the two server-function handles below, so this whole module is in the browser
+  graph. Node builtins there are externalized by Vite, and reading one throws
+  at module evaluation -- `/desk/ops` rendered "Something went wrong" with
+  `Module "node:path" has been externalized for browser compatibility.
+  Cannot access "node:path.isAbsolute" in client code.` The filesystem helpers
+  that need them live in `./storage-root.server.ts` and are pulled in inside
+  the save handler, whose body never reaches the client.
+*/
 
 export type MeetingRetentionMode = "media" | "audio-only" | "transcript-only";
 
@@ -45,40 +55,6 @@ export function youtubeChannelRejectionReason(raw: string): string | null {
   return null;
 }
 
-export function storageRootRejectionReason(raw: string | null | undefined): string | null {
-  const value = (raw ?? "").trim();
-  if (!value) return "Storage root is required. Enter an absolute folder path, e.g. D:\\TownReporter\\meetings";
-  if (!isAbsolutePathAnyPlatform(value)) {
-    return `Storage root must be an absolute path (got "${value}"). Enter a full path such as D:\\TownReporter\\meetings or /mnt/data/meetings.`;
-  }
-  return null;
-}
-
-/**
- * Verify the root is writable by performing a real write and delete at save
- * time. The error names the exact path and the underlying failure.
- */
-export function assertStorageRootWritable(root: string): { ok: true } | { ok: false; error: string } {
-  const resolved = normalizeAbsolutePath(root);
-  const probe = join(resolved, `.townreporter-write-test-${Date.now()}`);
-  try {
-    mkdirSync(resolved, { recursive: true });
-  } catch (error) {
-    return { ok: false, error: `Could not create the storage root "${resolved}": ${error instanceof Error ? error.message : String(error)}` };
-  }
-  try {
-    writeFileSync(probe, "townreporter write test", "utf8");
-  } catch (error) {
-    return { ok: false, error: `Storage root "${resolved}" is not writable: ${error instanceof Error ? error.message : String(error)}` };
-  }
-  try {
-    unlinkSync(probe);
-  } catch {
-    /* the write succeeded; a leftover probe file is not a failure */
-  }
-  return { ok: true };
-}
-
 async function ownedNewsroomId(userId: string): Promise<number> {
   const me = await requireEditor(userId);
   if (me.role !== "owner") throw new ForbiddenError("Only the owner can configure meeting capture.");
@@ -90,6 +66,8 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<MeetingOperatorSettings> => {
     const newsroomId = await ownedNewsroomId(context.userId);
     const sql = await getSql();
+    // Loaded here, not at module scope: see the note at the top of this module.
+    const { loadMeetingPriority } = await import("./meeting-capture.ts");
     const channels = await loadMeetingPriority(sql, newsroomId);
     const rows = await sql.query<{ storage_root: string | null; retention_mode: MeetingRetentionMode | null; enabled: boolean | null; duration_cap_seconds: number | null; size_cap_bytes: number | string | null }>(
       "select storage_root,retention_mode,enabled,duration_cap_seconds,size_cap_bytes from meeting_capture_settings where newsroom_id=$1",
@@ -134,6 +112,12 @@ export const saveMeetingSettingsFn = createServerFn({ method: "POST" })
   .handler(async ({ context, data }): Promise<SaveMeetingSettingsResult> => {
     const newsroomId = await ownedNewsroomId(context.userId);
     const sql = await getSql();
+    // Server-only filesystem helpers, loaded here so they never join the
+    // client graph (see the note at the top of this module).
+    const { storageRootRejectionReason, assertStorageRootWritable, normalizeAbsolutePath } = await import(
+      "./storage-root.server.ts"
+    );
+    const { loadMeetingPriority, saveMeetingPriority } = await import("./meeting-capture.ts");
 
     if (!RETENTION_MODES.includes(data.retentionMode)) {
       return { ok: false, error: `Retention mode must be one of ${RETENTION_MODES.join(", ")}.` };

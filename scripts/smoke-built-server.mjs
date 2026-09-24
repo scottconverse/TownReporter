@@ -57,6 +57,9 @@ const ROUTES = [
   ["/sitemap.xml", 200],
   ["/robots.txt", 200],
   ["/login", 200],
+  // The desk's server-settings surface. It owns the largest client module
+  // graph in the app; a 200 alone says nothing about whether it loads.
+  ["/desk/ops", 200],
   // A slug that cannot exist must 404, not render an empty article.
   ["/articles/definitely-not-a-real-slug-smoke-test", 404],
 ];
@@ -120,6 +123,20 @@ async function checkInBrowser() {
       bad("/desk rendered the desk to an unauthenticated visitor");
     } else {
       ok("/desk did not render the desk");
+    }
+
+    // The desk's server-settings page. Its component imports server functions
+    // whose modules once carried `node:` builtins into the browser graph: Vite
+    // externalizes them, the first property read throws while the module is
+    // evaluated, and the page answers 200 while showing the error boundary.
+    // Navigating here exercises that graph on every run.
+    await page.goto(BASE + "/desk/ops", { waitUntil: "networkidle", timeout: 30_000 });
+    await page.waitForTimeout(1200);
+    const opsText = await page.locator("body").innerText();
+    if (/Something went wrong/i.test(opsText)) {
+      bad("/desk/ops rendered the error boundary instead of the page");
+    } else {
+      ok("/desk/ops loaded its client graph without throwing");
     }
 
     if (errors.length === 0) {
