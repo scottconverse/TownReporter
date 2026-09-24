@@ -119,6 +119,16 @@ function assertNoSecrets(
   }
 }
 
+/*
+  Every case below pins CODEX_CLI_PATH / CLAUDE_CLI_PATH at
+  scripts/fakes/fake-env-cli.mjs before it calls the real spawn path, so none of
+  it can reach a live model or spend anything — no RUN_LIVE_MODEL_TESTS opt-in
+  needed, on the same terms as the fake-CLI cases in ai-claude-code.test.ts. The
+  fake reads its own environment and writes it out; that dump is the only place
+  the answer to "what did the child get?" is meaningful, since a parent that
+  spreads `process.env` and a parent that does not look identical from inside
+  the parent.
+*/
 describe("a spawned provider CLI gets an allow-list, not this server's environment", () => {
   it("a Codex draft child never sees a secret, and can still find its login", async () => {
     const env = await childEnvOf(
