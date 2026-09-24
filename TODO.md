@@ -2,7 +2,7 @@
 
 ## Current release work — 2026-09-21
 
-The current software version is [0.6.61](docs/releases/0.6.61.md): scan-refresh reliability and the meeting transcript-to-editor path. The paper can turn captured meeting evidence into a Queue lead and draft, show the citations the draft used, block stale or malformed meeting provenance, and create editor review when a recording changes after publication. The release guide keeps source, package, GitHub publication, and production deployment as separate facts.
+The current software version is [0.6.62](docs/releases/0.6.62.md): public-trust and security fixes. Every published story states how it was made, a draft's section must be confirmed before it prints, a story naming a listed news outlet its Sources do not cover is refused until an editor records the override, and the first-owner claim is one locked transaction. Spawned provider CLIs get a named environment allow-list, the URL guard blocks the IPv4 transition and translation ranges, and Grok federation is opt-in only. The release guide keeps source, package, GitHub publication, and production deployment as separate facts.
 
 The following acceptance work remains EXPLICITLY OPEN and is not closed by this release: fresh-machine human acceptance of the Windows install; the live provider matrix (configured-provider behaviour across the full provider set); five useful Dark Desk outcomes plus the September 3–8 replay; and the post-crash detached-child limitation. Production deployment and live-model proof are not asserted here.
 

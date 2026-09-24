@@ -2,7 +2,7 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.61](docs/releases/0.6.61.md).** The Scan page now observes a running scan finish without a reload. Meeting recordings now reach the Queue and a draft with persisted used citations; immutable transcript revisions block stale publication and create editor review without rewriting published history. GitHub remains the authority for publication state. [0.6.60 release guide](docs/releases/0.6.60.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.62](docs/releases/0.6.62.md).** Every published story now says plainly how it was made; a draft's section must be confirmed before the story prints; and a story that names a news outlet its Sources do not cover is refused unless an editor records the override. Spawned provider CLIs receive a named environment allow-list rather than the server's environment, the URL guard reads the IPv4 transition and translation ranges, and Grok federation is opt-in only. GitHub remains the authority for publication state. [0.6.61 release guide](docs/releases/0.6.61.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
 Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.61 release guide](docs/releases/0.6.61.md).
