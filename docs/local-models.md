@@ -432,8 +432,11 @@ to transcribe pages without usable text (`src/lib/news/ocr.ts`). Codex and
 Claude provide vision paths when their prerequisites are met. Grok (SuperGrok)
 is text-only for this path. OCR starts with the model selected for the run and,
 after a recognized technical failure, can try the next ready vision-capable
-cloud runtime. Claude is last in the unattended order and uses Sonnet or Haiku,
-never an automatic Opus default. This
+cloud runtime. **Unattended OCR has its own order, and it is not the writing
+ladder:** Codex Terra, then Claude, then a local model marked `· vision`. The
+writing ladder for stories and scans (DeepSeek v4.1 Flash, then Qwen 3.6 35B on
+this computer, then Codex Terra) never re-points OCR. Claude here uses Sonnet or
+Haiku, never an automatic Opus default. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model
 cannot, no matter how good it is at writing.

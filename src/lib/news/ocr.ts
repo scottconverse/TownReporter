@@ -27,10 +27,10 @@ import type { OcrImpl, OcrOptions, PdfPage } from "./ingest.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
 import { isCustomModelChoice } from "./model-choice.ts";
 import {
-  automaticLadder,
   modelEffort,
   providerEntry,
   providerModel,
+  type ProviderId,
   type ProviderKind,
 } from "./provider-registry.ts";
 import { automaticFailoverReason, looksLikeContentRefusal } from "./automatic-failover.ts";
@@ -194,14 +194,35 @@ async function resolveVisionLocal(
   return null;
 }
 
+/*
+  OCR's own unattended order, and deliberately NOT `automaticLadder()`.
+
+  Unit Y (0.6.63) re-pointed the WRITING/RESEARCH ladder at DeepSeek v4.1
+  Flash, then Qwen 3.6 35B on this computer, then Codex Terra. Nobody asked OCR
+  to change, and 0.6.62's unattended OCR order was Codex Terra, then Claude
+  (Sonnet or Haiku), then a discovered local vision model. Because both of
+  those new writing rungs are `kind: "local"` entries -- which OCR treats as a
+  *discovery* (`resolveVisionLocal`), not a registry rung -- iterating the
+  writing ladder here silently deleted Claude from an unattended scan and left
+  the two `claude-code` branches below dead. This constant keeps OCR on its own
+  order so a later ladder change for writing cannot quietly un-read scans.
+
+  A local vision model is still OCR's final capability, but it is appended
+  after these rungs by the builders below rather than named in this list.
+*/
+export const OCR_AUTOMATIC_ORDER = [
+  "codex-balanced",
+  "claude-sonnet",
+] as const satisfies readonly ProviderId[];
+
 const NO_VISION_AVAILABLE =
-  "No vision-capable model is available to read this scan: no ANTHROPIC_API_KEY, no Codex CLI, no signed-in Claude Code CLI, and no local model marked vision (· vision in the picker) was found.";
+  "No vision-capable model is available to read this scan. OCR's unattended order is Codex Terra, then Claude (an ANTHROPIC_API_KEY when one is set, otherwise the signed-in Claude Code CLI), then a local model marked vision (· vision in the picker) — and none of them answered.";
 
 function injectedAutomaticPlans(opts: OcrOptions): Plan[] {
   const adapters = opts.adapters as OcrAdapters | undefined;
   if (!adapters) return [];
   const plans: Plan[] = [];
-  for (const id of automaticLadder()) {
+  for (const id of OCR_AUTOMATIC_ORDER) {
     const entry = providerEntry(id);
     if (!entry) continue;
     if (entry.kind === "codex" && adapters.codex) {
@@ -229,7 +250,7 @@ function injectedAutomaticPlans(opts: OcrOptions): Plan[] {
 
 async function productionAutomaticPlans(opts: OcrOptions, firstOnly = false): Promise<Plan[]> {
   const plans: Plan[] = [];
-  for (const id of automaticLadder()) {
+  for (const id of OCR_AUTOMATIC_ORDER) {
     const entry = providerEntry(id);
     if (!entry) continue;
     if (entry.kind === "codex") {
@@ -336,8 +357,10 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   }
   const provider = opts.provider;
   if (!provider || provider === "auto") {
-    // Automatic follows provider-registry.ts's documented ladder. Local OCR
-    // remains an OCR-specific final capability when no cloud rung is ready.
+    // Automatic follows OCR's OWN unattended order (OCR_AUTOMATIC_ORDER):
+    // Codex Terra, then Claude, then a discovered local vision model. This is
+    // NOT provider-registry.ts's writing/research ladder and must not be
+    // re-pointed when that one changes -- see the constant's comment.
     return (await productionAutomaticPlans(opts, true))[0] ?? {
       needsOcr: true,
       reason: NO_VISION_AVAILABLE,
