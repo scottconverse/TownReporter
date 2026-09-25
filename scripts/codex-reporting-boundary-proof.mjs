@@ -80,8 +80,9 @@ let requestedModel = "gpt-5.5";
 let toolItemTypes = [];
 let invocationCount = 0;
 try {
-  const bin = await findCodexCli();
-  if (!bin) throw new Error("Codex CLI was not found.");
+  const lookup = await findCodexCli();
+  if (!lookup.ok) throw new Error(lookup.error);
+  const bin = lookup.bin;
   const args = buildCodexArgs({ model: requestedModel });
   const requiredFlags = [
     ["--sandbox", "read-only"],

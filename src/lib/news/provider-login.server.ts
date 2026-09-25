@@ -458,13 +458,28 @@ function forget(id: number) {
   live.delete(id);
 }
 
-async function findBinary(provider: ProviderId): Promise<string | null> {
+/**
+ * The binary to spawn for a provider's login, or why there is nothing to spawn.
+ *
+ * `error` is set only when the operator's own setting is the problem -- an
+ * explicit `CODEX_CLI_PATH` with no file behind it. That case must reach the
+ * sign-in panel as its own sentence rather than the generic "not installed":
+ * the fix is to correct the path, not to install something.
+ */
+type BinaryLookup = { ok: true; bin: string } | { ok: false; error: string | null };
+
+async function findBinary(provider: ProviderId): Promise<BinaryLookup> {
   if (provider === "claude") {
     const { findClaudeCli } = await import("./ai-claude-code.server.ts");
-    return findClaudeCli();
+    const bin = await findClaudeCli();
+    return bin ? { ok: true, bin } : { ok: false, error: null };
   }
   const { findCodexCli } = await import("./ai-codex.server.ts");
-  return findCodexCli();
+  const lookup = await findCodexCli();
+  // The bare `codex` PATH lookup stays "nothing to spawn here" -- it is not a
+  // path the finder found, and `providerStatuses` below treats it the same.
+  if (!lookup.ok) return { ok: false, error: lookup.error };
+  return lookup.bin === "codex" ? { ok: false, error: null } : { ok: true, bin: lookup.bin };
 }
 
 function loginArgs(provider: ProviderId): string[] {
@@ -524,7 +539,7 @@ export async function startProviderLogin(
     await expire(existing.id);
   }
 
-  const bin = await findBinary(provider);
+  const found = await findBinary(provider);
   const inserted = await sql.query<{ id: number }>(
     `insert into provider_logins (newsroom_id, provider, status) values ($1, $2, 'starting')
      returning id`,
@@ -532,18 +547,19 @@ export async function startProviderLogin(
   );
   const id = inserted[0]!.id;
 
-  if (!bin) {
+  if (!found.ok) {
     await patch(
       id,
       {
         status: "failed",
-        detail: `${PROVIDER_LABEL[provider]} is not installed on this machine.`,
+        detail: found.error ?? `${PROVIDER_LABEL[provider]} is not installed on this machine.`,
       },
       true,
     );
     return (await getProviderLogin(id, newsroomId))!;
   }
 
+  const bin = found.bin;
   let child: ReturnType<typeof spawn>;
   try {
     const plan = spawnPlan(bin, loginArgs(provider));
@@ -794,22 +810,26 @@ export async function providerStatuses(
   const out: ProviderStatus[] = [];
   for (const provider of ["claude", "codex"] as ProviderId[]) {
     const off = disabled(provider);
-    const bin = off ? null : await findBinary(provider);
+    const found = off ? null : await findBinary(provider);
     /*
-      `findCodexCli()` falls back to the bare string "codex" — a PATH lookup,
-      not a file it found. Treating that as installed would print a path that
-      may not exist, so it counts as installed only once a probe agrees.
+      `findCodexCli()` offers the bare string "codex" when it found no path of
+      its own — a PATH lookup, not a file it found — and `findBinary` reports
+      that as nothing to spawn. Treating it as installed would print a path
+      that may not exist, so a provider counts as installed only once a probe
+      agrees.
     */
-    const resolved = bin && bin !== "codex" ? bin : null;
+    const resolved = found?.ok ? found.bin : null;
     let signedIn = false;
     let account: string | null = null;
     let detail = "";
     if (off) {
       detail = `Turned off with ${provider === "claude" ? "TOWNREPORTER_CLAUDE_CODE" : "TOWNREPORTER_CODEX"}=0.`;
-    } else if (!bin) {
-      detail = `${PROVIDER_LABEL[provider]} was not found on this machine.`;
+    } else if (!found?.ok) {
+      // The named-path failure says which path and what to do about it; the
+      // generic sentence is only right when there was nothing to find.
+      detail = found?.error ?? `${PROVIDER_LABEL[provider]} was not found on this machine.`;
     } else if (provider === "claude") {
-      const seen = await claudeAccount(bin);
+      const seen = await claudeAccount(found.bin);
       signedIn = seen.signedIn;
       account = seen.account;
       if (!signedIn) detail = "Signed out. Sign in below and the desk can draft again.";

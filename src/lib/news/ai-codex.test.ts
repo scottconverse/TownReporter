@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import {
@@ -151,14 +151,17 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     try {
       await writeFile(path.join(dir, "relative-cli.mjs"), `process.stdout.write(${JSON.stringify(jsonl)});`);
       process.chdir(dir);
-      const resolved = await withEnv({ CODEX_CLI_PATH: "./relative-cli.mjs" }, () => findCodexCli());
+      const lookup = await withEnv({ CODEX_CLI_PATH: "./relative-cli.mjs" }, () => findCodexCli());
+      assert.equal(lookup.ok, true, `the named path exists, so it must resolve: ${JSON.stringify(lookup)}`);
+      if (!lookup.ok) return;
+      const resolved = lookup.bin;
       assert.equal(
-        path.resolve(resolved ?? ""),
+        path.resolve(resolved),
         path.resolve(path.join(dir, "relative-cli.mjs")),
         "the finder must name the file the operator pointed at",
       );
       assert.ok(
-        path.isAbsolute(resolved ?? ""),
+        path.isAbsolute(resolved),
         `a relative CODEX_CLI_PATH must leave the finder absolute, or the spawn resolves it against tmpdir(); got ${JSON.stringify(resolved)}`,
       );
       const result = await withEnv(
@@ -176,11 +179,81 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
   });
 
   it("leaves the bare `codex` PATH fallback alone rather than inventing a path for it", async () => {
-    const resolved = await withEnv(
+    const lookup = await withEnv(
       { CODEX_CLI_PATH: undefined, APPDATA: undefined },
       () => findCodexCli(),
     );
-    assert.equal(resolved, "codex");
+    assert.deepEqual(lookup, { ok: true, bin: "codex" });
+  });
+
+  /*
+    An explicit path is an instruction about WHICH Codex runs, not a hint.
+
+    `findCodexCli` treated `CODEX_CLI_PATH` as one candidate among several: it
+    checked the file, and when the file was not there it went on to the npm
+    install and finally to a bare `codex` on PATH. So a typo in the operator's
+    path silently ran a different Codex -- a different version, a different
+    account, a different sandbox -- and on a reporting path that is worse than
+    not running at all. The Claude CLI has read its own `CLAUDE_CLI_PATH` the
+    fail-closed way all along (`ai-claude-code.server.ts`: an explicit value is
+    returned whether or not the file exists, so the spawn fails on the path the
+    operator wrote); this is Codex catching up.
+
+    The installed Codex below is real to the finder: the vendor path exists on
+    disk, so the old code had something to fall back TO, and the assertion that
+    catches it names what it fell back to.
+  */
+  it("refuses a CODEX_CLI_PATH that is not there instead of running the installed Codex", async () => {
+    const appData = await mkdtemp(path.join(tmpdir(), "codex-named-path-test-"));
+    const vendorDir = path.join(
+      appData,
+      "npm",
+      "node_modules",
+      "@openai",
+      "codex",
+      "node_modules",
+      "@openai",
+      "codex-win32-x64",
+      "vendor",
+      "x86_64-pc-windows-msvc",
+      "bin",
+    );
+    const missing = path.join(appData, "not-installed-here.mjs");
+    const env = { CODEX_CLI_PATH: missing, APPDATA: appData };
+    try {
+      await mkdir(vendorDir, { recursive: true });
+      await writeFile(path.join(vendorDir, "codex.exe"), "");
+
+      const lookup = await withEnv(env, () => findCodexCli());
+      assert.equal(
+        lookup.ok,
+        false,
+        `the finder fell back to another Codex instead of refusing: ${JSON.stringify(lookup)}`,
+      );
+      if (!lookup.ok) {
+        assert.match(
+          lookup.error,
+          /CODEX_CLI_PATH/,
+          `the refusal must name the setting that is wrong: ${lookup.error}`,
+        );
+        assert.ok(
+          !lookup.error.includes(vendorDir),
+          `the refusal must not name the Codex it declined to run: ${lookup.error}`,
+        );
+      }
+
+      // And the drafting path reports that refusal rather than a draft made by
+      // a Codex the operator did not choose.
+      const result = await withEnv(env, () =>
+        codexChat({ system: "System", user: "User", model: "gpt-5.6-terra", timeoutMs: 5_000 }),
+      );
+      assert.equal(result.ok, false, "a chat call ran a Codex the operator did not name");
+      if (!result.ok) {
+        assert.match(result.error, /CODEX_CLI_PATH/, `wrong failure: ${result.error}`);
+      }
+    } finally {
+      await rm(appData, { recursive: true, force: true });
+    }
   });
 
   it("classifies native outcomes without retaining worker text", () => {
