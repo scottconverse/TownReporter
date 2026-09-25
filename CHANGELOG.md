@@ -1,6 +1,15 @@
 # Changelog
 
-Current software version: **0.6.63**. Publication state is recorded by GitHub.
+Current software version: **0.6.64**. Publication state is recorded by GitHub.
+
+## 0.6.64 — 2026-09-25
+
+- **The daily scan can be left on Automatic.** The scheduled ordinary scan on Server no longer has to name one provider before it can be saved: the picker offers **Automatic**, the same first option the Story and Scan pickers carry, and it walks the writing ladder already used for stories, scans and Dark Desk — DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra. A named choice is still available and is still tried first.
+- **A stored choice is never rewritten.** A schedule saved before this release keeps the model, local model or saved Custom AI connection it names, and the stored row still reads what the owner saved. The owner switches it to Automatic by hand on Scan settings.
+- **The run record names the model that ran.** Because a scheduled run stores the model it will use before its job is queued, Automatic is resolved to a ready model at that point, and the run keeps what was requested and what resolved — `Model: Automatic → DeepSeek v4.1 Flash` — with a switch note when the run had to move.
+- **A scan that fetched no source text says so.** A run that built no analysis batches now reports that it fetched no source text and names the first source that failed, instead of blaming the writing pass for returning nothing.
+
+The packaged release note names `v0.6.64` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.63 — 2026-09-25
 
