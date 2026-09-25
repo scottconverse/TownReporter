@@ -68,7 +68,11 @@ The owner manages sections in **Server → Sections** (**Newspaper sections** pa
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
+A section with no sources says so and opens its list by itself: **Sources this section reads (0) — choose or add below**. **Add a new source to this section** takes a URL and an optional label without leaving the page. It is the same add the Sources page runs — the same checks, the same duplicate detection — so the page goes on the watch list straight away; the section's use of it belongs to the section draft, and lands when you **Confirm and apply**. The panel says which half is which, and says so plainly. A URL already on watch is ticked rather than added twice, and the message tells you that instead of claiming a new source. Once a section reads sources, its list goes back to collapsed and its summary line names the first few.
+
 Choose **Review changes** before saving, or **Preview changes** when retiring a section. The unsaved review shows every changed section's name, section order, visibility, replacement, reporting brief, scan instructions, and accepted sources with both names and URLs. **Back to editing** preserves the draft, and **Cancel changes** discards it. Only **Confirm and apply** or **Confirm retirement and apply** writes the reviewed configuration. A failed or stale save keeps the draft available for correction; **Reload saved configuration** explicitly replaces it with the saved version.
+
+While the draft differs from the saved configuration, a bar sits at the bottom of the window: **You have unsaved section changes**, with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Navigating away with a draft — a desk link or closing the tab — asks first; **Stay on this page** keeps both the page and the draft. The older buttons above still work.
 
 Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
 
@@ -146,7 +150,12 @@ It fills the same fields **File a lead yourself** (Queue) asks for by hand, so u
 
 The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.
 
-**Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A.
+**Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A. The add form also carries an optional **Assign to sections** list: tick the newspaper sections this source should feed and it is filed under them as it is saved, in the same step. Opinion and About are not on that list — they are reserved pages.
+
+**Accept one:** accepting a proposed source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A proposed source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
+
+Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list; adding and accepting are still yours to do.
+
 
 **Add many:** bulk paste. Formats the toolkit already taught people:
 
