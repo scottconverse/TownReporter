@@ -21,15 +21,30 @@ import {
 } from "./import-review.ts";
 import { pasteOneStoryCard } from "./paste-one-story.ts";
 
-const FIXTURE = readFileSync(
-  new URL("./fixtures/civic-scanner-longmont-2026-09-24.md", import.meta.url),
-  "utf8",
-);
+/**
+ * The fixtures, on the same footing the reader puts a paste on.
+ *
+ * `precleanMarkdown` and `splitParagraphs` both fold CRLF to LF, so every body
+ * this module hands back is LF while the file on disk may not be: with
+ * `core.autocrlf=true` a Windows checkout writes `LF` blobs as CRLF (`git show
+ * HEAD:…/civic-scanner-longmont-2026-09-24.md` is 0 CR / 138 LF; the working
+ * tree copy is 138 CR / 138 LF). Folding here rather than comparing raw is not
+ * a weaker check: the claim at "byte for byte as pasted" is about words, and a
+ * body that dropped, added, re-cased or reordered one still fails it. The
+ * comparison below is byte-for-byte on text whose line-ending convention is the
+ * one the reader guarantees, instead of red on a Windows checkout and green on
+ * Linux for the same commit.
+ */
+function fixture(name: string): string {
+  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8").replace(
+    /\r\n?/g,
+    "\n",
+  );
+}
 
-const CLAUDE = readFileSync(
-  new URL("./fixtures/civic-scanner-claude-longmont-2026-09-24.md", import.meta.url),
-  "utf8",
-);
+const FIXTURE = fixture("civic-scanner-longmont-2026-09-24.md");
+
+const CLAUDE = fixture("civic-scanner-claude-longmont-2026-09-24.md");
 
 function cards(): ReviewCard[] {
   return cardsFromReport(parseFinishedStories(FIXTURE));
