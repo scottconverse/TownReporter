@@ -32,11 +32,11 @@ export async function validateDailyRuntime(
       Automatic runs the writing ladder itself, and it is resolved HERE rather
       than through `validate` (0.6.64, Unit AA). Two reasons. A scheduled run
       has to store the model it will run on before its job is queued, and
-      `probeProvider("auto")` answers with the operator's configured gateway
-      -- a name the transport re-reads at call time, which a stored run record
-      cannot do. And the rung it resolves to is an endpoint snapshot this
-      module knows how to write, so the receipt below is the same shape every
-      other runtime produces.
+      `probeProvider("auto")` can answer with whatever gateway the operator
+      set up for the desk -- a name the transport re-reads at call time, which
+      a stored run record cannot do. And the rung it resolves to is an endpoint
+      snapshot this module knows how to write, so the receipt below is the same
+      shape every other runtime produces.
 
       No switch reason or note: nothing failed over, this IS the resolution.
       A rung that was passed over because it is not loaded rides along in
