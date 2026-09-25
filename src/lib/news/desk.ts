@@ -2429,6 +2429,7 @@ export async function performNamedOutletReport(
       sourceUrls,
       sourceTitles: await sourceTitlesForDraft(sql, owned(context), draft),
       overridden: overrides.map((o) => o.outlet),
+      outlets: (await getPaperConfig(owned(context))).namedOutlets,
     }),
     overrides,
   };
@@ -2452,7 +2453,8 @@ export async function performOverrideNamedOutlet(
   leadId: number,
   outletName: string,
 ): Promise<{ ok: true; outlet: string } | { ok: false; error: string }> {
-  const outlet = namedOutlet(outletName);
+  const outlets = (await getPaperConfig(owned(context))).namedOutlets;
+  const outlet = namedOutlet(outletName, outlets);
   if (!outlet) {
     return {
       ok: false as const,
@@ -2474,6 +2476,7 @@ export async function performOverrideNamedOutlet(
       body: draft.body,
       sourceUrls: parseUrlList(draft.source_urls),
       sourceTitles: await sourceTitlesForDraft(sql, owned(context), draft),
+      outlets,
     });
     if (!unresolved.includes(outlet.name)) {
       return {
@@ -2666,6 +2669,12 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     sourceUrls: parseUrlList(draft.source_urls),
     sourceTitles: await sourceTitlesForDraft(outletSql, owned(context), draft),
     overridden: overrideRows.map((r) => r.outlet),
+    /*
+      This newsroom's own outlet list, not the shipped one (Unit P item 5).
+      The desk report and the override above read the same list, so the three
+      cannot disagree about what is outstanding.
+    */
+    outlets: (await getPaperConfig(owned(context))).namedOutlets,
   });
   if (unresolvedOutlets.length) {
     return { ok: false as const, error: namedOutletNotice(unresolvedOutlets) };
