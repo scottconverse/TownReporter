@@ -51,6 +51,20 @@ export const BODY_CHOICES: { key: BodyChoice; label: string; note: string }[] = 
 
 export type ReviewLink = { text: string; url: string; keep: boolean };
 
+/** What a card can be imported as, in the words the card wears. */
+export const IMPORT_KINDS: { key: ImportKind; label: string; note: string }[] = [
+  {
+    key: "story",
+    label: "Finished story",
+    note: "It goes in as a draft holding the text it carries, ready to edit and publish.",
+  },
+  {
+    key: "idea",
+    label: "Story idea",
+    note: "It goes in as a lead with the description as its why, for someone to write.",
+  },
+];
+
 export type ReviewCard = {
   key: string;
   /** The import tick box. Non-story sections arrive unticked. */
@@ -140,6 +154,31 @@ export function cardsFromReport(
     cleanSplit: story.cleanSplit,
     warning: story.warning,
   }));
+}
+
+/**
+ * What the review screen says it just read, in the shape of what it found.
+ *
+ * "Read 19 stories" was true of every paste this box used to accept, because
+ * every card in one was a written story. A report that lists leads it has not
+ * written, and a paste that is nothing but an idea list, are both read here
+ * now, and an editor who pastes eight ideas and is told eight stories have been
+ * read will go looking for eight stories that are not there.
+ */
+export function readSummary(report: ParsedReport): string {
+  const leads = report.stories.filter((s) => s.isStory);
+  const ideas = leads.filter((s) => s.kind === "idea").length;
+  const stories = leads.length - ideas;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (report.method === "plain") {
+    return stories + ideas <= 1 ? "Read one story, with no headings to split it." : "Read the paste.";
+  }
+  const parts = [
+    stories ? plural(stories, "story", "stories") : "",
+    ideas ? plural(ideas, "story idea", "story ideas") : "",
+  ].filter(Boolean);
+  if (parts.length === 0) return "Read the paste.";
+  return `Read ${parts.join(" and ")} out of the paste.`;
 }
 
 /**

@@ -12,7 +12,13 @@ export function ProvenanceBlock({
   form?: string | null;
 }) {
   const { formatDateTime, formatShortDate } = usePaperDateFormatters();
-  const urls = new Set(items.map((p) => p.url));
+  /*
+    A row can name a source with no URL: an imported story carries the
+    documents its report cited ("Sept 22 packet p. 819") and no link exists to
+    give. An empty string in this set would match the empty `source_urls` of a
+    finding that has none, so the blanks are dropped here.
+  */
+  const urls = new Set(items.map((p) => p.url).filter(Boolean));
   const versions = new Set(
     items.map((p) => p.version_id).filter((id): id is number => id != null),
   );
@@ -38,8 +44,11 @@ export function ProvenanceBlock({
             How we reported this
           </h2>
           <ul className="mt-3 space-y-3 text-sm">
-            {items.map((item) => (
-              <li key={item.url} className="border-b border-rule pb-3 last:border-0">
+            {items.map((item, index) => (
+              <li
+                key={item.url || `${item.title}-${index}`}
+                className="border-b border-rule pb-3 last:border-0"
+              >
                 <p className="font-medium text-ink">
                   {item.title}
                   {item.role && item.role !== "source" ? (
@@ -58,7 +67,7 @@ export function ProvenanceBlock({
                       : " — captured by TownReporter"}
                     .
                   </p>
-                ) : (
+                ) : item.url ? (
                   <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                     <a
                       href={item.url}
@@ -74,6 +83,15 @@ export function ProvenanceBlock({
                       </span>
                     ) : null}
                   </p>
+                ) : (
+                  /*
+                    A citation, not a link. The report the story came from named
+                    this document and nobody has a page for it; a "Current
+                    source" pointing at nothing would be worse than saying so.
+                  */
+                  <p className="mt-1 text-ink-2">
+                    Named in the report we worked from — there is no page to open for this one.
+                  </p>
                 )}
                 <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                   {item.version_id != null ? (
@@ -85,7 +103,7 @@ export function ProvenanceBlock({
                       View captured version
                     </Link>
                   ) : null}
-                  {(item.version_count ?? 0) > 1 ? (
+                  {item.url && (item.version_count ?? 0) > 1 ? (
                     <Link
                       to="/evidence/compare"
                       search={{ url: item.url }}

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseFinishedStories } from "./import-stories.ts";
 import {
+  IMPORT_KINDS,
   NO_SECTION,
   SECTION_REQUIRED,
   cardBody,
@@ -12,6 +13,7 @@ import {
   cardsFromReport,
   findDuplicate,
   keptLinks,
+  readSummary,
   tickedCards,
   duplicateNote,
   selectionFromCard,
@@ -203,6 +205,48 @@ describe("the kind a card is offered as", () => {
     assert.equal(card.kind, "story");
     assert.equal(card.includeByDefault, true);
     assert.deepEqual(card.citations, []);
+  });
+});
+
+describe("what the review screen says it read", () => {
+  /*
+    Step D: "Each card gets 'Import as: Finished story / Story idea'." The two
+    labels are the brief's own words, because the radio pair is the sentence an
+    editor reads.
+  */
+  it("offers the two import kinds in the brief's own words", () => {
+    assert.deepEqual(
+      IMPORT_KINDS.map((k) => k.label),
+      ["Finished story", "Story idea"],
+    );
+    assert.deepEqual(
+      IMPORT_KINDS.map((k) => k.key),
+      ["story", "idea"],
+    );
+  });
+
+  /**
+   * An idea list read as "8 stories" sends the editor looking for eight
+   * stories that are not there.
+   */
+  it("counts stories and ideas apart, on every shape of paste", () => {
+    assert.equal(readSummary(parseFinishedStories(FIXTURE)), "Read 7 stories out of the paste.");
+    assert.equal(
+      readSummary(parseFinishedStories(CLAUDE)),
+      "Read 10 stories and 12 story ideas out of the paste.",
+    );
+    const list = [
+      "# Story ideas — Longmont, week of September 21, 2026",
+      "",
+      "* Water Board conveyance plats at First and Main — the board takes it up Sept 21.",
+      "* The budget water fund gap — the 2027 budget leaves it open.",
+      "* Quiet zone work closes the 21st Avenue crossing — a week of closures.",
+    ].join("\n");
+    assert.equal(readSummary(parseFinishedStories(list)), "Read 3 story ideas out of the paste.");
+    assert.equal(
+      readSummary(parseFinishedStories("One headline\n\nThe one paragraph of a story.")),
+      "Read one story, with no headings to split it.",
+    );
   });
 });
 

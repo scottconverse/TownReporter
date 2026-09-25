@@ -12,10 +12,12 @@ import {
   detectedToolFromTitle,
   htmlToText,
   parseFinishedStories,
+  type ImportKind,
   type ParsedReport,
 } from "@/lib/news/import-stories";
 import {
   BODY_CHOICES,
+  IMPORT_KINDS,
   SECTION_REQUIRED,
   cardBody,
   cardDisclosure,
@@ -25,6 +27,7 @@ import {
   duplicateNote,
   findDuplicate,
   keptLinks,
+  readSummary,
   selectionFromCard,
   tickedCards,
   IMPORT_PASTE_KEY,
@@ -69,7 +72,10 @@ function ImportPage() {
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   const [notice, setNotice] = useState<{ text: string; kind: "info" | "error" } | null>(null);
-  const [done, setDone] = useState<{ headlines: string[]; refused: { headline: string; reason: string }[] } | null>(null);
+  const [done, setDone] = useState<{
+    imported: { headline: string; kind: ImportKind }[];
+    refused: { headline: string; reason: string }[];
+  } | null>(null);
 
   /*
     A paste handed over by the Desk's "Import finished stories" panel. Taken
@@ -110,6 +116,21 @@ function ImportPage() {
   const blocked = ticked.length - ready.length;
   const storyCount = cards.filter((c) => c.isStory).length;
   const sectionCount = cards.length - storyCount;
+  /*
+    What is about to be imported, in the two shapes it can arrive in: a finished
+    story becomes a draft, a story idea becomes a lead waiting to be written.
+    The button says both, because "Import 2 stories" over a paste that is two
+    ideas is the same wrong sentence the read notice used to say.
+  */
+  const readyIdeas = ready.filter((c) => c.kind === "idea").length;
+  const readyStories = ready.length - readyIdeas;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const importLabel =
+    readyIdeas === 0
+      ? `Import ${plural(readyStories, "story", "stories")} to the Queue`
+      : readyStories === 0
+        ? `Import ${plural(readyIdeas, "story idea", "story ideas")} to the Queue`
+        : `Import ${plural(readyStories, "story", "stories")} and ${plural(readyIdeas, "story idea", "story ideas")} to the Queue`;
 
   /** Read the paste. Deterministic first; a model only if there is nothing to read. */
   const read = () => {
@@ -131,12 +152,9 @@ function ImportPage() {
     setReport(parsed);
     setNeedsModel(false);
     setCards(cardsFromReport(parsed));
-    const found = parsed.stories.filter((s) => s.isStory).length;
-    setNotice({
-      text: `Read ${found} ${found === 1 ? "story" : "stories"} out of the paste. Check each one below — nothing is saved yet.`,
-      kind: "info",
-    });
-    announceToDesk(`Read ${found} ${found === 1 ? "story" : "stories"}. Check each one, then import.`);
+    const summary = readSummary(parsed);
+    setNotice({ text: `${summary} Check each one below — nothing is saved yet.`, kind: "info" });
+    announceToDesk(`${summary} Check each one, then import.`);
   };
 
   const structure = useMutation({
@@ -156,12 +174,13 @@ function ImportPage() {
         return;
       }
       const base = report ?? parseFinishedStories(text);
-      setCards(cardsFromReport({ ...base, stories: result.stories }));
+      const parsed = { ...base, stories: result.stories };
+      setCards(cardsFromReport(parsed));
       setNeedsModel(false);
-      const found = result.stories.filter((s) => s.isStory).length;
+      const summary = readSummary(parsed);
       setNotice({
         text: [
-          `Read ${found} ${found === 1 ? "story" : "stories"}.`,
+          summary,
           result.rejected
             ? `${result.rejected} could not be copied word for word and ${result.rejected === 1 ? "was" : "were"} flagged rather than invented.`
             : "",
@@ -173,7 +192,7 @@ function ImportPage() {
           .join(" "),
         kind: "info",
       });
-      announceToDesk(`Read ${found} ${found === 1 ? "story" : "stories"}. Check each one, then import.`);
+      announceToDesk(`${summary} Check each one, then import.`);
     },
     onError: (err) =>
       setNotice({
@@ -198,7 +217,7 @@ function ImportPage() {
         return;
       }
       setDone({
-        headlines: result.imported.map((i) => i.headline),
+        imported: result.imported.map((i) => ({ headline: i.headline, kind: i.kind })),
         refused: result.refused,
       });
       setCards([]);
@@ -206,7 +225,15 @@ function ImportPage() {
       setText("");
       setNeedsModel(false);
       const held = result.imported.filter((i) => i.hold).length;
-      const line = `${result.imported.length} ${result.imported.length === 1 ? "story" : "stories"} in the Queue, marked Imported.${held ? ` ${held} held.` : ""} Nothing is published.`;
+      const inIdeas = result.imported.filter((i) => i.kind === "idea").length;
+      const inStories = result.imported.length - inIdeas;
+      const what =
+        inIdeas === 0
+          ? plural(inStories, "story", "stories")
+          : inStories === 0
+            ? plural(inIdeas, "story idea", "story ideas")
+            : `${plural(inStories, "story", "stories")} and ${plural(inIdeas, "story idea", "story ideas")}`;
+      const line = `${what} in the Queue, marked Imported.${held ? ` ${held} held.` : ""} Nothing is published.`;
       setNotice({ text: line, kind: "info" });
       announceToDesk(line);
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -277,7 +304,14 @@ function ImportPage() {
             <p className="text-sm text-muted">
               Read as: {report.title || "no title"} · read by {tool || "the desk itself"}
               {report.method === "plain" ? " · one story, no headings" : ""}
-              {report.method === "structured" ? ` · ${storyCount} stories, ${sectionCount} sections that are not stories` : ""}
+              {/*
+                "22 stories" over a report whose twenty-two leads are ten
+                written stories and twelve ideas is the count the read notice
+                used to give, in a second place.
+              */}
+              {report.method === "structured"
+                ? ` · ${storyCount} ${report.stories.some((s) => s.isStory && s.kind === "idea") ? "stories and ideas" : "stories"}, ${sectionCount} sections that are not stories`
+                : ""}
             </p>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
@@ -376,7 +410,11 @@ function ImportPage() {
                       className="min-w-[16rem] flex-1 text-sm"
                     >
                       <span className="text-sm tracking-[0.14em] text-muted uppercase">
-                        {card.isStory ? "Import this story" : "Not a story — import it anyway?"}
+                        {card.isStory
+                          ? card.kind === "idea"
+                            ? "Import this idea"
+                            : "Import this story"
+                          : "Not a story — import it anyway?"}
                       </span>
                       <span className="mt-0.5 block text-base font-medium">{cardLabel(card)}</span>
                     </label>
@@ -407,6 +445,37 @@ function ImportPage() {
                       ) : null}
                     </p>
                   ) : null}
+
+                  {/*
+                    Step D, 2026-09-24: "Each card gets 'Import as: Finished
+                    story / Story idea'." The desk reads a card's kind off its
+                    own text, and the editor overrules it here -- the two
+                    routes through the desk are a draft to edit and a lead to
+                    write, and nothing else on this card says which one is
+                    about to happen.
+                  */}
+                  <fieldset className="mt-3 min-w-0">
+                    <legend className="text-sm tracking-[0.14em] text-muted uppercase">
+                      Import as
+                    </legend>
+                    <div className="mt-1 space-y-1">
+                      {IMPORT_KINDS.map((option) => (
+                        <label key={option.key} className="flex items-start gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name={`kind-${card.key}`}
+                            className="mt-1 h-4 w-4"
+                            checked={card.kind === option.key}
+                            onChange={() => patch(card.key, { kind: option.key })}
+                          />
+                          <span>
+                            {option.label}
+                            <span className="block text-sm text-muted">{option.note}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
 
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <label className="block">
@@ -470,7 +539,9 @@ function ImportPage() {
                   */}
                   <fieldset className="mt-3 min-w-0">
                     <legend className="text-sm tracking-[0.14em] text-muted uppercase">
-                      The text this story carries
+                      {card.kind === "idea"
+                        ? "The description this idea carries"
+                        : "The text this story carries"}
                     </legend>
                     <div className="mt-1 space-y-1">
                       {BODY_CHOICES.map((choice) => {
@@ -489,7 +560,9 @@ function ImportPage() {
                             <span>
                               {choice.label}
                               <span className="block text-sm text-muted">
-                                {missing ? "This report wrote no plain-language brief for this story." : choice.note}
+                                {missing
+                                  ? `This report wrote no plain-language brief for this ${card.kind === "idea" ? "idea" : "story"}.`
+                                  : choice.note}
                               </span>
                             </span>
                           </label>
@@ -534,12 +607,42 @@ function ImportPage() {
                         ))}
                       </ul>
                     </fieldset>
+                  ) : card.citations.length > 0 ? (
+                    /*
+                      A report that cites a packet page and no URL is not a
+                      report that cites nothing. Saying "no sources" over a
+                      card whose sources are listed two lines below is the
+                      screen contradicting itself.
+                    */
+                    <p className="mt-3 text-sm text-muted">
+                      This {card.kind === "idea" ? "idea" : "story"} links no pages. Its sources are the
+                      documents the report named, below.
+                    </p>
                   ) : (
                     <p className="mt-3 text-sm text-muted">
-                      This story cites no links, so it will go in with no sources. You can add them in the
-                      story editor.
+                      This {card.kind === "idea" ? "idea" : "story"} cites no links, so it will go in with
+                      no sources. You can add them in the story editor.
                     </p>
                   )}
+
+                  {card.citations.length > 0 ? (
+                    <fieldset className="mt-3 min-w-0">
+                      <legend className="text-sm tracking-[0.14em] text-muted uppercase">
+                        Named, not linked — {card.citations.length} the report cited
+                      </legend>
+                      <ul className="mt-1 list-disc pl-5 text-sm">
+                        {card.citations.map((citation, index) => (
+                          <li key={`${card.key}-citation-${index}`} className="wrap-anywhere">
+                            {citation}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-1 text-sm text-muted">
+                        These go on the story's sources as names, with no page to open, so whoever edits it
+                        knows where the figure came from.
+                      </p>
+                    </fieldset>
+                  ) : null}
 
                   <fieldset className="mt-3 min-w-0">
                     <legend className="text-sm tracking-[0.14em] text-muted uppercase">
@@ -651,16 +754,18 @@ function ImportPage() {
               onClick={() => runImport.mutate()}
               disabled={runImport.isPending || ready.length === 0}
             >
-              {runImport.isPending
-                ? "Importing…"
-                : `Import ${ready.length} ${ready.length === 1 ? "story" : "stories"} to the Queue`}
+              {runImport.isPending ? "Importing…" : importLabel}
             </InkButton>
             <span role="status" aria-live="polite" className="text-sm text-muted">
               {ready.length === 0
                 ? ticked.length === 0
-                  ? "Tick at least one story to import."
+                  ? "Tick at least one story or idea to import."
                   : "Something below needs fixing before these can be imported."
-                : `${ready.length} ready. They go in as drafts, marked Imported, and nothing is published.`}
+                : readyIdeas === 0
+                  ? `${ready.length} ready. They go in as drafts, marked Imported, and nothing is published.`
+                  : readyStories === 0
+                    ? `${ready.length} ready. They go on the Queue as story ideas, marked Imported, for someone to write. Nothing is published.`
+                    : `${readyStories} ready as drafts and ${readyIdeas} as story ideas, marked Imported. Nothing is published.`}
             </span>
           </div>
         </section>
@@ -670,17 +775,26 @@ function ImportPage() {
         <section className="mt-10 max-w-3xl border-2 border-ink p-4">
           <SecHead
             title="In the Queue"
-            count={done.headlines.length}
+            count={done.imported.length}
             aside={
               <Link to="/desk/queue" className="btn quiet small">
                 Open the Queue
               </Link>
             }
-            sub="Each one is a draft with its own lead, with the text exactly as you pasted it and its sources attached. Nothing is published."
+            sub={
+              done.imported.every((i) => i.kind === "idea")
+                ? "Each one is a lead on the Queue with the description you pasted as its why and its sources attached, waiting for someone to write. Nothing is published."
+                : done.imported.some((i) => i.kind === "idea")
+                  ? "Each finished story is a draft holding the text exactly as you pasted it; each story idea is a lead waiting to be written. All of them are marked Imported, and nothing is published."
+                  : "Each one is a draft with its own lead, with the text exactly as you pasted it and its sources attached. Nothing is published."
+            }
           />
           <ul className="mt-3 list-disc pl-5 text-sm">
-            {done.headlines.map((headline) => (
-              <li key={headline}>{headline}</li>
+            {done.imported.map((item, index) => (
+              <li key={`${item.headline}-${index}`}>
+                {item.headline}
+                {item.kind === "idea" ? " — a story idea, on the Queue to write" : ""}
+              </li>
             ))}
           </ul>
           {done.refused.length > 0 ? (
