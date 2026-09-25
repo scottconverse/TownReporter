@@ -11,7 +11,7 @@
  * through JSX.
  */
 
-import { topicFromText } from "./desk-copy.ts";
+import { titlesOverlap, topicFromText } from "./desk-copy.ts";
 import {
   IMPORT_LIMITS,
   disclosureLine,
@@ -179,6 +179,36 @@ export function duplicateNote(warning: DuplicateWarning | undefined): string {
   if (!warning) return "";
   const where = warning.slug ? `already published as “${warning.headline}”` : `already on the desk as “${warning.headline}”`;
   return `This looks like a story ${where}. Import it anyway if it is different — you decide.`;
+}
+
+/**
+ * Whether a card looks like a story the paper already has.
+ *
+ * A report covering the last month of meetings will happily re-tell something
+ * already printed, and the desk is the only place that can say so. Both lists
+ * come from questions the Queue screen already asks (`listLeads`,
+ * `listPublishedDesk`), so this costs no extra round trip.
+ *
+ * Published is checked before the desk: "already in the paper" is the more
+ * useful of the two facts when both are true, and the editor can still see the
+ * card in front of them either way. The headline is compared with the same
+ * `titlesOverlap` the desk already uses for its own ≈ PRINTED flag, so an
+ * imported story is judged by the rule every other story on the desk is.
+ */
+export function findDuplicate(
+  card: { headline: string },
+  existing: {
+    leads?: { id: number; headline: string }[];
+    published?: { slug: string; headline: string; published_at?: string }[];
+  },
+): DuplicateWarning | undefined {
+  const headline = card.headline.trim();
+  if (!headline) return undefined;
+  const printed = (existing.published ?? []).find((p) => titlesOverlap(headline, p.headline));
+  if (printed) return { headline: printed.headline, slug: printed.slug };
+  const lead = (existing.leads ?? []).find((l) => titlesOverlap(headline, l.headline));
+  if (lead) return { headline: lead.headline, leadId: lead.id };
+  return undefined;
 }
 
 /** The label for a card, used by the tick box and the status line. */

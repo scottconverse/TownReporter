@@ -9,6 +9,7 @@ import {
   cardDisclosure,
   cardProblems,
   cardsFromReport,
+  findDuplicate,
   keptLinks,
   tickedCards,
   duplicateNote,
@@ -137,5 +138,40 @@ describe("the choices the review screen offers", () => {
     );
     assert.match(duplicateNote({ headline: "Ride Longmont expansion", leadId: 12 }), /already on the desk/);
     assert.equal(duplicateNote(undefined), "");
+  });
+
+  it("finds a story already printed, and says which one, and leaves the decision to the editor", () => {
+    const card = stories()[0]!;
+    // The published paper carries the same story under its own headline.
+    const published = [
+      {
+        slug: "council-marijuana-hospitality",
+        headline: "Council votes to bring marijuana hospitality rules back for consideration",
+        published_at: "2026-09-20T00:00:00.000Z",
+      },
+    ];
+    assert.deepEqual(findDuplicate(card, { leads: [], published }), {
+      headline: "Council votes to bring marijuana hospitality rules back for consideration",
+      slug: "council-marijuana-hospitality",
+    });
+    // A lead on the desk, not yet published.
+    assert.deepEqual(findDuplicate(card, { leads: [{ id: 12, headline: card.headline }], published: [] }), {
+      headline: card.headline,
+      leadId: 12,
+    });
+    // Printed beats on-the-desk: it is the stronger of the two facts.
+    assert.equal(findDuplicate(card, { leads: [{ id: 12, headline: card.headline }], published })?.slug, published[0]!.slug);
+  });
+
+  it("does not warn about a story nothing resembles, or one with no headline yet", () => {
+    const card = stories()[0]!;
+    assert.equal(
+      findDuplicate(card, {
+        leads: [{ id: 1, headline: "Ride Longmont expansion opens Saturday" }],
+        published: [{ slug: "bike-lanes", headline: "City adds bike lanes on Main Street", published_at: "2026-09-01T00:00:00.000Z" }],
+      }),
+      undefined,
+    );
+    assert.equal(findDuplicate({ ...card, headline: "   " }, { leads: [{ id: 1, headline: card.headline }], published: [] }), undefined);
   });
 });

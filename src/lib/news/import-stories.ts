@@ -183,6 +183,72 @@ export function stripOrdinal(heading: string): string {
   return stripped || text;
 }
 
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  rsquo: "’",
+  lsquo: "‘",
+  ldquo: "“",
+  rdquo: "”",
+  mdash: "—",
+  ndash: "–",
+  hellip: "…",
+  copy: "©",
+  deg: "°",
+};
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
+    const named = ENTITIES[body.toLowerCase()];
+    if (named) return named;
+    if (body[0] === "#") {
+      const code = body[1]!.toLowerCase() === "x" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) return String.fromCodePoint(code);
+    }
+    return whole;
+  });
+}
+
+/**
+ * A saved web page as text, before anything reads it.
+ *
+ * The file path accepts `.html`, and raw markup fed to the reader would be
+ * worse than useless: `<h3>` is exactly the structure `parseStructure` looks
+ * for, and a tag soup has none. So the page is turned into the markdown the
+ * reader already understands — headings become `#`…`######`, list items become
+ * `-` lines, `<br>` and the block-closing tags become paragraph breaks — and
+ * script, style and the page's own `<title>` are dropped rather than imported
+ * as text nobody wrote for the story. Anything still in angle brackets is
+ * removed, so no markup reaches the body of an imported story.
+ *
+ * Deliberately not a general-purpose HTML parser: it reads the shape a saved
+ * report has, and a page whose text only appears inside a script or a nested
+ * table will come out with less than a browser would show. The review screen is
+ * where an editor sees that before anything is saved.
+ */
+export function htmlToText(html: string): string {
+  const text = String(html ?? "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|title|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<h([1-6])\b[^>]*>/gi, (_m, level: string) => `\n\n${"#".repeat(Number(level))} `)
+    .replace(/<\/h[1-6]\s*>/gi, "\n\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/(p|div|li|ul|ol|tr|table|section|article|blockquote|pre)\s*>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "");
+  return decodeEntities(text)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 type RawBlock = { level: number; heading: string; text: string };
 
 function splitBlocks(text: string): RawBlock[] {

@@ -7,6 +7,7 @@ import {
   disclosureLine,
   extractLinks,
   fallbackSingleStory,
+  htmlToText,
   parseFinishedStories,
   parsePlainStory,
   splitParagraphs,
@@ -290,5 +291,40 @@ describe("small helpers", () => {
     assert.match(disclosureLine("outside-ai"), /outside AI research tool/);
     assert.match(disclosureLine("person"), /A person wrote this/);
     assert.equal(disclosureLine("other", "  Written with a helper.  "), "Written with a helper.");
+  });
+});
+
+describe("htmlToText, so a saved web page is read as text", () => {
+  it("keeps the headings and paragraphs a saved page was written with", () => {
+    const html = [
+      "<!doctype html><html><head><title>Council report</title>",
+      "<style>body{color:red}</style><script>window.x=1</script></head>",
+      "<body><h1>Civic report</h1>",
+      "<h3>1. Council votes on marijuana rules</h3>",
+      "<p>First paragraph.</p><p>Second paragraph.</p>",
+      "<h2>Beat context</h2><p>Not a story.</p></body></html>",
+    ].join("");
+    const text = htmlToText(html);
+    assert.equal(text.includes("window.x"), false, "a script is not story text");
+    assert.equal(text.includes("color:red"), false, "a style block is not story text");
+    assert.equal(text.includes("<"), false, "no markup is left for the reader to read");
+    assert.match(text, /^# Civic report$/m);
+    assert.match(text, /^### 1\. Council votes on marijuana rules$/m);
+    assert.match(text, /^## Beat context$/m);
+    assert.ok(text.includes("First paragraph.") && text.includes("Second paragraph."));
+    // Headings and paragraphs arrive as markdown blocks, so the reader can split them.
+    assert.ok(splitParagraphs(text).includes("First paragraph."));
+    assert.equal(parseFinishedStories(text).stories.filter((s) => s.isStory).length, 1);
+  });
+
+  it("turns a list and the basic entities into the words a reader would see", () => {
+    const text = htmlToText(
+      "<ul><li>One &amp; two</li><li>3 &lt; 4</li></ul><p>Longmont&rsquo;s plan&nbsp;stands</p><br><p>After the break</p>",
+    );
+    assert.ok(text.includes("One & two"));
+    assert.ok(text.includes("3 < 4"));
+    assert.ok(text.includes("Longmont’s plan stands"));
+    assert.ok(text.split(/\n\n+/).some((p) => p.trim() === "After the break"));
+    assert.equal(text.includes("&amp;"), false);
   });
 });
