@@ -1,4 +1,8 @@
 import { z } from "zod";
+// Type-only: `ModelEffort` is the registry's own list, so the enum below cannot
+// drift from it without a compile error. Erased at runtime, so this file still
+// imports nothing but zod.
+import type { ModelEffort } from "./provider-registry.ts";
 
 /*
   Bounded input for the server functions this unit was scoped to: publish,
@@ -62,6 +66,122 @@ export const LIMITS = {
   meetingKeywordEntries: 100,
   listItem: 200,
   meetingKeyword: 120,
+
+  /*
+    0.6.63, the full sweep. The first group was written against the column
+    types until the schema was read: there are no bounded columns at all --
+    599 `text` and 293 `integer` across migrations/, and not one `varchar`,
+    `smallint` or length CHECK. So the boundary is the only bound there is,
+    and each number below is taken from the tightest app-level limit already
+    in the code, named beside it. Where the handler already refuses a size,
+    the ceiling is that exact number, so the answer at the boundary does not
+    move -- it just arrives before the work instead of after it.
+  */
+  /** An article slug. `views.ts:73` trims a view target to 300. */
+  slug: 300,
+  /** `desk.ts:348` `(topic || "council").slice(0, 40)`, `schema.ts` topic 40. */
+  topic: 40,
+  /** `public.ts:147` already slices the search box to 80; the UI caps 80 too. */
+  searchQuery: 80,
+  /** sources.kind / sources.tier are short keys ("council", "primary"). */
+  sourceKind: 60,
+  sourceTier: 40,
+  /** `schema.ts:113` proposed_sources[].title max 200. */
+  sourceTitle: 200,
+  /** `schema.ts:114` proposed_sources[].why max 400. */
+  sourceWhy: 400,
+  /**
+   * A paste of many "Title | URL" lines into the source box. `desk.ts:187`
+   * splits it and inserts a row per line, so the ceiling is what bounds the
+   * number of rows; 200,000 characters is a page of links.
+   */
+  bulkSourceText: 200_000,
+  /** `schema.ts:17` headline max 180, `desk.ts:340` slice(0, 180). */
+  leadHeadline: 180,
+  /** `schema.ts:21` why max 800, `desk.ts:341` slice(0, 800). */
+  leadWhy: 800,
+  /** `desk.ts:348` topic slice(0, 40). */
+  leadTopic: 40,
+  /**
+   * A draft headline and dek, hand-typed in the story editor. No store bounds
+   * either, and the textareas have no `maxLength` -- so the ceiling is a
+   * generous multiple (10x) of what the machine itself writes for the same
+   * two fields, `coerce-draft.ts:60-61` (headline 240, dek 400). Anything an
+   * editor could plausibly type passes; a 4 MB paste does not.
+   */
+  draftHeadline: 2_400,
+  draftDek: 4_000,
+  /**
+   * The editor's pasted story text. This is the one size the product already
+   * refuses: `model-request-commit.server.ts:635` rejects a text over
+   * 20,000,000, and the two opinion textareas are `maxLength={20_000_000}`.
+   * The same number here moves that refusal to the boundary.
+   */
+  storyText: 20_000_000,
+  /** A draft body. `desk.ts:1661` cuts a supplied document at 2,000,000. */
+  storyBody: 2_000_000,
+  /** `desk.ts:1993` slice(0, 1000); the story UI `maxLength` is 1000. */
+  storyDirection: 1000,
+  /** `write-story.ts:11` `WRITE_STORY_SCRATCH_LIMIT = 8000`. */
+  scratch: 8000,
+  /** desk.ts:415 cuts the whole notes JSON at 8000, so one note is under it. */
+  noteAdd: 8000,
+  /** `desk.ts:2022` `data.query.trim().slice(0, 240)`. */
+  pullQuery: 240,
+  /** `scan-source-packs.server.ts:138` `name.trim().slice(0, 120)`. */
+  packName: 120,
+  /** `sections.server.ts:177` refuses `sourceIds.length > 200`. */
+  packSources: 200,
+  /** `follow-ups.ts:91/92/111`: who 200, what 400, replyText 2000. */
+  followUpWho: 200,
+  followUpWhat: 400,
+  followUpReply: 2000,
+  /**
+   * A correction body. The form caps it at 2000 (`correction-form.tsx:71`)
+   * and the server checked only a minimum, so there was no upper bound at all.
+   */
+  correctionBody: 2000,
+  /** `finding-evidence-review.ts:867` refuses a reason over 2000. */
+  reviewNote: 2000,
+  /** One index per transcript segment: a long meeting has a few hundred. */
+  segmentIndexes: 5000,
+  /** An opaque evidence token (a hash or a revision marker). */
+  evidenceToken: 200,
+  /** A named outlet, e.g. "Longmont Leader". */
+  outlet: 200,
+  /** `legal-removal-store.ts:458` case ref regex allows exactly 120. */
+  caseRef: 120,
+  /** `legal-removal-store.ts:675` refuses an identifier over 200. */
+  backupIdentifier: 200,
+  /** `legal-removal-store.ts:37` refuses a selection over 200 rows. */
+  caseRefList: 200,
+  /** A county name. */
+  county: 80,
+  /** `dark.ts:1848` cuts a pasted investigation subject at 14,000. */
+  darkPaste: 200_000,
+  /** A Reddit post's title and body. */
+  redditTitle: 300,
+  redditExcerpt: 4000,
+  /** `story-documents.server.ts:123` refuses more than 22 ids. */
+  documentIds: 22,
+  /** `sections.server.ts:154/170/173/175` and the key regex at :162 (40). */
+  sectionCount: 100,
+  sectionName: 80,
+  sectionBrief: 3000,
+  sectionInstructions: 6000,
+  sectionKey: 40,
+  /** `routine-notice-checks.server.ts:191` refuses a sourceUrl over 4000. */
+  sourceUrl: 4000,
+  /** An ops action id: one of six short constants. */
+  opsActionId: 64,
+  /** `views.ts:73` trims a view target to 300. */
+  viewTarget: 300,
+  /** `opinion.ts:376` refuses written editorial text over 400,000. */
+  editorialBody: 400_000,
+  /** A reporting-notes todo list. The whole note JSON is cut at 8000 (desk.ts:415). */
+  noteList: 500,
+  /** A removal fingerprint: a hash or a JSON digest, far under 200. */
+  fingerprint: 200,
 } as const;
 
 /*
@@ -316,3 +436,524 @@ export function authBodyTooLarge(contentLength: string | null): boolean {
   const bytes = Number(contentLength);
   return Number.isFinite(bytes) && bytes > MAX_AUTH_BODY_BYTES;
 }
+
+/*
+  ---------------------------------------------------------------------------
+  0.6.63: the full sweep -- the rest of the surface
+  ---------------------------------------------------------------------------
+
+  Unit K (0.6.62) did this for publish, auth, paper settings and connections.
+  This is every other server function in `src/` that carried a `.validator()`
+  whose only runtime work was a TypeScript annotation: `(id: number) => id`,
+  `(input: {...}) => input`, `(v) => String(v ?? "")`. 83 of them, in 15 files.
+  A `.validator()` in TanStack Start is a runtime boundary -- its return value
+  is what the handler receives as `data` -- so `(input: T) => input` is a shape
+  check that does not check anything. Nothing here was ever injection (every
+  query is parameterised); what was missing was the bound, so a 4 MB headline
+  or a `"abc"` where an id belongs travelled as far as the driver.
+
+  THE BOUNDS. There are no bounded columns to copy: across `migrations/` there
+  are 599 `text` and 293 `integer` columns and not one `varchar`, `smallint` or
+  length CHECK, so every string column takes any length and every id column is
+  a 4-byte integer. Each ceiling below therefore comes from the tightest limit
+  the app already applies -- a store's refusal, a UI `maxLength`, a `slice()` --
+  and the comment beside it names that signal. Where a handler already refused
+  a size, the ceiling is that exact number, so the answer at the boundary does
+  not move; it arrives before the work instead of after it.
+
+  WHAT IS NOT HERE. Hand checks stay hand checks (`dark.ts` artifactOcrRequest,
+  `desk.ts` listScans, `dark.ts` saveDarkDials, `opinion.ts` opinionModelChoice,
+  `public.ts:147`'s slice, and the two meeting settings normalisers): they do
+  real work -- clamping, allow-listing, a fallback -- that a schema would have
+  to reimplement and then keep in step. `story-document-api.ts:5` still takes a
+  raw `FormData`: its handler already refuses a missing file and a part over
+  4 MB, and a `z.instanceof(FormData)` cannot be checked without exercising the
+  upload route.
+
+  STRICT OR FORGIVING. Most of these functions do not throw today -- they reach
+  a store or a query and fail, or answer a friendly refusal. So a thrown
+  ZodError is only used where the row was a scalar id or a string that could
+  not produce a working answer anyway: refusing an id that is not an integer
+  at the boundary is the same observable outcome as the query erroring, one
+  round trip earlier and with a clearer message. Where a function answers
+  friendly text (`claim.ts`'s `String(v ?? "")`, `legalRemovalCaseId`,
+  `opsAction`), the schema degrades the same way instead of throwing. And the
+  six rows whose checks live in the module they delegate to (`draft-batch.ts`,
+  `routine-notice-checks.ts`, `routine-notice-policy.ts`,
+  `routine-notice-automation.ts`) cannot throw at all: their stores answer
+  "Choose between one and five leads." where a 500 would be worse, so those use
+  `cleanOrRaw`.
+*/
+
+/* --- the pieces every group shares --------------------------------------- */
+
+/** A row id. Every `id` column here is a 4-byte integer. */
+export const rowId = z.number().int().positive().max(2_147_483_647);
+/** A revision or run counter: same column, but 0 is a real value. */
+export const counter = z.number().int().nonnegative().max(2_147_483_647);
+export const optionalId = rowId.optional();
+export const nullableId = rowId.nullable();
+/** A model choice: a registry key, a saved custom model id, or `auto`. */
+export const modelChoiceText = z.string().max(LIMITS.modelId);
+/** A short opaque id that arrives as text (a document id, a job key). */
+export const idText = z.string().max(LIMITS.modelId);
+/** `provider-registry.ts:58` is the same six names. */
+export const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ModelEffort[];
+export const modelEffortValue = z.enum(EFFORTS);
+export const modelEffortOrNull = modelEffortValue.nullable();
+/**
+ * An effort the registry is allowed to reinterpret. `modelEffort(choice, v)`
+ * already reads a value it does not know as "the model's own default", so junk
+ * becomes `null` -- which that function reads the same way -- rather than a
+ * 4 MB string travelling to the registry to be ignored there.
+ */
+export const modelEffortLoose = modelEffortValue.nullable().catch(null);
+export const researchScopeValue = z.enum(["public", "supplied"]);
+export const EVIDENCE_DECISIONS = ["keep", "remove"] as const;
+
+/**
+ * For a row whose real check is downstream. `safeParse` and, on failure, the
+ * value as it arrived: those stores hand-check and answer a friendly refusal
+ * ("Choose between one and five leads.", "Routine notice check filters were
+ * malformed.") where a thrown ZodError is a 500. The ceiling still applies --
+ * each text leaf carries its own `.catch`, so an oversize string is cut to
+ * something the downstream check already refuses instead of being carried.
+ *
+ * `T` is named by the caller rather than inferred from the schema: on the pass
+ * path the parsed value is handed on, and on the fail path the raw value is,
+ * and both have to be the shape the delegate already takes -- which is the
+ * shape the `.validator()` annotation promised before this change. The schema
+ * is what does the bounding; `T` is what the handler was already typed for.
+ */
+export function cleanOrRaw<T>(schema: z.ZodType): (raw: unknown) => T {
+  return (raw: unknown) => {
+    const parsed = schema.safeParse(raw);
+    return parsed.success ? (parsed.data as T) : (raw as T);
+  };
+}
+
+/* --- claim.ts (5 rows) ---------------------------------------------------- */
+
+/** `String(v ?? "")`: junk already became "", so an oversize token does too. */
+export const claimToken = z.string().max(LIMITS.evidenceToken).catch("");
+export const claimEmail = z.string().max(LIMITS.email).catch("");
+
+/* --- desk.ts (29 rows) --------------------------------------------------- */
+
+/** `desk.ts:167` addSource. */
+export const addSourceInput = z.object({
+  url: z.string().max(LIMITS.url),
+  title: z.string().max(LIMITS.sourceTitle),
+  kind: z.string().max(LIMITS.sourceKind),
+  tier: z.string().max(LIMITS.sourceTier),
+});
+
+/** `desk.ts:187` addSourcesFromText: one row per line, so this is the row cap. */
+export const bulkSourceInput = z.object({ text: z.string().max(LIMITS.bulkSourceText) });
+
+/** `desk.ts:220` setSourceStatus. */
+export const sourceStatusValue = z.enum(["accepted", "rejected", "proposed"]);
+export const sourceStatusInput = z.object({ id: rowId, status: sourceStatusValue });
+
+/** `desk.ts:338` fileLead (`desk.ts:340-348` slice the same three fields). */
+export const fileLeadInput = z.object({
+  headline: z.string().max(LIMITS.leadHeadline),
+  why: z.string().max(LIMITS.leadWhy),
+  topic: z.string().max(LIMITS.leadTopic),
+  url: z.string().max(LIMITS.url).optional(),
+});
+
+/** `desk.ts:586` saveScanSourcePackFn (`sections.server.ts:177` refuses > 200). */
+export const packSaveInput = z.object({
+  name: z.string().max(LIMITS.packName),
+  sourceIds: z.array(rowId).max(LIMITS.packSources),
+  packId: rowId.optional(),
+});
+
+/** `desk.ts:603` renameScanSourcePackFn. */
+export const packRenameInput = z.object({ packId: rowId, name: z.string().max(LIMITS.packName) });
+
+/** `desk.ts:617` deleteScanSourcePackFn. */
+export const packDeleteInput = z.object({ packId: rowId });
+
+/** `desk.ts:625` runScan (`input ?? {}` -- a no-arg call is a real call). */
+export const runScanInput = z.preprocess(
+  (v) => (v === undefined || v === null ? {} : v),
+  z.object({
+    modelChoice: modelChoiceText.optional(),
+    modelEffort: modelEffortOrNull.optional(),
+    sectionKey: z.string().max(LIMITS.sectionKey).optional(),
+    customSourceIds: z.array(rowId).max(LIMITS.packSources).optional(),
+    packId: rowId.optional(),
+  }),
+);
+
+/** `desk.ts:1880` draftLead: a bare id, or the full four-field form. */
+export const draftLeadInput = z.union([
+  rowId,
+  z.object({
+    leadId: rowId,
+    modelChoice: modelChoiceText.optional(),
+    modelEffort: modelEffortOrNull.optional(),
+    researchScope: researchScopeValue.optional(),
+  }),
+]);
+
+/** `desk.ts:1934` writeStoryFromInput (`story-documents.server.ts:123` caps 22). */
+export const writeStoryInput = z.object({
+  text: z.string().max(LIMITS.storyText),
+  documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+  researchScope: researchScopeValue.optional(),
+  sectionKey: z.string().max(LIMITS.sectionKey).optional(),
+});
+
+/**
+ * A stored todo, read back and written whole: loose, because the list is the
+ * editor's own notes and a key this file does not know must still round-trip
+ * (`notes.ts:13-24` names the five that exist today).
+ */
+export const noteTodo = z.looseObject({
+  t: z.string().max(LIMITS.listItem),
+  done: z.boolean(),
+  src: z.enum(["you", "machine", "gate"]),
+  q: z.string().max(LIMITS.listItem).optional(),
+  queries: z
+    .array(z.looseObject({ query: z.string().max(LIMITS.listItem), hit: z.boolean() }))
+    .max(50)
+    .optional(),
+});
+
+/** `desk.ts:1959` saveReportingNotes (`desk.ts:415` cuts the JSON at 8000). */
+export const reportingNotesInput = z.object({
+  leadId: rowId,
+  add: z.string().max(LIMITS.noteAdd).optional(),
+  toggle: z.number().int().nonnegative().max(1_000).optional(),
+  scratch: z.string().max(LIMITS.scratch).optional(),
+  storyDirection: z.string().max(LIMITS.storyDirection).optional(),
+  researchScope: researchScopeValue.optional(),
+  todos: z.array(noteTodo).max(LIMITS.noteList).optional(),
+});
+
+/** `desk.ts:2011` pullTodo. */
+export const pullTodoInput = z.object({
+  leadId: rowId,
+  query: z.string().max(LIMITS.pullQuery),
+  index: z.number().int().nonnegative().max(1_000).optional(),
+});
+
+/** `desk.ts:2065` listPullJobs. */
+export const leadIdInput = z.object({ leadId: rowId });
+
+/** `desk.ts:2117` / `desk.ts:2135` (stop, retry) and `desk.ts:2270` / `:2275`. */
+export const jobIdInput = z.object({ jobId: rowId });
+export const idOnlyInput = z.object({ id: rowId });
+
+/** `desk.ts:2208` setLeadStatus. */
+export const leadStatusInput = z.object({
+  id: rowId,
+  status: z.enum(["held", "killed", "new"]),
+});
+
+/** `desk.ts:2236` listFollowUps (`input ?? {}`). */
+export const followUpsInput = z.preprocess(
+  (v) => (v === undefined || v === null ? {} : v),
+  z.object({
+    status: z.enum(["open", "answered", "dropped"]).optional(),
+    limit: z.number().int().positive().max(1_000).optional(),
+  }),
+);
+
+/** `desk.ts:2252` createFollowUp (`follow-ups.ts:91-92` bound who/what). */
+export const followUpCreateInput = z.object({
+  leadId: nullableId.optional(),
+  articleId: nullableId.optional(),
+  who: z.string().max(LIMITS.followUpWho),
+  what: z.string().max(LIMITS.followUpWhat),
+  dueOn: z.string().max(40).nullable().optional(),
+});
+
+/** `desk.ts:2265` replyToFollowUp (`follow-ups.ts:111` bounds replyText). */
+export const followUpReplyInput = z.object({
+  id: rowId,
+  replyText: z.string().max(LIMITS.followUpReply),
+  repliedOn: z.string().max(40).nullable().optional(),
+});
+
+/** `desk.ts:2510` overrideNamedOutlet. */
+export const outletInput = z.object({ leadId: rowId, outlet: z.string().max(LIMITS.outlet) });
+
+/** `desk.ts:2770` addCorrection (`correction-form.tsx:71` caps the body at 2000). */
+export const correctionInput = z.object({
+  articleSlug: z.string().max(LIMITS.slug).optional(),
+  body: z.string().max(LIMITS.correctionBody),
+  meetingReviewId: rowId.optional(),
+});
+
+/**
+ * A segment index into a transcript: a long meeting is a few hundred, and
+ * `LIMITS.segmentIndexes` bounds the list.
+ */
+export const segmentIndex = z.number().int().nonnegative().max(1_000_000);
+
+/** `desk.ts:2791` resolveMeetingArticleReview (`finding-evidence-review.ts:867`). */
+export const meetingArticleReviewInput = z.object({
+  reviewId: rowId,
+  resolution: z.enum(["still-accurate", "correction-required"]),
+  acceptedArtifactId: rowId,
+  note: z.string().max(LIMITS.reviewNote),
+  confirmedSegmentIndices: z.array(segmentIndex).max(LIMITS.segmentIndexes),
+});
+
+/** `desk.ts:2814` resolveDraftMeetingReview. */
+export const draftMeetingReviewInput = z.object({
+  leadId: rowId,
+  draftId: rowId,
+  evidenceToken: z.string().max(LIMITS.evidenceToken),
+  acceptedArtifactId: rowId,
+  confirmedSegmentIndexes: z.array(segmentIndex).max(LIMITS.segmentIndexes),
+  note: z.string().max(LIMITS.reviewNote),
+});
+
+/** `desk.ts:2893` getDraftHistoryItem. */
+export const draftHistoryInput = z.object({ leadId: rowId, draftId: rowId });
+
+/** `desk.ts:3094` deleteArticleBySlug. */
+export const slugInput = z.string().max(LIMITS.slug);
+
+/* --- dark.ts (12 rows) --------------------------------------------------- */
+
+/**
+ * `dark.ts:1376` is the one row that coerced: `Number(artifactId)`. `z.coerce`
+ * keeps a digit-string working, which is the only reason that coercion was
+ * there, and refuses "abc" the way `Number` never did.
+ */
+export const artifactIdInput = z.coerce.number().int().positive().max(2_147_483_647);
+
+/** `dark.ts:2039` runDarkDesk (`dark.ts:1848` cuts a paste at 14,000). */
+export const darkRunInput = z.object({
+  paste: z.string().max(LIMITS.darkPaste),
+  investigationId: rowId.optional(),
+  modelChoice: modelChoiceText.optional(),
+});
+
+/** `dark.ts:2067` openDarkInvestigation. */
+export const darkOpenInput = z.object({
+  paste: z.string().max(LIMITS.darkPaste),
+  title: z.string().max(LIMITS.leadHeadline).optional(),
+});
+
+/** `dark.ts:2217` / `dark.ts:3617`: a bare id, or the step's dials. */
+export const darkStepInput = z.union([
+  rowId,
+  z.object({
+    id: rowId,
+    modelChoice: modelChoiceText.optional(),
+    modelEffort: modelEffortLoose.optional(),
+  }),
+]);
+
+/**
+ * `dark.ts:2875` / `dark.ts:3014`: a bare id, or the queue's tip flag. The
+ * store's handler reads `data.id` and `data.asTip`, so the bare id is folded
+ * into the object here -- exactly the `typeof input === "number" ? { id: input }
+ * : input` the two validators wrote by hand, kept because it is a shape the
+ * app produces, not a cast.
+ */
+export const darkSignalInput = z.preprocess(
+  (v) => (typeof v === "number" ? { id: v } : v),
+  z.object({ id: rowId, asTip: z.boolean().optional() }),
+);
+
+/** `dark.ts:3232` fileRedditTip (`fileRedditTipFor` reads these five). */
+export const redditTipInput = z.object({
+  url: z.string().max(LIMITS.url),
+  title: z.string().max(LIMITS.redditTitle),
+  excerpt: z.string().max(LIMITS.redditExcerpt).optional(),
+  updated: z.string().max(80).optional(),
+  author: z.string().max(200).optional(),
+});
+
+/** `dark.ts:3323` saveDarkCounty. */
+export const darkCountyInput = z.object({ county: z.string().max(LIMITS.county) });
+
+/* --- evidence.ts (4 rows) ------------------------------------------------ */
+
+/** `evidence.ts:437` / `:441` and the pair inside `:445`. */
+export const evidenceUrl = z.string().max(LIMITS.url);
+export const evidenceCompareInput = z.object({
+  url: evidenceUrl.optional(),
+  a: rowId.optional(),
+  b: rowId.optional(),
+});
+
+/* --- legal-removal.ts (5 rows) ------------------------------------------- */
+
+/** `legal-removal-store.ts:37` refuses a selection over 200 rows per list. */
+export const legalIdList = z.array(rowId).max(LIMITS.caseRefList);
+
+export const legalSelectionInput = z.object({
+  articleIds: legalIdList,
+  draftIds: legalIdList,
+  memoryIds: legalIdList,
+  auditIds: legalIdList,
+  trashIds: legalIdList,
+  reviewedLegacy: z.boolean(),
+  reviewedEvidence: z.boolean(),
+});
+
+/** `legal-removal.ts:33` confirmLegalRemoval (`legal-removal-store.ts:458` caseRef). */
+export const legalRemovalInput = z.object({
+  selection: legalSelectionInput,
+  fingerprint: z.string().max(LIMITS.fingerprint),
+  policy: z.enum(["retain", "destroy"]),
+  caseRef: z.string().max(LIMITS.caseRef),
+});
+
+/** `legal-removal.ts:40` / `:44`: `String(id)` already degraded to "". */
+export const legalCaseId = z.string().max(LIMITS.caseRef).catch("");
+
+/** `legal-removal.ts:48` legalBackupAction (`:675` bounds the identifier). */
+export const legalBackupInput = z.object({
+  caseId: z.string().max(LIMITS.caseRef),
+  identifier: z.string().max(LIMITS.backupIdentifier).optional(),
+  confirmId: rowId.optional(),
+});
+
+/* --- opinion.ts (4 rows) ------------------------------------------------- */
+
+/** `opinion.ts:161` startEditorial. */
+export const editorialStartInput = z.object({
+  subject: z.string().max(LIMITS.storyText),
+  askedFor: z.string().max(LIMITS.storyText).optional(),
+  articleSlug: z.string().max(LIMITS.slug).optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+  documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
+  retryRequestId: rowId.optional(),
+});
+
+/**
+ * `opinion.ts:230` saveEditorialDraft. The body is the same editor text the
+ * commit boundary already caps at 20,000,000, so a draft that could be created
+ * can always be saved again.
+ */
+export const editorialDraftInput = z.object({
+  draftId: rowId,
+  headline: z.string().max(LIMITS.draftHeadline),
+  dek: z.string().max(LIMITS.draftDek),
+  body: z.string().max(LIMITS.storyText),
+  topic: z.string().max(LIMITS.topic),
+  evidenceDecision: z.enum(EVIDENCE_DECISIONS).optional(),
+  evidenceToken: z.string().max(LIMITS.evidenceToken).optional(),
+});
+
+/**
+ * `desk.ts:2200` saveDraft: the same draft as `editorialDraftInput`, keyed by
+ * the lead it belongs to rather than the draft id -- `draft-edit.server.ts:5`
+ * names the field `leadId`, and the story editor saves through that path.
+ */
+export const draftEditInput = z.object({
+  leadId: rowId,
+  headline: z.string().max(LIMITS.draftHeadline),
+  dek: z.string().max(LIMITS.draftDek),
+  body: z.string().max(LIMITS.storyText),
+  topic: z.string().max(LIMITS.topic),
+  evidenceDecision: z.enum(EVIDENCE_DECISIONS).optional(),
+  evidenceToken: z.string().max(LIMITS.evidenceToken).optional(),
+});
+
+/** `opinion.ts:370` fileWrittenEditorial (`opinion.ts:376` refuses over 400,000). */
+export const editorialText = z.string().max(LIMITS.editorialBody);
+
+/* --- public.ts, sections.ts, story-document-api.ts, trash.ts ------------- */
+
+/** `public.ts:78` / `:116`. */
+export const publicSlug = z.string().max(LIMITS.slug);
+export const publicTopic = z.string().max(LIMITS.topic);
+
+/** A stored section, written back whole: loose, for the same reason as `noteTodo`. */
+export const sectionEntry = z.looseObject({
+  key: z.string().max(LIMITS.sectionKey),
+  name: z.string().max(LIMITS.sectionName),
+  visible: z.boolean(),
+  brief: z.string().max(LIMITS.sectionBrief),
+  instructions: z.string().max(LIMITS.sectionInstructions),
+  replacementKey: z.string().max(LIMITS.sectionKey).nullable(),
+  sourceIds: z.array(rowId).max(LIMITS.packSources),
+});
+
+/** `sections.ts:39` saveSectionConfig (`sections.server.ts:154-177`). */
+export const sectionConfigInput = z.object({
+  revision: counter,
+  sections: z.array(sectionEntry).max(LIMITS.sectionCount),
+});
+
+/** `story-document-api.ts:25` / `:44`. */
+export const storyDocumentListInput = z.object({ leadId: rowId });
+export const storyDocumentDownloadInput = z.object({
+  id: idText,
+  extracted: z.boolean().optional(),
+});
+
+/** `trash.ts:122` / `:179`: a row id, sent as the body itself. */
+export const trashId = rowId;
+
+/* --- the six delegated rows --------------------------------------------- */
+
+/** `draft-batch.ts:112` startDraftBatch (`cleanDraftBatchInput` owns the answer). */
+export const draftBatchStartInput = z.looseObject({
+  runtime: z.string().max(LIMITS.modelId).catch(""),
+  items: z
+    .array(z.looseObject({ leadId: rowId, researchScope: researchScopeValue.optional() }))
+    .max(5),
+});
+
+/** `draft-batch.ts:140` getDraftBatch. */
+export const draftBatchGetInput = z.looseObject({ batchId: rowId.optional() });
+
+/** `routine-notice-checks.ts:93` (`:191` refuses a sourceUrl over 4000). */
+export const routineCheckRunInput = z.looseObject({
+  sourceId: rowId.optional(),
+  sourceUrl: z.string().max(LIMITS.sourceUrl).catch(""),
+});
+
+/** `routine-notice-checks.ts:107` getRoutineNoticeChecks (`cleanListInput`). */
+export const routineChecksListInput = z.looseObject({
+  sourceId: rowId.optional(),
+  formatKey: z.string().max(40).optional(),
+});
+
+/** `routine-notice-checks.ts:124` getRoutineNoticeCapturedText. */
+export const routineCaptureInput = z.looseObject({ checkId: rowId.optional() });
+
+/** `routine-notice-policy.ts:384` saveRoutineNoticePolicy. */
+export const routinePolicyInput = z.looseObject({
+  expectedRevision: counter,
+  paused: z.boolean(),
+  approvals: z
+    .array(z.looseObject({ sourceId: rowId, sourceUrl: z.string().max(LIMITS.sourceUrl).catch(""), formatKey: z.string().max(40) }))
+    .max(LIMITS.caseRefList),
+});
+
+/**
+ * `routine-notice-automation.ts:396` saveRoutineNoticeAutomation. The stored
+ * record (`routine-notice-automation.ts:16-32`) is the editor's whole schedule
+ * -- channels, sources, timezone, local time -- so this bounds the two shapes
+ * that can grow without naming a channel or a source field, and stays loose so
+ * nothing the store knows about is dropped on the way in.
+ */
+export const routineAutomationInput = z.looseObject({
+  expectedRevision: counter,
+  enabled: z.boolean(),
+  timezone: z.string().max(LIMITS.timezone).catch(""),
+  localTime: z.string().max(40).catch(""),
+  sections: z.record(z.string().max(LIMITS.sectionKey), z.string().max(LIMITS.modelId)),
+  sources: z.array(z.looseObject({})).max(LIMITS.caseRefList),
+});
+
+/* --- ops/dashboard.ts (1 row) ------------------------------------------- */
+
+/** `ops/dashboard.ts:42`: `isOpsActionId` already answers "Unknown action." */
+export const opsAction = z.string().max(LIMITS.opsActionId).catch("");
