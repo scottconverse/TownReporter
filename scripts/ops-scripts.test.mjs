@@ -572,7 +572,7 @@ test("start-townreporter.ps1 starts the reader detached, after the paper, and ca
 
 test("the Control menu offers the reader in plain words and still publishes nothing", () => {
   const text = readFileSync(join(OPS, "TownReporter Control.cmd"), "utf8");
-  assert.match(text, /^echo   6  /m, "the menu must have a line 6");
+  assert.match(text, /^echo {3}6 {2}/m, "the menu must have a line 6");
   assert.match(text, /Reddit reader/i, "line 6 must be about the Reddit reader");
   assert.match(text, /if "%choice%"=="6" goto redlib/, "and must dispatch it");
   assert.match(text, /redlib\.ps1" restart/, "option 6 must restart the reader through its own ops script");
