@@ -14,6 +14,7 @@ import { inviteEditor, myDesk } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
 import { SectionsSetup } from "@/components/sections-setup";
+import { NamedOutletsSetup } from "@/components/named-outlets-setup";
 import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
 import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
 import {
@@ -109,6 +110,7 @@ const SETTINGS_PANELS = [
   "Routine notices",
   "Paper identity",
   "Sections",
+  "Named outlets",
   "Server health",
   "Recently deleted",
   "Editors & access",
@@ -120,6 +122,9 @@ function OpsPage() {
   useEffect(() => {
     if (signin) setPanel("Writing models");
     else if (hash === "custom-ai-connections") setPanel("Custom connections");
+    // "#named-outlets" opens the outlet list; a link that wants Sections still
+    // says "section", which the outlets hash does not contain.
+    else if (hash.includes("outlet")) setPanel("Named outlets");
     else if (hash.includes("section")) setPanel("Sections");
   }, [signin, hash]);
   const qc = useQueryClient();
@@ -216,6 +221,9 @@ function OpsPage() {
           </div>
           <div hidden={panel !== "Sections"}>
             <SectionsSetup />
+          </div>
+          <div hidden={panel !== "Named outlets"}>
+            <NamedOutletsSetup />
           </div>
           <div hidden={panel !== "Server health"}>
             <section className="mt-12">

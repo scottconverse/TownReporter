@@ -153,6 +153,27 @@ const DESK_CHROME_IMPORTS = {
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
 };
 
+const deskChromeUrl = moduleUrl(
+  await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
+  "desk-chrome.tsx",
+  DESK_CHROME_IMPORTS,
+);
+
+// The unsaved bar and the leave-page prompt, shared with the Named outlets
+// panel (Unit W). Compiled here as well so the "no bar before an edit"
+// assertion below is about the component the Sections panel really renders,
+// not about a stand-in that would keep passing if the panel stopped using it.
+const guardUrl = moduleUrl(
+  await readFile(new URL("../src/components/unsaved-changes-guard.tsx", import.meta.url), "utf8"),
+  "unsaved-changes-guard.tsx",
+  {
+    "@tanstack/react-router": routerStub,
+    "./desk-chrome": deskChromeUrl,
+    react: import.meta.resolve("react"),
+    "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+  },
+);
+
 const sectionsStub = inlineModule(`
   export async function editorSections() { return null; }
   export async function applySections() { return { ok: true, config: null }; }
@@ -168,11 +189,8 @@ const { SectionsSetup } = await import(
     {
       "@tanstack/react-router": routerStub,
       "@tanstack/react-query": reactQueryStub,
-      "./desk-chrome": moduleUrl(
-        await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
-        "desk-chrome.tsx",
-        DESK_CHROME_IMPORTS,
-      ),
+      "./desk-chrome": deskChromeUrl,
+      "./unsaved-changes-guard": guardUrl,
       "./desk-chrome-utils": deskChromeUtilsUrl,
       "./sections-setup-copy": copyUrl,
       "@/lib/news/sections": sectionsStub,

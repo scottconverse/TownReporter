@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useBlocker } from "@tanstack/react-router";
 import { InkButton } from "./desk-chrome";
 import { inputClass } from "./desk-chrome-utils";
+import { UnsavedChangesGuard } from "./unsaved-changes-guard";
 import {
   UNSAVED_SECTION_BAR_MESSAGE,
   sourceAddHint,
@@ -36,19 +36,6 @@ export function SectionsSetup() {
   const [addNotice, setAddNotice] = useState<{ key: string; kind: "ok" | "err"; text: string } | null>(
     null,
   );
-  // The unsaved-draft flag read by the navigation blocker. It lives in a ref so
-  // the blocker's shouldBlockFn keeps one identity for the life of the panel:
-  // useBlocker re-registers its history hook whenever that function changes.
-  const unsavedRef = useRef(false);
-  unsavedRef.current = draft !== null;
-  const hasUnsavedDraft = useCallback(() => unsavedRef.current, []);
-  const blocker = useBlocker({
-    shouldBlockFn: hasUnsavedDraft,
-    // Also arm the browser's own unload prompt; the in-app route blocker
-    // cannot see a reload, a closed tab or a typed URL.
-    enableBeforeUnload: hasUnsavedDraft,
-    withResolver: true,
-  });
   const config = draft ?? query.data;
   if (query.isPending) return <p className="mt-8 text-sm">Loading newspaper sections…</p>;
   if (query.error)
@@ -683,98 +670,40 @@ export function SectionsSetup() {
       The unsaved bar and the leave-page prompt sit outside the
       `Newspaper sections` section: they are page-level states, and keeping
       them out of the panel keeps `panel.getByRole(...)` unambiguous for the
-      walkers that drive this screen.
-
-      The bar is mounted at all times so its `role="status"` message is a live
-      region that already exists when the draft does -- text inserted into a
-      live region is announced, a live region inserted with its text is not.
-      With no draft it collapses to `sr-only` and holds no text, so it has no
-      footprint and nothing to announce.
-
-      `astra-unsaved-bar` is not decoration: the bar is fixed to the viewport
-      but must sit in the content column, and only CSS knows how wide the
-      desk's nav is at each breakpoint. See `.astra-unsaved-bar` (and
-      `--desk-nav-w`) in src/desk-astra.css.
+      walkers that drive this screen. Both are the shared guard
+      (unsaved-changes-guard.tsx), so the Named outlets panel cannot drift
+      from this one.
     */}
-    <div
-      aria-label={draft ? "Section changes not saved" : undefined}
-      className={
-        draft
-          ? "astra-unsaved-bar fixed bottom-0 z-30 border-t-2 border-rule bg-paper px-3 py-3"
-          : "sr-only"
-      }
-    >
-      <div
-        className={
-          draft
-            ? "mx-auto flex max-w-4xl flex-wrap items-center gap-x-3 gap-y-2"
-            : undefined
-        }
-      >
-        <p role="status" className={draft ? "text-sm font-semibold" : undefined}>
-          {draft ? UNSAVED_SECTION_BAR_MESSAGE : ""}
-        </p>
-        {draft ? (
-          <>
-            <InkButton
-              tone={preview && retiring ? "danger" : "solid"}
-              small
-              ariaLabel={
-                preview ? "Confirm and apply, from the unsaved changes bar" : "Review changes, from the unsaved changes bar"
-              }
-              disabled={busy}
-              onClick={() => {
-                if (!preview) {
-                  setPreview(true);
-                  return;
-                }
-                void apply();
-              }}
-            >
-              {busy
-                ? "Applying…"
-                : preview
-                  ? retiring
-                    ? "Confirm retirement and apply"
-                    : "Confirm and apply"
-                  : "Review changes"}
-            </InkButton>
-            <InkButton
-              tone="ghost"
-              small
-              ariaLabel="Cancel changes, from the unsaved changes bar"
-              disabled={busy}
-              onClick={cancel}
-            >
-              Cancel changes
-            </InkButton>
-          </>
-        ) : null}
-      </div>
-    </div>
-    {blocker.status === "blocked" ? (
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Leave with unsaved section changes?"
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      >
-        <div className="max-w-md border-2 border-rule bg-paper p-5 text-sm">
-          <h4 className="font-display text-xl">{UNSAVED_SECTION_BAR_MESSAGE}</h4>
-          <p className="mt-2">
-            Leaving now discards the draft. Review and confirm first if you want to keep it.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <InkButton tone="solid" onClick={() => blocker.proceed()}>
-              Leave and discard changes
-            </InkButton>
-            <InkButton tone="ghost" onClick={() => blocker.reset()}>
-              Stay on this page
-            </InkButton>
-          </div>
-        </div>
-      </div>
-    ) : null}
+    <UnsavedChangesGuard
+      unsaved={draft !== null}
+      barLabel="Section changes not saved"
+      message={UNSAVED_SECTION_BAR_MESSAGE}
+      leaveLabel="Leave with unsaved section changes?"
+      primary={{
+        tone: preview && retiring ? "danger" : "solid",
+        ariaLabel: preview
+          ? "Confirm and apply, from the unsaved changes bar"
+          : "Review changes, from the unsaved changes bar",
+        label: busy
+          ? "Applying…"
+          : preview
+            ? retiring
+              ? "Confirm retirement and apply"
+              : "Confirm and apply"
+            : "Review changes",
+        onClick: () => {
+          if (!preview) {
+            setPreview(true);
+            return;
+          }
+          void apply();
+        },
+      }}
+      cancelLabel="Cancel changes"
+      cancelAriaLabel="Cancel changes, from the unsaved changes bar"
+      onCancel={cancel}
+      busy={busy}
+    />
     </>
   );
 }

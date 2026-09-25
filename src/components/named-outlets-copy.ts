@@ -57,3 +57,19 @@ export const EMPTY_PREVIEW_NOTE = "This list is identical to the one the paper i
 
 export const APPLY_FAILED_NOTE =
   "Unable to apply the outlet list. Nothing has been changed.";
+
+/** The panel's own labels and hints, here so the walk finds the same words. */
+export const PANEL_INTRO =
+  "The outlets this paper checks by name. A published story that names one of them has to show the reader the source; if it does not, printing stops until an editor adds the source or overrides that outlet for that draft.";
+
+export const CUSTOMIZE_LABEL = "Customize";
+export const ADD_OUTLET_LABEL = "Add outlet";
+export const USE_BUILT_IN_LABEL = "Use the built-in list";
+export const CHECK_NONE_LABEL = "Check no outlet names";
+export const ALIAS_HINT =
+  "Separate aliases with commas. A story that names any of them has to show the reader the source.";
+export const DOMAIN_HINT =
+  "Write the domain alone, like denverpost.com. Leave it empty if the outlet has no website.";
+export const SAVED_MESSAGE = "Outlets saved. The paper now checks this list.";
+export const READ_ONLY_NOTE = "Only the owner can change which outlets the paper checks.";
+export const REVIEW_FAILED_NOTE = "Unable to review the change. Nothing has been changed.";
