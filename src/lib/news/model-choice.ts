@@ -252,6 +252,39 @@ function loadedRungNote(ladder: readonly string[] = automaticLadder()): string {
 }
 
 /**
+ * A rung's name in plain words on the Server page.
+ *
+ * A rung that has to be LOADED is named by family and location, not by the
+ * picker's model id: "Qwen on this computer if it is loaded" is the thing the
+ * operator can go and check, where "Qwen 3.6 35B" invites reading the
+ * sentence as a promise that the desk will page that exact model in.
+ */
+function plainRungName(id: string): string {
+  const entry = providerEntry(id);
+  if (!entry) return id;
+  if (!entry.requiresLoadedLocalModel) return entry.label;
+  return `${entry.label.split(" ")[0]} ${entry.detail} if it is loaded`;
+}
+
+/**
+ * The Automatic order in plain words, for the Server page's Writing models
+ * panel (0.6.63, Unit Y item 5): "Automatic uses DeepSeek v4.1 Flash first,
+ * then Qwen on this computer if it is loaded, then Codex Terra."
+ *
+ * Read from `automaticLadder`, like every other sentence the desk shows about
+ * Automatic, so a reordered or retired rung cannot leave the Server page
+ * describing a ladder the desk no longer walks.
+ */
+export function automaticOrderSentence(ladder: readonly string[] = automaticLadder()): string {
+  const names = ladder.map(plainRungName);
+  if (names.length === 0) return "Automatic has no writing model set up on this machine.";
+  const [first, ...rest] = names;
+  return rest.length === 0
+    ? `Automatic uses ${first}.`
+    : `Automatic uses ${first} first, then ${rest.join(", then ")}.`;
+}
+
+/**
  * The sentence under the picker.
  *
  * Automatic's story/scan/dark wording names the ladder in the order it is

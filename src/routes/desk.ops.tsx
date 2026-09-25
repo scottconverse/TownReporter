@@ -38,6 +38,7 @@ import {
 */
 import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
+import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
@@ -536,6 +537,13 @@ function WritingModels() {
       <p aria-live="polite" role="status" className="sr-only">
         {note}
       </p>
+      {/*
+        0.6.63 (Unit Y item 5): the order Automatic tries, in plain words. The
+        sentence comes from model-choice.ts's `automaticOrderSentence`, which
+        reads `automaticLadder` -- the same list the runs walk -- so this panel
+        cannot advertise an order the desk no longer has.
+      */}
+      <p className="mt-4 max-w-2xl text-sm text-ink-2">{automaticOrderSentence()}</p>
       {statuses.isPending ? (
         <ListSkeleton rows={2} />
       ) : statuses.isError ? (

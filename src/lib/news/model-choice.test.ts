@@ -313,3 +313,44 @@ describe("localModelOptionLabel", () => {
     );
   });
 });
+
+/*
+  0.6.63 (Unit Y item 5). The Server page's Writing models panel has to say
+  the order in plain words, and it reads the sentence from here so the panel
+  cannot describe a ladder the desk no longer has. The word "Qwen" is the
+  owner's -- plain rather than the picker's full model id -- because what the
+  operator has to check is that a Qwen is LOADED on this machine, not which
+  version number the label carries.
+
+  Imported through a variable on purpose: the test runner loads this file
+  whole, so a name that does not exist yet would fail every test in it rather
+  than the one that is actually red.
+*/
+const ORDER_MODULE = "./model-choice.ts";
+
+async function orderSentenceFn(): Promise<(ladder?: readonly string[]) => string> {
+  const module = (await import(ORDER_MODULE)) as unknown as Record<string, unknown>;
+  const fn = module.automaticOrderSentence;
+  assert.equal(typeof fn, "function", "model-choice.ts must export automaticOrderSentence");
+  return fn as (ladder?: readonly string[]) => string;
+}
+
+describe("the Writing models panel's ladder sentence", () => {
+  it("says the order in plain words, first to last", async () => {
+    const sentence = await orderSentenceFn();
+    assert.equal(
+      sentence(),
+      "Automatic uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then Codex Terra.",
+    );
+  });
+
+  it("follows the ladder it is given, and says so when there is none", async () => {
+    const sentence = await orderSentenceFn();
+    assert.equal(sentence(["codex-balanced"]), "Automatic uses Codex Terra.");
+    assert.equal(
+      sentence(["codex-balanced", "deepseek-flash"]),
+      "Automatic uses Codex Terra first, then DeepSeek v4.1 Flash.",
+    );
+    assert.equal(sentence([]), "Automatic has no writing model set up on this machine.");
+  });
+});
