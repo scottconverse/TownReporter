@@ -195,5 +195,19 @@ export async function runScanChatWithFailover(
   await setModelChoice(job.id, plan.next);
   await setStage(job.id, `Switched to ${plan.label}: ${switchReason}`);
   await input.setFailoverNote?.(job.id, switchNote);
-  return runOn(plan.next, nextEffort);
+  /*
+    The rung the hop landed on gets the same one second ask (Unit Y item 3). A
+    stutter is about the model, not about the position in the ladder, and here
+    there is no further rung to fall to -- so without this a batch that failed
+    over onto a stuttering rung would be reported as a success whose text is
+    not JSON at all, which is the one outcome the caller's parse cannot use.
+  */
+  const hop = await readableReplyOrRetry({
+    attempt: () => runOn(plan.next, nextEffort),
+    read: (text) => (input.read && !input.read(text) ? null : text),
+    label: plan.label,
+  });
+  return hop.ok
+    ? { ok: true, text: hop.value, ...(hop.meta ? { meta: hop.meta } : {}) }
+    : { ok: false, error: hop.error, ...(hop.meta ? { meta: hop.meta } : {}) };
 }

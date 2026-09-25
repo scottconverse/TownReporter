@@ -282,6 +282,46 @@ describe("runScanChatWithFailover", () => {
     assert.deepEqual(efforts, [undefined, "none"]);
   });
 
+  /**
+   * Unit Y item 3, second half of the hop: a stutter is about the model, not
+   * about the position in the ladder, so the rung a mid-run failover lands on
+   * gets the same one second ask the first rung got before its reply is called
+   * unreadable. There is no further rung to fall to here.
+   */
+  it("retries the rung a mid-run failover lands on once before calling its reply unreadable", async () => {
+    const grokCalls: unknown[] = [];
+    const result = await runScanChatWithFailover({
+      job: { id: 102, model_choice: "deepseek-flash", model_choice_source: "auto" },
+      system: "S",
+      user: "U",
+      maxTokens: 3500,
+      timeoutMs: () => 90_000,
+      read: (text) => text.includes('"leads"'),
+      grokChat: async (_s, _u, _m, opts) => {
+        grokCalls.push(opts?.choice);
+        return grokCalls.length === 1
+          ? { ok: false as const, error: RUNG_AUTH_FAILURE }
+          : { ok: true as const, text: "not json at all" };
+      },
+      probe: async () => ({
+        ok: true as const,
+        label: "Qwen 3.6 35B",
+        choice: "qwen-local" as const,
+      }),
+      setModelChoice: async () => undefined,
+      setStage: async () => undefined,
+    });
+
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("expected the unreadable reply to be reported");
+    assert.equal(result.error, "Qwen 3.6 35B sent a reply the desk could not read (unreadable JSON).");
+    assert.deepEqual(
+      grokCalls,
+      ["deepseek-flash", "qwen-local", "qwen-local"],
+      "the hopped-to rung is asked twice, exactly like the first rung",
+    );
+  });
+
   it("never fails over a non-auth failure, even on Automatic", async () => {
     const grokCalls: unknown[] = [];
     let probeCalled = false;
