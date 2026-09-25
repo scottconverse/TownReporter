@@ -16,6 +16,7 @@ import {
   IMPORT_LIMITS,
   disclosureLine,
   type DisclosureKey,
+  type ImportKind,
   type ParsedReport,
 } from "./import-stories.ts";
 
@@ -54,6 +55,10 @@ export type ReviewCard = {
   key: string;
   /** The import tick box. Non-story sections arrive unticked. */
   include: boolean;
+  /** What the editor is about to tick this as, until they say otherwise. */
+  kind: ImportKind;
+  /** The tick box as the reader set it, so "reset" has something to reset to. */
+  includeByDefault: boolean;
   /** False for a section of the report that is not a story. */
   isStory: boolean;
   headline: string;
@@ -67,6 +72,11 @@ export type ReviewCard = {
   body: string;
   /** `**Plain-language brief:**`, exactly as pasted ("" when the report has none). */
   plainBrief: string;
+  /**
+   * The documents the report cited that have no URL (a packet page, a
+   * recording), in its own words. Filed beside the links, never printed as one.
+   */
+  citations: string[];
   links: ReviewLink[];
   /** Editor notes. Never published. */
   score: string;
@@ -93,6 +103,12 @@ export const SECTION_REQUIRED = "Section not chosen — pick one";
  * "Upcoming dates") arrives unticked, and a story with a Hold triage arrives
  * ticked with `hold` set, so the Hold is visible on the Queue rather than
  * being a decision made for the editor.
+ *
+ * The tick comes from the reader's `includeByDefault` rather than from
+ * `isStory`: a report can list a lead it also dropped, and a card the report
+ * dropped is a card the editor should have to tick on purpose. What a card is
+ * -- a finished story or a story idea -- is the reader's `kind`, which the
+ * editor can overrule on the card.
  */
 export function cardsFromReport(
   report: ParsedReport,
@@ -100,7 +116,9 @@ export function cardsFromReport(
 ): ReviewCard[] {
   return report.stories.map((story) => ({
     key: story.key,
-    include: story.isStory,
+    include: story.includeByDefault,
+    kind: story.kind,
+    includeByDefault: story.includeByDefault,
     isStory: story.isStory,
     headline: story.headline.slice(0, IMPORT_LIMITS.headline),
     suggestedSection: story.sectionSuggestion || topicFromText(`${story.headline}\n${story.body}`),
@@ -111,6 +129,7 @@ export function cardsFromReport(
     bodyChoice: "main",
     body: story.body,
     plainBrief: story.plainBrief,
+    citations: story.citations,
     links: story.links.map((l) => ({ ...l, keep: true })),
     score: story.score,
     triage: story.triage,
@@ -163,11 +182,16 @@ export function cardDisclosure(card: ReviewCard): string {
  * section-confirmation gate and it applies to an imported story exactly as it
  * applies to a written one: nothing reaches the paper filed under a section
  * nobody chose.
+ *
+ * The missing-text line names what the card is: an idea that came in with
+ * nothing under it is missing a description, and telling its editor it "has no
+ * text" would send them looking for a body the card was never going to have.
  */
 export function cardProblems(card: ReviewCard): string[] {
   const problems: string[] = [];
   if (!card.headline.trim()) problems.push("Give it a headline first.");
-  if (!cardBody(card).trim()) problems.push("This story has no text.");
+  if (!cardBody(card).trim())
+    problems.push(card.kind === "idea" ? "This idea has no description." : "This story has no text.");
   if (!card.section.trim()) problems.push(SECTION_REQUIRED);
   if (card.disclosureKey === "other" && !card.disclosureOther.trim())
     problems.push("Write the disclosure line, or pick one of the ready-made ones.");
@@ -231,10 +255,16 @@ export function findDuplicate(
  * 2026-09-24) -- the prefix only said "story" to an editor who is looking at a
  * story card. The one card that must keep its word is the one that is not a
  * story: that is the whole reason the label exists.
+ *
+ * An idea keeps a word for the same reason: "Story idea: The budget's water
+ * fund gap" is the one line that tells an editor the card holds a description
+ * rather than a written story. What is still not repeated is the headline
+ * itself, which the field beneath shows word for word.
  */
 export function cardLabel(card: ReviewCard): string {
   const headline = card.headline.trim() || "Untitled";
-  return card.isStory ? headline : `Not a story: ${headline}`;
+  if (!card.isStory) return `Not a story: ${headline}`;
+  return card.kind === "idea" ? `Story idea: ${headline}` : headline;
 }
 
 /**
@@ -248,9 +278,16 @@ export function cardLabel(card: ReviewCard): string {
  */
 export type ImportSelectionPayload = {
   headline: string;
+  /**
+   * A finished story is filed as a lead and a draft; a story idea is filed as
+   * a lead only, waiting for someone to write it.
+   */
+  kind: ImportKind;
   section: string;
   dek: string;
   body: string;
+  /** The documents the report cited that carry no URL. Never printed as links. */
+  citations: string[];
   links: { text: string; url: string }[];
   score: string;
   triage: string;
@@ -269,9 +306,11 @@ export type ImportSelectionPayload = {
 export function selectionFromCard(card: ReviewCard): ImportSelectionPayload {
   return {
     headline: card.headline.trim(),
+    kind: card.kind,
     section: card.section,
     dek: cardDek(card),
     body: cardBody(card),
+    citations: card.citations.slice(),
     links: keptLinks(card),
     score: card.score,
     triage: card.triage,

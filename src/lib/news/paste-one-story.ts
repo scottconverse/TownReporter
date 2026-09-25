@@ -85,10 +85,17 @@ export function headlineFromPaste(text: string): string {
 /**
  * The one card this screen files.
  *
- * Ticked and a story, both of them: the editor pasted one thing and asked for
- * it to go to the Queue, so there is nothing to tick and nothing to call "not a
- * story". `include: true` on a card holding no text is refused by the server
- * the same way an empty card is refused on the review screen.
+ * Ticked and a finished story, both of them: the editor pasted one thing and
+ * asked for it to go to the Queue, so there is nothing to tick and nothing to
+ * call "not a story". `include: true` on a card holding no text is refused by
+ * the server the same way an empty card is refused on the review screen.
+ *
+ * `kind` is "story" and not read off the text the way a report card's is
+ * (`defaultImportKind`): a report is read for whatever is in it, and a short
+ * block there is a lead with no story written yet. Here the editor has said
+ * what this is by choosing the box marked *paste a story I already have* --
+ * telling them their own finished story is a story idea would be the screen
+ * arguing with the button they just pressed. It is a toggle away either way.
  */
 export function pasteOneStoryCard(input: PasteOneInput): ReviewCard {
   const text = String(input.text ?? "");
@@ -96,6 +103,8 @@ export function pasteOneStoryCard(input: PasteOneInput): ReviewCard {
   return {
     key: PASTE_ONE_KEY,
     include: true,
+    kind: "story",
+    includeByDefault: true,
     isStory: true,
     headline: typed || headlineFromPaste(text),
     /*
@@ -110,6 +119,8 @@ export function pasteOneStoryCard(input: PasteOneInput): ReviewCard {
     /* The paste, byte for byte. Never trimmed, never re-paragraphed. */
     body: text,
     plainBrief: "",
+    /* A story a person wrote cites nothing by name; it carries its own links. */
+    citations: [],
     links: extractLinks(text).map((l) => ({ ...l, keep: true })),
     /* No report format, so no editor notes to lift out of the text. */
     score: "",

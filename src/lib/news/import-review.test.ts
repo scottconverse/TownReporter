@@ -14,16 +14,27 @@ import {
   keptLinks,
   tickedCards,
   duplicateNote,
+  selectionFromCard,
   type ReviewCard,
 } from "./import-review.ts";
+import { pasteOneStoryCard } from "./paste-one-story.ts";
 
 const FIXTURE = readFileSync(
   new URL("./fixtures/civic-scanner-longmont-2026-09-24.md", import.meta.url),
   "utf8",
 );
 
+const CLAUDE = readFileSync(
+  new URL("./fixtures/civic-scanner-claude-longmont-2026-09-24.md", import.meta.url),
+  "utf8",
+);
+
 function cards(): ReviewCard[] {
   return cardsFromReport(parseFinishedStories(FIXTURE));
+}
+
+function claudeCards(): ReviewCard[] {
+  return cardsFromReport(parseFinishedStories(CLAUDE));
 }
 
 /** The cards that are stories, in the report's own order. */
@@ -99,6 +110,99 @@ describe("the label a card wears", () => {
   it("still says so when the card is not a story, which is all it has to say", () => {
     const notAStory = cards().find((c) => !c.isStory)!;
     assert.equal(cardLabel(notAStory), `Not a story: ${notAStory.headline.trim()}`);
+  });
+});
+
+describe("the kind a card is offered as", () => {
+  /*
+    Step D, 2026-09-24: "Each card gets 'Import as: Finished story / Story
+    idea'." The default is the reader's, off the card's own text (see
+    `defaultImportKind`), and a card the report itself dropped opens unticked --
+    the demoted leads in the Claude scan are cards now, but none of them is
+    ticked for the editor.
+  */
+  it("offers the Codex report's seven stories as finished stories, all ticked", () => {
+    const built = cards();
+    assert.deepEqual(
+      built.filter((c) => c.isStory).map((c) => c.kind),
+      Array.from({ length: 7 }, () => "story"),
+    );
+    for (const card of built.filter((c) => c.isStory)) {
+      assert.equal(card.include, true);
+      assert.equal(card.includeByDefault, true);
+    }
+    for (const card of built.filter((c) => !c.isStory)) assert.equal(card.include, false);
+  });
+
+  it("offers the Claude report's leads as stories or ideas, and ticks only the leads", () => {
+    const built = claudeCards();
+    assert.equal(built.length, 38);
+    assert.equal(built.filter((c) => c.include).length, 19);
+    const ticked = built.filter((c) => c.include);
+    assert.equal(ticked.filter((c) => c.kind === "story").length, 10);
+    assert.equal(ticked.filter((c) => c.kind === "idea").length, 9);
+    for (const card of built) assert.equal(card.include, card.includeByDefault);
+  });
+
+  it("opens a demoted lead's card unticked, because the report said not to run it", () => {
+    const demoted = claudeCards().filter((c) => c.triage === "Demote");
+    assert.equal(demoted.length, 3);
+    for (const card of demoted) {
+      assert.equal(card.kind, "idea");
+      assert.equal(card.include, false);
+      assert.equal(card.includeByDefault, false);
+      assert.equal(card.hold, true);
+      assert.ok(card.body.trim().length > 0);
+    }
+  });
+
+  it("says 'Story idea:' on a card that is one, and still 'Not a story:' on a section", () => {
+    const idea = claudeCards().find((c) => c.kind === "idea" && c.isStory)!;
+    assert.equal(cardLabel(idea), `Story idea: ${idea.headline.trim()}`);
+    const notAStory = cards().find((c) => !c.isStory)!;
+    assert.equal(cardLabel(notAStory), `Not a story: ${notAStory.headline.trim()}`);
+    const story = cards().find((c) => c.isStory && c.kind === "story")!;
+    assert.equal(cardLabel(story), story.headline.trim());
+  });
+
+  it("names the text an idea is missing in the idea's own words", () => {
+    const idea = claudeCards().find((c) => c.kind === "idea" && c.isStory)!;
+    assert.deepEqual(cardProblems(idea), []);
+    assert.deepEqual(cardProblems({ ...idea, body: " ", plainBrief: "" }), [
+      "This idea has no description.",
+    ]);
+    const story = cards().find((c) => c.isStory && c.kind === "story")!;
+    assert.deepEqual(cardProblems({ ...story, body: " ", plainBrief: "" }), [
+      "This story has no text.",
+    ]);
+  });
+
+  it("sends the kind and the report's cited documents with the card", () => {
+    const built = claudeCards();
+    const first = built.find((c) => c.headline.startsWith("Council votes 4-3"))!;
+    assert.deepEqual(first.citations, [
+      "Sept 22 council recording 0:23:37 to 0:36:25 (transcript-based)",
+      "Sept 22 packet p. 819 (Tier A)",
+      "2027 Budget Message, Sept 1 (Tier A, CONTEXT)",
+    ]);
+    const payload = selectionFromCard(first);
+    assert.equal(payload.kind, "story");
+    assert.deepEqual(payload.citations, first.citations);
+    const idea = claudeCards().find((c) => c.triage === "Demote")!;
+    const ideaPayload = selectionFromCard(idea);
+    assert.equal(ideaPayload.kind, "idea");
+    assert.equal(ideaPayload.headline, idea.headline.trim());
+  });
+
+  it("carries a card's kind wherever a card is built, the one-story paste included", () => {
+    const card = pasteOneStoryCard({
+      text: "A headline\n\nA paragraph of the story as it was pasted in.",
+      headline: "",
+      section: "council",
+    });
+    assert.equal(card.kind, "story");
+    assert.equal(card.includeByDefault, true);
+    assert.deepEqual(card.citations, []);
   });
 });
 

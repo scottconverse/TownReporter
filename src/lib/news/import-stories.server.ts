@@ -34,7 +34,7 @@ import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { audit } from "./ops.ts";
-import { provenanceFromUrls } from "./findings.ts";
+import { provenanceFromCitations, provenanceFromUrls } from "./findings.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import { ingestDocument } from "./ingest.ts";
 import { ensureStoryDocuments, storeStoryDocument } from "./story-documents.server.ts";
@@ -48,6 +48,7 @@ import {
   structureUserPrompt,
   verifyModelSplit,
   type DisclosureKey,
+  type ImportKind,
   type ImportedStory,
 } from "./import-stories.ts";
 
@@ -181,9 +182,18 @@ export async function readImportStructure(
 
 export type ImportSelection = {
   headline: string;
+  /**
+   * "story" is filed as a lead and a saved draft. "idea" is filed as a lead
+   * only, `new`, with its description as the lead's why and its links as its
+   * sources -- it is a tip waiting for an editor, and a draft holding a
+   * description would be a story the desk cannot tell from one already written.
+   */
+  kind: ImportKind;
   section: string;
   dek: string;
   body: string;
+  /** Documents the report cited that have no URL, in the report's own words. */
+  citations: string[];
   links: { text: string; url: string }[];
   score: string;
   triage: string;
@@ -202,7 +212,7 @@ export type ImportPayload = {
 export type ImportResult = {
   ok: boolean;
   error: string;
-  imported: { leadId: number; headline: string; hold: boolean }[];
+  imported: { leadId: number; headline: string; hold: boolean; kind: ImportKind }[];
   /** Cards refused because the text they carried is not what the editor pasted. */
   refused: { headline: string; reason: string }[];
 };
@@ -219,6 +229,10 @@ export function importInputSha256(text: string): string {
  * the editor never pasted -- the one thing this feature must never do. The
  * whole card is refused rather than trimmed: a story missing a paragraph is a
  * story an editor would publish without knowing what was cut.
+ *
+ * The wording names what the card is, because the refusal is read by the
+ * editor who just ticked it: an idea with nothing under it is missing a
+ * description, not a story's text.
  */
 export function verifySelections(
   text: string,
@@ -228,13 +242,20 @@ export function verifySelections(
   const refused: { headline: string; reason: string }[] = [];
   for (const selection of selections) {
     const headline = String(selection.headline ?? "").trim();
+    const idea = selection.kind === "idea";
     const paragraphs = splitParagraphs(selection.body);
     if (!headline) {
-      refused.push({ headline: "A story with no headline", reason: "Give it a headline first." });
+      refused.push({
+        headline: idea ? "An idea with no headline" : "A story with no headline",
+        reason: "Give it a headline first.",
+      });
       continue;
     }
     if (paragraphs.length === 0) {
-      refused.push({ headline, reason: "This story has no text." });
+      refused.push({
+        headline,
+        reason: idea ? "This idea has no description." : "This story has no text.",
+      });
       continue;
     }
     const outside = paragraphs.filter((p) => !containsVerbatimEither(text, p));
@@ -246,7 +267,7 @@ export function verifySelections(
       const sample = (outside[0] ?? dekOutside).slice(0, 120);
       refused.push({
         headline,
-        reason: `Part of this story is not word-for-word what you pasted: “${sample}”. Nothing was imported for it.`,
+        reason: `Part of this ${idea ? "idea" : "story"} is not word-for-word what you pasted: “${sample}”. Nothing was imported for it.`,
       });
       continue;
     }
@@ -267,7 +288,14 @@ function cleanUrl(url: string): string {
 }
 
 /**
- * File the ticked cards: one lead and one saved draft each, in the Queue.
+ * File the ticked cards into the Queue.
+ *
+ * A finished story is one lead and one saved draft. A story idea is one lead
+ * and nothing else: `new`, its description as the lead's why and evidence, its
+ * links as its sources, the editor's note kept -- and no draft, because the
+ * desk must not show a story with a body beside the ones that were written.
+ * The editor writes it, pastes into it, or presses the ordinary Draft button
+ * when they get to it.
  *
  * `inputSha256` is computed here from the text that actually arrived, not sent
  * by the client -- provenance that the client could choose is not provenance.
@@ -299,6 +327,7 @@ export async function performImportFinishedStories(
   const importedAt = new Date().toISOString();
 
   for (const story of accepted) {
+    const idea = story.kind === "idea";
     const urls = sanitizePublicUrls(story.links.map((l) => cleanUrl(l.url)));
     const why = (story.dek.trim() || splitParagraphs(story.body)[0] || story.headline).slice(0, 800);
     const topic = story.section.trim().slice(0, 40);
@@ -308,19 +337,28 @@ export async function performImportFinishedStories(
       importedAt,
       inputSha256,
       tool: String(payload.tool ?? "").slice(0, 200),
+      kind: story.kind,
       disclosureKey: story.disclosureKey,
       disclosureLine: disclosure,
       score: story.score,
       triage: story.triage,
+      citations: story.citations ?? [],
     });
-    const links = JSON.stringify(
-      provenanceFromUrls(
-        urls,
-        story.links
-          .map((l) => ({ url: cleanUrl(l.url), title: String(l.text ?? "").slice(0, 200) }))
-          .filter((l) => urls.includes(l.url)),
-      ),
+    /*
+      The documents the report named but did not link go in beside the real
+      links. They carry no URL, so they are names on the provenance panel and
+      never a "Current source" pointing at nothing (`provenanceFromCitations`).
+    */
+    const linked = provenanceFromUrls(
+      urls,
+      story.links
+        .map((l) => ({ url: cleanUrl(l.url), title: String(l.text ?? "").slice(0, 200) }))
+        .filter((l) => urls.includes(l.url)),
     );
+    const links = JSON.stringify([
+      ...linked,
+      ...provenanceFromCitations(story.citations ?? [], linked),
+    ]);
 
     const [lead] = await sql<{ id: number }>`
       insert into leads (
@@ -338,22 +376,31 @@ export async function performImportFinishedStories(
       continue;
     }
     /*
-      `importedText` marks the one thing about this draft that the rest of the
-      desk cannot tell from the rows: its body is a report an editor pasted, not
-      prose a model wrote beside gathered records. The evidence-review gate is
-      built for the second kind (draft-evidence.ts) and would otherwise stop an
-      editor from fixing a typo in the first kind and printing it.
+      A story idea stops here: a lead on the desk, `new`, waiting. Its
+      description is already the lead's why, so a draft would only be a second
+      copy of it wearing the shape of a written story -- and the Queue would
+      have no way to say which of its stories someone had actually written.
     */
-    await sql`
-      insert into drafts (
-        user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
-        provenance_json, disclosure_text, research_json
-      ) values (
-        ${context.userId}, ${context.newsroomId}, ${leadId}, ${story.headline.slice(0, 240)},
-        ${story.dek.trim().slice(0, 4000)}, ${story.body}, ${topic}, ${JSON.stringify(urls)},
-        ${links}, ${disclosure}, ${JSON.stringify({ importedText: true })}
-      )
-    `;
+    if (!idea) {
+      /*
+        `importedText` marks the one thing about this draft that the rest of the
+        desk cannot tell from the rows: its body is a report an editor pasted,
+        not prose a model wrote beside gathered records. The evidence-review
+        gate is built for the second kind (draft-evidence.ts) and would
+        otherwise stop an editor from fixing a typo in the first kind and
+        printing it.
+      */
+      await sql`
+        insert into drafts (
+          user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
+          provenance_json, disclosure_text, research_json
+        ) values (
+          ${context.userId}, ${context.newsroomId}, ${leadId}, ${story.headline.slice(0, 240)},
+          ${story.dek.trim().slice(0, 4000)}, ${story.body}, ${topic}, ${JSON.stringify(urls)},
+          ${links}, ${disclosure}, ${JSON.stringify({ importedText: true })}
+        )
+      `;
+    }
     if (story.reporterNextStep.trim()) {
       await sql`
         update leads
@@ -362,16 +409,24 @@ export async function performImportFinishedStories(
       `.catch(() => undefined);
     }
     await audit(context.userId, "lead", `imported ${leadId}`, context.newsroomId);
-    imported.push({ leadId, headline: story.headline, hold: story.hold });
+    imported.push({ leadId, headline: story.headline, hold: story.hold, kind: story.kind });
     for (const url of urls.slice(0, CAPTURE_LIMIT)) {
       captures.push({ url, headline: story.headline, leadId });
     }
   }
 
+  const stories = imported.filter((i) => i.kind === "story").length;
+  const ideas = imported.length - stories;
+  const counted = [
+    stories ? `${stories} ${stories === 1 ? "story" : "stories"}` : "",
+    ideas ? `${ideas} ${ideas === 1 ? "idea" : "ideas"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
   await audit(
     context.userId,
     "import",
-    `${imported.length} ${imported.length === 1 ? "story" : "stories"} read out of a pasted report${
+    `${counted} read out of a pasted report${
       payload.tool ? ` (${String(payload.tool).slice(0, 80)})` : ""
     }`,
     context.newsroomId,

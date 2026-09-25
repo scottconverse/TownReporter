@@ -108,9 +108,11 @@ async function importOneStory() {
       stories: [
         {
           headline: HEADLINE,
+          kind: "story",
           section: "council",
           dek: DEK,
           body: BODY,
+          citations: [],
           links: CITED.map((url) => ({ url, text: url })),
           score: "17/20",
           triage: "Advance",

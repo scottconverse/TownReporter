@@ -23,9 +23,11 @@ const MESSY = [
 
 const SELECTION: ImportSelection = {
   headline: "Council delays the transit vote",
+  kind: "story",
   section: "council",
   dek: "",
   body: [splitParagraphs(MESSY)[0]!, splitParagraphs(MESSY)[1]!].join("\n\n"),
+  citations: [],
   links: [],
   score: "",
   triage: "",
@@ -205,9 +207,11 @@ async function ensureSchema() {
 
 const CARD = {
   headline: "Council delays the transit vote",
+  kind: "story" as const,
   section: "council",
   dek: "The expansion decision now waits for ridership data.",
   body: `${PASTE_PARAGRAPHS[1]!}\n\n${PASTE_PARAGRAPHS[2]!}`,
+  citations: ["Sept 22 packet p. 819 (Tier A)"],
   links: [{ text: "council packet", url: "https://longmont.primegov.com/packet" }],
   score: "17/20",
   triage: "Advance",
@@ -219,15 +223,37 @@ const CARD = {
 
 const HOLD_CARD = {
   headline: "St. Vrain board packet presents assessment results",
+  kind: "story" as const,
   section: "schools",
   dek: "",
   body: PASTE_PARAGRAPHS[3]!,
+  citations: [],
   links: [],
   score: "9/20",
   triage: "Hold",
   reporterNextStep: "",
   hold: true,
   disclosureKey: "outside-ai" as const,
+  disclosureOther: "",
+};
+
+/**
+ * A lead the report wrote up short, with a description and a next step rather
+ * than a story: step D's "story idea".
+ */
+const IDEA_CARD: ImportSelection = {
+  headline: "The transit line costs $4 million a year to run",
+  kind: "idea",
+  section: "council",
+  dek: "",
+  body: PASTE_PARAGRAPHS[6]!,
+  citations: ["2027 Budget Message, Sept 1 (Tier A, CONTEXT)"],
+  links: [{ text: "council packet", url: "https://longmont.primegov.com/packet" }],
+  score: "7/20",
+  triage: "Watch",
+  reporterNextStep: "Ask the budget office what covers the gap.",
+  hold: false,
+  disclosureKey: "outside-ai",
   disclosureOther: "",
 };
 
@@ -307,6 +333,98 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.equal(published!.n, 0);
     assert.equal(seen.length, 1);
     assert.equal(seen[0]!.leadId, leads[0]!.id);
+  });
+
+  it("files a story idea as a lead with no draft, ready for someone to write", async () => {
+    const sql = await ensureSchema();
+    const result = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 95 },
+      { text: PASTE, tool: "Civic Source Scanner", stories: [IDEA_CARD] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    assert.equal(result.error, "");
+    assert.equal(result.refused.length, 0);
+    assert.deepEqual(
+      result.imported.map((i) => ({ headline: i.headline, kind: i.kind, hold: i.hold })),
+      [{ headline: IDEA_CARD.headline, kind: "idea", hold: false }],
+    );
+
+    const leads = await sql.query(
+      "select id, headline, why, topic, status, origin, source_urls, notes_json, provenance_json from leads where newsroom_id=95",
+    ) as {
+      id: number;
+      headline: string;
+      why: string;
+      topic: string;
+      status: string;
+      origin: string;
+      source_urls: string;
+      notes_json: string;
+      provenance_json: string;
+    }[];
+    assert.equal(leads.length, 1);
+    const lead = leads[0]!;
+    assert.equal(lead.status, "new");
+    assert.equal(lead.origin, "import");
+    // The description is the lead's why, word for word, and its evidence.
+    assert.equal(lead.why, IDEA_CARD.body);
+    assert.equal(lead.topic, "council");
+    // The links are its sources.
+    assert.deepEqual(JSON.parse(lead.source_urls), ["https://longmont.primegov.com/packet"]);
+    // The editor's note is kept for whoever writes it up.
+    assert.equal(
+      JSON.parse(lead.notes_json).editorialAssignment.text,
+      "Ask the budget office what covers the gap.",
+    );
+    const provenance = JSON.parse(lead.provenance_json) as Record<string, unknown>;
+    assert.equal(provenance.kind, "idea");
+    assert.deepEqual(provenance.citations, ["2027 Budget Message, Sept 1 (Tier A, CONTEXT)"]);
+    assert.equal(provenance.tool, "Civic Source Scanner");
+    assert.equal(provenance.inputSha256, importInputSha256(PASTE));
+
+    // Nothing is drafted: an idea is a lead waiting for an editor, not a story
+    // with a body nobody wrote.
+    const [drafts] = await sql.query(
+      "select count(*)::int as n from drafts where newsroom_id=95",
+    ) as { n: number }[];
+    assert.equal(drafts!.n, 0);
+  });
+
+  it("names a cited document on the lead without inventing a URL for it", async () => {
+    const sql = await ensureSchema();
+    await performImportFinishedStories(
+      { userId: "editor", newsroomId: 96 },
+      { text: PASTE, tool: "", stories: [CARD] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    const [draft] = await sql.query(
+      "select provenance_json from drafts where newsroom_id=96",
+    ) as { provenance_json: string }[];
+    const rows = JSON.parse(draft!.provenance_json) as {
+      title: string;
+      url: string;
+      role: string;
+      organization: string;
+    }[];
+    assert.deepEqual(
+      rows.map((r) => [r.title, r.url, r.role]),
+      [
+        ["council packet", "https://longmont.primegov.com/packet", "source"],
+        ["Sept 22 packet p. 819 (Tier A)", "", "cited"],
+      ],
+    );
+  });
+
+  it("says an idea has no description rather than that it has no text", () => {
+    const { accepted, refused } = verifySelections(PASTE, [
+      { ...IDEA_CARD, body: "  " },
+      { ...SELECTION, body: "  " },
+    ]);
+    assert.equal(accepted.length, 0);
+    assert.deepEqual(
+      refused.map((r) => r.reason),
+      ["This idea has no description.", "This story has no text."],
+    );
   });
 
   it("refuses an altered card and files nothing for it", async () => {

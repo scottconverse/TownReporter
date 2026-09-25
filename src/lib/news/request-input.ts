@@ -994,10 +994,17 @@ export const importStructureInput = z.object({
  */
 export const importStorySelection = z.looseObject({
   headline: z.string().max(LIMITS.draftHeadline).catch(""),
+  /**
+   * "story" files a lead and a draft; "idea" files a lead only. Anything the
+   * client does not say is a story, which is what this box did before ideas.
+   */
+  kind: z.enum(["story", "idea"]).catch("story"),
   /** A section key, or empty for "Section not chosen — pick one". */
   section: z.string().max(LIMITS.sectionKey).catch(""),
   dek: z.string().max(LIMITS.draftDek).catch(""),
   body: z.string().max(LIMITS.storyBody).catch(""),
+  /** Documents the report cited that have no URL, in the report's own words. */
+  citations: z.array(z.string().max(LIMITS.sourceTitle)).max(LIMITS.importLinks).catch([]),
   links: z
     .array(
       z.looseObject({
