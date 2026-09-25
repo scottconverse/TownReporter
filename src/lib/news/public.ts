@@ -83,7 +83,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
       const sql = await getSql();
       const rows = await sql<ArticleRow & { routine_notice: boolean }>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
-             provenance_json, form, found_note, unanswered,
+             provenance_json, form, found_note, unanswered, disclosure_text,
              /* Whether a fixed-template routine notice printed this row. The
                 reader-facing disclosure line depends on it, and it cannot be
                 inferred from the article's own columns: a routine notice is

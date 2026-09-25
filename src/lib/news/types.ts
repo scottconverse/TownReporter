@@ -59,6 +59,9 @@ export type DraftRow = {
   found_note?: string | null;
   unanswered?: string | null;
   research_json?: string | null;
+  /** Migration 0088. The reader-facing line the import review screen chose.
+   * Empty = the publish path falls back to the standard line. */
+  disclosure_text?: string | null;
 };
 
 export type ArticleRow = {
@@ -75,6 +78,9 @@ export type ArticleRow = {
   form?: string | null;
   found_note?: string | null;
   unanswered?: string | null;
+  /** Migration 0088. The disclosure line this article prints. Empty = the
+   * standard line from src/components/ai-disclosure.tsx. */
+  disclosure_text?: string | null;
   provenance?: import("./findings").ProvenanceItem[];
   findings?: import("./findings").StoryFinding[];
   corrections?: { date: string; body: string }[];

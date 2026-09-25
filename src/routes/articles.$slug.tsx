@@ -209,7 +209,7 @@ function ArticlePage() {
           <div className="articlebody" id="story-body">
             <StoryBody body={article.body} publicReading />
             <section className="sources" id="sources">
-              <AiDisclosure routine={article.routine_notice} />
+              <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
               <span className="eyebrow">FOLLOW THE EVIDENCE</span>
               {provenance.length ? (
                 <ProvenanceBlock

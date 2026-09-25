@@ -2605,7 +2605,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     (sql) =>
       sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-             provenance_json, form, found_note, unanswered, research_json
+             provenance_json, form, found_note, unanswered, research_json, disclosure_text
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
       order by updated_at desc, id desc limit 1
     `,
@@ -2742,12 +2742,16 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
-        provenance_json, form, found_note, unanswered, origin_draft_id
+        provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text
       )
       values (
         ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
         ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
-        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id}
+        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id},
+        /* The line the editor chose on the import screen, carried on the draft.
+           Empty for every story the desk wrote, which prints the standard AI
+           line exactly as before. */
+        ${row.disclosure_text || ""}
       ) returning id
     `;
       await recordPublishedMeetingEvidence(sql, {
