@@ -31,6 +31,40 @@ import { topicFromText } from "./desk-copy.ts";
 
 export type ImportLink = { text: string; url: string };
 
+/**
+ * What a card is offered as on the review screen. A finished story is a story
+ * the report already wrote; a story idea is a lead the report raised without
+ * the reporting behind it, and it becomes a lead in the Queue with no draft.
+ */
+export type ImportKind = "story" | "idea";
+
+/**
+ * The word count under which a card is an idea rather than a story.
+ *
+ * The owner, 2026-09-24: "what if it's other formats, like a list of stories
+ * with short paragraph descriptions of what was found?" A paragraph of notes
+ * about something seen is a lead to chase; several paragraphs are a story that
+ * has been written. 120 words is where the two reports actually divide: the
+ * Claude scan's eight HOLD leads sit between 34 and 83 words, its ten written
+ * leads between 150 and 263, so the threshold has room on both sides of it.
+ */
+export const IDEA_WORD_LIMIT = 120;
+
+/**
+ * Whether a card's text is a written story or the description of an idea.
+ *
+ * Two paragraphs or more AND 120 words or more is a story; anything else is an
+ * idea. The paragraph test is the one that matters for the shape a report
+ * actually writes (a lead with a single paragraph of body is a note, not a
+ * story), and the word test catches the long single paragraph.
+ */
+export function defaultImportKind(body: string): ImportKind {
+  const paragraphs = splitParagraphs(body);
+  if (paragraphs.length < 2) return "idea";
+  const words = normalizeForVerbatim(body).split(" ").filter(Boolean).length;
+  return words < IDEA_WORD_LIMIT ? "idea" : "story";
+}
+
 export type ImportedStory = {
   /** Stable within one parse: "s1".."sN" for stories, "n1".."nN" for the rest. */
   key: string;
@@ -38,6 +72,10 @@ export type ImportedStory = {
   headline: string;
   /** False for a section of the report that is not a story (brief says: default OFF). */
   isStory: boolean;
+  /** What the review screen offers it as: "Finished story" or "Story idea". */
+  kind: ImportKind;
+  /** The tick the review screen starts with. False for the report's own sections. */
+  includeByDefault: boolean;
   score: string;
   triage: string;
   /** True when the triage word is "Hold" — imports with a visible Hold flag. */
@@ -96,7 +134,7 @@ export type ParsedReport = {
    * found here or in the raw paste, so the two always agree.
    */
   cleanedText: string;
-  method: "structured" | "plain" | "none";
+  method: "structured" | "ideas" | "plain" | "none";
   warnings: string[];
 };
 
@@ -627,19 +665,26 @@ function makeStory(input: {
   scoreCode?: string;
   /** The verdict the section above the lead states, when the lead states none. */
   sectionVerdict?: string;
+  /** Overridden for a card this module already knows the kind of (an idea list). */
+  kind?: ImportKind;
+  /** Overridden for a card the report itself dropped (a demoted lead's bullet). */
+  includeByDefault?: boolean;
 }): ImportedStory {
   const parts = partsOf(input.paragraphs);
   const triage = (parts.triage || input.sectionVerdict || "").trim();
+  const body = parts.body.join("\n\n");
   return {
     key: input.key,
     order: input.order,
     headline: input.headline,
     isStory: input.isStory,
+    kind: input.kind ?? defaultImportKind(body),
+    includeByDefault: input.includeByDefault ?? input.isStory,
     score: parts.score || input.scoreCode || "",
     triage,
     holds: HOLD.test(triage) || DEMOTE.test(triage),
     dek: parts.why,
-    body: parts.body.join("\n\n"),
+    body,
     plainBrief: parts.brief,
     reporterNextStep: parts.next,
     scoreLine: parts.scoreLine,
@@ -647,7 +692,7 @@ function makeStory(input: {
     links: extractLinks(input.raw),
     raw: input.raw,
     sectionSuggestion: topicFromText(
-      [input.headline, parts.why, parts.body.join(" ")].join("\n"),
+      [input.headline, parts.why, body].join("\n"),
     ),
     disclosureKey: input.disclosureKey,
     cleanSplit: true,
@@ -669,6 +714,197 @@ function looksLikeStory(text: string): boolean {
   return splitParagraphs(text).some((p) =>
     splitLabelled(p).some((piece) => piece.group !== "" && piece.group !== "sources"),
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * Story ideas: a bullet, its headline and the description under it.
+ * ------------------------------------------------------------------ */
+
+/** A list item: `* …`, `- …`, `+ …`, `1. …`, `2) …`. */
+const BULLET_LINE = /^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/;
+
+/**
+ * The report's own filing label at the head of a bullet: `**LEAD 20** (6/20):`.
+ *
+ * The demoted leads in the Claude scan are written this way — one bullet per
+ * lead, its number in bold, its score in the report's `(6/20: …)` code. Both
+ * come off before the bullet is read, so the card's headline is the lead and the
+ * score still reaches the card.
+ */
+const BULLET_FILING_LABEL =
+  /^\*\*\s*(?:LEAD|STORY|ITEM|IDEA)\s*\d+\s*\*\*\s*(?:\(\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+)[^)]*\))?\s*[:.)—–-]?\s*/i;
+
+/** The dash or the colon that separates an idea's headline from its description. */
+const IDEA_DASH = /[—–]|\s-\s/;
+/** `**Headline**: description` — the label's own colon. */
+const IDEA_BOLD_LABEL = /^\*\*(.+?)\*\*\s*:\s*([\s\S]+)$/;
+/** `Headline: description`, unbolded. Narrow, so a body colon is not a headline. */
+const IDEA_PLAIN_LABEL = /^([^:]{4,140}?)\s*:\s+([\s\S]+)$/;
+
+/**
+ * A word the scan uses before a full stop that is not the end of a sentence:
+ * `206 S. Main`, `Filing No. 1`, `St. Vrain`. A single letter is the initial in
+ * a street name, which is why the first alternative is one capital letter.
+ */
+const NOT_A_SENTENCE_END =
+  /^(?:[A-Z]|No|Nos|St|Ave|Blvd|Rd|Dr|Mr|Mrs|Ms|Fig|Inc|Ltd|Co|Corp|Jr|Sr|vs|etc|approx|Dept|Univ)$/;
+
+/**
+ * Where the first sentence of `text` ends, or -1 when it has only one.
+ *
+ * Used for the bullets that state a lead and then describe it without a dash:
+ * `Water Board, Sept 21, "Action Required" conveyance plats for 701 S. Main …
+ * (1st and Main parcels). Outcome not confirmed.` The headline is the first
+ * sentence and the description is everything after it, one contiguous slice of
+ * the line — never a rewrite.
+ */
+function firstSentenceEnd(text: string): number {
+  for (const match of text.matchAll(/[.!?]\s+(?=[A-Z"“'])/g)) {
+    const index = match.index!;
+    const token = /([A-Za-z][A-Za-z.]*)$/.exec(text.slice(0, index))?.[1] ?? "";
+    if (NOT_A_SENTENCE_END.test(token.replace(/\.$/, ""))) continue;
+    return index;
+  }
+  return -1;
+}
+
+/** The markup off an idea's headline: nothing but `*`/`_` and a `n.` ordinal. */
+function cleanIdeaHeadline(text: string): string {
+  const wrapped = WRAPPED_EMPHASIS.exec(text.trim());
+  const bare = (wrapped ? wrapped[2]! : text).replace(/[*_]+/g, "").trim();
+  return stripOrdinal(bare).replace(/[.\s]+$/, "").trim();
+}
+
+export type IdeaItem = {
+  /** The lead's own words, with no bullet, filing label or score code on it. */
+  headline: string;
+  /** The report's description of it, a contiguous slice of the line. */
+  description: string;
+  /** The `(6/20)` code off the filing label, when the bullet carried one. */
+  score: string;
+  /** The line as it arrived, so the card's links and text stay traceable. */
+  raw: string;
+};
+
+/**
+ * Read one bullet as a story idea, or null when it is not one.
+ *
+ * The shape the owner asked about — "a list of stories with short paragraph
+ * descriptions of what was found" — is a bullet whose headline and description
+ * are separated by a dash, by a bold label's colon, or by nothing more than the
+ * end of the first sentence. Anything else (a bullet that is a whole sentence
+ * with no description, or one that carries no separator and no second sentence)
+ * is not an idea and comes back null rather than being guessed at.
+ */
+export function ideaItemFromLine(line: string): IdeaItem | null {
+  const bullet = BULLET_LINE.exec(String(line ?? ""));
+  if (!bullet) return null;
+  const raw = String(line).trim();
+  let text = bullet[1]!.trim();
+  const label = BULLET_FILING_LABEL.exec(text);
+  let score = "";
+  if (label) {
+    score = label[1] && label[2] ? `${label[1]}/${label[2]}` : "";
+    text = text.slice(label[0].length).trim();
+  }
+  if (!text) return null;
+
+  const boldLabel = IDEA_BOLD_LABEL.exec(text);
+  const dashAt = IDEA_DASH.exec(text)?.index ?? -1;
+  const plainLabel = IDEA_PLAIN_LABEL.exec(text);
+  let head = "";
+  let description = "";
+
+  if (boldLabel && (dashAt < 0 || boldLabel[0].length < dashAt)) {
+    head = boldLabel[1]!;
+    description = boldLabel[2]!;
+  } else if (dashAt >= 0) {
+    head = text.slice(0, dashAt);
+    description = text.slice(dashAt).replace(/^[\s—–-]+/, "");
+  } else if (plainLabel) {
+    head = plainLabel[1]!;
+    description = plainLabel[2]!;
+  } else {
+    const end = firstSentenceEnd(text);
+    if (end < 0) return null;
+    head = text.slice(0, end);
+    description = text.slice(end + 1);
+  }
+
+  const headline = cleanIdeaHeadline(head);
+  const body = description.trim();
+  if (!headline || !body) return null;
+  return { headline, description: body, score, raw };
+}
+
+/** Every line of `text` that is a bullet, or null when one line is not. */
+function allBullets(text: string): string[] | null {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  return lines.every((line) => BULLET_LINE.test(line)) ? lines : null;
+}
+
+/** One idea card from one bullet, with no paragraph invented for it. */
+function ideaCard(
+  item: IdeaItem,
+  input: {
+    key: string;
+    order: number;
+    disclosureKey: DisclosureKey;
+    sectionVerdict?: string;
+    /** False for a bullet the report itself filed as demoted. */
+    includeByDefault: boolean;
+  },
+): ImportedStory {
+  return makeStory({
+    key: input.key,
+    order: input.order,
+    headline: item.headline,
+    isStory: true,
+    raw: item.raw,
+    paragraphs: [item.description],
+    disclosureKey: input.disclosureKey,
+    scoreCode: item.score,
+    sectionVerdict: input.sectionVerdict,
+    kind: "idea",
+    includeByDefault: input.includeByDefault,
+  });
+}
+
+/**
+ * Read a paste that is nothing but a list of story ideas.
+ *
+ * Each bullet or numbered line is one idea: `Headline — description`,
+ * `**Headline**: description`, or `Headline: description`. The headline is
+ * structure (the card's name, the lead's headline) and the description is the
+ * body, word for word — so an idea imported this way is a lead the editor can
+ * write from, never a story that looks finished.
+ *
+ * Fewer than two items is not a list: a single bullet inside prose is a bullet,
+ * and the paste falls through to the plain-story and model paths instead.
+ */
+export function parseIdeaList(
+  text: string,
+  opts: { disclosureKey?: DisclosureKey } = {},
+): ImportedStory[] {
+  const disclosureKey = opts.disclosureKey ?? "outside-ai";
+  const stories: ImportedStory[] = [];
+  for (const line of precleanMarkdown(text).split("\n")) {
+    const item = ideaItemFromLine(line);
+    if (!item) continue;
+    stories.push(
+      ideaCard(item, {
+        key: `s${stories.length + 1}`,
+        order: stories.length + 1,
+        disclosureKey,
+        includeByDefault: true,
+      }),
+    );
+  }
+  return stories.length >= 2 ? stories : [];
 }
 
 /**
@@ -724,6 +960,30 @@ export function parseStructure(text: string, opts: { disclosureKey?: DisclosureK
     // A section states the verdict for the leads under it: "## LEADS (HOLD)".
     // The section card carries it too, so the card itself shows the flag.
     if (block.level === 2) sectionVerdict = sectionVerdictOf(block.heading);
+    /*
+      A section that states a verdict and whose text is nothing but bullets is a
+      list of leads the report filed one by one: "## LEADS (DEMOTE)" followed by
+      "**LEAD 20** (6/20): …" three times. One card for the whole section would
+      hide three leads inside it, so each bullet gets its own card, carrying the
+      section's verdict — and none of them is ticked, because the report itself
+      said not to run them.
+    */
+    const bullets = sectionVerdict ? allBullets(block.text) : null;
+    if (bullets && bullets.every((line) => ideaItemFromLine(line))) {
+      for (const line of bullets) {
+        const item = ideaItemFromLine(line)!;
+        stories.push(
+          ideaCard(item, {
+            key: `s${stories.length + 1}`,
+            order: stories.length + 1,
+            disclosureKey,
+            sectionVerdict,
+            includeByDefault: false,
+          }),
+        );
+      }
+      continue;
+    }
     const isStory = block.level === 3 || looksLikeStory(block.text);
     push(block.heading, isStory, [block.heading, block.text].join("\n\n"), block.text, sectionVerdict);
   }
@@ -814,6 +1074,26 @@ export function parseFinishedStories(
 
   const structured = parseStructure(raw, opts);
   if (structured.length > 0) {
+    /*
+      A report whose structure carries no story at all is not a report of
+      stories: a paste shaped "## Story ideas" and eight bullets is a list, and
+      reading it as one section card would hand the editor a single card where
+      eight leads are. The list is consulted only here -- a report that does
+      carry stories is read from its own structure, every time.
+    */
+    const ideas = structured.some((s) => s.isStory) ? [] : parseIdeaList(raw, opts);
+    if (ideas.length > 0) {
+      return {
+        title,
+        scanDate,
+        headerNote,
+        detectedTool,
+        stories: ideas,
+        cleanedText: cleaned,
+        method: "ideas",
+        warnings: [],
+      };
+    }
     return {
       title,
       scanDate,
@@ -822,6 +1102,20 @@ export function parseFinishedStories(
       stories: structured,
       cleanedText: cleaned,
       method: "structured",
+      warnings: [],
+    };
+  }
+
+  const ideas = parseIdeaList(raw, opts);
+  if (ideas.length > 0) {
+    return {
+      title,
+      scanDate,
+      headerNote,
+      detectedTool,
+      stories: ideas,
+      cleanedText: cleaned,
+      method: "ideas",
       warnings: [],
     };
   }

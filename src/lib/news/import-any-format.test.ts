@@ -25,9 +25,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  IDEA_WORD_LIMIT,
   bodyIsVerbatim,
   containsVerbatim,
   containsVerbatimEither,
+  defaultImportKind,
   parseFinishedStories,
   parsePlainStory,
   precleanMarkdown,
@@ -173,9 +175,13 @@ describe("the Claude report, read for the editor", () => {
   });
 
   it("finds every lead, split from the sections that are not leads", () => {
-    assert.equal(claudeStories.length, 19);
-    // "## LEADS (ADVANCE)" / "## LEADS (HOLD)" hold leads; the rest of the
-    // report is context, tables and notes, and none of it is a story.
+    // 19 leads under "## LEADS (ADVANCE)" and "## LEADS (HOLD)", plus the three
+    // demoted leads the report filed as bullets under "## LEADS (DEMOTE)" --
+    // each of those is a lead the report named, so each gets its own card
+    // (Step D: see "a section that only lists demoted leads" below).
+    assert.equal(claudeStories.length, 22);
+    // The rest of the report -- context, tables, the coverage ledger, the watch
+    // list -- is none of it a story.
     assert.ok(claude.stories.some((s) => !s.isStory));
   });
 
@@ -269,11 +275,184 @@ describe("the triage the report stated", () => {
     assert.equal(held[0]!.score, "9/20");
   });
 
-  it("shows the Hold flag on the Demote section too", () => {
-    const demote = claude.stories.find((s) => s.headline === "LEADS (DEMOTE)");
-    assert.ok(demote, "the DEMOTE section card");
-    assert.equal(demote!.triage, "Demote");
-    assert.equal(demote!.holds, true);
+  it("shows the Hold flag on every demoted lead, not only on its section", () => {
+    // Step D replaced the single "## LEADS (DEMOTE)" section card with one card
+    // per demoted lead. The flag the section carried is now on each of the three
+    // cards, which is where an editor ticks them.
+    const demoted = claude.stories.filter((s) => s.triage === "Demote");
+    assert.equal(demoted.length, 3);
+    for (const lead of demoted) {
+      assert.equal(lead.holds, true);
+      assert.ok(lead.key.startsWith("s"), `${lead.headline} is not carried as a lead`);
+    }
+  });
+});
+
+describe("story ideas: what each card is by default", () => {
+  it("calls a card an idea when its body is one paragraph or under 120 words", () => {
+    assert.equal(IDEA_WORD_LIMIT, 120);
+    const long = Array.from({ length: 130 }, (_, i) => `word${i}`).join(" ");
+    assert.equal(
+      defaultImportKind(`${long}\n\nA second paragraph, and a few more words after it.`),
+      "story",
+    );
+    // One long paragraph is still an idea: an idea is what a report wrote a
+    // paragraph about, a story is what it wrote several paragraphs about.
+    assert.equal(defaultImportKind(long), "idea");
+    assert.equal(defaultImportKind("Short.\n\nAnd a second short paragraph."), "idea");
+  });
+
+  it("keeps every one of the Codex report's seven stories a story", () => {
+    const stories = parseFinishedStories(CODEX).stories.filter((s) => s.isStory);
+    assert.equal(stories.length, 7);
+    for (const story of stories) assert.equal(story.kind, "story", story.headline);
+  });
+
+  it("reads the Claude report's short leads as ideas and its written leads as stories", () => {
+    const leads = claude.stories.filter((s) => s.kind);
+    assert.equal(leads.length, claude.stories.length);
+    // 19 written leads plus the 3 demoted bullets: 10 carry a written story,
+    // 12 are the one-paragraph leads the report filed as leads or as ideas.
+    assert.equal(claudeStories.filter((s) => s.kind === "story").length, 10);
+    assert.equal(claudeStories.filter((s) => s.kind === "idea").length, 12);
+    for (const card of claude.stories) {
+      assert.equal(card.kind, defaultImportKind(card.body), card.headline);
+    }
+    assert.ok(
+      claudeStories.some(
+        (s) => s.kind === "story" && s.headline.startsWith("Council votes 4-3 to bring back marijuana"),
+      ),
+    );
+    const crossing = claudeStories.find((s) => s.headline.startsWith("21st Avenue rail crossing"))!;
+    assert.equal(crossing.kind, "idea");
+    assert.equal(crossing.includeByDefault, true);
+  });
+
+  it("ticks the leads the report filed and leaves the report's own sections unticked", () => {
+    for (const card of claude.stories) {
+      if (card.key.startsWith("n")) assert.equal(card.includeByDefault, false, card.headline);
+    }
+    assert.ok(claude.stories.some((s) => !s.isStory && s.includeByDefault === false));
+  });
+});
+
+describe("a section that only lists demoted leads", () => {
+  const demoted = claude.stories.filter((s) => s.triage === "Demote");
+
+  it("gives each demoted lead its own card instead of one section card", () => {
+    assert.equal(claude.stories.some((s) => s.headline === "LEADS (DEMOTE)"), false);
+    assert.equal(demoted.length, 3);
+    for (const lead of demoted) assert.equal(lead.isStory, true);
+  });
+
+  it("takes the headline off the bullet's first sentence and keeps the rest as its text", () => {
+    const water = demoted[0]!;
+    assert.equal(
+      water.headline,
+      'Water Board, Sept 21, "Action Required" conveyance plats for 701 S. Main, FRCC, and Longmont Transit Center Filing No. 1 (1st and Main parcels)',
+    );
+    assert.equal(water.body, "Outcome not confirmed. Monitoring note for the transit hub thread.");
+    assert.equal(water.score, "6/20");
+    assert.equal(water.triage, "Demote");
+    assert.equal(water.holds, true);
+    assert.equal(water.kind, "idea");
+    assert.equal(water.includeByDefault, false);
+    assert.equal(bodyIsVerbatim(CLAUDE, water), true);
+  });
+
+  it("does not end the headline at the initial in a street name", () => {
+    const avis = demoted[1]!;
+    assert.equal(
+      avis.headline,
+      "P&Z, Sept 23, public hearing on a vehicle sales and rental conditional use at 206 S. Main (Avis)",
+    );
+    assert.equal(
+      avis.body,
+      "Packet has approve, conditional, and deny resolutions. Outcome not confirmed (recording blocked).",
+    );
+    assert.equal(avis.score, "6/20");
+    assert.equal(bodyIsVerbatim(CLAUDE, avis), true);
+  });
+
+  it("keeps a lead whose whole description is one short sentence", () => {
+    const church = demoted[2]!;
+    assert.equal(
+      church.headline,
+      "Neighborhood meeting Sept 17 on annexing 0.88 acres at 8979 Nelson Road (Connection Church Longmont; Norris Design)",
+    );
+    assert.equal(church.body, "Early stage.");
+    assert.equal(church.score, "5/20");
+    assert.equal(church.holds, true);
+  });
+});
+
+describe("a plain list of story ideas, with no report around it", () => {
+  const IDEAS = [
+    "# Story ideas — Longmont, week of September 21, 2026",
+    "",
+    '* **Water Board conveyance plats at First and Main** — the board accepted "Action Required" plats for 701 S. Main, FRCC and the Longmont Transit Center on Sept 21. Nobody has confirmed what it decided.',
+    "* P&Z hearing on the Avis vehicle rental use — a conditional use for vehicle sales and rental at 206 S. Main was heard Sept 23. The packet carries approve, conditional and deny resolutions.",
+    "* 1. Airport hangar lease assignment moves to a new owner — council approved the assignment 5 to 2 on Sept 22. Two members voted no both times.",
+    "* **Annexation of 0.88 acres on Nelson Road** — a neighborhood meeting on Sept 17 took up the Connection Church parcel at 8979 Nelson Road. No application has been filed yet.",
+    "* The budget's water fund gap — the 2027 budget message puts the Water Fund at $51.01 million. Planned spending is $54.4 million.",
+    "* **Quiet zone work closes the 21st Avenue crossing** — the crossing closes Sept 28 for four weeks of work tied to the rail quiet zone. The city has not said who pays.",
+    "* Downtown parking permit changes — staff proposed moving the permit year to April. The second-vehicle rate would rise by $40.",
+    "* **Library district asks for a mill levy question** — the district wants a November 2027 ballot question. The board has taken no position on it.",
+  ].join("\n");
+
+  const parsed = parseFinishedStories(IDEAS);
+
+  it("reads the list as ideas rather than one undifferentiated story", () => {
+    assert.equal(parsed.method, "ideas");
+    assert.equal(parsed.stories.length, 8);
+    assert.equal(parsed.detectedTool, "Story ideas");
+    for (const card of parsed.stories) {
+      assert.equal(card.kind, "idea");
+      assert.equal(card.isStory, true);
+      assert.equal(card.includeByDefault, true);
+    }
+  });
+
+  it("takes the headline and the description apart at the dash or the label", () => {
+    assert.deepEqual(
+      parsed.stories.map((s) => s.headline),
+      [
+        "Water Board conveyance plats at First and Main",
+        "P&Z hearing on the Avis vehicle rental use",
+        "Airport hangar lease assignment moves to a new owner",
+        "Annexation of 0.88 acres on Nelson Road",
+        "The budget's water fund gap",
+        "Quiet zone work closes the 21st Avenue crossing",
+        "Downtown parking permit changes",
+        "Library district asks for a mill levy question",
+      ],
+    );
+  });
+
+  it("keeps every description word for word, with no markup and no bullet left on it", () => {
+    assert.equal(
+      parsed.stories[1]!.body,
+      "a conditional use for vehicle sales and rental at 206 S. Main was heard Sept 23. The packet carries approve, conditional and deny resolutions.",
+    );
+    for (const card of parsed.stories) {
+      assert.ok(!card.body.includes("**"), card.body.slice(0, 60));
+      assert.ok(!card.headline.includes("**"), card.headline);
+      assert.equal(bodyIsVerbatim(IDEAS, card), true);
+    }
+  });
+
+  it("reads a list sitting under its own heading the same way", () => {
+    const under = parseFinishedStories(
+      [
+        "## Story ideas",
+        "",
+        "* **Water Board conveyance plats at First and Main** — the board accepted plats on Sept 21. Nobody has confirmed what it decided.",
+        "* **Quiet zone work closes the 21st Avenue crossing** — the crossing closes Sept 28. The city has not said who pays.",
+      ].join("\n"),
+    );
+    assert.equal(under.method, "ideas");
+    assert.equal(under.stories.length, 2);
+    assert.equal(under.stories[0]!.headline, "Water Board conveyance plats at First and Main");
   });
 });
 
