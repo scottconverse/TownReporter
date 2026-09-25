@@ -282,7 +282,9 @@ export function DailyScanSettings() {
         sub="A scheduled reporter pass for leads only. It does not draft or publish anything."
       />
       <p id="daily-scan-heading" className="mt-3 max-w-2xl text-sm text-muted">
-        Choose the preferred model for every scheduled run. If it is unavailable, out of quota,
+        Choose the model for every scheduled run. Automatic works down the writing ladder — DeepSeek
+        v4.1 Flash first, then Qwen 3.6 35B if it is already loaded, then Codex Terra — and the run
+        record names the model that actually ran. If the chosen model is unavailable, out of quota,
         signed out, or returns no output, the unfinished model call can move to the next ready
         writing model and the run records that switch. A content refusal stops the run. Saved Custom
         AI connections, including OpenAI-compatible Gemini endpoints, resolve their encrypted
@@ -312,15 +314,27 @@ export function DailyScanSettings() {
               onChange={(event) => changeDraft({ ...draft, localTime: event.target.value })}
             />
           </Field>
+          {/*
+            0.6.64 (Unit AA) item 2: Automatic is offered here now. The guard
+            this replaced swallowed it -- `if (runtime !== "auto")` -- because a
+            scheduled run had to name one exact provider; `DailyScanRuntime` has
+            since grown "auto" and `validateDailyRuntime` resolves it to a rung
+            before the job is queued. An effort that does not apply to the
+            chosen model is dropped by the server (`modelEffort` in
+            `cleanDailyScanPolicyInput`), not here.
+          */}
           <ModelPicker
             scope="scan"
             value={draft.runtime}
-            onChange={(runtime) => {
-              if (runtime !== "auto") changeDraft({ ...draft, runtime: runtime as DailyScanRuntime, modelEffort: defaultModelEffort(runtime) });
-            }}
+            onChange={(runtime) =>
+              changeDraft({
+                ...draft,
+                runtime: runtime as DailyScanRuntime,
+                modelEffort: defaultModelEffort(runtime),
+              })
+            }
             effort={draft.modelEffort}
             onEffortChange={(modelEffort) => changeDraft({ ...draft, modelEffort })}
-            excludeAutomatic
             compact
           />
         </div>

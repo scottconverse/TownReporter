@@ -11,6 +11,9 @@ import {
   FORCED_MODEL_CHOICES,
   opinionModelChoice,
   opinionProviderProblem,
+  PICKER_OPTION_TEXT_MAX,
+  pickerOptionText,
+  pickerOptionTitle,
   rememberedStoryModelChoice,
   retiredModelChoiceNote,
   STORY_MODEL_CHOICES,
@@ -230,6 +233,35 @@ describe("model choice contract", () => {
     assert.equal(
       modelChoiceHelp("codex-frontier"),
       "Prefers Codex Sol for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
+    );
+  });
+
+  it("tells the daily-scan picker what Automatic does for a scheduled run", () => {
+    /*
+      0.6.64 (Unit AA) item 2. The Scan picker now OFFERS Automatic, so the
+      sentence under it has to describe what a scheduled run actually does.
+      It cannot be Story's: a scheduled run stores the model it will run on in
+      its reservation and run record BEFORE the job is queued, so it pins one
+      rung instead of leaving "your configured gateway" to be read at call
+      time. Read from the same ladder sentence every other surface uses, so a
+      reordered or retired rung cannot leave this wording behind.
+    */
+    const help = modelChoiceHelp("auto", "scan");
+    assert.match(help, /DeepSeek v4\.1 Flash, Qwen 3\.6 35B, then Codex Terra/);
+    assert.match(help, /records which one ran/i);
+    assert.doesNotMatch(help, /configured gateway/i);
+    /*
+      The select's own line is unchanged: it is the measured 30-character
+      "Automatic — Recommended ladder" (Unit P item 7 -- a longer line is
+      clipped on the control that decides what a run spends), and the ladder
+      it means stays reachable as the option's title.
+    */
+    const automatic = STORY_MODEL_CHOICES.find((choice) => choice.value === "auto");
+    assert.ok(automatic, "the story/scan list must offer Automatic");
+    assert.ok(pickerOptionText(automatic!).length <= PICKER_OPTION_TEXT_MAX);
+    assert.match(
+      pickerOptionTitle(automatic!),
+      /DeepSeek v4\.1 Flash, Qwen 3\.6 35B, then Codex Terra/,
     );
   });
 
