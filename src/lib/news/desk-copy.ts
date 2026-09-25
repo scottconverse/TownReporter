@@ -1312,7 +1312,7 @@ export function topicFromText(
 
   const seen = new Set<string>();
   const record = (key: string, term: string, weight: "configured" | "strong" | "weak") => {
-    const stamp = `${key} ${term}`;
+    const stamp = `${key}\u0000${term}`;
     if (!term || seen.has(stamp)) return;
     if (!topicTermPattern(term).test(body)) return;
     seen.add(stamp);
