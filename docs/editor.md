@@ -459,6 +459,43 @@ How they join: a council video titled like `08/25/2026` joins that day’s packe
 
 Dark Desk is told: search the whole tape; names may be wrong; quotes need a check. It will still guess. You are the check.
 
+### Meetings with no captions (speech-to-text)
+
+Some tapes have no captions at all, so capture ends at the audio. If the owner
+has installed **textflowkit** on this machine and named it, the desk can listen
+to that recording and write a transcript from it. The pass you already run —
+**Run meetings now**, or the scheduled one — queues that work; there is nothing
+extra to press. One recording is transcribed at a time, it can be stopped, and
+if the machine restarts mid-run the desk picks the work up again. What the desk
+does with it afterwards is the same as for a caption transcript: alignment,
+citations with timestamps, drafts, and the publish checks all read it the same
+way.
+
+Two things to keep straight.
+
+**It is not the city’s record.** The desk labels these rows, next to the
+transcript’s hashes, as *speech-to-text (Whisper via textflowkit), not official
+captions*. Everything already said about auto-captions applies, and more
+sharply: a machine listened to audio and wrote down what it thought it heard.
+Names, numbers, and ordinance titles are exactly where it is most confident and
+most wrong. Play the tape before you print a quote or a name from one.
+
+**The desk says whether it is available.** **Server → Meeting capture** shows
+one line: *Speech-to-text: textflowkit 0.1.6 (model small, language en)* when it
+is there, or *not installed … meetings without captions stay audio-only* when it
+is not. If that line says not installed, a captionless meeting staying
+audio-only is the honest outcome, not a fault.
+
+A transcription that fails — the tool missing, the audio unreadable, or the run
+running past its allowance — leaves a named reason on the meeting row and keeps
+the recording exactly where it was. The next pass retries it. Nothing is written
+over: the audio is never deleted, and a transcript is never stored unless the
+recording it came from still matches the hash the desk recorded for those bytes.
+
+If captions turn up later, they are a new revision like any other, and the
+same rules apply — including the review step when a transcript changes after
+publication. Speech-to-text never overwrites a caption transcript.
+
 ### From a meeting recording to a story
 
 After channels and title keywords are saved in **Paper setup**, an owner can

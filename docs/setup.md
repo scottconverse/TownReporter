@@ -619,6 +619,44 @@ citations, redrafting against a newer transcript, publication review, and the
 limits of captions—see [From a meeting recording to a story in the editor’s
 manual](editor.md#from-a-meeting-recording-to-a-story).
 
+#### Speech-to-text for tapes with no captions (optional)
+
+TownReporter does not ship this tool and the Windows installer does not add
+it. Without it, a meeting that has no captions stays audio-only, which is what
+the app did before this existed. If you want those tapes transcribed, install
+**[textflowkit](https://github.com/scottconverse/textflowkit)** on the machine
+that runs TownReporter:
+
+```
+python -m pip install textflowkit
+```
+
+It calls **ffmpeg** to read the audio, so ffmpeg has to be installed and on
+`PATH` as well. Then tell TownReporter where it is, either in the environment
+of the service that runs the app:
+
+```
+TEXTFLOWKIT_CLI_PATH=C:\path\to\textflowkit.exe
+```
+
+or by leaving that unset and putting `textflowkit` on `PATH`. Two more
+environment variables are optional: `TEXTFLOWKIT_MODEL` (default `small`) and
+`TEXTFLOWKIT_LANGUAGE` (default `en`). A larger model is more accurate and
+takes longer; run a meeting by hand first and watch the row before you turn it
+loose on a schedule.
+
+To check, open **Server → Meeting capture**. One line tells you what the desk
+found: the version, the model and the language, or that it is not installed.
+That line is the answer to "why did this captionless meeting stay audio-only".
+
+The tool reads the recording the capture already downloaded and writes its own
+JSON into the meeting’s storage folder; the desk stores that JSON as the
+transcript, hashed, beside the audio. It is labeled in the desk as
+speech-to-text, not official captions. A run that cannot finish — no tool, no
+audio, a recording that no longer matches the hash the desk recorded for it, or
+a run past its allowance — leaves a named reason on the meeting and keeps the
+recording, so the next pass can try again.
+
 ### 4. PrimeGov
 
 If the city uses PrimeGov, add the public portal:
