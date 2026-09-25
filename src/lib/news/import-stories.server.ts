@@ -336,14 +336,21 @@ export async function performImportFinishedStories(
       refused.push({ headline: story.headline, reason: "Could not file that story." });
       continue;
     }
+    /*
+      `importedText` marks the one thing about this draft that the rest of the
+      desk cannot tell from the rows: its body is a report an editor pasted, not
+      prose a model wrote beside gathered records. The evidence-review gate is
+      built for the second kind (draft-evidence.ts) and would otherwise stop an
+      editor from fixing a typo in the first kind and printing it.
+    */
     await sql`
       insert into drafts (
         user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
-        provenance_json, disclosure_text
+        provenance_json, disclosure_text, research_json
       ) values (
         ${context.userId}, ${context.newsroomId}, ${leadId}, ${story.headline.slice(0, 240)},
         ${story.dek.trim().slice(0, 4000)}, ${story.body}, ${topic}, ${JSON.stringify(urls)},
-        ${links}, ${disclosure}
+        ${links}, ${disclosure}, ${JSON.stringify({ importedText: true })}
       )
     `;
     if (story.reporterNextStep.trim()) {

@@ -198,7 +198,7 @@ async function ensureSchema() {
   await sql.query(`create table if not exists drafts (id serial primary key, newsroom_id integer, user_id text,
     lead_id integer, headline text, dek text default '', body text not null, topic text not null,
     source_urls text default '[]', provenance_json text default '[]', disclosure_text text not null default '',
-    updated_at timestamptz default now())`);
+    research_json text default '{}', updated_at timestamptz default now())`);
   await sql.query(`create table if not exists articles (id serial primary key, newsroom_id integer)`);
   return sql;
 }
@@ -273,7 +273,7 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.match(String(provenance.importedAt), /^\d{4}-\d{2}-\d{2}T/);
 
     const drafts = await sql.query(
-      "select lead_id, headline, dek, body, topic, source_urls, disclosure_text from drafts where newsroom_id=91 order by id",
+      "select lead_id, headline, dek, body, topic, source_urls, disclosure_text, research_json from drafts where newsroom_id=91 order by id",
     ) as {
       lead_id: number;
       headline: string;
@@ -282,6 +282,7 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
       topic: string;
       source_urls: string;
       disclosure_text: string;
+      research_json: string;
     }[];
     assert.equal(drafts.length, 2);
     assert.equal(drafts[0]!.lead_id, leads[0]!.id);
@@ -295,6 +296,11 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
       drafts[0]!.disclosure_text,
       "An outside AI research tool wrote this from public records; an editor reviewed it.",
     );
+    // The body is imported text, and the draft says so: the evidence-review
+    // gate is built for model-written prose beside gathered records, and an
+    // editor who fixes a typo in pasted text must still be able to print it.
+    assert.deepEqual(JSON.parse(drafts[0]!.research_json), { importedText: true });
+    assert.deepEqual(JSON.parse(drafts[1]!.research_json), { importedText: true });
 
     // Nothing publishes: an imported story leaves the desk only via Publish.
     const [published] = await sql.query("select count(*)::int as n from articles") as { n: number }[];
