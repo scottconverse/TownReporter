@@ -139,6 +139,22 @@ function names(text: string, outlet: NamedOutlet): boolean {
 }
 
 /**
+ * The fold above, exposed as a comparison key.
+ *
+ * The rules an owner's list has to pass are the mirror of this function: two
+ * outlets whose names fold to one key are two outlets the gate cannot tell
+ * apart, so the editor has to refuse them rather than store a list where one
+ * row's credit silently lands on the other. It is exported rather than
+ * re-implemented for the same reason the matcher is the only place that
+ * decides what counts as naming an outlet -- a second fold would drift.
+ *
+ * Trimmed, because equality does not need the padding that `includes` does.
+ */
+export function outletNameKey(text: string): string {
+  return normalize(text).trim();
+}
+
+/**
  * A stored per-newsroom outlet list, or null when the value is missing or
  * malformed -- the two states that fall back to NAMED_OUTLETS.
  *

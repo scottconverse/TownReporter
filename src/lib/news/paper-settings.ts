@@ -121,6 +121,10 @@ export async function ensurePaperSettingsSchema() {
   await sql.query(`alter table paper_settings add column if not exists editor_email text`);
   // Unit P item 5: mirrors migrations/0088_paper_settings_named_outlets.sql
   await sql.query(`alter table paper_settings add column if not exists named_outlets jsonb`);
+  // Unit W item 3: mirrors migrations/0089_paper_settings_named_outlets_revision.sql
+  await sql.query(
+    `alter table paper_settings add column if not exists named_outlets_revision integer not null default 0`,
+  );
 }
 
 function defaultConfig(): PaperConfig {
