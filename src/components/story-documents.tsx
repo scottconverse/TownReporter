@@ -6,8 +6,52 @@ import {
   listStoryDocuments,
   downloadStoryDocument,
 } from "@/lib/news/story-document-api";
-import { documentKind, DOCUMENT_FILE_LIMIT } from "@/lib/news/story-document-text";
+import {
+  documentKind,
+  partialStoryDocuments,
+  DOCUMENT_FILE_LIMIT,
+} from "@/lib/news/story-document-text";
+import { Notice } from "@/components/states";
 export type StoryUpload = { id: string; filename: string; size: number };
+/**
+ * The plain notice the editor gets when a redraft ran on a partly read
+ * document. Owner's rule: pressing Redraft once must read everything it can and
+ * still produce a draft, and an editor must never be left with a red "Retry to
+ * continue" and no draft. So this is a warning, not an error, it says which
+ * document and how much of it was read, and it carries the one action that
+ * finishes the job -- "Read the rest" resumes from the retained pages.
+ */
+export function StoryDocumentPartialNotice({
+  leadId,
+  busy = false,
+  onReadRest,
+}: {
+  leadId: number;
+  busy?: boolean;
+  onReadRest: () => void;
+}) {
+  const query = useQuery({
+    queryKey: ["story-documents", leadId],
+    queryFn: () => listStoryDocuments({ data: { leadId } }),
+  });
+  const partial = partialStoryDocuments(query.data ?? []);
+  if (!partial.length) return null;
+  const named = partial
+    .map((doc) => `${doc.filename} (${doc.readPages} of ${doc.pages} pages read)`)
+    .join("; ");
+  return (
+    <Notice kind="warn">
+      {partial.length === 1
+        ? `One attached document was only partly read, so the draft used the pages that were read and nothing else from it: `
+        : `${partial.length} attached documents were only partly read, so the draft used the pages that were read and nothing else from them: `}
+      {named}. Reading stopped before the end of the document; your other documents were still read.{" "}
+      <button className="btn" type="button" disabled={busy} onClick={onReadRest}>
+        Read the rest
+      </button>
+      {busy ? " Reading the remaining pages…" : ""}
+    </Notice>
+  );
+}
 export function StoryDocumentUpload({
   documents,
   onChange,

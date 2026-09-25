@@ -14,8 +14,11 @@
  * a local model actually answering.
  *
  *   FAKE_DEEPSEEK_PORT    port to listen on (default 3318 -- the walk's own
- *                         declared port; `TOWNREPORTER_DEEPSEEK_BASE_URL` must
- *                         name http://127.0.0.1:<this port>/v1)
+ *                         declared port; the walk points either
+ *                         `TOWNREPORTER_DEEPSEEK_BASE_URL` (Automatic's rung 1)
+ *                         or `LLM_BASE_URL` (the configured gateway, and the
+ *                         base URL local discovery probes first) at
+ *                         http://127.0.0.1:<this port>/v1)
  *   FAKE_DEEPSEEK_MODEL   the one model id GET /models lists, and the id every
  *                         answer is attributed to (default
  *                         "deepseek-v4.1-flash:cloud", the rung's own model,
@@ -47,7 +50,40 @@
  *                         not a draft. A walk that needs the scan's write to
  *                         fail while rung 1's readiness probe still answers
  *                         sets this rather than `FAKE_DEEPSEEK_MODE`.
- *   FAKE_DEEPSEEK_DELAY_MS  delay before each chat answer (default 0)
+ *   FAKE_DEEPSEEK_DELAY_MS  delay before each chat answer (default 0). Vision
+ *                         pages are NOT delayed by this: OCR reads one page per
+ *                         call and a walk that wants to watch page-by-page
+ *                         progress needs each PAGE to hold its own stage long
+ *                         enough to survive a poll -- see the next knob.
+ *   FAKE_DEEPSEEK_OCR_DELAY_MS
+ *                         delay before each vision (page) answer (default 0).
+ *                         A walk sets this on the VISION reader so one page's
+ *                         "Reading packet.pdf: page 7 of 13" stage stays on the
+ *                         wire longer than the desk's own 2s poll, which is what
+ *                         makes every page -- the last one included -- an
+ *                         observed fact rather than a race.
+ *   FAKE_DEEPSEEK_OCR_PAGES how many pages the scan under test has, so a page
+ *                         answer can name itself ("SCANNED PAGE 7 OF 13"). Only
+ *                         read by the vision answer below.
+ *   FAKE_DEEPSEEK_ECHO_EVIDENCE=1
+ *                         answer an evidence-notes call (class "document", the
+ *                         interpret pass in story-documents.server.ts) with the
+ *                         labels the supplied text actually carries instead of
+ *                         "ok", and add the same labels to the write reply's
+ *                         `body`. A walk uses this to prove the chain
+ *                         page text -> notes -> writer prompt end to end: the
+ *                         finished draft quotes labels the fixture put on a
+ *                         real page, so the draft could only have them if the
+ *                         pages were read and their notes reached the writer.
+ *                         The canned answers are otherwise unchanged. Off by
+ *                         default: every other walk asserts the canned text.
+ *
+ * A vision call is answered from its content SHAPE, not its prompt: OCR sends
+ * `content: [{type:"image_url"...},{type:"text"...}]`, an array no draft or
+ * research call ever sends (ocr.ts's openAiCompatibleTranscribePage). It is
+ * logged as class "ocr" so a walk can count how many pages were really read,
+ * and it answers in page-call order because the fake cannot see the image it
+ * was handed.
  *
  * Two control routes, for the walk itself (never called by the product):
  *
@@ -67,6 +103,7 @@ import { createServer } from "node:http";
 const PORT = Number(process.env.FAKE_DEEPSEEK_PORT || 3318);
 const MODEL = process.env.FAKE_DEEPSEEK_MODEL || "deepseek-v4.1-flash:cloud";
 const DELAY_MS = Number(process.env.FAKE_DEEPSEEK_DELAY_MS || 0);
+const OCR_DELAY_MS = Number(process.env.FAKE_DEEPSEEK_OCR_DELAY_MS || 0);
 
 const MODES = new Set(["ready", "probe-5xx", "quota", "unreadable-json"]);
 
@@ -82,6 +119,40 @@ let scanMode = MODES.has(process.env.FAKE_DEEPSEEK_SCAN_MODE || "")
 
 /** Every request this server has answered, oldest first. */
 const requests = [];
+
+/** Pages this instance's scan has, and how many vision calls it has answered. */
+const OCR_PAGES = Number(process.env.FAKE_DEEPSEEK_OCR_PAGES || 13);
+const ECHO_EVIDENCE = process.env.FAKE_DEEPSEEK_ECHO_EVIDENCE === "1";
+let ocrCalls = 0;
+
+/**
+ * The labels a prompt actually carries, in the words the fixture wrote them.
+ * `evidenceTokens` reads only what is there -- it never invents a label -- so a
+ * draft that repeats one of these tokens can only have got it from the text the
+ * desk was given: a page label a scanned page's own OCR produced, a marker the
+ * walk put in a document, the scanned packet's final-page decision line, or a
+ * document filename. Only read in echo mode.
+ */
+function evidenceTokens(prompt) {
+  const tokens = new Set();
+  for (const match of prompt.matchAll(/SCANNED PAGE \d+ OF \d+/g)) tokens.add(match[0]);
+  for (const match of prompt.matchAll(/\b[A-Z][A-Z0-9_]{3,}_MARKER_[A-Za-z0-9_]+/g)) tokens.add(match[0]);
+  for (const match of prompt.matchAll(/FINAL PAGE DECISION: [^\n"]+/g)) tokens.add(match[0].trim());
+  for (const match of prompt.matchAll(/\b[\w-]+\.(?:pdf|txt|md|docx?|csv|srt|vtt)\b/gi))
+    tokens.add(match[0]);
+  return [...tokens].slice(0, 40);
+}
+
+/** Evidence notes that quote the labels the supplied text carries, as notes do. */
+function echoedNotes(prompt) {
+  const tokens = evidenceTokens(prompt);
+  if (!tokens.length) return "Evidence notes (echo mode): the supplied text carries no labelled page or marker.";
+  return (
+    "Evidence notes (echo mode). The supplied document labels itself with: " +
+    tokens.join("; ") +
+    ". The writer is told these are the exact labels the source carried."
+  );
+}
 
 /**
  * The desk makes several calls in one draft -- a document read, a compact
@@ -170,9 +241,33 @@ function scanAnswer(prompt) {
 const UNREADABLE =
   "The item passed after public discussion, and the council will revisit it next month.";
 
+/**
+ * One scanned page, in the shape a vision model would return for it: plain
+ * prose, page-labelled, with a marker the walk can look for in the retained
+ * text and the draft's evidence. `acceptedOcrText` (ocr.ts) rejects narration
+ * and refusals, so this stays a plain reading of the page.
+ */
+function ocrPageText(page) {
+  const last = page === OCR_PAGES;
+  return (
+    `CITY COUNCIL PACKET - SCANNED COPY\nSCANNED PAGE ${page} OF ${OCR_PAGES}\n` +
+    `Item ${page}: ${last ? "final decision" : "supporting exhibit"}\n` +
+    `Staff recommends approval of the consent agenda as presented.` +
+    (last ? `\nFINAL PAGE DECISION: approve 731250 dollars` : "")
+  );
+}
+
 function payload(klass, prompt = "") {
+  const echoedWrite = ECHO_EVIDENCE
+    ? {
+        ...READY_WRITE,
+        body:
+          `${READY_WRITE.body}\n\n` +
+          `Source labels the writer was shown: ${evidenceTokens(prompt).join("; ") || "none"}.`,
+      }
+    : READY_WRITE;
   const body =
-    klass === "research" ? READY_RESEARCH : klass === "scan" ? scanAnswer(prompt) : READY_WRITE;
+    klass === "research" ? READY_RESEARCH : klass === "scan" ? scanAnswer(prompt) : echoedWrite;
   return JSON.stringify({
     id: "fake-deepseek-1",
     object: "chat.completion",
@@ -183,9 +278,13 @@ function payload(klass, prompt = "") {
         message: {
           role: "assistant",
           content:
-            klass === "research" || klass === "write" || klass === "scan"
-              ? JSON.stringify(body)
-              : "ok",
+            klass === "ocr"
+              ? ocrPageText(Number(prompt) || 1)
+              : klass === "research" || klass === "write" || klass === "scan"
+                ? JSON.stringify(body)
+                : klass === "document" && ECHO_EVIDENCE
+                  ? echoedNotes(prompt)
+                  : "ok",
         },
         finish_reason: "stop",
       },
@@ -269,12 +368,23 @@ const server = createServer(async (req, res) => {
     const raw = await readBody(req);
     let klass = "write";
     let user = "";
+    let vision = false;
     try {
       const parsed = JSON.parse(raw || "{}");
-      user = String((parsed.messages || []).find((m) => m?.role === "user")?.content ?? "");
-      klass = classify(user);
+      const content = (parsed.messages || []).find((m) => m?.role === "user")?.content;
+      // An array content is OCR's own shape (image + instruction); no draft or
+      // research call sends one. See the header note.
+      vision = Array.isArray(content);
+      user = typeof content === "string" ? content : JSON.stringify(content ?? "");
+      klass = vision ? "ocr" : classify(user);
     } catch {
       klass = "write";
+    }
+    if (klass === "ocr") {
+      ocrCalls += 1;
+      if (OCR_DELAY_MS > 0) await new Promise((resolve) => setTimeout(resolve, OCR_DELAY_MS));
+      log({ path, method: req.method, class: "ocr", mode, status: 200, page: ocrCalls });
+      return send(res, 200, JSON.parse(payload("ocr", String(ocrCalls))));
     }
     const applied = modeFor(klass);
     if (DELAY_MS > 0) await new Promise((resolve) => setTimeout(resolve, DELAY_MS));

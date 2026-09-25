@@ -1,5 +1,5 @@
 import { StoryBody } from "@/components/story-body";
-import { StoryDocumentList } from "@/components/story-documents";
+import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { meetingClock } from "@/components/meeting-source-block-utils";
@@ -1484,6 +1484,19 @@ function StoryPage() {
               ) : null}
             </Notice>
           ) : null}
+          {/*
+            0.6.64 Unit AB: a document the redraft could only partly read is no
+            longer a red error line -- the draft ran on the pages that were read
+            and every later document was still read. This is the plain notice
+            that names the document (pages read of total) and carries the one
+            action that finishes it, so an editor never has to guess that
+            pressing Redraft again is the way forward.
+          */}
+          <StoryDocumentPartialNotice
+            leadId={id}
+            busy={waiting || draft.isPending}
+            onReadRest={() => draft.mutate()}
+          />
 
           {data.draft || body ? (
             <form className="work-form" onSubmit={(e) => e.preventDefault()}>
