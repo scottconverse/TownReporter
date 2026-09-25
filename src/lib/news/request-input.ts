@@ -145,8 +145,24 @@ export const LIMITS = {
   reviewNote: 2000,
   /** One index per transcript segment: a long meeting has a few hundred. */
   segmentIndexes: 5000,
-  /** An opaque evidence token (a hash or a revision marker). */
+  /** `claim.ts`'s reader claim link: an opaque marker, not a serialized row. */
   evidenceToken: 200,
+  /**
+   * The evidence token the *draft* editors send -- and this one is not a
+   * marker. `draft-evidence.ts:45` `evidenceReviewToken` is
+   * `JSON.stringify([...])` of the whole draft row, body included, and both
+   * editors send back exactly what the loader handed them
+   * (`desk.story.$leadId.tsx:530`, `opinion.ts:231`). Under it the desk
+   * refuses its own token, and the editor's "I checked: keep this evidence"
+   * dies as `too_big` -- which is what the story and corrections walks hit on
+   * 2026-09-25 (a fixture token measured 7,947 chars against a 200 ceiling).
+   * Size the same way as `storyText`: the body this token wraps, plus a
+   * margin for the row's other text columns (`source_urls`,
+   * `provenance_json`, `found_note`, `unanswered`, `research_json`), which are
+   * serialized alongside it. The value is only ever compared for equality
+   * (`draft-edit.server.ts:15`), never stored.
+   */
+  draftEvidenceToken: 24_000_000,
   /** A named outlet, e.g. "Longmont Leader". */
   outlet: 200,
   /** `legal-removal-store.ts:458` case ref regex allows exactly 120. */
@@ -722,7 +738,7 @@ export const meetingArticleReviewInput = z.object({
 export const draftMeetingReviewInput = z.object({
   leadId: rowId,
   draftId: rowId,
-  evidenceToken: z.string().max(LIMITS.evidenceToken),
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken),
   acceptedArtifactId: rowId,
   confirmedSegmentIndexes: z.array(segmentIndex).max(LIMITS.segmentIndexes),
   note: z.string().max(LIMITS.reviewNote),
@@ -858,7 +874,7 @@ export const editorialDraftInput = z.object({
   body: z.string().max(LIMITS.storyText),
   topic: z.string().max(LIMITS.topic),
   evidenceDecision: z.enum(EVIDENCE_DECISIONS).optional(),
-  evidenceToken: z.string().max(LIMITS.evidenceToken).optional(),
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken).optional(),
 });
 
 /**
@@ -873,7 +889,7 @@ export const draftEditInput = z.object({
   body: z.string().max(LIMITS.storyText),
   topic: z.string().max(LIMITS.topic),
   evidenceDecision: z.enum(EVIDENCE_DECISIONS).optional(),
-  evidenceToken: z.string().max(LIMITS.evidenceToken).optional(),
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken).optional(),
 });
 
 /** `opinion.ts:370` fileWrittenEditorial (`opinion.ts:376` refuses over 400,000). */

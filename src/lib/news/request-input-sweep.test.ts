@@ -355,6 +355,7 @@ const rows: Row[] = [
       { why: "oversize dek", value: { leadId: 5, headline: "h", dek: x(LIMITS.draftDek + 1), body: "b", topic: "council" } },
       { why: "draft id where the lead id goes", value: { draftId: 5, headline: "h", dek: "d", body: "b", topic: "council" } },
       { why: "unknown evidence decision", value: { leadId: 5, headline: "h", dek: "d", body: "b", topic: "council", evidenceDecision: "maybe" } },
+      { why: "oversize evidence token", value: { leadId: 5, headline: "h", dek: "d", body: "b", topic: "council", evidenceToken: x(LIMITS.draftEvidenceToken + 1) } },
     ],
   },
   {
@@ -435,7 +436,8 @@ const rows: Row[] = [
     run: draftMeetingReviewInput.parse.bind(draftMeetingReviewInput),
     valid: { leadId: 42, draftId: 5, evidenceToken: "sha256:abc", acceptedArtifactId: 8, confirmedSegmentIndexes: [0], note: "Checked." },
     bad: [
-      { why: "oversize evidence token", value: { leadId: 42, draftId: 5, evidenceToken: x(LIMITS.evidenceToken + 1), acceptedArtifactId: 8, confirmedSegmentIndexes: [], note: "n" } },
+      // The real token is a serialized draft row, not a hash -- see `LIMITS.draftEvidenceToken`.
+      { why: "oversize evidence token", value: { leadId: 42, draftId: 5, evidenceToken: x(LIMITS.draftEvidenceToken + 1), acceptedArtifactId: 8, confirmedSegmentIndexes: [], note: "n" } },
       { why: "negative draftId", value: { leadId: 42, draftId: -5, evidenceToken: "t", acceptedArtifactId: 8, confirmedSegmentIndexes: [], note: "n" } },
     ],
   },
@@ -876,6 +878,42 @@ describe("what a schema drops and what it keeps", () => {
     assert.deepEqual((parsed as { todos: unknown[] }).todos, [
       { t: "Confirm the vote", done: true, src: "you", fromTomorrowsBuild: "kept" },
     ]);
+  });
+});
+
+/**
+ * The bound that broke the desk, 2026-09-25. `evidenceReviewToken` is not a
+ * hash: it is `JSON.stringify` of the draft row, so an ordinary draft's token
+ * is kilobytes, and one carrying a full-length body is megabytes. When
+ * `draftEditInput` bounded it like a marker, `saveDraft` refused the desk's
+ * own token and the editor's keep-evidence click was lost. These are the
+ * shapes the two editors actually put on the wire.
+ */
+describe("the draft evidence token is a serialized row, and clears its bound", () => {
+  const rowToken = (body: string, research: string) =>
+    JSON.stringify([5, "The budget passes", "Two no votes.", "council", body, "", "{}", "", "", research, []]);
+
+  it("accepts one of the length the walks actually produced", () => {
+    // 7,947 chars measured from the corrections walk's own postgres fixture:
+    // a 65-char body next to ~7.9 KB of provenance and research columns, so
+    // the research column is where nearly all of the token's size lives.
+    const token = rowToken(x(65), x(7_800));
+    assert.ok(token.length > LIMITS.evidenceToken, "fixture is too small to be the regression");
+    assert.ok(draftEditInput.safeParse({ leadId: 5, headline: "h", dek: "d", body: "b", topic: "council", evidenceToken: token }).success);
+    assert.ok(draftMeetingReviewInput.safeParse({ leadId: 5, draftId: 5, evidenceToken: token, acceptedArtifactId: 8, confirmedSegmentIndexes: [], note: "n" }).success);
+    assert.ok(editorialDraftInput.safeParse({ draftId: 5, headline: "h", dek: "d", body: "b", topic: "opinion", evidenceToken: token }).success);
+  });
+
+  it("accepts a token wrapping a body at the ceiling this same payload allows", () => {
+    const token = rowToken(x(LIMITS.storyText), "{}");
+    assert.ok(token.length > LIMITS.storyText, "fixture is too small to be the regression");
+    assert.ok(draftEditInput.safeParse({ leadId: 5, headline: "h", dek: "d", body: x(LIMITS.storyText), topic: "council", evidenceToken: token }).success);
+  });
+
+  it("still refuses one past the bound", () => {
+    const token = x(LIMITS.draftEvidenceToken + 1);
+    assert.ok(!draftEditInput.safeParse({ leadId: 5, headline: "h", dek: "d", body: "b", topic: "council", evidenceToken: token }).success);
+    assert.ok(!editorialDraftInput.safeParse({ draftId: 5, headline: "h", dek: "d", body: "b", topic: "opinion", evidenceToken: token }).success);
   });
 });
 
