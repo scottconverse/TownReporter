@@ -453,17 +453,19 @@ jobs:
           }
           node scripts/provider-signin-e2e.mjs
 
-  # Automatic uses Codex first and makes one bounded move to Claude Sonnet if
-  # the first provider's login
-  # lapses mid-draft, the desk moves to the next rung of the ladder itself
-  # and finishes the job on it. It shipped with unit tests only -- never
-  # driven through the desk. Model-free, same trick as provider-signin:
-  # fake-codex answers readiness but every `exec` call returns a provider-shaped
-  # auth failure; fake-claude answers with a plausible JSON draft. Nothing here spends or
-  # touches a real credential. See the walk under scripts/, named for what
-  # it proves.
+  # Automatic walks its ladder in rank order -- DeepSeek v4.1 Flash, then Qwen
+  # 3.6 35B if it is loaded, then Codex Terra -- and finishes on the first rung
+  # that is ready. It shipped with unit tests only -- never driven through the
+  # desk. Model-free, same trick as provider-signin: the walk starts
+  # fake-deepseek-endpoint.mjs (an OpenAI-compatible rung 1 that can answer its
+  # readiness probe and then fail a real call the way the test needs),
+  # fake-lmstudio-endpoint.mjs (rung 2's server, on 1234 because that is how
+  # local discovery recognises an LM Studio one, listing no rung-2 model), and
+  # fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1 as the last rung. Nothing
+  # here spends allowance or touches a real credential. See the walk under
+  # scripts/, named for what it proves.
   failover:
-    name: Automatic fails over to Claude Sonnet when Codex login lapses, in a browser
+    name: Automatic's ladder skips a dead rung and fails over on quota, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -475,19 +477,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: A lapsed Codex login fails the draft over to Claude Sonnet
+      - name: A dead first rung and a quota failure both land on Codex Terra
         env:
           BETTER_AUTH_SECRET: ci-failover-secret-not-for-production
           PORT: "3317"
           HOST: 127.0.0.1
           FAILOVER_BASE_URL: http://127.0.0.1:3317
-          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          TOWNREPORTER_DEEPSEEK_BASE_URL: http://127.0.0.1:3318/v1
           CODEX_CLI_PATH: scripts/fakes/fake-codex-cli.mjs
           FAKE_CODEX_SIGNED_IN: "1"
-          FAKE_CODEX_FAIL_PROMPTS: "1"
-          FAKE_CLAUDE_SIGNED_IN: "1"
-          FAKE_CLAUDE_VALID_DRAFT: "1"
-          FAKE_CLAUDE_DELAY_MS: "1500"
+          FAKE_CODEX_VALID_DRAFT: "1"
+          FAKE_CODEX_DELAY_MS: "1500"
         run: |
           npm start > /tmp/failover.log 2>&1 &
           DEV_PID=$!
@@ -513,7 +513,7 @@ jobs:
           kill_tree "$DEV_PID"
 
   story-quota-failover:
-    name: Story upload survives Codex quota failover to Claude Sonnet
+    name: Story upload survives a first-rung quota failover to Codex Terra
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -525,19 +525,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: A Codex quota failure preserves the uploaded document through Claude Sonnet
+      - name: A first-rung quota failure preserves the uploaded document through Codex Terra
         env:
           BETTER_AUTH_SECRET: ci-story-quota-secret-not-for-production
           PORT: "3320"
           HOST: 127.0.0.1
           STORY_QUOTA_FAILOVER_BASE_URL: http://127.0.0.1:3320
+          TOWNREPORTER_DEEPSEEK_BASE_URL: http://127.0.0.1:3321/v1
           CODEX_CLI_PATH: scripts/fakes/fake-codex-cli.mjs
-          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
           FAKE_CODEX_SIGNED_IN: "1"
-          FAKE_CODEX_QUOTA_PROMPTS: "1"
-          FAKE_CLAUDE_SIGNED_IN: "1"
-          FAKE_CLAUDE_VALID_DRAFT: "1"
-          FAKE_CLAUDE_DELAY_MS: "1500"
+          FAKE_CODEX_VALID_DRAFT: "1"
+          FAKE_CODEX_DELAY_MS: "1500"
         run: |
           npm start > /tmp/story-quota-failover.log 2>&1 &
           DEV_PID=$!
