@@ -179,8 +179,9 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic records that gateway as the preferred first runtime.
-Otherwise it tries Codex Terra, then Claude Sonnet, chooses the first ready
-provider before enqueueing, and stores that effective choice on the job. A
+Otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it
+is loaded, then Codex Terra — choosing the first ready provider before
+enqueueing, and storing that effective choice on the job. A
 named model is also the recorded first choice. If that model reaches a usage
 limit, becomes unavailable, loses its login, times out, or returns no output,
 TownReporter can move only the unfinished model call to the next ready runtime
@@ -191,22 +192,20 @@ ladders put Claude last and use Sonnet; Opus is available
 only when an editor selects it.
 
 The Queue also offers **Draft selected** for one editor-chosen batch of up to
-five eligible leads. That batch requires one named Codex, Claude, Grok
-(SuperGrok), Local model, or saved Custom AI connection, including a configured
+five eligible leads. That batch requires one named Codex, Claude, Local model,
+or saved Custom AI connection, including a configured
 Gemini endpoint. It never uses Automatic. It retains each lead's saved research
 scope, shows each lead's durable result and workbench link, and never publishes
 a story. Technical provider failures can move the unfinished call to the next
 ready cloud runtime; a provider refusal remains terminal.
 
-Daily Scan uses the same named choices, including Grok (SuperGrok) and saved
-Custom AI connections. It stores the requested model with the schedule and the
+Daily Scan uses the same named choices and saved Custom AI connections. It stores the requested model with the schedule and the
 runtime actually used on each job. Technical preflight or mid-call failures can
 move unfinished work to the next ready cloud runtime and are recorded; a
 provider refusal stops the run. For image OCR, the same technical-only rule
 applies and only vision-capable candidates are considered.
 
-Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku;
-**Grok (SuperGrok)** through the newsroom's direct OAuth connection; or
+Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or
 **Local model** as the preferred provider for one run. A named choice remains
 the first choice; only a recognized technical failure can move the unfinished
 call. The endpoint/model compatibility overrides are

@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Grok (SuperGrok); Local model; and saved custom connections.     |
+| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -251,8 +251,9 @@ sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-tries Codex Terra, then Claude Sonnet, and stores the first ready provider on
-the job before it is enqueued. Every pass in that Story run uses the same
+uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded,
+then Codex Terra, and stores the first ready provider on the job before it is
+enqueued. Every pass in that Story run uses the same
 effective provider unless it reaches a usage limit, becomes unavailable,
 loses its login, or times out mid-run. Automatic then moves the unfinished
 model call to the next ladder rung once, if it is ready. Earlier calls in that

@@ -11,7 +11,7 @@ TownReporter can connect directly to xAI with the SuperGrok account you already 
 5. Return to TownReporter. It polls for completion, discovers the account's text models, and selects the strongest available model. You can choose another discovered model in the same card.
 6. Choose **Test connection** to send one tiny real request. This may count against the subscription.
 
-After connection, **Grok (SuperGrok)** appears in the same model picker used by Story, Scan, Opinion, Dark Desk, Queue batch, and Daily Scan. An explicit Grok choice is the requested first runtime. A recognized technical failure can move only the unfinished call to the next ready runtime and records requested and actual model and effort; a content refusal remains terminal.
+After connection the account is verified and its text models are discovered, but **Grok (SuperGrok) is no longer offered as a writing model** (0.6.63): it is out of every model picker and out of Automatic, and a job holding a stored Grok choice falls back to Automatic with a visible note. SuperGrok sign-in is unaffected, and the connection stays usable where a connection is what is being tested — the OCR path still names it as a text-only destination. An explicit Grok choice was the requested first runtime; a recognized technical failure moved only the unfinished call to the next ready runtime and recorded requested and actual model and effort, and a content refusal remained terminal.
 
 ## Credential ownership
 

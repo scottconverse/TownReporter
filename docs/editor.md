@@ -203,7 +203,8 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 Scan has the same **Writing model** picker Story and the queue have, next to
 **Run scan**: Automatic (the default), every named Codex and Claude model, or
 Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it tries Codex Terra, then Claude Sonnet. If the first one's login
+otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is
+loaded, then Codex Terra. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
 A named choice is the recorded first provider. A recognized technical failure
@@ -237,8 +238,9 @@ Statuses you will use:
 
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
-operator's configured gateway when one is set; otherwise it tries Codex Terra,
-then Claude Sonnet. If the first one's login lapses partway through the
+operator's configured gateway when one is set; otherwise it uses DeepSeek v4.1
+Flash first, then Qwen on this computer if it is loaded, then Codex Terra. If
+the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
 which provider took over and why. A named choice is the first recorded provider;
 the same technical-only retry rule applies. The result appears on the same
@@ -250,14 +252,14 @@ list.
 
 The **Draft selected leads** bar prepares up to five eligible Queue leads as
 one atomic batch. Tick the leads, then choose exactly one named **Codex**,
-**Claude**, **Grok (SuperGrok)**, **Local model**, or saved **Custom AI** connection,
+**Claude**, **Local model**, or saved **Custom AI** connection,
 including Gemini. It deliberately does not offer Automatic. Each lead keeps its
 saved research scope. If the named runtime fails technically, only the unfinished
 call can move to the next ready cloud runtime; a refusal remains terminal. If no
 runtime is ready, or one selected lead cannot be queued, the batch does not start
 and the Queue explains why.
 
-Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+Daily Scan uses the same named model choices and saved Custom
 AI connections. It does not offer Automatic. The named model is tried first;
 technical preflight or mid-call switches are recorded, and refusals remain
 terminal. OCR uses the same technical-only rule and considers only
@@ -355,8 +357,9 @@ During public-source reporting, a captured recurring record such as an agenda, m
 Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
 
 The picker beside it controls this run. **Automatic** uses a configured
-`LLM_*` gateway exclusively when present; otherwise it tries Codex Terra,
-then Claude Sonnet, chooses the first ready one before enqueueing, and keeps it
+`LLM_*` gateway exclusively when present; otherwise it uses DeepSeek v4.1 Flash
+first, then Qwen on this computer if it is loaded, then Codex Terra —
+choosing the first ready one before enqueueing, and keeping it
 for every reporting and writing pass unless it reaches a usage limit, becomes
 unavailable, loses its login, or times out. Automatic moves the unfinished work
 once to the next ready provider and shows the switch in the workbench. A model
@@ -569,8 +572,9 @@ Keep the file open while its research job is running and Dark Desk refreshes tha
 Next to **Keep digging** there is a **Digging model** picker, the same one the
 queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
 Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
-Dark Desk Automatic uses a configured gateway when present; otherwise it tries
-Codex Terra, then Claude Sonnet. Planning uses Claude Haiku or the cheaper Codex
+Dark Desk Automatic uses a configured gateway when present; otherwise it uses
+DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then
+Codex Terra. Planning uses Claude Haiku or the cheaper Codex
 planning model. If synthesis times out, only synthesis moves to the next model;
 completed searches and document reads do not run again. A model you name is the
 recorded first choice. A recognized technical failure can move only the failed

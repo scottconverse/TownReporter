@@ -278,8 +278,7 @@ Server page. It starts disabled. The
 owner selects accepted sources from any reporting beat, a local time
 in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
 Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
-saved Custom AI connection such as an OpenAI-compatible Gemini endpoint; or
-the newsroom's direct Grok (SuperGrok) connection.
+saved Custom AI connection such as an OpenAI-compatible Gemini endpoint.
 Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
 Opus. The selected scheduled runtime is tried first; a recognized technical
 failure can move only unfinished work, and the job records requested and actual
@@ -338,7 +337,7 @@ guidance, not an automatic installer or sign-in button.
 ### Draft selected leads
 
 The Queue can start one atomic batch of one to five eligible leads. Select the
-rows, choose one explicit named **Codex**, **Claude**, **Grok (SuperGrok)**, or **Local model**, and
+rows, choose one explicit named **Codex**, **Claude**, or **Local model**, and
 use **Draft selected**. The picker offers every named Codex and Claude model,
 Local model, and saved Custom AI connections such as Gemini. The batch does
 not use Automatic. It preserves each lead's stored research scope. A recognized
@@ -346,7 +345,7 @@ technical provider failure can move only the unfinished call; a refusal remains
 terminal. A missing runtime or ineligible selected lead refuses the whole
 start, before any partial batch is created.
 
-Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+Daily Scan uses the same named model choices and saved Custom
 AI connections, with no Automatic. The selected runtime is tried first;
 technical preflight and mid-call switches are recorded. OCR applies the same
 technical-only rule and considers only vision-capable destinations.
@@ -652,16 +651,16 @@ the registry is the canonical picker definition; provider adapters still impleme
 
 | Feature                               | Provider                                                                                                                                                                                                                                                                 | Model                                                                                                           |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Scan                                  | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
-| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
-| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Grok, Local model, or saved custom connection                                  |
+| Scan                                  | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
+| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
+| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Local model, or saved custom connection                                  |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
 | **Opinion (editorials)**              | Default: Codex Sol. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, all four named Codex
-models, all four named Claude models, Grok, Local model and custom connections. Automatic tries Codex Sol
+models, all four named Claude models, Local model and custom connections. Automatic tries Codex Sol
 then Claude Sonnet once when needed. Explicit choices remain the requested
 first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
@@ -1121,7 +1120,7 @@ flowchart TB
     CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
     Q1 -->|yes| OAI["Try that gateway first"]
-    Q1 -->|no| READY["First ready<br/>Codex Terra → Claude Sonnet"]
+    Q1 -->|no| READY["First ready<br/>DeepSeek v4.1 Flash → Qwen 3.6 35B if loaded → Codex Terra"]
     KIND -->|yes: named choice| ONE["Try that recorded provider first"]
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
