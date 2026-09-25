@@ -15,6 +15,17 @@
  * This module is the pure half: URLs, parsing, and deciding what is civic.
  */
 
+/**
+ * One comment, as a validated Redlib page gave it — enough to quote, and
+ * enough to weigh. Structurally the same shape as `RedlibComment`, kept
+ * separate so this module stays free of the HTML parser.
+ */
+export type RedditCommentExcerpt = {
+  author: string | null;
+  score: number | null;
+  bodyText: string;
+};
+
 export type RedditPost = {
   title: string;
   url: string;
@@ -32,6 +43,12 @@ export type RedditPost = {
   retrievedCommentCount?: number;
   coverage?: "complete" | "partial" | "unknown";
   enrichmentWarnings?: string[];
+  /**
+   * Top comments from the Redlib read, best first. Attached only when a local
+   * Redlib answered — the `.rss` listing never carries them, and on a local
+   * subreddit the substance of a thread is usually down here, not in the post.
+   */
+  comments?: RedditCommentExcerpt[];
 };
 
 export const REDDIT_AUTO_FILE_DAYS = 30;
@@ -63,6 +80,20 @@ export function isRedditUrl(url: URL): boolean {
 /** `/r/<sub>/comments/<id>/<slug>` (with or without a trailing comment id) — a thread permalink, not a listing/user/search page. */
 export function isRedditThreadUrl(url: URL): boolean {
   return isRedditUrl(url) && /^\/r\/[^/]+\/comments\/[^/]+/i.test(url.pathname);
+}
+
+/**
+ * `/r/<sub>/comments/<id>/<slug>` exactly — the submission, not one of its
+ * comments.
+ *
+ * A thread's own `.rss` feed carries the submission *and* its comments as
+ * separate entries, so the two have to be told apart by path shape: the
+ * submission has no trailing comment id (`.../comments/<id>/<slug>/`), a
+ * comment adds one more segment. Without this a comment could be mistaken for
+ * the post and become the lead's headline.
+ */
+export function isRedditSubmissionUrl(url: URL): boolean {
+  return isRedditUrl(url) && /^\/r\/[^/]+\/comments\/[^/]+\/?$/i.test(url.pathname);
 }
 
 /** `https://www.reddit.com/r/longmont/new/.rss` */

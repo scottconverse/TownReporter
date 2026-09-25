@@ -8,8 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # The complete serial suite now exceeds 20 minutes on hosted runners.
-    timeout-minutes: 30
+    # The complete serial suite now exceeds 20 minutes on hosted runners, and
+    # 0.6.64 (PR #94) was cancelled at 30 while still passing tests steadily
+    # (ok 957 at 29:54, no stall). Splitting the suite is backlogged.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1208,3 +1210,112 @@ jobs:
           BETTER_AUTH_SECRET: ci-import-civic-scanner-v26-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/import-civic-scanner-v26-e2e.mjs
+
+  # AA: the daily scan on Automatic. Before 0.6.64 the scheduled scan had to
+  # name one provider -- the picker refused Automatic because a scheduled run
+  # stores the model it will use before its job is queued, and "your configured
+  # gateway at call time" is not a name a stored record can keep. This walk sets
+  # the policy to Automatic through the browser, reloads, drives the scheduler's
+  # OWN trigger (GET /api/cron/monitors) with a stubbed rung 1, and reads back
+  # that the run record names the model that actually ran. Ports 3336 (server)
+  # and 3337 (the stubbed DeepSeek endpoint), which no other integration file
+  # may bind.
+  daily-scan-automatic:
+    name: The daily scan on Automatic, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Set the daily scan to Automatic, run it, and read the model off the run record
+        env:
+          BETTER_AUTH_SECRET: ci-daily-scan-automatic-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/daily-scan-automatic-e2e.mjs
+
+  # AE: no white flash in dark mode (0.6.64). The owner, 2026-09-25: "when I
+  # change screens and I'm in dark mode ... the screen flashes BRIGHT WHITE,
+  # announces where it's going like 'opening desk' then switches back to dark
+  # mode". Every appearance preference used to be read in a mount effect, one
+  # paint late, so a dark-mode editor got a full light frame on a hard reload
+  # and on every navigation into a screen outside the desk shell.
+  #
+  # This is the regression test for it, and it is a MEASUREMENT: a probe
+  # installed before any page script samples, at every animation frame, the
+  # colour that frame is about to paint, on a hard reload of every desk screen
+  # and on a client-side click between them, in dark and in light. Every
+  # sampled frame must be the right one; the light pass is the sensitivity
+  # control for the dark one, and each pass ends by deliberately breaking the
+  # attribute and requiring the same probe to report the other colour. Removing
+  # the <head> script in src/routes/__root.tsx makes this job fail on the first
+  # hard reload with `at: null, #f6f1e7` -- the owner's flash, reproduced.
+  #
+  # Port 3474, which no other integration file may bind. Boots its own copy of
+  # the built server on in-memory PGlite, so there is no `npm start` step here.
+  desk-dark-flash:
+    name: No light frame in dark mode, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Set dark, walk every desk screen, and sample the first frame of each
+        env:
+          BETTER_AUTH_SECRET: ci-desk-dark-flash-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/desk-dark-flash-walk.mjs
+
+  # AB: one press reads a long scanned packet to the end (0.6.64). An editor
+  # attached a 13-page scanned council packet and pressed Redraft. The desk
+  # read the twelve pages one vision call may handle (OCR_BATCH_PAGE_LIMIT =
+  # 12, src/lib/news/ocr-batches.ts:9), wrote a red "Retry to continue", and
+  # never rewrote the draft -- and because that stop THREW, every document
+  # attached after the packet was never read at all. This walk attaches the
+  # packet and a second document where the UI actually offers it, presses once,
+  # watches the stages cross the batch boundary and read the later document in
+  # the SAME job, then presses Redraft and requires one more job that reads no
+  # page a second time and asks the editor for nothing.
+  #
+  # Real vision work against a genuinely image-only PDF (unpdf + @napi-rs/canvas,
+  # 13 real scanned pages), served by ONE fake endpoint on 8080. That port is not
+  # a free choice: inferKind (local-models.ts:103) maps only 1234, 11434 and 8080
+  # to a local server kind, and a server of no known kind is never vision-capable
+  # -- so a fake anywhere else could serve the writing passes but could never read
+  # a page. 1234 and 11434 hold this machine's real LM Studio and Ollama in the
+  # authoring worktree; 8080 answers nothing, and the walk refuses loudly if
+  # something DOES answer there. CODEX_CLI_PATH and CLAUDE_CLI_PATH point at files
+  # that do not exist, so no CLI rung is ready and nothing real is reached.
+  #
+  # Port 3339, which no other integration file may bind
+  # (scripts/integration-ports-are-unique.test.mjs). The walk boots its own copy
+  # of the built server on in-memory PGlite, so there is no `npm start` step here.
+  redraft-scan:
+    name: One press reads a long scanned packet to the end, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Attach the packet and a second document, read both in one press, then redraft
+        env:
+          BETTER_AUTH_SECRET: ci-redraft-scan-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/redraft-scan-e2e.mjs

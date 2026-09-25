@@ -570,6 +570,45 @@
 .desk-ltr :focus-visible {
   outline-color: var(--fg);
 }
+/*
+  The dark palette has TWO triggers, and the second one is the one that
+  matters.
+
+  `.night` is the React-side truth: the desk shell is rendered with it when the
+  editor has chosen Dark. But it is only known after React has run, and React
+  cannot know it on the server -- localStorage is not sent to the server and
+  `useEffect` runs after the first paint. So for the whole of a hard reload, and
+  on every pending/loading/error screen, the document was painted in the light
+  palette and then flipped: the owner's "screen flashes BRIGHT WHITE ... late
+  at night, in a dark room ... it's a shock" (2026-09-25).
+
+  `:root[data-appearance="desk-dark"]` is stamped on <html> by the inline
+  <head> script in __root.tsx BEFORE the first paint (see
+  src/lib/appearance.ts), from the same localStorage the `.night` class reads.
+  Every rule below that used to key on `.night` now also keys on it, so the
+  first painted frame is already dark no matter what React does afterwards.
+  The two triggers always agree; the attribute merely gets there first.
+
+  The `:not(.astra)` scoping keeps this from fighting the astra shell, which
+  carries its own dark palette in desk-astra.css. That file extends its
+  `.desk-ltr.astra.night` rule the same way -- the desk's dark is #182024, not
+  the letterpress `--n-bg` black, and only astra knows that.
+
+  Which is why this rule NO LONGER keys on the attribute (2026-09-25). It used
+  to, and `:root[data-appearance="desk-dark"] .desk-ltr:not(.astra)` is
+  (0,4,0) -- specificity it wins with, against the (0,3,0) rule that gives
+  `.screen-page` the desk's dark palette further down this file. So the
+  pending/loading/error screens, which are the only non-astra `.desk-ltr`
+  surfaces in the tree (states.tsx, error-component.tsx, the two desk-gate
+  branches -- grep, 2026-09-25), kept THIS black: `--n-bg: #000000`. The
+  announce screen painted pure black where the desk is #182024, the
+  `.screen-page` palette below was dead code, and the first version of that fix
+  changed nothing at all -- the screenshot harness caught it, not a re-read.
+  The two remaining selectors are legacy letterpress surfaces (`.night` is
+  always paired with `.astra`, which overrides it; `.nightpanel` is genuinely a
+  black panel inside the light desk), so the attribute belongs down there with
+  the palette it actually wants.
+*/
 .desk-ltr.night, .desk-ltr .nightpanel {
   color-scheme: dark;
   --bg: var(--n-bg);
@@ -581,6 +620,158 @@
   --a: var(--n-a);
   --adeep: var(--n-adeep);
   --warn: var(--n-warn);
+}
+/*
+  Normal / Large, before React.
+
+  Same shape as the palette above and for the same reason: the desk shell only
+  gets its `.large` class once React has read localStorage, so an editor who
+  chose Large got a page of Normal-sized type that reflowed a paint later. The
+  attribute lets the first paint be the right size.
+*/
+:root[data-desk-size="large"] .desk-ltr {
+  --ts: 1.125;
+}
+/*
+  The document canvas.
+
+  Everything else on this site paints its own background, but the area a page
+  does not cover -- over-scroll, the rubber band, the gap before a route's
+  first element -- is the <html>/<body> background. Both used to be fixed
+  light: the base layer paints `var(--color-paper)` and __root.tsx used to
+  pin an inline `background: #F6F1E7` on <body> as well, which is what made a
+  dark page flash white from the edges inwards. This is the surface the walk in
+  scripts/desk-dark-flash-walk.mjs samples.
+
+  `color-scheme` belongs here too: it is what the browser paints scrollbars,
+  the default canvas and form controls with, and getting it wrong shows up as a
+  light scrollbar or a white text-input on a dark page.
+*/
+:root[data-appearance="desk-dark"] {
+  color-scheme: dark;
+  background: #182024;
+}
+:root[data-appearance="reader-dark"] {
+  color-scheme: dark;
+  background: #142428;
+}
+:root[data-appearance="desk-dark"] body {
+  background: #182024;
+}
+:root[data-appearance="reader-dark"] body {
+  background: #142428;
+}
+/*
+  A full-page screen with no desk shell around it.
+
+  `ScreenPending` (every "Opening the desk" / "Opening the edition"), the two
+  router error screens and the desk gate's EmptyState branches all render
+  outside the shell, which is why they never received a theme at all: the shell
+  is where the palette lives. They are exactly the screens an editor sees
+  BETWEEN pages, so they were the most reliable white flash in the app -- the
+  owner saw the copy ("announces where it's going like 'opening desk'") on a
+  white field.
+
+  These keep the `.desk-ltr` scope for the type scale, the 14px floor and the
+  `text-*`/`bg-*`/`border-*` remaps, and take their palette from the same
+  attributes as everything else. `--bg`/`--fg` come from `.desk-ltr` (light) or
+  from the `:root[data-appearance]` rules above (dark), so this rule only has
+  to lay the screen out.
+*/
+.screen-page {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding-inline: 1.5rem;
+  background: var(--bg);
+  color: var(--fg);
+}
+/*
+  The few things on a screen that read the fixed `@theme` tokens directly
+  rather than one of the remapped utilities: the ornament's rules and diamond
+  (`--color-rule`, `--color-rust`), and the "Sign in"/"Back to the paper"
+  buttons (`border-ink`, `bg-ink`, `text-paper`, `border-paper`). `@theme`
+  tokens are light-only by construction -- `--color-rust` is #9b2915, which is
+  ~1.6:1 against the dark canvas -- so on a dark screen they are pointed at the
+  screen's own palette. The kicker keeps the desk's dark-mode rust (#f3a19b,
+  8.2:1) rather than the light one.
+
+  The palette below is the desk's dark, spelled out, and it is the fix for a
+  second, quieter version of the owner's flash. `.screen-page` is the one
+  `.desk-ltr` surface that is NOT `.astra` (states.tsx, error-component.tsx and
+  both desk-gate branches all render `desk-ltr screen-page`), so on the
+  desk-dark path it was picking up the legacy `--n-*` set at `.desk-ltr` --
+  `--n-bg: #000000` -- and the announce screen the owner named painted PURE
+  BLACK while the desk it announced is #182024. Measured, not suspected: the
+  screenshot harness in work/ae-dark-flash/ decodes its PNGs, and the held
+  "Opening the desk" frame had mean luma 1 against the loaded desk's 42. Same
+  shape as the original complaint -- a surface that changes under the reader at
+  the moment the copy says where it is going -- so it is the same fix. (The
+  walk in scripts/desk-dark-flash-walk.mjs cannot see this: it samples the
+  canvas, not the element painted over it.)
+
+  Scoped to `.screen-page` on purpose. A grep for `desk-ltr` across src (ts,
+  tsx, js, mjs; 2026-09-25) finds a class string in exactly three places --
+  states.tsx, error-component.tsx and the two desk-gate branches of desk.tsx --
+  and all four are `desk-ltr screen-page`; the one builder of the other shape,
+  deskShellClassName, always has `" astra"` appended by desk-chrome.tsx. So the
+  `.nightpanel` in desk.index.tsx is the only remaining `--n-*` surface, inside
+  the astra shell, and it keeps its black.
+*/
+:root[data-appearance="desk-dark"] .screen-page {
+  color-scheme: dark;
+  --bg: #182024;
+  --bg2: #1c262b;
+  --fg: #edf2f3;
+  --fg2: #c1cdd1;
+  --mut: #a7b5ba;
+  --line: #39474d;
+  --a: #8bcac3;
+  --adeep: #a4dad4;
+  --warn: #f3a19b;
+  --color-rust: #f3a19b;
+  --color-rule: #39474d;
+  --color-danger: #f3a19b;
+}
+/*
+  The public paper's dark, which is not the desk's dark (#142428 against
+  #182024) and has its own palette in reader-astra.css. The reader keeps its
+  appearance in a per-paper blob rather than in the desk keys, so a screen on a
+  public route has to be given these directly.
+*/
+:root[data-appearance="reader-dark"] .screen-page {
+  color-scheme: dark;
+  --bg: #142428;
+  --bg2: #1a2d32;
+  --fg: #e0ebe7;
+  --fg2: #adbfbd;
+  --mut: #adbfbd;
+  --line: #354a4d;
+  --a: #83c9c3;
+  --adeep: #83c9c3;
+  --warn: #ffb4a7;
+  --color-rust: #ffb4a7;
+  --color-rule: #354a4d;
+  --color-danger: #ffb4a7;
+}
+.screen-page .border-ink {
+  border-color: var(--fg);
+}
+.screen-page .border-paper {
+  border-color: var(--bg);
+}
+.screen-page .bg-ink {
+  background-color: var(--fg);
+}
+.screen-page .text-paper {
+  color: var(--bg);
+}
+/* The ghost-button hover, which reads `--color-paper-2` through a `hover:`
+   variant rather than the `.bg-paper-2` class above's remap. Without this, a
+   dark screen's only button turned a light cream the moment it was pointed
+   at. */
+.screen-page .hover\:bg-paper-2:hover {
+  background-color: var(--bg2);
 }
 .desk-ltr a:hover {color:var(--a)}
 .desk-ltr .shell {min-height:100dvh;background:var(--bg);color:var(--fg)}

@@ -38,11 +38,16 @@ function* testFiles(dir) {
  * silently belonged to an integration test would be the same failure this
  * whole file exists to stop -- one server answering two scripts against the
  * wrong database.
+ *
+ * `-walk.mjs` too, since 2026-09-25: the name was the only thing keeping
+ * scripts/desk-dark-flash-walk.mjs (0.6.64, Unit AE) outside this check, and
+ * it boots the built server on a port of its own. Leaving it unscanned would
+ * make this file's guarantee a property of filenames rather than of ports.
  */
 function* walkFiles(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) continue;
-    if (/-e2e\.mjs$/.test(e.name)) yield join(dir, e.name);
+    if (/-e2e\.mjs$|-walk\.mjs$/.test(e.name)) yield join(dir, e.name);
   }
 }
 

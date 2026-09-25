@@ -4,9 +4,11 @@ import { kickJobs, type DeskJob } from "./jobs.ts";
 import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import {
+  resolveAutomaticForcedRuntime,
   runForcedChat,
   validateForcedRuntime,
   type ForcedChatAdapters,
+  type ForcedRuntime,
   type ForcedRuntimeSnapshot,
 } from "./forced-runtime.server.ts";
 import {
@@ -25,6 +27,32 @@ export async function validateDailyRuntime(
   effort?: ModelEffort | null,
   validate: typeof validateForcedRuntime = validateForcedRuntime,
 ) {
+  if (runtime === "auto") {
+    /*
+      Automatic runs the writing ladder itself, and it is resolved HERE rather
+      than through `validate` (0.6.64, Unit AA). Two reasons. A scheduled run
+      has to store the model it will run on before its job is queued, and
+      `probeProvider("auto")` can answer with whatever gateway the operator
+      set up for the desk -- a name the transport re-reads at call time, which
+      a stored run record cannot do. And the rung it resolves to is an endpoint
+      snapshot this module knows how to write, so the receipt below is the same
+      shape every other runtime produces.
+
+      No switch reason or note: nothing failed over, this IS the resolution.
+      A rung that was passed over because it is not loaded rides along in
+      `skippedRungs`, so the reservation records what the run did not use --
+      the same note the story path attaches.
+    */
+    const snapshot = await resolveAutomaticForcedRuntime(newsroomId, modelEffort("auto", effort));
+    return {
+      ...snapshot,
+      requestedRuntime: runtime,
+      requestedEffort: modelEffort("auto", effort),
+      resolvedRuntime: snapshot.modelChoice,
+      switchReason: null,
+      switchNote: null,
+    };
+  }
   try {
     const snapshot = await validate(newsroomId, runtime, modelEffort(runtime, effort));
     return { ...snapshot, requestedRuntime: runtime, requestedEffort: modelEffort(runtime, effort), resolvedRuntime: runtime, switchReason: null, switchNote: null };
@@ -32,11 +60,13 @@ export async function validateDailyRuntime(
     const detail = firstError instanceof Error ? firstError.message : String(firstError);
     const reason = automaticFailoverReason(detail);
     if (!reason) throw firstError;
-    // A scheduled run names one exact provider, so it fails over along the
-    // hand-pick ladder, never onto one of Automatic's own rungs (0.6.63, Unit
-    // Y item 1): `validateDailyRuntime` refuses a rung the same way the batch
-    // validator does. The membership filter is belt-and-braces for a stored
-    // runtime that is no longer offered.
+    // A HAND-PICKED scheduled runtime names one exact provider, so it fails
+    // over along the hand-pick ladder, never onto one of Automatic's own rungs
+    // (0.6.63, Unit Y item 1): this branch refuses a rung the same way the
+    // batch validator does. Automatic has its own branch above since 0.6.64
+    // (Unit AA) -- a policy with no hand-pick reaches this one only by failing
+    // over from a hand pick. The membership filter is belt-and-braces for a
+    // stored runtime that is no longer offered.
     const ladder: readonly string[] = FORCED_FAILOVER_LADDER;
     const at = ladder.indexOf(runtime);
     const forward = at >= 0 ? ladder.slice(at + 1) : ladder;
@@ -513,10 +543,18 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
         } satisfies ForcedChatAdapters<any>);
       const requested = opts?.choice;
       if (requested && requested !== model.modelChoice) {
+        /*
+          `automaticRung` is on because this is where Automatic's mid-run hop
+          lands: the desk switched the job to a rung, and the rung has to
+          resolve into the endpoint snapshot the rest of the scan runs on. A
+          hand-picked runtime is unaffected -- the flag only widens what a rung
+          id may resolve to (0.6.64, Unit AA).
+        */
         const next = await validateForcedRuntime(
           job.newsroom_id,
-          requested as DailyScanRuntime,
+          requested as ForcedRuntime,
           opts?.reasoningEffort ?? null,
+          { automaticRung: true },
         );
         return runForcedDailyChat(next, system, user, maxTokens, opts, adapters);
       }
@@ -541,7 +579,12 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
         switchNote: string;
       }) => {
         const validate = deps.validateRuntime ?? validateForcedRuntime;
-        const next = await validate(job.newsroom_id, receipt.nextChoice as DailyScanRuntime, receipt.nextEffort);
+        const next = await validate(
+          job.newsroom_id,
+          receipt.nextChoice as ForcedRuntime,
+          receipt.nextEffort,
+          { automaticRung: true },
+        );
         const persist = deps.persistRuntimeSwitch ?? persistDailyRuntimeSwitch;
         model = await persist(job, next, {
           previousRuntime: model.runtime ?? receipt.previousChoice,

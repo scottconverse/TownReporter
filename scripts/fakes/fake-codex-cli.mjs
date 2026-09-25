@@ -30,6 +30,13 @@
  * report.ts's own prompts puts in the user text, and answers each with a
  * JSON shape those parsers accept. Any prompt it does not recognise gets the
  * write-pass shape, which is the most complete one.
+ *
+ * The DAILY SCAN's writing pass (desk-copy.ts's buildScanUserMessage) is a
+ * fourth marker: it names the keys it wants, `"editor_summary"`, `"leads"`
+ * and `"proposed_sources"`, and desk.ts reads it with parseScanResult, which
+ * accepts nothing else. Such a prompt is answered with a scan shape -- never
+ * the draft shape -- so a scheduled scan that fails over onto Codex Terra
+ * files leads instead of reporting an unreadable reply.
  */
 import { existsSync, writeFileSync } from "node:fs";
 
@@ -111,6 +118,15 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
   const isDocumentRead = /UNTRUSTED SOURCE TEXT:/.test(prompt);
   const isResearchPass = /\bLead:\s/.test(prompt) && !/NEWS ANGLE:/.test(prompt);
   /*
+    A daily scan's writing pass is neither: desk-copy.ts's
+    buildScanUserMessage asks by name for `"editor_summary"`, `"leads"` and
+    `"proposed_sources"`, and desk.ts reads the reply with parseScanResult --
+    which accepts ONLY those keys. A prompt that asks for them must never get
+    the draft shape below, or the scan reports "Writing pass returned no usable
+    JSON." while the model answered perfectly well (Unit AA2).
+  */
+  const isScanPass = /["']editor_summary["']\s*:/.test(prompt);
+  /*
     A browser walk has to be able to SEE the transient "Switched to Codex
     Terra" stage that failOverAndRetry sets before this draft runs
     (src/lib/news/desk.ts). The real CLI takes real time to think; a fake
@@ -136,6 +152,27 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
         unknowns: [],
         follow: "",
         fetch_urls: [],
+      }) + "\n",
+    );
+  } else if (isScanPass) {
+    const cited = prompt.match(/^URL:\s*(\S+)/m)?.[1] ?? "";
+    process.stdout.write(
+      JSON.stringify({
+        editor_summary:
+          "Codex Terra read the fetched page after the scan moved off its first rung and filed one lead.",
+        leads: [
+          {
+            headline: ladderDraft
+              ? "Codex Terra completed the scheduled scan after the first rung hit its limit"
+              : "Codex Terra completed the scheduled scan after the first rung failed",
+            why: "The scan's writing pass moved on and finished the run on the next ready rung.",
+            topic: "council",
+            source_urls: cited ? [cited] : [],
+            evidence: "The fetched page said what the lead quotes.",
+            newsworthiness: 12,
+          },
+        ],
+        proposed_sources: [],
       }) + "\n",
     );
   } else {

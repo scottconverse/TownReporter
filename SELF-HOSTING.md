@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.63**. See the [0.6.63 release guide](docs/releases/0.6.63.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
+Repository documentation version: **0.6.64**. See the [0.6.64 release guide](docs/releases/0.6.64.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -103,11 +103,43 @@ have to run as S4U ("whether user is logged on or not") — which is a real
 change, not a checkbox, because the desk shells out to the Claude Code and
 Codex CLIs and those read the operator's login out of their profile.
 
+### What starts after a reboot
+
+In order, once you log in. Nothing here runs before the logon.
+
+| What                             | Started by                                   | When                          |
+| -------------------------------- | -------------------------------------------- | ----------------------------- |
+| Postgres on 5433                 | the `TownReporter` task (`ops/start-townreporter.ps1`) | logon, first                  |
+| The paper                        | the same task, after Postgres accepts connections | logon, a few seconds later    |
+| The Reddit reader (Redlib)       | the same task, detached, then the watchdog   | logon, in the background      |
+| Ollama                           | your own Startup shortcut (`Ollama.lnk`)     | logon, by Windows, not by us  |
+| The Cloudflare Tunnel            | the `TownReporter Tunnel` task               | logon                         |
+| Whatever has stopped since       | the `TownReporter Watchdog` task             | every 5 minutes               |
+| LM Studio                        | nothing here                                 | not started or touched at all |
+
+Three of these are optional and their absence is a supported state, not a
+fault. The paper serves either way.
+
+- **Redlib** is the only way the desk reads a Reddit thread in full — post
+  body, scores, replies. Without it the desk reads the subreddit through
+  Reddit's `.rss` and says so in the source text rather than pretending it read
+  the thread. Install or repair it with `ops/redlib.ps1 setup`; check it with
+  `ops/redlib.ps1 status`; stop it with `ops/redlib.ps1 stop`. It is stopped
+  through the pid file the installation wrote, never by image name. Set
+  `TOWNREPORTER_REDLIB=0` in `.env` to leave it alone entirely.
+- **Ollama** serves the first rung of the *Automatic* model ladder (DeepSeek
+  v4.1 Flash). With it down, *Automatic* walks to the next rung and the paper
+  keeps drafting. The watchdog starts it by reading your `Ollama.lnk` target,
+  **never stops it** — a model may be mid-draft — and never touches LM Studio or
+  its models. Set `TOWNREPORTER_OLLAMA=0` to leave it alone.
+- **LM Studio** owns its own models and memory. Nothing in `ops/` starts,
+  probes or unloads it.
+
 ### Without a terminal
 
 `ops/TownReporter Control.cmd`. Double-click, pick a number: check, restart the
-paper, restart the tunnel, start everything, stop everything. It cannot publish
-or delete anything.
+paper, restart the tunnel, start everything, stop everything, restart the
+Reddit reader. It cannot publish or delete anything.
 
 For a Desktop icon, run this once:
 

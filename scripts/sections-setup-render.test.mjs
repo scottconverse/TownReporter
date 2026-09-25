@@ -125,6 +125,21 @@ const deskServerStub = inlineModule(`
 `);
 const opinionStub = inlineModule(`export async function listEditorials() { return []; }`);
 
+// desk-chrome.tsx imports the appearance context (Light/Dark and Normal/Large
+// live there now -- src/lib/appearance-context.ts), so the module cannot load
+// without it resolving. Its shipped defaults are what a server render sees.
+const appearanceContextStub = inlineModule(`
+  export function useAppearance() {
+    return {
+      appearance: { desk: "light", size: "normal", reader: "light" },
+      surface: "light",
+      setDesk: () => {},
+      refreshReader: () => {},
+    };
+  }
+  export function useHydrated() { return false; }
+`);
+
 const deskChromeUtilsUrl = moduleUrl(
   await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
   "desk-chrome-utils.ts",
@@ -148,6 +163,7 @@ const DESK_CHROME_IMPORTS = {
   "@/lib/news/desk": deskServerStub,
   "@/lib/news/opinion": opinionStub,
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+  "@/lib/appearance-context": appearanceContextStub,
   "lucide-react": import.meta.resolve("lucide-react"),
   react: import.meta.resolve("react"),
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

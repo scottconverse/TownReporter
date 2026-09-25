@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.6.63](releases/0.6.63.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.6.64](releases/0.6.64.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -436,12 +436,36 @@ The `ops/` directory holds the legacy scripts:
 | `ops/restart-app.ps1`    | Stop and start the paper                                                                                              |
 | `ops/restart-tunnel.ps1` | Stop and start the tunnel                                                                                             |
 | `ops/rotate-logs.ps1`    | Keep `logs/` bounded                                                                                                  |
+| `ops/status.ps1`         | Read-only: is the paper up? Also the Reddit reader and the DeepSeek model server. `-Root` describes another install; `-DryRun` says what it would do and does nothing |
+| `ops/start-townreporter.ps1` | Start Postgres, migrate, serve — and start the Reddit reader if one is installed |
+| `ops/stop-townreporter.ps1` | Stop the paper and the Reddit reader (`-IncludeDatabase` for Postgres too)                                         |
+| `ops/redlib.ps1`         | The local Reddit reader: `status`, `start`, `stop`, `restart`, `check`, `setup`                                        |
 
 For that legacy installation, register the watchdog and the two restarts as **scheduled tasks**, not as child
 processes of the app. Two reasons learned the hard way: a process cannot restart
 itself, and a tunnel restart cannot deliver its own result over the tunnel it
 just killed. The Server page at `/desk/ops` triggers the tasks and reads the
 log.
+
+#### What starts after a reboot
+
+Once the operator logs in. Nothing runs before the logon.
+
+| What                       | Started by                                          |
+| -------------------------- | --------------------------------------------------- |
+| Postgres                   | the logon task, `ops/start-townreporter.ps1`         |
+| The paper                  | the same task, after Postgres accepts connections    |
+| The Reddit reader (Redlib) | the same task, detached, and the watchdog after that |
+| Ollama (DeepSeek's server) | the operator's own Startup shortcut (`Ollama.lnk`)   |
+| The tunnel                 | the tunnel logon task, `ops/run-tunnel.ps1`          |
+| Anything that has stopped  | the watchdog, every five minutes                     |
+
+The last three are optional. **Redlib** down, missing or switched off
+(`TOWNREPORTER_REDLIB=0`) means the desk reads a subreddit through Reddit's
+`.rss` and says so in the source text. **Ollama** down, missing or switched off
+(`TOWNREPORTER_OLLAMA=0`) means *Automatic* moves to the next model on its
+ladder. **LM Studio** is never started, probed or unloaded by anything in
+`ops/`; it owns its own models.
 
 ---
 

@@ -397,6 +397,20 @@ const claimStub = inlineModule(`
 const deskCopyStub = inlineModule(`
   export function createEditorCopy() { return {}; }
 `);
+// Chip() does not touch the appearance context, but desk-chrome.tsx imports it
+// (Light/Dark and Normal/Large moved there -- src/lib/appearance-context.ts),
+// so the module cannot load without it resolving.
+const appearanceContextStub = inlineModule(`
+  export function useAppearance() {
+    return {
+      appearance: { desk: "light", size: "normal", reader: "light" },
+      surface: "light",
+      setDesk: () => {},
+      refreshReader: () => {},
+    };
+  }
+  export function useHydrated() { return false; }
+`);
 
 const { Chip } = await import(
   moduleUrl(
@@ -413,6 +427,7 @@ const { Chip } = await import(
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+      "@/lib/appearance-context": appearanceContextStub,
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),

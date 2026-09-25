@@ -3,8 +3,9 @@ import { fetchPublicHttpOnce } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
 import {
   civicScore,
-  isRedditUrl,
+  isRedditSubmissionUrl,
   isRedditThreadUrl,
+  isRedditUrl,
   parseRedditFeed,
   threadFeed,
   type RedditPost,
@@ -152,7 +153,7 @@ export function redlibBaseUrl(raw = process.env.REDDIT_REDLIB_BASE_URL): URL | n
 
 type RedlibFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-type RedlibEnrichmentOptions = {
+export type RedlibEnrichmentOptions = {
   baseUrl?: string | null;
   fetcher?: RedlibFetch;
   /** Tests can skip the global eight-second Reddit queue. Production never does. */
@@ -308,6 +309,9 @@ export async function enrichRedditPostsWithLocalRedlib(
         retrievedCommentCount: thread.retrievedCommentCount,
         coverage: thread.coverage,
         enrichmentWarnings: thread.warnings,
+        // The listing's own `.rss` never carries these, and on a local
+        // subreddit the substance of a thread is usually in the replies.
+        comments: thread.comments,
       });
       enriched += 1;
       if (thread.coverage !== "complete") partialThreads += 1;
@@ -646,6 +650,248 @@ export async function fetchRedditDocument(url: URL): Promise<RedditDocument> {
     extractionMethod: "reddit-old",
     redirectChain,
   };
+}
+
+export type RedditSourceText = {
+  ok: boolean;
+  status: number;
+  title: string;
+  text: string;
+  extractionMethod: "reddit-rss" | "reddit-thread-rss";
+};
+
+/** How many posts a subreddit source hands the scan, and how much of each. */
+const SOURCE_POSTS = 12;
+const SOURCE_COMMENTS = 3;
+const SOURCE_BODY_CHARS = 900;
+const SOURCE_TEXT_CAP = 14_000;
+
+/**
+ * Said on every reddit source, in the text the model reads.
+ *
+ * The owner calls Reddit a primary source of leads. It is a primary source of
+ * *tips*: what a resident posts is a reason to go find the record, and nothing
+ * here may be repeated as fact. The wording has to survive being quoted out of
+ * context by a model looking for something to write.
+ */
+const SOURCE_CONTRACT =
+  "These are residents' own accounts, unverified — a lead, not a citation. " +
+  "Find the document before writing anything.";
+
+/**
+ * A reddit URL as a *scan source*, rather than as one document.
+ *
+ * `ingestUrl` (ingest.ts) is the function the daily scan calls for every
+ * accepted source. It routed YouTube and PrimeGov and had no reddit branch at
+ * all, so a subreddit source fell into the generic fetch-and-strip-tags path —
+ * which for reddit.com returns the JavaScript app shell. Live scan 52 lost
+ * accepted source 2876 ("r/Longmont — community tips (unverified)",
+ * https://www.reddit.com/r/Longmont/) to "Page had almost no readable text"
+ * while `https://www.reddit.com/r/Longmont/new/.rss` answered 200 with 25 real
+ * entries.
+ *
+ * What comes back is leads in the shape the desk already files them: title,
+ * date, author, the exact permalink, the body the feed carried — or the
+ * complete original post when a local Redlib is up — and, when Redlib is up,
+ * the top comments, which is usually where the substance is. Coverage is
+ * stated either way, so an RSS-only read says so instead of looking complete.
+ *
+ * Everything goes through `pacedRedditGet`: same eight-second gap, sequential,
+ * same shared cooldown as the sweep.
+ */
+export async function fetchRedditSourceText(
+  url: URL,
+  options: RedlibEnrichmentOptions = {},
+): Promise<RedditSourceText> {
+  const isThreadSource = url.hostname === "redd.it" || isRedditThreadUrl(url);
+  const extractionMethod = isThreadSource ? ("reddit-thread-rss" as const) : ("reddit-rss" as const);
+  const feedUrl = url.hostname === "redd.it" ? url.toString() : redditFeedUrl(url);
+  if (!feedUrl) {
+    return {
+      ok: false,
+      status: 0,
+      title: redditListingTitle(url),
+      text:
+        "This Reddit page has no feed to read (a wiki page, an /about page, the reddit.com home page). " +
+        "Point the source at a subreddit, a subreddit listing, or a thread permalink.",
+      extractionMethod,
+    };
+  }
+
+  const redirectChain = [url.toString()];
+  let res: Response;
+  try {
+    res = await pacedRedditGet(feedUrl, redirectChain, url.hostname === "redd.it");
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      title: redditListingTitle(url),
+      text: err instanceof Error ? err.message : "network error",
+      extractionMethod,
+    };
+  }
+  if (res.status === 429) {
+    return {
+      ok: false,
+      status: 429,
+      title: "Too many requests",
+      text: "Reddit rate-limited this machine. No posts were captured — try again in a few minutes.",
+      extractionMethod,
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      title: redditListingTitle(url),
+      text: `Reddit returned HTTP ${res.status}. No posts were captured.`,
+      extractionMethod,
+    };
+  }
+
+  const entries = parseRedditFeed(await res.text());
+  if (!entries.length) {
+    return {
+      ok: false,
+      status: res.status,
+      title: redditListingTitle(url),
+      text: "Reddit answered with a feed that carried no posts.",
+      extractionMethod,
+    };
+  }
+
+  /*
+    Best leads first, not newest first.
+
+    The scorer is the desk's own judgement about what a resident wrote that has
+    a record behind it (see reddit.ts's calibration notes), and the scan has a
+    handful of thousand characters for this source. "Best pizza in town?" is
+    real community life but it is not a lead, and at 25 entries the newest-first
+    listing buries the road closure under the small talk.
+  */
+  const ordered = entries
+    .map((post) => ({ post, score: civicScore(post) }))
+    .sort(
+      (a, b) =>
+        b.score - a.score || Date.parse(b.post.updated || "0") - Date.parse(a.post.updated || "0"),
+    )
+    .map(({ post }) => post);
+
+  const enrichment = await enrichRedditPostsWithLocalRedlib(
+    ordered,
+    isThreadSource ? 1 : 3,
+    options,
+  );
+
+  return {
+    ok: true,
+    status: res.status,
+    title: redditSourceTitle(url, enrichment.posts, isThreadSource),
+    text: renderRedditSourceText(url, feedUrl, enrichment.posts, enrichment.report, isThreadSource),
+    extractionMethod,
+  };
+}
+
+function redditSourceTitle(url: URL, posts: RedditPost[], isThreadSource: boolean): string {
+  if (!isThreadSource) return redditListingTitle(url);
+  const submission = posts.find((post) => {
+    try {
+      return isRedditSubmissionUrl(new URL(post.url));
+    } catch {
+      return false;
+    }
+  });
+  return submission?.title || "Reddit thread";
+}
+
+function redditCommentLine(comment: { author: string | null; score: number | null; bodyText: string }): string {
+  const who = comment.author ? `u/${comment.author}` : "a resident";
+  const score = comment.score === null ? "" : ` (${comment.score})`;
+  return `${who}${score}: ${comment.bodyText.slice(0, 400)}`;
+}
+
+function renderRedditPost(
+  post: RedditPost,
+  index: number,
+  commentLimit: number,
+): string {
+  const lines = [
+    `${index}. ${post.title}`,
+    `   posted ${post.updated || "undated"}${post.author ? ` by ${post.author}` : ""}`,
+    `   ${post.url}`,
+  ];
+  const body = (post.fullText || post.excerpt || "").trim();
+  if (body) lines.push(`   ${body.slice(0, SOURCE_BODY_CHARS)}`);
+  if (post.sourceAdapter === "redlib-html") {
+    const ratio =
+      typeof post.upvoteRatio === "number" ? `${Math.round(post.upvoteRatio * 100)}% upvoted` : "ratio hidden";
+    lines.push(
+      `   Redlib read this thread in full: ${post.redditScore ?? "score hidden"} points, ${ratio}, ` +
+        `${post.reportedCommentCount ?? "unknown"} comments reported / ${post.retrievedCommentCount ?? 0} retrieved` +
+        `${post.coverage === "complete" ? "" : ` — ${post.coverage ?? "unknown"} coverage`}.`,
+    );
+  }
+  const comments = (post.comments ?? []).slice(0, commentLimit);
+  if (comments.length) {
+    lines.push("   top comments:");
+    for (const comment of comments) lines.push(`   - ${redditCommentLine(comment)}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The source text an editor's model actually reads. Kept as one pure function
+ * so the framing — permalinks, coverage, the unverified contract — is asserted
+ * in one place rather than reconstructed by each caller.
+ */
+export function renderRedditSourceText(
+  url: URL,
+  feedUrl: string,
+  posts: RedditPost[],
+  report: RedditEnrichmentReport,
+  isThreadSource: boolean,
+): string {
+  const listing = redditListingTitle(url);
+  const submission = isThreadSource
+    ? posts.find((post) => {
+        try {
+          return isRedditSubmissionUrl(new URL(post.url));
+        } catch {
+          return false;
+        }
+      })
+    : undefined;
+  // A thread's feed carries the submission *and* its comments as entries; only
+  // the submission is a post here, and the comments arrive through Redlib.
+  const renderable = isThreadSource
+    ? posts.filter((post) => {
+        try {
+          return isRedditSubmissionUrl(new URL(post.url));
+        } catch {
+          return false;
+        }
+      })
+    : posts;
+  const shown = renderable.slice(0, SOURCE_POSTS);
+
+  const header = isThreadSource
+    ? `${submission?.title ?? "Reddit thread"} — an unverified resident thread from ${listing}`
+    : `${listing} — unverified resident posts read from ${feedUrl}`;
+  const coverage =
+    `Read ${shown.length} of ${renderable.length} entries in this feed, best leads first. ` +
+    `Reddit coverage: ${report.reason}`;
+
+  const body = [
+    header,
+    "",
+    coverage,
+    SOURCE_CONTRACT,
+    "",
+    ...shown.map((post, i) => renderRedditPost(post, i + 1, SOURCE_COMMENTS)),
+  ].join("\n\n");
+
+  return body.slice(0, SOURCE_TEXT_CAP);
 }
 
 /**

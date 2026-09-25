@@ -101,6 +101,27 @@ const deskCopyStub = inlineModule(`
   }
 `);
 
+/*
+  DeskShell now reads Light/Dark and Normal/Large from AppearanceProvider
+  (src/lib/appearance-context.ts) instead of two local read-on-mount effects
+  -- same store, applied before the first paint by the head script in
+  __root.tsx. This stub answers with the shipped defaults, which is what a
+  server render produces: both controls therefore render in their light /
+  Normal states below. `.large` still lands on the wrapping div through the
+  same pure helper this test asserts against directly.
+*/
+const appearanceContextStub = inlineModule(`
+  export function useAppearance() {
+    return {
+      appearance: { desk: "light", size: "normal", reader: "light" },
+      surface: "light",
+      setDesk: () => {},
+      refreshReader: () => {},
+    };
+  }
+  export function useHydrated() { return false; }
+`);
+
 const deskChromeUtilsUrl = moduleUrl(
   await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
   "desk-chrome-utils.ts",
@@ -123,6 +144,7 @@ const { DeskShell } = await import(
       "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+      "@/lib/appearance-context": appearanceContextStub,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

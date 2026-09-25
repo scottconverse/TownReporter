@@ -861,7 +861,7 @@ export function enabledAutomaticLadder(): readonly ProviderId[] {
 
 /**
  * The ladder a run that must name ONE exact provider fails over along: a
- * draft batch, the scheduled daily scan, a meeting redraft.
+ * draft batch, a hand-picked daily scan, a meeting redraft.
  *
  * Deliberately NOT `automaticLadder()`. Those surfaces cannot stand on a rung:
  * `deepseek-flash` and `qwen-local` are what Automatic resolved to on the day,
@@ -872,6 +872,12 @@ export function enabledAutomaticLadder(): readonly ProviderId[] {
  * moves, so this stays the order those surfaces have used since 0.6.1 --
  * Balanced, then Sonnet -- and DeepSeek and Qwen reach a batch only when an
  * editor picks them by hand.
+ *
+ * NOT the scheduled daily scan any more (0.6.64, Unit AA): a scan left on
+ * Automatic resolves its policy to a rung snapshot before the job is queued
+ * and then walks `automaticLadder()` itself, one hop at a time
+ * (scan-model-run.ts), so its failover is DeepSeek, then Qwen, then Codex
+ * Terra. A scan whose runtime was picked by hand still starts here.
  */
 export const FORCED_FAILOVER_LADDER = [
   "codex-balanced",

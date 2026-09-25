@@ -10,6 +10,32 @@ export function documentKind(name: string): "pdf" | "image" | "text" | "word" {
     "Choose PDF, Word DOC/DOCX, PNG, JPG, WebP, TXT, Markdown, CSV, SRT or VTT files.",
   );
 }
+/** One attached document a redraft could not finish reading (0.6.64, Unit AB). */
+export type PartialStoryDocument = { filename: string; readPages: number; pages: number };
+/**
+ * Which attached documents were left partly read. `read_pages < pages` is the
+ * whole test, and it is deliberately the same test the desk shows the editor:
+ * the server writes both numbers, so the notice names the document and the
+ * pages the draft actually used instead of asking for faith.
+ */
+export function partialStoryDocuments(
+  rows: readonly {
+    filename: string;
+    status: string;
+    pages: number | null;
+    read_pages: number | null;
+  }[],
+): PartialStoryDocument[] {
+  return rows
+    .filter(
+      (row) =>
+        row.status === "failed" &&
+        typeof row.read_pages === "number" &&
+        typeof row.pages === "number" &&
+        row.read_pages < row.pages,
+    )
+    .map((row) => ({ filename: row.filename, readPages: row.read_pages!, pages: row.pages! }));
+}
 export function documentChunks(
   text: string,
   size = 24000,

@@ -6,6 +6,7 @@ import {
   nextDailyOccurrence,
   nextEligibleDailyOccurrence,
   persistDailyScanPolicy,
+  runSnapshotRuntimes,
 } from "./daily-scan.ts";
 import { getSql } from "../db.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
@@ -191,5 +192,41 @@ describe("daily scan policy compare-and-swap", () => {
       [newsroomId],
     );
     assert.deepEqual(row, { revision: 2, local_time: "07:00" });
+  });
+});
+
+/*
+  Unit AA (0.6.64) item 6: "the run record names the resolved model". Both
+  writes a scheduled run makes -- `daily_scan_reservations.model_snapshot` and
+  `scan_runs.model_snapshot` -- store the runtime receipt whole, so the panel's
+  new "Model:" line reads it from the reservation the run left behind. These
+  pin the read, including the pre-0.6.64 row that named only `modelChoice`.
+*/
+describe("daily scan run record names the model", () => {
+  it("reads requested and resolved out of a scheduled run's model snapshot", () => {
+    assert.deepEqual(
+      runSnapshotRuntimes({
+        runtime: "deepseek-flash",
+        modelChoice: "deepseek-flash",
+        transport: "local",
+        localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
+        requestedRuntime: "auto",
+        requestedEffort: "medium",
+        resolvedRuntime: "deepseek-flash",
+        switchReason: null,
+        switchNote: null,
+      }),
+      { requestedRuntime: "auto", resolvedRuntime: "deepseek-flash" },
+    );
+  });
+  it("names the model a pre-0.6.64 reservation recorded, which carries only modelChoice", () => {
+    assert.deepEqual(
+      runSnapshotRuntimes({ runtime: "claude-haiku", modelChoice: "claude-haiku", transport: "cli" }),
+      { requestedRuntime: null, resolvedRuntime: "claude-haiku" },
+    );
+  });
+  it("says nothing rather than guessing at a snapshot it cannot read", () => {
+    for (const value of [null, undefined, "auto", {}, { requestedRuntime: 7, resolvedRuntime: "  " }])
+      assert.deepEqual(runSnapshotRuntimes(value), { requestedRuntime: null, resolvedRuntime: null });
   });
 });

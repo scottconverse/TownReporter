@@ -1096,7 +1096,24 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   }
 
   if (!batchResults.length) {
-    const error = lastBatchError ?? "Writing pass returned no usable JSON.";
+    /*
+      A run with ZERO batches never reached a model at all: `buildScanBatches`
+      returns nothing when no source yielded text (scan-batches.ts), so the only
+      thing that failed is the fetch. Reporting the model-shaped fallback for
+      that case sent its reader to the provider when the source had simply not
+      resolved -- measured in Unit AA2, where a scheduled run recorded
+      `sources_fetched 0`, `model_batches_used 0` and zero chat calls at the
+      stubbed rung, yet failed as "Writing pass returned no usable JSON." The
+      first failed source's own message is the truth when there is one; the
+      model-shaped fallback stays for the batches-ran-and-were-unreadable case.
+    */
+    const error =
+      lastBatchError ??
+      (batches.length === 0
+        ? `Scan fetched no source text, so no writing pass ran.${
+            failedSources[0] ? ` First source failed: ${failedSources[0].error}` : ""
+          }`
+        : "Writing pass returned no usable JSON.");
     /*
       Record the failed run on BOTH commit paths.
 

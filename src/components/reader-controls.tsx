@@ -11,11 +11,36 @@ import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
+import { readReaderMode } from "@/lib/appearance";
+import { useAppearance, useHydrated } from "@/lib/appearance-context";
 
 export function ReaderProvider({ children }: { children: ReactNode }) {
   const paper = usePaper();
   const key = readerStorageKey(paper.name, paper.city);
-  const [prefs, setPrefs] = useState(readerDefaults);
+  const { refreshReader } = useAppearance();
+  /*
+    The dark bit is known BEFORE the first render of a client-side navigation.
+
+    `prefs` still starts at the light default -- that is what the server
+    renders, and the reader element is hydrated against it, so changing the
+    initial value unconditionally would be a hydration mismatch. But a
+    navigation from a dark desk to an article mounts this component fresh on
+    the client, where there is no server HTML to match: there `hydrated` is
+    already true, so the stored choice is read during the first render and the
+    `.reader` element is dark on the frame it is created. `useHydrated()` is
+    false on the server and during hydration, true after -- see
+    appearance-context.ts.
+
+    A hard load is covered earlier still: reader-astra.css paints
+    `:root[data-appearance="reader-dark"] .reader`, which the head script in
+    __root.tsx stamps before anything paints. This is the belt to that
+    braces, and it is what keeps the reader's own toggle honest -- `update`
+    below calls `refreshReader()` so the document attribute follows the class.
+  */
+  const hydrated = useHydrated();
+  const [prefs, setPrefs] = useState<ReaderPrefs>(() =>
+    hydrated ? { ...readerDefaults, dark: readReaderMode(key) === "dark" } : readerDefaults,
+  );
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
@@ -48,6 +73,11 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
+    // The document's own surface has to follow. Without this the class flips
+    // but `data-appearance` still says what it said at load, and the next
+    // screen that renders from the attribute (a pending screen, say) comes
+    // back on the old one.
+    if (value.dark !== undefined) refreshReader();
   }
   return (
     <ReaderContext.Provider value={{ ...prefs, ready, update, notify: setMessage }}>

@@ -35,10 +35,14 @@ export const listStoryDocuments = createServerFn({ method: "GET" })
       status: string;
       detail: string;
       pages: number | null;
+      /* 0.6.64 Unit AB: pages actually read when a document was left partial;
+         null when it is not partial. read_pages < pages drives the "Read the
+         rest" notice. */
+      read_pages: number | null;
       read_parts: number;
       total_parts: number;
       characters: number;
-    }>`select id,filename,status,detail,pages,read_parts,total_parts,length(full_text) as characters from story_documents where newsroom_id=${context.newsroomId ?? 1} and lead_id=${data.leadId} order by created_at,id`;
+    }>`select id,filename,status,detail,pages,read_pages,read_parts,total_parts,length(full_text) as characters from story_documents where newsroom_id=${context.newsroomId ?? 1} and lead_id=${data.leadId} order by created_at,id`;
   });
 export const downloadStoryDocument = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])

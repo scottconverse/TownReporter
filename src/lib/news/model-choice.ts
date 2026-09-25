@@ -72,11 +72,17 @@ export function pickerOptionTitle(option: ModelChoiceOption): string {
  * Not a provider: an instruction to probe the ladder and pin whatever
  * answers. It is prepended to every picker rather than living in the
  * registry, because it has no model, no budget and no transport of its own.
+ *
+ * The select line stays the measured 30-character "Automatic — Recommended
+ * ladder" (Unit P item 7: a longer line is clipped on the control that decides
+ * what a run spends), and `detail` names the ladder it means, read from the
+ * registry, so hovering the option says what Automatic will try.
  */
 const AUTOMATIC: ModelChoiceOption = {
   value: "auto",
   label: "Automatic",
-  detail: "Recommended ladder",
+  detail: `Recommended ladder: ${ladderSentence()}`,
+  optionDetail: "Recommended ladder",
 };
 
 export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceOption[] {
@@ -138,16 +144,24 @@ export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesF
  * gets, because every provider that can draft can also dig.
  */
 export const DARK_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("dark");
-/** Batch and scheduled runs must name one exact provider; Automatic is absent. */
+/**
+ * Batch and meeting runs must name one exact provider, so Automatic is absent.
+ * The SCHEDULED daily scan is no longer one of these as of 0.6.64 (Unit AA):
+ * it has its own list -- the story/scan list, Automatic included, which is what
+ * `scope="scan"` renders -- and the server resolves Automatic to a rung before
+ * the job is queued.
+ */
 export const FORCED_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("forced");
 
 export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
 /**
- * Batch, scheduled and meeting runs must name ONE exact provider, so Automatic
- * is absent -- and so are Automatic's own rungs. A rung is not a choice an
- * editor can make; it is what Automatic resolved to on the day, which is why
- * `dailyScanRuntime` and `draftBatchRuntime` narrow the rungs away too.
+ * Batch and meeting runs must name ONE exact provider, so Automatic is absent
+ * -- and so are Automatic's own rungs. A rung is not a choice an editor can
+ * make; it is what Automatic resolved to on the day, which is why
+ * `dailyScanRuntime` and `draftBatchRuntime` narrow the rungs away too. The
+ * daily scan keeps "auto" itself (Unit AA): a rung is refused, Automatic is
+ * allowed, and the server names the rung it resolved to on the run record.
  */
 export type ForcedModelChoice = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 
@@ -323,6 +337,20 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   }
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}.${loadedRungNote(DARK_AUTOMATIC_LADDER)} Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
+  }
+  /*
+    0.6.64 (Unit AA) item 2: the Scan picker offers Automatic now, and a
+    scheduled run cannot mean what Story's sentence means. A story resolves
+    Automatic at call time, so "your configured gateway when set" is a promise
+    the transport can keep; the daily scan stores the model it WILL run on in
+    its reservation and run record before the job is queued, so Automatic is
+    resolved up front and pinned to one rung (`resolveAutomaticForcedRuntime`,
+    src/lib/news/forced-runtime.server.ts) -- the run record then names which
+    one ran. Saying "configured gateway" here would promise a model the run
+    record never mentions.
+  */
+  if (scope === "scan") {
+    return `Uses ${ladderSentence()} for each scheduled run and records which one ran.${loadedRungNote()} If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.`;
   }
   return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}.${loadedRungNote()} If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.`;
 }

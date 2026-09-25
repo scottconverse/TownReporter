@@ -179,7 +179,12 @@ async function dailySettingsJourney(context, observePage) {
   const labels = (await runtime.locator("option").allTextContents()).map((label) =>
     label.split("—")[0].trim(),
   );
+  // 0.6.64 (Unit AA) item 2: the daily-scan picker offers Automatic now -- a
+  // scheduled run walks the writing ladder and the run record names the rung it
+  // resolved to. It is the first option and the only addition; the BATCH picker
+  // further down this walk is `scope="forced"` and keeps its own list.
   const expected = [
+    "Automatic",
     "Codex Astra",
     "Codex Sol",
     "Codex Terra",

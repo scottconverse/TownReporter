@@ -6,6 +6,9 @@ import { siteUrl } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity } from "@/lib/paper-identity";
 import { PaperProvider } from "@/lib/paper-context";
 import { getPaperIdentityFn } from "@/lib/news/paper-settings";
+import { AppearanceProvider } from "@/lib/appearance-provider";
+import { appearanceHeadScript } from "@/lib/appearance";
+import { readerStorageKey } from "@/lib/reader";
 import appCss from "../styles.css?url";
 import deskCss from "../desk-astra.css?url";
 import readerCss from "../reader-astra.css?url";
@@ -127,8 +130,55 @@ function Root() {
     <html lang="en" className="antialiased" suppressHydrationWarning>
       <head>
         <HeadContent />
+        {/*
+          The theme is chosen BEFORE the first paint.
+
+          The saved Light/Dark and Normal/Large choices live in localStorage,
+          which only script can read, and the server has no idea which one is
+          set -- so the server renders the light palette and the client used
+          to correct it in a mount effect, one paint too late. On a hard
+          reload, and on every client-side navigation into a screen that
+          renders outside the desk shell, an editor in dark mode saw a full
+          white frame (owner report, 2026-09-25). This script runs as the
+          head is parsed -- before <body> exists, so before anything can
+          paint -- reads both values, and stamps `data-appearance` and
+          `data-desk-size` on <html>. Every dark palette in styles.css,
+          desk-astra.css and reader-astra.css is keyed on those attributes,
+          so the first painted frame is already the right one.
+
+          Why a head script and not a cookie the server reads: a cookie is a
+          SECOND store, written at a different moment from localStorage, and
+          the two can disagree -- a stale cookie means the server renders the
+          wrong theme and the bug is back, silently, with nothing to notice
+          it by. localStorage already holds the choice; this reads the one
+          store. It is also the only mechanism that covers a page whose
+          JavaScript never runs, and its reader key is per-paper, which a
+          cookie (per-origin) cannot express. See src/lib/appearance.ts for
+          the full rationale and src/lib/appearance.test.ts for the parity
+          check against `appearanceSurface`.
+
+          It sits AFTER <HeadContent /> on purpose: the theme-color meta it
+          corrects is rendered by HeadContent, and it updates that meta
+          rather than adding its own.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: appearanceHeadScript(readerStorageKey(paper.name, paper.city)),
+          }}
+        />
       </head>
-      <body style={{ background: "#F6F1E7", color: "#1C1410", margin: 0 }}>
+      {/*
+        No inline `background`/`color` here any more.
+
+        This element carried `style={{ background: "#F6F1E7", ... }}`, a fixed
+        light canvas -- and inline styles beat every stylesheet, so it was the
+        one surface the `data-appearance` rules in styles.css could not
+        repaint. It duplicated the `@layer base` body rule anyway; the
+        background now comes from that rule plus
+        `:root[data-appearance="desk-dark"] body` / `"reader-dark"`, which the
+        script above has already applied by the time this element paints.
+      */}
+      <body>
         {/*
           Last resort for a page where React never started.
 
@@ -184,13 +234,24 @@ function Root() {
           }}
         />
         <PreviewHostBridge />
-        <AuthProvider>
-          <QueryClientProvider client={client}>
-            <PaperProvider value={paper}>
-              <Outlet />
-            </PaperProvider>
-          </QueryClientProvider>
-        </AuthProvider>
+        {/*
+          Outermost of the app providers, so every screen -- the desk shell,
+          the pending/error screens that render outside it, and the public
+          paper -- can ask what the appearance is. It renders no markup of its
+          own and writes no attribute React owns: the head script above owns
+          `data-appearance`/`data-desk-size` until hydration, and this
+          provider only re-stamps them afterwards so a toggle takes effect
+          without a reload. See src/lib/appearance-context.ts.
+        */}
+        <AppearanceProvider readerKey={readerStorageKey(paper.name, paper.city)}>
+          <AuthProvider>
+            <QueryClientProvider client={client}>
+              <PaperProvider value={paper}>
+                <Outlet />
+              </PaperProvider>
+            </QueryClientProvider>
+          </AuthProvider>
+        </AppearanceProvider>
         <Scripts />
       </body>
     </html>

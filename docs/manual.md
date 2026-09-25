@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.63 · publication and deployment are recorded separately**
+**Version 0.6.64 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.63 release guide and evidence boundaries](releases/0.6.63.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.64 release guide and evidence boundaries](releases/0.6.64.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -276,11 +276,19 @@ disappears when there is nothing older to load.
 The owner can also configure a daily ordinary scan on the
 Server page. It starts disabled. The
 owner selects accepted sources from any reporting beat, a local time
-in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
-Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
+in the paper's timezone, and a scheduled model: **Automatic**, or one named
+choice — Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or
+Haiku; the selected local model; or a
 saved Custom AI connection such as an OpenAI-compatible Gemini endpoint.
+Automatic (0.6.64) walks the same writing ladder a story does — DeepSeek v4.1
+Flash first, then Qwen 3.6 35B when it is loaded, then Codex Terra — and the
+run record names the model that resolved. The rung is resolved before the run
+is queued, because a scheduled run has to store the model it will use; the
+panel therefore shows the requested and resolved model as a pair. A policy
+saved before 0.6.64 keeps the model it names — no stored choice is rewritten in
+silence; the owner switches it to Automatic by hand.
 Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
-Opus. The selected scheduled runtime is tried first; a recognized technical
+Opus. A recognized technical
 failure can move only unfinished work, and the job records requested and actual
 model and effort. A content refusal is terminal. Saved Custom AI credentials are
 resolved only when the scheduled run starts and are not copied into its job
@@ -345,8 +353,9 @@ technical provider failure can move only the unfinished call; a refusal remains
 terminal. A missing runtime or ineligible selected lead refuses the whole
 start, before any partial batch is created.
 
-Daily Scan uses the same named model choices and saved Custom
-AI connections, with no Automatic. The selected runtime is tried first;
+Daily Scan offers the same named model choices and saved Custom
+AI connections, and also Automatic, which the daily scheduler resolves to a
+ready rung before the run is queued. A named choice is tried first;
 technical preflight and mid-call switches are recorded. OCR applies the same
 technical-only rule and considers only vision-capable destinations.
 

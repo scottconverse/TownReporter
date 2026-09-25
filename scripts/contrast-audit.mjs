@@ -210,6 +210,25 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   printTable(rows());
 }
 
+/*
+  The pending/error screens ("Opening the desk") are the one surface that
+  renders outside the desk shell, so they cannot inherit either palette --
+  they declare their own (0.6.64, Unit AE; the rule is in styles.css). Before
+  that rule they took the letterpress black above (`--n-bg: #000000`), which
+  the desk never uses. A palette declared in this file rather than inherited
+  is exactly the kind of thing this audit exists to catch, so it is checked
+  here instead of being assumed from the desk's own dark tokens.
+*/
+const screenPageDark = customProps(block(':root[data-appearance="desk-dark"] .screen-page {'));
+const SCREEN_PAGE_PAIRS = [
+  { fg: "fg", label: 'ScreenPending heading and body copy ("Opening the desk")' },
+  { fg: "fg2", label: "ScreenPending secondary copy" },
+  { fg: "mut", label: 'ScreenPending hint ("Setting type...") and meta' },
+  { fg: "adeep", label: "ScreenPending kicker (EDITOR DESK) and links" },
+  { fg: "warn", label: "ScreenPending error copy (.warn-inline)" },
+  { fg: "color-danger", label: "error-component.tsx danger text (text-danger)" },
+];
+
 // ── node:test: fail the build under 4.5:1 for any "text" token pair ────────
 
 test("every desk text-color token pairing meets WCAG AA in both themes", () => {
@@ -219,6 +238,24 @@ test("every desk text-color token pairing meets WCAG AA in both themes", () => {
     [],
     "these token pairings fail WCAG AA contrast for readable text",
   );
+});
+
+test("the pending/error screens meet WCAG AA on the desk's dark palette", () => {
+  const bgHex = resolveHex(screenPageDark.get("bg"));
+  const rows = SCREEN_PAGE_PAIRS.map((pair) => {
+    const fgHex = resolveHex(screenPageDark.get(pair.fg));
+    return { fgHex, ratio: contrastRatio(fgHex, bgHex), label: pair.label };
+  });
+  const failures = rows.filter((r) => r.ratio < 4.5);
+  assert.deepEqual(
+    failures.map((f) => `${f.fgHex} on ${bgHex} = ${f.ratio.toFixed(2)}:1 (${f.label})`),
+    [],
+    "these pending/error-screen pairings fail WCAG AA contrast for readable text",
+  );
+  // The palette really is the desk's dark one, not the letterpress black this
+  // screen used to paint -- and the parse found the rule at all.
+  assert.equal(bgHex.toLowerCase(), "#182024");
+  assert.equal(rows.length, SCREEN_PAGE_PAIRS.length);
 });
 
 test("desk tokens parsed from styles.css are the ones the CSS actually declares", () => {
