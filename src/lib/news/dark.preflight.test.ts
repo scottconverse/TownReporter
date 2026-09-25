@@ -38,10 +38,35 @@ const ENV_KEYS = [
   "TOWNREPORTER_CLAUDE_CODE",
   "TOWNREPORTER_CODEX",
   "CLAUDE_CLI_PATH",
+  /*
+    Automatic's local rungs had to join this list in 0.6.63 (Unit Y item 1),
+    when Dark Desk's Automatic began walking the same ladder Story and Scan
+    walk: a rung's enabledness reads its own off switch and its own endpoint,
+    so a test that means to control which rung answers has to own both.
+  */
+  "TOWNREPORTER_DEEPSEEK",
+  "TOWNREPORTER_QWEN",
+  "TOWNREPORTER_DEEPSEEK_BASE_URL",
+  "TOWNREPORTER_QWEN_BASE_URL",
+  "TOWNREPORTER_DEEPSEEK_MODEL",
+  "TOWNREPORTER_QWEN_MODEL",
+  "CODEX_CLI_PATH",
+  "FAKE_CODEX_SIGNED_IN",
 ] as const;
 
+/**
+ * Rung 1's endpoint, named so a test can make that ONE rung answer.
+ *
+ * A rung is enabled by its own endpoint or by a discovery probe, and a test
+ * process has neither -- so a test that means "a writing model is set up on
+ * this desk" has to name one. The address is never dialled: the stubbed fetch
+ * in the test below answers it.
+ */
+const DEEPSEEK_URL = "http://127.0.0.1:11434/v1";
+
 /*
-  No keys AND neither local CLI — the exact first-run state the audit walked.
+  No keys, neither local CLI, and no local model switched on — the exact
+  first-run state the audit walked.
 
   `TOWNREPORTER_CODEX: "0"` joined this in 0.6.2. Dark Desk's preflight used
   to probe with no argument at all, which walked `resolveProvider()`'s default
@@ -50,8 +75,19 @@ const ENV_KEYS = [
   installed and signed in, "no model is configured" was no longer true with
   only Claude Code switched off — the test was describing a machine that no
   longer existed, not a defect in the refusal.
+
+  The two local rungs are switched off by their own off switches for the same
+  reason (Unit Y item 1): Dark Desk's Automatic walks the registry ladder now,
+  and a desk with LM Studio or Ollama running on it is not the first-run desk
+  this test is about. Off switches, not "nothing is listening", so the answer
+  no longer depends on what happens to be running on the machine.
 */
-const BARE = { TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" };
+const BARE = {
+  TOWNREPORTER_CLAUDE_CODE: "0",
+  TOWNREPORTER_CODEX: "0",
+  TOWNREPORTER_DEEPSEEK: "0",
+  TOWNREPORTER_QWEN: "0",
+};
 
 async function withEnv<T>(
   vars: Record<string, string | undefined>,
@@ -128,20 +164,47 @@ describe("dark desk preflight (QA-002)", { timeout: 60000 }, () => {
       instead of a preflight refusal — without ever starting that job.
     */
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      // Rung 1 answers with a model list holding exactly the model it names,
+      // which is what `probeOpenAi` verifies; everything else answers `{}`, so
+      // no other rung can accidentally look configured.
+      if (url.startsWith(DEEPSEEK_URL)) {
+        return new Response(JSON.stringify({ data: [{ id: "deepseek-v4.1-flash:cloud" }] }), {
+          status: 200,
+        });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof globalThis.fetch;
     try {
-      await withEnv({ ANTHROPIC_API_KEY: "test-key-validated-by-stub" }, async () => {
-        const userId = `dark-preflight-ok-${Date.now()}`;
-        const result = await startDarkRound({ userId }, 999_999_999);
-        assert.equal(result.ok, false);
-        if (result.ok) return;
-        assert.equal((result as { error?: string }).error, "Investigation not found");
-        assert.notEqual(
-          (result as { kind?: string }).kind,
-          "unconfigured",
-          "a provider that answered its readiness probe must not be reported as unconfigured",
-        );
-      });
+      await withEnv(
+        {
+          /*
+            DeepSeek is the configured provider here, not Claude: since 0.6.63
+            (Unit Y item 1) Claude Sonnet is a hand pick, so a reachable Claude
+            key no longer makes a rung ready and this test would now be
+            asserting a refusal it did not mean to describe.
+          */
+          TOWNREPORTER_DEEPSEEK_BASE_URL: DEEPSEEK_URL,
+          // The other two rungs are off, so this test never runs the Codex CLI
+          // installed on a developer machine.
+          TOWNREPORTER_QWEN: "0",
+          TOWNREPORTER_CODEX: "0",
+        },
+        async () => {
+          const userId = `dark-preflight-ok-${Date.now()}`;
+          const result = await startDarkRound({ userId }, 999_999_999);
+          assert.equal(result.ok, false);
+          if (result.ok) return;
+          assert.equal((result as { error?: string }).error, "Investigation not found");
+          assert.notEqual(
+            (result as { kind?: string }).kind,
+            "unconfigured",
+            "a provider that answered its readiness probe must not be reported as unconfigured",
+          );
+        },
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

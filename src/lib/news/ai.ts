@@ -14,6 +14,7 @@ import {
   KIND_BUDGETS,
   automaticLadder,
   effectiveBudget,
+  isAutomaticRungId,
   plannerModelFor,
   openAiCompatibleModelEfforts,
   defaultModelEffort,
@@ -644,6 +645,28 @@ export async function probeProvider(
       };
     }
   }
+  /*
+    0.6.63 (Unit Y item 2), at the rung itself.
+
+    A rung is probed by name in three places: Automatic's own loop below, the
+    mid-run hop in automatic-failover.ts, and Dark Desk's preflight. The rule
+    "a model that has to be loaded is used only when it IS loaded" is one rule,
+    so it is answered where the rung is probed rather than re-implemented by
+    each caller. A skipped rung is a refusal with a reason attached: the
+    callers pass the reason on to the receipt and move to the next rung, so
+    the editor reads which model actually wrote the draft and what was passed
+    over on the way.
+  */
+  if (typeof choice === "string" && isAutomaticRungId(choice)) {
+    const entry = providerEntry(choice);
+    const skipped = entry
+      ? await skippedRungReason(entry, adapters?.resolveLocalCatalog)
+      : null;
+    if (entry && skipped) {
+      const note = `${entry.label} skipped: ${skipped}`;
+      return { ok: false, error: `${note}.`, skippedRungs: [note] };
+    }
+  }
   if (choice === "auto") {
     const configured = customGateway();
     if (configured) {
@@ -662,21 +685,20 @@ export async function probeProvider(
       2026-09-02: Zen and Local Qwen removed from the picker entirely ("it's
       not working it seems" -- Claude/Codex only for now). The ladder is just
       Claude, then Codex.
+
+      0.6.63 (Unit Y item 1): DeepSeek v4.1 Flash, then Qwen on this computer,
+      then Codex Terra. The skip of a rung that has to be already loaded is NOT
+      written here: it lives at the rung, in the `isAutomaticRungId` branch
+      above, so the mid-run hop (automatic-failover.ts) and Dark Desk's own
+      preflight get the same rule instead of each re-implementing it.
     */
     const failures: string[] = [];
     const skippedRungs: string[] = [];
     for (const rung of AUTOMATIC_LADDER) {
-      const entry = providerEntry(rung);
-      const skipped = entry
-        ? await skippedRungReason(entry, adapters?.resolveLocalCatalog)
-        : null;
-      if (skipped && entry) {
-        skippedRungs.push(`${entry.label} skipped: ${skipped}`);
-        continue;
-      }
-      const result = await probeProvider(rung);
+      const result = await probeProvider(rung, newsroomId, adapters);
       if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
-      failures.push(result.error);
+      if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+      else failures.push(result.error);
     }
     const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
     return {

@@ -427,13 +427,29 @@ async function probeDarkProvider(choice?: string, newsroomId?: number) {
       },
     };
   }
+  /*
+    0.6.63 (Unit Y item 2). Dark Desk walks the registry ladder now (item 1),
+    so it inherits the rule that a rung whose model has to be ALREADY loaded is
+    skipped rather than pinned -- and it inherits it from the rung's own probe
+    (ai.ts), the same one Story, Scan and the mid-run hop use. A rung that was
+    passed over is not a failure: it is carried out on the receipt, so a round
+    that ran on Terra says Qwen was skipped and why, rather than looking like a
+    round that never offered it.
+  */
   const failures: string[] = [];
+  const skippedRungs: string[] = [];
   for (const rung of ["configured", ...DARK_AUTOMATIC_LADDER]) {
     const result = await probeProvider(rung, newsroomId, undefined, "dark");
-    if (result.ok) return result;
-    failures.push(result.error);
+    if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
+    if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+    else failures.push(result.error);
   }
-  return { ok: false as const, error: `No Dark Desk Automatic provider is ready. ${failures.join(" ")}` };
+  const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
+  return {
+    ok: false as const,
+    error: `No Dark Desk Automatic provider is ready. ${failures.join(" ")}${skippedNote}`,
+    ...(skippedRungs.length ? { skippedRungs } : {}),
+  };
 }
 
 async function darkPreflightRefusal(
@@ -2197,6 +2213,13 @@ export async function startDarkRound(
       actualEffort: modelEffort,
       localModel: probe.ok ? probe.localModel : undefined,
       preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
+      /*
+        A rung the desk passed over on the way to the one that answered
+        (0.6.63, Unit Y item 2). Omitted when empty -- see
+        `initialModelRuntimeReceipt` -- so every receipt that has nothing to
+        report reads exactly as it did before.
+      */
+      skippedRungs: probe.skippedRungs,
     })),
   });
   if ("switchReceipt" in probe) {
@@ -3552,6 +3575,13 @@ export async function startBriefJob(
       actualEffort: modelEffort,
       localModel: probe.ok ? probe.localModel : undefined,
       preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
+      /*
+        A rung the desk passed over on the way to the one that answered
+        (0.6.63, Unit Y item 2). Omitted when empty -- see
+        `initialModelRuntimeReceipt` -- so every receipt that has nothing to
+        report reads exactly as it did before.
+      */
+      skippedRungs: probe.skippedRungs,
     })),
   });
   if ("switchReceipt" in probe) {

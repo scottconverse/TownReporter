@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DARK_AUTOMATIC_LADDER,
   effectiveStoryModelChoice,
   darkModelChoice,
   localModelOptionLabel,
@@ -214,14 +215,38 @@ describe("model choice contract", () => {
       modelChoiceHelp("auto", "opinion"),
       "Tries Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.",
     );
+    /*
+      0.6.63 (Unit Y item 1). Dark Desk's Automatic ladder used to be a typed
+      out Terra -> Sonnet tuple, so the owner's "DeepSeek first for research"
+      decision did not reach the surface that does the most research. It is the
+      registry ladder now, and this sentence is read from it -- including the
+      half-line that says a rung on this computer is used only when it is
+      already loaded.
+    */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Qwen 3.6 35B, then Codex Terra. A model on this computer is used only when it is already loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
       "Prefers Codex Sol for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
+  });
+
+  it("walks Dark Desk's Automatic down the same ladder as Story and Scan", () => {
+    /*
+      0.6.63, Unit Y item 1: "Ladder for every Automatic surface that drafts or
+      researches ... Dark Desk". Dark's ladder is derived, not typed out, so a
+      rung added, removed or reordered for Story cannot leave Dark Desk -- or
+      `probeDarkProvider`'s loop, which spreads this list -- describing a
+      different order.
+    */
+    assert.deepEqual(
+      [...DARK_AUTOMATIC_LADDER],
+      [...automaticLadder()],
+      "Dark Desk's Automatic ladder must be the registry's, in order",
+    );
+    assert.equal(DARK_AUTOMATIC_LADDER[0], "deepseek-flash");
   });
 
   it("names the local model in every picker and says an unavailable selection stops", () => {

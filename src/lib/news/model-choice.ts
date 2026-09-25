@@ -114,11 +114,21 @@ export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
 export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as const;
 /**
- * Dark Desk spends most of a round on mechanical planning and evidence
- * triage. Automatic therefore uses the balanced synthesis models; Opus and
- * Astra remain explicit choices for an editor who wants them.
+ * Dark Desk's Automatic ladder, which is Automatic's ladder (0.6.63, Unit Y
+ * item 1).
+ *
+ * It used to be a typed-out Terra -> Sonnet tuple. That made Dark Desk the one
+ * Automatic surface the owner's decision did not reach -- and Dark Desk is the
+ * surface that researches most, so "DeepSeek first for research and drafting"
+ * was exactly the order it was not walking. Derived now, so the two lists
+ * cannot drift: `probeDarkProvider` spreads this one, and the mid-round
+ * failover passes it to `planAutomaticFailover`.
+ *
+ * Terra is still on it, in the registry's position -- rank 3, after the two
+ * local rungs. Opus and Astra remain explicit choices for an editor who wants
+ * them.
  */
-export const DARK_AUTOMATIC_LADDER = ["codex-balanced", "claude-sonnet"] as const;
+export const DARK_AUTOMATIC_LADDER: readonly string[] = automaticLadder();
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("opinion");
 
 /**
@@ -312,7 +322,7 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
     return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.`;
   }
   if (scope === "dark") {
-    return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
+    return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}.${loadedRungNote(DARK_AUTOMATIC_LADDER)} Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
   }
   return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}.${loadedRungNote()} If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.`;
 }
