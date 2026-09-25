@@ -169,6 +169,8 @@ A **Hold** in the report is shown on the card as a Hold. If a story looks like o
 
 From there an imported story is a story like any other: open it, edit it, redraft it if you want to, and **Publish** it when it is right. A well-formed imported story — headline, section, body, at least one source — is not held back by the checks that exist for AI drafts, such as matching passages to cited records. The checks that protect readers still run.
 
+**One story you already have.** When what you have is a single finished story rather than a report full of them, the desk landing page has a shorter way in, under the import panel: **Paste a story I already have**. Paste it, leave the headline empty and its first line becomes the headline, choose the section, and press **Add to Queue**. There is no review screen and no model reads it — the whole paste is the draft, word for word, its links come across as the story's sources, and it lands in the Queue marked **Imported** as a regular news story. **Nothing is published**, and the section you choose there is not the confirmation: that still happens in the story editor, on the ordinary button, before the story can publish.
+
 ---
 
 ## Sources (`/desk/sources`)
