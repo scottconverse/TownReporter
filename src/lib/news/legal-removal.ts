@@ -9,6 +9,7 @@ import {
   recordBackupAction,
 } from "./legal-removal-store";
 import type { LegalSelection, LegalRemovalInput } from "./legal-removal-types";
+import { legalCaseId, legalBackupInput, legalRemovalInput, legalSelectionInput } from "./request-input.ts";
 
 async function response<T>(work: () => Promise<T>) {
   try {
@@ -26,26 +27,26 @@ async function response<T>(work: () => Promise<T>) {
 }
 export const legalPreview = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: LegalSelection) => data)
+  .validator((data: LegalSelection) => legalSelectionInput.parse(data))
   .handler(({ context, data }) => response(() => previewLegalRemoval(context.userId, data)));
 export const legalConfirm = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: LegalRemovalInput) => data)
+  .validator((data: LegalRemovalInput) => legalRemovalInput.parse(data))
   .handler(({ context, data }) => response(() => removeLegally(context.userId, data)));
 export const legalCases = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(({ context }) => response(() => listLegalCases(context.userId)));
 export const legalCase = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: string) => String(id))
+  .validator((id: unknown) => legalCaseId.parse(id))
   .handler(({ context, data }) => response(() => getLegalCase(context.userId, data)));
 export const legalRetainedCopy = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: string) => String(id))
+  .validator((id: unknown) => legalCaseId.parse(id))
   .handler(({ context, data }) => response(() => readLegalCopy(context.userId, data)));
 export const legalBackupAction = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: { caseId: string; identifier?: string; confirmId?: number }) => data)
+  .validator((data: { caseId: string; identifier?: string; confirmId?: number }) => legalBackupInput.parse(data))
   .handler(({ context, data }) =>
     response(() => recordBackupAction(context.userId, data.caseId, data)),
   );

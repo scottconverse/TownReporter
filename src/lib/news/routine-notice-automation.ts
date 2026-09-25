@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { ROUTINE_NOTICE_FORMAT_KEYS, type RoutineNoticeFormatKey } from "./routine-notice-types.ts";
+import { cleanOrRaw, routineAutomationInput } from "./request-input.ts";
 
 export type RoutineEditionChannel = "today" | "weekend" | "deadlines";
 export type RoutineAutomationSource = {
@@ -393,7 +394,8 @@ export const getRoutineNoticeAutomation = createServerFn({ method: "GET" })
   });
 export const saveRoutineNoticeAutomation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((x: SaveRoutineNoticeAutomationInput) => x)
+  // Bounded here; `cleanRoutineNoticeAutomation` still names the refusal.
+  .validator((x: SaveRoutineNoticeAutomationInput) => cleanOrRaw<SaveRoutineNoticeAutomationInput>(routineAutomationInput)(x))
   .handler(async ({ context, data }): Promise<RoutineNoticeAutomationResult> => {
     try {
       return {

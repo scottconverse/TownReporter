@@ -10,6 +10,7 @@ import { collapsePrintedDuplicates } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { publicSlug, publicTopic } from "./request-input.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
@@ -75,7 +76,7 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
 );
 
 export const getPublishedArticle = createServerFn({ method: "GET" })
-  .validator((slug: string) => slug)
+  .validator((slug: string) => publicSlug.parse(slug))
   .handler(async ({ data: slug }) => {
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
     try {
@@ -113,7 +114,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
   });
 
 export const listPublishedByTopic = createServerFn({ method: "GET" })
-  .validator((topic: string) => topic)
+  .validator((topic: string) => publicTopic.parse(topic))
   .handler(async ({ data: topic }) => {
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
     try {

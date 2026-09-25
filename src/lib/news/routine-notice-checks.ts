@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import type { RoutineField, RoutineNoticeFormatKey } from "./routine-notice-types.ts";
+import { cleanOrRaw, routineCaptureInput, routineCheckRunInput, routineChecksListInput } from "./request-input.ts";
 
 export type RoutineNoticeCheckErrorCode =
   | "forbidden"
@@ -90,7 +91,8 @@ const failure = (error: unknown): Failure => {
 
 export const checkRoutineNoticeSource = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((value: unknown) => value)
+  // Bounded here; the store's own cleaner still owns the refusal.
+  .validator((value: unknown) => cleanOrRaw(routineCheckRunInput)(value))
   .handler(async ({ context, data }): Promise<RoutineNoticeCheckResult> => {
     try {
       return await (await import("./routine-notice-checks.server.ts")).checkRoutineNoticeSourceForOwner(
@@ -104,7 +106,7 @@ export const checkRoutineNoticeSource = createServerFn({ method: "POST" })
 
 export const getRoutineNoticeChecks = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((value: unknown) => value)
+  .validator((value: unknown) => cleanOrRaw(routineChecksListInput)(value))
   .handler(async ({ context, data }): Promise<RoutineNoticeChecksResult> => {
     try {
       return {
@@ -121,7 +123,7 @@ export const getRoutineNoticeChecks = createServerFn({ method: "GET" })
 
 export const getRoutineNoticeCapturedText = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((value: unknown) => value)
+  .validator((value: unknown) => cleanOrRaw(routineCaptureInput)(value))
   .handler(async ({ context, data }): Promise<RoutineNoticeCapturedTextResult> => {
     try {
       return {
