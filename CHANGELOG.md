@@ -1,6 +1,21 @@
 # Changelog
 
-Current software version: **0.6.62**. Publication state is recorded by GitHub.
+Current software version: **0.6.63**. Publication state is recorded by GitHub.
+
+## 0.6.63 — 2026-09-25
+
+- **Import finished stories.** Paste a report the outside tool wrote (a civic-scanner briefing, markdown, plain text, or a saved web page) and the desk reads it into one card per story with the headline, dek, brief and cited links separated out. Every body paragraph is checked against the pasted text before it is kept; a paragraph that was altered is refused rather than filed, and a report that cannot be split cleanly comes back as one flagged card holding every word of the paste. Ticking cards files them as leads; the unticked ones stay out.
+- **Paste one story.** A second box on the Desk, for a single finished story rather than a report. It opens with the section the same chooser the write box uses would pick, or "Section not chosen — pick one" when the text names no section, instead of a section nobody chose.
+- **Add a source inside a section.** A section page now takes a new source without leaving it: the row lands on the watch list the moment it is added, and the assignment to that section is applied when the editor confirms it.
+- **Sticky save bar.** The draft's save and confirm controls stay in reach on a long story rather than scrolling away from the editor.
+- **Outlet editor.** The owner's named-outlet list is editable on the Server page, with the three states (built-in list, the owner's own list, checks no outlet names) shown as they are stored, and the removal preview naming the story it would unblock.
+- **Front-page river.** The reader's front page shows the paper's own stories in the order an editor sees them.
+- **Section not chosen.** A section the chooser cannot place is now an explicit "Section not chosen — pick one" the editor must answer, rather than a guess filed as a decision. The chooser reads whole words and the newsroom's own section names.
+- **Model order.** Stories, scans and Dark Desk run DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra. Opinion runs Codex Sol, then Claude Sonnet.
+- **Textflowkit transcription.** Meeting audio is transcribed through textflowkit with the run's provenance recorded on the artifact, and imported leads carry where they came from.
+- Bounded the input checks the import, paste and settings surfaces accept, so an oversized or malformed body is refused rather than stored.
+
+The packaged release note names `v0.6.63` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.62 — 2026-09-24
 

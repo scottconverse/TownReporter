@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.62 · publication and deployment are recorded separately**
+**Version 0.6.63 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.62 release guide and evidence boundaries](releases/0.6.62.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.63 release guide and evidence boundaries](releases/0.6.63.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -448,8 +448,11 @@ paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
 Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
-Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
-once if Codex is unavailable. Explicit choices remain the requested first
+Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Opinion's own Automatic tries Codex Sol, then Claude Sonnet
+once if Codex is unavailable; that order belongs to Opinion. Stories, scans and
+Dark Desk walk the desk's own Automatic ladder instead — DeepSeek v4.1 Flash,
+then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra.
+Explicit choices remain the requested first
 runtime and use the same technical-only unfinished-call retry. Claude Code
 and Codex both read the complete configured voice through their native instruction-file options. The page
 lists every missing voice, installation, or login prerequisite and stays
@@ -458,11 +461,11 @@ disabled while readiness is unknown.
 A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
 bodies before draft storage. A provider refusal or invalid delivery reports a
-failed run without creating a draft. Automatic can move from Codex Sol to
-Claude Sonnet once; an explicit choice is tried first and can switch only for a
-recognized technical failure. A failed row has no Read, Edit, or Publish
+failed run without creating a draft. Opinion's Automatic can move from Codex Sol
+to Claude Sonnet once; an explicit choice is tried first and can switch only for
+a recognized technical failure. A failed row has no Read, Edit, or Publish
 action; a finished row shows the requested and actual model and effort. An
-unattended ladder never selects Opus.
+unattended ladder never selects Opus, on any surface.
 
 **Edit**, on the row, opens the piece in its own workbench at
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
@@ -472,7 +475,8 @@ It fetches records before it writes. Historical runs took **ten to forty
 minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
 Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
 each research or writing pass, with a default of 45 minutes per pass. A pair
-can take about 90 minutes, excluding document intake. Automatic can try a Claude Sonnet pair after Codex fails, so its total can be longer.
+can take about 90 minutes, excluding document intake. Opinion's Automatic can
+try a Claude Sonnet pair after Codex fails, so its total can be longer.
 Explicit Local model performs one writing call using the supplied material;
 it does not run the frontier research pass. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
@@ -660,8 +664,11 @@ the registry is the canonical picker definition; provider adapters still impleme
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, all four named Codex
-models, all four named Claude models, Local model and custom connections. Automatic tries Codex Sol
-then Claude Sonnet once when needed. Explicit choices remain the requested
+models, all four named Claude models, Local model and custom connections. Opinion's Automatic tries Codex Sol
+then Claude Sonnet once when needed; the desk's own Automatic ladders for
+stories, scans and Dark Desk run DeepSeek v4.1 Flash, then Qwen 3.6 35B on this
+computer when it is loaded, then Codex Terra, and do not select Claude on their
+own. Explicit choices remain the requested
 first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
@@ -1315,11 +1322,11 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 notes
 
-0.6.52 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders put Claude Sonnet last and never select Opus. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
+0.6.52 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders never select Opus; Claude Sonnet is Opinion's last rung. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
 
 The Daily scan panel is owner-editable for schedule time, runtime, supported effort, accepted sources, and a source cap of 1–12. Its result remains leads for the Queue, never direct publication. The Server health queue now separates retained failures from current queued/running work and the latest terminal workflow result.
 

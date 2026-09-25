@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current software version: [0.6.62](releases/0.6.62.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.63](releases/0.6.63.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -748,8 +748,12 @@ Where the paper says what it thinks.
 Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
 Choose **Automatic**, any named Codex or Claude model, or **Local model**;
-saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
-Codex Sol, then Claude Sonnet once if Codex is unavailable. An explicit choice
+saved custom connections are offered too. Codex Sol is selected by default.
+**Opinion's own Automatic** tries
+Codex Sol, then Claude Sonnet once if Codex is unavailable — that order belongs
+to Opinion. Stories, scans and Dark Desk walk the desk's own Automatic ladder:
+DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then
+Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
 A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
@@ -788,10 +792,11 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic can move from Codex Sol to Claude Sonnet once. A named choice is tried
+Opinion's Automatic can move from Codex Sol to Claude Sonnet once. A named
+choice is tried
 first and the same technical-only unfinished-call rule applies. A finished row
 names the requested and actual model and effort. Opus is never selected by an
-unattended ladder.
+unattended ladder, on any surface.
 
 **Edit** opens the piece in its own editor. That is where you change the
 headline, fix a line, print it, or throw it away. The fact sheet and the image

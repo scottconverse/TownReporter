@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.62**. See the [0.6.62 release guide](docs/releases/0.6.62.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
+Repository documentation version: **0.6.63**. See the [0.6.63 release guide](docs/releases/0.6.63.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -178,9 +178,12 @@ trusted automatically.
 
 ### Claude Code, no key
 
-No API key. When an editor selects a Claude model, or an unattended run reaches
-its final Claude Sonnet rung, the desk shells out to the local **Claude Code**
-login, so the subscription powers it. Automatic never selects Opus; Opus is an
+No API key. When an editor selects a Claude model, or Opinion's Automatic
+reaches its final Claude Sonnet rung, the desk shells out to the local **Claude
+Code** login, so the subscription powers it. Claude Sonnet is on Opinion's
+ladder only; stories, scans and Dark Desk walk DeepSeek v4.1 Flash, then Qwen
+3.6 35B on this computer when it is loaded, then Codex Terra, and do not select
+Claude on their own. No automatic ladder selects Opus; Opus is an
 explicit editor choice. The CLI may also make a small internal Haiku call that
 cannot be turned off from here.
 
@@ -217,7 +220,7 @@ does not read or store the token.
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
 incomplete bodies before draft storage. The Opinion picker offers Automatic,
 Codex Astra, Sol, Terra, and Luna; Claude Fable, Opus, Sonnet, and Haiku; Local model; and custom connections;
-Automatic can move from Codex Sol to Claude Sonnet once when Codex is unavailable. A failed request has no draft
+Opinion's Automatic can move from Codex Sol to Claude Sonnet once when Codex is unavailable. A failed request has no draft
 or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
@@ -348,4 +351,4 @@ jobs. That is why self-hosting is the default.
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
