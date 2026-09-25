@@ -30,8 +30,14 @@ import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
  * This walk's own listen port, registered with
  * scripts/integration-ports-are-unique.test.mjs so no other integration file
  * can quietly bind it and answer this one's requests.
+ *
+ * This was 3321 until the two 0.6.63 lanes merged. Y2's
+ * scripts/story-quota-failover-e2e.mjs already binds 3321 for its fake
+ * DeepSeek endpoint, and that port check caught the collision at merge time --
+ * exactly the "one server answering two scripts" failure the check exists for.
+ * This walk is the newer claim, so it is the one that moves.
  */
-const PORT_IMPORT_ANY_FORMAT = 3321;
+const PORT_IMPORT_ANY_FORMAT = 3322;
 
 const REPO = process.cwd();
 const SHOTS = "C:/Users/scott/Desktop/Code/townreporter-deepseek-oversight/scratch/X3";
