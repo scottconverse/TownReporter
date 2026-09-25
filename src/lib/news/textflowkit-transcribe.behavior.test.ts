@@ -371,6 +371,37 @@ test("a restart adopts the stale running row and runs the transcription once", a
   assert.equal(rows.length, 1, "the adopted job produced one revision, not one per attempt");
 });
 
+/*
+  Found by the brief's ONE real run, and by nothing else.
+
+  The real textflowkit reports `duration` as a float -- 69.9935 for the 70-second
+  clip. `meeting_capture_records.duration_seconds` is an `integer`, so the whole
+  capture write failed with `invalid input syntax for type integer: "69.9935"`
+  and the transcript was lost with it. Every fake-based test above passes a whole
+  number, because the fake defaults to 15.0 and this file's seeds all use whole
+  seeds -- so no green test could have found this. The fake can emit a float on
+  request, which is what makes this one able to.
+*/
+test("a fractional duration from the tool is stored as whole seconds rather than failing the capture write", async () => {
+  const sql = await getSql();
+  const audio = Buffer.from("opus-bytes-for-the-fractional-duration-case");
+  const seed = await seedCapturedMeeting(sql, 97106, { videoId: "stt-fractional-1", audio, durationSeconds: 70 });
+  setEnv("FAKE_TEXTFLOWKIT_MODE", "ok");
+  setEnv("FAKE_TEXTFLOWKIT_DURATION", "69.9935");
+  const env = cliEnv();
+  runWorkerWith(env);
+
+  assert.equal((await enqueueMissingTranscriptions(sql, { newsroomId: seed.room, userId: seed.user, env })).queued, 1);
+  await drainQueuedJobs();
+  const jobs = await waitForJobSettled(sql, seed.room);
+  assert.equal(jobs[0]!.status, "completed", jobs[0]!.error ?? "a float duration must not fail the capture write");
+
+  const record = await captureRecord(sql, seed.room, seed.videoId);
+  assert.equal(record.caption_format, "textflowkit-json");
+  assert.equal(record.duration_seconds, 70, "the nearest whole second, and a number -- not the string the column rejected");
+  assert.equal(Number.isInteger(record.duration_seconds), true);
+});
+
 test("the transcription child sees the allow-list and no secrets", async () => {
   const sql = await getSql();
   const seed = await seedCapturedMeeting(sql, 97105, { videoId: "stt-env-1", audio: Buffer.from("opus-bytes-for-the-env-case"), durationSeconds: 15 });
