@@ -19,24 +19,34 @@ export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | AutomaticRu
 type CliProviderChoice = Exclude<PickerProviderId, "local-model" | "grok-oauth">;
 /** One rung of Automatic's ladder, minus the internal "configured" entry. */
 type LadderChoice = Exclude<ProviderId, "configured">;
-export type ForcedRuntimeSnapshot =
+/**
+ * A run pinned to one of Automatic's own rungs (0.6.64, Unit AA).
+ *
+ * DeepSeek v4.1 Flash or Qwen 3.6 35B, both on a local endpoint. `transport:
+ * "local"` routes it through the same adapter the "Local model" snapshot uses;
+ * the endpoint is the RUNG's, from the registry, so it is never the editor's
+ * local-model pick.
+ *
+ * This is a separate type rather than a variant typed inline, because
+ * `parseForcedRuntimeSnapshot` REFUSES one unless the caller asks for it: a
+ * rung is not a model an editor can pick, so a stored row naming one is not
+ * runnable by a batch. The split is what lets a reader that did NOT opt in
+ * narrow `runtime` to a name an editor could actually have chosen -- without
+ * it, that reader has to cast, and the cast is where a rung would slip in.
+ */
+export type AutomaticRungSnapshot = {
+  runtime: AutomaticRungId;
+  modelChoice: AutomaticRungId;
+  transport: "local";
+  localModel: { baseUrl: string; id: string };
+  modelEffort?: ModelEffort;
+};
+
+/** Every snapshot whose runtime is a model an editor can name. */
+export type NamedForcedRuntimeSnapshot =
   | {
       runtime: "local";
       modelChoice: "local-model";
-      transport: "local";
-      localModel: { baseUrl: string; id: string };
-      modelEffort?: ModelEffort;
-    }
-  | {
-      /*
-        0.6.64 (Unit AA). A run on Automatic that resolved to one of Automatic's
-        own rungs: DeepSeek v4.1 Flash or Qwen 3.6 35B, both on a local
-        endpoint. `transport: "local"` routes it through the same adapter the
-        "Local model" snapshot uses; the endpoint is the RUNG's, from the
-        registry, so it is never the editor's local-model pick.
-      */
-      runtime: AutomaticRungId;
-      modelChoice: AutomaticRungId;
       transport: "local";
       localModel: { baseUrl: string; id: string };
       modelEffort?: ModelEffort;
@@ -65,6 +75,8 @@ export type ForcedRuntimeSnapshot =
       label?: string;
       modelEffort?: ModelEffort;
     };
+
+export type ForcedRuntimeSnapshot = NamedForcedRuntimeSnapshot | AutomaticRungSnapshot;
 
 const choiceFor = (
   runtime: Exclude<ForcedRuntime, CustomModelChoice | AutomaticRungId>,
@@ -241,6 +253,23 @@ export async function resolveAutomaticForcedRuntime(
   throw new Error(`No model in the Automatic ladder is ready. ${failures.join(" ")}${skippedNote}`);
 }
 
+/**
+ * Read a stored runtime snapshot back, refusing what this caller may not run.
+ *
+ * The overloads say out loud what the body does: a rung snapshot is returned
+ * ONLY to a caller that passed `{ automaticRung: true }` -- the run path, which
+ * has to be able to continue a scheduled scan pinned to a rung. Every other
+ * caller gets the named snapshots, so a batch reader's `runtime` cannot be a
+ * rung it never agreed to run.
+ */
+export function parseForcedRuntimeSnapshot(
+  value: unknown,
+  options: { automaticRung: true },
+): ForcedRuntimeSnapshot | null;
+export function parseForcedRuntimeSnapshot(
+  value: unknown,
+  options?: { automaticRung?: false },
+): NamedForcedRuntimeSnapshot | null;
 export function parseForcedRuntimeSnapshot(
   value: unknown,
   options?: { automaticRung?: boolean },

@@ -245,17 +245,26 @@ describe("daily scan on Automatic", () => {
         });
         try {
           const calls: string[] = [];
-          let receipt: {
-            previousChoice: string;
-            nextChoice: string;
-            previousLabel: string;
-            nextLabel: string;
-            nextEffort: unknown;
-            reason: string;
-            switchReason: string;
-            switchNote: string;
-          } | null = null;
-          let resolved: Awaited<ReturnType<typeof validateForcedRuntime>> | null = null;
+          /*
+            A holder rather than two `let`s: both are written from inside the
+            `onSwitch` callback below, which control-flow analysis cannot see,
+            so a `let` initialised to null would still read as null here and
+            `assert.ok` would narrow it to `never`. Property reads carry the
+            declared type instead.
+          */
+          const seen: {
+            receipt?: {
+              previousChoice: string;
+              nextChoice: string;
+              previousLabel: string;
+              nextLabel: string;
+              nextEffort: unknown;
+              reason: string;
+              switchReason: string;
+              switchNote: string;
+            };
+            resolved?: Awaited<ReturnType<typeof validateForcedRuntime>>;
+          } = {};
           const reply = await runScanChatWithFailover({
             job: { id: 7, model_choice: "deepseek-flash", model_choice_source: "scheduled" },
             newsroomId: 1,
@@ -263,7 +272,12 @@ describe("daily scan on Automatic", () => {
             user: "Read the sources.",
             maxTokens: 100,
             timeoutMs: () => 1000,
-            grokChat: (async (_system, _user, _maxTokens, options) => {
+            grokChat: (async (
+              _system: string,
+              _user: string,
+              _maxTokens: number,
+              options: { choice?: string } | undefined,
+            ) => {
               calls.push(String(options?.choice));
               return options?.choice === "deepseek-flash"
                 ? { ok: false, error: "DeepSeek v4.1 Flash is rate limited (429)." }
@@ -284,8 +298,8 @@ describe("daily scan on Automatic", () => {
             // persist itself is not exercised here (it needs a live PGlite
             // schema and belongs to the browser walk).
             onSwitch: async (next) => {
-              receipt = next as unknown as typeof receipt;
-              resolved = await validateForcedRuntime(
+              seen.receipt = next as unknown as typeof seen.receipt;
+              seen.resolved = await validateForcedRuntime(
                 1,
                 next.nextChoice as never,
                 next.nextEffort,
@@ -294,20 +308,22 @@ describe("daily scan on Automatic", () => {
             },
           });
           assert.deepEqual(calls, ["deepseek-flash", "qwen-local"]);
+          const receipt = seen.receipt;
           assert.ok(receipt);
-          assert.equal(receipt!.previousChoice, "deepseek-flash");
-          assert.equal(receipt!.previousLabel, "DeepSeek v4.1 Flash");
-          assert.equal(receipt!.nextChoice, "qwen-local");
-          assert.equal(receipt!.nextLabel, "Qwen 3.6 35B");
-          assert.equal(receipt!.reason, "quota");
+          assert.equal(receipt.previousChoice, "deepseek-flash");
+          assert.equal(receipt.previousLabel, "DeepSeek v4.1 Flash");
+          assert.equal(receipt.nextChoice, "qwen-local");
+          assert.equal(receipt.nextLabel, "Qwen 3.6 35B");
+          assert.equal(receipt.reason, "quota");
           assert.match(
-            receipt!.switchNote,
+            receipt.switchNote,
             /moved to Qwen 3\.6 35B because DeepSeek v4\.1 Flash reached its usage limit/i,
           );
+          const resolved = seen.resolved;
           assert.ok(resolved);
-          assert.equal(resolved!.modelChoice, "qwen-local");
-          assert.equal(resolved!.transport, "local");
-          assert.deepEqual(resolved!.localModel, {
+          assert.equal(resolved.modelChoice, "qwen-local");
+          assert.equal(resolved.transport, "local");
+          assert.deepEqual(resolved.localModel, {
             baseUrl: "http://127.0.0.1:1234/v1",
             id: "halo/qwen3.6-35b-a3b",
           });
