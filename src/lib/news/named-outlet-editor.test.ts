@@ -400,11 +400,11 @@ describe("the preview names the published stories a change stops checking", { ti
     assert.equal(change.storyCount, 1);
     assert.deepEqual(change.stories.map((s) => s.headline), ["Sirens at midnight"]);
     assert.equal(
-      change.before.aliases.length,
+      change.before?.aliases.length,
       2,
       "the preview shows the before and after of the row it changed",
     );
-    assert.deepEqual(change.after.aliases, ["Riverside Gazette"]);
+    assert.deepEqual(change.after?.aliases, ["Riverside Gazette"]);
   });
 
   it("shows an added outlet without a story list, because nothing is unchecked", async () => {
@@ -469,7 +469,13 @@ describe("the preview names the published stories a change stops checking", { ti
 describe("the preview decides with the gate's own matcher", () => {
   it("does not report a story that only happens to contain the words", () => {
     const stories = [
-      { id: 1, headline: "At the office", slug: "at-the-office", body: "Call the office at times call, and the camera at the corner was repainted." },
+      {
+        id: 1,
+        headline: "At the office",
+        slug: "at-the-office",
+        body: "Call the office at times call, and the camera at the corner was repainted.",
+        sourceUrls: [],
+      },
     ];
     assert.deepEqual(
       namedOutletPreview([NAMED_OUTLETS[0]], [], stories),
