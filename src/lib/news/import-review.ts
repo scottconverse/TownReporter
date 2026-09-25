@@ -380,15 +380,22 @@ export type ImportSelectionPayload = {
   score: string;
   triage: string;
   reporterNextStep: string;
-  /** The filing label the report used ("S1"), kept as provenance on the lead. */
-  storyId: string;
+  /**
+   * The filing label the report used ("S1"), kept as provenance on the lead.
+   * Optional here for the same reason as on `ImportSelection` in
+   * `import-stories.server.ts`: it is the v2.6 fields a page built before them
+   * does not send, and the two shapes are checked against each other at every
+   * call site, so they stay optional together or not at all. `selectionFromCard`
+   * always fills all three.
+   */
+  storyId?: string;
   /** The editorial readiness tier the report stated, 0 when it stated none. */
-  readiness: ReadinessTier;
+  readiness?: ReadinessTier;
   /**
    * The editor notes: the tier's qualifier, the claims ledger with its
    * statuses, and the next step. Stored on the lead, never published.
    */
-  notes: string;
+  notes?: string;
   hold: boolean;
   disclosureKey: DisclosureKey;
   disclosureOther: string;

@@ -199,17 +199,29 @@ export type ImportSelection = {
   score: string;
   triage: string;
   reporterNextStep: string;
-  /** The report's own filing label ("S1"), kept as provenance. */
-  storyId: string;
-  /** The editorial readiness tier the report stated: 1 ready, 2 developing, 3 potential, 0 unstated. */
-  readiness: ReadinessTier;
+  /**
+   * The report's own filing label ("S1"), kept as provenance. Optional: a
+   * review page built before the v2.6 fields existed sends no label, and the
+   * import must still file. Read as `String(story.storyId ?? "")` below.
+   */
+  storyId?: string;
+  /**
+   * The editorial readiness tier the report stated: 1 ready, 2 developing, 3
+   * potential, 0 unstated. Optional for the same reason as `storyId`, and
+   * read as `story.readiness ?? 0` below -- an unstated tier is 0, not a
+   * refused import.
+   */
+  readiness?: ReadinessTier;
   /**
    * The editor notes the card carried: the tier's qualifier, the claims ledger
    * with its statuses, the next step. Stored, never published -- and used in
    * place of `reporterNextStep` when the card has them, because the ledger is
    * the part of the notes an editor must be able to find again.
+   *
+   * Optional like the two above: a pre-v2.6 card has no ledger, and the
+   * handler falls back to `reporterNextStep` (read as `String(story.notes ?? "")`).
    */
-  notes: string;
+  notes?: string;
   hold: boolean;
   disclosureKey: DisclosureKey;
   disclosureOther: string;
