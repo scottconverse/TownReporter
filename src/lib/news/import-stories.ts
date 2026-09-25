@@ -52,6 +52,14 @@ export type ImportedStory = {
   reporterNextStep: string;
   /** The line naming the official sources, exactly as written ("" when absent). */
   scoreLine: string;
+  /**
+   * The sources the report cited as documents rather than links, one per entry,
+   * in its own words: `Sept 22 packet p. 819 (Tier A)`. A packet page or a
+   * council recording has no URL, and the desk must not print a made-up one --
+   * so these are carried as the text they are, beside the real links in
+   * `links` (`provenanceFromCitations` files them that way).
+   */
+  citations: string[];
   /** Every link in the block, deduped by URL, in the order they appear. */
   links: ImportLink[];
   /** The whole block as it arrived — what "the text is kept exactly as written" means. */
@@ -116,23 +124,82 @@ export function disclosureLine(key: DisclosureKey, other = ""): string {
 /** The word the source tool used for a story it wants held. */
 const HOLD = /^hold$/i;
 
+/**
+ * The word it used for a story it wants dropped to a lower tier. Demote is not
+ * the same request as Hold, but it is the same flag for the desk: a lead that
+ * may not be published as it stands, and one the editor should look at first.
+ */
+const DEMOTE = /^demote$/i;
+
 const LINK_RE = /\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)/g;
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const LEADING_ORDINAL = /^(?:\d+|[ivxlc]+)[.)]\s+/i;
 
-const LABEL = {
-  score: /^\*\*Score:\*\*\s*/i,
-  why: /^\*\*Why it matters:\*\*\s*/i,
-  brief: /^\*\*Plain-language brief:\*\*\s*/i,
-  next: /^\*\*Reporter next step:\*\*\s*/i,
-};
+/**
+ * Which part of a story a label names, in the words of whichever tool wrote it.
+ *
+ * The Codex scan writes `**Plain-language brief:**`; the very same scan run
+ * inside Claude writes `**Plain-language version:**`, and writes `**Why it
+ * matters for Longmont:**` where Codex writes `**Why it matters:**`. The editor
+ * should not have to care which one they ran, so the synonyms live here in one
+ * table: adding a wording is one line, and the list is read by
+ * `labelGroupOf()` for every label in every report.
+ *
+ * `score` is its own group rather than a kind of note because that one line
+ * carries the score and the verdict the desk files the lead under; the rest of
+ * the notes group is editorial guidance that is never published.
+ */
+export type ImportLabelGroup = "score" | "brief" | "dek" | "notes" | "sources";
 
-/** Any paragraph that opens with a `**Label:**` the report format defines. */
-const ANY_PART_LABEL = /^\*\*(?:Score|Why it matters|Plain-language brief|Reporter next step):\*\*/i;
+export const IMPORT_LABELS: { group: ImportLabelGroup; label: RegExp; why: string }[] = [
+  { group: "score", label: /^(?:score|triage(?:\s+score)?)$/i, why: "the score line: score + verdict" },
+  { group: "brief", label: /^plain[- ]language(?:\s+(?:brief|version|summary))?$/i, why: "plain-language brief" },
+  { group: "dek", label: /^why (?:it|this) matters(?:\s+for\s+.+)?$/i, why: "why it matters" },
+  {
+    group: "notes",
+    label: /^(?:reporter next step|next step|what would elevate|what elevates this|verification|editors?'? note)$/i,
+    why: "editor guidance, never published",
+  },
+  {
+    group: "sources",
+    label: /^(?:official\s+)?sources?(?:\s+and\s+records)?$|^citations?$/i,
+    why: "the report's own source list",
+  },
+];
+
+/** Which part of a story this label names, or "" when the table does not know it. */
+export function labelGroupOf(label: string): ImportLabelGroup | "" {
+  const text = String(label ?? "")
+    .trim()
+    .replace(/[*_]+$/g, "")
+    .trim();
+  if (!text) return "";
+  return IMPORT_LABELS.find((entry) => entry.label.test(text))?.group ?? "";
+}
+
+/**
+ * A labelled run inside a paragraph: `**Score: 16/20**`, `**Why it matters:**`.
+ *
+ * Both shapes the exports use -- the label's value inside the bold and the value
+ * after it -- and both in one document, which is why this splits a paragraph
+ * rather than matching a whole one. A Claude lead carries two labels inside a
+ * single paragraph (`… **What would elevate:** … **Plain language:** …`), and a
+ * bold phrase that is not a label (`**Water Fund:** $51.01 million`) matches
+ * nothing here and stays in the body, exactly as the editor wrote it.
+ */
+const LABEL_RUN = /\*\*\s*([A-Za-z][^*:\n]{0,40}?)\s*:\s*([^*\n]*?)\s*\*\*/g;
+
+/**
+ * The report's own source list, as its own paragraph: `*Sources: Sept 22 packet
+ * p. 819 (Tier A); …*`, `**Official sources:** …`, `Citations: …`.
+ *
+ * Italic rather than bold, which is why it is matched here and not by
+ * `LABEL_RUN`; anchored at the start of the paragraph, so a sentence that merely
+ * mentions the word cannot become the source list.
+ */
+const SOURCES_LINE = /^\s*[*_]{0,2}\s*((?:official\s+)?sources?(?:\s+and\s+records)?|citations?)\s*:\s*[*_]{0,2}\s*([\s\S]*?)\s*[*_]{0,6}\s*$/i;
 
 const NAMED_SECTION = /^\*\*(?:Date|Scan date|Run|Mode|Status|Verification boundary):\*\*/i;
-
-const TRIAGE_WORD = /\*\*(Advance|Hold|Skip|Watch|Monitor)\*\*/i;
 
 export const IMPORT_LIMITS = { text: 400_000, headline: 180, stories: 200 };
 
@@ -161,15 +228,36 @@ export function containsVerbatim(input: string, paragraph: string): boolean {
   return normalizeForVerbatim(input).includes(needle);
 }
 
-/** Every markdown link in a stretch of text, deduped by URL, in order. */
+/**
+ * A URL the report pasted without its scheme: `youtube.com/watch?v=jhsFsEz0P5A`,
+ * `longmont.primegov.com/api/v2/PublicPortal/ListArchivedMeetings`.
+ *
+ * The reports cite bare domains in running text and in source-access tables, and
+ * an editor who wants the recording should get a link they can click. The
+ * boundary group is what keeps this off a URL that is already inside a markdown
+ * link (`](https://…` puts `/` before the host, which is not a boundary), and the
+ * scheme is added, never guessed: the host is what the report wrote.
+ */
+const BARE_URL_RE =
+  /(?:^|[\s([|,])((?:[a-z0-9-]+\.)+(?:com|org|net|gov|edu|io|ai|us|co|info|biz|dev)(?:\/[^\s)\]"'<>]*)?)/gi;
+
+/** The markdown links and the bare domains in a stretch of text. */
 export function extractLinks(text: string): ImportLink[] {
+  const body = String(text ?? "");
   const found: ImportLink[] = [];
   const seen = new Set<string>();
-  for (const match of String(text ?? "").matchAll(LINK_RE)) {
+  for (const match of body.matchAll(LINK_RE)) {
     const url = match[2]!;
     if (seen.has(url)) continue;
     seen.add(url);
     found.push({ text: (match[1] || url).trim(), url });
+  }
+  for (const match of body.matchAll(BARE_URL_RE)) {
+    const host = match[1]!.replace(/[.,;:]+$/, "");
+    const url = `https://${host}`;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push({ text: host, url });
   }
   return found;
 }
@@ -190,6 +278,105 @@ export function stripOrdinal(heading: string): string {
 }
 
 /* ------------------------------------------------------------------ *
+ * Labels: what the report called each part, and where it said it.
+ * ------------------------------------------------------------------ */
+
+type LabelledPiece = { group: ImportLabelGroup | ""; text: string };
+
+/**
+ * One paragraph, split at every label the table knows -- in order, words
+ * untouched. A paragraph with no known label comes back whole.
+ *
+ * The label's own value belongs to the label either way: `**Score: 16/20**` and
+ * `**Score:** 17/20` both leave the score as the first thing after the label.
+ */
+export function splitLabelled(paragraph: string): LabelledPiece[] {
+  const text = String(paragraph ?? "");
+  const runs: { start: number; end: number; group: ImportLabelGroup; value: string }[] = [];
+  for (const match of text.matchAll(LABEL_RUN)) {
+    const group = labelGroupOf(match[1]!);
+    // An unknown bold label is the editor's own words: it stays where it is.
+    if (!group) continue;
+    runs.push({
+      start: match.index!,
+      end: match.index! + match[0].length,
+      group,
+      value: (match[2] ?? "").trim(),
+    });
+  }
+  const first = runs[0];
+  if (!first) return [{ group: "", text }];
+
+  const pieces: LabelledPiece[] = [];
+  const head = text.slice(0, first.start).trim();
+  if (head) pieces.push({ group: "", text: head });
+  runs.forEach((run, index) => {
+    const until = index + 1 < runs.length ? runs[index + 1]!.start : text.length;
+    const after = text.slice(run.end, until).trim();
+    pieces.push({ group: run.group, text: [run.value, after].filter(Boolean).join(" ") });
+  });
+  return pieces;
+}
+
+/** The text of a paragraph that is the report's own `Sources:` list, or "". */
+export function sourcesLineOf(paragraph: string): string {
+  const match = SOURCES_LINE.exec(String(paragraph ?? ""));
+  return match ? (match[2] ?? "").trim() : "";
+}
+
+/**
+ * The entries in a sources line, one per `;`, each with its trailing full stop
+ * taken off. They are the report's own words: a citation of a packet page or a
+ * recording has no URL to invent, and nothing here guesses one.
+ */
+export function citationsFromText(text: string): string[] {
+  return String(text ?? "")
+    .split(";")
+    .map((part) => part.trim().replace(/[.\s]+$/, "").trim())
+    .filter(Boolean);
+}
+
+const TRIAGE_BOLD = /\*\*\s*(advance|hold|demote|kill|suppress|skip|watch|monitor)\s*\*\*/i;
+const TRIAGE_BARE = /\b(advance|hold|demote|kill|suppress)\b/i;
+
+/** The report's verdict word, in the casing the desk shows it: "Advance", "Hold". */
+export function triageWordOf(text: string): string {
+  const raw = String(text ?? "");
+  const word = TRIAGE_BOLD.exec(raw)?.[1] ?? TRIAGE_BARE.exec(raw)?.[1] ?? "";
+  if (!word) return "";
+  return word[0]!.toUpperCase() + word.slice(1).toLowerCase();
+}
+
+/** `## LEADS (HOLD)` / `## HOLD` — a section that states its verdict in its name. */
+const SECTION_VERDICT = /^(?:leads?|stories|items|cards?)?\s*\(?\s*(advance|hold|demote|kill|suppress|skip)\s*\)?\s*$/i;
+
+/** The verdict a section's name states, or "". Deliberately strict: only a
+ *  section whose *whole* name is the verdict, so "Signals and watch list" is
+ *  a section of the report and not a Watch on every lead under it. */
+export function sectionVerdictOf(heading: string): string {
+  const word = SECTION_VERDICT.exec(cleanHeadingText(String(heading ?? "")))?.[1] ?? "";
+  if (!word) return "";
+  return word[0]!.toUpperCase() + word.slice(1).toLowerCase();
+}
+
+/** The `(9/20: …)` code a report puts on a heading, by the heading's own words. */
+function headingScoreCodes(text: string): Map<string, string> {
+  const codes = new Map<string, string>();
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const heading = HEADING_RE.exec(line);
+    if (!heading) continue;
+    // The bold around the heading comes off first: the code sits inside it.
+    const raw = unescapeMarkdown(heading[2]!.trim())
+      .replace(/[*_]+$/, "")
+      .trim();
+    const code = /\(\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+)\s*:[^)]*\)\s*$/.exec(raw);
+    if (!code) continue;
+    codes.set(cleanHeadingText(heading[2]!), `${code[1]}/${code[2]}`);
+  }
+  return codes;
+}
+
+/* ------------------------------------------------------------------ *
  * Pre-clean: the display damage a markdown export leaves behind.
  * ------------------------------------------------------------------ */
 
@@ -202,7 +389,7 @@ export function stripOrdinal(heading: string): string {
  * the editor wants on a page. Removing the backslash, and nothing else, is the
  * whole of this step.
  */
-const MARKDOWN_ESCAPE = /\\([!-\/:-@[-`{-~])/g;
+const MARKDOWN_ESCAPE = /\\([!-/:-@[-`{-~])/g;
 
 /**
  * A bold the export escaped on one side only: `\*\*$4,513,469**`.
@@ -378,6 +565,11 @@ function splitBlocks(text: string): RawBlock[] {
   return blocks;
 }
 
+/** A labelled part, appended when a report states the same part twice. */
+function joinPart(previous: string, text: string): string {
+  return previous ? `${previous}\n\n${text}` : text;
+}
+
 function partsOf(paragraphs: string[]) {
   const out = {
     score: "",
@@ -386,30 +578,41 @@ function partsOf(paragraphs: string[]) {
     why: "",
     brief: "",
     next: "",
+    sources: "",
     body: [] as string[],
   };
   for (const paragraph of paragraphs) {
-    if (LABEL.score.test(paragraph)) {
-      out.scoreLine = paragraph;
-      out.score = (paragraph.replace(LABEL.score, "").split("·")[0] ?? "").trim();
-      out.triage = TRIAGE_WORD.exec(paragraph)?.[1] ?? "";
+    const sources = sourcesLineOf(paragraph);
+    if (sources) {
+      out.sources = joinPart(out.sources, sources);
       continue;
     }
-    if (LABEL.why.test(paragraph)) {
-      out.why = paragraph.replace(LABEL.why, "").trim();
-      continue;
+    for (const piece of splitLabelled(paragraph)) {
+      switch (piece.group) {
+        case "":
+          out.body.push(piece.text);
+          break;
+        case "score":
+          out.scoreLine = paragraph;
+          out.score ||= piece.text.split(/[·|]/)[0]!.trim();
+          out.triage ||= triageWordOf(paragraph);
+          break;
+        case "dek":
+          out.why = joinPart(out.why, piece.text);
+          break;
+        case "brief":
+          out.brief = joinPart(out.brief, piece.text);
+          break;
+        case "notes":
+          out.next = joinPart(out.next, piece.text);
+          break;
+        case "sources":
+          out.sources = joinPart(out.sources, piece.text);
+          break;
+      }
     }
-    if (LABEL.brief.test(paragraph)) {
-      out.brief = paragraph.replace(LABEL.brief, "").trim();
-      continue;
-    }
-    if (LABEL.next.test(paragraph)) {
-      out.next = paragraph.replace(LABEL.next, "").trim();
-      continue;
-    }
-    out.body.push(paragraph);
   }
-  return out;
+  return { ...out, citations: citationsFromText(out.sources) };
 }
 
 function makeStory(input: {
@@ -420,22 +623,27 @@ function makeStory(input: {
   raw: string;
   paragraphs: string[];
   disclosureKey: DisclosureKey;
+  /** The `(9/20: …)` code off the heading, when the lead states no score of its own. */
+  scoreCode?: string;
+  /** The verdict the section above the lead states, when the lead states none. */
+  sectionVerdict?: string;
 }): ImportedStory {
   const parts = partsOf(input.paragraphs);
-  const triage = (parts.triage || "").trim();
+  const triage = (parts.triage || input.sectionVerdict || "").trim();
   return {
     key: input.key,
     order: input.order,
     headline: input.headline,
     isStory: input.isStory,
-    score: parts.score,
+    score: parts.score || input.scoreCode || "",
     triage,
-    holds: HOLD.test(triage),
+    holds: HOLD.test(triage) || DEMOTE.test(triage),
     dek: parts.why,
     body: parts.body.join("\n\n"),
     plainBrief: parts.brief,
     reporterNextStep: parts.next,
     scoreLine: parts.scoreLine,
+    citations: parts.citations,
     links: extractLinks(input.raw),
     raw: input.raw,
     sectionSuggestion: topicFromText(
@@ -447,9 +655,20 @@ function makeStory(input: {
   };
 }
 
-/** Does this block carry any of the report format's labelled parts? */
+/**
+ * Does this block carry the labelled parts a story has -- a score line, a dek,
+ * a brief, a next step?
+ *
+ * A sources line deliberately does not count. Both reports have sections that
+ * name their own source in prose (`## COVERAGE LEDGER: … **Source:** official
+ * recording …`) and none of them is a story; a section with a citation list and
+ * no claim of its own is a record of the scan, which is what the desk already
+ * shows it as.
+ */
 function looksLikeStory(text: string): boolean {
-  return splitParagraphs(text).some((p) => ANY_PART_LABEL.test(p));
+  return splitParagraphs(text).some((p) =>
+    splitLabelled(p).some((piece) => piece.group !== "" && piece.group !== "sources"),
+  );
 }
 
 /**
@@ -473,10 +692,15 @@ function looksLikeStory(text: string): boolean {
  */
 export function parseStructure(text: string, opts: { disclosureKey?: DisclosureKey } = {}): ImportedStory[] {
   const blocks = splitBlocks(precleanMarkdown(text));
+  // The `(9/20: I3 Im1 C3 N2)` codes come off the headings before pre-cleaning
+  // strips them, so a lead that carries no score line of its own -- every HOLD
+  // lead in the Claude report -- still shows the score the report gave it.
+  const scoreCodes = headingScoreCodes(text);
   const stories: ImportedStory[] = [];
   const disclosureKey = opts.disclosureKey ?? "outside-ai";
+  let sectionVerdict = "";
 
-  const push = (headline: string, isStory: boolean, raw: string, bodyText: string) => {
+  const push = (headline: string, isStory: boolean, raw: string, bodyText: string, verdict: string) => {
     const paragraphs = splitParagraphs(bodyText);
     stories.push(
       makeStory({
@@ -489,14 +713,19 @@ export function parseStructure(text: string, opts: { disclosureKey?: DisclosureK
         raw,
         paragraphs,
         disclosureKey,
+        scoreCode: scoreCodes.get(headline) ?? "",
+        sectionVerdict: verdict,
       }),
     );
   };
 
   for (const block of blocks) {
     if (block.level < 2) continue;
+    // A section states the verdict for the leads under it: "## LEADS (HOLD)".
+    // The section card carries it too, so the card itself shows the flag.
+    if (block.level === 2) sectionVerdict = sectionVerdictOf(block.heading);
     const isStory = block.level === 3 || looksLikeStory(block.text);
-    push(block.heading, isStory, [block.heading, block.text].join("\n\n"), block.text);
+    push(block.heading, isStory, [block.heading, block.text].join("\n\n"), block.text, sectionVerdict);
   }
   return stories;
 }
@@ -524,20 +753,19 @@ export function parsePlainStory(
   if (headline.split(/\s+/).length > 25) return null;
 
   const rest = paragraphs.slice(1);
-  const sourcesParagraph = rest.findIndex((p) =>
-    /^\s*\*{0,2}Sources?(?:\s+and\s+records)?\s*:?\*{0,2}\s*$/i.test(p) ||
-    /^\s*\*{0,2}Sources?(?:\s+and\s+records)?\s*:?\*{0,2}\s+\S/i.test(p),
-  );
-  const bodyParagraphs = sourcesParagraph >= 0 ? rest.slice(0, sourcesParagraph) : rest;
-  if (bodyParagraphs.length === 0) return null;
+  const sourcesParagraph = rest.findIndex((p) => sourcesLineOf(p) !== "");
+  if (sourcesParagraph === 0) return null;
 
+  // The whole remainder goes in: the reader takes the `Sources:` paragraph out
+  // of the body itself (`sourcesLineOf`), so a plain story's cited documents
+  // land in `citations` instead of being dropped on the way here.
   return makeStory({
     key: "s1",
     order: 1,
     headline,
     isStory: true,
     raw: text,
-    paragraphs: bodyParagraphs,
+    paragraphs: rest,
     disclosureKey: opts.disclosureKey ?? "person",
   });
 }

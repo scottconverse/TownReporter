@@ -208,6 +208,75 @@ describe("the Claude report, read for the editor", () => {
   });
 });
 
+describe("the report's labels, in whichever words it used", () => {
+  const lead = claudeStories.find((s) => s.headline.startsWith("Hangar lease assignment"))!;
+
+  it("splits a paragraph whose labels sit inside it, and keeps the body's own words", () => {
+    assert.ok(lead, "the hangar lease lead");
+    assert.equal(lead.reporterNextStep, "a council statement linking lease policy to the vision session.");
+    assert.equal(
+      lead.plainBrief,
+      "Council approved moving a hangar lease at the city airport to a new owner, 5 to 2. Two members voted no both times. Earlier, one member wanted to wait until after Saturday's airport session.",
+    );
+    assert.ok(!lead.body.includes("What would elevate"), lead.body.slice(-160));
+    assert.ok(!lead.body.includes("Plain language"), lead.body.slice(-160));
+    assert.equal(bodyIsVerbatim(CLAUDE, lead), true);
+  });
+
+  it("reads a \"Why it matters for Longmont:\" dek, which names the place", () => {
+    const first = claudeStories[0]!;
+    assert.match(first.dek, /^This revives a policy that failed in 2025 on a 3-3 vote/);
+    assert.ok(!first.body.includes("Why it matters"));
+  });
+
+  it("takes the report's own cited documents as sources, inventing no URL for them", () => {
+    const first = claudeStories[0]!;
+    assert.deepEqual(first.citations, [
+      "Sept 22 council recording 0:23:37 to 0:36:25 (transcript-based)",
+      "Sept 22 packet p. 819 (Tier A)",
+      "2027 Budget Message, Sept 1 (Tier A, CONTEXT)",
+    ]);
+    assert.deepEqual(first.links, []);
+    assert.ok(!first.body.includes("Sources:"));
+  });
+
+  it("makes a real link out of a domain the report pasted without a scheme", () => {
+    const section = claude.stories.find((s) => s.headline === "LEADS (ADVANCE)");
+    assert.ok(section, "the ADVANCE section card");
+    assert.ok(
+      section!.links.some((l) => l.url === "https://youtube.com/watch?v=jhsFsEz0P5A"),
+      JSON.stringify(section!.links),
+    );
+  });
+});
+
+describe("the triage the report stated", () => {
+  it("reads the score and the verdict off the score line", () => {
+    assert.equal(claudeStories[0]!.score, "16/20");
+    assert.equal(claudeStories[0]!.triage, "Advance");
+    assert.equal(claudeStories[0]!.holds, false);
+  });
+
+  it("reads a Hold from the section a lead sits under, and the score off its heading", () => {
+    const held = claudeStories.filter((s) =>
+      /^(Hangar lease assignment|Joint meeting with Boulder County|First out-of-city)/.test(s.headline),
+    );
+    assert.equal(held.length, 3);
+    for (const held_ of held) {
+      assert.equal(held_.triage, "Hold");
+      assert.equal(held_.holds, true);
+    }
+    assert.equal(held[0]!.score, "9/20");
+  });
+
+  it("shows the Hold flag on the Demote section too", () => {
+    const demote = claude.stories.find((s) => s.headline === "LEADS (DEMOTE)");
+    assert.ok(demote, "the DEMOTE section card");
+    assert.equal(demote!.triage, "Demote");
+    assert.equal(demote!.holds, true);
+  });
+});
+
 describe("a single finished story with no markdown headings", () => {
   const PLAIN = [
     "Longmont council delays the transit vote to October",
