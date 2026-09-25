@@ -1,10 +1,17 @@
 import { createHash } from "node:crypto";
 
 export type CaptionFormat = "srv3" | "vtt";
+/**
+ * Unit R: a transcript that is not a caption file at all. `textflowkit-json`
+ * records that the text came from speech-to-text, so nothing downstream can
+ * mistake it for the publisher's own captions -- the distinction the desk's
+ * reader-facing label depends on.
+ */
+export type TranscriptFormat = CaptionFormat | "textflowkit-json";
 
 export type ParsedCaptionFile = {
   text: string;
-  format: CaptionFormat;
+  format: TranscriptFormat;
   sha256: string;
   sourcePath: string;
   segments?: ParsedCaptionSegment[];

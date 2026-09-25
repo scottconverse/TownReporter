@@ -539,6 +539,13 @@ export async function applyCapturedMeetingTranscript(
     result: Extract<CaptionCaptureResult, { ok: true }>;
     forced?: boolean;
     now?: Date;
+    /**
+     * Unit R: this revision is speech-to-text, not the publisher's captions.
+     * Both fields travel together into the artifact row so the desk can label
+     * it for a reader and an editor can see which model read the audio.
+     */
+    sourceMethod?: string;
+    provenance?: Record<string, unknown> | null;
   },
   deps: Pick<MeetingAwarenessDeps, "storeMeetingTranscriptArtifact" | "runSection5" | "withTransaction"> = {},
 ): Promise<{ revised: boolean; settled: boolean; artifactId: number; warnings: string[] }> {
@@ -605,6 +612,8 @@ export async function applyCapturedMeetingTranscript(
       videoId: input.video.id,
       parsed: input.result.parsed,
       infoSourcePath: input.result.infoPath,
+      sourceMethod: input.sourceMethod,
+      provenance: input.provenance ?? null,
     });
     const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, {
       newsroomId: input.newsroomId,

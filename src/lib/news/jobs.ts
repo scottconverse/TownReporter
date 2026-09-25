@@ -15,7 +15,15 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * provider took. It is a job now, on the default lane, for the same reasons
  * drafting is.
  */
-export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull";
+/**
+ * `audio-transcribe` joined the list in 0.6.63 (unit R). Transcribing a
+ * meeting's retained audio with textflowkit is minutes of CPU, not seconds --
+ * the same reason `editorial` and `artifact-ocr` are jobs rather than inline
+ * work. It rides the `default` lane and serialises itself to one run at a time
+ * (see textflowkit-transcribe.server.ts); the lane's concurrency of 2 is about
+ * how many jobs may be *open*, not how many may burn CPU.
+ */
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -224,6 +232,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "pull") {
     const { performPullWork } = await import("./pull.server.ts");
     await performPullWork(job);
+  } else if (job.kind === "audio-transcribe") {
+    const { performAudioTranscribeWork } = await import("./textflowkit-transcribe.server.ts");
+    await performAudioTranscribeWork(job);
   }
 }
 
