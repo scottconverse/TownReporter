@@ -315,6 +315,15 @@
   background: var(--surface);
   overflow: hidden;
 }
+/*
+  A paper with no stories past "The latest" has nothing to put in the box
+  beside the lead, and the box is not rendered at all -- the grid then has one
+  child and would leave the second column empty, so the lead takes the full
+  width instead. `index.tsx` adds this class when the box is absent.
+*/
+.reader .hero.single {
+  grid-template-columns: 1fr;
+}
 .reader .lead {
   padding: 39px 42px 34px;
 }
@@ -1784,7 +1793,8 @@
 }
 
 /* The latest-stories river: every published story, below the front page's
-   lead, "The latest" list and opinion band, which the loader excludes. */
+   lead, "The latest" list, the "More of the story" box and the opinion band,
+   which the loader excludes. */
 .reader .river {
   padding: 30px 0 45px;
   border-top: 1px solid var(--line);

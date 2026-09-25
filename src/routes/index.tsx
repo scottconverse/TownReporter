@@ -13,6 +13,18 @@ import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /** How many stories one "Latest stories" batch carries. */
 const RIVER_BATCH = 12;
+/**
+ * Where "The latest" ends: the lead, then the five under it. The box beside the
+ * lead picks up here -- it used to print stories 2, 3 and 4, which "The latest"
+ * already prints, so three of the front page's first six appeared twice.
+ */
+const LATEST_END = 6;
+/**
+ * How many stories the top of the front page prints in all: the lead, the five
+ * under "The latest", and the three in the box beside the lead. The opinion
+ * band and the river start below them, so no story is printed twice.
+ */
+const TOP_STORIES = 9;
 
 export const Route = createFileRoute("/")({
   validateSearch: readerSearch,
@@ -29,20 +41,25 @@ export const Route = createFileRoute("/")({
       },
     });
     if (listing) return { listing: page, river: null, opinion: null };
+    // The lead, "The latest" and the box beside the lead: what is printed above
+    // the band and the river.
+    const above = page.stories.slice(0, TOP_STORIES).map((s) => s.id);
     /*
       The opinion band is above the river, so its story is read here -- once --
       both to print that band on the server and to keep the piece out of the
-      river. Without it the same story appears twice on one front page.
+      river. It takes the newest opinion story the top of the page has NOT
+      printed: the band's own piece used to be one of "The latest" rows as well,
+      so the front page carried it twice.
     */
     const opinion = await readerArticles({
-      data: { topic: "opinion", page: 1, oldest: false, limit: 1 },
+      data: { topic: "opinion", page: 1, oldest: false, limit: 1, exclude: above },
     });
     const river = await readerArticles({
       data: {
         limit: RIVER_BATCH,
-        // The lead, the record list, "The latest" and the opinion band: every
-        // story the top of the page already prints.
-        exclude: [...page.stories.slice(0, 6).map((s) => s.id), ...opinion.stories.map((s) => s.id)],
+        // Everything the top of the page prints, and the band's piece: the
+        // river carries what is left, and each story once.
+        exclude: [...above, ...opinion.stories.map((s) => s.id)],
       },
     });
     return { listing: page, river, opinion };
@@ -79,16 +96,34 @@ function Home() {
     initialData: search.view === "saved" ? undefined : initial.listing,
     enabled: search.view !== "saved" || reader.ready,
   });
-  const opinion = useQuery({
-    queryKey: ["reader-opinion"],
-    queryFn: () => readerArticles({ data: { topic: "opinion", page: 1, oldest: false } }),
-    enabled: !listing,
-    initialData: initial.opinion ?? undefined,
-  });
   const data = query.data ?? initial.listing;
   const stories = data.stories;
   const lead = stories[0];
+  /*
+    The band asks the same question the loader asked, with the same exclusion:
+    the top of the page's own stories. A client query without it would refetch
+    the newest opinion piece as soon as the page hydrated and print the story
+    under "The latest" a second time.
+  */
+  const aboveIds = stories.slice(0, TOP_STORIES).map((s) => s.id);
+  const opinion = useQuery({
+    queryKey: ["reader-opinion", aboveIds],
+    queryFn: () =>
+      readerArticles({
+        data: { topic: "opinion", page: 1, oldest: false, limit: 1, exclude: aboveIds },
+      }),
+    enabled: !listing,
+    initialData: initial.opinion ?? undefined,
+  });
   const featuredOpinion = opinion.data?.stories[0];
+  /*
+    The box beside the lead. It picks up where "The latest" stops rather than
+    repeating it: the hero deepens the front page instead of printing three of
+    its stories a second time. On a paper with nothing left at story 7 there is
+    nothing for the box to add, and it is left out -- the "Explore the archive"
+    button under "The latest" is the way down the page either way.
+  */
+  const moreStories = stories.slice(LATEST_END, TOP_STORIES);
   /*
     The "Latest stories" river. The loader server-renders its first batch, so
     the list is there without JavaScript and for a crawler; the rest arrives
@@ -297,7 +332,10 @@ function Home() {
             </span>
           </div>
           {lead ? (
-            <section className="hero" aria-label="Featured story">
+            <section
+              className={moreStories.length > 0 ? "hero" : "hero single"}
+              aria-label="Featured story"
+            >
               <article className="lead">
                 <Link to="/" search={{ topic: lead.topic }} className={`tag ${lead.topic}`}>
                   {sections.find((s) => s.key === lead.topic)?.name ?? lead.topic} · THE LEAD
@@ -318,34 +356,36 @@ function Home() {
                   <SaveStory story={lead} />
                 </div>
               </article>
-              <aside className="record">
-                <div>
-                  <div className="topline">
-                    <FileText aria-hidden /> Around the publication
+              {moreStories.length > 0 ? (
+                <aside className="record">
+                  <div>
+                    <div className="topline">
+                      <FileText aria-hidden /> Around the publication
+                    </div>
+                    <h3>
+                      More of the story.
+                      <br />
+                      More of your community.
+                    </h3>
+                    <ol className="record-list">
+                      {moreStories.map((s, i) => (
+                        <li key={s.id}>
+                          <span className="num">0{LATEST_END + i + 1}</span>
+                          <div>
+                            <Link to="/articles/$slug" params={{ slug: s.slug }}>
+                              <strong>{s.headline}</strong>
+                            </Link>
+                            <p>{sections.find((t) => t.key === s.topic)?.name ?? s.topic}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
                   </div>
-                  <h3>
-                    More of the story.
-                    <br />
-                    More of your community.
-                  </h3>
-                  <ol className="record-list">
-                    {stories.slice(1, 4).map((s, i) => (
-                      <li key={s.id}>
-                        <span className="num">0{i + 1}</span>
-                        <div>
-                          <Link to="/articles/$slug" params={{ slug: s.slug }}>
-                            <strong>{s.headline}</strong>
-                          </Link>
-                          <p>{sections.find((t) => t.key === s.topic)?.name ?? s.topic}</p>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-                <Link className="textlink" to="/" search={{ view: "archive" }}>
-                  Explore the archive <ArrowRight aria-hidden />
-                </Link>
-              </aside>
+                  <Link className="textlink" to="/" search={{ view: "archive" }}>
+                    Explore the archive <ArrowRight aria-hidden />
+                  </Link>
+                </aside>
+              ) : null}
             </section>
           ) : !query.isError ? (
             <div className="empty">
