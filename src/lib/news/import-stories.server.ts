@@ -5,10 +5,11 @@
  * cards into rows. Three things it will not do:
  *
  * 1. It never invents text. Every body paragraph and dek is re-checked against
- *    the paste with `containsVerbatim` BEFORE it is stored -- the same check
- *    the deterministic reader applies to a model's reply. A card that fails
- *    that test is refused by name and nothing is written for it, because a
- *    silently "tidied" sentence is the one failure a newsroom cannot see.
+ *    the paste with `containsVerbatimEither` BEFORE it is stored -- the same
+ *    check the deterministic reader applies to a model's reply, against the
+ *    paste as typed and as cleaned. A card that fails that test is refused by
+ *    name and nothing is written for it, because a silently "tidied" sentence
+ *    is the one failure a newsroom cannot see.
  *
  * 2. It never calls a model unless the deterministic reader found no stories.
  *    `readImportStructure` exists for the "none" case only; the caller reaches
@@ -39,7 +40,7 @@ import { ingestDocument } from "./ingest.ts";
 import { ensureStoryDocuments, storeStoryDocument } from "./story-documents.server.ts";
 import {
   STRUCTURE_SYSTEM,
-  containsVerbatim,
+  containsVerbatimEither,
   CLEAN_SPLIT_FLAG,
   disclosureLine,
   fallbackSingleStory,
@@ -236,9 +237,9 @@ export function verifySelections(
       refused.push({ headline, reason: "This story has no text." });
       continue;
     }
-    const outside = paragraphs.filter((p) => !containsVerbatim(text, p));
+    const outside = paragraphs.filter((p) => !containsVerbatimEither(text, p));
     const dekOutside =
-      selection.dek.trim() && !containsVerbatim(text, selection.dek.trim())
+      selection.dek.trim() && !containsVerbatimEither(text, selection.dek.trim())
         ? selection.dek.trim()
         : "";
     if (outside.length > 0 || dekOutside) {

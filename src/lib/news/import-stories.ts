@@ -82,6 +82,12 @@ export type ParsedReport = {
   /** Name of the tool that produced the report, when the title names one. */
   detectedTool: string;
   stories: ImportedStory[];
+  /**
+   * The paste with its display damage taken off (see `precleanMarkdown`). Every
+   * card's text is a slice of this, and the verbatim check accepts a paragraph
+   * found here or in the raw paste, so the two always agree.
+   */
+  cleanedText: string;
   method: "structured" | "plain" | "none";
   warnings: string[];
 };
@@ -124,7 +130,7 @@ const LABEL = {
 /** Any paragraph that opens with a `**Label:**` the report format defines. */
 const ANY_PART_LABEL = /^\*\*(?:Score|Why it matters|Plain-language brief|Reporter next step):\*\*/i;
 
-const NAMED_SECTION = /^\*\*(?:Scan date|Run|Mode|Status|Verification boundary):\*\*/i;
+const NAMED_SECTION = /^\*\*(?:Date|Scan date|Run|Mode|Status|Verification boundary):\*\*/i;
 
 const TRIAGE_WORD = /\*\*(Advance|Hold|Skip|Watch|Monitor)\*\*/i;
 
@@ -181,6 +187,107 @@ export function stripOrdinal(heading: string): string {
   const text = String(heading ?? "").trim();
   const stripped = text.replace(LEADING_ORDINAL, "").trim();
   return stripped || text;
+}
+
+/* ------------------------------------------------------------------ *
+ * Pre-clean: the display damage a markdown export leaves behind.
+ * ------------------------------------------------------------------ */
+
+/**
+ * A backslash before any ASCII punctuation — `\$`, `\#`, `\.`, `\&`, `\(`.
+ *
+ * Markdown lets an author escape a punctuation mark so it prints as itself, and
+ * a Google Docs export escapes far more than it needs to. To a reader `\$4.5
+ * million` and `$4.5 million` are the same three words; only one of them is what
+ * the editor wants on a page. Removing the backslash, and nothing else, is the
+ * whole of this step.
+ */
+const MARKDOWN_ESCAPE = /\\([!-\/:-@[-`{-~])/g;
+
+/**
+ * A bold the export escaped on one side only: `\*\*$4,513,469**`.
+ *
+ * Google Docs writes this when it loses track of where the emphasis started.
+ * Repaired here, before the general unescape, so the marks go without the text
+ * between them being touched. Deliberately narrow — `**bold**` written on
+ * purpose inside a paragraph is left exactly as the editor wrote it.
+ */
+const ESCAPED_BOLD_OPEN = /\\\*\\\*([^\n]+?)\*\*/g;
+const ESCAPED_BOLD_CLOSE = /\*\*([^\n]+?)\\\*\\\*/g;
+
+/** The report's own filing label on a heading: `LEAD 12:`, `Story 3.`, `Item 4 —`. */
+const HEADING_FILING_LABEL = /^(?:LEAD|STORY|ITEM)\s*\d+\s*[:.)—-]\s*/i;
+
+/** The report's triage arithmetic, appended to some headings: `(9/20: I3 Im1 C3 N2)`. */
+const HEADING_SCORE_CODE = /\s*\(\s*\d+(?:\.\d+)?\s*\/\s*\d+\s*:[^)]*\)\s*$/;
+
+/** A heading wrapped in `**bold**`, `*italic*` or `***both***`. */
+const WRAPPED_EMPHASIS = /^([*_]{1,3})([\s\S]+?)\1$/;
+
+/** A horizontal rule: `---`, `***`, `___`. It separates cards; it is not text. */
+const HORIZONTAL_RULE = /^\s*(?:[-*_]\s*){3,}$/;
+
+function unescapeMarkdown(line: string): string {
+  return line
+    .replace(ESCAPED_BOLD_OPEN, "$1")
+    .replace(ESCAPED_BOLD_CLOSE, "$1")
+    .replace(MARKDOWN_ESCAPE, "$1");
+}
+
+/**
+ * A heading's own words, with the markup, the filing label and the score code
+ * taken off — never anything else. `### **LEAD 12: Hangar lease … (9/20: I3 Im1
+ * C3 N2)**` becomes `Hangar lease …`.
+ */
+function cleanHeadingText(heading: string): string {
+  let text = unescapeMarkdown(String(heading ?? "").trim()).trim();
+  const wrapped = WRAPPED_EMPHASIS.exec(text);
+  if (wrapped) text = wrapped[2]!.trim();
+  text = stripOrdinal(text);
+  text = text.replace(HEADING_FILING_LABEL, "").trim();
+  text = text.replace(HEADING_SCORE_CODE, "").trim();
+  return text;
+}
+
+/**
+ * Take the display damage off a pasted report: escapes, bold and italic around
+ * headings, the report's `LEAD n:` filing labels and `(9/20: …)` score codes,
+ * and its `---` rules.
+ *
+ * **Structure and display only — never words.** A line comes out of here either
+ * the same line or with punctuation marks removed around words that stay in
+ * place, in order, one line per line. That is what lets the review screen show
+ * a clean headline while the verbatim check still compares a body paragraph
+ * against the editor's own paste.
+ *
+ * The reports Unit X already reads have no escapes, no bold headings and no
+ * rules, so on those this is a no-op and their reading is unchanged.
+ */
+export function precleanMarkdown(text: string): string {
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    if (HORIZONTAL_RULE.test(line)) {
+      out.push("");
+      continue;
+    }
+    const heading = HEADING_RE.exec(line);
+    if (heading) {
+      out.push(`${heading[1]} ${cleanHeadingText(heading[2]!)}`);
+      continue;
+    }
+    out.push(unescapeMarkdown(line));
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * True when `paragraph` is in the paste as the editor typed it, or in the paste
+ * with its display damage removed. The two readings of the same paste: a
+ * paragraph the reader cleaned is still the editor's own text, word for word.
+ */
+export function containsVerbatimEither(input: string, paragraph: string): boolean {
+  return containsVerbatim(input, paragraph) || containsVerbatim(precleanMarkdown(input), paragraph);
 }
 
 const ENTITIES: Record<string, string> = {
@@ -365,7 +472,7 @@ function looksLikeStory(text: string): boolean {
  * The heading itself never becomes a body paragraph — it becomes the headline.
  */
 export function parseStructure(text: string, opts: { disclosureKey?: DisclosureKey } = {}): ImportedStory[] {
-  const blocks = splitBlocks(text);
+  const blocks = splitBlocks(precleanMarkdown(text));
   const stories: ImportedStory[] = [];
   const disclosureKey = opts.disclosureKey ?? "outside-ai";
 
@@ -406,7 +513,8 @@ export function parsePlainStory(
   text: string,
   opts: { disclosureKey?: DisclosureKey } = {},
 ): ImportedStory | null {
-  const paragraphs = splitParagraphs(text);
+  const cleaned = precleanMarkdown(text);
+  const paragraphs = splitParagraphs(cleaned);
   if (paragraphs.length < 2) return null;
   const first = paragraphs[0]!;
   if (first.includes("\n")) return null;
@@ -455,7 +563,8 @@ export function parseFinishedStories(
   opts: { disclosureKey?: DisclosureKey } = {},
 ): ParsedReport {
   const raw = String(text ?? "");
-  const blocks = splitBlocks(raw);
+  const cleaned = precleanMarkdown(raw);
+  const blocks = splitBlocks(cleaned);
   const titleBlock = blocks.find((b) => b.level === 1);
   const title = titleBlock?.heading ?? "";
   const headerParagraphs = splitParagraphs(titleBlock?.text ?? "");
@@ -463,6 +572,9 @@ export function parseFinishedStories(
     headerParagraphs.find((p) => /^\*\*Scan date:\*\*/i.test(p)) ??
     headerParagraphs.find((p) => NAMED_SECTION.test(p)) ??
     "";
+  // The paste as the reader cleaned it: the report's own rules dropped, its
+  // escapes gone, the filing labels and score codes off the headings.
+
   // The title is reported separately, so it is not repeated in here.
   const headerNote = [
     scanDate,
@@ -480,6 +592,7 @@ export function parseFinishedStories(
       headerNote,
       detectedTool,
       stories: structured,
+      cleanedText: cleaned,
       method: "structured",
       warnings: [],
     };
@@ -493,6 +606,7 @@ export function parseFinishedStories(
       headerNote,
       detectedTool,
       stories: [plain],
+      cleanedText: cleaned,
       method: "plain",
       warnings: [],
     };
@@ -504,6 +618,7 @@ export function parseFinishedStories(
     headerNote,
     detectedTool,
     stories: [],
+    cleanedText: cleaned,
     method: "none",
     warnings: ["This text has no headings to read."],
   };
@@ -567,7 +682,7 @@ export function verifyModelSplit(
       continue;
     }
     const altered = [...bodyParagraphs, ...(dek ? [dek] : [])].filter(
-      (paragraph) => !containsVerbatim(input, paragraph),
+      (paragraph) => !containsVerbatimEither(input, paragraph),
     );
     if (altered.length > 0) {
       rejected += 1;
@@ -626,5 +741,5 @@ export function fallbackSingleStory(
 /** True when `body` is the exact text of the story's own paragraphs. */
 export function bodyIsVerbatim(input: string, story: ImportedStory): boolean {
   const paragraphs = splitParagraphs(story.body);
-  return paragraphs.length > 0 && paragraphs.every((p) => containsVerbatim(input, p));
+  return paragraphs.length > 0 && paragraphs.every((p) => containsVerbatimEither(input, p));
 }
