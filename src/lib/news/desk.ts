@@ -92,7 +92,13 @@ import { buildDraftCompletionReceipt } from "./draft-completion.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
-import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
+import {
+  FORCED_FAILOVER_LADDER,
+  isAutomaticRungId,
+  modelEffort,
+  type ModelEffort,
+  type ProviderOverrides,
+} from "./provider-registry.ts";
 import {
   failoverNoteSentence,
   failoverReasonPhrase,
@@ -1349,6 +1355,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       {
         modelEffort: effortFromJob(job),
         source: job.model_choice_source ?? "editor",
+        // A batch job's document stage moves along the hand-pick ladder with
+        // its writer (see FORCED_FAILOVER_LADDER): a batch row cannot hold one
+        // of Automatic's own rungs. An ordinary Story job keeps the shared
+        // Automatic ladder.
+        ladder: batchSnapshot ? FORCED_FAILOVER_LADDER : undefined,
         localModel: queuedLocalModel ?? undefined,
         probe: (choice) => probe(choice, owned(context), undefined, "story", choice === "local-model" ? queuedLocalModel ?? undefined : undefined),
         chat: deps.chat,
@@ -1360,7 +1371,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           const switchNote = failoverNoteSentence(nextLabel, previousLabel, reason);
           await setFailoverNote(job.id, switchNote);
           if (batchSnapshot) {
-            if (nextChoice === "auto" || nextChoice === "configured") throw new Error("Draft batch fallback did not resolve to a selectable runtime.");
+            if (nextChoice === "auto" || nextChoice === "configured" || isAutomaticRungId(nextChoice))
+              throw new Error("Draft batch fallback did not resolve to a selectable runtime.");
             const old = batchSnapshot as typeof batchSnapshot & { requestedRuntime?: string; requestedEffort?: ModelEffort | null };
             const { validateForcedRuntime } = await import("./forced-runtime.server.ts");
             const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
@@ -1563,11 +1575,19 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         source: "editor",
         run,
         probe: (choice) => probe(choice, job.newsroom_id),
-        resolve: (choice) => validateBatchRuntime(
-          job.newsroom_id,
-          choice,
-          "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
-        ),
+        ladder: FORCED_FAILOVER_LADDER,
+        resolve: (choice) => {
+          // Unreachable with FORCED_FAILOVER_LADDER, which carries no rung --
+          // but Automatic's own rung is not a runtime a batch row can hold, so
+          // it must never reach the batch validator either.
+          if (isAutomaticRungId(choice))
+            throw new Error("A draft batch cannot run on Automatic's own rung.");
+          return validateBatchRuntime(
+            job.newsroom_id,
+            choice,
+            "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
+          );
+        },
         onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
           void nextChoice;
           const old = activeBatchSnapshot as typeof activeBatchSnapshot & {

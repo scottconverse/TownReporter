@@ -8,6 +8,7 @@ import {
   PICKER_PROVIDER_IDS,
   PIPELINE_BUDGET,
   PROVIDER_REGISTRY,
+  RETIRED_PROVIDER_IDS,
   automaticLadder,
   clampBudgetMs,
   effectiveBudget,
@@ -29,6 +30,12 @@ const ENV_KEYS = [
   "TOWNREPORTER_CLAUDE_CODE",
   "TOWNREPORTER_GROK_OAUTH",
   "TOWNREPORTER_LOCAL",
+  "TOWNREPORTER_DEEPSEEK",
+  "TOWNREPORTER_QWEN",
+  "TOWNREPORTER_DEEPSEEK_BASE_URL",
+  "TOWNREPORTER_QWEN_BASE_URL",
+  "TOWNREPORTER_DEEPSEEK_MODEL",
+  "TOWNREPORTER_QWEN_MODEL",
   "TOWNREPORTER_CODEX_TERRA_MODEL",
   "TOWNREPORTER_CODEX_SOL_MODEL",
   "ANTHROPIC_MODEL",
@@ -55,6 +62,31 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 }
 
 const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
+
+/**
+ * `withEnv`, for a check that wants the value back instead of just a verdict.
+ *
+ * Unlike `withEnv` it clears ONLY the keys it is given, so it nests safely
+ * inside one: the outer call's switches have to stay in force while the inner
+ * one adds an endpoint.
+ */
+function withEnvValue<T>(vars: Record<string, string | undefined>, fn: () => T): T {
+  const keys = Object.keys(vars);
+  const prev: Record<string, string | undefined> = {};
+  for (const k of keys) {
+    prev[k] = process.env[k];
+    if (vars[k] === undefined) delete process.env[k];
+    else process.env[k] = vars[k];
+  }
+  try {
+    return fn();
+  } finally {
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  }
+}
 
 describe("model-specific thinking effort", () => {
   it("offers only values accepted by each exact Codex model", () => {
@@ -149,8 +181,8 @@ describe("the provider registry is the one description of a writing model", () =
     assert.equal(new Set(ids).size, ids.length, "two entries share an id");
     assert.deepEqual(
       [...ids].sort(),
-      [...PICKER_PROVIDER_IDS, ...INTERNAL_PROVIDER_IDS].sort(),
-      "PICKER_PROVIDER_IDS + INTERNAL_PROVIDER_IDS must name exactly the registry's entries",
+      [...PICKER_PROVIDER_IDS, ...INTERNAL_PROVIDER_IDS, ...RETIRED_PROVIDER_IDS].sort(),
+      "the picker list, the internal list and the retired list must name exactly the registry's entries",
     );
     // An INTERNAL id is one no picker offers; that is what makes it internal.
     for (const id of INTERNAL_PROVIDER_IDS) {
@@ -159,6 +191,17 @@ describe("the provider registry is the one description of a writing model", () =
         SURFACES.every((surface) => !entry.offeredFor[surface]),
         `${id} is an internal provider but some picker offers it`,
       );
+    }
+    // A RETIRED id keeps its registry entry -- the transport and the Server
+    // page's sign-in card read it -- but no picker and no ladder offers it.
+    for (const id of RETIRED_PROVIDER_IDS) {
+      const entry = providerEntry(id)!;
+      assert.ok(
+        SURFACES.every((surface) => !entry.offeredFor[surface]),
+        `${id} is retired but some picker offers it`,
+      );
+      assert.ok(!automaticLadder().includes(id), `${id} is retired but still on the ladder`);
+      assert.ok(!(PICKER_PROVIDER_IDS as readonly string[]).includes(id));
     }
   });
 
@@ -176,7 +219,6 @@ describe("the provider registry is the one description of a writing model", () =
         "claude-frontier",
         "claude-sonnet",
         "claude-haiku",
-        "grok-oauth",
         "local-model",
       ],
     );
@@ -195,18 +237,30 @@ describe("the provider registry is the one description of a writing model", () =
 });
 
 describe("the Automatic ladder is derived, not typed out", () => {
-  it("orders Automatic with Codex first and the cheaper Claude Sonnet fallback last", () => {
+  it("orders Automatic with DeepSeek first and Codex Terra last", () => {
+    // 0.6.63, Unit Y item 1, on the owner's measured blind research test:
+    // DeepSeek v4.1 Flash 30.9, Qwen3.6-35B 15.8, Terra 15.3.
     const ladder = automaticLadder();
-    assert.deepEqual(ladder, ["codex-balanced", "claude-sonnet"]);
-    assert.deepEqual(
-      ladder,
-      providersFor("story")
-        .map((entry) => entry.id)
-        .filter((id) => automaticLadder().includes(id)),
-    );
+    assert.deepEqual(ladder, ["deepseek-flash", "qwen-local", "codex-balanced"]);
     for (const id of ladder) {
       assert.ok(providerEntry(id), `ladder names ${id}, which is not in the registry`);
     }
+    // The rungs are not menu options, so they are the ladder minus the story
+    // picker. This asserts the ladder is a superset of the story list's
+    // ordering rather than its reverse.
+    assert.deepEqual(
+      ladder.filter((id) => providersFor("story").some((entry) => entry.id === id)),
+      ["codex-balanced"],
+    );
+    assert.deepEqual(
+      ladder.slice(0, 2),
+      automaticLadder().filter((id) => !providersFor("story").some((entry) => entry.id === id)),
+    );
+  });
+
+  it("asks a rung that must already be loaded before Automatic may use it", () => {
+    assert.equal(providerEntry("qwen-local")!.requiresLoadedLocalModel, true);
+    assert.equal(providerEntry("deepseek-flash")!.requiresLoadedLocalModel, undefined);
   });
 
   it("leaves the frontier model and the gateway out of the ladder", () => {
@@ -218,15 +272,45 @@ describe("the Automatic ladder is derived, not typed out", () => {
   });
 
   it("drops a rung the machine has switched off, without changing the static ladder", () => {
+    // The two local rungs need a discovered local server (or a hand-named
+    // endpoint), which this test's environment does not have, so the only
+    // rung left standing is Codex. Naming the endpoints makes them stand.
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), ["claude-sonnet"]);
+      assert.deepEqual(enabledAutomaticLadder(), []);
+      assert.deepEqual(
+        withEnvValue(
+          {
+            TOWNREPORTER_DEEPSEEK_BASE_URL: "http://127.0.0.1:11434/v1",
+            TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+          },
+          () => enabledAutomaticLadder(),
+        ),
+        ["deepseek-flash", "qwen-local"],
+      );
       // The static list is unchanged: it is read at module load by ai.ts, and
       // the probe loop already copes with a rung that turns out to be gone.
-      assert.deepEqual(automaticLadder(), ["codex-balanced", "claude-sonnet"]);
+      assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced"]);
     });
     withEnv({ TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" }, () => {
       assert.deepEqual(enabledAutomaticLadder(), []);
     });
+  });
+
+  it("takes DeepSeek out of the enabled ladder on its own off switch", () => {
+    // The Qwen rung stays: the switch is per rung, not per kind. This is how
+    // the live-paper proof (Unit Y item 6) forces the ladder to rung 2.
+    assert.deepEqual(
+      withEnvValue(
+        {
+          TOWNREPORTER_DEEPSEEK: "0",
+          TOWNREPORTER_CODEX: "0",
+          TOWNREPORTER_DEEPSEEK_BASE_URL: "http://127.0.0.1:11434/v1",
+          TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        },
+        () => enabledAutomaticLadder(),
+      ),
+      ["qwen-local"],
+    );
   });
 });
 

@@ -2,9 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
-import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-registry.ts";
 
-export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto">;
+export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 export type DraftBatchStoredRuntime =
   | DraftBatchRuntime
   | "local"

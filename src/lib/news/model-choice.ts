@@ -10,8 +10,11 @@
 
 import {
   automaticLadder,
+  isAutomaticChoiceId,
+  isAutomaticRungId,
   providersFor,
   providerEntry,
+  type AutomaticRungId,
   type PickerProviderId,
   type ProviderSurface,
 } from "./provider-registry.ts";
@@ -92,7 +95,13 @@ export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceO
 export const STORY_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("story");
 
 export type CustomModelChoice = `custom:${string}`;
-export type StoryModelChoice = "auto" | PickerProviderId | CustomModelChoice;
+/**
+ * Every value a job may store. Automatic's own rungs are in the union even
+ * though no menu shows them: a job Automatic pinned to the DeepSeek or Qwen
+ * rung has to be able to hold that id, and the mid-run failover answers with
+ * one (`planAutomaticFailover` returns `storyModelChoice(rung)`).
+ */
+export type StoryModelChoice = "auto" | PickerProviderId | AutomaticRungId | CustomModelChoice;
 /** Preserve explicit custom intent, including stale IDs. Server resolution validates
  * ownership and availability; invalid custom picks must never become Automatic. */
 export function isCustomModelChoice(value: unknown): value is CustomModelChoice {
@@ -124,13 +133,27 @@ export const FORCED_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFo
 
 export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
-export type ForcedModelChoice = Exclude<StoryModelChoice, "auto">;
+/**
+ * Batch, scheduled and meeting runs must name ONE exact provider, so Automatic
+ * is absent -- and so are Automatic's own rungs. A rung is not a choice an
+ * editor can make; it is what Automatic resolved to on the day, which is why
+ * `dailyScanRuntime` and `draftBatchRuntime` narrow the rungs away too.
+ */
+export type ForcedModelChoice = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 
+/**
+ * Turn an untrusted stored string back into a choice a job may hold.
+ *
+ * `isAutomaticChoiceId` rather than the STORY list, because Automatic's own
+ * rungs are not options in any menu: a job Automatic pinned to
+ * `deepseek-flash` has to keep that id when it is read back, or the mid-run
+ * failover re-probes the ladder from the top and can land on the very rung
+ * that just failed. A retired id (`grok-oauth`) is not in either list, so a
+ * stored Grok choice still normalises to Automatic.
+ */
 export function storyModelChoice(value: unknown): StoryModelChoice {
   if (isCustomModelChoice(value)) return value;
-  return STORY_MODEL_CHOICES.some((choice) => choice.value === value)
-    ? (value as StoryModelChoice)
-    : "auto";
+  return isAutomaticChoiceId(value) ? value : "auto";
 }
 
 /** The provider Automatic actually selected, persisted for the whole queued run. */
@@ -172,7 +195,28 @@ export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story
     const match = modelChoicesFor(surface).find((choice) => choice.value === value);
     if (match) return match.label;
   }
+  // A rung is in no menu, so the loop above cannot label one -- and "Automatic"
+  // would be a lie on the line the editor reads to find out which model wrote
+  // the draft. Read it from the registry instead.
+  if (isAutomaticRungId(value)) return providerEntry(value)?.label ?? value;
   return "Automatic";
+}
+
+/**
+ * The note an existing newsroom or job gets when it holds a choice this build
+ * no longer offers, or null when it holds anything else.
+ *
+ * 0.6.63 (Unit Y item 4) retired SuperGrok from every model picker and from
+ * Automatic. A stored `grok-oauth` therefore normalises to Automatic -- see
+ * `storyModelChoice` -- and this is the sentence that says so out loud, so an
+ * editor who chose it does not read the change as the desk forgetting.
+ * Sign-in is deliberately untouched by the retirement, which is why the
+ * sentence says so.
+ */
+export function retiredModelChoiceNote(value: unknown): string | null {
+  return value === "grok-oauth"
+    ? "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected."
+    : null;
 }
 
 /**
@@ -188,6 +232,23 @@ function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
   if (labels.length === 0) return "nothing (no model is set up)";
   if (labels.length === 1) return labels[0];
   return `${labels.slice(0, -1).join(", ")}, then ${labels[labels.length - 1]}`;
+}
+
+/**
+ * The extra sentence a ladder containing a local rung needs, or "".
+ *
+ * LM Studio lists a downloaded model on `/v1/models` whether or not it is in
+ * memory, and paging a 35B in from disk can take minutes, so Automatic only
+ * uses such a rung when it is ALREADY loaded (the preflight skips it
+ * otherwise -- see `requiresLoadedLocalModel`). The picker has to say that
+ * out loud, or "tries Qwen second" reads as a promise the desk will load it.
+ * Read from the registry, so neither the sentence nor this rule can drift from
+ * which rungs actually carry the requirement.
+ */
+function loadedRungNote(ladder: readonly string[] = automaticLadder()): string {
+  return ladder.some((id) => providerEntry(id)?.requiresLoadedLocalModel)
+    ? " A model on this computer is used only when it is already loaded."
+    : "";
 }
 
 /**
@@ -220,7 +281,7 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
   }
-  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.`;
+  return `Uses your configured gateway when set; otherwise tries ${ladderSentence()}.${loadedRungNote()} If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.`;
 }
 
 /**

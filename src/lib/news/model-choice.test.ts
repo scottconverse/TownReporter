@@ -11,12 +11,13 @@ import {
   opinionModelChoice,
   opinionProviderProblem,
   rememberedStoryModelChoice,
+  retiredModelChoiceNote,
   STORY_MODEL_CHOICES,
   storyModelChoice,
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
 import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
-import { providersFor } from "./provider-registry.ts";
+import { automaticLadder, providersFor } from "./provider-registry.ts";
 
 const STORY_VALUES = [
   "auto",
@@ -28,9 +29,14 @@ const STORY_VALUES = [
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
-  "grok-oauth",
   "local-model",
 ] as const;
+
+/**
+ * Automatic's own rungs: not options in any menu, but valid on a job row
+ * (0.6.63, Unit Y item 1). A job Automatic pinned to one has to keep it.
+ */
+const RUNG_VALUES = ["deepseek-flash", "qwen-local"] as const;
 
 describe("model choice contract", () => {
   it("offers every named subscription model in the shared Story picker", () => {
@@ -46,10 +52,20 @@ describe("model choice contract", () => {
         "Claude Opus",
         "Claude Sonnet",
         "Claude Haiku",
-        "Grok (SuperGrok)",
         "Local model",
       ],
     );
+  });
+  it("runs Automatic on DeepSeek, then Qwen, then Codex Terra", () => {
+    assert.deepEqual([...automaticLadder()], [
+      "deepseek-flash",
+      "qwen-local",
+      "codex-balanced",
+    ]);
+    // Claude Sonnet left the ladder in 0.6.63 (Unit Y item 1) and is a hand
+    // pick only; the frontier Codex stays off it as it always has.
+    assert.ok(!automaticLadder().includes("claude-sonnet"));
+    assert.ok(!automaticLadder().includes("codex-frontier"));
   });
   it("never converts a missing or malformed custom connection into Automatic", () => {
     for (const value of ["custom:", "custom:deleted", "custom:untrusted/input"]) {
@@ -112,9 +128,36 @@ describe("model choice contract", () => {
   });
 
   it("round-trips every valid Story choice and defaults invalid input safely", () => {
-    for (const value of STORY_VALUES) assert.equal(storyModelChoice(value), value);
+    for (const value of [...STORY_VALUES, ...RUNG_VALUES]) {
+      assert.equal(storyModelChoice(value), value);
+    }
     for (const invalid of [undefined, null, "", "codex", "local; rm", 0, {}, []]) {
       assert.equal(storyModelChoice(invalid), "auto");
+    }
+  });
+
+  it("labels a pinned rung with the model that actually wrote the draft", () => {
+    // "Automatic" would be a lie on the line the editor reads to find out.
+    assert.equal(modelChoiceLabel("deepseek-flash"), "DeepSeek v4.1 Flash");
+    assert.equal(modelChoiceLabel("qwen-local"), "Qwen 3.6 35B");
+  });
+
+  it("falls a stored SuperGrok choice back to Automatic and says so", () => {
+    // Sign-in is untouched by the retirement, so the note says so.
+    assert.equal(modelChoiceLabel("grok-oauth"), "Automatic");
+    assert.equal(storyModelChoice("grok-oauth"), "auto");
+    assert.equal(opinionModelChoice("grok-oauth"), "codex-frontier");
+    assert.equal(darkModelChoice("grok-oauth"), "auto");
+    assert.equal(
+      retiredModelChoiceNote("grok-oauth"),
+      "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected.",
+    );
+    for (const value of [...STORY_VALUES, ...RUNG_VALUES, undefined, null, "custom:x"]) {
+      assert.equal(retiredModelChoiceNote(value), null);
+    }
+    // Retired means retired: no menu offers it on any surface.
+    for (const surface of ["story", "scan", "opinion", "dark", "forced"] as const) {
+      assert.ok(!providersFor(surface).some((entry) => entry.id === "grok-oauth"));
     }
   });
 
@@ -145,12 +188,11 @@ describe("model choice contract", () => {
       "claude-frontier",
       "codex-balanced",
       "codex-frontier",
-      "grok-oauth",
       "local-model",
     ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
-    for (const invalid of ["local", "zen", "codex", undefined, null, {}]) {
+    for (const invalid of ["local", "zen", "codex", "grok-oauth", undefined, null, {}]) {
       assert.equal(opinionModelChoice(invalid), "codex-frontier");
     }
   });
@@ -166,7 +208,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Qwen 3.6 35B, then Codex Terra. A model on this computer is used only when it is already loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
@@ -198,14 +240,14 @@ describe("model choice contract", () => {
     );
   });
 
-  it("names SuperGrok in every picker with technical fallback", () => {
-    assert.equal(modelChoiceLabel("grok-oauth"), "Grok (SuperGrok)");
+  it("no longer names SuperGrok as a writing model in any picker", () => {
+    // Retired 0.6.63, Unit Y item 4. A stored choice reads as Automatic and
+    // the help says why, rather than describing a provider the menu dropped.
     for (const surface of [undefined, "opinion", "dark"] as const) {
-      assert.equal(
-        modelChoiceHelp("grok-oauth", surface),
-        "Prefers Grok (SuperGrok) for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
-      );
+      const help = modelChoiceHelp("grok-oauth", surface);
+      assert.doesNotMatch(help, /Prefers Grok/);
     }
+    assert.match(modelChoiceHelp("grok-oauth"), /^Uses your configured gateway/);
   });
 
   it("gives Opinion setup steps for its one provider, and does not send anyone to Codex", () => {

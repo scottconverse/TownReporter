@@ -20,6 +20,7 @@ import {
   providerEntry,
   providerModel,
   type ProviderBudget,
+  type ProviderEntry,
   type ProviderOverrides,
   type ModelEffort,
 } from "./provider-registry.ts";
@@ -182,6 +183,37 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
   };
 }
 
+/**
+ * One rung of the Automatic ladder's own endpoint.
+ *
+ * A rung is a model with a FIXED home -- DeepSeek v4.1 Flash on the Ollama
+ * server, Qwen 3.6 35B on LM Studio's OpenAI-compatible port. Both are local,
+ * and `localGateway()` above can only describe ONE of them: with no resolved
+ * override it reads `LLM_BASE_URL`, so a second rung would be sent to the first
+ * rung's server (0.6.63, Unit Y item 1: "use the existing local/custom-connection
+ * machinery so two local endpoints can coexist"). The registry entry carries its
+ * base URL, model and env overrides, so this reads them and NEVER falls back to
+ * `LLM_BASE_URL` -- a rung with no endpoint is not a rung, it is a misconfigured
+ * install, and returns null so the ladder moves on rather than silently talking
+ * to whatever the operator last pointed `LLM_BASE_URL` at.
+ *
+ * Only for entries with a `ladderRank`; everything else keeps the gateway it has
+ * always had.
+ */
+function rungGateway(entry: ProviderEntry): LlmConfig | null {
+  const overrideBase = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
+  const baseUrl = overrideBase || entry.baseUrl;
+  if (!baseUrl) return null;
+  const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
+  const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
+  return {
+    apiKey: apiKey || "not-needed",
+    baseUrl: trimSlash(baseUrl),
+    model: providerModel(entry),
+    label: entry.label,
+  };
+}
+
 function xaiGateway(): LlmConfig | null {
   const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
   if (!xai) return null;
@@ -301,7 +333,11 @@ function explicitProvider(
   }
 
   if (entry.kind === "local") {
-    const llm = localGateway(localOverride);
+    // A rung carries its own endpoint (see `rungGateway`); the "Local model"
+    // entry keeps the resolved-override-or-LLM_BASE_URL behaviour it has always
+    // had. The two coexist because the rung never reads LLM_BASE_URL.
+    const llm =
+      entry.ladderRank === undefined ? localGateway(localOverride) : rungGateway(entry);
     return llm ? { kind: "openai", ...llm } : null;
   }
 

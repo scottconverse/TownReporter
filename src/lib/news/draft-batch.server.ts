@@ -22,7 +22,7 @@ import {
   failoverReasonPhrase,
   planAutomaticFailover,
 } from "./automatic-failover.ts";
-import { automaticLadder, modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { FORCED_FAILOVER_LADDER, modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 import type { ForcedRuntime } from "./forced-runtime.server.ts";
 
@@ -66,7 +66,10 @@ export async function validateBatchRuntime(
       source: "editor",
       current: runtime,
       error: detail,
-      ladder: automaticLadder(),
+      // The hand-pick ladder, not Automatic's: a batch that fails over has to
+      // land on a provider it can actually name (`deepseek-flash` and
+      // `qwen-local` are refused by `validateForcedRuntime`).
+      ladder: FORCED_FAILOVER_LADDER,
       probe: async (candidate) => {
         try {
           const snapshot = await validate(newsroomId, candidate as ForcedRuntime, modelEffort(candidate, effort));

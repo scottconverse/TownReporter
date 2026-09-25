@@ -206,10 +206,14 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
       return row as ForcedRuntimeSnapshot;
     }
     const runtime = row.runtime as ForcedRuntime;
+    // `grok-oauth` is retired from every picker (0.6.63, Unit Y item 4) and has
+    // its own branch above, so a stored row that reaches here on the retired id
+    // is not a snapshot this build can run. `PICKER_PROVIDER_IDS` no longer
+    // contains it, so this is a plain membership answer, not a cast.
     const knownRuntime =
       (["local", "claude-cli", "codex-terra", "codex-sol"] as const).includes(
         runtime as LegacyForcedRuntime,
-      ) || PICKER_PROVIDER_IDS.includes(runtime as PickerProviderId);
+      ) || (PICKER_PROVIDER_IDS as readonly string[]).includes(runtime);
     const choice = knownRuntime
       ? choiceFor(runtime as Exclude<ForcedRuntime, CustomModelChoice>)
       : null;
