@@ -4,6 +4,7 @@ import { assertRate, audit } from "@/lib/news/ops";
 import { isOpsActionId } from "./actions";
 import type { OpsHealth } from "./health.server";
 import type { OpsActionResult } from "./actions.server";
+import { opsAction } from "../news/request-input.ts";
 
 /**
  * The two calls the ops dashboard makes.
@@ -39,7 +40,9 @@ export const getOpsHealth = createServerFn({ method: "GET" })
 
 export const runOpsAction = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: string) => id)
+  // Answers text, never throws: the handler's own `isOpsActionId` still
+  // decides, and an over-long action reads as "Unknown action." as before.
+  .validator((id: unknown) => opsAction.parse(id))
   .handler(async ({ context, data }): Promise<OpsActionResult> => {
     assertOwner(context.role);
     /*
