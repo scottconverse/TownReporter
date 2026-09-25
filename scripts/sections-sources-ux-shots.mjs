@@ -51,11 +51,37 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const shots = [];
 
-async function shot(name, target, width) {
+/**
+ * The desk's pinned chrome, hidden only for as long as one capture takes.
+ *
+ * A capture that reaches past the viewport -- which is what an element shot of
+ * anything taller than the screen does -- paints `position: sticky` and
+ * `position: fixed` elements at whatever viewport offset it reached from, not
+ * where the element is. The 1280 shot of the Business fieldset is clean because
+ * that fieldset fits the screen; at 375 it is 1168px against a 780px viewport,
+ * so the sticky header and the skip link -- `top: -100px` and unfocused, so not
+ * on screen at all -- landed across the middle of the image. Hiding them for
+ * the duration of the capture is the honest repair; a companion viewport shot
+ * at the same width shows both of them where they really are.
+ */
+const PINNED_CHROME_HIDDEN = ".astra-topbar,.astra-skip{visibility:hidden !important}";
+
+async function shot(name, target, width, { hidePinnedChrome = false, scrollTo = null } = {}) {
   await page.setViewportSize({ width, height: width === 375 ? 780 : 900 });
+  // Nothing is focused in a screenshot run, and the skip link is the one piece
+  // of chrome whose position depends on focus. Blur first so a shot can never
+  // photograph a link that only a keyboard user would see.
+  await page.evaluate(() => document.activeElement?.blur?.());
+  // After the resize, not before: the breakpoint moves the fieldset, so a
+  // scroll done at the old width lands somewhere else.
+  if (scrollTo) await scrollTo.scrollIntoViewIfNeeded();
   await page.waitForTimeout(250);
+  const style = hidePinnedChrome
+    ? await page.addStyleTag({ content: PINNED_CHROME_HIDDEN })
+    : null;
   const file = resolve(outDir, `${name}-${width}.png`);
   await (target ?? page).screenshot({ path: file, animations: "disabled" });
+  if (style) await style.evaluate((el) => el.remove());
   shots.push(file);
   console.log(`  shot  ${file}`);
 }
@@ -89,8 +115,12 @@ try {
 
   const business = page.getByRole("group", { name: /^Business/ });
   await business.waitFor({ timeout: 30_000 });
-  await shot("sections-empty-business", business, 1280);
-  await shot("sections-empty-business", business, 375);
+  // Paired: the viewport shot is the one that shows the desk's chrome where it
+  // belongs, and is what the fieldset shot is read against.
+  await shot("sections-empty-business-viewport", null, 1280, { scrollTo: business });
+  await shot("sections-empty-business", business, 1280, { hidePinnedChrome: true });
+  await shot("sections-empty-business-viewport", null, 375, { scrollTo: business });
+  await shot("sections-empty-business", business, 375, { hidePinnedChrome: true });
 
   // The Sources add form, on its own page.
   await page.setViewportSize({ width: 1280, height: 900 });

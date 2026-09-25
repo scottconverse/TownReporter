@@ -20,8 +20,10 @@
  *   node scripts/sections-source-add-e2e.mjs
  */
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { chromium } from "playwright";
-import { checkedUrl } from "./browser-guard.mjs";
+import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
 /**
@@ -46,12 +48,34 @@ const sourceTitle = `City Council packets ${stamp}`;
 const secondUrl = `https://www.example-city-council.test/minutes-${stamp}`;
 const secondTitle = `City Council minutes ${stamp}`;
 
+/**
+ * Where the two geometry steps put their evidence images. Outside the repo,
+ * like every other artefact this walk produces: a screenshot is not source.
+ */
+const outDir = checkedOutputPath(
+  resolve(
+    process.env.SECTIONS_SOURCE_ADD_OUT_DIR ||
+      "../townreporter-deepseek-oversight/scratch/S2",
+  ),
+  [resolve("..")],
+  "output directory",
+);
+mkdirSync(outDir, { recursive: true });
+
 let page;
 const done = [];
+const shots = [];
 
 function step(name) {
   done.push(name);
   console.log(`  ok    ${name}`);
+}
+
+async function shot(name, target) {
+  const file = resolve(outDir, `${name}.png`);
+  await (target ?? page).screenshot({ path: file, animations: "disabled" });
+  shots.push(file);
+  console.log(`  shot  ${file}`);
 }
 
 async function dump(err) {
@@ -161,34 +185,39 @@ async function aDuplicateUrlIsTickedRatherThanDuplicated() {
   await openSections();
   const business = group("Business");
   await business.getByLabel("New source URL").fill(sourceUrl);
-  // The same label as the first time. The shared add path upserts on URL and
-  // takes the title from the form, so re-adding with an empty label would
-  // rename the row to its host name -- real Sources-page behaviour, but not
-  // this unit's subject, and letting it happen here would make the summary
-  // assertion further down depend on that side effect.
-  await business.getByLabel("Label (optional)").fill(sourceTitle);
+  // The label is deliberately left blank on this re-add. The field is labelled
+  // optional, and it used to be the quiet way to lose a source's name: the
+  // shared add path substituted the URL's host for the empty label, so
+  // "City Council packets <stamp>" came back as "www.example-city-council.test"
+  // because the editor declined to type a label they were told they need not
+  // type. The URL is already on watch, so the blank label has to leave the
+  // row's title exactly as it found it.
+  await business.getByLabel("Label (optional)").fill("");
   await business.getByRole("button", { name: "Add and tick for this section" }).click();
   // The message must not claim a new source for a URL that was already on
-  // watch: the add path returns the *same* row, and the sentence says so.
+  // watch, and it names the row by the title the row still has.
   await business
     .getByText(`Already on watch — ticked for Business: ${sourceTitle}`)
     .waitFor({ timeout: 45_000 });
-  step("a URL already on watch is ticked, and the message says so");
+  step("re-adding with the label left blank ticks the row and keeps its name");
 
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
   const rows = page.locator("tr.lead-tr", { hasText: sourceUrl });
   await rows.first().waitFor({ timeout: 45_000 });
   assert.equal(await rows.count(), 1, "a duplicate URL must not create a second source row");
-  step("the watch list still holds exactly one row for that URL");
+  const name = await rows.first().locator(".src-t").innerText();
+  assert.equal(name, sourceTitle, `a blank label renamed the row to "${name}"`);
+  step(`the watch list holds one row for that URL, still named "${name}"`);
 }
 
 async function theBarReviewsAndApplies() {
   await openSections();
   const business = group("Business");
   await business.getByLabel("New source URL").fill(sourceUrl);
-  // Label again, for the reason given in the duplicate step above: an empty
-  // label makes the shared upsert rename the row to its host, and the summary
-  // assertion below is about the draft, not about that.
+  // A label IS typed here, and that is on purpose: a label that was given still
+  // renames the row -- that is today's Sources-page behaviour and this unit
+  // must not change it. The blank-label case is the step above; this one keeps
+  // the two branches apart.
   await business.getByLabel("Label (optional)").fill(sourceTitle);
   await business.getByRole("button", { name: "Add and tick for this section" }).click();
   await business.getByText(/Already on watch/).waitFor({ timeout: 45_000 });
@@ -357,6 +386,167 @@ async function keyboardAndPhoneWidth() {
   await page.setViewportSize({ width: 1280, height: 900 });
 }
 
+/** The bar, its column and the nav beside it, in viewport pixels. */
+async function barGeometry(width) {
+  await page.setViewportSize({ width, height: width === 375 ? 780 : 900 });
+  await page.waitForTimeout(250);
+  return page.evaluate(() => {
+    const barEl = document.querySelector('[aria-label="Section changes not saved"]');
+    if (!barEl) return { missing: true };
+    const sidebar = document.querySelector(".astra-sidebar");
+    const msg = barEl.querySelector('p[role="status"]');
+    const range = document.createRange();
+    range.setStart(msg.firstChild, 0);
+    range.setEnd(msg.firstChild, 1);
+    const ch = range.getBoundingClientRect();
+    const hit = document.elementFromPoint(ch.left + 1, ch.top + ch.height / 2);
+    const b = barEl.getBoundingClientRect();
+    const s = sidebar.getBoundingClientRect();
+    return {
+      viewportWidth: window.innerWidth,
+      insideAstra: Boolean(barEl.closest(".desk-ltr.astra")),
+      bar: { left: Math.round(b.left), right: Math.round(b.right) },
+      sidebar: {
+        right: Math.round(s.right),
+        position: getComputedStyle(sidebar).position,
+        offCanvas: getComputedStyle(sidebar).left === "-255px",
+      },
+      firstChar: { left: Math.round(ch.left), text: (msg.textContent || "").slice(0, 8) },
+      hitIsMessage: hit === msg || Boolean(hit && msg.contains(hit)),
+      hit: hit ? `${hit.tagName.toLowerCase()}.${String(hit.className || "").split(" ")[0]}` : null,
+    };
+  });
+}
+
+/**
+ * The bar belongs to the content column, not to the viewport.
+ *
+ * It used to be `fixed inset-x-0` -- pinned to both viewport edges -- while its
+ * message sat in an `mx-auto max-w-4xl` column of its own. The desk's nav is
+ * drawn at the left of the viewport at a higher z-index, so at 1280 the bar's
+ * own left edge and the first characters of its message were behind the nav:
+ * the bar read "…ave unsaved section changes" and "Review changes" was partly
+ * unreachable. Measured at three widths because the column it has to follow is
+ * three different things -- 232px above 1200, 206px at 1000, and off-canvas at
+ * 375, where there is no nav to sit beside and the bar takes the whole width.
+ */
+async function theBarStaysInsideTheContentColumn() {
+  const wide = await barGeometry(1280);
+  console.log(`  meas  1280 ${JSON.stringify(wide)}`);
+  assert.equal(wide.missing, undefined, "no unsaved bar to measure at 1280");
+  assert.equal(wide.insideAstra, true, "the bar must live inside the desk shell whose width it follows");
+  assert.equal(wide.sidebar.position, "sticky", `at 1280 the nav is beside the content (${wide.sidebar.position})`);
+  assert.ok(
+    wide.bar.left >= wide.sidebar.right,
+    `at 1280 the bar starts at ${wide.bar.left}px, behind a nav ending at ${wide.sidebar.right}px`,
+  );
+  assert.equal(
+    wide.hitIsMessage,
+    true,
+    `the message's first character at ${wide.firstChar.left}px is covered by <${wide.hit}> at 1280`,
+  );
+  step(`at 1280 the bar starts at ${wide.bar.left}px, right of the nav's ${wide.sidebar.right}px edge`);
+
+  const mid = await barGeometry(1000);
+  console.log(`  meas  1000 ${JSON.stringify(mid)}`);
+  assert.equal(mid.sidebar.position, "sticky", `at 1000 the nav is still beside the content (${mid.sidebar.position})`);
+  assert.ok(
+    mid.bar.left >= mid.sidebar.right,
+    `at 1000 the bar starts at ${mid.bar.left}px, behind a nav ending at ${mid.sidebar.right}px`,
+  );
+  assert.equal(mid.hitIsMessage, true, `the message is covered by <${mid.hit}> at 1000`);
+  step(`at 1000 the narrower nav (${mid.sidebar.right}px) still clears the bar at ${mid.bar.left}px`);
+
+  const phone = await barGeometry(375);
+  console.log(`  meas  375 ${JSON.stringify(phone)}`);
+  assert.equal(phone.sidebar.offCanvas, true, "at 375 the nav is off-canvas, not beside the content");
+  assert.ok(
+    phone.bar.left <= 1 && phone.bar.right >= phone.viewportWidth - 1,
+    `at 375 the bar must span the width (${phone.bar.left}..${phone.bar.right} of ${phone.viewportWidth})`,
+  );
+  assert.equal(phone.hitIsMessage, true, `the message is covered by <${phone.hit}> at 375`);
+  step(`at 375 the bar spans the whole width (${phone.bar.left}..${phone.bar.right})`);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
+
+/**
+ * The desk's pinned chrome is in the picture, so measure where it really is.
+ *
+ * The portrait shot of the Business fieldset (297x1168) showed "Public news
+ * page", the search box, the theme toggle and "Skip to desk" drawn across the
+ * middle of the fieldset. Both are pinned to the viewport: the desk header is
+ * `position: sticky; top: 0` and the skip link is `position: fixed; top: -100px`
+ * until it takes focus. A capture that has to reach past the viewport to
+ * assemble a tall image paints them at their viewport offsets for whatever
+ * scroll position it was on, which lands them mid-image. The 1280 shot of the
+ * same element in the same state is clean, and the only difference is that at
+ * 1280 the fieldset fits the viewport and no reach-past is needed.
+ *
+ * So this measures the live page instead of the capture: with the fieldset in
+ * view and nothing focused, the header is at the viewport's top edge, the skip
+ * link is off-screen, and a hit test inside the fieldset returns the fieldset.
+ * It writes both a viewport shot and the element shot it is disproving.
+ */
+async function theDeskChromeDoesNotCoverTheSection() {
+  // Run while Business is still empty, because that is the state the artefact
+  // was photographed in: the open source list and the add box make the fieldset
+  // 1168px tall against a 780px viewport, which is what forces the capture to
+  // reach past the screen in the first place.
+  await page.setViewportSize({ width: 375, height: 780 });
+  const business = group("Business");
+  await business.scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.waitForTimeout(250);
+  await shot("chrome-375-viewport");
+
+  const probe = await page.evaluate(() => {
+    const topbar = document.querySelector(".astra-topbar");
+    const skip = document.querySelector(".astra-skip");
+    // The panel holds one fieldset per section, so the Business one has to be
+    // picked by its legend -- the first fieldset on the page is Council.
+    const field = [
+      ...document.querySelectorAll('section[aria-label="Newspaper sections"] fieldset'),
+    ].find((f) => (f.querySelector("legend")?.textContent || "").trim().startsWith("Business"));
+    const t = topbar?.getBoundingClientRect();
+    const k = skip?.getBoundingClientRect();
+    const f = field?.getBoundingClientRect();
+    const y = f ? (Math.max(f.top, 0) + Math.min(f.bottom, window.innerHeight)) / 2 : 0;
+    const hit = f ? document.elementFromPoint(f.left + f.width / 2, y) : null;
+    const round = (n) => Math.round(n);
+    return {
+      focused: document.activeElement ? document.activeElement.tagName.toLowerCase() : null,
+      topbar: t ? { top: round(t.top), bottom: round(t.bottom) } : null,
+      skip: k ? { top: round(k.top), bottom: round(k.bottom) } : null,
+      field: f ? { top: round(f.top), bottom: round(f.bottom), height: round(f.height) } : null,
+      midIsInsideField: Boolean(hit && field.contains(hit)),
+      mid: hit ? `${hit.tagName.toLowerCase()}.${String(hit.className || "").split(" ")[0]}` : null,
+    };
+  });
+  console.log(`  meas  chrome375 ${JSON.stringify(probe)}`);
+
+  assert.equal(probe.focused, "body", `a screenshot run focuses nothing (activeElement ${probe.focused})`);
+  assert.ok(
+    probe.skip && probe.skip.bottom <= 0,
+    `the skip link is off-screen until focused (${JSON.stringify(probe.skip)})`,
+  );
+  assert.ok(
+    probe.topbar && Math.abs(probe.topbar.top) <= 1,
+    `the desk header is pinned to the viewport's top edge (${JSON.stringify(probe.topbar)})`,
+  );
+  assert.equal(
+    probe.midIsInsideField,
+    true,
+    `something is painted over the middle of the fieldset (hit ${probe.mid})`,
+  );
+  step("with nothing focused the header is at the top edge, the skip link off-screen");
+
+  // The same capture the portrait screenshot made, taken here to keep the
+  // disproved artefact beside the measurement that disproves it.
+  await shot("chrome-375-element", business);
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
+
 async function main() {
   const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -376,6 +566,7 @@ async function main() {
   await openSections();
   await businessIsASavedEmptySection();
   await anEmptySectionOpensItselfAndOffersAnAddBox();
+  await theDeskChromeDoesNotCoverTheSection();
   await addingFromInsideTheSectionTicksItButDoesNotSaveIt();
   await aDuplicateUrlIsTickedRatherThanDuplicated();
   await theBarReviewsAndApplies();
@@ -384,13 +575,14 @@ async function main() {
   await leavingInAppIsBlocked();
   await theSourcesPageCanAssignWithoutASecondTrip();
   await keyboardAndPhoneWidth();
+  await theBarStaysInsideTheContentColumn();
 
   await browser.close();
   if (consoleErrors.length) {
     console.error(JSON.stringify({ ok: false, consoleErrors, completed: done }, null, 2));
     process.exit(1);
   }
-  console.log(JSON.stringify({ ok: true, completed: done }, null, 2));
+  console.log(JSON.stringify({ ok: true, completed: done, outDir, shots }, null, 2));
 }
 
 main().catch(dump);
