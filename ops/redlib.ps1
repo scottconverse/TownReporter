@@ -18,14 +18,19 @@
   scripts are Windows PowerShell 5.1. So status is answered here directly,
   and everything that touches the install is forwarded to pwsh.
 
-  Nothing here is started automatically. A Redlib left running is a process
-  holding an upstream Reddit identity; start it when the desk needs it and
-  stop it when it does not.
+  Nothing here is started automatically. Logon (start-townreporter.ps1), the
+  watchdog and the Control menu drive it through ops\lib-redlib.ps1, which is
+  where the "is it installed / which process is it / is it answering" answers
+  live so four scripts cannot disagree about them. A Redlib left running is a
+  process holding an upstream Reddit identity; the watchdog keeps it up only
+  while the machine is up, and stop-townreporter.ps1 takes it down with the
+  paper.
 
   Usage:
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1              # status
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 start
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 stop
+    powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 restart      # stop, then start
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 check        # full usability test
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 setup        # build/install only
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 start -SkillRoot <path>
@@ -35,7 +40,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "start", "stop", "check", "setup")]
+  [ValidateSet("status", "start", "stop", "restart", "check", "setup")]
   [string]$Action = "status",
   [string]$SkillRoot,
   [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "RedditSearch\Redlib"),
@@ -43,6 +48,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "lib-redlib.ps1")
 $baseUrl = "http://127.0.0.1:$Port"
 
 function Find-SkillRoot {
@@ -87,27 +93,8 @@ function Invoke-SkillScript {
   return $LASTEXITCODE
 }
 
-function Get-Install {
-  $configPath = Join-Path $InstallRoot "install.json"
-  if (-not (Test-Path -LiteralPath $configPath)) { return $null }
-  return (Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json)
-}
-
-function Get-Running {
-  param($Config)
-  $pidPath = Join-Path $InstallRoot "redlib.pid"
-  if (-not (Test-Path -LiteralPath $pidPath)) { return $null }
-  $pidValue = [int](Get-Content -Raw -LiteralPath $pidPath)
-  $process = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
-  if (-not $process) { return $null }
-  $expected = [IO.Path]::GetFullPath([string]$Config.executable)
-  $actual = [IO.Path]::GetFullPath($process.MainModule.FileName)
-  if ($actual -ne $expected) { return $null }
-  return $pidValue
-}
-
 function Show-Status {
-  $config = Get-Install
+  $config = Get-RedlibConfig -InstallRoot $InstallRoot
   Write-Host ""
   Write-Host "  Local Redlib, as seen from this machine"
   Write-Host "  --------------------------------------"
@@ -121,9 +108,15 @@ function Show-Status {
   }
 
   Write-Host ("  [  OK  ] installed            " + $config.commit + " (" + $config.installedAt + ")")
-  $pidValue = Get-Running -Config $config
+  $entry = Get-RedlibProcess -InstallRoot $InstallRoot
+  $pidValue = if ($entry.State -eq 'live') { $entry.Pid } else { $null }
   if (-not $pidValue) {
-    Write-Host "  [  DOWN  ] running            no process holding the recorded pid"
+    $why = switch ($entry.State) {
+      'other'      { "the recorded pid is running a different program" }
+      'unverified' { "the recorded pid is alive but its executable could not be read" }
+      default      { "no process holding the recorded pid" }
+    }
+    Write-Host ("  [  DOWN  ] running            " + $why)
     Write-Host "             to start it:       powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 start"
     Write-Host ""
     return 1
@@ -158,6 +151,31 @@ switch ($Action) {
   }
   "stop" {
     exit (Invoke-SkillScript -Name "stop_redlib_windows.ps1" -ExtraArgs @())
+  }
+  "restart" {
+    # The Control menu's "Restart the Reddit reader".
+    #
+    # Stop goes through the pid file in lib-redlib.ps1 (never by image name).
+    # Start is the skill's own path, run to completion here rather than
+    # detached, so this action answers with what actually happened: the menu
+    # exists so an operator can be told the truth, not so a process can be
+    # launched and left to explain itself. ops\start-townreporter.ps1 is the
+    # opposite case -- an optional reader has no business holding up logon --
+    # and uses Start-RedlibIfDown for exactly that reason.
+    $stopped = Stop-Redlib -InstallRoot $InstallRoot
+    Write-Host ("  stopped: " + $stopped)
+    if ($stopped -eq 'absent') {
+      Write-Host "  Redlib is not installed here, so there is nothing to restart."
+      Write-Host "  Install it with: powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 setup"
+      exit 1
+    }
+    if ($stopped -eq 'refused') {
+      Write-Host "  Refusing to start a second Redlib: the recorded pid is not a Redlib this script can stop."
+      Write-Host "  Look at it with: ops\redlib.ps1 status"
+      exit 1
+    }
+    Start-Sleep -Seconds 1
+    exit (Invoke-SkillScript -Name "start_redlib_windows.ps1" -ExtraArgs @())
   }
   "check" {
     exit (Invoke-SkillScript -Name "test_redlib_windows.ps1" -ExtraArgs @())

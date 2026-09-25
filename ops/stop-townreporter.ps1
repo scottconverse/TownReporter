@@ -1,17 +1,19 @@
 <#
-  Stops this install's TownReporter server. Postgres only if you ask.
+  Stops this install's TownReporter server, and the Reddit reader with it.
+  Postgres only if you ask.
 
   Never matches by image name: `node.exe` and `postgres.exe` both run on this
   machine for other things, and a blanket stop-by-name has taken down
-  unrelated software here before.
+  unrelated software here before. Redlib is stopped the same way -- through
+  the pid file the reddit-search skill wrote, never by its image name.
 
   Postgres is shared. One cluster on 5433 serves the live paper, the
   development copy, the end-to-end databases and whatever scratch databases
   are in flight, so stopping it as part of stopping the paper reaches a long
   way past the paper. It is now opt-in.
 
-    ops\stop-townreporter.ps1                    # the app only
-    ops\stop-townreporter.ps1 -IncludeDatabase   # the app and the cluster
+    ops\stop-townreporter.ps1                    # the app and the Reddit reader
+    ops\stop-townreporter.ps1 -IncludeDatabase   # those and the cluster
 #>
 [CmdletBinding()]
 param([switch]$IncludeDatabase)
@@ -54,6 +56,32 @@ foreach ($owner in $owners) {
   }
   Write-Host "stopping app PID $owner on port $port"
   Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+}
+
+<#
+  The Reddit reader goes down with the paper.
+
+  A Redlib left running is a process holding an upstream Reddit identity, and
+  it is ours to take down: this script is "stop everything" on the Control
+  menu, and Redlib is part of everything. Through the pid file only -- see
+  lib-redlib.ps1. When the recorded pid belongs to something else, or its
+  executable cannot be read, Stop-Redlib refuses and says so rather than
+  killing a process it cannot identify.
+
+  Wrapped, like the start side: the app is already down by the time this runs,
+  and a problem with an optional reader must not change that answer.
+#>
+try {
+  . (Join-Path $PSScriptRoot "lib-redlib.ps1")
+  $redlib = Stop-Redlib
+  switch ($redlib) {
+    'stopped'     { Write-Host "stopped the Reddit reader (Redlib)" }
+    'not-running' { Write-Host "the Reddit reader was not running" }
+    'absent'      { Write-Host "no Reddit reader is installed here; nothing to stop" }
+    'refused'     { Write-Host "the Reddit reader's recorded pid is not a Redlib this script can stop -- leaving it alone" }
+  }
+} catch {
+  Write-Host "could not stop the Reddit reader: $($_.Exception.Message)"
 }
 
 $bin  = $OwnedPgBin

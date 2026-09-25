@@ -87,6 +87,28 @@ $tasks = @(
   @{ Name = "TownReporter Tunnel Restart"; Action = (PsAction     "restart-tunnel.ps1");     Trigger = $null;      Why = "on demand, from the Server page" }
 )
 
+<#
+  There is NO task for Redlib or Ollama, and that is the decision, not an
+  oversight.
+
+  Nothing about them needs its own trigger:
+
+  * Redlib starts at logon, because "TownReporter" (above) runs
+    start-townreporter.ps1, which starts the paper and then starts Redlib if it
+    is down and installed -- detached, so an optional reader never holds up the
+    paper. If it stops later, "TownReporter Watchdog" (above, every five
+    minutes) starts it again. A dedicated task would be a second starter racing
+    the watchdog, which is exactly the class of bug the ownership guards in
+    lib-ownership.ps1 exist to catch.
+  * Ollama is not ours to schedule: it is started by the operator's own Startup
+    shortcut (Ollama.lnk), and the watchdog reads that shortcut's target rather
+    than restating it. A task here would be a second launch path that could
+    drift from the one this machine is known to work with.
+
+  So both are reached through tasks that already exist. Adding a task here would
+  also mean an installer change on every machine, for no new coverage.
+#>
+
 Write-Host ""
 Write-Host "  TownReporter scheduled tasks"
 Write-Host "  ----------------------------"

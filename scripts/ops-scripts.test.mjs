@@ -25,7 +25,15 @@ const OPS = join(ROOT, "ops");
  * TE-06.
  */
 
-/** Every script the docs and the Server page depend on. */
+/**
+ * Every script the docs, the Server page and the other ops scripts depend on.
+ *
+ * The lib-*.ps1 entries are here because a dot-source of a missing file fails
+ * at runtime, on the machine that keeps the paper online, with nothing in CI
+ * to say so. The two about optional services (lib-redlib.ps1, lib-ollama.ps1)
+ * are the ones four different callers agree through; losing one silently
+ * would turn "is the Reddit reader up" into four different answers again.
+ */
 const REQUIRED = [
   "watchdog.ps1",
   "run-tunnel.ps1",
@@ -38,6 +46,10 @@ const REQUIRED = [
   "cron-tick.ps1",
   "run-hidden.vbs",
   "TownReporter Control.cmd",
+  "redlib.ps1",
+  "lib-redlib.ps1",
+  "lib-ollama.ps1",
+  "lib-env.ps1",
 ];
 
 test("every ops script the docs promise actually exists", () => {
@@ -480,3 +492,223 @@ test("lib-port.ps1 defines Test-TownReporterPort and Get-TownReporterPortOwner",
     "Get-TownReporterPortOwner must filter listeners by LocalAddress",
   );
 });
+
+/* ------------------------------------------------------------------------- *
+ * Redlib, the local Reddit reader, and Ollama, the first Automatic rung's
+ * server. Both are OPTIONAL: the desk reads Reddit through Reddit's .rss when
+ * Redlib is down, and "Automatic" walks to the next model when Ollama is.
+ *
+ * That optionality is the property these tests protect. The failure mode is
+ * not "Redlib did not start" -- it is an optional reader becoming a reason to
+ * restart or stop the paper, which is how a supported degraded state turns
+ * into an outage. So the gates below are mostly about what must NOT happen.
+ * ------------------------------------------------------------------------- */
+
+const read = (name) => readFileSync(join(OPS, name), "utf8");
+
+/**
+ * PowerShell text with its comments removed.
+ *
+ * Several of these scripts explain in prose what they must never do -- "there
+ * is no Stop-Process in lib-ollama.ps1 at all" -- and a naive search for the
+ * forbidden code finds the sentence saying the code is absent. That is the
+ * false-positive version of the claims-of-absence mistake: the assertion has
+ * to be about the code, so strip the prose first.
+ */
+const stripComments = (ps) => ps.replace(/<#[\s\S]*?#>/g, "").replace(/(^|\s)#[^\n]*/g, "$1");
+
+test("the Reddit reader is stopped by its own pid file, never by image name", () => {
+  const lib = read("lib-redlib.ps1");
+  assert.match(lib, /redlib\.pid/, "lib-redlib.ps1 must know the pid file the skill writes");
+  assert.match(lib, /function Stop-Redlib/, "lib-redlib.ps1 must own the stop path");
+  assert.match(
+    lib,
+    /function Stop-Redlib[\s\S]{0,900}?Stop-Process -Id \$entry\.Pid/,
+    "Stop-Redlib must stop the pid it verified, not a name match",
+  );
+  assert.doesNotMatch(lib, /Stop-Process\s+-Name/i, "lib-redlib.ps1 must never stop by image name");
+
+  // The recorded pid must be CHECKED against the installed executable, not
+  // believed: a recycled pid would otherwise be a kill aimed at a stranger.
+  assert.match(lib, /MainModule\.FileName/, "the pid's executable must be read");
+  assert.match(lib, /config\.executable/, "and compared with the executable install.json names");
+  assert.match(lib, /'refused'/, "an unidentifiable pid must be refused, not orphaned");
+});
+
+test("stop-townreporter.ps1 takes the Reddit reader down with the paper", () => {
+  const text = read("stop-townreporter.ps1");
+  assert.match(text, /Stop-Redlib/, "the 'stop everything' path must stop the reader");
+  assert.doesNotMatch(
+    text,
+    /redlib[\s\S]{0,200}?Stop-Process\s+-Name/i,
+    "the reader must not be stopped by image name",
+  );
+  // Postgres stays opt-in and the app stop must still be port-scoped: this
+  // change adds a third thing to the script and must not have relaxed either.
+  assert.match(text, /param\(\[switch\]\$IncludeDatabase\)/, "-IncludeDatabase must survive");
+  assert.match(text, /Get-TownReporterPortOwner \$port/, "the app stop must stay port-scoped");
+});
+
+test("start-townreporter.ps1 starts the reader detached, after the paper, and cannot fail on it", () => {
+  const text = read("start-townreporter.ps1");
+  assert.match(text, /Start-RedlibIfDown/, "logon must start the reader if it is down");
+  assert.match(text, /Get-RedlibOffSwitch/, "and must honour TOWNREPORTER_REDLIB");
+  assert.match(text, /try\s*\{[\s\S]*?Start-RedlibIfDown[\s\S]*?\}\s*catch/, "the reader start must be wrapped");
+  // Non-blocking: the child is spawned by Start-RedlibIfDown, and nothing in
+  // this script waits on it. A reader that waits for Reddit to answer must
+  // never hold up the paper's logon start.
+  const lib = read("lib-redlib.ps1");
+  assert.match(lib, /function Start-RedlibIfDown[\s\S]{0,1200}?Start-Process/, "the start must be detached");
+  assert.doesNotMatch(
+    lib.slice(lib.indexOf("function Start-RedlibIfDown"), lib.indexOf("function Stop-Redlib")),
+    /Wait-Process|Start-Sleep/,
+    "Start-RedlibIfDown must not wait for the reader",
+  );
+  // Order: the app is started first, and only then the reader.
+  const appStart = text.indexOf(".output\\server\\index.mjs");
+  const readerStart = text.indexOf("Start-RedlibIfDown");
+  assert.ok(appStart > 0 && readerStart > appStart, "the paper must be started before the optional reader");
+});
+
+test("the Control menu offers the reader in plain words and still publishes nothing", () => {
+  const text = readFileSync(join(OPS, "TownReporter Control.cmd"), "utf8");
+  assert.match(text, /^echo   6  /m, "the menu must have a line 6");
+  assert.match(text, /Reddit reader/i, "line 6 must be about the Reddit reader");
+  assert.match(text, /if "%choice%"=="6" goto redlib/, "and must dispatch it");
+  assert.match(text, /redlib\.ps1" restart/, "option 6 must restart the reader through its own ops script");
+  // The menu's promise at the top of the file, re-checked: the numbers may
+  // only ever read state or run the fixed set of ops scripts. ("publish" and
+  // "delete" appear in the promise itself, so the search is for commands.)
+  assert.doesNotMatch(
+    text,
+    /schtasks \/delete|Stop-Process|taskkill|psql|del |rmdir|robocopy/i,
+    "the menu must stay read/restart only",
+  );
+  assert.doesNotMatch(text, /if "%choice%"=="7"|if "%choice%"=="8"/, "no undocumented menu items");
+});
+
+test("the watchdog repairs the reader and the model server without ever aiming at the paper", () => {
+  const wd = read("watchdog.ps1");
+  assert.match(wd, /Start-RedlibIfDown/, "the watchdog must start the reader if it is down");
+  assert.match(wd, /Start-OllamaIfDown/, "the watchdog must start Ollama if it is down");
+
+  // The two optional sections sit between the app and the tunnel sections and
+  // are each skipped in test mode. Sliced, then read for what must not appear.
+  const optionalRaw = wd.slice(wd.indexOf("--- Reddit reader (Redlib)"), wd.indexOf("--- Tunnel ---"));
+  assert.ok(optionalRaw.length > 0, "could not find the optional-service sections");
+  const optional = stripComments(optionalRaw);
+  assert.match(optional, /WATCHDOG_TEST_MODE -ne '1'/, "both sections must be skipped in test mode");
+  assert.equal(
+    [...optional.matchAll(/catch\s*\{/g)].length,
+    2,
+    "each optional section must be wrapped in its own catch -- neither may throw into the paper's path",
+  );
+  assert.doesNotMatch(optional, /Stop-Process/, "nothing in either section may stop a process");
+  assert.doesNotMatch(optional, /Start-ScheduledTask/, "and neither may start a scheduled task");
+  assert.doesNotMatch(optional, /throw /, "and neither may throw");
+
+  // The app's own section must not know these exist. If a reader check ever
+  // lands inside the app block, a Redlib problem becomes an app restart.
+  const appBlock = stripComments(
+    wd.slice(wd.indexOf("# --- App ---"), wd.indexOf("--- Reddit reader (Redlib)")),
+  );
+  assert.ok(appBlock.length > 0, "could not find the app section");
+  assert.doesNotMatch(appBlock, /redlib|ollama/i, "the app repair path must not consult the optional services");
+
+  // A detached start cannot be reported as a completed repair on the same run.
+  assert.doesNotMatch(
+    optional,
+    /\$repaired \+= "(redlib|ollama)"/,
+    "an unverified detached start must not be claimed as a repair in the same run",
+  );
+});
+
+test("Ollama is started the shortcut's way and is never killed, and LM Studio is never touched", () => {
+  const libRaw = read("lib-ollama.ps1");
+  const lib = stripComments(libRaw);
+  assert.doesNotMatch(
+    lib,
+    /Stop-Process|Stop-Service|taskkill/i,
+    "lib-ollama.ps1 must contain no path that stops anything -- a wedged Ollama is the operator's to restart",
+  );
+  assert.doesNotMatch(
+    lib,
+    /1234|lms|lm-studio|\bLM Studio\b/i,
+    "lib-ollama.ps1 must not reach toward LM Studio or its models",
+  );
+  // The launch target is READ out of the operator's shortcut, not restated.
+  assert.match(lib, /CreateShortcut/, "the Startup shortcut must be read, not assumed");
+  assert.match(lib, /Ollama\.lnk/, "and the default is the operator's own Startup shortcut");
+  assert.match(lib, /OLLAMA_SHORTCUT/, "with an override for a non-default install");
+  // Started only when nothing is running: a process that exists but is not
+  // answering is left alone, so a slow start is never doubled.
+  assert.match(
+    lib,
+    /function Start-OllamaIfDown[\s\S]{0,900}?if \(Test-OllamaProcessRunning\) \{ return 'starting' \}/,
+    "a running-but-not-ready Ollama must be left alone",
+  );
+  // Ready means the model list answers, the same question the desk asks.
+  assert.match(lib, /\/models/, "readiness must be the OpenAI-compatible model list");
+  assert.match(lib, /11434/, "and must default to the DeepSeek rung's own endpoint");
+});
+
+test("status.ps1 answers for the reader and the model server in plain words, read-only", () => {
+  const text = read("status.ps1");
+  assert.match(text, /Reddit reader \(Redlib\)/, "status must name the reader");
+  assert.match(text, /DeepSeek \(via Ollama\)/, "status must name the model");
+  // The wording is the point: Ollama down is not a fault, and the line must
+  // say what the paper does about it rather than implying something is broken.
+  assert.match(text, /Ollama not running - the paper will use the next model/);
+  assert.match(text, /switched off \(TOWNREPORTER_REDLIB=0\)/, "the reader's off-switch must be honoured");
+  // Both lines must be shown as notes, not faults: an optional service that is
+  // down must not read the same as the paper being down.
+  const readerLine = text.slice(text.indexOf('Show "Reddit reader (Redlib)"'));
+  assert.match(readerLine.slice(0, 80), /\$redlibOptional/, "the reader must not be marked as a fault");
+  assert.match(text, /Show "DeepSeek \(via Ollama\)"[^\n]*\$true/, "the model line must not be marked as a fault");
+
+  // Read-only, in both modes, and -DryRun must SAY so rather than imply it.
+  assert.match(text, /\[switch\]\$DryRun/, "status.ps1 must take -DryRun");
+  assert.match(text, /\[string\]\$Root/, "status.ps1 must take -Root so it can describe the live install");
+  assert.match(text, /Nothing was started, stopped or changed/, "-DryRun must state plainly that nothing happened");
+  assert.match(text, /-Root exists so this script can be run from a worktree/, "-Root's reason must be documented");
+  assert.doesNotMatch(text, /Stop-Process|Start-Process|Start-ScheduledTask/, "status.ps1 must start and stop nothing");
+  assert.doesNotMatch(text, /schtasks/, "and must not run a scheduled task");
+  // The .env parser is shared now; a second private copy is how the two
+  // answers to "what port is this install on" drift apart.
+  assert.match(text, /Read-OpsEnvValue/, "status.ps1 must use the shared .env reader");
+  assert.doesNotMatch(text, /function Read-EnvValue/, "and must not keep its own copy of it");
+});
+
+test("both optional services have an off-switch the operator can throw", () => {
+  const redlib = read("lib-redlib.ps1");
+  const ollama = read("lib-ollama.ps1");
+  assert.match(redlib, /TOWNREPORTER_REDLIB/, "the reader's off-switch must be the app's own env var");
+  assert.ok(
+    /Test-RedlibUp|Get-RedlibState/.test(redlib.slice(redlib.indexOf("function Get-RedlibState"))),
+    "the reader's state must come from whether it answers, not only from a pid file",
+  );
+  assert.match(ollama, /function Start-OllamaIfDown[\s\S]{0,200}?OffSwitch/, "Ollama's start must honour an off-switch");
+});
+
+test("no new scheduled task is registered for either optional service", () => {
+  /*
+    Both are reached through tasks that already exist: "TownReporter" (logon)
+    starts the reader via start-townreporter.ps1, "TownReporter Watchdog"
+    (every five minutes) restarts either if it stops, and Ollama is launched by
+    the operator's own Startup shortcut. A dedicated task would be a second
+    starter racing the watchdog. The installer must say so, and must not have
+    quietly grown a seventh task.
+  */
+  const text = read("install-tasks.ps1");
+  assert.match(text, /There is NO task for Redlib or Ollama/, "install-tasks.ps1 must record the decision");
+  // CRLF, so the closing paren is matched with a pattern rather than a literal.
+  const list = text.match(/\$tasks = @\(([\s\S]*?)\r?\n\)\r?\n/);
+  assert.ok(list, "could not find the task list");
+  assert.equal(
+    [...list[1].matchAll(/Name = "/g)].length,
+    6,
+    "the task list grew or shrank -- if that is intended, update this count and the docs table deliberately",
+  );
+  assert.doesNotMatch(list[1], /[Rr]edlib|[Oo]llama/, "neither optional service may get its own task");
+});
+

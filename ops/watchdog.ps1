@@ -16,6 +16,14 @@
   up against a dead database produces a site that answers 200 with no stories,
   which is worse than a site that is plainly unreachable.
 
+  It also keeps two optional services alive, and keeps them separate from the
+  paper. Redlib (the Reddit reader) and Ollama (the first Automatic rung's
+  model server) are each started if down and never started, stopped or
+  restarted because of, or as a reason to touch, the app: both sections run
+  inside their own try/catch, both are skipped in test mode, and neither is
+  added to `repaired` -- their starts are detached and a run cannot yet say
+  they worked. Both are described in ops\lib-redlib.ps1 and ops\lib-ollama.ps1.
+
   ASCII only, on purpose. The first version used em-dashes in its log messages;
   Windows PowerShell 5.1 reads a BOM-less UTF-8 script as ANSI, so those lines
   came out as mojibake and truncated mid-message. A log nobody can read is the
@@ -225,6 +233,80 @@ if (-not $appHealthy) {
     } catch {
       Write-Log "app: start failed: $($_.Exception.Message)"
     }
+  }
+}
+
+# --- Reddit reader (Redlib) -----------------------------------------------
+<#
+  Optional, and treated as optional.
+
+  The desk reads a subreddit through Reddit's .rss when Redlib is down and says
+  so in the source text (src\lib\news\reddit.server.ts), so this section starts
+  Redlib and reports it -- it never restarts the paper, never stops the paper,
+  and never lets a Redlib failure reach anything above it. Every path is inside
+  the try/catch; the only thing that leaves this block is a log line.
+
+  Start is non-blocking (lib-redlib.ps1 Start-RedlibIfDown spawns the skill's
+  start script detached), because that script waits for Redlib to answer Reddit
+  and the watchdog's real job is the paper. The next run a few minutes later
+  reports whether it came up.
+
+  Skipped in test mode: a CI runner has no Redlib and no business starting one.
+#>
+if ($env:WATCHDOG_TEST_MODE -ne '1') {
+  try {
+    . (Join-Path $PSScriptRoot "lib-redlib.ps1")
+    $redlibSwitch = Get-RedlibOffSwitch -EnvFile (Join-Path $app ".env")
+    $redlibState = Get-RedlibState
+    $redlibAction = Start-RedlibIfDown -OffSwitch $redlibSwitch
+    switch ($redlibAction) {
+      'up'      { Write-Log "redlib: up (state=$redlibState)" }
+      # Deliberately NOT added to $repaired: the start is detached, so this run
+      # cannot yet say it worked. The next run's "redlib: up" is the receipt.
+      'started' { Write-Log "redlib: not answering (state=$redlibState), starting it" }
+      'absent'  { Write-Log "redlib: not installed here; the desk reads Reddit through RSS alone" }
+      'off'     { Write-Log "redlib: switched off by TOWNREPORTER_REDLIB=0; leaving it alone" }
+    }
+  } catch {
+    Write-Log "redlib: check failed: $($_.Exception.Message) -- the paper is unaffected"
+  }
+}
+
+# --- Ollama, the first Automatic rung's server -----------------------------
+<#
+  Also optional, and also never fatal.
+
+  "Automatic" walks its local rungs in order (src\lib\news\provider-registry.ts
+  `automaticLadder`): DeepSeek v4.1 Flash on Ollama, then Qwen 3.6 35B on LM
+  Studio when that model is already loaded. Ollama being down is not the paper
+  being down -- the ladder moves to the next rung -- so this section starts it
+  and says what it found.
+
+  Two things it never does, both in lib-ollama.ps1: it never stops or restarts
+  Ollama (a model may be mid-draft on it; a wedged Ollama is the operator's to
+  restart), and it never touches LM Studio or its models. There is no
+  Stop-Process in lib-ollama.ps1 at all, so no path from here reaches a kill.
+
+  Started the way the operator's own Startup shortcut starts it: the target is
+  read out of Ollama.lnk, not restated here, so this cannot drift from the
+  launch this machine is known to work with.
+#>
+if ($env:WATCHDOG_TEST_MODE -ne '1') {
+  try {
+    . (Join-Path $PSScriptRoot "lib-ollama.ps1")
+    $ollamaSwitch = Read-OpsEnvValue -EnvFile (Join-Path $app ".env") -Name "TOWNREPORTER_OLLAMA" -Fallback '1'
+    $ollamaState = Get-OllamaState
+    $ollamaAction = Start-OllamaIfDown -OffSwitch $ollamaSwitch
+    switch ($ollamaAction) {
+      'up'       { Write-Log "ollama: ready (state=$ollamaState)" }
+      'starting' { Write-Log "ollama: a process is up but not answering yet; leaving it alone" }
+      'started'  { Write-Log "ollama: not running (state=$ollamaState), started it from the Startup shortcut" }
+      'remote'   { Write-Log "ollama: the DeepSeek rung points off this machine; not ours to start" }
+      'absent'   { Write-Log "ollama: not running and no Startup shortcut to start it from; the paper will use the next model" }
+      'off'      { Write-Log "ollama: switched off by TOWNREPORTER_OLLAMA=0; leaving it alone" }
+    }
+  } catch {
+    Write-Log "ollama: check failed: $($_.Exception.Message) -- the paper is unaffected"
   }
 }
 
