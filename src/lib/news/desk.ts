@@ -730,6 +730,25 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       };
     }
   }
+  /*
+    Speech-to-text (unit R) runs AFTER the capture pass, never inside it. A
+    meeting that ended at audio because captions were unavailable is exactly the
+    one worth transcribing -- but textflowkit is optional and external, so a
+    missing or unhappy tool adds a line to the coverage summary instead of
+    failing a scan that otherwise did its job. When it is not installed nothing
+    is queued and the coverage line is unchanged.
+  */
+  if (meetingAwareness) {
+    try {
+      const { enqueueMissingTranscriptions } = await import("./textflowkit-transcribe.server.ts");
+      const speech = await enqueueMissingTranscriptions(sql, { newsroomId: owned(context), userId: job.user_id });
+      if (speech.queued > 0) {
+        meetingAwareness.coverageLine = `${meetingAwareness.coverageLine} (speech-to-text: ${speech.queued} queued)`;
+      }
+    } catch (e) {
+      meetingAwareness.failures.push(`speech-to-text: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   let runId = job.subject_id;
   const { getSections } = await import("./sections.server.ts");
   const sectionConfig = await getSections(owned(context));

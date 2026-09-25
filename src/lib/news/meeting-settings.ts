@@ -20,6 +20,15 @@ import { DEFAULT_CAPTURE_CAPS } from "./meeting-capture-caps.ts";
 
 export type MeetingRetentionMode = "media" | "audio-only" | "transcript-only";
 
+export type MeetingSpeechToTextStatus = {
+  installed: boolean;
+  version: string | null;
+  model: string;
+  language: string;
+  /** The operator-facing sentence, composed by the pure module. */
+  line: string;
+};
+
 export type MeetingOperatorSettings = {
   channels: string[];
   storageRoot: string | null;
@@ -27,6 +36,8 @@ export type MeetingOperatorSettings = {
   enabled: boolean;
   durationCapSeconds: number;
   sizeCapBytes: number;
+  /** Unit R: whether speech-to-text is available on this server at all. */
+  speechToText: MeetingSpeechToTextStatus;
 };
 
 const RETENTION_MODES: MeetingRetentionMode[] = ["media", "audio-only", "transcript-only"];
@@ -73,6 +84,40 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
       "select storage_root,retention_mode,enabled,duration_cap_seconds,size_cap_bytes from meeting_capture_settings where newsroom_id=$1",
       [newsroomId],
     );
+    /*
+      Unit R: the operator has to be able to see whether speech-to-text is
+      available BEFORE wondering why a captionless meeting stayed audio-only.
+      Both modules are loaded inside the handler for the reason the note above
+      gives -- textflowkit.ts hashes with node:crypto and textflowkit-cli.server.ts
+      spawns a process.
+
+      The probe is bounded well under the job's own 15s allowance: this runs on
+      a page load, and a pathological CLI must not hold the settings screen.
+      A probe that misbehaves is reported as not installed rather than thrown:
+      the panel still renders, and the sentence says what happened.
+    */
+    let speechToText: MeetingSpeechToTextStatus;
+    try {
+      const { probeTextflowkit } = await import("./textflowkit-cli.server.ts");
+      const { textflowkitStatusLine } = await import("./textflowkit.ts");
+      const probe = await probeTextflowkit({ timeoutMs: 5_000 });
+      speechToText = {
+        installed: probe.installed,
+        version: probe.version,
+        model: probe.model,
+        language: probe.language,
+        line: textflowkitStatusLine(probe),
+      };
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      speechToText = {
+        installed: false,
+        version: null,
+        model: "",
+        language: "",
+        line: `Speech-to-text: the textflowkit check failed (${detail}) — meetings without captions stay audio-only`,
+      };
+    }
     return {
       channels: channels.map((c) => c.url),
       storageRoot: rows[0]?.storage_root ?? null,
@@ -80,6 +125,7 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
       enabled: rows[0]?.enabled ?? false,
       durationCapSeconds: Number(rows[0]?.duration_cap_seconds ?? DEFAULT_CAPTURE_CAPS.durationCapSeconds),
       sizeCapBytes: Number(rows[0]?.size_cap_bytes ?? DEFAULT_CAPTURE_CAPS.sizeCapBytes),
+      speechToText,
     };
   });
 

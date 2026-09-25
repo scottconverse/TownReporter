@@ -97,6 +97,15 @@ export function MeetingCaptureSettings() {
         title="Meeting capture"
         sub="Watch city YouTube channels, capture meetings, and store transcripts. These settings write immediately to this newsroom's configuration."
       />
+      {/*
+        Unit R. textflowkit is an optional external tool this app never
+        installs, so the operator has to be able to see whether speech-to-text
+        is available here -- otherwise the only symptom is a captionless
+        meeting that stayed audio-only with no explanation.
+      */}
+      {settings.data && (
+        <p className="mt-3 text-sm text-ink-2">{settings.data.speechToText.line}</p>
+      )}
       <div className="mt-4 space-y-5">
         <Field label="Meeting capture" hint="Turn the meetings step on or off without deleting your configuration.">
           <label className="flex items-center gap-2 text-sm">
