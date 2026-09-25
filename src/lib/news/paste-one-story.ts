@@ -1,0 +1,124 @@
+/**
+ * "Paste a story I already have": one pasted story, straight into the Queue.
+ *
+ * The owner, 2026-09-24: "the same function in opinion that just lets me paste
+ * in an already written story, just one, to dump in the queue, as a regular
+ * non-opinion story for massaging later via the queue."
+ *
+ * Opinion already has this (`fileWrittenEditorial`, opinion.ts:374) and it is
+ * the one thing the news side could not do: pasting a finished story into
+ * "Write a story" ran the writer over it, which is the opposite of filing it.
+ *
+ * This is deliberately NOT a second save path. It builds ONE card in the shape
+ * `import-review.ts` builds its cards in, and that card goes through the same
+ * `importFinishedStories` server function the review screen calls: the same
+ * lead origin `import`, the same draft holding the paste exactly, the same
+ * link -> source extraction, the same disclosure choices, the same duplicate
+ * warning. There is no new server function and no new table.
+ *
+ * Three things it does differently from a report import, all of them because
+ * there is nothing here to read:
+ *
+ * 1. No model call at all, not even the structure-only one. One story pasted
+ *    with no headings has nothing to split, so nothing is split.
+ * 2. Nothing is taken out of the text. The report reader lifts `**Why it
+ *    matters:**`, `**Score:**` and the rest into editor-note fields, because a
+ *    scanner's report format defines them; a story you wrote has no such
+ *    format, and guessing that a line is a note is how a published story ends
+ *    up missing a paragraph. The whole paste is the draft, byte for byte.
+ * 3. The section is not guessed. The chooser opens at "Section not chosen —
+ *    pick one" and the ordinary confirm-at-publish gate asks later. An import
+ *    suggests from the text because a report's own headings say what a story
+ *    is about; a single paste says nothing a chooser should act on.
+ */
+
+import { IMPORT_LIMITS, extractLinks, type DisclosureKey } from "./import-stories.ts";
+import { type ReviewCard } from "./import-review.ts";
+
+/**
+ * Who wrote a pasted story, until the editor says otherwise.
+ *
+ * "A person" and not "An outside AI tool": the box says *paste a story I
+ * already have*, and the common case is the editor's own words or a colleague's
+ * — the same reading the report reader takes for a story with no report format
+ * around it (`parsePlainStory`, import-stories.ts:433). It is one select away
+ * from being changed, and the line it prints is shown next to it.
+ */
+export const PASTE_ONE_DISCLOSURE: DisclosureKey = "person";
+
+/** The card key for the one card this screen ever has. */
+export const PASTE_ONE_KEY = "pasted-story";
+
+export type PasteOneInput = {
+  /** The story, exactly as pasted. */
+  text: string;
+  /** Empty -> the first line of the paste becomes the headline. */
+  headline?: string;
+  /** A newsroom section key, or "" for "Section not chosen — pick one". */
+  section?: string;
+  disclosureKey?: DisclosureKey;
+  disclosureOther?: string;
+};
+
+/**
+ * The headline a paste carries when the editor did not type one.
+ *
+ * The first line that has anything in it, with a markdown heading marker and a
+ * wrapping `**` taken off — `# Council votes` and `**Council votes**` are both
+ * headlines a person would write on the first line. Never invented: an empty
+ * paste gives an empty headline, and the desk says so by name rather than
+ * calling the story "Untitled".
+ */
+export function headlineFromPaste(text: string): string {
+  const first =
+    String(text ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? "";
+  return first
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/^\*\*(.+)\*\*$/, "$1")
+    .trim()
+    .slice(0, IMPORT_LIMITS.headline);
+}
+
+/**
+ * The one card this screen files.
+ *
+ * Ticked and a story, both of them: the editor pasted one thing and asked for
+ * it to go to the Queue, so there is nothing to tick and nothing to call "not a
+ * story". `include: true` on a card holding no text is refused by the server
+ * the same way an empty card is refused on the review screen.
+ */
+export function pasteOneStoryCard(input: PasteOneInput): ReviewCard {
+  const text = String(input.text ?? "");
+  const typed = String(input.headline ?? "").trim().slice(0, IMPORT_LIMITS.headline);
+  return {
+    key: PASTE_ONE_KEY,
+    include: true,
+    isStory: true,
+    headline: typed || headlineFromPaste(text),
+    /*
+      Empty, and not `topicFromText(...)`: the section is the editor's to
+      choose here (see the note at the top), so nothing is offered that they
+      did not ask for.
+    */
+    suggestedSection: "",
+    section: String(input.section ?? "").trim().slice(0, 40),
+    dek: "",
+    bodyChoice: "main",
+    /* The paste, byte for byte. Never trimmed, never re-paragraphed. */
+    body: text,
+    plainBrief: "",
+    links: extractLinks(text).map((l) => ({ ...l, keep: true })),
+    /* No report format, so no editor notes to lift out of the text. */
+    score: "",
+    triage: "",
+    reporterNextStep: "",
+    hold: false,
+    disclosureKey: input.disclosureKey ?? PASTE_ONE_DISCLOSURE,
+    disclosureOther: String(input.disclosureOther ?? "").trim(),
+    cleanSplit: true,
+    warning: "",
+  };
+}

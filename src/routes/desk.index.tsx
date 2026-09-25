@@ -12,6 +12,7 @@ import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   dropFollowUp,
+  importFinishedStories,
   listFollowUps,
   listLeads,
   listRecentStoryWork,
@@ -27,8 +28,23 @@ import {
   writeStoryFromInput,
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
-import { IMPORT_LIMITS, htmlToText } from "@/lib/news/import-stories";
-import { IMPORT_PASTE_KEY } from "@/lib/news/import-review";
+import {
+  IMPORT_DISCLOSURES,
+  IMPORT_LIMITS,
+  htmlToText,
+  type DisclosureKey,
+} from "@/lib/news/import-stories";
+import {
+  IMPORT_PASTE_KEY,
+  NO_SECTION,
+  SECTION_REQUIRED,
+  cardProblems,
+  duplicateNote,
+  findDuplicate,
+  selectionFromCard,
+  type DuplicateWarning,
+} from "@/lib/news/import-review";
+import { PASTE_ONE_DISCLOSURE, pasteOneStoryCard } from "@/lib/news/paste-one-story";
 import { listInvestigations, listWorthALook, openDarkInvestigation } from "@/lib/news/dark";
 import {
   editorKindLabel,
@@ -213,6 +229,81 @@ function DeskHome() {
     editor is already looking at; see IMPORT_PASTE_KEY for the handoff.
   */
   const [importText, setImportText] = useState("");
+  /*
+    "Paste a story I already have": one story, straight into the Queue, no
+    review screen and no model. See paste-one-story.ts for why it is the import
+    path and not a second one.
+  */
+  const [pasteText, setPasteText] = useState("");
+  const [pasteHeadline, setPasteHeadline] = useState("");
+  const [pasteSection, setPasteSection] = useState(NO_SECTION);
+  const [pasteDisclosure, setPasteDisclosure] = useState<DisclosureKey>(PASTE_ONE_DISCLOSURE);
+  const [pasteOther, setPasteOther] = useState("");
+  const [pasteNotice, setPasteNotice] = useState<string>("");
+  const [pasted, setPasted] = useState<
+    { headline: string; leadId: number; duplicate?: DuplicateWarning } | null
+  >(null);
+  const pasteStory = useMutation({
+    mutationFn: () => {
+      const card = pasteOneStoryCard({
+        text: pasteText,
+        headline: pasteHeadline,
+        section: pasteSection,
+        disclosureKey: pasteDisclosure,
+        disclosureOther: pasteOther,
+      });
+      /*
+        The section is asked for here, in the review screen's own words and by
+        the review screen's own rule, because a draft cannot be filed without
+        one: the database refuses an empty topic outright (the
+        resolve_story_section trigger on `drafts`, sections.server.ts:37), and
+        every other way into the Queue -- the write box, the import screen --
+        picks a section first. The placeholder in the select is a question, not
+        an answer, so leaving it is answered with the question again rather
+        than with a section nobody chose.
+      */
+      const problems = cardProblems(card);
+      if (problems.length > 0) throw new Error(problems.join(" "));
+      /*
+        The duplicate is looked up BEFORE the story is filed, from the lists the
+        Queue screen has already loaded. Checked afterwards it would find the
+        lead this very click just created and call every paste a duplicate of
+        itself. It is shown after the add, as a warning, because the paste is
+        already in the Queue either way -- nothing is merged, killed or renamed
+        behind the editor's back.
+      */
+      const duplicate = findDuplicate(card, {
+        leads: leads.data?.map((l) => ({ id: l.id, headline: l.headline ?? "" })),
+        published: published.data?.map((p) => ({ slug: p.slug, headline: p.headline })),
+      });
+      return importFinishedStories({
+        data: { text: pasteText, tool: "", stories: [selectionFromCard(card)] },
+      }).then((result) => ({ result, duplicate }));
+    },
+    onSuccess: ({ result, duplicate }) => {
+      if (!result.ok) {
+        const line = result.error || "That story was not added. Nothing was changed.";
+        setPasteNotice(line);
+        announceToDesk(line);
+        return;
+      }
+      const first = result.imported[0];
+      setPasted({ headline: first?.headline ?? "", leadId: first?.leadId ?? 0, duplicate });
+      setPasteNotice("");
+      setPasteText("");
+      setPasteHeadline("");
+      setPasteOther("");
+      announceToDesk("Added to the Queue as a draft. Nothing is published.");
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["published-desk"] });
+    },
+    onError: (err) => {
+      const line =
+        err instanceof Error ? err.message : "That story was not added. Nothing was changed.";
+      setPasteNotice(line);
+      announceToDesk(line);
+    },
+  });
   async function readImportFile(file: File | undefined) {
     if (!file) return;
     const raw = await file.text();
@@ -689,6 +780,159 @@ function DeskHome() {
               </p>
             </div>
           </footer>
+        </section>
+
+        {/*
+          The third choice: one story, already written, straight to the Queue.
+
+          The owner asked for the Opinion desk's "Paste a piece I wrote" on the
+          news side (2026-09-24): "just one, to dump in the queue, as a regular
+          non-opinion story for massaging later via the queue." No review
+          screen, no model, no second save path -- it files the same card the
+          import screen files, through the same server function.
+        */}
+        <section
+          id="paste-one-story"
+          className="composer story-composer"
+          aria-labelledby="paste-one-story-title"
+        >
+          <header className="story-composer-heading">
+            <div>
+              <p className="composer-eyebrow">Or one you already wrote</p>
+              <h2 id="paste-one-story-title">Paste a story I already have</h2>
+            </div>
+            <p>One finished story. It goes to the Queue as a draft for you to work on there.</p>
+          </header>
+          <div className="composer-sources">
+            <div className="composer-pasted">
+              <label htmlFor="paste-one-text">The story</label>
+              <p>
+                Paste it as it is. Nothing is rewritten, nothing is cut, and no AI reads it — the
+                whole paste is the draft. Its links come across as the story&rsquo;s sources.
+              </p>
+              <textarea
+                id="paste-one-text"
+                className={areaClass}
+                rows={14}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                maxLength={IMPORT_LIMITS.text}
+                placeholder={
+                  "Council votes to bring the rules back for consideration\n\nThe council voted 5-2 on Tuesday. [The packet](https://example.test/packet)"
+                }
+              />
+              <label htmlFor="paste-one-headline" className="composer-source-note">
+                Headline — leave it empty and the first line becomes the headline
+              </label>
+              <input
+                id="paste-one-headline"
+                className={inputClass}
+                value={pasteHeadline}
+                onChange={(e) => setPasteHeadline(e.target.value)}
+                maxLength={IMPORT_LIMITS.headline}
+                placeholder="Taken from the first line if you leave this empty"
+              />
+              <label htmlFor="paste-one-section" className="composer-source-note">
+                Section
+              </label>
+              <select
+                id="paste-one-section"
+                className={inputClass}
+                value={pasteSection}
+                disabled={sectionQuery.sections.length === 0}
+                onChange={(e) => setPasteSection(e.target.value)}
+              >
+                <option value={NO_SECTION}>{SECTION_REQUIRED}</option>
+                {sectionQuery.sections.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <span className="composer-source-note">
+                {sectionQuery.sections.length === 0
+                  ? "Your sections could not load, and there is nothing to file this under without one. Try again in a moment."
+                  : "Pick one to add it — and you still confirm it in the story editor before it can publish."}
+              </span>
+              <label htmlFor="paste-one-disclosure" className="composer-source-note">
+                Who wrote this — the line readers see
+              </label>
+              <select
+                id="paste-one-disclosure"
+                className={inputClass}
+                value={pasteDisclosure}
+                onChange={(e) => setPasteDisclosure(e.target.value as DisclosureKey)}
+              >
+                {IMPORT_DISCLOSURES.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+              {pasteDisclosure === "other" ? (
+                <input
+                  className={inputClass}
+                  value={pasteOther}
+                  onChange={(e) => setPasteOther(e.target.value)}
+                  placeholder="The line to print under the story"
+                  aria-label="The disclosure line to print"
+                />
+              ) : (
+                <span className="composer-source-note">
+                  {IMPORT_DISCLOSURES.find((d) => d.key === pasteDisclosure)?.line}
+                </span>
+              )}
+              <span className="composer-source-note">
+                Nothing is published. The story lands in the Queue as a news draft, editable like
+                any other — you can publish it whenever it is ready.
+              </span>
+            </div>
+          </div>
+          <footer className="composer-footer">
+            <div className="composer-submit">
+              <InkButton
+                tone="solid"
+                onClick={() => void pasteStory.mutate()}
+                disabled={pasteText.trim().length < 40 || pasteStory.isPending}
+              >
+                {pasteStory.isPending ? "Adding…" : "Add to Queue"}
+              </InkButton>
+              <p>No screen to check first. One story in, one draft in the Queue.</p>
+            </div>
+          </footer>
+          {pasteNotice ? (
+            <p className="composer-source-note" role="status">
+              {pasteNotice}
+            </p>
+          ) : null}
+          {pasted ? (
+            <p className="composer-source-note" role="status">
+              Added to the Queue as a draft. Nothing is published.{" "}
+              <Link to="/desk/story/$leadId" params={{ leadId: String(pasted.leadId) }} className="inline-link">
+                Open it
+              </Link>
+              .
+              {pasted.duplicate ? (
+                <>
+                  {" "}
+                  {duplicateNote(pasted.duplicate)}{" "}
+                  {pasted.duplicate.slug ? (
+                    <Link to="/articles/$slug" params={{ slug: pasted.duplicate.slug }} className="inline-link">
+                      Read the printed one
+                    </Link>
+                  ) : pasted.duplicate.leadId ? (
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(pasted.duplicate.leadId) }}
+                      className="inline-link"
+                    >
+                      Open the one on the desk
+                    </Link>
+                  ) : null}
+                </>
+              ) : null}
+            </p>
+          ) : null}
         </section>
 
         {needs.length > 0 ? (
