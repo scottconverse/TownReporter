@@ -464,7 +464,14 @@ function ImportPage() {
                     />
                   </label>
 
-                  <fieldset className="mt-3">
+                  {/*
+                    min-w-0 on these fieldsets and `wrap-anywhere` on the pasted
+                    text: each fieldset is a grid item, so the browser gives it a
+                    min-content floor, and the longest unbroken thing in a
+                    report is a citation URL. Without both, one card pushed the
+                    page 108px sideways on a 375px phone.
+                  */}
+                  <fieldset className="mt-3 min-w-0">
                     <legend className="text-sm tracking-[0.14em] text-muted uppercase">
                       The text this story carries
                     </legend>
@@ -495,13 +502,13 @@ function ImportPage() {
                     <p className="mt-2 text-sm tracking-[0.14em] text-muted uppercase">
                       Exactly as pasted — not rewritten
                     </p>
-                    <pre className="mt-1 max-h-64 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
+                    <pre className="mt-1 max-h-64 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap wrap-anywhere">
                       {cardBody(card)}
                     </pre>
                   </fieldset>
 
                   {card.links.length > 0 ? (
-                    <fieldset className="mt-3">
+                    <fieldset className="mt-3 min-w-0">
                       <legend className="text-sm tracking-[0.14em] text-muted uppercase">
                         Sources — {keptLinks(card).length} of {card.links.length} kept
                       </legend>
@@ -537,7 +544,7 @@ function ImportPage() {
                     </p>
                   )}
 
-                  <fieldset className="mt-3">
+                  <fieldset className="mt-3 min-w-0">
                     <legend className="text-sm tracking-[0.14em] text-muted uppercase">
                       Who wrote this — the line readers see
                     </legend>
