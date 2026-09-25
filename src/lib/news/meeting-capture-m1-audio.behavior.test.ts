@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +6,28 @@ import { join } from "node:path";
 import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
+
+/*
+  These tests drive the real capture path, and `runMeetingAwareness` writes its
+  yt-dlp download-archive through `meetingArchivePath()`, which roots at
+  `meetingRuntimeRoot()` (`src/lib/news/meeting-capture.ts`): TOWNREPORTER_DATA_ROOT,
+  else TOWNREPORTER_DATA_DIR, else `process.cwd()`. With neither variable set the
+  run left `meeting-capture/newsroom-1/yt-dlp-archive.txt` in whatever directory
+  the runner started in -- a stray untracked folder at the repo root. The
+  `mkdtempSync` storage root below is unrelated; it is the archive that leaks.
+  Pin the root to a temp dir for this file and put the environment back after.
+*/
+let priorDataRoot: string | undefined;
+
+before(() => {
+  priorDataRoot = process.env.TOWNREPORTER_DATA_ROOT;
+  process.env.TOWNREPORTER_DATA_ROOT = mkdtempSync(join(tmpdir(), "townreporter-m1-audio-root-"));
+});
+
+after(() => {
+  if (priorDataRoot === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
+  else process.env.TOWNREPORTER_DATA_ROOT = priorDataRoot;
+});
 
 function statefulSql(): {
   sql: Sql; rows: Map<string, Row>; audioRows: Row[];
