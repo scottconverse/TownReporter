@@ -21,6 +21,10 @@ export type LeadRow = {
   evidence: string | null;
   newsworthiness: number | null;
   created_at: string;
+  /** How this lead entered the desk (migration 0088). "import" = read out of
+   * a report the editor pasted; null = not recorded, which includes every lead
+   * filed before 0088 and every scanner lead (those carry scan_run_id). */
+  origin?: string | null;
   article_slug?: string | null;
   investigation_id?: number | null;
   notes_json?: string | null;

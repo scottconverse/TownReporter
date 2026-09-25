@@ -57,6 +57,8 @@ import {
   packDeleteInput,
   packRenameInput,
   packSaveInput,
+  importStoriesInput,
+  importStructureInput,
   pullTodoInput,
   reportingNotesInput,
   rowId,
@@ -269,6 +271,9 @@ export const listLeads = createServerFn({ method: "GET" })
     >`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+             -- "import" = read out of a report the editor pasted; null = not
+             -- recorded. The Queue shows the Imported badge off this.
+             l.origin,
              coalesce(a.headline, (select nullif(d.headline, '') from drafts d
                where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
                order by d.updated_at desc,d.id desc limit 1)) as story_headline,
@@ -401,6 +406,7 @@ export const getLead = createServerFn({ method: "GET" })
     await ensureDraftMemoColumn();
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
+             l.origin,
              l.possible_duplicate_of,
              case when prior.id is null then null else jsonb_build_object(
                'id', prior.id, 'headline', prior.headline, 'status', prior.status
@@ -1954,6 +1960,44 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       modelEffort: data.modelEffort,
       researchScope: data.researchScope,
     });
+  });
+
+/**
+ * "Import finished stories" — the second choice in New story. The editor
+ * pastes a report (or a single story); `import-stories.ts` reads the story
+ * boundaries and their parts with no model at all when the text has headings.
+ * This call is the exception: the editor reaches it from the review screen for
+ * a paste where the deterministic reader found nothing, and it asks ONE
+ * question about structure and checks every sentence back against the paste.
+ */
+export const structureImportStories = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => importStructureInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { readImportStructure } = await import("./import-stories.server.ts");
+    return readImportStructure({
+      text: data.text,
+      newsroomId: owned(context),
+      modelChoice: data.modelChoice,
+      modelEffort: data.modelEffort,
+    });
+  });
+
+/**
+ * File the ticked cards: one lead and one saved draft each, in the Queue,
+ * every word checked against the paste first. Nothing here publishes — an
+ * imported story leaves the desk through the ordinary Publish button, with
+ * the ordinary gates. The cited pages are captured in the background.
+ */
+export const importFinishedStories = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => importStoriesInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { performImportFinishedStories } = await import("./import-stories.server.ts");
+    return performImportFinishedStories(
+      { userId: context.userId, newsroomId: owned(context) },
+      { text: data.text, tool: data.tool, stories: data.stories },
+    );
   });
 
 export const saveReportingNotes = createServerFn({ method: "POST" })

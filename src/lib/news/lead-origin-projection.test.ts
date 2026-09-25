@@ -50,7 +50,17 @@ function projectionQuery(name: "listLeads" | "getLead"): string {
     .replaceAll("${id}", "1");
 }
 
-test("real queue and story projections carry persisted scanner provenance", async () => {
+/** Pin one projection to one lead. The two queries filter differently
+ * (`l.newsroom_id` in the queue, `l.id` in the story view), so both spellings
+ * are narrowed; a query that stops matching either assertion below fails
+ * loudly rather than silently returning the wrong row. */
+function forLead(query: string, id: number): string {
+  return query
+    .replace("where l.newsroom_id = 1\n", `where l.newsroom_id = 1 and l.id = ${id}\n`)
+    .replace("where l.id = 1 and", `where l.id = ${id} and`);
+}
+
+test("real queue and story projections carry persisted scanner provenance and import origin", async () => {
   const pg = new PGlite();
   await pg.waitReady;
   await pg.exec(`
@@ -59,17 +69,39 @@ test("real queue and story projections carry persisted scanner provenance", asyn
       headline text, why text, topic text, status text, source_urls text, evidence text,
       newsworthiness integer, created_at timestamptz, investigation_id integer, notes_json text,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer, possible_duplicate_of integer
+      last_resurfaced_scan_run_id integer, possible_duplicate_of integer,
+      origin text, provenance_json text
     );
     create table articles (id integer primary key, lead_id integer, status text, slug text, headline text);
     create table drafts (id integer primary key, lead_id integer, newsroom_id integer, headline text, updated_at timestamptz);
     insert into leads(id,newsroom_id,scan_run_id,headline,why,topic,status,source_urls,newsworthiness,created_at)
     values(1,1,20,'Scanner lead','Why','council','new','[]',0,now());
+    insert into leads(id,newsroom_id,scan_run_id,headline,why,topic,status,source_urls,newsworthiness,created_at,origin,provenance_json)
+    values(2,1,null,'Imported story','Why','council','new','[]',0,now(),'import','{"tool":"Civic Source Scanner"}');
   `);
   try {
     for (const name of ["listLeads", "getLead"] as const) {
-      const result = await pg.query<{ scan_run_id: number | null }>(projectionQuery(name));
+      const result = await pg.query<{ scan_run_id: number | null }>(
+        forLead(projectionQuery(name), 1),
+      );
       assert.equal(result.rows[0]?.scan_run_id, 20, `${name} must return persisted scan_run_id`);
+    }
+    /*
+      Migration 0088 gives a lead an origin. The Queue shows an "Imported"
+      badge off it, so a lead read out of a pasted report has to survive the
+      same two projections that carry the scanner's provenance -- and a
+      scanner lead still has to come back null rather than borrowing a word
+      that is not true of it.
+    */
+    for (const name of ["listLeads", "getLead"] as const) {
+      const result = await pg.query<{ id: number; origin: string | null }>(
+        forLead(projectionQuery(name), 2),
+      );
+      assert.equal(result.rows[0]?.origin, "import", `${name} must return the imported lead's origin`);
+    }
+    for (const name of ["listLeads", "getLead"] as const) {
+      const result = await pg.query<{ origin: string | null }>(forLead(projectionQuery(name), 1));
+      assert.equal(result.rows[0]?.origin, null, `${name} must not claim an origin for a scanner lead`);
     }
   } finally {
     await pg.close();
