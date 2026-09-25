@@ -26,10 +26,23 @@ import {
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
 import { normalizeProviderModelId } from "./provider-model-id.ts";
+import type { LocalCatalog } from "./local-models.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
-  { ok: true; label: string; choice: EffectiveProviderChoice; localModel?: LocalModelOverride } | { ok: false; error: string };
+  | {
+      ok: true;
+      label: string;
+      choice: EffectiveProviderChoice;
+      localModel?: LocalModelOverride;
+      /**
+       * Rungs Automatic passed over before the one that answered, in the words
+       * the job's receipt shows ("Qwen 3.6 35B skipped: not loaded"). Absent
+       * when nothing was skipped, which is the ordinary case.
+       */
+      skippedRungs?: string[];
+    }
+  | { ok: false; error: string; skippedRungs?: string[] };
 
 /*
   What the desk says when no provider can answer. This used to be the v1-v4
@@ -119,6 +132,13 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
   }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
+  /**
+   * Test-only seam for the local-models catalog. Automatic asks it whether a
+   * rung that must already be loaded actually is (see `skippedRungReason`),
+   * and the real answer comes from probing this machine's local ports -- which
+   * a test must not do.
+   */
+  resolveLocalCatalog?: () => Promise<LocalCatalog>;
 };
 
 function trimSlash(url: string): string {
@@ -553,10 +573,48 @@ async function probeAnthropic(
  */
 export const AUTOMATIC_LADDER = automaticLadder();
 
+/**
+ * Why Automatic must pass over a rung BEFORE trying it, or null to try it.
+ *
+ * A rung whose model has to be ALREADY loaded (see `requiresLoadedLocalModel`)
+ * cannot be checked the ordinary way. LM Studio answers `/v1/models` with every
+ * model it has on disk, loaded or not, and paging a 35B into memory takes
+ * minutes -- so "the endpoint replied" would pin a draft to a model that is
+ * still coming off the disk while the editor watches a job that looks stuck.
+ * The desk never loads or unloads a model on the paper's behalf (owner rule:
+ * Qwen is used "if it is loaded"), so it skips the rung and records why.
+ *
+ * Only rungs that carry the requirement are checked here; every other rung is
+ * checked the ordinary way, by asking its endpoint to answer.
+ */
+async function skippedRungReason(
+  entry: ProviderEntry,
+  readCatalog?: () => Promise<LocalCatalog>,
+): Promise<string | null> {
+  if (!entry.requiresLoadedLocalModel) return null;
+  const gateway = rungGateway(entry);
+  if (!gateway) return null; // No endpoint named for it: the probe reports that.
+  const catalog = readCatalog
+    ? await readCatalog()
+    : await (await import("./local-models.ts")).discoverLocalModels();
+  const server = catalog.servers.find(
+    (s) => trimSlash(s.baseUrl) === gateway.baseUrl && s.reachable,
+  );
+  if (!server) return "its server did not answer";
+  const model = server.models.find((m) => m.id === gateway.model);
+  if (!model || model.loaded === false) return "not loaded";
+  // A server that does not report load state cannot answer the question, and
+  // the rule is that Qwen is used only when it IS loaded -- so unknown skips.
+  return model.loaded === true ? null : "load state unknown";
+}
+
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
-  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
+  adapters?: Pick<
+    GrokChatAdapters,
+    "resolveCustom" | "resolveLocal" | "resolveXaiOauth" | "resolveLocalCatalog"
+  >,
   scope?: "story" | "scan" | "opinion" | "dark" | "forced",
   exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
@@ -606,12 +664,26 @@ export async function probeProvider(
       Claude, then Codex.
     */
     const failures: string[] = [];
+    const skippedRungs: string[] = [];
     for (const rung of AUTOMATIC_LADDER) {
+      const entry = providerEntry(rung);
+      const skipped = entry
+        ? await skippedRungReason(entry, adapters?.resolveLocalCatalog)
+        : null;
+      if (skipped && entry) {
+        skippedRungs.push(`${entry.label} skipped: ${skipped}`);
+        continue;
+      }
       const result = await probeProvider(rung);
-      if (result.ok) return result;
+      if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
       failures.push(result.error);
     }
-    return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
+    const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
+    return {
+      ok: false,
+      error: `No model in the Automatic ladder is ready. ${failures.join(" ")}${skippedNote}`,
+      ...(skippedRungs.length ? { skippedRungs } : {}),
+    };
   }
   let provider = resolveProvider(choice);
   let localOverride: LocalModelOverride | null = null;

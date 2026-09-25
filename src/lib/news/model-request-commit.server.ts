@@ -153,6 +153,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
       localModel: providerProbe.ok ? providerProbe.localModel : undefined,
+      skippedRungs: providerProbe.skippedRungs,
       preflightFailover: preflight.switchReceipt,
     })),
   });
@@ -316,6 +317,7 @@ export async function commitScanForAuthenticatedEditor(
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
       localModel: providerProbe.ok ? providerProbe.localModel : undefined,
+      skippedRungs: providerProbe.skippedRungs,
       preflightFailover: preflight.switchReceipt,
     })),
   });

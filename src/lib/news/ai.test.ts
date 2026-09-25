@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import {
   plannerModel,
   GROK_UNAVAILABLE,
@@ -31,6 +32,21 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     "TOWNREPORTER_CODEX",
     "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
+    // The two Automatic rungs added in 0.6.63 (Unit Y item 1). A rung's
+    // enabledness reads its own off switch and its own endpoint, so a test
+    // that means to control the ladder has to own both -- and clearing them
+    // is also what keeps an ambient shell value out of every other test here.
+    "TOWNREPORTER_DEEPSEEK",
+    "TOWNREPORTER_QWEN",
+    "TOWNREPORTER_DEEPSEEK_BASE_URL",
+    "TOWNREPORTER_QWEN_BASE_URL",
+    "TOWNREPORTER_DEEPSEEK_MODEL",
+    "TOWNREPORTER_QWEN_MODEL",
+    // The ladder's last rung is Codex, so a test that reaches it must point at
+    // the fake CLI (scripts/fakes/fake-codex-cli.mjs, which never calls a
+    // model) rather than at whatever `codex` this machine has.
+    "CODEX_CLI_PATH",
+    "FAKE_CODEX_SIGNED_IN",
   ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
@@ -66,6 +82,21 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
     "TOWNREPORTER_CODEX",
     "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
+    // The two Automatic rungs added in 0.6.63 (Unit Y item 1). A rung's
+    // enabledness reads its own off switch and its own endpoint, so a test
+    // that means to control the ladder has to own both -- and clearing them
+    // is also what keeps an ambient shell value out of every other test here.
+    "TOWNREPORTER_DEEPSEEK",
+    "TOWNREPORTER_QWEN",
+    "TOWNREPORTER_DEEPSEEK_BASE_URL",
+    "TOWNREPORTER_QWEN_BASE_URL",
+    "TOWNREPORTER_DEEPSEEK_MODEL",
+    "TOWNREPORTER_QWEN_MODEL",
+    // The ladder's last rung is Codex, so a test that reaches it must point at
+    // the fake CLI (scripts/fakes/fake-codex-cli.mjs, which never calls a
+    // model) rather than at whatever `codex` this machine has.
+    "CODEX_CLI_PATH",
+    "FAKE_CODEX_SIGNED_IN",
   ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
@@ -84,6 +115,16 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
 
 /** No keys AND no local CLI — the genuinely unconfigured desk. */
 const BARE = { TOWNREPORTER_CLAUDE_CODE: "0" };
+
+/**
+ * The Codex rung's own stand-in. `probeCodex` runs `codex login status` and
+ * nothing else, so pointing this at the fake is the difference between "the
+ * ladder reached Codex Terra" and "this test started a real agent CLI on the
+ * machine". Absolute, because the probe spawns with `cwd: tmpdir()`.
+ */
+const FAKE_CODEX = fileURLToPath(
+  new URL("../../../scripts/fakes/fake-codex-cli.mjs", import.meta.url),
+);
 
 describe("isGrokAvailable", () => {
   it("is false with no key and the local CLI ruled out", () => {
@@ -1030,31 +1071,153 @@ describe("model-picker provider readiness", () => {
     });
   });
 
-  it("Automatic falls through to Claude Sonnet when Codex is switched off", async () => {
-        const originalFetch = globalThis.fetch;
-    const urls: string[] = [];
-    globalThis.fetch = async (input) => {
-      urls.push(String(input));
-      return new Response(JSON.stringify({}), { status: 200 });
+  /*
+    Unit Y item 2: a rung that must already be loaded is passed over BEFORE it
+    is probed, and the job's receipt records why.
+
+    Before this, the ladder asked the Qwen endpoint "did you answer?" -- and
+    LM Studio answers that with every model it has on DISK, loaded or not. The
+    probe would therefore pin a draft to a 35B that then has to be paged into
+    memory while the editor watches a job that looks stuck. The desk never
+    loads a model (owner rule: "if it is loaded"), so the rung is skipped and
+    the ladder moves to Codex Terra.
+  */
+  it("skips a rung whose local model is not loaded and runs the next one instead", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetched = 0;
+    globalThis.fetch = async () => {
+      fetched += 1;
+      throw new TypeError("connection refused");
     };
     try {
-      await withEnvAsync({ ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_CODEX: "0" }, async () => {
-        const result = await probeProvider("auto");
-        assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "claude-sonnet");
-      });
-      // Codex was skipped by its off switch, so the first network probe is the
-      // lower-cost Claude fallback.
-      assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
+      await withEnvAsync(
+        {
+          ...BARE,
+          // Rung 1 out of the way by its own off switch, so rung 2 is the one
+          // under test; rung 3 is Codex, reached through the fake CLI.
+          TOWNREPORTER_DEEPSEEK: "0",
+          TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+          CODEX_CLI_PATH: FAKE_CODEX,
+          FAKE_CODEX_SIGNED_IN: "1",
+        },
+        async () => {
+          const result = await probeProvider("auto", undefined, {
+            resolveLocalCatalog: async () => ({
+              servers: [
+                {
+                  kind: "lmstudio",
+                  baseUrl: "http://127.0.0.1:1234/v1",
+                  reachable: true,
+                  models: [
+                    {
+                      id: "halo/qwen3.6-35b-a3b",
+                      label: "Qwen 3.6 35B",
+                      loaded: false,
+                      kind: "lmstudio",
+                      thinking: false,
+                      vision: false,
+                      cloud: false,
+                    },
+                  ],
+                },
+              ],
+              defaultModel: null,
+              checkedAt: Date.now(),
+            }),
+          });
+          assert.equal(result.ok, true);
+          if (result.ok) {
+            assert.equal(result.choice, "codex-balanced");
+            assert.equal(result.label, "Codex Terra");
+            assert.deepEqual(result.skippedRungs, ["Qwen 3.6 35B skipped: not loaded"]);
+          }
+        },
+      );
+      // The skipped rung was never asked anything: not its catalog, and not
+      // its endpoint. A probe of the Qwen rung is what used to pin the draft.
+      assert.equal(fetched, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
+  it("keeps saying which rungs Automatic passed over when the ladder runs out", async () => {
+    await withEnvAsync(
+      {
+        ...BARE,
+        TOWNREPORTER_DEEPSEEK: "0",
+        TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        TOWNREPORTER_CODEX: "0",
+      },
+      async () => {
+        const result = await probeProvider("auto", undefined, {
+          resolveLocalCatalog: async () => ({
+            servers: [
+              {
+                kind: "lmstudio",
+                baseUrl: "http://127.0.0.1:1234/v1",
+                reachable: true,
+                models: [
+                  {
+                    id: "halo/qwen3.6-35b-a3b",
+                    label: "Qwen 3.6 35B",
+                    // A server that cannot say whether it is loaded cannot
+                    // answer the question, and the rule is "only when it IS
+                    // loaded" -- so unknown skips too.
+                    loaded: null,
+                    kind: "lmstudio",
+                    thinking: false,
+                    vision: false,
+                    cloud: false,
+                  },
+                ],
+              },
+            ],
+            defaultModel: null,
+            checkedAt: Date.now(),
+          }),
+        });
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.match(result.error, /No model in the Automatic ladder is ready/);
+          assert.match(result.error, /Qwen 3.6 35B skipped: load state unknown/);
+          assert.deepEqual(result.skippedRungs, ["Qwen 3.6 35B skipped: load state unknown"]);
+        }
+      },
+    );
+  });
+
+  it("skips a rung whose own server is not answering at all", async () => {
+    await withEnvAsync(
+      {
+        ...BARE,
+        TOWNREPORTER_DEEPSEEK: "0",
+        TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        TOWNREPORTER_CODEX: "0",
+      },
+      async () => {
+        const result = await probeProvider("auto", undefined, {
+          // The catalog was read, and it holds no server at that address.
+          resolveLocalCatalog: async () => ({
+            servers: [],
+            defaultModel: null,
+            checkedAt: Date.now(),
+          }),
+        });
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.deepEqual(result.skippedRungs, [
+            "Qwen 3.6 35B skipped: its server did not answer",
+          ]);
+        }
+      },
+    );
+  });
+
   it("Automatic reports failure once the operator's own providers are all out", async () => {
-    // Claude off (BARE) and Codex off: nothing is left in the ladder. Zen and
-    // Local Qwen were removed from Automatic 2026-09-02 ("Claude/Codex only
-    // for now"), so there is no free-cloud rung left to fall through to.
+    // Claude off (BARE) and Codex off, and neither local rung has an endpoint
+    // named for it (Unit Y's rungs are enabled by their own base URL or by a
+    // discovery probe, and a test process has neither): nothing is left.
     await withEnvAsync({ ...BARE, TOWNREPORTER_CODEX: "0" }, async () => {
       const result = await probeProvider("auto");
       assert.equal(result.ok, false);
