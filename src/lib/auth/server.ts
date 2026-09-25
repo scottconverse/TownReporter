@@ -47,7 +47,7 @@ import { emailAndPasswordEnabled } from "./email-password";
 import { GATE_PROVIDER_ID, gateIdentitySessions, safeTanstackStartCookies } from "./gate-session.server";
 import { GROK_PROVIDERS } from "./providers";
 import { pgliteDialect } from "./pglite-dialect";
-import { authEnforced, grokFederation, grokFederationWarning } from "./grok-federation";
+import { authEnforced, grokFederation, grokFederationWarning, previewHostsTrusted } from "./grok-federation";
 import {
   GROK_ISSUER_DEFAULT,
   PREVIEW_ALLOWED_HOSTS,
@@ -158,9 +158,17 @@ if (federation?.from === "preview") {
 // preview allowlist, which makes the OAuth `redirect_uri` the concrete preview URL
 // the broker's preview client accepts.
 const explicitBaseURL = env("BETTER_AUTH_URL");
+/*
+  The sandbox wildcard is trusted only where the sandbox is. This used to be
+  spread into `trustedOrigins` and `allowedHosts` unconditionally, so an install
+  that never set `TOWNREPORTER_GROK_PREVIEW` still accepted credentialed auth
+  POSTs from any `*.grok-sandbox.com` Origin and still derived its own origin
+  from such a request's Host header. Same switch as the preview *client*, so
+  there is one variable an operator sets and one an auditor reads.
+*/
 // Explicit `string[]` (not a readonly tuple) — Better Auth's DynamicBaseURLConfig
 // requires a mutable `allowedHosts: string[]`.
-const previewAllowedHosts: string[] = [...PREVIEW_ALLOWED_HOSTS];
+const previewAllowedHosts: string[] = previewHostsTrusted() ? [...PREVIEW_ALLOWED_HOSTS] : [];
 // Local `npm run dev` (port 8080 contract). Browsers may send Origin as any of
 // these for the same server — trusting only `localhost` rejects `127.0.0.1` and
 // breaks email/password with "Invalid origin".
