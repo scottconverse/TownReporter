@@ -182,6 +182,18 @@ export const LIMITS = {
   noteList: 500,
   /** A removal fingerprint: a hash or a JSON digest, far under 200. */
   fingerprint: 200,
+  /**
+   * A pasted finished report. `import-stories.ts:131` states the same ceiling
+   * as `IMPORT_LIMITS.text` and the paste box enforces it with `maxLength`,
+   * so an editor meets the limit in the box rather than at the server.
+   */
+  importText: 400_000,
+  /** `import-stories.ts` `IMPORT_LIMITS.stories` — cards in one paste. */
+  importStories: 200,
+  /** Links on one imported story. A report story cites a handful. */
+  importLinks: 100,
+  /** A reader-facing disclosure line the editor typed themselves. */
+  disclosureOther: 400,
 } as const;
 
 /*
@@ -957,3 +969,59 @@ export const routineAutomationInput = z.looseObject({
 
 /** `ops/dashboard.ts:42`: `isOpsActionId` already answers "Unknown action." */
 export const opsAction = z.string().max(LIMITS.opsActionId).catch("");
+
+/* --- import-stories.server.ts (2) --------------------------------------- */
+
+/**
+ * `import-stories.server.ts` readImportStructure: the one structure-only model
+ * call, made only when the deterministic reader found no headings. Bounded by
+ * the same paste ceiling as the import itself.
+ */
+export const importStructureInput = z.object({
+  text: z.string().max(LIMITS.importText),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+});
+
+/**
+ * One detected story, as the review screen sends it back.
+ *
+ * Loose, and every display string degrades rather than refusing: the editor is
+ * looking at a form and a mistake in one card must not lose the other nine.
+ * The fields that must stay exact to be usable -- `body`, `headline` -- are
+ * still checked downstream, where the verbatim test is the real gate and a
+ * failure is reported per story rather than as a wall.
+ */
+export const importStorySelection = z.looseObject({
+  headline: z.string().max(LIMITS.draftHeadline).catch(""),
+  /** A section key, or empty for "Section not chosen — pick one". */
+  section: z.string().max(LIMITS.sectionKey).catch(""),
+  dek: z.string().max(LIMITS.draftDek).catch(""),
+  body: z.string().max(LIMITS.storyBody).catch(""),
+  links: z
+    .array(
+      z.looseObject({
+        text: z.string().max(LIMITS.sourceTitle).catch(""),
+        url: z.string().max(LIMITS.url).catch(""),
+      }),
+    )
+    .max(LIMITS.importLinks)
+    .catch([]),
+  /** Editor notes. Never published. */
+  score: z.string().max(40).catch(""),
+  triage: z.string().max(40).catch(""),
+  reporterNextStep: z.string().max(LIMITS.draftDek).catch(""),
+  /** A "Hold" triage imports with a visible Hold flag. */
+  hold: z.boolean().catch(false),
+  disclosureKey: z.enum(["outside-ai", "person", "other"]).catch("outside-ai"),
+  disclosureOther: z.string().max(LIMITS.disclosureOther).catch(""),
+});
+
+/** `import-stories.server.ts` importFinishedStories. Nothing here publishes. */
+export const importStoriesInput = z.object({
+  text: z.string().max(LIMITS.importText),
+  /** The tool the report names, kept in the lead's provenance. */
+  tool: z.string().max(LIMITS.sourceTitle).catch(""),
+  /** Only the ticked cards arrive here; the server re-checks every one. */
+  stories: z.array(importStorySelection).max(LIMITS.importStories),
+});

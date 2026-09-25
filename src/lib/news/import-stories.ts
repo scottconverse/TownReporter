@@ -524,6 +524,13 @@ export function verifyModelSplit(
 }
 
 /**
+ * The one wording the review screen shows for a story that was not split
+ * cleanly. The specific reason ("the model changed wording ...") is appended to
+ * it rather than replacing it, so the flag is always recognisable on the card.
+ */
+export const CLEAN_SPLIT_FLAG = "Could not split this cleanly — check it.";
+
+/**
  * The fallback when a model split is rejected or the text has no structure at
  * all: one story holding the whole paste, flagged so the editor can see it was
  * not split cleanly. Nothing is invented and nothing is dropped.
@@ -542,8 +549,11 @@ export function fallbackSingleStory(
     paragraphs,
     disclosureKey: opts.disclosureKey ?? "outside-ai",
   });
+  const reason = opts.reason?.trim() ?? "";
   story.cleanSplit = false;
-  story.warning = opts.reason?.trim() || "Could not split this cleanly — check it.";
+  story.warning = reason.includes(CLEAN_SPLIT_FLAG)
+    ? reason
+    : [CLEAN_SPLIT_FLAG, reason].filter(Boolean).join(" ");
   return story;
 }
 
