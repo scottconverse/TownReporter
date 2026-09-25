@@ -142,6 +142,35 @@ It fills the same fields **File a lead yourself** (Queue) asks for by hand, so u
 
 ---
 
+## Import finished stories
+
+Some stories arrive already written — a report from a research tool, a document a colleague sent, a piece you wrote somewhere else. **Write a story** is not for those: it treats what you paste as source material and has a model write a new draft from it. **Import finished stories** is the other way in. It is on the desk landing page under the paste box, on the Queue's empty state, and at **Import** in the sidebar.
+
+**Paste one story, or a whole report.** You can also choose a saved page (`.md`, `.txt`, `.html`). Nothing is kept in the box; the text you pasted is what gets saved.
+
+**Read the stories.** The desk reads the text and shows you what it found. It does not rewrite anything: every paragraph it shows you is a paragraph of your paste, word for word, and it will not put a sentence in a story that was not in the text you gave it. A report with headings is split by those headings. A report or story with no usable structure is read once by the writing model you have set up, which is asked only where the stories start and end, what each headline is, and which paragraphs are the body — never to write a line. If that pass changes a single paragraph, the desk throws it away and falls back to splitting on blank lines, and the card says **Could not split this cleanly — check it** so you look before importing.
+
+**Check every story.** One card per story, and everything on it is yours to change:
+
+| On the card                          | What it does                                                                                                            |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| The tick box                         | Import this one. Sections that are not stories (beat context, watch lists, dates) arrive unticked.                       |
+| **Headline**                         | The heading, with any leading number (`7.`) taken off.                                                                  |
+| **Section**                          | Your newsroom's sections, suggested from the text. **Section not chosen — pick one** until you choose one yourself.      |
+| **Dek**                              | The line under the headline.                                                                                            |
+| **The text this story carries**      | The body as written, or the report's plain-language brief, or both with the brief first. The text is shown underneath.   |
+| **Sources**                          | Every link the story cited, each with its own tick box. Links also stay in the body where they were written.            |
+| **Who wrote this**                   | The line readers see. For a report from an outside research tool the default is "An outside AI research tool wrote this from public records; an editor reviewed it." |
+| **Editor notes — never published**   | Score, triage and the reporter next step the report carried.                                                            |
+
+A **Hold** in the report is shown on the card as a Hold. If a story looks like one already on the desk or already printed, the card says so and links to the printed one — you decide whether to import it anyway.
+
+**Import.** The ticked stories go to the **Queue**, each as a lead marked **Imported** with a saved draft holding your paste exactly, its sources attached, and a note of who imported it, when, and from which text. Copies of the cited pages are fetched in the background; if one will not load, the import still goes through. **Nothing is published by an import.**
+
+From there an imported story is a story like any other: open it, edit it, redraft it if you want to, and **Publish** it when it is right. A well-formed imported story — headline, section, body, at least one source — is not held back by the checks that exist for AI drafts, such as matching passages to cited records. The checks that protect readers still run.
+
+---
+
 ## Sources (`/desk/sources`)
 
 The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.
