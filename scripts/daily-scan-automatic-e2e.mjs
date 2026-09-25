@@ -18,7 +18,9 @@
  *     deployed cron hits) runs a real tick, which resolves Automatic by
  *     probing the ladder and reserves the run;
  *  4. the run record names the resolved model, as the requested -> resolved
- *     pair, and the scan history lists the run it reserved.
+ *     pair;
+ *  5. the queued job actually WRITES: it fetches its source, calls rung 1's
+ *     chat endpoint, files the lead the stub answered with, and completes.
  *
  * Model-free, the way the Y2 failover walks are: rung 1 (DeepSeek v4.1 Flash)
  * is an OpenAI-compatible endpoint, so the walk starts
@@ -29,13 +31,17 @@
  * run resolves to anything but rung 1, which is also what keeps a real Codex
  * from ever being started here.
  *
- * The reserved scan job then runs on its own, against the walk's accepted
- * source, and its outcome is NOT asserted here -- it does not need to be. The
- * model receipt is written by the tick BEFORE the job is queued (the source
- * fetch and the writing pass come after), so the record this walk reads is
- * complete whether that job ends completed or failed. What the walk DOES
- * assert is that rung 1 was probed during the tick, so the resolution it reads
- * was made against the stub rather than by falling through to a real provider.
+ * Step 5 is why this walk is not entirely offline, and the exception is worth
+ * stating plainly: the scan's writing pass runs on the text it FETCHED, and
+ * the desk's SSRF guard (url-guard.ts) refuses loopback, private and
+ * unresolvable hosts with no escape hatch -- so a source this walk could serve
+ * to itself is a source no scan is allowed to read. The accepted source is
+ * therefore https://example.com/ (IANA's static example page, ~200 characters
+ * of plain text) and the walk needs ONE outbound GET to it. Everything after
+ * that GET is the stub: the text is written by the model call this walk
+ * stubbed, and a run that fetched the page but reached a real provider would
+ * still fail the assertions below. If the fetch yields no text the walk fails
+ * with the desk's own reason rather than reporting a model problem.
  */
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -71,7 +77,14 @@ const stamp = Date.now();
 const email = `daily-scan-automatic-${stamp}@townreporter.test`;
 const password = "daily-scan-automatic-e2e-pass";
 const SOURCE_NAME = "Daily scan automatic source";
-const SOURCE_URL = `https://daily-scan-automatic-${stamp}.example.test/agenda`;
+/**
+ * The one host this walk fetches for real: the scan reads the text it fetched,
+ * and the SSRF guard refuses every address this walk could serve itself (see
+ * the header). IANA's example page is static, public, and has no rate limit
+ * worth the name, and the walk asserts the fetch produced text rather than
+ * assuming it.
+ */
+const SOURCE_URL = "https://example.com/";
 
 let page;
 const done = [];
@@ -165,6 +178,18 @@ async function readJson(url) {
 /** What the fake rung 1 has answered, in order. */
 async function fakeLog() {
   return readJson(`http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/__log`);
+}
+
+/** Poll a read-only check until it returns something truthy, or fail loudly. */
+async function waitForTruth(describe, read, timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  do {
+    last = await read();
+    if (last) return last;
+    await new Promise((r) => setTimeout(r, 500));
+  } while (Date.now() < deadline);
+  throw new Error(`timed out after ${timeoutMs}ms waiting for ${describe}; last read ${JSON.stringify(last)}`);
 }
 
 /**
@@ -382,6 +407,93 @@ async function theScheduledTickReservesTheRun() {
   step("the scheduler's own trigger resolves Automatic to rung 1 and reserves the run");
 }
 
+/**
+ * Item (d) of the Unit AA report, closed: the reserved job must actually WRITE
+ * on the rung its record named.
+ *
+ * AA's walk stopped at the receipt, because the receipt is written by the tick
+ * before the job is queued -- and the job then failed "Writing pass returned no
+ * usable JSON." with the stub never asked to write. The lesson is that the
+ * receipt and the run are two different facts: a scan can name DeepSeek and
+ * still never reach it. So this step waits for the job to finish and reads the
+ * writing pass's own trace: text was fetched, rung 1's chat endpoint answered
+ * the scan call, nothing failed over, and the lead it replied with is on the
+ * run.
+ */
+async function theQueuedJobWritesOnTheResolvedRung() {
+  const pg = await globalThis.__pgliteInstance__;
+  const job = await waitForTruth("the queued scheduled scan job to finish", async () => {
+    const row = (
+      await pg.query(
+        "select id, kind, status, stage, error from desk_jobs order by id desc limit 1",
+      )
+    ).rows[0];
+    return row && (row.status === "completed" || row.status === "failed") ? row : null;
+  });
+  must(
+    job.status === "completed",
+    `the scheduled scan job ended ${job.status} (stage ${JSON.stringify(job.stage)}): ` +
+      `${JSON.stringify(job.error)}. A failed job here means the writing pass did not run on the ` +
+      `rung the record named, which is the whole point of this walk.`,
+  );
+
+  const run = (
+    await pg.query(
+      // scan_runs has no status column of its own: a run's state is the
+      // reservation's, which is what the panel's "Current or last run:" reads.
+      "select r.error, r.sources_fetched, r.sources_attempted, r.model_batches_used, " +
+        "r.model_batches_failed, r.leads_created, r.failed_sources, " +
+        "(select status from daily_scan_reservations where scan_run_id = r.id) as run_status " +
+        "from scan_runs r order by r.id desc limit 1",
+    )
+  ).rows[0];
+  must(Boolean(run), "the completed job left no scan run to read");
+  /*
+    The source fetch first, and with its own message: the writing pass runs on
+    text the scan fetched, so a run that fetched nothing would fail below for a
+    reason that is not the model's. https://example.com/ is the walk's one real
+    request; if a runner has no egress this line says so instead of blaming the
+    stub.
+  */
+  must(
+    run.sources_fetched >= 1,
+    `the scan fetched no source text, so no writing pass could run ` +
+      `(sources_attempted ${run.sources_attempted}, failed ${JSON.stringify(run.failed_sources)}, ` +
+      `run error ${JSON.stringify(run.error)}). This walk needs one outbound GET of ${SOURCE_URL}.`,
+  );
+  must(
+    run.model_batches_used >= 1 && run.model_batches_failed === 0 && run.run_status === "completed",
+    `the run did not complete on its first rung: status ${JSON.stringify(run.run_status)}, ` +
+      `batches ${run.model_batches_used} used / ${run.model_batches_failed} failed, ` +
+      `error ${JSON.stringify(run.error)}`,
+  );
+  must(
+    run.leads_created >= 1,
+    `the writing pass answered but the run filed no lead (leads_created ${run.leads_created})`,
+  );
+
+  const log = await fakeLog();
+  const scanCalls = (log?.requests ?? []).filter(
+    (r) => r.class === "scan" && r.path.endsWith("/chat/completions"),
+  );
+  must(
+    scanCalls.length === 1,
+    `the stubbed rung received ${scanCalls.length} scan writing calls, expected exactly 1 ` +
+      `(every request it saw: ${JSON.stringify((log?.requests ?? []).map((r) => [r.class, r.path]))})`,
+  );
+  facts.push({
+    jobStatus: job.status,
+    scanRun: {
+      status: run.run_status,
+      sourcesFetched: run.sources_fetched,
+      modelBatchesUsed: run.model_batches_used,
+      leadsCreated: run.leads_created,
+    },
+    stubScanCalls: scanCalls.length,
+  });
+  step("the queued job fetched its source, wrote on rung 1, filed the lead, and completed");
+}
+
 /** Item 6: the run record names the model that actually ran. */
 async function theRunRecordNamesTheResolvedModel() {
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -389,9 +501,14 @@ async function theRunRecordNamesTheResolvedModel() {
   const statusLine = panel.locator("p", { hasText: /^Current or last run:/ });
   await statusLine.waitFor({ timeout: 30_000 });
   const statusText = (await statusLine.innerText()).replace(/\s+/g, " ").trim();
+  /*
+    `completed`, not "some terminal state": this reads the scheduled run whose
+    writing pass the step before it proved, and the panel is the owner's view of
+    that same row.
+  */
   must(
-    /^Current or last run: (queued|running|completed|failed) for \d{4}-\d{2}-\d{2}/.test(statusText),
-    `the panel does not show today's run: ${JSON.stringify(statusText)}`,
+    /^Current or last run: completed for \d{4}-\d{2}-\d{2}/.test(statusText),
+    `the panel does not show today's run as completed: ${JSON.stringify(statusText)}`,
   );
   const modelLine = panel.locator("p", { hasText: /^Model:/ });
   must(
@@ -445,6 +562,7 @@ async function main() {
     await theOwnerSwitchesTheScanToAutomatic(panel);
     await theChoiceSurvivesAReload();
     await theScheduledTickReservesTheRun();
+    await theQueuedJobWritesOnTheResolvedRung();
     await theRunRecordNamesTheResolvedModel();
     await theScanHistoryListsTheRun();
   } catch (err) {
