@@ -42,7 +42,6 @@ const expectedModelNames = [
   "Claude Opus",
   "Claude Sonnet",
   "Claude Haiku",
-  "Grok (SuperGrok)",
   "Local model",
 ];
 
