@@ -1,3 +1,5 @@
+import { parseJsonBlock } from "./ai.ts";
+
 export type ResearchFinding = {
   text: string;
   evidenceUrl?: string;
@@ -17,10 +19,19 @@ export type ResearchActionReceipt = {
   links: string[];
 };
 
+/**
+ * One tolerant reader, the desk's own (0.6.63, Unit Y item 3).
+ *
+ * This used to be a second, stricter copy of the fence-strip-and-slice trick
+ * followed by a bare `JSON.parse` that THREW: a malformed action reply came
+ * back as a raw SyntaxError instead of the typed refusal `parseResearchAction`
+ * is written to produce, and it never saw the missing-comma repair
+ * `parseJsonBlock` grew for the bake-off's DeepSeek replies. `null` here is
+ * handled one line below, so routing through the shared parser changed only
+ * which failures are survivable.
+ */
 function jsonValue(text: string): unknown {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const candidate = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  return JSON.parse(candidate);
+  return parseJsonBlock<unknown>(text);
 }
 
 function clean(value: unknown, max: number): string {

@@ -1022,6 +1022,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         state: paperConfig.state,
       }),
       user: userMsg,
+      /*
+        A reply this batch cannot read is not a success (Unit Y item 3): the
+        helper retries it once on the same rung and then fails over, so the
+        batch's parse below is the second half of the contract rather than the
+        only reader. Same parser as the line after the call, so the two cannot
+        disagree about what "readable" means.
+      */
+      read: (text) => !parseScanResult(parseJsonBlock<unknown>(text), allowedTopics, topicChoices).parseError,
       maxTokens: 3500,
       modelEffort: effortFromJob(job),
       timeoutMs: batchTimeoutMs,

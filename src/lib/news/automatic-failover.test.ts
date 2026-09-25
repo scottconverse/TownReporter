@@ -6,6 +6,7 @@ import {
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
+import { unreadableReplyError } from "./ai.ts";
 
 /**
  * Live case 2026-09-02, job 41: Automatic pinned to Claude Opus, and Claude
@@ -276,6 +277,58 @@ describe("failoverReasonPhrase", () => {
 
   it("reads as a lapsed sign-in for reason 'auth'", () => {
     assert.equal(failoverReasonPhrase("Claude Opus", "auth"), "Claude Opus sign-in lapsed");
+  });
+
+  it("reads as a reply the desk could not read for reason 'unreadable'", () => {
+    assert.equal(
+      failoverReasonPhrase("DeepSeek v4.1 Flash", "unreadable"),
+      "DeepSeek v4.1 Flash sent a reply the desk could not read",
+    );
+  });
+});
+
+/**
+ * Unit Y item 3's second half. The bake-off (2026-09-24) caught DeepSeek
+ * answering with JSON missing one comma; `readableReplyOrRetry` (./ai.ts)
+ * retries that once on the SAME provider and then reports it with
+ * `unreadableReplyError`'s wording. Until this classifier existed that
+ * sentence matched nothing here, so the ladder treated a stutter as terminal
+ * -- the whole point of the item was that the reply, not the socket, was the
+ * failure, and a failure of either kind gets the one hop.
+ */
+describe("an unreadable reply is a provider failure like any other", () => {
+  it("classifies the sentence the retry reports as 'unreadable'", () => {
+    assert.equal(automaticFailoverReason(unreadableReplyError("DeepSeek v4.1 Flash")), "unreadable");
+    assert.equal(
+      automaticFailoverReason("The writing model sent a reply the desk could not read (unreadable JSON)."),
+      "unreadable",
+    );
+  });
+
+  it("moves Automatic to the next rung after two unreadable replies from rung 1", async () => {
+    const calls: string[] = [];
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "deepseek-flash",
+      error: unreadableReplyError("DeepSeek v4.1 Flash"),
+      probe: async (choice) => {
+        calls.push(choice);
+        return choice === "qwen-local"
+          ? { ok: false, error: "Qwen 3.6 35B skipped: not loaded" }
+          : { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+      },
+    });
+
+    assert.deepEqual(plan, {
+      next: "codex-balanced",
+      label: "Codex Terra",
+      reason: "unreadable",
+    });
+    assert.deepEqual(calls, ["qwen-local", "codex-balanced"]);
+  });
+
+  it("still treats a content refusal as terminal, not as an unreadable reply", async () => {
+    assert.equal(automaticFailoverReason("EDITORIAL_REFUSAL: I cannot write this."), null);
   });
 });
 

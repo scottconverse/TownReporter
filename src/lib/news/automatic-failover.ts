@@ -51,7 +51,7 @@ export type AutomaticFailoverInput = {
 };
 
 /** Why Automatic is moving on, so the caller can word the switch accurately. */
-export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable";
+export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable";
 
 export type AutomaticFailoverPlan = {
   next: StoryModelChoice;
@@ -100,6 +100,25 @@ export function looksLikeProviderUnavailable(detail: string | null | undefined):
   );
 }
 
+/**
+ * A reply the desk could not read at all: the model answered, the transport
+ * called it a success, and what came back was not the JSON the prompt asked
+ * for (see `readableReplyOrRetry` in ./ai.ts, which retries the same provider
+ * once before reporting this).
+ *
+ * 0.6.63 Unit Y item 3: the 2026-09-24 bake-off caught DeepSeek emitting JSON
+ * with a missing comma, and "Draft came back unreadable. Try again." matched
+ * NONE of the classifiers below -- so a stutter was terminal for the whole
+ * run while a dead socket moved on. A stutter is a model failure like any
+ * other and gets the same one hop.
+ */
+export function looksLikeUnreadableReply(detail: string | null | undefined): boolean {
+  return (
+    Boolean(detail) &&
+    /\bunreadable\b|invalid json|malformed json|(?:not|isn't) valid json/i.test(detail!)
+  );
+}
+
 export function looksLikeContentRefusal(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
@@ -113,6 +132,7 @@ export function automaticFailoverReason(
   detail: string | null | undefined,
 ): AutomaticFailoverReason | null {
   if (looksLikeContentRefusal(detail)) return null;
+  if (looksLikeUnreadableReply(detail)) return "unreadable";
   if (looksLikeTimeoutOrNoOutput(detail)) return "timeout";
   if (looksLikeProviderQuota(detail)) return "quota";
   if (looksLikeProviderAuthFailure(detail)) return "auth";
@@ -178,6 +198,7 @@ export function failoverReasonPhrase(
   if (reason === "timeout") return `${previousLabel} timed out`;
   if (reason === "auth") return `${previousLabel} sign-in lapsed`;
   if (reason === "quota") return `${previousLabel} reached its usage limit`;
+  if (reason === "unreadable") return `${previousLabel} sent a reply the desk could not read`;
   return `${previousLabel} was unavailable`;
 }
 

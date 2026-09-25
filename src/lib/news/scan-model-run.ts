@@ -10,7 +10,7 @@
  * reason about in isolation.
  */
 import type { EffectiveProviderChoice, ProviderProbe, LocalModelOverride, grokChat } from "./ai.ts";
-import { providerBudget } from "./ai.ts";
+import { providerBudget, readableReplyOrRetry } from "./ai.ts";
 import {
   modelEffort as validatedModelEffort,
   type ModelEffort,
@@ -87,6 +87,18 @@ export type RunScanChatWithFailoverInput = {
    */
   timeoutMs: (choice: string) => number;
   grokChat: GrokChatFn;
+  /**
+   * Says whether a SUCCESSFUL reply is the JSON the scan asked for.
+   *
+   * 0.6.63, Unit Y item 3. A reply the desk cannot read is not a success even
+   * though the transport called it one: given this validator, such a reply is
+   * retried once on the same rung and then reported unreadable, which makes it
+   * an ordinary `!ai.ok` failure for the one-hop failover below -- so a model
+   * that stutters twice moves the batch to the next rung instead of ending the
+   * scan. Omitted, a successful reply is taken at its word (the pre-0.6.63
+   * behaviour, kept for callers whose reply is not JSON).
+   */
+  read?: (text: string) => boolean;
   probe: (choice: string) => Promise<ProviderProbe>;
   setModelChoice: (id: number, choice: string) => Promise<void>;
   setStage: (id: number, stage: string) => Promise<void>;
@@ -130,13 +142,30 @@ export async function runScanChatWithFailover(
   const firstEffort = input.modelEffort == null
     ? null
     : validatedModelEffort(firstChoice, input.modelEffort);
-  const ai = await chat(system, user, maxTokens, {
-    timeoutMs: timeoutMs(firstChoice),
-    choice: firstChoice,
-    newsroomId: input.newsroomId,
-    ...(input.localModel ? { localModel: input.localModel } : {}),
-    ...(firstEffort ? { reasoningEffort: firstEffort } : {}),
+  const runOn = (choice: EffectiveProviderChoice, effort: ModelEffort | null) =>
+    chat(system, user, maxTokens, {
+      timeoutMs: timeoutMs(choice),
+      choice,
+      newsroomId: input.newsroomId,
+      ...(input.localModel ? { localModel: input.localModel } : {}),
+      ...(effort ? { reasoningEffort: effort } : {}),
+    });
+
+  /*
+    The retry the desk owes a malformed reply, taken from the shared helper so
+    there is one implementation of it: `read` returning null means this reply
+    is no use, and the helper asks the SAME rung once more before it reports
+    the reply unreadable. Everything after this treats that report like any
+    other provider failure, which is what lets the hop below happen.
+  */
+  const reply = await readableReplyOrRetry({
+    attempt: () => runOn(firstChoice, firstEffort),
+    read: (text) => (input.read && !input.read(text) ? null : text),
+    label: modelChoiceLabel(firstChoice),
   });
+  const ai: GrokResult = reply.ok
+    ? { ok: true, text: reply.value, ...(reply.meta ? { meta: reply.meta } : {}) }
+    : { ok: false, error: reply.error, ...(reply.meta ? { meta: reply.meta } : {}) };
   if (ai.ok) return ai;
 
   const plan = await planAutomaticFailover({
@@ -166,11 +195,5 @@ export async function runScanChatWithFailover(
   await setModelChoice(job.id, plan.next);
   await setStage(job.id, `Switched to ${plan.label}: ${switchReason}`);
   await input.setFailoverNote?.(job.id, switchNote);
-  return chat(system, user, maxTokens, {
-    timeoutMs: timeoutMs(plan.next),
-    choice: plan.next,
-    newsroomId: input.newsroomId,
-    ...(input.localModel ? { localModel: input.localModel } : {}),
-    ...(nextEffort ? { reasoningEffort: nextEffort } : {}),
-  });
+  return runOn(plan.next, nextEffort);
 }

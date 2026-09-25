@@ -1,3 +1,5 @@
+import { parseJsonBlock } from "./ai.ts";
+
 export type MeetingEvidenceChat = (
   system: string,
   user: string,
@@ -37,19 +39,22 @@ export type MeetingFocusScope = "item" | "meeting" | "none";
 
 type IndexedFinding = ReporterFinding & { candidateId: string };
 
+/**
+ * One tolerant reader, the desk's own (0.6.63, Unit Y item 3).
+ *
+ * This was a second copy of the fence-strip-and-slice parser and had no
+ * missing-comma repair, so a findings reply missing one comma came back here
+ * as `null` -- which `parseFindings` reports as `valid: false`, indistinguishable
+ * from a reply that had no findings in it. Routing through `parseJsonBlock`
+ * gives this reply the same repair and the same slicing rule as every other
+ * JSON-shaped one; the object-not-array narrowing stays, because that is this
+ * reader's contract with `parseFindings`.
+ */
 function jsonObject(text: string): Record<string, unknown> | null {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? text;
-  const start = fenced.indexOf("{");
-  const end = fenced.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  try {
-    const value = JSON.parse(fenced.slice(start, end + 1)) as unknown;
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+  const value = parseJsonBlock<unknown>(text);
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function parseFindings(text: string, allowed: Set<number>): { valid: boolean; findings: ReporterFinding[] } {

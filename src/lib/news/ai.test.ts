@@ -8,6 +8,8 @@ import {
   isGrokAvailable,
   parseJsonBlock,
   probeProvider,
+  readableReplyOrRetry,
+  unreadableReplyError,
   providerBudget,
   resolveAnthropic,
   resolveLlm,
@@ -1249,6 +1251,139 @@ describe("parseJsonBlock", () => {
   it("parses a fenced object", () => {
     const raw = '```json\n{"headline":"Hi"}\n```';
     assert.deepEqual(parseJsonBlock<{ headline: string }>(raw), { headline: "Hi" });
+  });
+
+  /**
+   * The bake-off (2026-09-24) recorded DeepSeek emitting JSON with one missing
+   * comma. Unit Y item 3 asks for that reply to be usable, and the repair has
+   * to be string-aware: a draft body is a JSON string that may itself contain
+   * braces, digits and prose, and a repair that inserts commas there would
+   * rewrite the sentence on its way to publication.
+   */
+  it("repairs a missing comma between two values", () => {
+    assert.deepEqual(parseJsonBlock<{ headline: string; dek: string }>('{"headline":"Hi" "dek":"There"}'), {
+      headline: "Hi",
+      dek: "There",
+    });
+    assert.deepEqual(parseJsonBlock<number[]>("[1 2 3]"), [1, 2, 3]);
+    assert.deepEqual(
+      parseJsonBlock<{ claims: unknown[]; form: string }>('{"claims":[] "form":"news"}'),
+      { claims: [], form: "news" },
+    );
+  });
+
+  it("never inserts a comma inside a string, and leaves valid JSON alone", () => {
+    const body = '{"body":"The council met 4 2 and left {a b} 1 2"}';
+    assert.deepEqual(parseJsonBlock<{ body: string }>(body), {
+      body: "The council met 4 2 and left {a b} 1 2",
+    });
+    // A missing comma INSIDE the prose is still only repaired if a strict
+    // parse failed -- and here it must be, because the value is a string.
+    const broken = '{"headline":"Hi" "body":"He said \\"no\\" 1 2 {x}"}';
+    assert.deepEqual(parseJsonBlock<{ headline: string; body: string }>(broken), {
+      headline: "Hi",
+      body: 'He said "no" 1 2 {x}',
+    });
+  });
+
+  it("still returns null for a reply that is not JSON at all", () => {
+    assert.equal(parseJsonBlock("I could not write that draft."), null);
+    assert.equal(parseJsonBlock('{"headline": '), null);
+  });
+});
+
+/**
+ * Unit Y item 3's first half: a malformed reply retries ONCE on the same
+ * provider, and the failure it finally reports is the wording the failover
+ * classifier reads ("unreadable" -- see automatic-failover.ts).
+ */
+describe("readableReplyOrRetry", () => {
+  const readObject = (text: string) => parseJsonBlock<{ headline: string }>(text);
+
+  it("uses the first reply when it is readable, without a second call", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return { ok: true as const, text: '{"headline":"Hi"}' };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 1);
+    assert.equal(reply.ok, true);
+    assert.deepEqual(reply.ok && reply.value, { headline: "Hi" });
+    assert.equal(reply.retried, false);
+  });
+
+  it("retries the same provider once when the first reply cannot be read", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return calls === 1
+          ? { ok: true as const, text: '{"headline":"Hi" "dek"' }
+          : { ok: true as const, text: '{"headline":"Hi","dek":"There"}' };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 2);
+    assert.equal(reply.ok, true);
+    assert.deepEqual(reply.ok && reply.value, { headline: "Hi", dek: "There" });
+    assert.equal(reply.retried, true);
+  });
+
+  it("reports unreadable after two replies the reader cannot use, in the classifier's words", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return { ok: true as const, text: "I could not write that draft." };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 2);
+    assert.equal(reply.ok, false);
+    assert.equal(reply.retried, true);
+    assert.equal(
+      reply.ok === false && reply.error,
+      "DeepSeek v4.1 Flash sent a reply the desk could not read (unreadable JSON).",
+    );
+    assert.equal(unreadableReplyError("DeepSeek v4.1 Flash"), reply.ok === false && reply.error);
+  });
+
+  it("passes a transport failure straight through without retrying it", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return { ok: false as const, error: "DeepSeek v4.1 Flash request timed out" };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 1);
+    assert.equal(reply.ok, false);
+    assert.equal(reply.retried, false);
+    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash request timed out");
+  });
+
+  it("keeps the second attempt's own transport error rather than inventing one", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return calls === 1
+          ? { ok: true as const, text: "not json" }
+          : { ok: false as const, error: "DeepSeek v4.1 Flash was unavailable" };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 2);
+    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash was unavailable");
   });
 });
 

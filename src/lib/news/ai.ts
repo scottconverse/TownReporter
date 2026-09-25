@@ -1240,6 +1240,58 @@ export function plannerModel(choice?: EffectiveProviderChoice | string): string 
   return "";
 }
 
+/**
+ * Insert the commas a model forgot, WITHOUT touching string contents.
+ *
+ * The 2026-09-24 research bake-off (`oversight/design/
+ * research-bakeoff-results-2026-09-24.md`) recorded DeepSeek returning JSON
+ * with one missing comma. Every JSON-shaped reply in the desk already goes
+ * through `parseJsonBlock`, so one repair here covers story drafting, scan,
+ * Dark Desk and the meeting paths at once -- the alternative was a second
+ * tolerant parser per call site, which is how the two parsers in
+ * `research-actions.ts` and `meeting-evidence-retrieval.ts` came to exist.
+ *
+ * String-aware on purpose: a draft body is a JSON string that may contain
+ * `{`, `[`, digits and prose, and a regex that inserts commas on "value then
+ * value" would silently rewrite the sentence the editor is about to publish.
+ * The walk therefore tracks whether it is inside a string (and whether the
+ * last character was a backslash escape) and only ever inserts BETWEEN two
+ * values that are both outside strings.
+ *
+ * Called only after a strict `JSON.parse` has already failed, so a reply that
+ * is valid JSON is never rewritten.
+ */
+function repairMissingCommas(slice: string): string {
+  const ENDS_VALUE = /["}\]0-9a-z]/;
+  const STARTS_VALUE = /["{[\-0-9a-z]/;
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let lastSignificant = "";
+  for (const ch of slice) {
+    if (!inString) {
+      const significant = ch.trim() !== "";
+      const betweenValues =
+        significant &&
+        lastSignificant !== "" &&
+        ENDS_VALUE.test(lastSignificant) &&
+        STARTS_VALUE.test(ch) &&
+        !/[,:}\]]/.test(ch);
+      if (betweenValues) out += ",";
+      if (significant) lastSignificant = ch;
+    }
+    out += ch;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+    }
+  }
+  return out;
+}
+
 export function parseJsonBlock<T>(raw: string): T | null {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = (fenced?.[1] ?? raw).trim();
@@ -1256,8 +1308,69 @@ export function parseJsonBlock<T>(raw: string): T | null {
   try {
     return JSON.parse(slice) as T;
   } catch {
-    return null;
+    try {
+      return JSON.parse(repairMissingCommas(slice)) as T;
+    } catch {
+      return null;
+    }
   }
+}
+
+/**
+ * The sentence a run reports when a model's reply cannot be read at all.
+ *
+ * One wording, built here, so the classifier in ./automatic-failover.ts can
+ * recognise it and move the unfinished call to the next rung. The word
+ * "unreadable" is the token that classifier matches; keep the two together.
+ */
+export function unreadableReplyError(label?: string): string {
+  const who = label ? `${label} ` : "The model ";
+  return `${who}sent a reply the desk could not read (unreadable JSON).`;
+}
+
+/**
+ * One JSON-shaped model call, retried ONCE on the same provider.
+ *
+ * Item 3 of 0.6.63's Unit Y: a malformed reply retries once on the same rung,
+ * then falls to the next. `parseJsonBlock` above repairs what it can, but a
+ * reply that is not JSON at all is still unreadable, and every path that ends
+ * a run used to stop there -- "Draft came back unreadable. Try again." matched
+ * no failover classifier, so Automatic died on a stutter instead of moving on.
+ *
+ * The retry is on the SAME provider on purpose: a truncated or mis-commaed
+ * stream usually comes back whole on a second ask, and the caller's own
+ * failover seam (./automatic-failover.ts) owns the hop to the next rung. The
+ * failure it returns carries `unreadableReplyError`'s wording so that seam
+ * recognises it.
+ *
+ * `attempt` is the caller's own transport (`chat`, `grokChat`, `runChat`),
+ * and `read` is the caller's own parser, so this stays hermetic: the two
+ * functions are injected, and no model is called here.
+ */
+export async function readableReplyOrRetry<T>(input: {
+  attempt: () => Promise<GrokOk | GrokErr>;
+  read: (text: string) => T | null;
+  label?: string;
+}): Promise<
+  | { ok: true; value: T; text: string; meta?: ChatResultMetadata; retried: boolean }
+  | { ok: false; error: string; meta?: ChatResultMetadata; retried: boolean }
+> {
+  const first = await input.attempt();
+  if (!first.ok) return { ok: false, error: first.error, meta: first.meta, retried: false };
+  const value = input.read(first.text);
+  if (value !== null) return { ok: true, value, text: first.text, meta: first.meta, retried: false };
+
+  const second = await input.attempt();
+  if (!second.ok) return { ok: false, error: second.error, meta: second.meta, retried: true };
+  const recovered = input.read(second.text);
+  if (recovered !== null)
+    return { ok: true, value: recovered, text: second.text, meta: second.meta, retried: true };
+  return {
+    ok: false,
+    error: unreadableReplyError(input.label),
+    meta: second.meta,
+    retried: true,
+  };
 }
 
 /*

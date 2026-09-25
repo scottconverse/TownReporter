@@ -1,4 +1,10 @@
-import { grokChat, parseJsonBlock, providerBudget, type ProviderProbe } from "./ai.ts";
+import {
+  grokChat,
+  parseJsonBlock,
+  providerBudget,
+  readableReplyOrRetry,
+  type ProviderProbe,
+} from "./ai.ts";
 import type { MeetingStoryFocus } from "./meeting-evidence-retrieval.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import type { OcrOptions } from "./ingest.ts";
@@ -1494,8 +1500,18 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
   let research: ResearchJson | null = null;
   if (timeLeft() > 8_000) {
     await deps.onStage?.("Planning the reporting");
-    const researchAi = await chat(reportResearchSystem(paper), researchUser, 900);
-    research = researchAi.ok ? parseJsonBlock<ResearchJson>(researchAi.text) : null;
+    /*
+      Same once-per-provider retry as the writer below (Unit Y item 3). This
+      pass never ends the run -- an unreadable reply leaves `research` null and
+      the draft continues from the retrieved evidence -- so the retry is the
+      whole of what it owes; there is no rung to fall to here.
+    */
+    const researchReply = await readableReplyOrRetry({
+      attempt: () => chat(reportResearchSystem(paper), researchUser, 900),
+      read: (text) => parseJsonBlock<ResearchJson>(text),
+      label: "The research model",
+    });
+    research = researchReply.ok ? researchReply.value : null;
   }
   if (meetingFocus) {
     // The research model may identify follow-ups, but it cannot silently
@@ -1697,16 +1713,30 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     if (timeLeft() < 4_000) return { error: "The draft ran out of time before writing." };
     const built = buildPacket();
     await deps.onStage?.("Writing the draft");
-    const writeAi = await chat(reportWriteSystem(paper), built.packet, 2200);
-    if (!writeAi.ok) return { error: writeAi.error };
-    const coerced = coerceDraft(writeAi.text, {
-      headline: opts.lead.headline,
-      dek: opts.lead.why,
-      topic: opts.lead.topic,
+    /*
+      A malformed writer reply is retried once on the same provider, then
+      reported unreadable (0.6.63, Unit Y item 3). Before this, the sentence
+      below was the end of the run: it matched no classifier in
+      ./automatic-failover.ts, so Automatic stopped on a stutter instead of
+      moving to the next rung. `readableReplyOrRetry` owns the retry, and its
+      failure wording is the token that classifier reads.
+    */
+    const write = await readableReplyOrRetry({
+      attempt: () => chat(reportWriteSystem(paper), built.packet, 2200),
+      read: (text) => {
+        const candidate = coerceDraft(text, {
+          headline: opts.lead.headline,
+          dek: opts.lead.why,
+          topic: opts.lead.topic,
+        });
+        return candidate.body ? candidate : null;
+      },
+      label: "The writing model",
     });
-    if (!coerced.body) return { error: "Draft came back unreadable. Try again." };
+    if (!write.ok) return { error: write.error };
+    const coerced = write.value;
 
-    const parsed = parseJsonBlock<Record<string, unknown>>(writeAi.text) ?? {};
+    const parsed = parseJsonBlock<Record<string, unknown>>(write.text) ?? {};
     let passBody = collapseRepeatedParagraphs(stripReporterNotebook(stripAiFiller(coerced.body)));
     const checkpointUrls = sanitizePublicUrls(coerced.source_urls).filter(url => docs.some(doc => doc.url === url && Boolean(doc.text) && doc.version_id != null));
     const checkpointCaptures = docs.filter(doc => checkpointUrls.includes(doc.url)).map(doc => ({
