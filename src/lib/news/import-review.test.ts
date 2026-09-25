@@ -7,6 +7,7 @@ import {
   SECTION_REQUIRED,
   cardBody,
   cardDisclosure,
+  cardLabel,
   cardProblems,
   cardsFromReport,
   findDuplicate,
@@ -79,6 +80,25 @@ describe("cardsFromReport on the real civic-scanner report", () => {
       cardDisclosure(stories()[0]!),
       "An outside AI research tool wrote this from public records; an editor reviewed it.",
     );
+  });
+});
+
+describe("the label a card wears", () => {
+  /*
+    The card's header sat directly above a HEADLINE field holding the same
+    words, prefixed "Story: " (coordinator review of the Unit X screenshots,
+    2026-09-24). For a story the label is the headline; the prefix said nothing
+    the field below did not, to an editor looking at a story card.
+  */
+  it("is the headline itself, with no 'Story: ' in front of the same words", () => {
+    const first = stories()[0]!;
+    assert.equal(cardLabel(first), first.headline.trim());
+    assert.equal(cardLabel(first).startsWith("Story:"), false);
+  });
+
+  it("still says so when the card is not a story, which is all it has to say", () => {
+    const notAStory = cards().find((c) => !c.isStory)!;
+    assert.equal(cardLabel(notAStory), `Not a story: ${notAStory.headline.trim()}`);
   });
 });
 

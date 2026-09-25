@@ -223,8 +223,61 @@ export function findDuplicate(
   return undefined;
 }
 
-/** The label for a card, used by the tick box and the status line. */
+/**
+ * The label for a card, used by the tick box and the status line.
+ *
+ * No "Story: " in front of a headline the HEADLINE field two lines below
+ * already shows word for word (coordinator review of the Unit X screenshots,
+ * 2026-09-24) -- the prefix only said "story" to an editor who is looking at a
+ * story card. The one card that must keep its word is the one that is not a
+ * story: that is the whole reason the label exists.
+ */
 export function cardLabel(card: ReviewCard): string {
   const headline = card.headline.trim() || "Untitled";
-  return card.isStory ? `Story: ${headline}` : `Not a story: ${headline}`;
+  return card.isStory ? headline : `Not a story: ${headline}`;
+}
+
+/**
+ * What one card sends to the import server function.
+ *
+ * Declared here rather than imported from `import-stories.server.ts` so this
+ * module stays client-safe: it is read by the Desk and by the review screen,
+ * and neither should have a `.server.ts` edge in its bundle. It is the same
+ * shape as that file's `ImportSelection`, and TypeScript checks the two against
+ * each other at every call site, so they cannot drift apart quietly.
+ */
+export type ImportSelectionPayload = {
+  headline: string;
+  section: string;
+  dek: string;
+  body: string;
+  links: { text: string; url: string }[];
+  score: string;
+  triage: string;
+  reporterNextStep: string;
+  hold: boolean;
+  disclosureKey: DisclosureKey;
+  disclosureOther: string;
+};
+
+/**
+ * One card, as the payload the import server function takes.
+ *
+ * The single mapping from a card to a row, so the review screen and the Desk's
+ * one-story paste cannot save the same card two different ways.
+ */
+export function selectionFromCard(card: ReviewCard): ImportSelectionPayload {
+  return {
+    headline: card.headline.trim(),
+    section: card.section,
+    dek: cardDek(card),
+    body: cardBody(card),
+    links: keptLinks(card),
+    score: card.score,
+    triage: card.triage,
+    reporterNextStep: card.reporterNextStep,
+    hold: card.hold,
+    disclosureKey: card.disclosureKey,
+    disclosureOther: card.disclosureOther.trim(),
+  };
 }
