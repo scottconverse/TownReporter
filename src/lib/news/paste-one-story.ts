@@ -140,6 +140,15 @@ export function pasteOneStoryCard(input: PasteOneInput): ReviewCard {
     kind: "story",
     includeByDefault: true,
     isStory: true,
+    /* No report wrote this, so it states no filing label and no tier. */
+    storyId: "",
+    readiness: 0,
+    readinessNote: "",
+    readinessFlag: "",
+    unverified: false,
+    claims: [],
+    claimsWarning: "",
+    notes: "",
     headline: typed || headlineFromPaste(text),
     /*
       Empty, and not `topicFromText(...)`: the section is the editor's to

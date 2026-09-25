@@ -14,10 +14,15 @@
 import { titlesOverlap } from "./desk-copy.ts";
 import {
   IMPORT_LIMITS,
+  claimsWarning,
   disclosureLine,
+  editorNotesFor,
+  readinessFlagOf,
   type DisclosureKey,
+  type ImportClaim,
   type ImportKind,
   type ParsedReport,
+  type ReadinessTier,
 } from "./import-stories.ts";
 
 /**
@@ -75,6 +80,25 @@ export type ReviewCard = {
   includeByDefault: boolean;
   /** False for a section of the report that is not a story. */
   isStory: boolean;
+  /** The report's own filing label ("S1", "H3"), kept for the notes and provenance. */
+  storyId: string;
+  /** The report's editorial readiness tier: 1 ready, 2 developing, 3 potential, 0 unstated. */
+  readiness: ReadinessTier;
+  /** The sentence that came with the tier statement, for the notes. */
+  readinessNote: string;
+  /**
+   * What the card wears for the tier: "Developing — gaps marked",
+   * "Unverified — Black Desk", or "" for a card the report filed ready.
+   */
+  readinessFlag: string;
+  /** True under a Black Desk heading, or on a Tier 3 card: never publication copy. */
+  unverified: boolean;
+  /** The claims ledger, in the report's words. Editor notes, never published. */
+  claims: ImportClaim[];
+  /** The warning raised when the ledger carries an unverified or contested claim. */
+  claimsWarning: string;
+  /** Everything the editor must read but must not publish. */
+  notes: string;
   headline: string;
   /** The section suggestion from the topic chooser, kept so "reset" is possible. */
   suggestedSection: string;
@@ -134,6 +158,14 @@ export function cardsFromReport(
     kind: story.kind,
     includeByDefault: story.includeByDefault,
     isStory: story.isStory,
+    storyId: story.storyId,
+    readiness: story.readiness,
+    readinessNote: story.readinessNote,
+    readinessFlag: readinessFlagOf(story),
+    unverified: story.unverified,
+    claims: story.claims,
+    claimsWarning: claimsWarning(story.claims),
+    notes: editorNotesFor(story),
     headline: story.headline.slice(0, IMPORT_LIMITS.headline),
     suggestedSection: story.sectionSuggestion,
     section: story.isStory ? story.sectionSuggestion : NO_SECTION,
@@ -177,6 +209,25 @@ export function readSummary(report: ParsedReport): string {
   ].filter(Boolean);
   if (parts.length === 0) return "Read the paste.";
   return `Read ${parts.join(" and ")} out of the paste.`;
+}
+
+/**
+ * The banner the review screen shows above the cards when the run that wrote
+ * the paste says it stopped early.
+ *
+ * v2.6 states its own completeness (`**Run status: PARTIAL.**`) and lists what
+ * it did not finish. Nothing here is a reason not to import the cards -- they
+ * are exactly the cards the run did finish -- but an editor reading eight
+ * stories and not the sentence saying the meeting sweep never ran would take the
+ * run for a complete scan of the month. `null` when the run claims to be whole
+ * (or says nothing, which is every report before v2.6).
+ */
+export function runBanner(
+  report: Pick<ParsedReport, "runStatus" | "runRemains">,
+): { status: string; remains: string[] } | null {
+  const status = report.runStatus.trim();
+  if (!status || status === "COMPLETE") return null;
+  return { status, remains: report.runRemains.slice() };
 }
 
 /**
@@ -329,6 +380,15 @@ export type ImportSelectionPayload = {
   score: string;
   triage: string;
   reporterNextStep: string;
+  /** The filing label the report used ("S1"), kept as provenance on the lead. */
+  storyId: string;
+  /** The editorial readiness tier the report stated, 0 when it stated none. */
+  readiness: ReadinessTier;
+  /**
+   * The editor notes: the tier's qualifier, the claims ledger with its
+   * statuses, and the next step. Stored on the lead, never published.
+   */
+  notes: string;
   hold: boolean;
   disclosureKey: DisclosureKey;
   disclosureOther: string;
@@ -352,6 +412,9 @@ export function selectionFromCard(card: ReviewCard): ImportSelectionPayload {
     score: card.score,
     triage: card.triage,
     reporterNextStep: card.reporterNextStep,
+    storyId: card.storyId,
+    readiness: card.readiness,
+    notes: card.notes,
     hold: card.hold,
     disclosureKey: card.disclosureKey,
     disclosureOther: card.disclosureOther.trim(),

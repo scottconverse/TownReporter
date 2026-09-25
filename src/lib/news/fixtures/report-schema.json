@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Pipeline data schema for civic-scanner build-report.js. The pipeline MUST produce a JSON file matching this schema. The build script validates against these requirements before generating the .docx.",
+  "type": "object",
+  "required": ["meta", "stats", "meetingCoverage", "agent1_leads", "agent2_stories", "agent25_gate", "agent3_blackDesk", "agent4_adversarial", "agent5_completeness", "agent6_legal", "agent7_plainLanguage", "agent75_distribution", "agent8_hygiene", "heldStories", "trustDashboard"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["city", "state", "date", "runNumber", "version"],
+      "properties": {
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "runNumber": { "type": "integer", "minimum": 1 },
+        "version": { "type": "string" }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["scanned", "advanced", "held", "killed", "suppressed", "tierACounts", "tierBCounts", "tierCCounts"],
+      "properties": {
+        "scanned": { "type": "integer" },
+        "advanced": { "type": "integer" },
+        "held": { "type": "integer" },
+        "killed": { "type": "integer" },
+        "suppressed": { "type": "integer" },
+        "tierACounts": { "type": "integer" },
+        "tierBCounts": { "type": "integer" },
+        "tierCCounts": { "type": "integer" }
+      }
+    },
+    "beatContext": {
+      "type": "object",
+      "properties": { "text": { "type": "string" } }
+    },
+    "sourceAccessLimitations": {
+      "type": "object",
+      "properties": {
+        "blockedDomains": { "type": "string" },
+        "manualReviewItems": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "meetingCoverage": {
+      "type": "object",
+      "required": ["status", "sourceInventory", "meetings", "actions", "agendaReconciliation", "unresolvedGaps"],
+      "properties": {
+        "status": { "type": "string", "enum": ["COMPLETE", "PARTIAL"] },
+        "sourceInventory": { "type": "string" },
+        "meetings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["body", "date", "coverageStatus"],
+            "properties": {
+              "body": { "type": "string" },
+              "date": { "type": "string" },
+              "coverageStatus": { "type": "string", "enum": ["complete", "partial", "unavailable"] },
+              "recordingUrl": { "type": "string" },
+              "gaps": { "type": "string" }
+            }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["actionId", "timestamp", "motionOrAction", "outcome", "vote", "policyStage", "evidence", "disposition"],
+            "properties": {
+              "actionId": { "type": "string" },
+              "timestamp": { "type": "string" },
+              "motionOrAction": { "type": "string" },
+              "outcome": { "type": "string" },
+              "vote": { "type": "string" },
+              "policyStage": { "type": "string" },
+              "evidence": { "type": "string" },
+              "disposition": { "type": "string" }
+            }
+          }
+        },
+        "agendaReconciliation": { "type": "string" },
+        "unresolvedGaps": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "agent1_leads": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "tier", "headline", "details"],
+        "properties": {
+          "id": { "type": "string" },
+          "tier": { "type": "string", "enum": ["A", "B", "C"] },
+          "headline": { "type": "string" },
+          "source": { "type": "string" },
+          "url": { "type": "string" },
+          "confidence": { "type": "string" },
+          "action": { "type": "string" },
+          "beat": { "type": "string" },
+          "details": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "agent2_stories": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "draft", "claims", "sourceList"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "draft": { "type": "string", "minLength": 400, "$comment": "Substantial 400-800 word or longer AI-reported story draft when warranted; Tier 1 is nearly finished editor copy, not a summary." },
+          "claims": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "text", "status", "sourceIds"],
+              "properties": {
+                "id": { "type": "string" },
+                "text": { "type": "string" },
+                "status": { "type": "string", "enum": ["VERIFIED", "CONTESTED", "UNVERIFIED"] },
+                "sourceIds": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+                "note": { "type": "string" }
+              }
+            }
+          },
+          "sourceList": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "title", "tier", "locator"],
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": "string" },
+                "tier": { "type": "string", "enum": ["A", "B", "C"] },
+                "url": { "type": "string", "format": "uri" },
+                "recordRef": { "type": "string" },
+                "locator": { "type": "string", "$comment": "Page, item, timestamp, or other precise location" },
+                "date": { "type": "string" }
+              },
+              "anyOf": [{ "required": ["url"] }, { "required": ["recordRef"] }]
+            }
+          }
+        }
+      }
+    },
+    "agent25_gate": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "immediacy", "impact", "conflict", "novelty", "total", "decision", "editorialTier", "editorRecommendation", "whatCannotSay", "aiNextStep", "reportingNotes"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "immediacy": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "immediacyReason": { "type": "string" },
+          "impact": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "impactReason": { "type": "string" },
+          "conflict": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "conflictReason": { "type": "string" },
+          "novelty": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "noveltyReason": { "type": "string" },
+          "total": { "type": "integer", "minimum": 4, "maximum": 20 },
+          "decision": { "type": "string", "enum": ["ADVANCE", "HOLD", "DEMOTE"] },
+          "editorialTier": { "type": "integer", "enum": [1, 2, 3], "$comment": "Readiness tier; separate from source tier A/B/C and newsworthiness decision" },
+          "editorRecommendation": { "type": "string", "enum": ["EDIT", "REWRITE", "MORE_REPORTING", "DARK_DESK", "HOLD", "KILL"], "$comment": "AI recommendation only; human editor makes the decision" },
+          "whatCannotSay": { "type": "string", "$comment": "Material unsupported wording or state none" },
+          "aiNextStep": { "type": "string", "$comment": "Next AI-accessible check or state complete; human work belongs in reportingNotes only when essential" },
+          "reasoning": { "type": "string" },
+          "beat": { "type": "string" },
+          "headlineAudit": { "type": "string" },
+          "legalRisk": { "type": "string" },
+          "reportingNotes": { "type": "string", "$comment": "Confirmed / Still unverified / Published documents checked / Falsify / Visuals / AI next steps / Human reporting required only when essential; no formal records requests" },
+          "visualDirection": { "type": "string", "$comment": "FULL visual direction brief with generation prompts. NOT a one-liner." }
+        }
+      }
+    },
+    "agent3_blackDesk": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signalId", "source", "sourceTier", "confidence", "title", "speculativeAngle", "investigationQuestion", "vulnerabilityTypes", "vulnerabilityDetail", "agent4Target"],
+        "properties": {
+          "signalId": { "type": "string" },
+          "source": { "type": "string" },
+          "sourceTier": { "type": "string", "enum": ["A", "B", "C"] },
+          "confidence": { "type": "number", "minimum": 0.1, "maximum": 0.5 },
+          "title": { "type": "string" },
+          "speculativeAngle": { "type": "string", "minLength": 50, "$comment": "Full speculative reasoning, not a one-liner" },
+          "connections": { "type": "string" },
+          "investigationQuestion": { "type": "string" },
+          "vulnerabilityTypes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "enum": ["single-source-anonymous", "conflict-of-interest", "no-primary-record", "temporal-mismatch", "amplification-pattern", "hearsay-chain", "missing-counterparty", "jurisdiction-mismatch", "numerical-uncertainty", "unsupported-inference"] }
+          },
+          "vulnerabilityDetail": { "type": "string" },
+          "agent4Target": { "type": "string" }
+        }
+      }
+    },
+    "agent4_adversarial": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "gate1", "gate2", "gate3_counterNarrative", "severity", "verdict"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "gate1": { "type": "string", "minLength": 50 },
+          "gate2": { "type": "string", "minLength": 50 },
+          "gate3_counterNarrative": { "type": "string", "minLength": 100, "$comment": "FULL counter-narrative. The strongest possible opposing argument." },
+          "gate4": { "type": "string" },
+          "targetCheck": { "type": "string", "$comment": "For a Black Desk handoff: result of the named Agent 4 target check" },
+          "severity": { "type": "string" },
+          "verdict": { "type": "string" }
+        }
+      }
+    },
+    "agent5_completeness": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "attribution", "balance", "harm", "legalFlag", "verdict"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "attribution": { "type": "string" },
+          "balance": { "type": "string" },
+          "harm": { "type": "string" },
+          "legalFlag": { "type": "string" },
+          "verdict": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "agent6_legal": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "riskLevel", "analysis", "recommendation"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "threatType": { "type": "string" },
+          "doctrine": { "type": "string" },
+          "riskLevel": { "type": "string" },
+          "analysis": { "type": "string", "minLength": 100, "$comment": "Per-story legal analysis. NOT a summary paragraph." },
+          "recommendation": { "type": "string" }
+        }
+      }
+    },
+    "agent7_plainLanguage": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "rewrite"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "rewrite": { "type": "string", "minLength": 150, "$comment": "Full 150-200+ word plain-language rewrite. NOT a 3-sentence summary." }
+        }
+      }
+    },
+    "agent75_distribution": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "headline", "seo", "twitter", "facebook", "linkedin", "nextdoor", "newsletter", "emailSubjects"],
+        "properties": {
+          "id": { "type": "string" },
+          "headline": { "type": "string" },
+          "seo": { "type": "string" },
+          "twitter": { "type": "string" },
+          "hashtags": { "type": "string" },
+          "facebook": { "type": "string" },
+          "linkedin": { "type": "string" },
+          "nextdoor": { "type": "string" },
+          "newsletter": { "type": "string" },
+          "emailSubjects": { "$comment": "3 email subject line options", "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] }
+        }
+      }
+    },
+    "agent8_hygiene": {
+      "type": "object",
+      "required": ["sourceChecks", "headlineAudit", "originalityCheck"],
+      "properties": {
+        "sourceChecks": { "type": "string" },
+        "headlineAudit": { "type": "string" },
+        "originalityCheck": { "type": "string" }
+      }
+    },
+    "agent9_research": {
+      "type": "object",
+      "properties": { "text": { "type": "string" } }
+    },
+    "heldStories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["storyId", "headline"],
+        "properties": {
+          "storyId": { "type": "string", "$comment": "References an agent2_stories packet with claims and sourceList" },
+          "headline": { "type": "string" },
+          "source": { "type": "string" },
+          "details": { "type": "string" },
+          "scoring": { "type": "string" },
+          "reason": { "type": "string" },
+          "elevate": { "type": "string" }
+        }
+      }
+    },
+    "suppressionLedger": { "type": "array" },
+    "upcomingMeetings": { "type": "array", "items": { "type": "string" } },
+    "trustDashboard": { "type": "object" }
+  }
+}
