@@ -8,6 +8,7 @@ import {
   modelChoiceHelp,
   pickerOptionText,
   pickerOptionTitle,
+  retiredModelChoiceNote,
   type DarkModelChoice,
   type ModelChoiceOption,
   type OpinionModelChoice,
@@ -278,7 +279,24 @@ export function ModelPicker(props: Props) {
       detail: connections.isPending ? "Loading…" : "Unavailable — choose another model",
     });
   }
-  const selected = options.find((option) => option.value === props.value) ?? options[0];
+  /*
+    0.6.63 (Unit Y item 4): a stored choice this build retired normalises to
+    Automatic when it runs (`storyModelChoice`, src/lib/news/model-choice.ts),
+    so the control has to show Automatic too -- a `<select value>` left on an
+    id no option carries renders EMPTY, which reads as "no model chosen" --
+    and the help line has to say why, in the one sentence model-choice.ts
+    owns. A retired id is in no option list, so the only way it arrives here
+    is a row read straight out of the database (a newsroom, a `desk_jobs`
+    row, or a page-watch row from a build that still offered it); a menu that
+    offered it again would be the bug this is the fallback for.
+  */
+  const retiredNote = retiredModelChoiceNote(props.value);
+  const shownValue = retiredNote
+    ? options.some((option) => option.value === "auto")
+      ? "auto"
+      : options[0]?.value ?? "auto"
+    : props.value;
+  const selected = options.find((option) => option.value === shownValue) ?? options[0];
   const helpId = useId();
   const effortId = useId();
   const flagId = useId();
@@ -314,29 +332,31 @@ export function ModelPicker(props: Props) {
   const unavailable = options.filter(
     (option) => option.value !== "auto" && !isAvailable(option.value),
   );
-  const selectedUnavailable = !isAvailable(props.value);
+  const selectedUnavailable = !isAvailable(shownValue);
   // The one un-set-up option gets flagged even when it is not the current
   // selection, so an editor sees "not set up" before picking it rather than
   // after a failed draft.
   const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
-  const help = isCustomModelChoice(props.value)
-    ? selectedUnavailable
-      ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
-      : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
-    : selectedUnavailable
-      ? notSetUpHelp(selected)
-      : modelChoiceHelp(selected.value, props.scope ?? "story");
-  const customConnection = isCustomModelChoice(props.value)
-    ? connections.data?.find((row) => `custom:${row.id}` === props.value)
+  const help = retiredNote
+    ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
+    : isCustomModelChoice(shownValue)
+      ? selectedUnavailable
+        ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+        : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
+      : selectedUnavailable
+        ? notSetUpHelp(selected)
+        : modelChoiceHelp(selected.value, props.scope ?? "story");
+  const customConnection = isCustomModelChoice(shownValue)
+    ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
     : null;
-  const exactModel = props.value === "local-model"
+  const exactModel = shownValue === "local-model"
     ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
     : customConnection?.modelId ?? null;
-  const effortOptions = modelEffortsFor(props.value, exactModel);
+  const effortOptions = modelEffortsFor(shownValue, exactModel);
   const selectedEffort =
     props.effort && effortOptions.includes(props.effort)
       ? props.effort
-      : defaultModelEffort(props.value, exactModel);
+      : defaultModelEffort(shownValue, exactModel);
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
@@ -344,7 +364,7 @@ export function ModelPicker(props: Props) {
       </label>
       <select
         id={selectId}
-        value={props.value}
+        value={shownValue}
         disabled={props.disabled}
         aria-describedby={flagged ? `${helpId} ${flagId}` : helpId}
         /*

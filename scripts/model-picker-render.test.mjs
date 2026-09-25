@@ -296,3 +296,58 @@ test("disabled and deleted custom picks remain visible without selecting Automat
   }
   availabilityStub.__setConnections([]);
 });
+
+/*
+  0.6.63 (Unit Y item 4). The owner's standing instruction is "REMOVE Grok".
+  The registry keeps the entry only because `xai-oauth` still describes the
+  transport the Server page's sign-in card reads (see RETIRED_PROVIDER_IDS in
+  src/lib/news/provider-registry.ts), so the retirement is only real if the
+  MENUS show it: no surface's option list may offer it, and no rendered option
+  may carry the retired value.
+*/
+test("no picker surface offers SuperGrok", () => {
+  for (const scope of ["story", "scan", "opinion", "dark", "forced"]) {
+    const html = render({ scope });
+    assert.doesNotMatch(html, /grok/i, `the ${scope} picker must offer no Grok option`);
+    assert.doesNotMatch(
+      html,
+      /value="grok-oauth"/,
+      `the ${scope} picker must not carry the retired value`,
+    );
+  }
+});
+
+/*
+  A newsroom, a `desk_jobs` row, a draft batch or a page-watch row can still
+  hold `grok-oauth` from 0.6.x. The run normalises it to Automatic
+  (`storyModelChoice`, src/lib/news/model-choice.ts), so the control has to
+  SHOW Automatic -- a select whose value matches no option renders empty --
+  and its help has to say why, in the one sentence model-choice.ts owns.
+*/
+const RETIRED_NOTE =
+  "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected.";
+
+function matchesRetiredNote(html) {
+  assert.ok(
+    html.includes(RETIRED_NOTE),
+    `the picker must show the retirement note verbatim; got:\n${html}`,
+  );
+}
+
+test("a stored SuperGrok choice shows Automatic, explains itself, and offers no Grok back", () => {
+  const html = render({ value: "grok-oauth" });
+  matchesRetiredNote(html);
+  assert.match(html, /value="auto"[^>]*selected=""/, "the control must show Automatic");
+  assert.doesNotMatch(html, /value="grok-oauth"/);
+  // The note explains the fallback; the surface's own help still says what
+  // Automatic will actually do, read from the ladder itself.
+  assert.match(html, /DeepSeek v4\.1 Flash, Qwen 3\.6 35B, then Codex Terra/);
+});
+
+test("a stored SuperGrok choice on a picker that has no Automatic falls back to that surface's first choice", () => {
+  const html = render({ scope: "forced", value: "grok-oauth" });
+  matchesRetiredNote(html);
+  const [first] = registry.providersFor("forced");
+  assert.match(html, new RegExp(`value="${first.id}"[^>]*selected=""`));
+  assert.doesNotMatch(html, /value="grok-oauth"/);
+});

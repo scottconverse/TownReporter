@@ -66,6 +66,7 @@ import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review
 import {
   modelChoiceLabel,
   rememberedStoryModelChoice,
+  retiredModelChoiceNote,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -339,6 +340,14 @@ function StoryPage() {
       setModelEffort(defaultModelEffort(remembered));
     }
   }, [data?.job]);
+
+  /*
+    0.6.63 (Unit Y item 4): a job row that still holds the retired Grok choice
+    runs on Automatic -- `modelChoice` above is already normalised, so the note
+    has to be read from the stored row, or the editor would see "Automatic"
+    with no explanation of where their pick went.
+  */
+  const retiredModelNote = retiredModelChoiceNote(data?.job?.model_choice);
 
   useEffect(() => {
     if (!waitingSince) {
@@ -925,6 +934,11 @@ function StoryPage() {
         >
           Model & research · {modelChoiceLabel(modelChoice)}
         </button>
+        {retiredModelNote ? (
+          <p className="note" role="status">
+            {retiredModelNote}
+          </p>
+        ) : null}
         <span className="astra-save-state" role="status">
           {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
         </span>
