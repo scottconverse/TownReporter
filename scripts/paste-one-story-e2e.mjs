@@ -23,8 +23,9 @@
  *     published, and the paper does not carry it;
  *   - the Queue row is marked Imported: it is the same import path, not a
  *     second one;
- *   - the draft holds the paste word for word, the first line as its headline,
- *     and the sentence the editor edits is the sentence the reader gets;
+ *   - the draft holds the paste word for word with the first line as its
+ *     headline and not repeated as the body's first line (step G), and the
+ *     sentence the editor edits is the sentence the reader gets;
  *   - a pasted story with a cited page prints it under Sources beneath FOLLOW
  *     THE EVIDENCE; a pasted story with none prints no such heading and says in
  *     words that there are no source records (coordinator review of the Unit X
@@ -66,6 +67,11 @@ const STORY = [
 ].join("\n");
 /** The paste's first line, which is the headline when none is typed. */
 const FIRST_LINE = "Longmont council revives the hospitality licence question";
+/**
+ * The text the draft holds: the paste with the line that became the headline
+ * taken off the top (step G). Every other line is byte for byte as pasted.
+ */
+const BODY = STORY.split("\n").slice(2).join("\n");
 /** One sentence in the middle of the paste, which the editor rewrites. */
 const BEFORE_EDIT =
   "The council voted 5-2 on Tuesday to bring the rules back for a second reading.";
@@ -88,6 +94,8 @@ const SECOND = [
   "",
   "Two members asked for the sales figures first, and staff said they would come with the packet.",
 ].join("\n");
+/** The second draft's text: its paste with its own headline line taken off. */
+const SECOND_BODY = SECOND.split("\n").slice(2).join("\n");
 /** What the editor retitles the second story to, after the duplicate warning. */
 const SECOND_TITLE = "Hospitality licence rules come back for a second reading";
 
@@ -277,7 +285,7 @@ async function nothingPrinted() {
   step("nothing is published: the paper does not carry the pasted story");
 }
 
-/** The Queue marks it Imported, and the draft holds the paste word for word. */
+/** The Queue marks it Imported, and the draft holds the paste word for word (headline line off). */
 async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = FIRST_LINE) {
   await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
   const row = page.locator(".lead-row", { hasText: expectedTitle });
@@ -299,11 +307,20 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
   const body = page.locator(".astra-story-body");
   await body.waitFor({ timeout: 30_000 });
   const held = await body.inputValue();
+  /*
+    Step G: the draft holds the paste with the line that became the headline
+    taken off the top, and nothing else moved.
+  */
+  const expectedBody = expectedTitle === FIRST_LINE ? BODY : SECOND_BODY;
   must(
-    held === STORY || held === SECOND,
-    `the draft does not hold the paste word for word: ${held.length} characters against ` +
-      `${STORY.length} pasted (first difference at ` +
-      `${[...held].findIndex((c, i) => c !== STORY[i])})`,
+    held === expectedBody,
+    `the draft does not hold the paste minus its headline line, word for word: ` +
+      `${held.length} characters against ${expectedBody.length} expected (first difference at ` +
+      `${[...held].findIndex((c, i) => c !== expectedBody[i])})`,
+  );
+  must(
+    !held.startsWith(expectedTitle),
+    "the headline line is repeated as the draft body's first line",
   );
 
   const topic = page.locator("#story-topic select");
@@ -320,7 +337,7 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
     );
   }
   step(
-    `the Queue row is Imported and the draft is the paste, word for word` +
+    `the Queue row is Imported and the draft is the paste, word for word, headline line off` +
       (sectionChoice ? `, filed under "${sectionChoice.name}"` : `, with no section chosen`),
   );
   return { headline, body };
@@ -328,7 +345,7 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
 
 /** The editor rewrites one sentence and saves it, as desk work. */
 async function theEditorEditsASentence(bodyField) {
-  await bodyField.fill(STORY.replace(BEFORE_EDIT, AFTER_EDIT));
+  await bodyField.fill(BODY.replace(BEFORE_EDIT, AFTER_EDIT));
   await page
     .locator(".astra-save-state")
     .filter({ hasText: "Unsaved changes" })
@@ -679,7 +696,7 @@ async function main() {
       .filter({ hasText: "Saved draft" })
       .waitFor({ timeout: 45_000 });
     must(
-      (await secondBody.inputValue()) === SECOND,
+      (await secondBody.inputValue()) === SECOND_BODY,
       "the second story's text did not survive being retitled and re-sectioned",
     );
     const printedTwo = await publishIt();

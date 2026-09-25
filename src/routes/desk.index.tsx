@@ -807,8 +807,9 @@ function DeskHome() {
             <div className="composer-pasted">
               <label htmlFor="paste-one-text">The story</label>
               <p>
-                Paste it as it is. Nothing is rewritten, nothing is cut, and no AI reads it — the
-                whole paste is the draft. Its links come across as the story&rsquo;s sources.
+                Paste it as it is. Nothing is rewritten and no AI reads it — the paste becomes the
+                draft, with its first line as the headline if you leave that empty. Its links come
+                across as the story&rsquo;s sources.
               </p>
               <textarea
                 id="paste-one-text"

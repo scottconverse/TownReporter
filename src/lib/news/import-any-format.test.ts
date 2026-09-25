@@ -36,6 +36,8 @@ import {
   splitParagraphs,
   stripOrdinal,
 } from "./import-stories.ts";
+import { cardBody, cardsFromReport, type ReviewCard } from "./import-review.ts";
+import { pasteOneStoryCard } from "./paste-one-story.ts";
 
 const CODEX = readFileSync(
   new URL("./fixtures/civic-scanner-longmont-2026-09-24.md", import.meta.url),
@@ -471,5 +473,61 @@ describe("a single finished story with no markdown headings", () => {
     assert.equal(splitParagraphs(story.body).length, 2);
     assert.equal(stripOrdinal("1. Council votes"), "Council votes");
     assert.equal(parseFinishedStories("A wall of text with no headings and no breaks in it at all, running on and on until nobody could call any of it a headline").method, "none");
+  });
+});
+
+describe("the line a headline came from is not repeated as the body's first line", () => {
+  /*
+    Step G, from the Unit X2 walk (item 11): the paste's first line is the
+    headline, so it is not the body's first line as well. A story whose
+    headline is read off a heading line arrives in the editor with that line
+    printed over it again otherwise.
+
+    Every shape this unit reads, one list: the report paths already took the
+    heading off (the plain-story reader and the structured reader both slice
+    the first paragraph away), and the one-story paste did not until this step.
+  */
+  const LIST = [
+    "# Story ideas — Longmont, week of September 21, 2026",
+    "",
+    "* Quiet zone work closes the 21st Avenue crossing — the crossing closes Sept 28 for four weeks.",
+    "* The budget's water fund gap — the 2027 budget message puts the Water Fund at $51.01 million.",
+  ].join("\n");
+
+  const PLAIN = [
+    "Longmont council delays the transit vote to October",
+    "",
+    "The council put off its decision on the Ride Longmont expansion until October 6.",
+    "",
+    "Two members said they wanted the ridership figures first.",
+  ].join("\n");
+
+  function everyShape(): { name: string; cards: ReviewCard[] }[] {
+    return [
+      { name: "the Codex report", cards: cardsFromReport(parseFinishedStories(CODEX)) },
+      { name: "the Claude report", cards: cardsFromReport(parseFinishedStories(CLAUDE)) },
+      { name: "an idea list", cards: cardsFromReport(parseFinishedStories(LIST)) },
+      { name: "a plain story", cards: cardsFromReport(parseFinishedStories(PLAIN)) },
+      { name: "one pasted story", cards: [pasteOneStoryCard({ text: PLAIN })] },
+    ];
+  }
+
+  it("keeps every card's body from opening with its own headline", () => {
+    for (const { name, cards } of everyShape()) {
+      assert.ok(cards.length > 0, `${name} read into cards`);
+      for (const card of cards) {
+        const firstLine = (splitParagraphs(cardBody(card))[0] ?? "").trim();
+        assert.notEqual(firstLine, card.headline.trim(), `${name}: ${card.headline}`);
+      }
+    }
+  });
+
+  it("leaves every remaining line of a plain paste byte-identical, in order", () => {
+    const card = pasteOneStoryCard({ text: PLAIN });
+    assert.equal(card.headline, PLAIN.split("\n")[0]);
+    assert.deepEqual(cardBody(card).split("\n"), PLAIN.split("\n").slice(2));
+    const plain = cardsFromReport(parseFinishedStories(PLAIN))[0]!;
+    assert.equal(plain.headline, PLAIN.split("\n")[0]);
+    assert.deepEqual(plain.body.split("\n"), PLAIN.split("\n").slice(2));
   });
 });

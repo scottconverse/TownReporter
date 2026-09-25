@@ -17,6 +17,9 @@ import { headlineFromPaste, pasteOneStoryCard } from "./paste-one-story.ts";
  * out of the text (it is part of a scanner's format), and this screen must not,
  * because a story you wrote has no format and a line removed by guesswork is a
  * paragraph published missing.
+ *
+ * The one line that does leave is the headline's own (step G): a paste's first
+ * line becomes the headline, and it is not repeated as the body's first line.
  */
 const PASTED = [
   "Council votes to bring marijuana hospitality rules back for consideration",
@@ -31,6 +34,14 @@ const PASTED = [
   "",
   "Correction: an earlier version said the vote was unanimous.",
 ].join("\n");
+
+/**
+ * The same paste with the line that becomes its headline taken off.
+ *
+ * Step G (from the Unit X2 walk, item 11): the first line is the headline, so
+ * it is not also the body's first line. Nothing else moves.
+ */
+const PASTED_BODY = PASTED.split("\n").slice(2).join("\n");
 
 async function ensureSchema() {
   const sql = await getSql();
@@ -68,14 +79,42 @@ describe("headlineFromPaste: the first line, when nothing is typed", () => {
 });
 
 describe("pasteOneStoryCard: one story, exactly as pasted", () => {
-  it("carries the paste byte for byte, and takes no line out of it", () => {
+  it("carries the paste byte for byte, with the headline's own line taken off the top", () => {
     const card = pasteOneStoryCard({ text: PASTED });
-    assert.equal(card.body, PASTED);
+    /*
+      Step G: the first line is the headline and is not repeated as the body's
+      first line. Every remaining line is byte-identical, in order, exactly
+      once -- this is a split, not an edit.
+    */
+    assert.equal(card.body, PASTED_BODY);
+    assert.deepEqual(card.body.split("\n"), PASTED.split("\n").slice(2));
+    assert.equal(card.body.startsWith("The council voted 5-2"), true);
+    assert.equal(card.body.includes("Council votes to bring marijuana hospitality rules back"), false);
     // The report reader would have moved this out of the text and into the
     // editor notes. Here it stays in the story and the notes stay empty.
     assert.equal(card.body.includes("**Score:** 9/20"), true);
     assert.deepEqual([card.score, card.triage, card.reporterNextStep], ["", "", ""]);
     assert.equal(card.body.includes("Correction: an earlier version"), true);
+  });
+
+  it("takes the headline's line off a paste that writes it as a heading", () => {
+    const pasted = ["# Council votes on the hospitality rules", "", "The council voted 5-2 on Tuesday."].join("\n");
+    const card = pasteOneStoryCard({ text: pasted });
+    assert.equal(card.headline, "Council votes on the hospitality rules");
+    assert.equal(card.body, "The council voted 5-2 on Tuesday.");
+  });
+
+  /**
+   * The literal reading of the rule, on the paste that has nothing but a
+   * headline: the line is the headline, so no body is left, and the ordinary
+   * "This story has no text." refusal says so rather than filing a draft whose
+   * body is the headline the field above it already shows.
+   */
+  it("leaves no body at all when the paste is one line, and says so", () => {
+    const card = pasteOneStoryCard({ text: "Only a headline, and nothing under it" });
+    assert.equal(card.headline, "Only a headline, and nothing under it");
+    assert.equal(card.body, "");
+    assert.deepEqual(cardProblems({ ...card, section: "council" }), ["This story has no text."]);
   });
 
   it("collects the links in the paste as its sources, ticked", () => {
@@ -116,10 +155,16 @@ describe("pasteOneStoryCard: one story, exactly as pasted", () => {
     assert.deepEqual(cardProblems(pasteOneStoryCard({ text: PASTED, section: "schools" })), []);
   });
 
-  it("takes a typed headline over the first line, and still does not touch the text", () => {
+  it("takes a typed headline over the first line, and then the whole paste is the body", () => {
     const card = pasteOneStoryCard({ text: PASTED, headline: "  Hospitality rules return  " });
     assert.equal(card.headline, "Hospitality rules return");
+    /*
+      The other half of step G: the editor wrote the headline themselves, so
+      the paste's first line is just the story's first line and nothing is
+      taken off it.
+    */
     assert.equal(card.body, PASTED);
+    assert.equal(card.body.startsWith("Council votes to bring marijuana hospitality rules back"), true);
   });
 
   it("says a person wrote it, and prints the line when the editor says otherwise", () => {
@@ -162,9 +207,11 @@ describe("a pasted story, through the real import path", () => {
     }[];
     assert.equal(drafts.length, 1);
     assert.equal(drafts[0]!.lead_id, leads[0]!.id);
-    // The text an editor gets in the story editor is the paste, byte for byte.
-    assert.equal(drafts[0]!.body, PASTED);
-    assert.equal(Buffer.byteLength(drafts[0]!.body, "utf8"), Buffer.byteLength(PASTED, "utf8"));
+    // The text an editor gets in the story editor is the paste minus the line
+    // that became the headline, byte for byte.
+    assert.equal(drafts[0]!.body, PASTED_BODY);
+    assert.equal(Buffer.byteLength(drafts[0]!.body, "utf8"), Buffer.byteLength(PASTED_BODY, "utf8"));
+    assert.equal(PASTED.includes(drafts[0]!.body), true);
     // The section the editor chose on the Desk reaches the draft unchanged.
     // (It is not confirmed yet -- the ordinary confirm-at-publish gate still
     // asks, and the browser walk clicks that button on this story.)

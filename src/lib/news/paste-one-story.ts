@@ -25,7 +25,9 @@
  *    matters:**`, `**Score:**` and the rest into editor-note fields, because a
  *    scanner's report format defines them; a story you wrote has no such
  *    format, and guessing that a line is a note is how a published story ends
- *    up missing a paragraph. The whole paste is the draft, byte for byte.
+ *    up missing a paragraph. The paste is the draft, byte for byte -- with the
+ *    single exception of the line that becomes the headline, which is the
+ *    headline and not the first line of the body (see `bodyFromPaste`).
  * 3. The section is not guessed. The chooser opens at "Section not chosen —
  *    pick one" and the ordinary confirm-at-publish gate asks later. An import
  *    suggests from the text because a report's own headings say what a story
@@ -83,6 +85,38 @@ export function headlineFromPaste(text: string): string {
 }
 
 /**
+ * The paste without the line the headline was taken from.
+ *
+ * Step G, from the Unit X2 walk (item 11): when the headline is the paste's
+ * first line, that line is the headline and must not be repeated as the body's
+ * first line, or every story pasted this way opens in the editor with its own
+ * headline sitting over it again. This is structure, not rewriting: the one
+ * line the headline was taken from comes off, together with the blank lines
+ * that separated it from the text, and every remaining line stays byte for
+ * byte as pasted, in order.
+ *
+ * The first line that has anything in it is the one that came off -- the same
+ * line `headlineFromPaste` read -- so a paste that opens with blank lines
+ * loses only those blanks and its headline line.
+ *
+ * Nothing else is ever touched. A `**Score:**` line stays in the story (see
+ * the note at the top of this file); only the headline's own line leaves.
+ *
+ * A paste that is nothing but a headline therefore has no body left, and the
+ * ordinary "This story has no text." refusal says so -- filing a draft whose
+ * body repeats the headline field above it is worse than asking for the story.
+ */
+export function bodyFromPaste(text: string): string {
+  const lines = String(text ?? "").split(/\r?\n/);
+  const head = lines.findIndex((line) => line.trim().length > 0);
+  if (head < 0) return "";
+  let start = head + 1;
+  /* The blank lines between the headline and the first paragraph go with it. */
+  while (start < lines.length && !lines[start]!.trim()) start++;
+  return lines.slice(start).join("\n");
+}
+
+/**
  * The one card this screen files.
  *
  * Ticked and a finished story, both of them: the editor pasted one thing and
@@ -116,8 +150,12 @@ export function pasteOneStoryCard(input: PasteOneInput): ReviewCard {
     section: String(input.section ?? "").trim().slice(0, 40),
     dek: "",
     bodyChoice: "main",
-    /* The paste, byte for byte. Never trimmed, never re-paragraphed. */
-    body: text,
+    /*
+      Never re-paragraphed, never trimmed of anything but the line the headline
+      came from: a headline the editor typed leaves the paste whole, and a
+      headline read off the first line takes that one line off the top.
+    */
+    body: typed ? text : bodyFromPaste(text),
     plainBrief: "",
     /* A story a person wrote cites nothing by name; it carries its own links. */
     citations: [],
