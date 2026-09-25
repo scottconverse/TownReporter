@@ -4,6 +4,8 @@ For TownReporter 0.6.62. The publication uses its configured name, town and visi
 
 The front page leads with the latest published story, more recent coverage, sections, local resources and Opinion. Select the publication name to return here from any reader page. **Editor’s desk** in the footer opens the signed-in desk or its sign-in screen. **Public news page** and the TownReporter logo in the desk return to the newspaper.
 
+Below the front page's lead and Opinion there is a **Latest stories** list: every story we have published, newest first, each row showing its section, headline, a line of summary, the date, the read time and the bookmark. It brings in more as you scroll, and a **Load more stories** button stays under the list for a keyboard, a slow connection or a browser without scripting; when you reach the oldest story it says you are at the first story we published.
+
 ## Find and save stories
 
 **Search stories** and **Explore the archive** open the complete published archive. Search for a name, place or phrase, choose a section, change newest/oldest order and use Previous/Next. Existing article addresses and section links still work. Empty results offer a route back and a way to clear filters.
