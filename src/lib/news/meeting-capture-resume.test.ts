@@ -1,9 +1,30 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
+
+/*
+  The Continue path reaches `capture({ archivePath: meetingArchivePath(newsroomId) })`
+  in `src/lib/news/meeting-capture.ts`, and `meetingArchivePath()` roots at
+  `meetingRuntimeRoot()`: TOWNREPORTER_DATA_ROOT, else TOWNREPORTER_DATA_DIR, else
+  `process.cwd()`. These tests drive it for real, so with neither variable set the
+  run left `meeting-capture/newsroom-1/yt-dlp-archive.txt` in whatever directory
+  the runner started in -- a stray untracked folder at the repo root. Pin the root
+  to a temp dir for this file and put the environment back afterwards.
+*/
+let priorDataRoot: string | undefined;
+
+before(() => {
+  priorDataRoot = process.env.TOWNREPORTER_DATA_ROOT;
+  process.env.TOWNREPORTER_DATA_ROOT = mkdtempSync(join(tmpdir(), "townreporter-resume-root-"));
+});
+
+after(() => {
+  if (priorDataRoot === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
+  else process.env.TOWNREPORTER_DATA_ROOT = priorDataRoot;
+});
 
 /*
   N-5 Continue: a capture the operator STOPPED must be resumable.
