@@ -377,7 +377,16 @@ function ImportPage() {
                       checked={card.include}
                       onChange={(e) => patch(card.key, { include: e.target.checked })}
                     />
-                    <label htmlFor={`tick-${card.key}`} className="min-w-0 flex-1 text-sm">
+                    {/*
+                      The label keeps 16rem before the Triage/Score line may
+                      share its row. Without the floor, flex shrank the headline
+                      to about eight characters on a 375px phone and it read one
+                      word to a line; the flags wrap instead.
+                    */}
+                    <label
+                      htmlFor={`tick-${card.key}`}
+                      className="min-w-[16rem] flex-1 text-sm"
+                    >
                       <span className="text-sm tracking-[0.14em] text-muted uppercase">
                         {card.isStory ? "Import this story" : "Not a story — import it anyway?"}
                       </span>

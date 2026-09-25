@@ -393,6 +393,9 @@ async function theTickedStoriesLandInTheQueue() {
     (await heldRow.locator(".chip.st-held").count()) === 1,
     "the held story is on the Queue with no Hold flag",
   );
+  // Taken here, while all six are still on the Queue: the phase that publishes
+  // one happens later, and a picture of five would not match the claim.
+  facts.push(await screenshot("import-queue-1280-light.png", 1280, 900, ".chip.imported"));
   step("the Queue shows six Imported leads, the held one flagged");
 }
 
@@ -525,33 +528,45 @@ async function fitsAt375(note, enforceType = false) {
  * One screenshot, every animation on the page finished first, and the colours
  * the shutter actually caught measured and printed -- so what the report says
  * about the picture can be checked against the picture.
+ *
+ * The anchor is scrolled to the middle of the viewport before the shutter: the
+ * picture is supposed to show the thing being talked about, and the first
+ * attempt framed the paste box at the top of the screen instead of the cards.
+ * `index` picks among several matches, because the first card of a report can
+ * be a section that is not a story.
  */
-async function screenshot(name, width, height, anchor) {
+async function screenshot(name, width, height, anchor, index = 0) {
   await page.setViewportSize({ width, height });
-  const measured = await page.evaluate((selector) => {
-    const running = document.getAnimations();
-    const names = running.map((a) => a.transitionProperty || a.animationName || "?").filter(Boolean);
-    running.forEach((a) => {
-      try {
-        a.finish();
-      } catch {
-        /* an infinite animation will not finish, and it is not a fade */
+  const measured = await page.evaluate(
+    ({ selector, at }) => {
+      const running = document.getAnimations();
+      const names = running
+        .map((a) => a.transitionProperty || a.animationName || "?")
+        .filter(Boolean);
+      running.forEach((a) => {
+        try {
+          a.finish();
+        } catch {
+          /* an infinite animation will not finish, and it is not a fade */
+        }
+      });
+      const el = document.querySelectorAll(selector)[at];
+      el?.scrollIntoView({ block: "center", behavior: "instant" });
+      let background = "rgba(0, 0, 0, 0)";
+      let up = el;
+      while (up && (background === "rgba(0, 0, 0, 0)" || background === "transparent")) {
+        background = getComputedStyle(up).backgroundColor;
+        up = up.parentElement;
       }
-    });
-    const el = document.querySelector(selector);
-    let background = "rgba(0, 0, 0, 0)";
-    let up = el;
-    while (up && (background === "rgba(0, 0, 0, 0)" || background === "transparent")) {
-      background = getComputedStyle(up).backgroundColor;
-      up = up.parentElement;
-    }
-    return {
-      text: (el?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
-      color: el ? getComputedStyle(el).color : "",
-      background,
-      finishedAnimations: names,
-    };
-  }, anchor);
+      return {
+        text: (el?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
+        color: el ? getComputedStyle(el).color : "",
+        background,
+        finishedAnimations: names,
+      };
+    },
+    { selector: anchor, at: index },
+  );
   mkdirSync(SHOTS, { recursive: true });
   const file = join(SHOTS, name);
   await page.screenshot({ path: file, fullPage: false });
@@ -564,7 +579,10 @@ async function screenshot(name, width, height, anchor) {
 }
 
 async function thePictures() {
+  // The first card of this report is a section that is not a story, so the
+  // pictures frame the second one: the first story.
   const cardHeadline = 'label[for^="tick-"] > span.block';
+  const firstStory = 1;
 
   // The review screen, as the editor leaves it just before importing.
   await page.goto(`${base}/desk/import`, { waitUntil: "networkidle" });
@@ -574,21 +592,20 @@ async function thePictures() {
     .getByRole("heading", { name: "Check every story", exact: true })
     .waitFor({ timeout: 60_000 });
 
-  facts.push(await screenshot("import-review-1280-light.png", 1280, 900, cardHeadline));
+  facts.push(
+    await screenshot("import-review-1280-light.png", 1280, 900, cardHeadline, firstStory),
+  );
   await page.getByRole("button", { name: "Switch to dark appearance" }).click();
   await page.waitForTimeout(400);
-  facts.push(await screenshot("import-review-1280-dark.png", 1280, 900, cardHeadline));
+  facts.push(await screenshot("import-review-1280-dark.png", 1280, 900, cardHeadline, firstStory));
   await page.getByRole("button", { name: "Switch to light appearance" }).click();
   await page.waitForTimeout(400);
 
   await page.setViewportSize({ width: 375, height: 720 });
   facts.push(await fitsAt375("the import review screen", true));
-  facts.push(await screenshot("import-review-375-light.png", 375, 720, cardHeadline));
+  facts.push(await screenshot("import-review-375-light.png", 375, 720, cardHeadline, firstStory));
 
-  // The Queue, with the Imported leads on it.
-  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
-  await page.locator(".chip.imported").first().waitFor({ timeout: 45_000 });
-  facts.push(await screenshot("import-queue-1280-light.png", 1280, 900, ".chip.imported"));
+  // The Queue picture is taken in the import phase, while all six are on it.
 
   /*
     The published story, as a reader sees it. Read from the Published page: the
@@ -604,6 +621,11 @@ async function thePictures() {
   await page.goto(new URL(printed, base).href, { waitUntil: "networkidle" });
   await page.locator(".articlehead h1").waitFor({ timeout: 45_000 });
   facts.push(await screenshot("import-published-1280-light.png", 1280, 900, ".articlehead h1"));
+  // The line readers see, and the cited pages under it: below the fold of the
+  // picture above, so framed on its own.
+  facts.push(
+    await screenshot("import-published-sources-1280-light.png", 1280, 900, ".ai-disclosure"),
+  );
   facts.push(await fitsAt375("the published imported story"));
   facts.push(await screenshot("import-published-375-light.png", 375, 720, ".articlehead h1"));
 }
