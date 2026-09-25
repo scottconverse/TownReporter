@@ -1,3 +1,13 @@
+import {
+  artifactIdInput,
+  darkCountyInput,
+  darkOpenInput,
+  darkRunInput,
+  darkSignalInput,
+  darkStepInput,
+  redditTipInput,
+  rowId,
+} from "./request-input.ts";
 import { subredditFromSources } from "./dark-place.ts";
 import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
@@ -1001,7 +1011,7 @@ export const listWorthALook = createServerFn({ method: "GET" })
 
 export const getInvestigation = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -1277,7 +1287,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
 
 export const getArtifact = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -1373,7 +1383,7 @@ export const queueArtifactOcr = createServerFn({ method: "POST" })
 
 export const getArtifactOcrJob = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((artifactId: number) => Number(artifactId))
+  .validator((artifactId: unknown) => artifactIdInput.parse(artifactId))
   .handler(async ({ context, data: artifactId }) => {
     const sql = await getSql();
     const rows = await sql<{ id: number; status: string; stage: string; error: string | null; result_json: string }>`
@@ -2036,7 +2046,7 @@ async function executeDarkRun(
 
 export const runDarkDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { paste: string; investigationId?: number; modelChoice?: string }) => input)
+  .validator((input: unknown) => darkRunInput.parse(input))
   .handler(async ({ context, data }) => {
     /*
       The editor's pick decides which provider is probed, and an unresolvable
@@ -2064,7 +2074,7 @@ export const runDarkDesk = createServerFn({ method: "POST" })
 
 export const openDarkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { paste: string; title?: string }) => input)
+  .validator((input: unknown) => darkOpenInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
       await ensureDarkSchema();
@@ -2214,7 +2224,7 @@ export async function startDarkRound(
 
 export const continueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; modelChoice?: string; modelEffort?: unknown }) => input)
+  .validator((input: unknown) => darkStepInput.parse(input))
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startDarkRound(context, data)
@@ -2872,9 +2882,7 @@ export async function sendDarkSignalToQueueFor(
 
 export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; asTip?: boolean }) =>
-    typeof input === "number" ? { id: input } : input,
-  )
+  .validator((input: unknown) => darkSignalInput.parse(input))
   .handler(async ({ context, data }) =>
     sendDarkSignalToQueueFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
@@ -3011,9 +3019,7 @@ export async function queueInvestigationFor(
 
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; asTip?: boolean }) =>
-    typeof input === "number" ? { id: input } : input,
-  )
+  .validator((input: unknown) => darkSignalInput.parse(input))
   .handler(async ({ context, data }) =>
     queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
@@ -3022,7 +3028,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
 
 export const parkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -3039,7 +3045,7 @@ export const parkInvestigation = createServerFn({ method: "POST" })
 
 export const reopenParkedInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -3229,7 +3235,7 @@ export async function fileRedditTipFor(
 
 export const fileRedditTip = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: { url: string; title: string; excerpt?: string; updated?: string; author?: string }) => data)
+  .validator((data: unknown) => redditTipInput.parse(data))
   .handler(async ({ context, data }) => fileRedditTipFor(context.userId, owned(context), data));
 
 /**
@@ -3320,7 +3326,7 @@ export async function saveDarkCountyFor(newsroomId: number, county: string): Pro
 
 export const saveDarkCounty = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { county: string }) => input)
+  .validator((input: unknown) => darkCountyInput.parse(input))
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     const county = await saveDarkCountyFor(owned(context), data.county);
@@ -3614,7 +3620,7 @@ export async function performBriefWork(job: DeskJob) {
 
 export const refreshBrief = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; modelChoice?: string; modelEffort?: unknown }) => input)
+  .validator((input: unknown) => darkStepInput.parse(input))
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startBriefJob(context, data)
