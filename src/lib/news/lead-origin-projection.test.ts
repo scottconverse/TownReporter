@@ -87,7 +87,7 @@ test("real queue and story projections carry persisted scanner provenance and im
       assert.equal(result.rows[0]?.scan_run_id, 20, `${name} must return persisted scan_run_id`);
     }
     /*
-      Migration 0088 gives a lead an origin. The Queue shows an "Imported"
+      Migration 0091 gives a lead an origin. The Queue shows an "Imported"
       badge off it, so a lead read out of a pasted report has to survive the
       same two projections that carry the scanner's provenance -- and a
       scanner lead still has to come back null rather than borrowing a word

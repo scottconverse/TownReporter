@@ -37,7 +37,7 @@ export function leadOrigin(lead: {
   scan_run_id?: number | null;
   why?: string;
   newsworthiness?: number | null;
-  /** Migration 0088: "import" = read out of a report the editor pasted. */
+  /** Migration 0091: "import" = read out of a report the editor pasted. */
   origin?: string | null;
 }) {
   /*

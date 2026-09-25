@@ -28,7 +28,7 @@ export function AiDisclosure({ routine = false, text = "" }: { routine?: boolean
     because the standard line above would be false for a report an outside
     research tool wrote: it would claim this paper's AI drafted it. Empty text
     -- every story the desk wrote, and every article printed before migration
-    0088 -- falls back to exactly what used to print.
+    0091 -- falls back to exactly what used to print.
   */
   const line = text.trim() || (routine ? ROUTINE_NOTICE_DISCLOSURE : AI_DISCLOSURE);
   return <p className="ai-disclosure">{line}</p>;

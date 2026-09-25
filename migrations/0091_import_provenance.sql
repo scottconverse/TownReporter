@@ -1,14 +1,14 @@
 -- Imported stories: where a pasted report's story came from, and what line the
 -- paper prints to say who wrote it.
 --
--- Nullable on purpose, for the same reason 0087's transcript provenance is: a
+-- Nullable on purpose, for the same reason 0090's transcript provenance is: a
 -- scanner lead filed before this migration has no provenance, and a default
 -- would claim one it does not have. Null means "not recorded", which is the
 -- honest answer and the one the desk can show.
 alter table leads add column if not exists origin text;
 alter table leads add column if not exists provenance_json text;
 comment on column leads.origin is
-  'How this lead entered the desk. ''import'' = read out of a report the editor pasted. Null = not recorded (every lead filed before 0088, and every scanner lead, which is identified by scan_run_id).';
+  'How this lead entered the desk. ''import'' = read out of a report the editor pasted. Null = not recorded (every lead filed before 0091, and every scanner lead, which is identified by scan_run_id).';
 comment on column leads.provenance_json is
   'JSON provenance for an imported lead: {importer, importedAt, inputSha256, tool}. Null = not recorded.';
 
