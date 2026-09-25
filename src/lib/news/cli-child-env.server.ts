@@ -13,6 +13,7 @@
   temp directory, proxy and TLS trust, the locale.
 */
 import path from "node:path";
+import { tmpdir } from "node:os";
 
 /** Names a provider CLI genuinely needs. Windows variable names are case-insensitive. */
 const ALLOWED = [
@@ -196,13 +197,44 @@ export function claudeChildEnv(): NodeJS.ProcessEnv {
   return cliChildEnv(CLAUDE_CREDENTIAL_ENV);
 }
 
+/** The names a temp directory can be named by, in any case a host may use. */
+const TEMP_NAMES = new Set(["TEMP", "TMP", "TMPDIR"]);
+
+/**
+ * Name a temp directory, because a host is allowed to have none.
+ *
+ * `TEMP`, `TMP` and `TMPDIR` are on the allow-list, so a parent that has one
+ * hands it through and this does nothing. A parent that has none is not
+ * hypothetical: a systemd unit, a container, and the ubuntu CI runner all start
+ * this server with the three unset, and a child handed none of them is a child
+ * that cannot write its scratch files: yt-dlp writes its fragments and its cache
+ * through one, and python's own `tempfile` falls back to a directory it does not
+ * have. The desk names the directory rather than leaving it to the child's
+ * fallback, the same way `withCodexHome` names a home for a server launched by
+ * the installer.
+ *
+ * The name is the host's, chosen by `process.platform`: TMPDIR is what a POSIX
+ * child reads, and a Windows child reads TEMP and TMP. Both Windows names are
+ * set there because the two are read by different programs -- ffmpeg and the
+ * python runtime do not agree on which one they trust.
+ */
+export function withTempDir(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const named = Object.keys(env).some((name) => TEMP_NAMES.has(name.toUpperCase()));
+  if (named) return env;
+  const dir = tmpdir();
+  return process.platform === "win32" ? { ...env, TEMP: dir, TMP: dir } : { ...env, TMPDIR: dir };
+}
+
 /**
  * The environment for a python media tool: the allow-list plus what running
  * python on this host means here. No provider credential -- yt-dlp is not a
  * model client, and `ANTHROPIC_API_KEY` is Claude's own, not a media tool's.
+ *
+ * It does carry a temp directory on every host, derived when the parent has
+ * none: see `withTempDir`.
  */
 export function mediaToolChildEnv(): NodeJS.ProcessEnv {
-  return cliChildEnv(MEDIA_TOOL_EXTRA);
+  return withTempDir(cliChildEnv(MEDIA_TOOL_EXTRA));
 }
 
 /**

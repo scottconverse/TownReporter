@@ -99,7 +99,10 @@ function fakePythonDir(): string {
 }
 
 /** Spawn once through the real runner and return the environment the child saw. */
-async function childEnvOf(argv: string[]): Promise<Record<string, string>> {
+async function childEnvOf(
+  argv: string[],
+  changes: Record<string, string | undefined> = {},
+): Promise<Record<string, string>> {
   const binDir = fakePythonDir();
   const dir = mkdtempSync(join(tmpdir(), "tr-media-tool-dump-"));
   const dump = join(dir, "env.json");
@@ -108,6 +111,7 @@ async function childEnvOf(argv: string[]): Promise<Record<string, string>> {
       {
         ...SECRETS,
         ...KEPT,
+        ...changes,
         FAKE_ENV_DUMP: dump,
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
       },
@@ -163,6 +167,39 @@ describe("a spawned media tool gets an allow-list, not this server's environment
       "yt-dlp resolves its cache and its cookies file from the user's home",
     );
     assert.ok(env.FAKE_ENV_DUMP, "the harness seam FAKE_* must pass through");
+  });
+
+  it("names a temp directory for a host that has none, so a Linux child still has one", async () => {
+    /*
+      A systemd unit, a container and the ubuntu CI runner all start this server
+      with TEMP, TMP and TMPDIR unset -- and the runner is where the assertion
+      above went red. A child is not a working child without a temp directory:
+      yt-dlp writes its fragments and its cache through one, and python's own
+      `tempfile` refuses to start without it. So the desk names the directory
+      rather than leaving it to the child's fallback, and the name is the host's.
+
+      Measured inside the child, as every case here is, and read in the same
+      window as the spawn: on Windows `os.tmpdir()` itself falls back to the
+      parent's TEMP, so asking after the deletion is undone would compare the
+      child against a different directory than the one it was handed.
+    */
+    const cleared = { TEMP: undefined, TMP: undefined, TMPDIR: undefined };
+    await withEnv(cleared, async () => {
+      const expected = tmpdir();
+      const env = await childEnvOf(["-e", DUMP_ENV], cleared);
+
+      assert.ok(Object.keys(env).length > 0, "the stand-in python should have dumped its environment");
+      assert.ok(
+        env.TEMP || env.TMP || env.TMPDIR,
+        "yt-dlp writes its fragments and its cache through the temp directory",
+      );
+      if (process.platform === "win32") {
+        assert.equal(env.TEMP, expected, "a Windows child reads TEMP");
+        assert.equal(env.TMP, expected, "ffmpeg reads TMP, and it is not the reader TEMP is");
+      } else {
+        assert.equal(env.TMPDIR, expected, "a POSIX child reads TMPDIR");
+      }
+    });
   });
 
   it("keeps the lowercase proxy names yt-dlp and ffmpeg actually read", async () => {
