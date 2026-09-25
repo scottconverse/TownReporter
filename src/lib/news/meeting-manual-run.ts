@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
 /* N-5: an in-flight manual meeting pass can be stopped. One controller per newsroom. */
 const runningPasses = new Map<number, AbortController>();
@@ -31,7 +31,21 @@ import type { MeetingAwarenessResult } from "./meeting-capture.ts";
   A server function's handler body becomes an RPC stub in the client build, so
   `await import()` inside one never pulls the engine into the browser. Same
   repair as the 0.6.61 `node:child_process` fix.
+
+  0.6.63: the loop below is not a handler, so its `await import()` of the engine
+  was resolved in the client build after all -- and the engine now reaches a
+  `.server` module (the allow-listed python runner), which import-protection
+  refuses. The shared pass loads the engine through `loadMeetingEngine` instead:
+  a body handed to createServerOnlyFn is a boundary the client build prunes, so
+  this file keeps its one engine loading point and the browser sees none of it.
 */
+
+/** The meeting engine, loaded only ever on the server: see the note above. */
+const loadMeetingEngine = createServerOnlyFn(async () => {
+  const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
+  const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
+  return { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions };
+});
 
 export type MeetingManualRunResult =
   | {
@@ -62,9 +76,8 @@ export async function runMeetingPassWritesRow(
   let awareness: MeetingAwarenessResult;
   const failures: string[] = [];
   try {
-    // Loaded here, not at module scope: see the note at the top of this file.
-    const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
-    const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
+    // Loaded through the server-only boundary above: see the note at the top.
+    const { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions } = await loadMeetingEngine();
     awareness = await runMeetingAwareness(sql, input.newsroomId, { captureMeeting: (ci) => captureMeetingCaptions({ ...ci, signal: input.signal }) });
     const recheck = await recheckProvisionalMeetings(sql, input.newsroomId);
     if (recheck.failures.length) {

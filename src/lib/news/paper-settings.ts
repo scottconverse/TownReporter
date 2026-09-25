@@ -18,9 +18,21 @@ import { createServerFn } from "@tanstack/react-start";
 */
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
-import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES, EDITOR_EMAIL } from "../paper.ts";
+/*
+  MEETING_KEYWORDS and LONGMONT_YOUTUBE_CHANNELS come from ../paper.ts, not
+  from ./youtube.ts where they were written: this module is loaded by the
+  root route, and youtube.ts spawns python through a `.server.ts` module, so
+  importing it here put a server-only file in the client build (0.6.63).
+*/
+import {
+  PAPER,
+  COUNCIL_VOTES_URL,
+  SEED_SOURCES,
+  EDITOR_EMAIL,
+  MEETING_KEYWORDS,
+  LONGMONT_YOUTUBE_CHANNELS,
+} from "../paper.ts";
 import type { PaperIdentity } from "../paper-identity.ts";
-import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
 /* Pure constants + folds, no database: the outlet list and its parser. */
 import { NAMED_OUTLETS, asNamedOutlets, type NamedOutlet } from "./outlet-credit.ts";
 /* Pure zod + constants, no database: safe to load from a plain node test. */
