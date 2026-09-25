@@ -303,8 +303,9 @@ call can move to the next ready cloud runtime; a refusal remains terminal. If no
 runtime is ready, or one selected lead cannot be queued, the batch does not start
 and the Queue explains why.
 
-Daily Scan uses the same named model choices and saved Custom
-AI connections. It does not offer Automatic. The named model is tried first;
+Daily Scan offers the same named model choices and saved Custom
+AI connections, and also Automatic, which the scheduler resolves to a ready
+model before the run is queued. A named model is tried first;
 technical preflight or mid-call switches are recorded, and refusals remain
 terminal. OCR uses the same technical-only rule and considers only
 vision-capable destinations.
@@ -874,12 +875,20 @@ Every available maintenance action explains its effect before you run it.
 The daily scan controls on Server are available to the owner.
 They start disabled. The owner chooses a local time in the paper's configured
 timezone, selects as many as 12 accepted sources from any reporting beat, and
-chooses one explicit model: Codex Astra, Sol, Terra, or Luna; Claude Fable,
-Opus, Sonnet, or Haiku; the already selected local model; or a saved Custom AI
-connection such as an OpenAI-compatible Gemini endpoint. A legacy saved
+chooses the model for each scheduled run. **Automatic** is the default for a
+newsroom that has never saved the schedule, and works down the same writing
+ladder a story uses: DeepSeek v4.1 Flash first, then Qwen 3.6 35B if it is
+already loaded, then Codex Terra. The owner may instead name one explicit
+model: Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku;
+the already selected local model; or a saved Custom AI connection such as an
+OpenAI-compatible Gemini endpoint. A legacy saved
 "Claude Code subscription" setting opens as Claude Sonnet. A technical preflight
 or model-call failure can switch only unfinished work and records the requested
-and actual model and effort. Custom credentials stay encrypted in newsroom
+and actual model and effort. A schedule saved before 0.6.64 keeps the model it
+names — nothing rewrites a stored choice on its own; the owner switches it to
+Automatic by hand. Because the reservation is written before the run is queued,
+Automatic is resolved to a ready model at that point, and the record shows the
+requested and the resolved model as a pair. Custom credentials stay encrypted in newsroom
 settings and are resolved only when the run starts. It reads bounded excerpts from the selected
 sources; it does not claim full-site coverage.
 
