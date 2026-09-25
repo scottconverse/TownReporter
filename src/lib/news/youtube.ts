@@ -337,7 +337,7 @@ export function parseYtDlpChannelJson(raw: string, tab: ListedVideo["tab"]): Lis
 }
 
 async function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos"): Promise<ListedVideo[]> {
-  const { spawn } = await import("node:child_process");
+  const { spawnMediaTool } = await import("./media-tool-process.server.ts");
   const base = channelUrl.replace(/\/(videos|streams|featured|playlists|about)\/?$/, "").replace(/\/$/, "");
   const target = `${base}/${tab}`;
   return new Promise((resolveRows) => {
@@ -349,7 +349,7 @@ async function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos")
       "--js-runtimes", "node",
       target,
     ];
-    const child = spawn("python", argv, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnMediaTool(argv, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -486,7 +486,7 @@ export function parseYtDlpCaptureReadiness(raw: string): YoutubeCaptureReadiness
 }
 
 async function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
-  const { spawn } = await import("node:child_process");
+  const { spawnMediaTool } = await import("./media-tool-process.server.ts");
   return new Promise((resolveReadiness) => {
     let stdout = "";
     let settled = false;
@@ -496,7 +496,7 @@ async function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptur
       clearTimeout(timer);
       resolveReadiness(readiness);
     };
-    const child = spawn("python", buildYtDlpCaptureReadinessArgs(videoId), { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawnMediaTool(buildYtDlpCaptureReadinessArgs(videoId), { stdio: ["ignore", "pipe", "ignore"] });
     child.stdout?.on("data", (chunk: Buffer | string) => {
       if (stdout.length < 2_000_000) stdout += chunk.toString();
     });

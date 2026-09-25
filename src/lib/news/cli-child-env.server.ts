@@ -85,6 +85,43 @@ export const CLAUDE_CREDENTIAL_ENV = [
 ];
 
 /**
+ * What a python media tool needs that an agent CLI does not.
+ *
+ * The desk starts yt-dlp -- and through it ffmpeg -- as a child of this server,
+ * from a URL fetched from the open web. Same class of child, same allow-list,
+ * but a different installer behind it: an operator who put yt-dlp in a virtual
+ * environment, or who set the python encoding on a Windows host, has told this
+ * machine how to run python, and dropping those silently changes which
+ * interpreter the capture uses. `PATH` already carries a venv's `Scripts`
+ * directory; `VIRTUAL_ENV` and these `PYTHON*` names are how the rest of that
+ * decision is expressed.
+ *
+ * `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` are here for the same reason
+ * `SSL_CERT_FILE` is in the list above: yt-dlp fetches over TLS through python's
+ * own trust store, and a newsroom behind a private CA has to name its bundle
+ * once, in the form the fetcher reads.
+ *
+ * No home is derived here, unlike `withCodexHome`. That derivation exists
+ * because a Codex sign-in is keyed to a home directory and a child handed a
+ * different one writes credentials the desk never reads. yt-dlp's home is a
+ * cache and a cookies file; a host without one gets no cache, not a capture
+ * that silently fails.
+ */
+export const MEDIA_TOOL_EXTRA = [
+  "PYTHONPATH",
+  "PYTHONHOME",
+  "PYTHONUTF8",
+  "PYTHONIOENCODING",
+  "PYTHONUNBUFFERED",
+  "PYTHONWARNINGS",
+  "PYTHONNOUSERSITE",
+  "PYTHONDONTWRITEBYTECODE",
+  "VIRTUAL_ENV",
+  "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE",
+];
+
+/**
  * The hermetic CLI harness (`scripts/fakes/*.mjs`) steers a fake through
  * `FAKE_*` variables it reads from the environment, and CI drives the real
  * spawn path with them. They hold no secrets and are absent from an install;
@@ -157,4 +194,13 @@ export function codexChildEnv(): NodeJS.ProcessEnv {
 /** The environment for a Claude child: the allow-list plus its own credentials. */
 export function claudeChildEnv(): NodeJS.ProcessEnv {
   return cliChildEnv(CLAUDE_CREDENTIAL_ENV);
+}
+
+/**
+ * The environment for a python media tool: the allow-list plus what running
+ * python on this host means here. No provider credential -- yt-dlp is not a
+ * model client, and `ANTHROPIC_API_KEY` is Claude's own, not a media tool's.
+ */
+export function mediaToolChildEnv(): NodeJS.ProcessEnv {
+  return cliChildEnv(MEDIA_TOOL_EXTRA);
 }

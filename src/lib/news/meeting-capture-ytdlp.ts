@@ -239,12 +239,10 @@ async function runYtdlp(
   cwd: string,
   control: CaptureControl = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }> {
-  const { spawn } = await import("node:child_process");
+  const { spawnMediaTool } = await import("./media-tool-process.server.ts");
   return await new Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }>((resolvePromise, reject) => {
-    const child = spawn("python", argv, {
+    const child = spawnMediaTool(argv, {
       cwd,
-      shell: false,
-      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
