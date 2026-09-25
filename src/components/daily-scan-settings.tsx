@@ -15,6 +15,7 @@ import {
   type DailyScanRuntime,
 } from "@/lib/news/daily-scan";
 import { ModelPicker } from "@/components/model-picker";
+import { modelChoiceLabel } from "@/lib/news/model-choice";
 import { defaultModelEffort } from "@/lib/news/provider-registry";
 
 type Draft = Pick<
@@ -492,6 +493,21 @@ export function DailyScanSettings() {
         <p className="mt-1">
           <span className="text-muted">Current or last run:</span> {runStatus(current)}
         </p>
+        {current.lastRun?.resolvedRuntime ? (
+          /*
+            0.6.64 (Unit AA) item 6: the run record names the model that
+            actually ran. Read from the reservation's own snapshot, so a run
+            that resolved Automatic to a rung says the rung -- and a requested
+            name different from the resolved one is shown as the pair.
+          */
+          <p className="mt-1" role="status">
+            <span className="text-muted">Model:</span>{" "}
+            {current.lastRun.requestedRuntime &&
+            current.lastRun.requestedRuntime !== current.lastRun.resolvedRuntime
+              ? `${modelChoiceLabel(current.lastRun.requestedRuntime)} → ${modelChoiceLabel(current.lastRun.resolvedRuntime)}`
+              : modelChoiceLabel(current.lastRun.resolvedRuntime)}
+          </p>
+        ) : null}
         {current.lastRun?.failoverNote ? (
           <p className="mt-1" role="status">
             <span className="text-muted">Model switch:</span> {current.lastRun.failoverNote}

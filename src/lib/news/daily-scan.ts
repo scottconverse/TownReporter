@@ -46,6 +46,15 @@ export type DailyScanPolicy = {
     createdAt: string;
     finishedAt: string | null;
     failoverNote: string | null;
+    /**
+     * What the run was asked for and what it resolved to, read off the
+     * reservation's `model_snapshot` (0.6.64, Unit AA item 6). These stay
+     * `string` rather than `DailyScanRuntime`: a resolved value is normally
+     * one of Automatic's own rungs, which no editor can store as a hand pick
+     * and which `dailyScanRuntime` would read as "auto".
+     */
+    requestedRuntime: string | null;
+    resolvedRuntime: string | null;
   };
 };
 export type SaveDailyScanPolicyInput = {
@@ -219,6 +228,28 @@ export function nextEligibleDailyOccurrence(
   return candidate;
 }
 
+/**
+ * The two model names a scheduled run's `model_snapshot` carries.
+ *
+ * 0.6.64 (Unit AA) added `requestedRuntime`/`resolvedRuntime` to the receipt
+ * `validateDailyRuntime` returns, so a run that resolved Automatic to a rung
+ * says both. A reservation written before that has only `modelChoice`, which
+ * is the resolved model under another name, and it is read here rather than
+ * left blank -- an old row's run still names the model that ran.
+ */
+export function runSnapshotRuntimes(value: unknown): {
+  requestedRuntime: string | null;
+  resolvedRuntime: string | null;
+} {
+  const row = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const text = (entry: unknown) =>
+    typeof entry === "string" && entry.trim() ? entry.trim() : null;
+  return {
+    requestedRuntime: text(row.requestedRuntime),
+    resolvedRuntime: text(row.resolvedRuntime) ?? text(row.modelChoice),
+  };
+}
+
 export async function readDailyScanPolicy(
   newsroomId: number,
   now = new Date(),
@@ -248,6 +279,7 @@ export async function readDailyScanPolicy(
           r.model_snapshot && typeof r.model_snapshot === "object" && typeof r.model_snapshot.switchNote === "string"
             ? r.model_snapshot.switchNote
             : null,
+        ...runSnapshotRuntimes(r.model_snapshot),
       }
     : null;
   const lastLocalDay = r ? String(r.local_day) : null;
