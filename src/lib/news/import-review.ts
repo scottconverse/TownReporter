@@ -19,6 +19,18 @@ import {
   type ParsedReport,
 } from "./import-stories.ts";
 
+/**
+ * Where the Desk parks a paste on its way to the import screen.
+ *
+ * The Desk's second choice ("Import finished stories") takes the paste in the
+ * same place the editor is already working, and the review screen opens with it
+ * already in the box. A paste can be a quarter of a megabyte, so it cannot ride
+ * in the URL; this is the same handoff the Desk already uses to open a Dark
+ * Desk investigation (`townreporter.dark.openId`). Absent or unreadable, the
+ * review screen simply opens empty with its own box.
+ */
+export const IMPORT_PASTE_KEY = "townreporter.import.paste";
+
 /** Which text the imported story carries. */
 export type BodyChoice = "main" | "brief" | "both";
 

@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
-import { areaClass, announceToDesk } from "@/components/desk-chrome-utils";
+import { areaClass, announceToDesk, inputClass } from "@/components/desk-chrome-utils";
 import { LeadRowView } from "@/components/desk-leads";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
@@ -27,6 +27,8 @@ import {
   writeStoryFromInput,
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
+import { IMPORT_LIMITS, htmlToText } from "@/lib/news/import-stories";
+import { IMPORT_PASTE_KEY } from "@/lib/news/import-review";
 import { listInvestigations, listWorthALook, openDarkInvestigation } from "@/lib/news/dark";
 import {
   editorKindLabel,
@@ -205,6 +207,19 @@ function DeskHome() {
     authDetail?: string | null;
     leadId?: number;
   } | null>(null);
+  /*
+    A finished story or a whole report, on its way to the import screen. Kept
+    here rather than typed straight into that screen because this is the box the
+    editor is already looking at; see IMPORT_PASTE_KEY for the handoff.
+  */
+  const [importText, setImportText] = useState("");
+  async function readImportFile(file: File | undefined) {
+    if (!file) return;
+    const raw = await file.text();
+    const isHtml = /\.html?$/i.test(file.name) || /^\s*<(!doctype|html)/i.test(raw);
+    setImportText(isHtml ? htmlToText(raw) : raw);
+    announceToDesk(`${file.name} is ready. Read the stories when you are.`);
+  }
   const writeStory = useMutation({
     mutationFn: () =>
       writeStoryFromInput({
@@ -590,6 +605,90 @@ function DeskHome() {
               <ProviderSignInButton detail={storyNotice.authDetail} />
             ) : null}
           </div>
+        </section>
+
+        {/*
+          The second choice, right where the first one is.
+
+          Before this, a finished story could not be brought to the desk at all
+          unless it was an Opinion column. Pasting a report into "Write a story"
+          made the model rewrite it, which is the opposite of importing one: the
+          owner asked for the words to be kept exactly as written and for no
+          model to be run to find the stories. So this panel takes the paste and
+          hands it to a screen whose only job is to read it and let an editor
+          check every card.
+        */}
+        <section
+          id="import-story"
+          className="composer story-composer"
+          aria-labelledby="import-story-title"
+        >
+          <header className="story-composer-heading">
+            <div>
+              <p className="composer-eyebrow">Or bring one already written</p>
+              <h2 id="import-story-title">Import finished stories</h2>
+            </div>
+            <p>
+              Paste one story or a whole report. The text is kept exactly as written.
+            </p>
+          </header>
+          <div className="composer-sources">
+            <div className="composer-pasted">
+              <label htmlFor="import-source-text">The story, or the whole report</label>
+              <p>
+                A story on its own, or a report with headings — one story per heading. Its source
+                links come across with it. A saved page (.md, .txt, .html) can be chosen instead.
+              </p>
+              <textarea
+                id="import-source-text"
+                className={areaClass}
+                rows={6}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                maxLength={IMPORT_LIMITS.text}
+                placeholder={"# A report title, if it has one\n\n### 1. The headline of the first story\nThe body of the story, exactly as it was written. [A source](https://example.test/record)"}
+              />
+              <label htmlFor="import-source-file" className="composer-source-note">
+                Or choose a file (.md, .txt, .html)
+              </label>
+              <input
+                id="import-source-file"
+                type="file"
+                accept=".md,.markdown,.txt,.html,.htm,text/plain,text/markdown,text/html"
+                className={inputClass}
+                onChange={(e) => void readImportFile(e.target.files?.[0])}
+              />
+              <span className="composer-source-note">
+                Nothing is saved or published yet. Next you check each story — its headline, its
+                section, its text and its sources — and only the ones you tick are imported.
+              </span>
+            </div>
+          </div>
+          <footer className="composer-footer">
+            <div className="composer-submit">
+              <InkButton
+                tone="solid"
+                onClick={() => {
+                  try {
+                    sessionStorage.setItem(IMPORT_PASTE_KEY, importText);
+                  } catch {
+                    /* ignore */
+                  }
+                  void navigate({ to: "/desk/import" });
+                }}
+                disabled={importText.trim().length < 20}
+              >
+                Read the stories
+              </InkButton>
+              <p>
+                Opens the import screen with this text in the box.{" "}
+                <Link to="/desk/import" className="inline-link">
+                  Go there on its own
+                </Link>
+                .
+              </p>
+            </div>
+          </footer>
         </section>
 
         {needs.length > 0 ? (
