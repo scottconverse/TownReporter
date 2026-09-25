@@ -1,0 +1,337 @@
+{
+  "meeting": {
+    "id": "longmont-2026-09-22",
+    "title": "City Council Regular Session - September 22, 2026",
+    "city": "Longmont",
+    "date": "2026-09-22",
+    "recording": {
+      "source": "recording",
+      "url": "https://www.youtube.com/watch?v=zREvH6v072E",
+      "publisher": "Longmont Public Media",
+      "captions": {
+        "format": "srv3",
+        "sha256": "c5873c2760120436c9b9cb342d77bd127565bd4a7b4e552aa039740f2e9c571c",
+        "oversight_path": "scratch/E/capture-storage/newsroom-1/zREvH6v072E/transcript-c5873c2760120436c9b9cb342d77bd127565bd4a7b4e552aa039740f2e9c571c.srv3",
+        "note": "Timedtext <p t=\"ms\" d=\"ms\"> spans. t is milliseconds from the start of the recording. Captions are evidence of what was said, never of official spelling: every name below is misspelled in the captions."
+      }
+    },
+    "roster_source": {
+      "source": "roster",
+      "url": "https://longmontcolorado.gov/government/mayor-city-council-members/",
+      "fetched": "2026-09-24",
+      "note": "Official spellings and titles come from this page, not from the recording."
+    }
+  },
+  "roster": [
+    {
+      "name": "Susie Hidalgo-Fahring",
+      "role": "Mayor",
+      "district": "At Large",
+      "honorific": null,
+      "caption_name_aliases": [],
+      "source": "roster"
+    },
+    {
+      "name": "Diane Crist",
+      "role": "Council Member",
+      "district": "Ward 1",
+      "honorific": null,
+      "caption_name_aliases": [
+        "Christ",
+        "Christrist",
+        "Cristrist"
+      ],
+      "source": "roster"
+    },
+    {
+      "name": "Matthew Popkin",
+      "role": "Council Member",
+      "district": "Ward 2",
+      "honorific": null,
+      "caption_name_aliases": [
+        "Popkins"
+      ],
+      "source": "roster"
+    },
+    {
+      "name": "Alex Kalkhofer",
+      "role": "Council Member",
+      "district": "Ward 3",
+      "honorific": null,
+      "caption_name_aliases": [
+        "Coloffer",
+        "Kalkhoffer",
+        "Kalhoffer"
+      ],
+      "source": "roster"
+    },
+    {
+      "name": "Sean McCoy",
+      "role": "Council Member",
+      "district": "At Large",
+      "honorific": "Mayor Pro Tem",
+      "caption_name_aliases": [],
+      "caption_honorific_aliases": [
+        "Mayor Prom McCoy",
+        "Mayor Pro Tim McCoy"
+      ],
+      "source": "roster"
+    },
+    {
+      "name": "Jake Marsing",
+      "role": "Council Member",
+      "district": "At Large",
+      "honorific": null,
+      "caption_name_aliases": [
+        "Marcine",
+        "Marcen"
+      ],
+      "source": "roster"
+    },
+    {
+      "name": "Crystal Prieto",
+      "role": "Council Member",
+      "district": "At Large",
+      "honorific": null,
+      "caption_name_aliases": [
+        "Brito",
+        "Prieta"
+      ],
+      "source": "roster"
+    }
+  ],
+  "conflation": {
+    "note": "Mayor Pro Tem Sean McCoy seconded other motions earlier in this meeting; he did not second the marijuana-hospitality motion. A story that attaches 'Mayor Pro Tem' to the seconder has merged the two.",
+    "evidence": [
+      {
+        "source": "recording",
+        "line": 4267,
+        "t_ms": 4937120,
+        "at": "82:17",
+        "quote": "seconded by Mayor Prom McCoy. Um, okay.",
+        "caption_quote_raw": "<p t=\"4937120\" d=\"4000\" w=\"1\"><s ac=\"0\">seconded</s><s t=\"240\" ac=\"0\"> by</s><s t=\"480\" ac=\"0\"> Mayor</s><s t=\"800\" ac=\"0\"> Prom</s><s t=\"1120\" ac=\"0\"> McCoy.</s></p>"
+      },
+      {
+        "source": "recording",
+        "line": 9418,
+        "t_ms": 8767920,
+        "at": "146:07",
+        "quote": "seconded by Mayor Prom McCoy"
+      },
+      {
+        "source": "recording",
+        "line": 565,
+        "t_ms": 1759760,
+        "at": "29:19",
+        "quote": "Prom McCoy, seconded by um Council"
+      }
+    ]
+  },
+  "facts": [
+    {
+      "kind": "motion",
+      "required": true,
+      "fact_source": "recording",
+      "summary": "Direct staff to bring back a revised marijuana hospitality ordinance authorizing only retail marijuana hospitality and sales business licenses.",
+      "must_mention": [
+        "retail marijuana hospitality",
+        "sales business licenses"
+      ],
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 670,
+          "t_ms": 1840960,
+          "at": "30:41",
+          "quote": ">> And the motion was made by council",
+          "note": "The motion's substance is read out in the captions from ~29:46 to 42:25; this is the point where the chair restates who moved it."
+        }
+      ]
+    },
+    {
+      "kind": "mover",
+      "required": true,
+      "fact_source": "recording",
+      "name_source": "roster",
+      "person": "Jake Marsing",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 673,
+          "t_ms": 1843039,
+          "at": "30:43",
+          "quote": "member Marcine, seconded by council"
+        },
+        {
+          "source": "recording",
+          "line": 670,
+          "t_ms": 1840960,
+          "at": "30:41",
+          "quote": ">> And the motion was made by council"
+        }
+      ]
+    },
+    {
+      "kind": "seconder",
+      "required": true,
+      "fact_source": "recording",
+      "name_source": "roster",
+      "person": "Alex Kalkhofer",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 676,
+          "t_ms": 1844559,
+          "at": "30:45",
+          "quote": "member Coloffer."
+        },
+        {
+          "source": "recording",
+          "line": 673,
+          "t_ms": 1843039,
+          "at": "30:43",
+          "quote": "member Marcine, seconded by council"
+        }
+      ]
+    },
+    {
+      "kind": "result",
+      "required": true,
+      "fact_source": "recording",
+      "result": "carried",
+      "tally": "4-3",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1597,
+          "t_ms": 2544800,
+          "at": "42:25",
+          "quote": "Okay. And that carries four to three"
+        }
+      ]
+    },
+    {
+      "kind": "opposed",
+      "required": true,
+      "fact_source": "recording",
+      "name_source": "roster",
+      "person": "Diane Crist",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1600,
+          "t_ms": 2546560,
+          "at": "42:27",
+          "quote": "with council members Christrist, council"
+        }
+      ]
+    },
+    {
+      "kind": "opposed",
+      "required": true,
+      "fact_source": "recording",
+      "name_source": "roster",
+      "person": "Matthew Popkin",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1603,
+          "t_ms": 2548480,
+          "at": "42:28",
+          "quote": "member Popkin, and council member Brito"
+        }
+      ]
+    },
+    {
+      "kind": "opposed",
+      "required": true,
+      "fact_source": "recording",
+      "name_source": "roster",
+      "person": "Crystal Prieto",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1603,
+          "t_ms": 2548480,
+          "at": "42:28",
+          "quote": "member Popkin, and council member Brito"
+        },
+        {
+          "source": "recording",
+          "line": 1606,
+          "t_ms": 2550400,
+          "at": "42:30",
+          "quote": "in opposition."
+        }
+      ]
+    },
+    {
+      "kind": "in-favor",
+      "required": false,
+      "fact_source": "recording+roster",
+      "name_source": "roster",
+      "person": "Jake Marsing",
+      "derivation": "Not named in the captions. Derived from the roster (7 members) minus the three named opposed, consistent with the recorded 4-3 tally.",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1597,
+          "t_ms": 2544800,
+          "at": "42:25",
+          "quote": "Okay. And that carries four to three"
+        }
+      ]
+    },
+    {
+      "kind": "in-favor",
+      "required": false,
+      "fact_source": "recording+roster",
+      "name_source": "roster",
+      "person": "Alex Kalkhofer",
+      "derivation": "Not named in the captions. Derived from the roster (7 members) minus the three named opposed, consistent with the recorded 4-3 tally.",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1597,
+          "t_ms": 2544800,
+          "at": "42:25",
+          "quote": "Okay. And that carries four to three"
+        }
+      ]
+    },
+    {
+      "kind": "in-favor",
+      "required": false,
+      "fact_source": "recording+roster",
+      "name_source": "roster",
+      "person": "Sean McCoy",
+      "derivation": "Not named in the captions. Derived from the roster (7 members) minus the three named opposed, consistent with the recorded 4-3 tally.",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1597,
+          "t_ms": 2544800,
+          "at": "42:25",
+          "quote": "Okay. And that carries four to three"
+        }
+      ]
+    },
+    {
+      "kind": "in-favor",
+      "required": false,
+      "fact_source": "recording+roster",
+      "name_source": "roster",
+      "person": "Susie Hidalgo-Fahring",
+      "derivation": "Not named in the captions. The mayor votes with the council; derived from the roster (7 members) minus the three named opposed, consistent with the recorded 4-3 tally.",
+      "evidence": [
+        {
+          "source": "recording",
+          "line": 1597,
+          "t_ms": 2544800,
+          "at": "42:25",
+          "quote": "Okay. And that carries four to three"
+        }
+      ]
+    }
+  ]
+}
