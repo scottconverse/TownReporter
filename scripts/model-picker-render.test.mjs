@@ -36,6 +36,7 @@ const choices = moduleUrl(
   "model-choice.ts",
   { "./provider-registry.ts": registryUrl, "./preflight.ts": preflightUrl },
 );
+const choiceModule = await import(choices);
 
 /*
   0.6.19: the picker now asks the server which offered providers are actually
@@ -206,10 +207,47 @@ test("disabled picker retains accessible setup help, associated label, and techn
 test("an unavailable provider renders as a disabled option labelled 'not set up'", () => {
   availabilityStub.__setAvailability({ "local-model": false });
   const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
-  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — llama\.cpp, LM Studio, or another OpenAI-compatible server — not set up<\/option>/);
+  // Unit P item 7: the option shows the registry's short half-line, not the
+  // 56-character clause that was clipped to "...or anot" in a 191px box.
+  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — on this computer — not set up<\/option>/);
   // Not selected, but the only unavailable option -- still surfaced.
   assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
   assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);
+});
+
+/*
+  Unit P item 7: a native select clips its selected option's text at its own
+  content box, so an option text longer than the box is a sentence with its
+  ending missing on the control that decides what a run spends. Every shipped
+  option is asserted against the measured bound, and against the rule that
+  shortening the visible line must not lose the sentence -- the full
+  `label — detail` stays reachable as the option's `title`
+  (see pickerOptionText / pickerOptionTitle in src/lib/news/model-choice.ts).
+*/
+test("every shipped picker option fits the measured select box and keeps its full line as a title", () => {
+  const { PICKER_OPTION_TEXT_MAX, pickerOptionText, pickerOptionTitle } = choiceModule;
+  for (const scope of ["story", "scan", "opinion", "dark", "forced"]) {
+    for (const option of registry.providersFor(scope)) {
+      const text = pickerOptionText({
+        value: option.id,
+        label: option.label,
+        detail: option.detail,
+        optionDetail: option.optionDetail,
+      });
+      assert.ok(
+        text.length <= PICKER_OPTION_TEXT_MAX,
+        `${scope} option "${text}" is ${text.length} chars, over ${PICKER_OPTION_TEXT_MAX}`,
+      );
+      // A clause-length detail is not dropped, it moves to the title.
+      const title = pickerOptionTitle({
+        value: option.id,
+        label: option.label,
+        detail: option.detail,
+        optionDetail: option.optionDetail,
+      });
+      if (option.detail) assert.ok(title.includes(option.detail), `${scope} title must carry the detail`);
+    }
+  }
 });
 
 test("selecting the unavailable provider replaces the normal help with the specific one", () => {
@@ -234,7 +272,9 @@ test("saved API connections supplement rather than replace all built-in picker c
   availabilityStub.__setConnections([{ id: "abc", name: "Newsroom LiteLLM", modelId: "my-model", enabled: true }]);
   for (const scope of ["story", "dark", "opinion"]) {
     const html = render({ scope, value: "custom:abc" });
-    assert.match(html, /value="custom:abc" selected=""/);
+    // `[^>]*` rather than a literal space: 0.6.63 gave every option a `title`
+    // (Unit P item 7), which sits between the value and `selected`.
+    assert.match(html, /value="custom:abc"[^>]*selected=""/);
     assert.match(html, /Newsroom LiteLLM — my-model/);
     assert.match(html, /Prefers Newsroom LiteLLM \(my-model\) for this run/);
     assert.match(html, /technical failure can move the unfinished call/);

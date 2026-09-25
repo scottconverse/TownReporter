@@ -6,6 +6,8 @@ import {
   localModelOptionLabel,
   isCustomModelChoice,
   modelChoiceHelp,
+  pickerOptionText,
+  pickerOptionTitle,
   type DarkModelChoice,
   type ModelChoiceOption,
   type OpinionModelChoice,
@@ -184,8 +186,21 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
             {reachable.map((server) => (
               <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
                 {server.models.map((model) => (
-                  <option key={model.id} value={`${server.baseUrl} ${model.id}`}>
-                    {localModelOptionLabel(model)}
+                  /*
+                    The id alone: a catalog label is the model id plus up to
+                    four facts ("deepseek-v4.1-flash:cloud · Ollama Cloud ·
+                    1M context · thinking off · vision" measured 465px), which
+                    no select this wide can show -- and the id is the part an
+                    editor is choosing between. The facts stay in the title
+                    and, for the model actually selected, in the help line
+                    directly under this select.
+                  */
+                  <option
+                    key={model.id}
+                    value={`${server.baseUrl} ${model.id}`}
+                    title={localModelOptionLabel(model)}
+                  >
+                    {model.id}
                   </option>
                 ))}
               </optgroup>
@@ -242,7 +257,15 @@ export function ModelPicker(props: Props) {
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
     label: connection.name,
-    detail: connection.modelId ?? "Choose a model in Server settings",
+    /*
+      A connection with no model yet has nothing to say in a half-line: the
+      option already reads "— not set up" (isAvailable() is false without a
+      model), and the help line under the picker spells out what to do. The
+      old fallback detail said "Choose a model in Server settings", which
+      turned the option into 56 characters of text in a 260px box -- clipped
+      on a phone, and a duplicate of the sentence beside it.
+    */
+    detail: connection.modelId ?? "",
   }));
   const options = [
     ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
@@ -324,13 +347,24 @@ export function ModelPicker(props: Props) {
         value={props.value}
         disabled={props.disabled}
         aria-describedby={flagged ? `${helpId} ${flagId}` : helpId}
+        /*
+          The closed control shows the selected option's SHORT line (see
+          pickerOptionText), so the full sentence goes here as a title: a
+          select clips its own text and there is no CSS that can recover it.
+        */
+        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? " — not set up" : ""}` : undefined}
         onChange={(event) => props.onChange(event.target.value as never)}
       >
         {options.map((option) => {
           const available = isAvailable(option.value);
           return (
-            <option key={option.value} value={option.value} disabled={!available}>
-              {option.label} — {option.detail}
+            <option
+              key={option.value}
+              value={option.value}
+              disabled={!available}
+              title={`${pickerOptionTitle(option)}${available ? "" : " — not set up"}`}
+            >
+              {pickerOptionText(option)}
               {available ? "" : " — not set up"}
             </option>
           );

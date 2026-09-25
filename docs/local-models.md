@@ -275,6 +275,12 @@ The entry itself, in `PROVIDER_REGISTRY`:
   id: "local-model",
   label: "Local model",
   detail: "llama.cpp, LM Studio, or another OpenAI-compatible server",
+  // 0.6.63: the half-line the select itself shows. `detail` is a clause --
+  // 56 characters -- and a native select clips the selected option at its
+  // content box, so the picker showed "Local model — llama.cpp, LM Studio,
+  // or anot". The full sentence is still what the option and select carry
+  // as their `title`, and what the help line under the picker says.
+  optionDetail: "on this computer",
   kind: "local",                        // inherits KIND_BUDGETS.local: 600s a call
   model: "local-model",
   baseUrl: "http://127.0.0.1:1234/v1",

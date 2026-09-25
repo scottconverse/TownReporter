@@ -112,6 +112,21 @@ export type ProviderEntry = {
   label: string;
   /** The half-line under the label in the picker. */
   detail: string;
+  /**
+   * The half-line a native SELECT can actually show, when `detail` is a
+   * clause rather than a phrase.
+   *
+   * Unit P item 7: a `<select>` clips the selected option's text at its own
+   * content box and no CSS rule wraps or ellipsizes it, because the closed
+   * control is drawn by the browser. So "Local model — llama.cpp, LM Studio,
+   * or another OpenAI-compatible server" reached an editor as "Local model —
+   * llama.cpp, LM Studio, or anot" (measured 464px of text in a 191px box).
+   * Providers whose `detail` is a clause declare the short half-line here;
+   * `detail` remains the full sentence, which is what the help line under
+   * the picker and each option's `title` say. See `pickerOptionText` in
+   * ./model-choice.ts for the two of them put back together.
+   */
+  optionDetail?: string;
   kind: ProviderKind;
   /** Default model identifier, before `envOverrides.model` is consulted. */
   model: string;
@@ -387,6 +402,10 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     id: "grok-oauth",
     label: "Grok (SuperGrok)",
     detail: "TownReporter OAuth · selected account model",
+    // The select's own line: 42 characters of detail became 60 in the option
+    // text, which no picker on a phone can show. The OAuth sentence stays in
+    // `detail`, so the help line and the option's title still say it.
+    optionDetail: "account model",
     kind: "xai-oauth",
     model: "grok-4.6",
     envOverrides: {},
@@ -401,6 +420,11 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     id: "local-model",
     label: "Local model",
     detail: "llama.cpp, LM Studio, or another OpenAI-compatible server",
+    // The select's own line: the clause above is 56 characters, which even a
+    // full-width phone select cuts. "on this computer" is the one thing the
+    // option has to say -- the servers it can mean are in the help line, on
+    // the Server page, and in docs/local-models.md.
+    optionDetail: "on this computer",
     kind: "local",
     /*
       Same env wiring as the `configured` gateway below, on purpose. The

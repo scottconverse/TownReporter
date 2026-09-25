@@ -21,7 +21,49 @@ export type ModelChoiceOption = {
   value: StoryModelChoice;
   label: string;
   detail: string;
+  /** The short half-line a select can show, when `detail` is a clause. */
+  optionDetail?: string;
 };
+
+/**
+ * The longest option text a picker select is known to show without clipping.
+ *
+ * Measured, not guessed (Unit P item 7): in the 375px walk the narrowest
+ * select that carries a model choice had a 260px text box, and there the
+ * 30-character "Automatic — Recommended ladder" measured 222px. 34 keeps
+ * that 38px of headroom and still leaves room for a wider glyph mix. The
+ * shipped options are asserted against this in
+ * scripts/model-picker-render.test.mjs, so a new provider with a sentence
+ * for a detail fails there instead of reaching a screenshot.
+ */
+export const PICKER_OPTION_TEXT_MAX = 34;
+
+/**
+ * The text a picker option shows.
+ *
+ * A native `<select>` clips the selected option's text at its content box;
+ * no CSS wraps or ellipsizes it, because the browser draws the closed
+ * control. An owner screenshot of "Automatic — Recommende" on the Scan page
+ * is that clip (0.6.63, Unit P item 7): the compact select's text box was
+ * 191px and the line needed 222px. The box is wider now (styles.css) and a
+ * provider whose `detail` is a whole clause declares `optionDetail`, the
+ * short half-line, instead of pushing the sentence into the control.
+ */
+export function pickerOptionText(option: ModelChoiceOption): string {
+  const detail = option.optionDetail ?? option.detail;
+  return detail ? `${option.label} — ${detail}` : option.label;
+}
+
+/**
+ * The same line in full, for the option's `title`.
+ *
+ * Shortening the visible text must not lose the sentence: an editor who
+ * hovers the option (or the select, which wears the selected option's full
+ * line) reads exactly what the long detail said.
+ */
+export function pickerOptionTitle(option: ModelChoiceOption): string {
+  return option.detail ? `${option.label} — ${option.detail}` : option.label;
+}
 
 /**
  * Not a provider: an instruction to probe the ladder and pin whatever
@@ -42,6 +84,7 @@ export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceO
       value: entry.id as StoryModelChoice,
       label: entry.label,
       detail: entry.detail,
+      optionDetail: entry.optionDetail,
     })),
   ];
 }
