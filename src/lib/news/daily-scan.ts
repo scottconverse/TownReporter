@@ -10,7 +10,16 @@ import {
   type ModelEffort,
 } from "./provider-registry.ts";
 
-export type DailyScanRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
+/**
+ * What a daily-scan policy may store as its runtime.
+ *
+ * "auto" is here since 0.6.64 (Unit AA): the scheduled scan can run Automatic
+ * and walks the same writing ladder a story does. A rung is still NOT here --
+ * DeepSeek v4.1 Flash and Qwen 3.6 35B are what Automatic RESOLVED to on the
+ * day, which the run record names, never a hand pick an editor can store (the
+ * old value was `Exclude<StoryModelChoice, "auto" | AutomaticRungId>`).
+ */
+export type DailyScanRuntime = Exclude<StoryModelChoice, AutomaticRungId>;
 type LegacyDailyScanRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
 export type StoredDailyScanRuntime = DailyScanRuntime | LegacyDailyScanRuntime;
 export type DailyScanPolicy = {
@@ -72,7 +81,11 @@ const LEGACY_DAILY_SCAN_RUNTIMES = new Set<string>([
 ]);
 
 function validDailyScanRuntime(value: string): value is DailyScanRuntime {
-  return isCustomModelChoice(value) || PICKER_PROVIDER_IDS.includes(value as (typeof PICKER_PROVIDER_IDS)[number]);
+  return (
+    value === "auto" ||
+    isCustomModelChoice(value) ||
+    PICKER_PROVIDER_IDS.includes(value as (typeof PICKER_PROVIDER_IDS)[number])
+  );
 }
 
 function validStoredDailyScanRuntime(value: unknown): value is StoredDailyScanRuntime {
@@ -80,7 +93,17 @@ function validStoredDailyScanRuntime(value: unknown): value is StoredDailyScanRu
     (validDailyScanRuntime(value) || LEGACY_DAILY_SCAN_RUNTIMES.has(value));
 }
 
+/**
+ * The runtime a stored row means.
+ *
+ * A stored hand pick keeps its own meaning, including the legacy names an old
+ * row still spells -- 0.6.64 (Unit AA) does NOT rewrite one into Automatic,
+ * because that would change which model a paper runs without anyone asking.
+ * Only a row with no runtime at all, or one this build no longer offers,
+ * reads as "auto": the schedule's new default.
+ */
 export function dailyScanRuntime(value: unknown): DailyScanRuntime {
+  if (value === "auto") return "auto";
   if (value === "local") return "local-model";
   if (value === "claude-cli") return "claude-sonnet";
   if (value === "codex-terra") return "codex-balanced";
@@ -88,7 +111,7 @@ export function dailyScanRuntime(value: unknown): DailyScanRuntime {
   if (isCustomModelChoice(value)) return value;
   return validDailyScanRuntime(String(value))
     ? (value as DailyScanRuntime)
-    : "local-model";
+    : "auto";
 }
 
 export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInput {
@@ -97,7 +120,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
   const input: CleanDailyScanPolicyInput = {
     enabled: value.enabled === true,
     localTime: typeof value.localTime === "string" ? value.localTime.trim() : "",
-    runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "local-model",
+    runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "auto",
     modelEffort: null,
     sourceCap: typeof value.sourceCap === "number" ? value.sourceCap : Number.NaN,
     selectedSourceIds: sourceIds.filter((id): id is number => typeof id === "number"),

@@ -235,6 +235,28 @@ function rungGateway(entry: ProviderEntry): LlmConfig | null {
   };
 }
 
+/**
+ * The endpoint a rung actually reaches, named the way a snapshot stores it.
+ *
+ * `probeProvider` hands a `localModel` override back for the "Local model"
+ * choice only, because that choice's endpoint is the editor's own pick and
+ * the caller has to be told what it resolved to. A rung's endpoint is registry
+ * data, so a caller that needs to PIN a run to a rung -- the scheduled daily
+ * scan, which stores the model it ran on in its reservation and run record --
+ * asks here (0.6.64, Unit AA). Same `rungGateway` the transport uses, so the
+ * stored pair cannot drift from the pair the call is sent to.
+ *
+ * Null for anything that is not a rung, and for a rung with no endpoint, which
+ * is the same condition `rungGateway` refuses: a misconfigured install is not
+ * a runnable model.
+ */
+export function rungLocalModel(choice: string | undefined | null): LocalModelOverride | null {
+  if (!isAutomaticRungId(choice)) return null;
+  const entry = providerEntry(choice);
+  const gateway = entry ? rungGateway(entry) : null;
+  return gateway ? { baseUrl: gateway.baseUrl, id: gateway.model } : null;
+}
+
 function xaiGateway(): LlmConfig | null {
   const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
   if (!xai) return null;

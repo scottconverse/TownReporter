@@ -2,17 +2,23 @@ import { resolveLocalModelChoice } from "./provider-settings.ts";
 import { isCustomModelChoice, type CustomModelChoice } from "./model-choice.ts";
 import {
   PICKER_PROVIDER_IDS,
+  isAutomaticRungId,
   providerEntry,
   providerModel,
+  type AutomaticRungId,
   type PickerProviderId,
+  type ProviderId,
   modelEffort,
   type ModelEffort,
 } from "./provider-registry.ts";
+import type { ProviderProbe } from "./ai.ts";
 import type { OcrOptions } from "./ingest.ts";
 
 type LegacyForcedRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
-export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | CustomModelChoice;
+export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | AutomaticRungId | CustomModelChoice;
 type CliProviderChoice = Exclude<PickerProviderId, "local-model" | "grok-oauth">;
+/** One rung of Automatic's ladder, minus the internal "configured" entry. */
+type LadderChoice = Exclude<ProviderId, "configured">;
 export type ForcedRuntimeSnapshot =
   | {
       runtime: "local";
@@ -22,7 +28,21 @@ export type ForcedRuntimeSnapshot =
       modelEffort?: ModelEffort;
     }
   | {
-      runtime: Exclude<ForcedRuntime, "local" | "local-model">;
+      /*
+        0.6.64 (Unit AA). A run on Automatic that resolved to one of Automatic's
+        own rungs: DeepSeek v4.1 Flash or Qwen 3.6 35B, both on a local
+        endpoint. `transport: "local"` routes it through the same adapter the
+        "Local model" snapshot uses; the endpoint is the RUNG's, from the
+        registry, so it is never the editor's local-model pick.
+      */
+      runtime: AutomaticRungId;
+      modelChoice: AutomaticRungId;
+      transport: "local";
+      localModel: { baseUrl: string; id: string };
+      modelEffort?: ModelEffort;
+    }
+  | {
+      runtime: Exclude<ForcedRuntime, "local" | "local-model" | AutomaticRungId>;
       modelChoice: CliProviderChoice;
       transport: "claude-code" | "codex";
       model: string;
@@ -47,7 +67,7 @@ export type ForcedRuntimeSnapshot =
     };
 
 const choiceFor = (
-  runtime: Exclude<ForcedRuntime, CustomModelChoice>,
+  runtime: Exclude<ForcedRuntime, CustomModelChoice | AutomaticRungId>,
 ): PickerProviderId =>
   runtime === "local" || runtime === "local-model"
     ? "local-model"
@@ -59,10 +79,21 @@ const choiceFor = (
           ? "codex-frontier"
           : runtime;
 
+/**
+ * Resolve a runtime to the exact snapshot a run is pinned to.
+ *
+ * `options.automaticRung` opens the one door a rung needs (0.6.64, Unit AA):
+ * Automatic's own rungs are not pickable models -- no picker lists them and
+ * `parseForcedRuntimeSnapshot` refuses them by default -- but a scheduled run
+ * that Automatic resolved to a rung has to be able to record the endpoint it
+ * ran against. Left off, a rung still throws the same sentence the batch
+ * picker has always shown.
+ */
 export async function validateForcedRuntime(
   newsroomId: number,
   runtime: ForcedRuntime,
   effort?: ModelEffort | null,
+  options?: { automaticRung?: boolean },
 ): Promise<ForcedRuntimeSnapshot> {
   if (runtime === "local" || runtime === "local-model") {
     const local = await resolveLocalModelChoice(newsroomId, "forced");
@@ -123,6 +154,28 @@ export async function validateForcedRuntime(
       ...(exactEffort ? { modelEffort: exactEffort } : {}),
     };
   }
+  if (isAutomaticRungId(runtime)) {
+    if (!options?.automaticRung) throw new Error("The selected batch model is unavailable in this build.");
+    /*
+      A rung, named by the run that resolved to it. The endpoint comes from the
+      registry through `rungLocalModel`, and the probe is the same one the
+      ladder walk used -- so a rung that stopped answering between the walk and
+      this call fails here rather than being stored as if it had run.
+    */
+    const { probeProvider, rungLocalModel } = await import("./ai.ts");
+    const localModel = rungLocalModel(runtime);
+    if (!localModel) throw new Error("The selected batch model is unavailable in this build.");
+    const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
+    if (!ready.ok) throw new Error(ready.error);
+    const exactEffort = modelEffort(runtime, effort, localModel.id);
+    return {
+      runtime,
+      modelChoice: runtime,
+      transport: "local",
+      localModel,
+      ...(exactEffort ? { modelEffort: exactEffort } : {}),
+    };
+  }
   const choice = choiceFor(runtime);
   const entry = providerEntry(choice);
   if (!entry || (entry.kind !== "claude-code" && entry.kind !== "codex")) {
@@ -142,9 +195,97 @@ export async function validateForcedRuntime(
   };
 }
 
-export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapshot | null {
+/**
+ * Resolve Automatic for a run that has to name ONE provider up front.
+ *
+ * Automatic's own resolution (`probeProvider("auto")`) answers with the
+ * operator's configured gateway when there is one, because an interactive
+ * editor can be told "it will use your gateway" and the transport reads the
+ * gateway again at call time. A scheduled run cannot: it stores the model it
+ * will run on in its reservation and run record before the job is queued, and
+ * a stored name has to be a model that can be called. So this walks the same
+ * ladder, in the same order, and returns the first rung that is READY, already
+ * resolved to its exact endpoint (0.6.64, Unit AA).
+ *
+ * A rung that is skipped rather than failed -- Qwen is used only when it is
+ * loaded -- carries its reason forward in `skippedRungs` so the reservation
+ * records what was passed over, exactly as the story path's Automatic does.
+ * Nothing ready is an error naming every reason, the same shape the story
+ * path uses.
+ */
+export async function resolveAutomaticForcedRuntime(
+  newsroomId: number,
+  effort?: ModelEffort | null,
+  deps?: { probe?: (rung: LadderChoice) => Promise<ProviderProbe> },
+): Promise<ForcedRuntimeSnapshot & { skippedRungs?: string[] }> {
+  const { AUTOMATIC_LADDER, probeProvider } = await import("./ai.ts");
+  const probe =
+    deps?.probe ?? ((rung: LadderChoice) => probeProvider(rung, newsroomId, undefined, "forced"));
+  const failures: string[] = [];
+  const skippedRungs: string[] = [];
+  const ladder = AUTOMATIC_LADDER.filter(
+    (id): id is LadderChoice => id !== "configured",
+  );
+  for (const rung of ladder) {
+    const ready = await probe(rung);
+    if (ready.ok) {
+      const snapshot = await validateForcedRuntime(newsroomId, rung, effort, {
+        automaticRung: true,
+      });
+      return skippedRungs.length ? { ...snapshot, skippedRungs } : snapshot;
+    }
+    if (ready.skippedRungs?.length) skippedRungs.push(...ready.skippedRungs);
+    else failures.push(ready.error);
+  }
+  const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
+  throw new Error(`No model in the Automatic ladder is ready. ${failures.join(" ")}${skippedNote}`);
+}
+
+export function parseForcedRuntimeSnapshot(
+  value: unknown,
+  options?: { automaticRung?: boolean },
+): ForcedRuntimeSnapshot | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
+  /*
+    A rung snapshot (0.6.64, Unit AA), read only where the caller says so. The
+    default is deny, and that is the point: a rung is not a model an editor can
+    pick, so a stored row naming one is a row this build must not run -- the
+    same answer the batch picker gives for it.
+
+    No loopback guard here, unlike the "local" variant above: that guard stops
+    an editor pointing a local run at a remote host, while a rung's base URL
+    comes from the registry and the rung's own env override -- operator
+    configuration, which the transport reads through `rungGateway` anyway.
+  */
+  if (options?.automaticRung && isAutomaticRungId(row.runtime)) {
+    if (
+      row.modelChoice === row.runtime &&
+      row.transport === "local" &&
+      row.localModel &&
+      typeof row.localModel === "object"
+    ) {
+      const local = row.localModel as Record<string, unknown>;
+      if (
+        typeof local.baseUrl === "string" &&
+        /^https?:\/\//i.test(local.baseUrl) &&
+        typeof local.id === "string" &&
+        local.id.trim()
+      ) {
+        const parsedEffort =
+          row.modelEffort === undefined ? null : modelEffort(row.runtime, row.modelEffort, local.id);
+        if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
+        return {
+          runtime: row.runtime,
+          modelChoice: row.runtime,
+          transport: "local",
+          localModel: { baseUrl: local.baseUrl, id: local.id },
+          ...(parsedEffort ? { modelEffort: parsedEffort } : {}),
+        };
+      }
+    }
+    return null;
+  }
   if (
     row.runtime === "local" &&
     row.modelChoice === "local-model" &&
@@ -215,7 +356,7 @@ export function parseForcedRuntimeSnapshot(value: unknown): ForcedRuntimeSnapsho
         runtime as LegacyForcedRuntime,
       ) || (PICKER_PROVIDER_IDS as readonly string[]).includes(runtime);
     const choice = knownRuntime
-      ? choiceFor(runtime as Exclude<ForcedRuntime, CustomModelChoice>)
+      ? choiceFor(runtime as Exclude<ForcedRuntime, CustomModelChoice | AutomaticRungId>)
       : null;
     const entry = choice ? providerEntry(choice) : null;
     if (
@@ -292,10 +433,10 @@ export async function runForcedChat<T>(
   options: { timeoutMs?: number; noTools?: boolean } | undefined,
   adapters: ForcedChatAdapters<T>,
 ): Promise<T> {
-  const valid = parseForcedRuntimeSnapshot(snapshot);
+  const valid = parseForcedRuntimeSnapshot(snapshot, { automaticRung: true });
   if (!valid) throw new Error("The forced runtime snapshot is invalid.");
   const timeoutMs = options?.timeoutMs ?? 150000;
-  if (valid.runtime === "local") {
+  if (valid.transport === "local") {
     return adapters.local(system, user, maxTokens, {
       ...options,
       choice: "local-model",
@@ -353,9 +494,9 @@ export function forcedOcrOptions(
       snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
         ? String(snapshot.newsroomId)
         : undefined,
-    localModel: snapshot.runtime === "local" ? snapshot.localModel : undefined,
+    localModel: snapshot.transport === "local" ? snapshot.localModel : undefined,
     forcedPlan:
-      snapshot.runtime === "local"
+      snapshot.transport === "local"
         ? { kind: "local", baseUrl: snapshot.localModel.baseUrl, model: snapshot.localModel.id }
         : snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
           ? undefined
