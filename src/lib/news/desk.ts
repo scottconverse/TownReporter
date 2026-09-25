@@ -168,12 +168,20 @@ export const addSource = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const parsed = parseHttpUrl(data.url);
     if (!parsed.ok) return { ok: false as const, error: parsed.error };
-    const title = data.title.trim() || parsed.host;
+    /*
+      The label, verbatim -- including an empty one.
+
+      The host name used to be substituted here, which made "no label" and "the
+      label is the host" the same string by the time the row was written, so a
+      re-add with no label renamed a source that already had a name. The name a
+      first-time row needs is the write path's business (source-seeds.server.ts),
+      where the row's own title is visible.
+    */
     const kind = data.kind || kindFromSourceUrl(parsed.url);
     const source = await upsertSource(
       context.userId,
       parsed.url,
-      title,
+      data.title,
       kind,
       data.tier || "A",
       owned(context),
