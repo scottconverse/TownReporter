@@ -537,6 +537,35 @@ async function ingestRedditIfNeeded(url: URL): Promise<RedditIngest | null> {
   return fetchRedditDocument(url);
 }
 
+/**
+ * The *scan's* reddit path — a different entry point from `ingestDocument`'s
+ * reddit branch above, which is why the bug survived there.
+ *
+ * `performScanWork` (desk.ts) calls `ingestUrl`, not `ingestDocument`, for
+ * every accepted source; `ingestUrl` routed YouTube and PrimeGov and had no
+ * reddit branch at all. So a reddit source fell through to the generic
+ * fetch-and-strip-tags path below, and reddit.com answers that with its
+ * JavaScript app shell — live scan 52 lost accepted source 2876
+ * ("r/Longmont — community tips (unverified)", https://www.reddit.com/r/Longmont/)
+ * to "Page had almost no readable text" while `/r/Longmont/new/.rss` answered
+ * 200 with 25 real entries.
+ *
+ * `fetchRedditSourceText` returns the subreddit's recent posts as Tier C
+ * leads — title, date, author, exact permalink, body, and the top comments
+ * when a local Redlib is up — with the coverage it actually got stated in the
+ * text. A failure is thrown, not swallowed, so the scan records it in
+ * `sources.last_error` the way it records every other source it could not read.
+ */
+async function ingestRedditSourceIfNeeded(url: URL): Promise<IngestResult | null> {
+  if (typeof window !== "undefined") return null;
+  const { isRedditUrl } = await import("./reddit.ts");
+  if (!isRedditUrl(url)) return null;
+  const { fetchRedditSourceText } = await import("./reddit.server.ts");
+  const source = await fetchRedditSourceText(url);
+  if (!source.ok) throw new Error(source.text);
+  return { text: source.text, titleHint: source.title, extras: [] };
+}
+
 export type IngestResult = {
   text: string;
   titleHint: string;
@@ -893,6 +922,8 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
   if (yt) return { text: yt.text, titleHint: yt.title, extras: yt.extras ?? [] };
   const pg = await ingestPrimeGov(url);
   if (pg) return { text: pg.text, titleHint: pg.title, extras: pg.extras };
+  const rd = await ingestRedditSourceIfNeeded(url);
+  if (rd) return rd;
   const path = url.pathname.toLowerCase();
 
   const res = await fetchPublicHttp(url);

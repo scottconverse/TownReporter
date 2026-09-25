@@ -102,3 +102,25 @@ if (-not (Test-TownReporterPort $port)) {
     -RedirectStandardError  (Join-Path $logDir "app.err.log") `
     -NoNewWindow
 }
+
+<#
+  The Reddit reader, if this machine has one.
+
+  Started AFTER the paper, and started DETACHED: ops\redlib.ps1 forwards to the
+  reddit-search skill's start script, which waits for Redlib to answer Reddit,
+  and the paper must not be held behind an optional reader. The desk reads a
+  subreddit through Reddit's .rss when Redlib is down and says so in the source
+  text, so "down" here is a supported state, not a failure.
+
+  Read-only when Redlib is already answering, and a no-op when it was never
+  installed or the operator set TOWNREPORTER_REDLIB=0. The whole block is
+  wrapped: nothing about an optional reader may fail the logon task, which is
+  what actually brings the paper up.
+#>
+try {
+  . (Join-Path $PSScriptRoot "lib-redlib.ps1")
+  $redlib = Start-RedlibIfDown -OffSwitch (Get-RedlibOffSwitch -EnvFile (Join-Path $app ".env"))
+  "redlib: $redlib" | Add-Content $appLog
+} catch {
+  "redlib: not started: $($_.Exception.Message)" | Add-Content $appLog
+}
