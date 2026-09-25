@@ -63,6 +63,19 @@ function editorPaperIdentity(config: PaperConfig): PaperIdentity {
   return identity;
 }
 
+/*
+  Every branch of this gate renders OUTSIDE the desk shell, which is the only
+  place the desk's theme lives -- so none of them used to have one, and an
+  editor moving between desk pages saw each of these screens on a white field
+  regardless of their Light/Dark choice (owner report, 2026-09-25: "the screen
+  flashes BRIGHT WHITE, announces where it's going like 'opening desk'").
+
+  They are wrapped in `.desk-ltr .screen-page` instead: the same scope and type
+  scale the shell gives, with the palette taken from the `data-appearance`
+  attribute the pre-paint script stamps on <html> -- see the `.screen-page`
+  block in src/styles.css and src/lib/appearance.ts. Nothing here needs to know
+  which theme is on.
+*/
 function DeskGate() {
   const { user, isPending } = useCurrentUserState();
   /*
@@ -113,28 +126,32 @@ function DeskGate() {
     if (taken) {
       const copy = deskTakenLoginCopy();
       return (
-        <EmptyState
-          kicker="Editor desk"
-          title={copy.title}
-          body={copy.body}
-          action={
-            <span className="flex flex-wrap gap-2">
-              <Link
-                to="/"
-                className="pressable inline-flex min-h-11 items-center justify-center border border-ink bg-ink px-4 text-sm text-paper"
-              >
-                Back to the paper
-              </Link>
-              <button
-                type="button"
-                className="pressable inline-flex min-h-11 items-center justify-center border border-ink bg-paper px-4 text-sm hover:bg-paper-2"
-                onClick={() => void signOut()}
-              >
-                Sign out
-              </button>
-            </span>
-          }
-        />
+        <div className="desk-ltr screen-page">
+          <div className="w-full">
+            <EmptyState
+              kicker="Editor desk"
+              title={copy.title}
+              body={copy.body}
+              action={
+                <span className="flex flex-wrap gap-2">
+                  <Link
+                    to="/"
+                    className="pressable inline-flex min-h-11 items-center justify-center border border-ink bg-ink px-4 text-sm text-paper"
+                  >
+                    Back to the paper
+                  </Link>
+                  <button
+                    type="button"
+                    className="pressable inline-flex min-h-11 items-center justify-center border border-ink bg-paper px-4 text-sm hover:bg-paper-2"
+                    onClick={() => void signOut()}
+                  >
+                    Sign out
+                  </button>
+                </span>
+              }
+            />
+          </div>
+        </div>
       );
     }
     if (paper.isPending) {
@@ -148,11 +165,15 @@ function DeskGate() {
     }
     if (paper.isError || !paper.data) {
       return (
-        <EmptyState
-          kicker="Editor desk"
-          title="The paper identity could not be loaded"
-          body="Refresh the desk and try again. The newsroom configuration was not changed."
-        />
+        <div className="desk-ltr screen-page">
+          <div className="w-full">
+            <EmptyState
+              kicker="Editor desk"
+              title="The paper identity could not be loaded"
+              body="Refresh the desk and try again. The newsroom configuration was not changed."
+            />
+          </div>
+        </div>
       );
     }
     return (

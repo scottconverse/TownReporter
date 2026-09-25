@@ -51,11 +51,22 @@ const ESCAPE_MARKER = "data-stranded-signin";
 /** The attribute the fallback stamps on the screen to reveal that link. */
 const STRANDED_MARKER = "data-stranded";
 
-/** The injected script, taken from the dangerouslySetInnerHTML string itself. */
+/**
+ * The injected script, taken from the dangerouslySetInnerHTML string itself.
+ *
+ * Picked by subject, not by position: __root.tsx injects more than one inline
+ * script. The other one is the pre-paint appearance script in <head> (it
+ * stamps `data-appearance` from localStorage so a dark page's first frame is
+ * dark -- see src/lib/appearance.ts), and it is a different mechanism with a
+ * different job. Selecting "the last script" would break the moment a third is
+ * added after it; everything asserted below is about the fallback, so the
+ * fallback is what gets selected.
+ */
 function injected() {
-  const m = root.match(/dangerouslySetInnerHTML=\{\{[\s\S]*?__html:\s*([\s\S]*?)\n\s*\}\}/);
-  assert.ok(m, "no inline script found in __root.tsx");
-  return m[1];
+  const all = [...root.matchAll(/dangerouslySetInnerHTML=\{\{[\s\S]*?__html:\s*([\s\S]*?)\n\s*\}\}/g)];
+  const fallback = all.map((m) => m[1]).find((script) => script.includes("data-awaiting-session"));
+  assert.ok(fallback, "no inline fallback script found in __root.tsx");
+  return fallback;
 }
 
 test("the fallback keys on a marker, not on heading copy", () => {

@@ -28,13 +28,24 @@ export function ScreenPending({
   title,
   kicker,
   hint = "Setting type…",
-  night = false,
   action,
   awaitingSession = false,
 }: {
   title: string;
   kicker?: string;
   hint?: string;
+  /*
+    Was the light/dark switch, and is now a no-op kept for call-site
+    compatibility.
+
+    A screen has no theme of its own to be told about: it has no desk shell
+    around it to inherit one from, which is the whole reason it used to be
+    light. It takes the document's surface from <html data-appearance>, which
+    the pre-paint script in __root.tsx stamps from localStorage -- see
+    src/lib/appearance.ts. `night` could only ever say what that attribute
+    already says, and it said it a paint too late, which is how this screen
+    came to be the most reliable white flash in the app.
+  */
   night?: boolean;
   action?: ReactNode;
   /**
@@ -72,11 +83,7 @@ export function ScreenPending({
   return (
     <div
       ref={marker}
-      className={
-        night
-          ? "grid min-h-dvh place-items-center bg-ink px-6 text-paper"
-          : "grid min-h-dvh place-items-center bg-paper px-6 text-ink"
-      }
+      className="desk-ltr screen-page"
       role="status"
       {...(awaitingSession ? { "data-awaiting-session": "" } : {})}
       aria-live="polite"
@@ -88,17 +95,10 @@ export function ScreenPending({
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold">{title}</h1>
         <div className="mt-6">
-          <Ornament busy night={night} />
+          <Ornament busy />
         </div>
         {hint ? (
-          <p
-            className={
-              "shimmer-text mt-5 text-sm " +
-              (night ? "text-paper-2" : "text-muted")
-            }
-          >
-            {hint}
-          </p>
+          <p className="shimmer-text mt-5 text-sm text-muted">{hint}</p>
         ) : null}
         {action ? <div className="mt-6">{action}</div> : null}
         {/*
@@ -114,12 +114,7 @@ export function ScreenPending({
           <div className="mt-6" hidden data-stranded-signin>
             <a
               href="/login"
-              className={
-                "pressable inline-flex min-h-11 items-center justify-center border px-4 text-sm " +
-                (night
-                  ? "border-paper bg-ink text-paper"
-                  : "border-ink bg-paper hover:bg-paper-2")
-              }
+              className="pressable inline-flex min-h-11 items-center justify-center border border-ink bg-paper px-4 text-sm hover:bg-paper-2"
             >
               Sign in
             </a>

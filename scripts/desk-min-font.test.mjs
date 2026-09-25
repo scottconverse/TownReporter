@@ -221,12 +221,14 @@ const FILE_GLOBS = ["src/**/desk*.tsx", "src/lib/**/*.tsx"];
 /*
  * src/lib/error-component.tsx (AppErrorComponent / AppNotFound) matches the
  * src/lib glob but is NOT desk-scoped: it's wired as the router's
- * defaultErrorComponent / defaultNotFoundComponent in src/router.tsx, so it
- * replaces the whole page -- including on the public paper -- and never
- * renders inside .desk-ltr. Its text-[11px] is the paper's own type scale,
- * not the desk's; changing it would touch the public paper's styles, which
- * is out of scope for the desk audit this test guards. Excluded rather
- * than fixed.
+ * defaultErrorComponent / defaultNotFoundComponent in src/router.tsx, so the
+ * SAME component renders the public paper's 404s and errors. It carries
+ * `desk-ltr screen-page` now, so a desk error does land inside .desk-ltr --
+ * but the class is the surface, not a claim that this file is desk-only, and
+ * its text-[11px] kicker is the paper's own type scale, shared with
+ * src/components/states.tsx. Raising it here would change the public paper's
+ * look, which is the one thing the appearance work was told not to do.
+ * Excluded rather than fixed.
  */
 const NOT_DESK_SCOPED = new Set(["src/lib/error-component.tsx"]);
 const BANNED_UTILITIES = [/\btext-xs\b/, /text-\[1[0-3]px\]/, /font-size:\s*1[0-3]px\b/];

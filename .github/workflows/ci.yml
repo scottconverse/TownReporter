@@ -1236,3 +1236,41 @@ jobs:
           BETTER_AUTH_SECRET: ci-daily-scan-automatic-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/daily-scan-automatic-e2e.mjs
+
+  # AB: no white flash in dark mode (0.6.64). The owner, 2026-09-25: "when I
+  # change screens and I'm in dark mode ... the screen flashes BRIGHT WHITE,
+  # announces where it's going like 'opening desk' then switches back to dark
+  # mode". Every appearance preference used to be read in a mount effect, one
+  # paint late, so a dark-mode editor got a full light frame on a hard reload
+  # and on every navigation into a screen outside the desk shell.
+  #
+  # This is the regression test for it, and it is a MEASUREMENT: a probe
+  # installed before any page script samples, at every animation frame, the
+  # colour that frame is about to paint, on a hard reload of every desk screen
+  # and on a client-side click between them, in dark and in light. Every
+  # sampled frame must be the right one; the light pass is the sensitivity
+  # control for the dark one, and each pass ends by deliberately breaking the
+  # attribute and requiring the same probe to report the other colour. Removing
+  # the <head> script in src/routes/__root.tsx makes this job fail on the first
+  # hard reload with `at: null, #f6f1e7` -- the owner's flash, reproduced.
+  #
+  # Port 3474, which no other integration file may bind. Boots its own copy of
+  # the built server on in-memory PGlite, so there is no `npm start` step here.
+  desk-dark-flash:
+    name: No light frame in dark mode, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Set dark, walk every desk screen, and sample the first frame of each
+        env:
+          BETTER_AUTH_SECRET: ci-desk-dark-flash-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/desk-dark-flash-walk.mjs

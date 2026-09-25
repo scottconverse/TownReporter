@@ -1099,7 +1099,30 @@
   font-size: 14px;
   color: var(--muted);
 }
-.reader.mode-dark {
+/*
+  Two triggers, one palette -- the same pair as the desk's night palette (see
+  the comment in desk-astra.css).
+
+  `.mode-dark` is what React renders once it has read the reader's preference,
+  and React cannot know it on the server: it lives in a per-paper localStorage
+  blob, so a hard reload of an article was server-rendered light -- a full
+  page of #f8faf9 in a dark room -- and flipped dark a paint later.
+  `:root[data-appearance="reader-dark"]` is stamped on <html> by the inline
+  <head> script in __root.tsx BEFORE the first paint, out of the same blob, so
+  the first frame is already this palette.
+
+  #142428 is the reader's dark, and it is also what `READER_DARK_BG` in
+  src/lib/appearance.ts reports to the `<meta name="theme-color">` update --
+  src/lib/appearance.test.ts fails if either colour moves without the other.
+
+  Every `.reader.mode-dark …` override below carries the attribute form too.
+  They are not redundant: before hydration only the attribute is set, and a
+  `.prototype` banner or an opinion tag that kept its light colours over a dark
+  page would be a legibility bug of its own (--color-rust is #9b2915, 1.6:1
+  against this background).
+*/
+.reader.mode-dark,
+:root[data-appearance="reader-dark"] .reader {
   --bg: #142428;
   --surface: #1a2d32;
   --ink: #e0ebe7;
@@ -1109,24 +1132,30 @@
   --soft: #233e3e;
   --warm: #39372f;
 }
-.reader.mode-dark .prototype {
+.reader.mode-dark .prototype,
+:root[data-appearance="reader-dark"] .reader .prototype {
   background: #233638;
   color: #bacac7;
 }
-.reader.mode-dark .btn.primary {
+.reader.mode-dark .btn.primary,
+:root[data-appearance="reader-dark"] .reader .btn.primary {
   color: #152d31;
 }
-.reader.mode-dark .record-list li {
+.reader.mode-dark .record-list li,
+:root[data-appearance="reader-dark"] .reader .record-list li {
   border-color: var(--line);
 }
-.reader.mode-dark .articlebody .notice {
+.reader.mode-dark .articlebody .notice,
+:root[data-appearance="reader-dark"] .reader .articlebody .notice {
   color: #d9c49d;
 }
-.reader.mode-dark .opinionmark {
+.reader.mode-dark .opinionmark,
+:root[data-appearance="reader-dark"] .reader .opinionmark {
   background: #554a37;
   color: #e7c698;
 }
-.reader.mode-dark .tag.opinion {
+.reader.mode-dark .tag.opinion,
+:root[data-appearance="reader-dark"] .reader .tag.opinion {
   color: #d7b58c;
 }
 @media (min-width: 1500px) {
@@ -1532,14 +1561,17 @@
   color: var(--ink);
   background: var(--bg);
 }
-.reader.mode-dark {
+.reader.mode-dark,
+:root[data-appearance="reader-dark"] .reader {
   color-scheme: dark;
 }
-.reader.mode-dark .btn.primary:hover {
+.reader.mode-dark .btn.primary:hover,
+:root[data-appearance="reader-dark"] .reader .btn.primary:hover {
   background: #a0ddd5;
   color: #152d31;
 }
-.reader.mode-dark .record-list .num {
+.reader.mode-dark .record-list .num,
+:root[data-appearance="reader-dark"] .reader .record-list .num {
   color: #a1c8b8;
 }
 .reader .skip {
@@ -1634,7 +1666,8 @@
   color: var(--ink);
   background: var(--bg);
 }
-.reader.mode-dark {
+.reader.mode-dark,
+:root[data-appearance="reader-dark"] .reader {
   --color-danger: #ffb4a7;
   color-scheme: dark;
 }

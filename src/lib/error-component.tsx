@@ -5,7 +5,7 @@ import { inkGhost, inkSolid } from "@/components/desk-chrome-utils";
 
 export function AppErrorComponent({ error }: ErrorComponentProps) {
   return (
-    <main className="grid min-h-dvh place-items-center bg-paper px-6 text-ink">
+    <main className="desk-ltr screen-page">
       <div className="stagger-in max-w-md text-center">
         <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
           TownReporter
@@ -28,7 +28,7 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
 
 export function AppNotFound() {
   return (
-    <main className="grid min-h-dvh place-items-center bg-paper px-6 text-ink">
+    <main className="desk-ltr screen-page">
       <div className="stagger-in max-w-md text-center">
         <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
           TownReporter

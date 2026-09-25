@@ -8,6 +8,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { leaveEditor } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
+import { useAppearance } from "@/lib/appearance-context";
 
 import {
   LayoutDashboard,
@@ -53,57 +54,41 @@ const LINKS = [
   { to: "/desk/stats", label: "Stats" },
 ] as const;
 
-const MODE_KEY = "townreporter.desk.mode";
-const TEXT_SIZE_KEY = "townreporter.desk.textsize";
+/*
+  Light/Dark and Normal/Large both come from AppearanceProvider now.
 
+  They used to be two copy-pasted hooks here, each with its own copy of the
+  storage key and its own read-on-mount `useEffect` -- which is why both of
+  them applied a paint late, and why the shell was light for a frame on every
+  reload in dark mode. The provider reads the same two keys, and the head
+  script in __root.tsx has already painted them from localStorage before this
+  component exists; see src/lib/appearance.ts.
+
+  These two wrappers keep the call sites below reading the way they did
+  (`mode` / `choose`, `size` / `chooseSize`) so nothing else has to change.
+  The `choose` functions write straight through to storage -- no local state
+  to drift from it.
+*/
 function useDeskMode() {
-  const [mode, setMode] = useState<"light" | "dark">("light");
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(MODE_KEY);
-      if (raw === "dark" || raw === "light") setMode(raw);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  function choose(next: "light" | "dark") {
-    setMode(next);
-    try {
-      localStorage.setItem(MODE_KEY, next);
-    } catch {
-      /* ignore */
-    }
-  }
-  return { mode, choose };
+  const { appearance, setDesk } = useAppearance();
+  return {
+    mode: appearance.desk,
+    choose: (next: "light" | "dark") => setDesk({ desk: next }),
+  };
 }
 
 /**
- * Text: Normal / Large — mirrors useDeskMode's storage pattern exactly (same
- * key shape, same read-on-mount effect, same swallow-and-default-on-failure
- * behavior), so the two controls behave identically to an editor even though
- * one flips a class the theme owns and the other flips `.large`, which scales
- * every font-size this pass raised to the 14px/13px floor (see the `--ts`
- * custom property in styles.css). Defaults to Normal.
+ * Text: Normal / Large — the `.large` class the shell already carried, and now
+ * also the `data-desk-size` attribute the stylesheets key on (see the `--ts`
+ * custom property in styles.css), which scales every font-size this pass raised
+ * to the 14px/13px floor. Defaults to Normal.
  */
 function useDeskTextSize() {
-  const [size, setSize] = useState<"normal" | "large">("normal");
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(TEXT_SIZE_KEY);
-      if (raw === "large" || raw === "normal") setSize(raw);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  function choose(next: "normal" | "large") {
-    setSize(next);
-    try {
-      localStorage.setItem(TEXT_SIZE_KEY, next);
-    } catch {
-      /* ignore */
-    }
-  }
-  return { size, choose };
+  const { appearance, setDesk } = useAppearance();
+  return {
+    size: appearance.size,
+    choose: (next: "normal" | "large") => setDesk({ size: next }),
+  };
 }
 
 export function DeskShell({

@@ -40,7 +40,21 @@
   color: var(--fg);
   color-scheme: light;
 }
-.desk-ltr.astra.night {
+/*
+  Two triggers, one palette -- see the block of the same shape in styles.css.
+
+  `.night` is what React renders once it has read the editor's choice, and on
+  the server it cannot: it is the reason the desk arrived light and flipped
+  dark a paint later. `:root[data-appearance="desk-dark"]` is stamped on <html>
+  by the inline <head> script before the first paint, from the same
+  localStorage, so the first frame is already this palette. #182024 is the
+  desk's dark, and it is also what `DESK_NIGHT_BG` in src/lib/appearance.ts
+  reports to the `<meta name="theme-color">` update -- if either colour moves,
+  the test in src/lib/appearance.test.ts fails rather than the address bar
+  going quietly out of step.
+*/
+.desk-ltr.astra.night,
+:root[data-appearance="desk-dark"] .desk-ltr.astra {
   --bg: #182024;
   --bg2: #1c262b;
   --surface: #222c31;
@@ -54,6 +68,14 @@
   --hover: #304046;
   --warn: #f3a19b;
   color-scheme: dark;
+}
+/*
+  Normal / Large before React, same reasoning: the shell carries `.large` only
+  after the client has read localStorage, and until then a Large reader got a
+  page of Normal type that reflowed a paint in.
+*/
+:root[data-desk-size="large"] .desk-ltr.astra {
+  --ts: 1.125;
 }
 .desk-ltr.astra * {
   box-sizing: border-box;
