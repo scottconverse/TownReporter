@@ -29,11 +29,13 @@
  * run resolves to anything but rung 1, which is also what keeps a real Codex
  * from ever being started here.
  *
- * The reserved scan job itself then tries to fetch the walk's accepted source
- * (a .example.test host that does not resolve, so no request leaves the
- * machine) and fails. That is expected and asserted nowhere: the model
- * receipt is written by the tick BEFORE the job is queued, and it is the
- * receipt this walk is about.
+ * The reserved scan job then runs on its own, against the walk's accepted
+ * source, and its outcome is NOT asserted here -- it does not need to be. The
+ * model receipt is written by the tick BEFORE the job is queued (the source
+ * fetch and the writing pass come after), so the record this walk reads is
+ * complete whether that job ends completed or failed. What the walk DOES
+ * assert is that rung 1 was probed during the tick, so the resolution it reads
+ * was made against the stub rather than by falling through to a real provider.
  */
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -83,6 +85,22 @@ function step(name) {
 
 function must(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+/**
+ * A jsonb column read straight off the PGlite handle comes back as text, not
+ * as the object `getSql()` hands the product (which parses it). Both shapes
+ * mean the same receipt, so read either.
+ */
+function asRecord(value) {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) ?? {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" ? value : {};
 }
 
 async function dump(err) {
@@ -348,7 +366,7 @@ async function theScheduledTickReservesTheRun() {
     )
   ).rows[0];
   must(Boolean(run), "the tick reserved no scan run at all");
-  const snapshot = run.model_snapshot ?? {};
+  const snapshot = asRecord(run.model_snapshot);
   must(
     run.execution_origin === "scheduled" &&
       snapshot.requestedRuntime === "auto" &&
