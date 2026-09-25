@@ -526,6 +526,43 @@ async function theScreenshots(browser, main) {
   }
 }
 
+/**
+ * A paper with nothing past "The latest" prints no box beside the lead.
+ *
+ * Three stories: the lead is the first, "The latest" carries the other two, and
+ * there is no seventh story to fill the box. The box is left out rather than
+ * filled with stories the page already prints, and the lead takes the width the
+ * box would have had -- `.reader .hero.single` (`src/reader-astra.css:324`),
+ * measured here as the lead's own width, because a class with no rule behind it
+ * would hide the box and still leave the column empty.
+ *
+ * This runs last: it deletes the rest of the paper.
+ */
+async function theBoxIsLeftOutWhenThePaperHasNothingLeft() {
+  const pg = await globalThis.__pgliteInstance__;
+  await pg.query(
+    `delete from articles where slug not in ('river-e2e-1','river-e2e-2','river-e2e-3')`,
+  );
+  await page.goto(`${base}/`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { level: 2, name: "The latest" }).waitFor({ timeout: 30_000 });
+  const counts = await assertEveryStoryIsPrintedOnce(page, "three stories in");
+  if (counts.cards !== 3)
+    throw new Error(`the short front page prints ${counts.cards} cards, expected 3`);
+  if (await page.locator(".record, .record-list").count())
+    throw new Error("the empty box was rendered anyway");
+  if (await page.locator(".river").count())
+    throw new Error("a river with nothing left in it was rendered");
+  // `clientWidth` is the hero's inside width: the 1px border on each side would
+  // otherwise read as a 2px gap and the lead would look like it left a sliver.
+  const [hero, lead] = await page.evaluate(() => [
+    document.querySelector(".hero")?.clientWidth ?? 0,
+    document.querySelector(".lead")?.getBoundingClientRect().width ?? 0,
+  ]);
+  if (Math.abs(hero - lead) > 1)
+    throw new Error(`the lead is ${Math.round(lead)}px inside a ${Math.round(hero)}px hero`);
+  step("with three stories the box is left out and the lead takes the whole width");
+}
+
 async function main() {
   await bootTheServer();
   await seedThePaper();
@@ -548,6 +585,7 @@ async function main() {
     await theListIsReadableWithNoJavaScript(browser, page);
     await theButtonWorksWithoutAnObserver(browser, page);
     await theScreenshots(browser, page);
+    await theBoxIsLeftOutWhenThePaperHasNothingLeft();
   } catch (err) {
     await dump(err);
   }
