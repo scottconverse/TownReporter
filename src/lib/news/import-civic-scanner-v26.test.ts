@@ -13,7 +13,7 @@ import {
   type ImportedStory,
 } from "./import-stories.ts";
 import { cardsFromReport, runBanner, type ReviewCard } from "./import-review.ts";
-import { darkSeedFromCard } from "./dark-seed.ts";
+import { DARK_SEED_KEY, darkSeedFromCard, takeDarkSeed } from "./dark-seed.ts";
 
 /**
  * The v2.6 reports. `precleanMarkdown`/`splitParagraphs` fold CRLF to LF, so
@@ -362,6 +362,31 @@ describe("the Dark Desk handoff an unverified card carries", () => {
     assert.match(seed, /^Unverified — Black Desk · BD1 — The Dry Creek annexation/);
     assert.equal(seed.split("Next check:").length - 1, 1, "the report's own check, once");
     assert.match(seed, /obtain a usable official recording/);
+  });
+
+  it("opens the Dark Desk's box with the seed, once, and then forgets it", () => {
+    const kept = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      removeItem: (key: string) => void kept.delete(key),
+    };
+    const seed = darkSeedFromCard(card("H2"));
+    kept.set(DARK_SEED_KEY, seed);
+    assert.equal(takeDarkSeed(storage), seed, "the box opens holding the hypothesis");
+    assert.equal(kept.has(DARK_SEED_KEY), false, "and the desk has taken it");
+    assert.equal(takeDarkSeed(storage), "", "so a later visit opens its own empty box");
+  });
+
+  it("opens its own empty box when the browser will not keep one", () => {
+    assert.equal(
+      takeDarkSeed({
+        getItem: () => {
+          throw new Error("sessionStorage is blocked");
+        },
+        removeItem: () => undefined,
+      }),
+      "",
+    );
   });
 
   it("banners a run that stopped early, and stays quiet on a whole one", () => {

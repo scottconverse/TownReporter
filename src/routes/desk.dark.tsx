@@ -59,6 +59,7 @@ import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-
 import { SearchTrailEntry } from "@/components/search-trail-entry";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
+import { takeDarkSeed } from "@/lib/news/dark-seed";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -113,6 +114,17 @@ function DarkPage() {
     try {
       const raw = sessionStorage.getItem(OPEN_KEY);
       if (raw) setOpenId(Number(raw));
+      /*
+        A hypothesis the editor sent over from an import's review screen arrives
+        here in `sessionStorage`, for the same reason the import paste does
+        (`import-review.ts:38`): a couple of long paragraphs cannot ride in a
+        URL. `takeDarkSeed` reads it once and clears it, so this opens the start
+        box holding the lead and the next visit opens its own empty one -- the
+        file it describes has been started by then, and re-filling the box would
+        invite a second copy of it.
+      */
+      const seed = takeDarkSeed(sessionStorage);
+      if (seed) setPaste(seed);
     } catch {
       /* ignore */
     }

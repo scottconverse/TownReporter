@@ -25,6 +25,40 @@ import { UNVERIFIED_FLAG } from "./import-stories.ts";
 export const DARK_SEED_KEY = "townreporter.dark.seed";
 
 /**
+ * The two `sessionStorage` calls the handoff makes, spelled out rather than
+ * borrowed from the DOM's `Storage`, so a test can stand in for a browser and
+ * so this module stays readable from Node.
+ */
+export type DarkSeedStore = {
+  getItem(key: string): string | null;
+  removeItem(key: string): void;
+};
+
+/**
+ * The seed waiting for the Dark Desk's start box, taken and cleared.
+ *
+ * The review screen parks it on the way over; the Dark Desk reads it here, in
+ * the mount effect, before the editor sees the form. It is taken exactly once:
+ * a browser that opens its own empty box afterwards is the correct behaviour,
+ * because the file it describes already exists and silently re-filling the box
+ * with a hypothesis that has been sent would invite a second copy of it.
+ *
+ * A browser that refuses to keep or hand back a seed -- private mode, a policy
+ * that blocks `sessionStorage`, a quota error -- opens an empty box, which is
+ * the same box the editor has always had. The hypothesis is not lost: it is
+ * still on the review screen behind them.
+ */
+export function takeDarkSeed(storage: DarkSeedStore): string {
+  try {
+    const seed = storage.getItem(DARK_SEED_KEY) ?? "";
+    if (seed) storage.removeItem(DARK_SEED_KEY);
+    return seed;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * The text the Dark Desk's "Start a file" box opens with.
  *
  * The first line becomes the file's title (`desk.dark.tsx` reads
