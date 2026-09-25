@@ -32,6 +32,9 @@ const SELECTION: ImportSelection = {
   score: "",
   triage: "",
   reporterNextStep: "",
+  storyId: "",
+  readiness: 0,
+  notes: "",
   hold: false,
   disclosureKey: "person",
   disclosureOther: "",
@@ -252,6 +255,9 @@ const IDEA_CARD: ImportSelection = {
   score: "7/20",
   triage: "Watch",
   reporterNextStep: "Ask the budget office what covers the gap.",
+  storyId: "",
+  readiness: 0,
+  notes: "",
   hold: false,
   disclosureKey: "outside-ai",
   disclosureOther: "",
@@ -537,5 +543,94 @@ describe("captureCitedPages: the existing capture path, best effort", () => {
     const stored = Buffer.from(docs[0]!.original).toString("utf8");
     assert.match(stored, /^SOURCE URL: https:\/\/example\.test\/ok\n/);
     assert.match(stored, /costs \$4 million a year/);
+  });
+});
+
+/* --- a v2.6 card, through the same write path ------------------------- */
+
+/**
+ * A Tier 1 packet from a civic-scanner v2.6 report, carrying the three things
+ * the report attaches to a story now: its filing label, its editorial
+ * readiness tier, and the claims ledger with its statuses.
+ */
+const V26_CARD: ImportSelection = {
+  headline: "Council approves on-bill financing for efficiency upgrades",
+  kind: "story",
+  section: "council",
+  dek: "",
+  body: PASTE_PARAGRAPHS[1]!,
+  citations: ["S1-A1 · City of Longmont ordinance O-2026-63 (Tier A for the city's own ordinance)"],
+  links: [],
+  score: "14/20",
+  triage: "Advance",
+  reporterNextStep: "Confirm the ordinance number against the published text.",
+  storyId: "S1",
+  readiness: 1,
+  notes: [
+    "Report ID: S1. Editorial tier 1. Triage: Advance.",
+    "Claims ledger — never published:",
+    "- VERIFIED [S1-A1]: On-bill financing was approved. — ordinance title and final reading",
+    "- UNVERIFIED: Interest rate and effective date. — confirm in the published ordinance text",
+    "Next step: Confirm the ordinance number against the published text.",
+  ].join("\n"),
+  hold: false,
+  disclosureKey: "outside-ai",
+  disclosureOther: "",
+};
+
+/**
+ * The tier and the filing label are provenance -- what the report said about
+ * this story, kept so an editor can find the packet again. The ledger is an
+ * editor note. Neither belongs in the draft: the claims ledger names what the
+ * run could NOT confirm, and a ledger in a story's body is a page of doubt
+ * printed under a headline the run filed ready.
+ */
+describe("a v2.6 card's tier, label and ledger, through the write path", () => {
+  it("keeps the label and tier as provenance, and the ledger in the editor notes", async () => {
+    const sql = await ensureSchema();
+    const result = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 97 },
+      { text: PASTE, tool: "Civic Scanner", stories: [V26_CARD] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    assert.equal(result.error, "");
+    assert.equal(result.refused.length, 0);
+
+    const leads = await sql.query(
+      "select notes_json, provenance_json from leads where newsroom_id=97",
+    ) as { notes_json: string; provenance_json: string }[];
+    assert.equal(leads.length, 1);
+    const provenance = JSON.parse(leads[0]!.provenance_json) as Record<string, unknown>;
+    assert.equal(provenance.storyId, "S1");
+    assert.equal(provenance.readiness, 1);
+
+    const notes = JSON.parse(leads[0]!.notes_json) as { editorialAssignment?: { text?: string } };
+    const text = notes.editorialAssignment?.text ?? "";
+    assert.match(text, /Claims ledger — never published/);
+    assert.match(text, /UNVERIFIED/);
+    assert.match(text, /S1-A1/);
+
+    const drafts = await sql.query("select body from drafts where newsroom_id=97") as {
+      body: string;
+    }[];
+    assert.equal(drafts.length, 1);
+    assert.equal(drafts[0]!.body.includes("Claims ledger"), false);
+    assert.equal(drafts[0]!.body.includes("VERIFIED"), false);
+  });
+
+  it("still keeps a card that states no notes' next step on the lead", async () => {
+    const sql = await ensureSchema();
+    await performImportFinishedStories(
+      { userId: "editor", newsroomId: 98 },
+      { text: PASTE, tool: "", stories: [{ ...V26_CARD, notes: "", storyId: "", readiness: 0 }] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    const [lead] = await sql.query(
+      "select notes_json from leads where newsroom_id=98",
+    ) as { notes_json: string }[];
+    assert.equal(
+      JSON.parse(lead!.notes_json).editorialAssignment.text,
+      "Confirm the ordinance number against the published text.",
+    );
   });
 });

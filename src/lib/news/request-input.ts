@@ -1018,6 +1018,26 @@ export const importStorySelection = z.looseObject({
   score: z.string().max(40).catch(""),
   triage: z.string().max(40).catch(""),
   reporterNextStep: z.string().max(LIMITS.draftDek).catch(""),
+  /**
+   * The report's own filing label ("S1", "H1"), kept as provenance so the
+   * editor can find the packet again. Never published.
+   */
+  storyId: z.string().max(12).catch(""),
+  /**
+   * The editorial readiness tier the report stated: 1 ready for edit, 2
+   * developing, 3 potential, and 0 for a report that stated none. A v2.6 paste
+   * always decides a card's kind and its tick from this, so an out-of-range
+   * number is read as unstated rather than as some tier between them.
+   */
+  readiness: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).catch(0),
+  /**
+   * The editor notes the card carried: the tier's own qualifier, the claims
+   * ledger with its statuses, the next check. Longer than a next step ever was
+   * -- `import-stories.server.ts` stores these under the same
+   * `editorialAssignment` and applies the same 4000 ceiling -- and never
+   * published.
+   */
+  notes: z.string().max(4_000).catch(""),
   /** A "Hold" triage imports with a visible Hold flag. */
   hold: z.boolean().catch(false),
   disclosureKey: z.enum(["outside-ai", "person", "other"]).catch("outside-ai"),

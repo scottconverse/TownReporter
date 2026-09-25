@@ -50,6 +50,7 @@ import {
   type DisclosureKey,
   type ImportKind,
   type ImportedStory,
+  type ReadinessTier,
 } from "./import-stories.ts";
 
 /** `leads.origin` for a story read out of a report the editor pasted. */
@@ -198,6 +199,17 @@ export type ImportSelection = {
   score: string;
   triage: string;
   reporterNextStep: string;
+  /** The report's own filing label ("S1"), kept as provenance. */
+  storyId: string;
+  /** The editorial readiness tier the report stated: 1 ready, 2 developing, 3 potential, 0 unstated. */
+  readiness: ReadinessTier;
+  /**
+   * The editor notes the card carried: the tier's qualifier, the claims ledger
+   * with its statuses, the next step. Stored, never published -- and used in
+   * place of `reporterNextStep` when the card has them, because the ledger is
+   * the part of the notes an editor must be able to find again.
+   */
+  notes: string;
   hold: boolean;
   disclosureKey: DisclosureKey;
   disclosureOther: string;
@@ -343,6 +355,14 @@ export async function performImportFinishedStories(
       score: story.score,
       triage: story.triage,
       citations: story.citations ?? [],
+      /*
+        What the report filed this story as: its own label, so the editor can
+        find the packet again, and the editorial readiness tier it stated. Both
+        are provenance -- the desk's record of where the story came from -- and
+        neither is ever published.
+      */
+      storyId: String(story.storyId ?? ""),
+      readiness: story.readiness ?? 0,
     });
     /*
       The documents the report named but did not link go in beside the real
@@ -401,10 +421,19 @@ export async function performImportFinishedStories(
         )
       `;
     }
-    if (story.reporterNextStep.trim()) {
+    /*
+      The notes a v2.6 report attaches to a story -- the tier's qualifier, the
+      claims ledger with its statuses, the next step -- go on the lead here,
+      under the same `editorialAssignment` a next step has always gone under.
+      They are longer than a next step ever was, so the cap is the paste's own
+      scale rather than the 1000 a sentence needed: a ledger cut off mid-row
+      would drop the very claims it exists to warn about.
+    */
+    const editorNotes = String(story.notes ?? "").trim() || story.reporterNextStep.trim();
+    if (editorNotes) {
       await sql`
         update leads
-        set notes_json = ${JSON.stringify({ editorialAssignment: { origin: "import", text: story.reporterNextStep.trim().slice(0, 1000) } })}
+        set notes_json = ${JSON.stringify({ editorialAssignment: { origin: "import", text: editorNotes.slice(0, 4000) } })}
         where id = ${leadId} and newsroom_id = ${context.newsroomId}
       `.catch(() => undefined);
     }
