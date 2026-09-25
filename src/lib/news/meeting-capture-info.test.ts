@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeEndedAt, parseInfoSidecar } from "./meeting-capture-info.ts";
+import { computeEndedAt, parseInfoSidecar, wholeDurationSeconds } from "./meeting-capture-info.ts";
 import { captureDisposition } from "./meeting-revision.ts";
 
 describe("meeting capture info sidecar timestamps", () => {
@@ -24,5 +24,21 @@ describe("meeting capture info sidecar timestamps", () => {
       endedAt,
       now: new Date("2026-09-23T05:30:00Z"),
     }), "provisional", "the real end time is inside the 24-hour provisional window");
+  });
+});
+
+describe("the duration the integer column can hold", () => {
+  it("rounds the float a transcriber reports, because the real one reported 69.9935 for a 70s clip", () => {
+    // The value that failed the real run's capture write.
+    assert.equal(wholeDurationSeconds(69.9935), 70);
+    assert.equal(wholeDurationSeconds(14_290.4), 14_290);
+    assert.equal(wholeDurationSeconds(0.5), 1, "the nearest second, so a half rounds up");
+    assert.equal(wholeDurationSeconds(0), 0, "a zero duration is a number, not an absence");
+  });
+
+  it("keeps an absent duration absent, so 'unknown' is never stored as zero seconds", () => {
+    for (const missing of [null, undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.equal(wholeDurationSeconds(missing), null, `${String(missing)}`);
+    }
   });
 });

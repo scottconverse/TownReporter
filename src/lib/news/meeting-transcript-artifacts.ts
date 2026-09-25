@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolutePathAnyPlatform, normalizeAbsolutePath } from "./absolute-path.ts";
 import { join, resolve } from "node:path";
 import type { Sql } from "../db.ts";
-import type { ParsedCaptionFile } from "./caption-parse.ts";
+import type { ParsedCaptionFile, TranscriptFormat } from "./caption-parse.ts";
 
 export type MeetingRetentionMode = "media" | "audio-only" | "transcript-only";
 export type MeetingTranscriptSegment = {
@@ -191,9 +191,33 @@ export function storeMeetingInfoSidecar(sourceInfoPath: string | null | undefine
   };
 }
 
+/**
+ * The extension the stored artifact keeps on disk.
+ *
+ * Unit R: a speech-to-text run's artifact IS the tool's own JSON, so it is
+ * stored with its own extension rather than relabelled `.vtt`. Storing JSON
+ * bytes under a caption extension would make the file's name disagree with its
+ * contents, and every integrity check downstream reads the bytes.
+ */
+export function transcriptArtifactExtension(format: TranscriptFormat): string {
+  if (format === "srv3") return ".srv3";
+  if (format === "textflowkit-json") return ".json";
+  return ".vtt";
+}
+
 export async function storeMeetingTranscriptArtifact(
   sql: Sql,
-  input: { newsroomId: number; videoId: string; parsed: ParsedCaptionFile; infoSourcePath?: string | null; sourceMethod?: string },
+  input: {
+    newsroomId: number; videoId: string; parsed: ParsedCaptionFile; infoSourcePath?: string | null; sourceMethod?: string;
+    /**
+     * Unit R: what produced this transcript -- tool version, model, device, and
+     * the hash of the audio it was transcribed from. A speech-to-text revision
+     * that does not say which model read it cannot be re-checked or explained
+     * to a reader, so this is recorded beside the artifact rather than folded
+     * into a free-text field.
+     */
+    provenance?: Record<string, unknown> | null;
+  },
   /** Internal test seam for exercising an abrupt process stop before rename. */
   fault?: ImmutableWriteFaultInjection,
 ): Promise<MeetingTranscriptArtifact> {
@@ -202,7 +226,7 @@ export async function storeMeetingTranscriptArtifact(
   retentionPlan(retentionMode);
   const targetDir = join(storageRoot, `newsroom-${input.newsroomId}`, input.videoId);
   mkdirSync(targetDir, { recursive: true });
-  const extension = input.parsed.format === "srv3" ? ".srv3" : ".vtt";
+  const extension = transcriptArtifactExtension(input.parsed.format);
   const targetPath = join(targetDir, `transcript-${input.parsed.sha256}${extension}`);
   let byteSize: number;
   if (resolve(input.parsed.sourcePath) !== resolve(targetPath)) {
@@ -223,16 +247,19 @@ export async function storeMeetingTranscriptArtifact(
         captionSha256: input.parsed.sha256,
       }))
     : parseTranscriptSegments(input.parsed.text, input.parsed.sha256);
+  const sourceMethod = input.sourceMethod ?? "yt-dlp-captions";
+  const provenanceJson = input.provenance ? JSON.stringify({ ...input.provenance, sourceMethod }) : null;
   const rows = await sql.query<{ id: number; captured_at: string }>(
     `insert into meeting_transcript_artifacts
-       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size,info_path,info_sha256,info_bytes,info_missing_reason,integrity_status,integrity_detail,integrity_checked_at)
-     values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size,info_path,info_sha256,info_bytes,info_missing_reason,integrity_status,integrity_detail,integrity_checked_at,provenance_json)
+     values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15)
      on conflict (newsroom_id,video_id,artifact_type,sha256)
      do update set storage_path=excluded.storage_path,format=excluded.format,source_method=excluded.source_method,
        retention_mode=excluded.retention_mode,byte_size=excluded.byte_size,info_path=excluded.info_path,info_sha256=excluded.info_sha256,info_bytes=excluded.info_bytes,info_missing_reason=excluded.info_missing_reason,
-       integrity_status=excluded.integrity_status,integrity_detail=excluded.integrity_detail,integrity_checked_at=excluded.integrity_checked_at,updated_at=now()
+       integrity_status=excluded.integrity_status,integrity_detail=excluded.integrity_detail,integrity_checked_at=excluded.integrity_checked_at,
+       provenance_json=coalesce(excluded.provenance_json,meeting_transcript_artifacts.provenance_json),updated_at=now()
      returning id,captured_at::text as captured_at`,
-    [input.newsroomId, input.videoId, targetPath, input.parsed.format, input.parsed.sha256, input.sourceMethod ?? "yt-dlp-captions", retentionMode, byteSize, sidecar.infoPath, sidecar.infoSha256, sidecar.infoBytes, sidecar.infoMissingReason, input.infoSourcePath && sidecar.infoMissingReason ? "sidecar-missing" : "valid", sidecar.infoMissingReason],
+    [input.newsroomId, input.videoId, targetPath, input.parsed.format, input.parsed.sha256, sourceMethod, retentionMode, byteSize, sidecar.infoPath, sidecar.infoSha256, sidecar.infoBytes, sidecar.infoMissingReason, input.infoSourcePath && sidecar.infoMissingReason ? "sidecar-missing" : "valid", sidecar.infoMissingReason, provenanceJson],
   );
   const artifactId = rows[0]?.id;
   if (!artifactId) throw new Error("Meeting transcript artifact insert returned no id.");
@@ -250,7 +277,7 @@ export async function storeMeetingTranscriptArtifact(
   return {
     id: artifactId, newsroomId: input.newsroomId, videoId: input.videoId, artifactType: "transcript",
     storagePath: targetPath, format: input.parsed.format, sha256: input.parsed.sha256, byteSize,
-    capturedAt: rows[0]!.captured_at, sourceMethod: input.sourceMethod ?? "yt-dlp-captions", retentionMode,
+    capturedAt: rows[0]!.captured_at, sourceMethod, retentionMode,
   };
 }
 

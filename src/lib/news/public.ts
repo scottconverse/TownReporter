@@ -10,6 +10,7 @@ import { collapsePrintedDuplicates } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { publicSlug, publicTopic } from "./request-input.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
@@ -75,14 +76,14 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
 );
 
 export const getPublishedArticle = createServerFn({ method: "GET" })
-  .validator((slug: string) => slug)
+  .validator((slug: string) => publicSlug.parse(slug))
   .handler(async ({ data: slug }) => {
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
     try {
       const sql = await getSql();
       const rows = await sql<ArticleRow & { routine_notice: boolean }>`
       select id, slug, headline, dek, body, topic, source_urls, status, published_at,
-             provenance_json, form, found_note, unanswered,
+             provenance_json, form, found_note, unanswered, disclosure_text,
              /* Whether a fixed-template routine notice printed this row. The
                 reader-facing disclosure line depends on it, and it cannot be
                 inferred from the article's own columns: a routine notice is
@@ -113,7 +114,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
   });
 
 export const listPublishedByTopic = createServerFn({ method: "GET" })
-  .validator((topic: string) => topic)
+  .validator((topic: string) => publicTopic.parse(topic))
   .handler(async ({ data: topic }) => {
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
     try {

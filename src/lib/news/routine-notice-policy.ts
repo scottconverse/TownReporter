@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { ForbiddenError } from "./membership.ts";
+import { cleanOrRaw, routinePolicyInput } from "./request-input.ts";
 
 export const ROUTINE_NOTICE_FORMATS = [
   { key: "library-notice", label: "Library notices", description: "Routine library notices." },
@@ -381,7 +382,8 @@ export const getRoutineNoticePolicy = createServerFn({ method: "GET" })
   });
 export const saveRoutineNoticePolicy = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: SaveRoutineNoticePolicyInput) => input)
+  // Bounded here; `cleanRoutineNoticePolicy` still names the refusal.
+  .validator((input: SaveRoutineNoticePolicyInput) => cleanOrRaw<SaveRoutineNoticePolicyInput>(routinePolicyInput)(input))
   .handler(async ({ context, data }): Promise<RoutineNoticePolicyResult> => {
     try {
       return {

@@ -15,7 +15,28 @@ export function mayInheritLeadSources(draft: Partial<DraftRow>): boolean {
   const research = memo(draft.research_json);
   return !publicEvidenceWasRemoved(draft) && research.researchScope !== "supplied" && research.citationPolicy !== "explicit";
 }
+/**
+ * A draft whose text came in from an editor's import, not from the drafting
+ * model (see import-stories.server.ts).
+ *
+ * The two are opposite shapes and the evidence gate is built for one of them.
+ * A model draft is prose written ABOUT records gathered beside it, so when the
+ * prose changes a person has to check the new prose still matches those
+ * records. An imported story's text IS the material -- a report an editor read
+ * and chose -- and its sources are the pages it cites. Editing a name in it and
+ * saving is ordinary desk work, and routing that edit into a review of
+ * model-extracted claims would ask the editor to compare the story against
+ * something that was never extracted.
+ *
+ * This exempts the draft from that one gate and nothing else: the section is
+ * still confirmed for the version being printed, the named-outlet credit check
+ * still runs, and the disclosure line still reaches the reader.
+ */
+export function isImportedText(draft: Partial<DraftRow>): boolean {
+  return memo(draft.research_json).importedText === true;
+}
 export function evidenceNeedsReview(draft: Partial<DraftRow>, body: string): boolean {
+  if (isImportedText(draft)) return false;
   const review = memo(draft.research_json).evidenceReview as { required?: boolean } | undefined;
   const hasEvidence = [draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered].some(x => Boolean(x?.trim() && !["[]", "{}"].includes(x.trim())));
   return review?.required === true || (hasEvidence && normalized(body) !== normalized(draft.body ?? ""));

@@ -583,14 +583,25 @@
   grid-column: 1;
   grid-row: 1;
 }
+/*
+  One composer under another in the first column. This was a pinned
+  `grid-row: 2`, which was right while the Desk had a single composer; the
+  import panel and the one-story paste panel are composers too, so all three
+  landed in the same cell and drew on top of each other (measured on the built
+  server: write box, #import-story and #paste-one-story all at col 1 / row 2,
+  and #paste-one-text sharing its exact rect with #import-story's textarea).
+  Column only, no row: the grid stacks them in document order, and any composer
+  added later is placed the same way instead of being hidden.
+*/
 .desk-ltr.astra .story-composer {
   grid-column: 1;
-  grid-row: 2;
   scroll-margin-top: 92px;
 }
 .desk-ltr.astra .gc-queue {
   grid-column: 1;
-  grid-row: 3 / span 2;
+  /* Below the composers, whatever number of them there are: auto-placement
+     steps over occupied cells, so this only moves down if one is added. */
+  grid-row: 5 / span 2;
 }
 .desk-ltr.astra .gc-darkdesk {
   grid-column: 2;

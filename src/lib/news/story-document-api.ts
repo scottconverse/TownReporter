@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth";
+import { storyDocumentDownloadInput, storyDocumentListInput } from "./request-input.ts";
 export const uploadStoryDocument = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((data: FormData) => data)
@@ -22,7 +23,7 @@ export const uploadStoryDocument = createServerFn({ method: "POST" })
   });
 export const listStoryDocuments = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((data: { leadId: number }) => data)
+  .validator((data: { leadId: number }) => storyDocumentListInput.parse(data))
   .handler(async ({ data, context }) => {
     const { getSql } = await import("../db.ts");
     const sql = await getSql();
@@ -41,7 +42,7 @@ export const listStoryDocuments = createServerFn({ method: "GET" })
   });
 export const downloadStoryDocument = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((data: { id: string; extracted?: boolean }) => data)
+  .validator((data: { id: string; extracted?: boolean }) => storyDocumentDownloadInput.parse(data))
   .handler(async ({ data, context }) => {
     const { getSql } = await import("../db.ts");
     const sql = await getSql();

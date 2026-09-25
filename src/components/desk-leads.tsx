@@ -250,6 +250,11 @@ export function LeadRowView({
             Section not chosen — pick one
           </span>
         ) : null}
+        {lead.origin === "import" ? (
+          <span className="chip imported" title="Read out of a report you pasted, not written by the desk.">
+            Imported
+          </span>
+        ) : null}
         {dup ? (
           <span
             className="chip dup"

@@ -21,8 +21,15 @@ export const AI_DISCLOSURE =
 export const ROUTINE_NOTICE_DISCLOSURE =
   "A fixed template assembled this routine notice from owner-approved public sources. No AI wrote it and no reporter rewrote it. The sources are listed under Sources.";
 
-export function AiDisclosure({ routine = false }: { routine?: boolean }) {
-  return (
-    <p className="ai-disclosure">{routine ? ROUTINE_NOTICE_DISCLOSURE : AI_DISCLOSURE}</p>
-  );
+export function AiDisclosure({ routine = false, text = "" }: { routine?: boolean; text?: string }) {
+  /*
+    An imported story gets its own line. The editor chose the wording on the
+    import screen (src/routes/desk.import.tsx) and it is stored on the article,
+    because the standard line above would be false for a report an outside
+    research tool wrote: it would claim this paper's AI drafted it. Empty text
+    -- every story the desk wrote, and every article printed before migration
+    0088 -- falls back to exactly what used to print.
+  */
+  const line = text.trim() || (routine ? ROUTINE_NOTICE_DISCLOSURE : AI_DISCLOSURE);
+  return <p className="ai-disclosure">{line}</p>;
 }

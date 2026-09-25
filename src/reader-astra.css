@@ -315,6 +315,15 @@
   background: var(--surface);
   overflow: hidden;
 }
+/*
+  A paper with no stories past "The latest" has nothing to put in the box
+  beside the lead, and the box is not rendered at all -- the grid then has one
+  child and would leave the second column empty, so the lead takes the full
+  width instead. `index.tsx` adds this class when the box is absent.
+*/
+.reader .hero.single {
+  grid-template-columns: 1fr;
+}
 .reader .lead {
   padding: 39px 42px 34px;
 }
@@ -1781,4 +1790,48 @@
 }
 .reader .record-list {
   list-style: none;
+}
+
+/* The latest-stories river: every published story, below the front page's
+   lead, "The latest" list, the "More of the story" box and the opinion band,
+   which the loader excludes. */
+.reader .river {
+  padding: 30px 0 45px;
+  border-top: 1px solid var(--line);
+}
+.reader .riverintro {
+  font-size: 14px;
+  color: var(--muted);
+  margin: -12px 0 6px;
+}
+.reader .river .newsrow h3 {
+  font-size: 20px;
+}
+/* One line, clamped to two: the river is a list, not a second front page. */
+.reader .river .newsrow p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.reader .river .more {
+  display: block;
+  text-align: center;
+}
+.reader .riverend {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 20px;
+  text-align: center;
+}
+/* The batch announcement reserves its line, so it never shifts the page. */
+.reader .rivernote {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 10px;
+  min-height: 22px;
+  text-align: center;
+}
+.reader .riversentinel {
+  height: 1px;
 }

@@ -36,7 +36,38 @@ import {
 } from "./meeting-article-revision.ts";
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
-import { cleanPublishId } from "./request-input.ts";
+import {
+  addSourceInput,
+  bulkSourceInput,
+  correctionInput,
+  draftEditInput,
+  draftHistoryInput,
+  draftLeadInput,
+  draftMeetingReviewInput,
+  fileLeadInput,
+  followUpCreateInput,
+  followUpReplyInput,
+  followUpsInput,
+  idOnlyInput,
+  jobIdInput,
+  leadIdInput,
+  leadStatusInput,
+  meetingArticleReviewInput,
+  outletInput,
+  packDeleteInput,
+  packRenameInput,
+  packSaveInput,
+  importStoriesInput,
+  importStructureInput,
+  pullTodoInput,
+  reportingNotesInput,
+  rowId,
+  runScanInput,
+  slugInput,
+  sourceStatusInput,
+  writeStoryInput,
+  cleanPublishId,
+} from "./request-input.ts";
 import {
   evidenceNeedsReview,
   evidenceReviewToken,
@@ -170,7 +201,7 @@ async function upsertSource(
 
 export const addSource = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { url: string; title: string; kind: string; tier: string }) => input)
+  .validator((input: unknown) => addSourceInput.parse(input))
   .handler(async ({ context, data }) => {
     const parsed = parseHttpUrl(data.url);
     if (!parsed.ok) return { ok: false as const, error: parsed.error };
@@ -198,7 +229,7 @@ export const addSource = createServerFn({ method: "POST" })
 
 export const addSourcesBulk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { text: string }) => input)
+  .validator((input: unknown) => bulkSourceInput.parse(input))
   .handler(async ({ context, data }) => {
     const rows = parseSourceLines(data.text);
     if (rows.length === 0) {
@@ -231,7 +262,7 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
 
 export const setSourceStatus = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { id: number; status: "accepted" | "rejected" | "proposed" }) => input)
+  .validator((input: unknown) => sourceStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await sql`
@@ -254,6 +285,9 @@ export const listLeads = createServerFn({ method: "GET" })
     >`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+             -- "import" = read out of a report the editor pasted; null = not
+             -- recorded. The Queue shows the Imported badge off this.
+             l.origin,
              coalesce(a.headline, (select nullif(d.headline, '') from drafts d
                where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
                order by d.updated_at desc,d.id desc limit 1)) as story_headline,
@@ -349,7 +383,7 @@ async function insertLeadWithDraft(
 
 export const fileLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { headline: string; why: string; topic: string; url?: string }) => input)
+  .validator((input: unknown) => fileLeadInput.parse(input))
   .handler(async ({ context, data }) => {
     const headline = data.headline.trim().slice(0, 180);
     const why = data.why.trim().slice(0, 800);
@@ -379,13 +413,14 @@ export const fileLead = createServerFn({ method: "POST" })
 
 export const getLead = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     kickJobs();
     const sql = await getSql();
     await ensureDraftMemoColumn();
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
+             l.origin,
              l.possible_duplicate_of,
              case when prior.id is null then null else jsonb_build_object(
                'id', prior.id, 'headline', prior.headline, 'status', prior.status
@@ -597,9 +632,7 @@ export const listScanSourcePacksFn = createServerFn({ method: "GET" })
 /** P0-2: create or update a named pack from an explicit accepted source set. */
 export const saveScanSourcePackFn = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: { name: string; sourceIds: number[]; packId?: number }) => input,
-  )
+  .validator((input: unknown) => packSaveInput.parse(input))
   .handler(async ({ context, data }) => {
     const { saveScanSourcePack } = await import("./scan-source-packs.server.ts");
     return saveScanSourcePack({
@@ -614,7 +647,7 @@ export const saveScanSourcePackFn = createServerFn({ method: "POST" })
 /** P0-2: rename a pack without touching its membership. */
 export const renameScanSourcePackFn = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { packId: number; name: string }) => input)
+  .validator((input: unknown) => packRenameInput.parse(input))
   .handler(async ({ context, data }) => {
     const { renameScanSourcePack } = await import("./scan-source-packs.server.ts");
     await renameScanSourcePack({
@@ -628,7 +661,7 @@ export const renameScanSourcePackFn = createServerFn({ method: "POST" })
 /** P0-2: delete a pack. Accepted sources themselves are untouched. */
 export const deleteScanSourcePackFn = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { packId: number }) => input)
+  .validator((input: unknown) => packDeleteInput.parse(input))
   .handler(async ({ context, data }) => {
     const { deleteScanSourcePack } = await import("./scan-source-packs.server.ts");
     await deleteScanSourcePack({ newsroomId: owned(context), packId: data.packId });
@@ -636,19 +669,8 @@ export const deleteScanSourcePackFn = createServerFn({ method: "POST" })
   });
 export const runScan = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (
-      input:
-        | {
-            modelChoice?: string;
-            modelEffort?: ModelEffort | null;
-            sectionKey?: string;
-            customSourceIds?: number[];
-            packId?: number;
-          }
-        | undefined,
-    ) => input ?? {},
-  )
+  // `input ?? {}` is preserved by the schema: a no-dial run is a real run.
+  .validator((input: unknown) => runScanInput.parse(input))
   .handler(async ({ context, data }) => {
     /*
       Check the model BEFORE spending the scan.
@@ -742,6 +764,25 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         failures: [e instanceof Error ? e.message : String(e)],
         archivePath: null,
       };
+    }
+  }
+  /*
+    Speech-to-text (unit R) runs AFTER the capture pass, never inside it. A
+    meeting that ended at audio because captions were unavailable is exactly the
+    one worth transcribing -- but textflowkit is optional and external, so a
+    missing or unhappy tool adds a line to the coverage summary instead of
+    failing a scan that otherwise did its job. When it is not installed nothing
+    is queued and the coverage line is unchanged.
+  */
+  if (meetingAwareness) {
+    try {
+      const { enqueueMissingTranscriptions } = await import("./textflowkit-transcribe.server.ts");
+      const speech = await enqueueMissingTranscriptions(sql, { newsroomId: owned(context), userId: job.user_id });
+      if (speech.queued > 0) {
+        meetingAwareness.coverageLine = `${meetingAwareness.coverageLine} (speech-to-text: ${speech.queued} queued)`;
+      }
+    } catch (e) {
+      meetingAwareness.failures.push(`speech-to-text: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   let runId = job.subject_id;
@@ -1904,12 +1945,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
 
 export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (
-      input:
-        number | { leadId: number; modelChoice?: string; modelEffort?: ModelEffort | null; researchScope?: "public" | "supplied" },
-    ) => input,
-  )
+  .validator((input: unknown) => draftLeadInput.parse(input))
   .handler(async ({ context, data }) => {
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
@@ -1958,16 +1994,7 @@ export const listRecentStoryWork = createServerFn({ method: "GET" })
 
 export const writeStoryFromInput = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: {
-      text: string;
-      documentIds?: string[];
-      modelChoice?: string;
-      modelEffort?: ModelEffort | null;
-      researchScope?: "public" | "supplied";
-      sectionKey?: string;
-    }) => input,
-  )
+  .validator((input: unknown) => writeStoryInput.parse(input))
   .handler(async ({ context, data }) => {
     const { writeStoryForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
     return writeStoryForAuthenticatedEditor({
@@ -1981,19 +2008,47 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
     });
   });
 
+/**
+ * "Import finished stories" — the second choice in New story. The editor
+ * pastes a report (or a single story); `import-stories.ts` reads the story
+ * boundaries and their parts with no model at all when the text has headings.
+ * This call is the exception: the editor reaches it from the review screen for
+ * a paste where the deterministic reader found nothing, and it asks ONE
+ * question about structure and checks every sentence back against the paste.
+ */
+export const structureImportStories = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => importStructureInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { readImportStructure } = await import("./import-stories.server.ts");
+    return readImportStructure({
+      text: data.text,
+      newsroomId: owned(context),
+      modelChoice: data.modelChoice,
+      modelEffort: data.modelEffort,
+    });
+  });
+
+/**
+ * File the ticked cards: one lead and one saved draft each, in the Queue,
+ * every word checked against the paste first. Nothing here publishes — an
+ * imported story leaves the desk through the ordinary Publish button, with
+ * the ordinary gates. The cited pages are captured in the background.
+ */
+export const importFinishedStories = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => importStoriesInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { performImportFinishedStories } = await import("./import-stories.server.ts");
+    return performImportFinishedStories(
+      { userId: context.userId, newsroomId: owned(context) },
+      { text: data.text, tool: data.tool, stories: data.stories },
+    );
+  });
+
 export const saveReportingNotes = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: {
-      leadId: number;
-      add?: string;
-      toggle?: number;
-      scratch?: string;
-      storyDirection?: string;
-      researchScope?: "public" | "supplied";
-      todos?: NoteTodo[];
-    }) => input,
-  )
+  .validator((input: unknown) => reportingNotesInput.parse(input))
   .handler(async ({ context, data }) => {
     await ensureDraftMemoColumn();
     return withTransaction(async (sql) => {
@@ -2035,7 +2090,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
 
 export const pullTodo = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { leadId: number; query: string; index?: number }) => input)
+  .validator((input: unknown) => pullTodoInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
       await assertRate(context.userId, "pull", owned(context));
@@ -2089,7 +2144,7 @@ export const pullTodo = createServerFn({ method: "POST" })
 
 export const listPullJobs = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((input: { leadId: number }) => input)
+  .validator((input: unknown) => leadIdInput.parse(input))
   .handler(async ({ context, data }): Promise<PullRunView[]> => {
     const sql = await getSql();
     const rows = await sql<{
@@ -2141,7 +2196,7 @@ export const listPullJobs = createServerFn({ method: "GET" })
 
 export const stopPullJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { jobId: number }) => input)
+  .validator((input: unknown) => jobIdInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const changed = await sql<{ id: number }>`
@@ -2159,7 +2214,7 @@ export const stopPullJob = createServerFn({ method: "POST" })
 
 export const continuePullJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { jobId: number }) => input)
+  .validator((input: unknown) => jobIdInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
       await assertRate(context.userId, "pull", owned(context));
@@ -2224,7 +2279,7 @@ export const continuePullJob = createServerFn({ method: "POST" })
 
 export const saveDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: import("./draft-edit.server.ts").DraftEditInput) => input)
+  .validator((input: unknown) => draftEditInput.parse(input))
   .handler(async ({ context, data }) => {
     const { saveDraftForEditor } = await import("./draft-edit.server.ts");
     return saveDraftForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
@@ -2232,7 +2287,7 @@ export const saveDraft = createServerFn({ method: "POST" })
 
 export const setLeadStatus = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { id: number; status: "held" | "killed" | "new" }) => input)
+  .validator((input: unknown) => leadStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     await sql`
@@ -2260,7 +2315,8 @@ import {
 
 export const listFollowUps = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((input?: { status?: "open" | "answered" | "dropped"; limit?: number }) => input ?? {})
+  // `input ?? {}` is preserved by the schema: listing with no filter is real.
+  .validator((input: unknown) => followUpsInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
       return await _performListFollowUps(context, data);
@@ -2276,30 +2332,22 @@ export const listFollowUps = createServerFn({ method: "GET" })
 
 export const createFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator(
-    (input: {
-      leadId?: number | null;
-      articleId?: number | null;
-      who: string;
-      what: string;
-      dueOn?: string | null;
-    }) => input,
-  )
+  .validator((input: unknown) => followUpCreateInput.parse(input))
   .handler(async ({ context, data }) => _performCreateFollowUp(context, data));
 
 export const recordFollowUpReply = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { id: number; replyText: string; repliedOn?: string | null }) => input)
+  .validator((input: unknown) => followUpReplyInput.parse(input))
   .handler(async ({ context, data }) => _performRecordFollowUpReply(context, data));
 
 export const nudgeFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { id: number }) => input)
+  .validator((input: unknown) => idOnlyInput.parse(input))
   .handler(async ({ context, data }) => _performNudgeFollowUp(context, data.id));
 
 export const dropFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { id: number }) => input)
+  .validator((input: unknown) => idOnlyInput.parse(input))
   .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
 
 /**
@@ -2364,7 +2412,7 @@ export async function performConfirmDraftTopic(
 
 export const confirmDraftTopic = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((leadId: number) => leadId)
+  .validator((leadId: unknown) => rowId.parse(leadId))
   .handler(async ({ context, data: leadId }) => performConfirmDraftTopic(context, leadId));
 
 /**
@@ -2544,7 +2592,7 @@ export async function performOverrideNamedOutlet(
 
 export const overrideNamedOutlet = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: { leadId: number; outlet: string }) => data)
+  .validator((data: unknown) => outletInput.parse(data))
   .handler(async ({ context, data }) =>
     performOverrideNamedOutlet(context, data.leadId, data.outlet),
   );
@@ -2613,7 +2661,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     (sql) =>
       sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-             provenance_json, form, found_note, unanswered, research_json
+             provenance_json, form, found_note, unanswered, research_json, disclosure_text
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
       order by updated_at desc, id desc limit 1
     `,
@@ -2756,12 +2804,16 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
-        provenance_json, form, found_note, unanswered, origin_draft_id
+        provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text
       )
       values (
         ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
         ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
-        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id}
+        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id},
+        /* The line the editor chose on the import screen, carried on the draft.
+           Empty for every story the desk wrote, which prints the standard AI
+           line exactly as before. */
+        ${row.disclosure_text || ""}
       ) returning id
     `;
       await recordPublishedMeetingEvidence(sql, {
@@ -2810,7 +2862,7 @@ export const publishLead = createServerFn({ method: "POST" })
 
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { articleSlug?: string; body: string; meetingReviewId?: number }) => input)
+  .validator((input: unknown) => correctionInput.parse(input))
   .handler(async ({ context, data }) => {
     const { performAddCorrection } = await import("./corrections.ts");
     return performAddCorrection({ userId: context.userId, newsroomId: owned(context) }, data);
@@ -2831,13 +2883,7 @@ export type DeskPublishedRow = {
 
 export const resolveMeetingArticleReview = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: {
-    reviewId: number;
-    resolution: "still-accurate" | "correction-required";
-    acceptedArtifactId: number;
-    note: string;
-    confirmedSegmentIndices: number[];
-  }) => input)
+  .validator((input: unknown) => meetingArticleReviewInput.parse(input))
   .handler(async ({ context, data }) => {
     if (!data.note.trim()) return { ok: false as const, error: "Record what you checked or what needs correction." };
     await withTransaction((sql) => resolvePublishedMeetingReview(sql, {
@@ -2854,14 +2900,7 @@ export const resolveMeetingArticleReview = createServerFn({ method: "POST" })
 
 export const resolveDraftMeetingReview = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: {
-    leadId: number;
-    draftId: number;
-    evidenceToken: string;
-    acceptedArtifactId: number;
-    confirmedSegmentIndexes: number[];
-    note: string;
-  }) => input)
+  .validator((input: unknown) => draftMeetingReviewInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
       const result = await withTransaction((sql) => recordDraftTranscriptRevisionReview(sql, {
@@ -2885,7 +2924,7 @@ export const resolveDraftMeetingReview = createServerFn({ method: "POST" })
 
 export const listDraftHistory = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((leadId: number) => leadId)
+  .validator((leadId: unknown) => rowId.parse(leadId))
   .handler(async ({ context, data: leadId }) => {
     const sql = await getSql();
     const drafts = await sql<{
@@ -2933,7 +2972,7 @@ export const listDraftHistory = createServerFn({ method: "GET" })
 
 export const getDraftHistoryItem = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((input: { leadId: number; draftId: number }) => input)
+  .validator((input: unknown) => draftHistoryInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
     const rows = await sql<{
@@ -3082,7 +3121,7 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
  */
 export const deleteLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((leadId: number) => leadId)
+  .validator((leadId: unknown) => rowId.parse(leadId))
   .handler(async ({ context, data: leadId }) => {
     const sql = await getSql();
     /*
@@ -3134,7 +3173,7 @@ export const deleteLead = createServerFn({ method: "POST" })
  */
 export const deleteArticle = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((slug: string) => slug)
+  .validator((slug: unknown) => slugInput.parse(slug))
   .handler(async ({ context, data: slug }) => {
     const sql = await getSql();
     const found = await sql<{ id: number }>`

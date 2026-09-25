@@ -35,23 +35,36 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
       )}
 
       {row.status === "captured" && (
-        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
-          <div><dt className="meta">Caption format</dt><dd>{row.captionFormat ?? "—"}</dd></div>
-          <div className="col-span-2"><dt className="meta">Caption hash</dt><dd className="break-all">{row.captionSha256 ?? "—"}</dd></div>
-          {row.artifactFormat ? (
-            <>
-              <div><dt className="meta">Artifact format</dt><dd>{row.artifactFormat}</dd></div>
-              <div><dt className="meta">Artifact bytes</dt><dd>{row.artifactBytes ?? "—"}</dd></div>
-              <div className="col-span-2"><dt className="meta">Artifact hash</dt><dd className="break-all">{row.artifactSha256 ?? "—"}</dd></div>
-            </>
-          ) : null}
-          {row.audioFormat ? (
-            <div className="col-span-2"><dt className="meta">Audio fallback</dt><dd>{row.audioFormat}, {row.audioBytes ?? "?"} bytes — {row.audioTriggerReason ?? "reason not recorded"}</dd></div>
-          ) : null}
-          <div><dt className="meta">Disposition</dt><dd>{row.captureDisposition ?? "final"}</dd></div>
-          <div><dt className="meta">Revisions</dt><dd>{row.revisionCount}</dd></div>
-          <div><dt className="meta">Settled under churn</dt><dd>{row.settledUnderChurn ? "yes" : "no"}</dd></div>
-        </dl>
+        <>
+          {/*
+            Unit R. A transcript this newsroom produced by listening to the
+            recording is not the city's own record, and the difference matters
+            to anyone citing it. Said where the transcript's hashes are shown,
+            so it cannot be missed by scrolling past it.
+          */}
+          {row.captionFormat === "textflowkit-json" && (
+            <p className="mt-2 text-sm">
+              Transcript: speech-to-text (Whisper via textflowkit), not official captions
+            </p>
+          )}
+          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+            <div><dt className="meta">Caption format</dt><dd>{row.captionFormat ?? "—"}</dd></div>
+            <div className="col-span-2"><dt className="meta">Caption hash</dt><dd className="break-all">{row.captionSha256 ?? "—"}</dd></div>
+            {row.artifactFormat ? (
+              <>
+                <div><dt className="meta">Artifact format</dt><dd>{row.artifactFormat}</dd></div>
+                <div><dt className="meta">Artifact bytes</dt><dd>{row.artifactBytes ?? "—"}</dd></div>
+                <div className="col-span-2"><dt className="meta">Artifact hash</dt><dd className="break-all">{row.artifactSha256 ?? "—"}</dd></div>
+              </>
+            ) : null}
+            {row.audioFormat ? (
+              <div className="col-span-2"><dt className="meta">Audio fallback</dt><dd>{row.audioFormat}, {row.audioBytes ?? "?"} bytes — {row.audioTriggerReason ?? "reason not recorded"}</dd></div>
+            ) : null}
+            <div><dt className="meta">Disposition</dt><dd>{row.captureDisposition ?? "final"}</dd></div>
+            <div><dt className="meta">Revisions</dt><dd>{row.revisionCount}</dd></div>
+            <div><dt className="meta">Settled under churn</dt><dd>{row.settledUnderChurn ? "yes" : "no"}</dd></div>
+          </dl>
+        </>
       )}
 
       {row.aligned !== null && (

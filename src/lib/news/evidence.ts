@@ -5,6 +5,7 @@ import type { ProvenanceItem } from "./findings.ts";
 import { describeTextChanges, type VersionDiff } from "./retrieve.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { evidenceUrl, evidenceCompareInput, rowId } from "./request-input.ts";
 
 export type CaptureObservationKind =
   | "captured"
@@ -430,17 +431,17 @@ export async function comparePublishedEvidence(data: {
 }
 
 export const getPublicEvidence = createServerFn({ method: "GET" })
-  .validator((versionId: number) => versionId)
+  .validator((versionId: number) => rowId.parse(versionId))
   .handler(async ({ data: versionId }) => loadPublicEvidence(versionId));
 
 export const listPublicHistory = createServerFn({ method: "GET" })
-  .validator((url: string) => url)
+  .validator((url: string) => evidenceUrl.parse(url))
   .handler(async ({ data: url }) => listPublicCaptureHistory(url));
 
 export const listPublicVersionsForUrl = createServerFn({ method: "GET" })
-  .validator((url: string) => url)
+  .validator((url: string) => evidenceUrl.parse(url))
   .handler(async ({ data: url }) => listPublicCaptureHistory(url));
 
 export const comparePublicEvidence = createServerFn({ method: "GET" })
-  .validator((input: { url?: string; a?: number; b?: number }) => input)
+  .validator((input: { url?: string; a?: number; b?: number }) => evidenceCompareInput.parse(input))
   .handler(async ({ data }) => comparePublishedEvidence(data));

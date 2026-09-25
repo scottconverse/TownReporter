@@ -42,6 +42,7 @@ export {
   TRASH_DAYS,
   purgeAllOldTrash,
 } from "./trash-store";
+import { trashId } from "./request-input.ts";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
@@ -119,7 +120,9 @@ export const listTrash = createServerFn({ method: "GET" })
  */
 export const restoreTrashItem = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  // A row id, not a cast: the store hands anything it is given to a 4-byte
+  // integer column, so a 1.5 or a negative fails there instead of here.
+  .validator((id: number) => trashId.parse(id))
   .handler(async ({ context, data: id }) => {
     const { withTransaction } = await import("@/lib/db");
     const sql = await getSql();
@@ -176,7 +179,9 @@ export const restoreTrashItem = createServerFn({ method: "POST" })
 /** Really gone, now, rather than in thirty days. */
 export const purgeTrashItem = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  // A row id, not a cast: the store hands anything it is given to a 4-byte
+  // integer column, so a 1.5 or a negative fails there instead of here.
+  .validator((id: number) => trashId.parse(id))
   .handler(async ({ context, data: id }) => {
     const sql = await getSql();
     const gone = await sql<{ label: string; kind: TrashKind; payload: string }>`

@@ -204,3 +204,30 @@ export function claudeChildEnv(): NodeJS.ProcessEnv {
 export function mediaToolChildEnv(): NodeJS.ProcessEnv {
   return cliChildEnv(MEDIA_TOOL_EXTRA);
 }
+
+/**
+ * The environment for a textflowkit child (unit R).
+ *
+ * A transcription needs no credential at all -- it runs a downloaded model
+ * over a local audio file -- so this adds only what a Python CLI genuinely
+ * cannot resolve for itself: where the operator said the tool is, where the
+ * model weights are cached (Whisper keeps them under `XDG_CACHE_HOME` or
+ * `~/.cache/whisper`, and a server with neither re-downloads hundreds of
+ * megabytes on every run), and the two names that decide how Python encodes
+ * the transcript it prints on Windows.
+ *
+ * It deliberately adds NO credential name, no DATABASE_URL and no provider
+ * key. `TEXTFLOWKIT_CLI_PATH` is passed because it names a program path, the
+ * same way `CODEX_CLI_PATH` and `CLAUDE_CLI_PATH` already are -- not because a
+ * child needs to read it.
+ */
+export function textflowkitChildEnv(): NodeJS.ProcessEnv {
+  return cliChildEnv([
+    "TEXTFLOWKIT_CLI_PATH",
+    "XDG_CACHE_HOME",
+    "HF_HOME",
+    "TORCH_HOME",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+  ]);
+}

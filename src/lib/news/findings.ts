@@ -161,6 +161,43 @@ export function provenanceFromUrls(
   return [...byUrl.values()].map(finalizeProvenance);
 }
 
+/** `role` for a row that names a document nobody has a URL for. */
+export const CITED_ROLE = "cited";
+
+/**
+ * Provenance rows for the documents a report named but did not link.
+ *
+ * A report cites "Sept 22 packet p. 819 (Tier A)" and a council recording the
+ * same way an editor would in their notes: by naming them. There is no URL to
+ * fetch and none is invented here -- the row keeps the report's own words as
+ * its title with an empty `url`, and `ProvenanceBlock` prints a name rather
+ * than a link for it, which is the honest shape of "this is where the figure
+ * came from and you will have to go and look".
+ *
+ * Filed beside the real links rather than instead of them: an imported story's
+ * sources are all of what the report cited, not the half that happened to be on
+ * the web. A citation whose words a link already carries is dropped, so the
+ * same document is never two rows; and rows are deduped by their text, because
+ * a report that cites the same packet page twice cited one page.
+ */
+export function provenanceFromCitations(
+  citations: string[],
+  existing: ProvenanceItem[] = [],
+): ProvenanceItem[] {
+  const already = new Set(existing.map((item) => item.title.trim().toLowerCase()));
+  const seen = new Set<string>();
+  const rows: ProvenanceItem[] = [];
+  for (const citation of citations ?? []) {
+    const title = String(citation ?? "").trim().slice(0, 300);
+    if (!title) continue;
+    const key = title.toLowerCase();
+    if (seen.has(key) || already.has(key)) continue;
+    seen.add(key);
+    rows.push({ ...blankProvenance(""), title, role: CITED_ROLE });
+  }
+  return rows;
+}
+
 function asIntList(raw: unknown): number[] {
   if (!Array.isArray(raw)) return [];
   return raw

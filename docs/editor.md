@@ -158,6 +158,42 @@ It fills the same fields **File a lead yourself** (Queue) asks for by hand, so u
 
 ---
 
+## Import finished stories
+
+Some stories arrive already written — a report from a research tool, a document a colleague sent, a piece you wrote somewhere else. **Write a story** is not for those: it treats what you paste as source material and has a model write a new draft from it. **Import finished stories** is the other way in. It is on the desk landing page under the paste box, on the Queue's empty state, and at **Import** in the sidebar.
+
+**Paste one story, or a whole report.** You can also choose a saved page (`.md`, `.txt`, `.html`). Nothing is kept in the box; the text you pasted is what gets saved.
+
+**Read the stories.** The desk reads the text and shows you what it found. It does not rewrite anything: every paragraph it shows you is a paragraph of your paste, word for word, and it will not put a sentence in a story that was not in the text you gave it. A report with headings is split by those headings. A report or story with no usable structure is read once by the writing model you have set up, which is asked only where the stories start and end, what each headline is, and which paragraphs are the body — never to write a line. If that pass changes a single paragraph, the desk throws it away and falls back to splitting on blank lines, and the card says **Could not split this cleanly — check it** so you look before importing.
+
+**Check every story.** One card per story, and everything on it is yours to change:
+
+| On the card                          | What it does                                                                                                            |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| The tick box                         | Import this one. Sections that are not stories (beat context, watch lists, dates) arrive unticked.                       |
+| **Headline**                         | The heading, with any leading number (`7.`) taken off. That heading line is the headline, so the text below never opens by repeating it. |
+| **Section**                          | Your newsroom's sections, suggested from the text. **Section not chosen — pick one** until you choose one yourself.      |
+| **Dek**                              | The line under the headline.                                                                                            |
+| **The text this story carries**      | The body as written, or the report's plain-language brief, or both with the brief first. The text is shown underneath.   |
+| **Sources**                          | Every link the story cited, each with its own tick box. Links also stay in the body where they were written.            |
+| **Who wrote this**                   | The line readers see. For a report from an outside research tool the default is "An outside AI research tool wrote this from public records; an editor reviewed it." |
+| **Editor notes — never published**   | Score, triage and the reporter next step the report carried.                                                            |
+| **Import as**                        | **Finished story** — a draft holding the text it carries, ready to edit and publish. **Story idea** — a lead with the description as its why, for someone to write. |
+
+A **Hold** in the report is shown on the card as a Hold. If a story looks like one already on the desk or already printed, the card says so and links to the printed one — you decide whether to import it anyway.
+
+**Finished story or story idea.** Not everything a scan reports is written. The desk reads each card and marks it **Finished story** when it carries a body of two paragraphs or more and 120 words or more, and **Story idea** when it does not — a short block, or a single paragraph, is a lead to write rather than a draft to edit. A lead the report itself flagged **DEMOTE** arrives as a story idea rather than a draft, unticked: the desk is not going to file a one-line note as a finished story, and you can tick it either way. **Import as** on the card overrules the desk whenever it guessed wrong.
+
+A paste that is nothing but a list of ideas — bullets or numbered lines shaped **Headline — description**, or **Headline**: description — is read as one card per idea, headline and description, with no model involved.
+
+**Import.** The ticked stories go to the **Queue**, each as a lead marked **Imported** with a saved draft holding your paste exactly, its sources attached, and a note of who imported it, when, and from which text. A ticked story idea goes to the Queue as a lead marked **Imported** with the description as its why, waiting to be written — there is no draft, because nobody has written it. Copies of the cited pages are fetched in the background; if one will not load, the import still goes through. **Nothing is published by an import.**
+
+From there an imported story is a story like any other: open it, edit it, redraft it if you want to, and **Publish** it when it is right. A well-formed imported story — headline, section, body, at least one source — is not held back by the checks that exist for AI drafts, such as matching passages to cited records. The checks that protect readers still run.
+
+**One story you already have.** When what you have is a single finished story rather than a report full of them, the desk landing page has a shorter way in, under the import panel: **Paste a story I already have**. Paste it, leave the headline empty and its first line becomes the headline, choose the section, and press **Add to Queue**. The line the headline came from is the headline and not the first line of the body: the paste that follows it is the draft, word for word, line for line, and nothing else is moved or trimmed. Type a headline of your own and the whole paste is the body instead. There is no review screen and no model reads it — its links come across as the story's sources, and it lands in the Queue marked **Imported** as a regular news story. **Nothing is published**, and the section you choose there is not the confirmation: that still happens in the story editor, on the ordinary button, before the story can publish.
+
+---
+
 ## Sources (`/desk/sources`)
 
 The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.
@@ -482,6 +518,43 @@ How they join: a council video titled like `08/25/2026` joins that day’s packe
 **Minutes not posted** after 36 hours (council / commission / board / authority, skipping cancel / continued / TBD) is a catalog note. It is a reason to look, not a story by itself.
 
 Dark Desk is told: search the whole tape; names may be wrong; quotes need a check. It will still guess. You are the check.
+
+### Meetings with no captions (speech-to-text)
+
+Some tapes have no captions at all, so capture ends at the audio. If the owner
+has installed **textflowkit** on this machine and named it, the desk can listen
+to that recording and write a transcript from it. The pass you already run —
+**Run meetings now**, or the scheduled one — queues that work; there is nothing
+extra to press. One recording is transcribed at a time, it can be stopped, and
+if the machine restarts mid-run the desk picks the work up again. What the desk
+does with it afterwards is the same as for a caption transcript: alignment,
+citations with timestamps, drafts, and the publish checks all read it the same
+way.
+
+Two things to keep straight.
+
+**It is not the city’s record.** The desk labels these rows, next to the
+transcript’s hashes, as *speech-to-text (Whisper via textflowkit), not official
+captions*. Everything already said about auto-captions applies, and more
+sharply: a machine listened to audio and wrote down what it thought it heard.
+Names, numbers, and ordinance titles are exactly where it is most confident and
+most wrong. Play the tape before you print a quote or a name from one.
+
+**The desk says whether it is available.** **Server → Meeting capture** shows
+one line: *Speech-to-text: textflowkit 0.1.6 (model small, language en)* when it
+is there, or *not installed … meetings without captions stay audio-only* when it
+is not. If that line says not installed, a captionless meeting staying
+audio-only is the honest outcome, not a fault.
+
+A transcription that fails — the tool missing, the audio unreadable, or the run
+running past its allowance — leaves a named reason on the meeting row and keeps
+the recording exactly where it was. The next pass retries it. Nothing is written
+over: the audio is never deleted, and a transcript is never stored unless the
+recording it came from still matches the hash the desk recorded for those bytes.
+
+If captions turn up later, they are a new revision like any other, and the
+same rules apply — including the review step when a transcript changes after
+publication. Speech-to-text never overwrites a caption transcript.
 
 ### From a meeting recording to a story
 
