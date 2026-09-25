@@ -210,13 +210,25 @@ function ArticlePage() {
             <StoryBody body={article.body} publicReading />
             <section className="sources" id="sources">
               <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
-              <span className="eyebrow">FOLLOW THE EVIDENCE</span>
+              {/*
+                FOLLOW THE EVIDENCE used to print above this section whatever was
+                in it, so a story with no separate source records showed a
+                heading with nothing under it (coordinator review of the Unit X
+                screenshots, 2026-09-24: a published imported story read
+                "FOLLOW THE EVIDENCE" and then stopped). It is a heading for the
+                evidence that follows, so it is rendered only when there is
+                evidence to follow -- for every story, not only imported ones.
+                The branch below already says in words that there is none.
+              */}
               {provenance.length ? (
-                <ProvenanceBlock
-                  items={provenance}
-                  findings={article.findings}
-                  form={article.form}
-                />
+                <>
+                  <span className="eyebrow">FOLLOW THE EVIDENCE</span>
+                  <ProvenanceBlock
+                    items={provenance}
+                    findings={article.findings}
+                    form={article.form}
+                  />
+                </>
               ) : (
                 <>
                   <h2>Sources &amp; public records</h2>
