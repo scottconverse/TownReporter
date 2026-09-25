@@ -78,6 +78,18 @@ Retire a section only into an active reporting section. Review the count of affe
 
 Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
 
+## Named outlets
+
+The owner manages the outlets this paper checks by name in **Server → Named outlets**, below Sections. A published story that names one of these outlets has to show the reader where it came from; if it does not, printing stops until an editor adds the source or overrides that outlet for that one draft. Editors can read the list there; only the owner changes it, and anyone else is told so instead of being shown a form.
+
+The panel always says which of three states the paper is in. **Using the built-in list (7 outlets)** means nothing has been stored: the paper checks the outlets it shipped with. Their names, aliases and websites are readable, and **Customize** copies them into an editable draft. **This paper checks no outlet names** means the owner has decided to check none; it is shown as a decision, with a warning that printing no longer stops when a story names another newsroom's work and does not show the reader that source. A count — **This paper checks 9 outlets** — means the paper checks the owner's own list.
+
+Editing works like the sections panel: rows you can rename, give aliases and a website domain, remove, and add. Aliases are the other ways a story may write the outlet's name, separated by commas. A domain decides only what counts as showing the reader the source, so changing one never stops the paper checking a story. A refusal appears beside the field it is about, in words: an empty name, a name or alias another row already answers to (capitals, and a doubled hyphen or punctuation between the words, do not hide a clash), or a domain written as a web address. **Review changes** will not run while a row is refused.
+
+**Review changes** reads the published paper before anything is written: what is added, what is removed, what changed, and — for every removal and every alias dropped — the published stories whose credit stops being checked, by headline and link, newest first, up to 20 with "and N more". That sentence is the point of the screen: *3 published stories credit Times-Call. After this change the paper will no longer check that credit.* Only **Confirm and apply** writes the list, and it writes against the version the preview actually read, so a stale preview is refused and the draft stays for correction. A story that already shows the reader the source is never listed: the change costs the paper a check only where a check was still stopping the story.
+
+While a draft differs from what is stored, the same bar as the sections panel sits at the bottom of the window — **You have unsaved outlet list changes** — with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Leaving with a draft, by a desk link or by closing the tab, asks first; **Stay on this page** keeps both the page and the draft. **Reload saved configuration** discards the draft and reads the stored list back. **Use the built-in list** asks for the shipped list again, as its own change to review; **Check no outlet names** is the empty list, and it is the one setting here that can only lose the paper a check.
+
 ## Two rooms
 
 The **paper** (`/`) is what the public reads: published stories, About, How we report, Corrections, RSS. Ordinary reporting reaches it through your review and publication; approved sources can produce automatic roundups of routine notices through fixed templates.
