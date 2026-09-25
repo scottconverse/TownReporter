@@ -278,10 +278,54 @@ async function theHeadlinesAreClean() {
       `no card for "${headline}", the clean reading of ${(NOISY[index] ?? "").slice(0, 30)}…`,
     );
   }
-  for (const card of read.filter((c) => c.kind !== "Not a story — import it anyway?")) {
-    must(card.section.length > 0, `"${card.headline}" arrived with no section at all`);
+  /*
+    A card's arrival has two honest shapes now that the two 0.6.63 lanes are
+    merged, and this step holds both: the section the chooser read out of the
+    text, or the review screen's own "Section not chosen — pick one" marker
+    (value "", from `suggestedSectionFromText`, import-stories.ts:686).
+
+    This step used to demand a section on every card, because the chooser this
+    branch forked always named something. That is the silent guess lane 1's
+    Unit P removed from the write box, and the import is the third caller of
+    that same one chooser, so demanding a section here would be demanding the
+    guess back. The claim is not weakened, it is corrected and made narrower:
+    no card may arrive with a value that is neither a section this screen
+    offers nor the marker, and the chooser must still place the report's own
+    leads -- measured on this fixture, 33 of the 38 cards arrive with a named
+    section across 9 different sections, so a chooser that had given up on
+    everything would fail the two checks below rather than pass them.
+  */
+  const sectionKeys = await page.evaluate(() =>
+    [
+      ...new Set(
+        [...document.querySelectorAll("li select option")].map((o) => o.value).filter(Boolean),
+      ),
+    ],
+  );
+  must(
+    sectionKeys.length >= 8,
+    `the section select offers only ${sectionKeys.length} sections: ${sectionKeys.join(", ")}`,
+  );
+  const offered = new Set(sectionKeys);
+  const cards = read.filter((c) => c.kind !== "Not a story — import it anyway?");
+  for (const card of cards) {
+    must(
+      card.section === "" || offered.has(card.section),
+      `"${card.headline}" arrived with "${card.section}", which is neither a section this screen offers nor the not-chosen marker`,
+    );
   }
-  step(`thirty-eight cards: ${TICKED} leads ticked, ${SECTIONS} sections not, every headline clean`);
+  const placed = cards.filter((c) => offered.has(c.section));
+  must(
+    placed.length >= 20,
+    `only ${placed.length} of ${cards.length} cards arrived with a section the chooser named`,
+  );
+  must(
+    new Set(placed.map((c) => c.section)).size >= 3,
+    "the chooser put every card it placed under one section",
+  );
+  step(
+    `thirty-eight cards: ${TICKED} leads ticked, ${SECTIONS} sections not, every headline clean, ${placed.length} cards placed by the chooser and ${cards.length - placed.length} left to the editor`,
+  );
 }
 
 /** The Hold flags, and the three demoted leads opening as unticked ideas. */

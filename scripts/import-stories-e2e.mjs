@@ -54,11 +54,23 @@ const REPO = process.cwd();
 const SHOTS = "C:/Users/scott/Desktop/Code/townreporter-deepseek-oversight/scratch/X";
 const base = checkedUrl(`http://127.0.0.1:${PORT_IMPORT_STORIES}`);
 
-/** The owner's own report, read from the repo's copy of it. */
+/**
+ * The owner's own report, read from the repo's copy of it.
+ *
+ * CRLF is folded to LF, the way `precleanMarkdown` and `splitParagraphs` fold it
+ * and the way a real paste arrives. This checkout has `core.autocrlf=true`, so
+ * git puts the fixture on disk with 138 CR bytes in it; a `<textarea>`'s DOM
+ * `value` normalises CRLF to LF per spec, so the box the text is handed to can
+ * never hold the file's raw bytes. Measured here before this line existed:
+ * `bytes 27554 chars 27473 CRs 138 LF-normalized length 27335` -- the hand-off
+ * check below compared 27335 against 27473 and timed out on every Windows run
+ * while passing on LF checkouts. The claim it makes is unchanged: every word of
+ * the paste survives the hand-off from the Desk to the import screen.
+ */
 const FIXTURE = readFileSync(
   join(REPO, "src/lib/news/fixtures/civic-scanner-longmont-2026-09-24.md"),
   "utf8",
-);
+).replace(/\r\n?/g, "\n");
 
 /** The seven stories in the report, in its own order, heading numbers stripped. */
 const STORIES = [
