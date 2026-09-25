@@ -38,7 +38,16 @@ Return JSON:
   ],
   "proposed_sources": []
 }
-topic must be exactly one of: council, budget, housing, utilities, schools, planning, infrastructure, elections.
+Sections this newsroom files under:
+- council (Council)
+- budget (Budget)
+- housing (Housing)
+- utilities (Utilities)
+- schools (Schools)
+- planning (Planning)
+- infrastructure (Infrastructure)
+- elections (Elections)
+Set "topic" to the exact key of the section that fits, never the display name alone.
 File civic leads when the text contains a meeting, vote, budget figure, contract, deadline, housing/utility/school action, or missing record that is not in Already covered. Return 0 leads only if none of the sources contain such a fact.`;
 
 describe("scan writing pass", () => {

@@ -158,7 +158,7 @@ it("passes custom coverage instructions to the scanner and carries the key throu
     reread: false,
     memory: [],
     payload: "SOURCE: Library\nA neighborhood choir welcomes new members.",
-    topics: ["community-life"],
+    topics: [{ key: "community-life", name: "Community life", brief: "Neighborhood clubs and local arts" }],
     section: {
       name: "Community life",
       brief: "Neighborhood clubs and local arts",
@@ -168,7 +168,11 @@ it("passes custom coverage instructions to the scanner and carries the key throu
   const transport = async (user: string) => {
     assert.match(user, /Neighborhood clubs and local arts/);
     assert.match(user, /access barriers to participation/);
-    assert.match(user, /topic must be exactly one of: community-life/);
+    // The prompt now names the section it files under -- key plus display name
+    // -- instead of printing the bare key alone, so the model is choosing from
+    // something a person wrote rather than from a word.
+    assert.match(user, /- community-life \(Community life\): Neighborhood clubs and local arts/);
+    assert.match(user, /Set "topic" to the exact key of the section that fits/);
     return {
       leads: [
         {

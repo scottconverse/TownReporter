@@ -16,6 +16,11 @@ export type LeadRow = {
   headline: string;
   why: string;
   topic: string;
+  /** The scan filed this lead under a section the model never named, so the
+   * section shown is the desk's fallback rather than a decision. Set by
+   * `parseScanResult` (lib/news/schema.ts), cleared when an editor confirms a
+   * section on the draft (`performConfirmDraftTopic`, lib/news/desk.ts). */
+  topic_unchosen?: boolean;
   status: string;
   source_urls: string;
   evidence: string | null;

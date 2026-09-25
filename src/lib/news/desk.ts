@@ -238,7 +238,7 @@ export const listLeads = createServerFn({ method: "GET" })
         story_headline: string | null;
       }
     >`
-      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence,
+      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
              coalesce(a.headline, (select nullif(d.headline, '') from drafts d
                where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
@@ -371,7 +371,7 @@ export const getLead = createServerFn({ method: "GET" })
     const sql = await getSql();
     await ensureDraftMemoColumn();
     const leads = await sql<LeadRow>`
-      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
+      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.possible_duplicate_of,
              case when prior.id is null then null else jsonb_build_object(
                'id', prior.id, 'headline', prior.headline, 'status', prior.status
@@ -757,11 +757,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const sectionSnapshot = customSnapshot
     ? null
     : (parsedSnapshot as import("./section-types.ts").SectionScanSnapshot | null);
-  const allowedTopics = sectionSnapshot
-    ? [sectionSnapshot.key]
-    : sectionConfig.sections
-        .filter((s) => !s.replacementKey && !["about", "opinion"].includes(s.key))
-        .map((s) => s.key);
+  /*
+    The sections this run may file under, as the objects every later step needs.
+
+    The prompt is handed the key, the display name and the editor's reporting
+    brief for each one -- a model shown nothing but `schools` was guessing at
+    what this newsroom means by it. The keys stay in this order because the
+    parser's fallback for a lead the model did not file under a section is the
+    first entry (`schema.ts`), and that has always been the first configured
+    section.
+  */
+  const filingSections: { key: string; name: string; brief: string }[] = sectionSnapshot
+    ? [sectionSnapshot]
+    : sectionConfig.sections.filter((s) => !s.replacementKey && !["about", "opinion"].includes(s.key));
+  const allowedTopics = filingSections.map((s) => s.key);
+  const topicChoices = filingSections.map((s) => ({ key: s.key, name: s.name, brief: s.brief }));
   const allSources =
     deps.scheduledSnapshot?.sources ??
     (await sql<SourceRow>`
@@ -974,7 +984,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   for (const batch of batches) {
     await deps.scheduledGuard?.();
     const userMsg = buildScanUserMessage({
-      topics: allowedTopics,
+      topics: topicChoices,
       section: sectionSnapshot,
       city: paperConfig.city,
       state: paperConfig.state,
@@ -1013,7 +1023,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       lastBatchError = ai.error;
       continue;
     }
-    const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics);
+    const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics, topicChoices);
     if (parsed.parseError) {
       batchesFailed += 1;
       lastBatchError = parsed.parseError;
@@ -2301,8 +2311,15 @@ export async function performConfirmDraftTopic(
       token: topicConfirmationFingerprint(evidenceReviewToken(row)),
       at: new Date().toISOString(),
     };
+    /*
+      A lead the scan filed under a section the MODEL never chose stops being
+      that the moment an editor confirms the section on this draft: from here
+      the section is a decision somebody made and read the story under. The
+      column is cleared in the same statement as the confirmation record, so
+      the Queue chip and the story-page notice cannot outlive the decision.
+    */
     await sql`
-      update leads set notes_json = ${packNotes(notes)}
+      update leads set notes_json = ${packNotes(notes)}, topic_unchosen = false
       where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const, topic };

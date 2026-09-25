@@ -75,3 +75,34 @@ test("the story editor's own-note and follow-up inputs have accessible names", a
   assert.match(story, /placeholder="Your own line — a call to make, a record to pull"[\s\S]{0,100}aria-label="Add a reporting note"/);
 });
 
+
+/*
+  Unit P item 1 pin: a lead the General Scan filed under a section the MODEL
+  never chose keeps a section (the column needs one) and says so. On the story
+  page -- the surface where an editor would otherwise write and print on that
+  section -- the notice sits above the publish gate, names the section that was
+  not chosen, and disappears once the section is confirmed.
+
+  The rendered Queue-row notice is exercised as real markup in
+  scripts/lead-badge-render.test.mjs and the clearing on confirm in
+  src/lib/news/topic-confirmation-gate.test.ts; this page has no SSR harness,
+  so like the other route pins here it asserts the page's own markup.
+*/
+test("the story page tells the editor when the scan never chose the section", async () => {
+  const story = await readFile(new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
+  assert.match(
+    story,
+    /data\.lead\.topic_unchosen\s*&&\s*!topicConfirmed[\s\S]{0,400}Section not chosen — pick one/,
+    "the notice must be gated on the not-chosen mark and the section still being unconfirmed",
+  );
+  assert.match(
+    story,
+    /Section not chosen — pick one[\s\S]{0,600}the model named no section this newsroom files under/,
+    "the notice must say why the lead carries a section nobody chose",
+  );
+  assert.match(
+    story,
+    /!onPaper &&[\s\S]{0,80}data\.lead\.topic_unchosen/,
+    "a printed story is past the decision; the notice belongs to the working draft",
+  );
+});

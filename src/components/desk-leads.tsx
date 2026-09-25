@@ -236,6 +236,20 @@ export function LeadRowView({
       </div>
       <div className="lead-flags">
         <Chip s={lead.status} />
+        {/*
+          The scan's section list is what the model files under, and when its
+          reply named none of them the desk wrote a fallback key
+          (`schema.ts`) with nothing on the row to say so. An editor saw a
+          section the machine guessed, in the same type as one it chose.
+        */}
+        {lead.topic_unchosen ? (
+          <span
+            className="chip topic-unchosen"
+            title="The scan filed this lead under a section the model did not choose. Open the story and confirm the section it belongs in."
+          >
+            Section not chosen — pick one
+          </span>
+        ) : null}
         {dup ? (
           <span
             className="chip dup"

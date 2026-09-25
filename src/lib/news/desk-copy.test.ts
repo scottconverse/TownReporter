@@ -1265,7 +1265,7 @@ describe("buildScanUserMessage resident coverage contract", () => {
       reread: false,
       memory: [],
       payload: "source text",
-      topics: ["libraries"],
+      topics: [{ key: "libraries", name: "Libraries", brief: "Library access and programs" }],
       section: { name: "Libraries", brief: "Library access and programs", instructions: "Prefer dated changes" },
     });
     assert.match(prompt, /Editor-selected section: Libraries/);

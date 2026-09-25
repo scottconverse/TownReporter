@@ -37,7 +37,7 @@ after(async () => vite.close());
 const NEWSROOM = 98411;
 const USER = "topic-gate-editor";
 
-async function fixture(topic = "council") {
+async function fixture(topic = "council", topicUnchosen = false) {
   const sql = await getSql();
   await sql.query("delete from articles where newsroom_id=$1", [NEWSROOM]);
   await sql.query("delete from audit_events where newsroom_id=$1", [NEWSROOM]);
@@ -49,8 +49,8 @@ async function fixture(topic = "council") {
     NEWSROOM,
   ]);
   const [lead] = await sql.query<{ id: number }>(
-    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Council approves the plan','Why',$3,'new','[]','',1,'{}') returning id",
-    [USER, NEWSROOM, topic],
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,topic_unchosen) values($1,$2,'Council approves the plan','Why',$3,'new','[]','',1,'{}',$4) returning id",
+    [USER, NEWSROOM, topic, topicUnchosen],
   );
   const [draft] = await sql.query<{ id: number }>(
     "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council approves the plan','The plan passed.','The council approved the plan on Tuesday.',$4,'[]','','[]','news','[]','[]','{}') returning id",
@@ -124,5 +124,42 @@ it("refuses when the draft is rewritten after the confirmation", async () => {
     published.ok,
     false,
     "the confirmation is for the version that was read, not for the lead",
+  );
+});
+
+/*
+  Unit P item 1: when the scan names no section this newsroom files under, the
+  lead keeps a section (the column needs one) and records that the model did
+  not choose it (topic_unchosen, migrations/0087_lead_topic_unchosen.sql). The
+  Queue row and the story page say "Section not chosen — pick one" until an
+  editor actually picks one. Confirming the section on the draft IS that
+  choice, so the mark has to clear -- otherwise the notice keeps telling an
+  editor to do the thing they just did.
+*/
+it("clears the not-chosen mark when an editor confirms the section, and only then", async () => {
+  const { leadId } = await fixture("council", true);
+  const sql = await getSql();
+  const marked = async () => {
+    const [row] = await sql.query<{ topic_unchosen: boolean }>(
+      "select topic_unchosen from leads where id=$1",
+      [leadId],
+    );
+    return row!.topic_unchosen;
+  };
+  assert.equal(await marked(), true, "a lead filed under a section the scan never chose starts marked");
+
+  // 0.6.62 still applies: the publish gate does not care why the section is
+  // unconfirmed, and nothing here is a way around it.
+  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId);
+  assert.equal(published.ok, false, "an unconfirmed section must not print, chosen or not");
+  assert.equal(await marked(), true, "a refused publish is not a confirmation");
+
+  const confirmed = await performConfirmDraftTopic({ userId: USER, newsroomId: NEWSROOM }, leadId);
+  assert.equal(confirmed.ok, true);
+  assert.equal(await marked(), false, "confirming the section is the editor choosing it");
+  assert.equal(
+    (await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId)).ok,
+    true,
+    "the confirmed section prints",
   );
 });

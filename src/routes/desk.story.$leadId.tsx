@@ -1510,6 +1510,24 @@ function StoryPage() {
                     ) : null}
                   </select>
                 </Field>
+                {/*
+                  A lead the scan filed under a section the model never chose.
+
+                  The desk still had to write a key (`schema.ts`), so the row
+                  and this select show one -- but it is the desk's fallback,
+                  not a decision, and printing it as though it were is how a
+                  guessed section reaches the paper. The notice is the same
+                  words the Queue row carries, and it goes away when somebody
+                  confirms a section below.
+                */}
+                {!onPaper && data.lead.topic_unchosen && !topicConfirmed ? (
+                  <p className="note publish-blocked">
+                    Section not chosen — pick one. The scan filed this lead under{" "}
+                    {sections.find((s) => s.key === data.lead.topic)?.name ?? data.lead.topic} because
+                    the model named no section this newsroom files under. Choose the section above,
+                    save the draft, then confirm it.
+                  </p>
+                ) : null}
                 {onPaper ? null : topicConfirmed ? (
                   <p className="note">
                     Section confirmed for this saved draft:{" "}

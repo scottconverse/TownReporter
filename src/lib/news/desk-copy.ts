@@ -2,6 +2,7 @@
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { nonStoplistedProperNouns } from "./lead-match.ts";
+import { TOPICS } from "../paper.ts";
 
 export function organizationFromUrl(url: string): string {
   try {
@@ -1241,6 +1242,51 @@ export function humanFrontierLabel(label: string): string {
   string-building only -- no behaviour change from the inline template it
   replaced.
 */
+/*
+  How much of a section's reporting brief reaches the scanning model.
+
+  A brief is the editor's own description of the section and can run to 3000
+  characters (`sections.server.ts` caps it there). The General scan lists EVERY
+  active section in one prompt, so an uncapped brief would let one long one
+  crowd out the rest of the list -- and the list is what the model uses to pick
+  a section at all. The cap is stated here, once, so the prompt and the test
+  that measures it cannot drift apart.
+*/
+export const SCAN_TOPIC_BRIEF_CAP = 240;
+
+/** One section as the scan prompt shows it: the key it must return, and how to tell what it means. */
+export type ScanTopicOption = { key: string; name: string; brief: string };
+
+/**
+ * The sections named when a caller passes none.
+ *
+ * Every production caller passes the newsroom's own configured sections
+ * (`desk.ts` reads them from `sections.server.ts`). This list is the shipped
+ * fallback, named the way migration 0045 seeds a new newsroom, so a prompt
+ * built without a section list still names sections rather than printing keys.
+ */
+const DEFAULT_TOPIC_OPTIONS: readonly ScanTopicOption[] = TOPICS.filter(
+  (key) => key !== "about" && key !== "opinion",
+).map((key) => ({ key, name: key[0]!.toUpperCase() + key.slice(1), brief: "" }));
+
+/**
+ * The section list, one line each: the key the model must return, the display
+ * name the editor sees, and the editor's own reporting brief (capped, above).
+ */
+function scanTopicBlock(options: readonly ScanTopicOption[]): string {
+  if (!options.length) return "";
+  const lines = options.map((section) => {
+    const brief = (section.brief ?? "").trim().slice(0, SCAN_TOPIC_BRIEF_CAP);
+    const name = (section.name ?? "").trim();
+    const label = name && name.toLowerCase() !== section.key.toLowerCase() ? ` (${name})` : "";
+    return `- ${section.key}${label}${brief ? `: ${brief}` : ""}`;
+  });
+  return `Sections this newsroom files under:
+${lines.join("\n")}
+Set "topic" to the exact key of the section that fits, never the display name alone.
+`;
+}
+
 export function buildScanUserMessage(opts: {
   city: string;
   state: string;
@@ -1248,7 +1294,7 @@ export function buildScanUserMessage(opts: {
   memory: { entity: string; last_angle: string }[];
   published?: { headline: string; dek: string; source_urls: string[]; published_at: string }[];
   payload: string;
-  topics?: readonly string[];
+  topics?: readonly ScanTopicOption[];
   section?: {name:string;brief:string;instructions:string}|null;
 }): string {
   const { city, state, reread, memory, payload } = opts;
@@ -1293,7 +1339,7 @@ Return JSON:
     { "url": "https://...", "title": "", "why": "page worth investigating further" }
   ]
 }
-topic must be exactly one of: ${(opts.topics??["council","budget","housing","utilities","schools","planning","infrastructure","elections"]).join(", ")}.
+${scanTopicBlock(opts.topics ?? DEFAULT_TOPIC_OPTIONS)}
 ${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler or manufacture a lead to earn a score. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
 }
 
