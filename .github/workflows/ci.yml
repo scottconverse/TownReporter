@@ -1208,3 +1208,31 @@ jobs:
           BETTER_AUTH_SECRET: ci-import-civic-scanner-v26-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/import-civic-scanner-v26-e2e.mjs
+
+  # AA: the daily scan on Automatic. Before 0.6.64 the scheduled scan had to
+  # name one provider -- the picker refused Automatic because a scheduled run
+  # stores the model it will use before its job is queued, and "your configured
+  # gateway at call time" is not a name a stored record can keep. This walk sets
+  # the policy to Automatic through the browser, reloads, drives the scheduler's
+  # OWN trigger (GET /api/cron/monitors) with a stubbed rung 1, and reads back
+  # that the run record names the model that actually ran. Ports 3336 (server)
+  # and 3337 (the stubbed DeepSeek endpoint), which no other integration file
+  # may bind.
+  daily-scan-automatic:
+    name: The daily scan on Automatic, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Set the daily scan to Automatic, run it, and read the model off the run record
+        env:
+          BETTER_AUTH_SECRET: ci-daily-scan-automatic-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/daily-scan-automatic-e2e.mjs
