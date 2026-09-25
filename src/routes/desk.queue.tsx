@@ -289,6 +289,10 @@ function QueuePage() {
       <details className="file-form">
         <summary>File a lead yourself</summary>
         <p>Have a transcript, packet or documents? <Link to="/desk">Write a story from text or uploaded documents on the Desk.</Link></p>
+        <p>
+          Already written somewhere else? <Link to="/desk/import">Import finished stories</Link> — paste
+          one story or a whole report and check each one before it lands here.
+        </p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -547,6 +551,13 @@ function QueuePage() {
                   Published
                 </Link>
               ) : null}
+              <span>
+                Already have the story written?{" "}
+                <Link to="/desk/import" className="inline-link">
+                  Import finished stories
+                </Link>{" "}
+                — paste it, check it, and it lands here.
+              </span>
             </>
           ) : (
             `No ${filter} leads.`

@@ -27,6 +27,7 @@ import {
   ArrowUpRight,
   Telescope,
   MessagesSquare,
+  ClipboardPaste,
 } from "lucide-react";
 import { listLeads } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
@@ -569,6 +570,14 @@ function DeskNav({ onNavigate }: { onNavigate: () => void }) {
       <Link to="/desk/follow-ups" onClick={onNavigate} className="astra-nav">
         <MessagesSquare size={18} aria-hidden />
         <span>Follow-ups</span>
+      </Link>
+      <Link
+        to="/desk/import"
+        onClick={onNavigate}
+        className={"astra-nav" + (matchRoute({ to: "/desk/import" }) ? " active" : "")}
+      >
+        <ClipboardPaste size={18} aria-hidden />
+        <span>Import</span>
       </Link>
       <div className="astra-nav-bottom">{LINKS.slice(6).map((l, i) => item(l, i + 6))}</div>
     </nav>

@@ -236,6 +236,11 @@ export function LeadRowView({
       </div>
       <div className="lead-flags">
         <Chip s={lead.status} />
+        {lead.origin === "import" ? (
+          <span className="chip imported" title="Read out of a report you pasted, not written by the desk.">
+            Imported
+          </span>
+        ) : null}
         {dup ? (
           <span
             className="chip dup"
