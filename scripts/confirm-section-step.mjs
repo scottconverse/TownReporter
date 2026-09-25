@@ -16,8 +16,16 @@
   it just saved (confirmTopic, desk.story.$leadId.tsx). That ordering is why
   this must run AFTER every edit the walk means to publish -- editing the
   body or the section afterwards puts the gate straight back, by design.
+
+  `publishable: false` is for the walk that means to leave the button down.
+  scripts/named-outlets-e2e.mjs writes a body that names an outlet and shows
+  the reader nothing, on purpose: the named-outlet gate is what it is there to
+  photograph, and the override on the story screen is the only way past it
+  (desk.ts, performOverrideNamedOutlet). The section still has to be confirmed
+  there -- the override needs a saved draft -- but waiting for an enabled
+  Publish button would wait for a state that walk exists to disprove.
 */
-export async function confirmSectionAndWaitForPublishable(page) {
+export async function confirmSectionAndWaitForPublishable(page, { publishable = true } = {}) {
   const block = page.locator("#story-topic");
   await block.waitFor({ state: "visible", timeout: 45_000 });
   const confirm = block.getByRole("button", { name: "Confirm this section" });
@@ -33,6 +41,7 @@ export async function confirmSectionAndWaitForPublishable(page) {
     */
     await block.getByText(/Section confirmed for this saved draft/).waitFor({ timeout: 30_000 });
   }
+  if (!publishable) return;
   /*
     The unconfirmed section is what was holding the button down. Wait for the
     desk to enable it, so the walk's next click is a click on a live button
