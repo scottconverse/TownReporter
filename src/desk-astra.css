@@ -25,6 +25,12 @@
   --font-serif: var(--fb);
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
+  /* The first track above, as a length the fixed chrome can read. A fixed
+     element's `left` is measured from the viewport, so anything pinned at the
+     bottom of the desk has to be told where the content column starts; the
+     three values here and in the two breakpoints below are the only ones that
+     know. See `.astra-unsaved-bar`. */
+  --desk-nav-w: 232px;
   align-items: start;
   min-height: 100dvh;
   font-family: var(--fb);
@@ -90,6 +96,17 @@
 }
 .desk-ltr.astra .astra-skip:focus {
   top: 12px;
+}
+/* The unsaved-changes bar spans the content column, not the viewport.
+   It used to be `inset-x-0`, which put its left edge -- and the first six
+   characters of its message, which sits in an `mx-auto max-w-4xl` column of
+   its own -- under the nav, so the bar read "…ave unsaved section changes" and
+   its button was partly behind a higher-z-index sidebar. `--desk-nav-w` is the
+   grid's first track and is 0 where that track is gone, so at 375 the bar takes
+   the whole width, which is what a one-column desk wants. */
+.desk-ltr.astra .astra-unsaved-bar {
+  left: var(--desk-nav-w);
+  right: 0;
 }
 .desk-ltr.astra .astra-sidebar {
   height: 100dvh;
@@ -1343,6 +1360,7 @@
 @media (max-width: 1200px) {
   .desk-ltr.astra {
     grid-template-columns: 206px minmax(0, 1fr);
+    --desk-nav-w: 206px;
   }
   .desk-ltr.astra .deskmain {
     padding: 28px 26px 60px;
@@ -1421,6 +1439,8 @@
 @media (max-width: 700px) {
   .desk-ltr.astra {
     display: block;
+    /* No column to sit beside: the nav is off-canvas. */
+    --desk-nav-w: 0px;
   }
   .desk-ltr.astra .astra-sidebar {
     position: fixed;

@@ -690,12 +690,17 @@ export function SectionsSetup() {
       live region is announced, a live region inserted with its text is not.
       With no draft it collapses to `sr-only` and holds no text, so it has no
       footprint and nothing to announce.
+
+      `astra-unsaved-bar` is not decoration: the bar is fixed to the viewport
+      but must sit in the content column, and only CSS knows how wide the
+      desk's nav is at each breakpoint. See `.astra-unsaved-bar` (and
+      `--desk-nav-w`) in src/desk-astra.css.
     */}
     <div
       aria-label={draft ? "Section changes not saved" : undefined}
       className={
         draft
-          ? "fixed inset-x-0 bottom-0 z-30 border-t-2 border-rule bg-paper px-3 py-3"
+          ? "astra-unsaved-bar fixed bottom-0 z-30 border-t-2 border-rule bg-paper px-3 py-3"
           : "sr-only"
       }
     >
