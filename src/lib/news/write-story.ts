@@ -6,7 +6,7 @@
   on its own and reused by the server function that files the lead.
 */
 import { sanitizePublicUrls } from "./schema.ts";
-import { topicFromText } from "./desk-copy.ts";
+import { topicFromText, type TopicSection } from "./desk-copy.ts";
 
 export const WRITE_STORY_SCRATCH_LIMIT = 8000;
 const HEADLINE_LIMIT = 180;
@@ -19,6 +19,13 @@ export type WriteStoryParsed = {
   headline: string;
   why: string;
   topic: string;
+  /**
+   * True when the pasted text named no section this newsroom files under, so
+   * `topic` is only the column's fallback (see `topicFromText`). The caller
+   * writes it to the lead's topic_unchosen so the Queue row and the story page
+   * can say the section was never chosen.
+   */
+  topicUnchosen: boolean;
   urls: string[];
   scratch: string;
   editorialAssignment?: EditorialAssignment;
@@ -72,12 +79,17 @@ function firstSentence(text: string): string {
  *     path.
  *  3. The why-now line is a fixed sentence, with the second line of the
  *     input appended when there is one.
- *  4. The topic defaults to "council", or whatever `topicFromText` reads
- *     out of the pasted text.
+ *  4. The topic is whatever `topicFromText` reads out of the pasted text as a
+ *     whole word, preferring this newsroom's own section names and briefs.
+ *     When it reads none, the first section this newsroom files under still
+ *     fills the column and `topicUnchosen` says nobody picked it.
  *  5. The full original text is kept verbatim as the reporting-notes
  *     scratch, capped at 8000 chars, so the draft reads it as evidence.
  */
-export function parseWriteStoryInput(rawText: string): WriteStoryParseResult {
+export function parseWriteStoryInput(
+  rawText: string,
+  sections?: readonly TopicSection[],
+): WriteStoryParseResult {
   const text = String(rawText ?? "");
   const found = text.match(URL_RE) ?? [];
   const urls = sanitizePublicUrls(found).slice(0, MAX_SOURCE_URLS);
@@ -112,9 +124,9 @@ export function parseWriteStoryInput(rawText: string): WriteStoryParseResult {
   if (secondLine) why = `${why} ${secondLine}`;
   why = why.slice(0, 800);
 
-  const topic = topicFromText(text);
+  const { topic, unchosen: topicUnchosen } = topicFromText(text, sections);
   const scratch = text.trim().slice(0, WRITE_STORY_SCRATCH_LIMIT);
 
   const editorialAssignment = editorialAssignmentFromText(text);
-  return { ok: true, value: { headline, why, topic, urls, scratch, ...(editorialAssignment ? { editorialAssignment } : {}) } };
+  return { ok: true, value: { headline, why, topic, topicUnchosen, urls, scratch, ...(editorialAssignment ? { editorialAssignment } : {}) } };
 }

@@ -14,6 +14,7 @@ import { inviteEditor, myDesk } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
 import { SectionsSetup } from "@/components/sections-setup";
+import { NamedOutletsSetup } from "@/components/named-outlets-setup";
 import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
 import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
 import {
@@ -37,6 +38,7 @@ import {
 */
 import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
+import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
@@ -109,6 +111,7 @@ const SETTINGS_PANELS = [
   "Routine notices",
   "Paper identity",
   "Sections",
+  "Named outlets",
   "Server health",
   "Recently deleted",
   "Editors & access",
@@ -120,6 +123,9 @@ function OpsPage() {
   useEffect(() => {
     if (signin) setPanel("Writing models");
     else if (hash === "custom-ai-connections") setPanel("Custom connections");
+    // "#named-outlets" opens the outlet list; a link that wants Sections still
+    // says "section", which the outlets hash does not contain.
+    else if (hash.includes("outlet")) setPanel("Named outlets");
     else if (hash.includes("section")) setPanel("Sections");
   }, [signin, hash]);
   const qc = useQueryClient();
@@ -216,6 +222,9 @@ function OpsPage() {
           </div>
           <div hidden={panel !== "Sections"}>
             <SectionsSetup />
+          </div>
+          <div hidden={panel !== "Named outlets"}>
+            <NamedOutletsSetup />
           </div>
           <div hidden={panel !== "Server health"}>
             <section className="mt-12">
@@ -528,6 +537,13 @@ function WritingModels() {
       <p aria-live="polite" role="status" className="sr-only">
         {note}
       </p>
+      {/*
+        0.6.63 (Unit Y item 5): the order Automatic tries, in plain words. The
+        sentence comes from model-choice.ts's `automaticOrderSentence`, which
+        reads `automaticLadder` -- the same list the runs walk -- so this panel
+        cannot advertise an order the desk no longer has.
+      */}
+      <p className="mt-4 max-w-2xl text-sm text-ink-2">{automaticOrderSentence()}</p>
       {statuses.isPending ? (
         <ListSkeleton rows={2} />
       ) : statuses.isError ? (

@@ -190,10 +190,10 @@ Story routing and a separate Opinion frontier path:
 
 | Work               | Current provider rule                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, Claude Code, or Grok), or an explicit picker choice including Local model            |
-| Story — Automatic  | configured `LLM_*` gateway when present; otherwise first ready Codex Terra → Claude Sonnet rung                                    |
-| Story — named      | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; Local model; Grok; or a saved custom connection is tried first; recognized technical failures move only the unfinished call |
-| Dark — Automatic   | configured gateway when present; otherwise Codex Terra → Claude Sonnet; technical retry is per failed call and does not replay searches or completed reads |
+| Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, or Claude Code), or an explicit picker choice including Local model                  |
+| Story — Automatic  | configured `LLM_*` gateway when present; otherwise Automatic's ladder — DeepSeek v4.1 Flash, then Qwen on this computer if it is loaded, then Codex Terra |
+| Story — named      | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; Local model; or a saved custom connection is tried first; recognized technical failures move only the unfinished call |
+| Dark — Automatic   | configured gateway when present; otherwise the same ladder — DeepSeek v4.1 Flash, then Qwen on this computer if it is loaded, then Codex Terra; technical retry is per failed call and does not replay searches or completed reads |
 | Opinion            | Automatic uses Codex Sol → Claude Sonnet; a named choice is tried first and the same technical-only per-call retry applies |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
@@ -275,6 +275,12 @@ The entry itself, in `PROVIDER_REGISTRY`:
   id: "local-model",
   label: "Local model",
   detail: "llama.cpp, LM Studio, or another OpenAI-compatible server",
+  // 0.6.63: the half-line the select itself shows. `detail` is a clause --
+  // 56 characters -- and a native select clips the selected option at its
+  // content box, so the picker showed "Local model — llama.cpp, LM Studio,
+  // or anot". The full sentence is still what the option and select carry
+  // as their `title`, and what the help line under the picker says.
+  optionDetail: "on this computer",
   kind: "local",                        // inherits KIND_BUDGETS.local: 600s a call
   model: "local-model",
   baseUrl: "http://127.0.0.1:1234/v1",
@@ -426,8 +432,11 @@ to transcribe pages without usable text (`src/lib/news/ocr.ts`). Codex and
 Claude provide vision paths when their prerequisites are met. Grok (SuperGrok)
 is text-only for this path. OCR starts with the model selected for the run and,
 after a recognized technical failure, can try the next ready vision-capable
-cloud runtime. Claude is last in the unattended order and uses Sonnet or Haiku,
-never an automatic Opus default. This
+cloud runtime. **Unattended OCR has its own order, and it is not the writing
+ladder:** Codex Terra, then Claude, then a local model marked `· vision`. The
+writing ladder for stories and scans (DeepSeek v4.1 Flash, then Qwen 3.6 35B on
+this computer, then Codex Terra) never re-points OCR. Claude here uses Sonnet or
+Haiku, never an automatic Opus default. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model
 cannot, no matter how good it is at writing.

@@ -68,6 +68,38 @@ export const COUNCIL_VOTES_URL = "https://longmontcitycouncil.org/";
 
 export type Topic = (typeof TOPICS)[number];
 
+/**
+ * Which meeting titles the scanning beat counts as meetings.
+ *
+ * Shipped defaults, overridable per newsroom (paper_settings.meeting_keywords).
+ * They live here, with the rest of the shipped constants, rather than in
+ * src/lib/news/youtube.ts where they were written: that module spawns python
+ * to read a channel, and this file is the one every screen already imports,
+ * so a constant read on the client must not be the thing that drags a
+ * process-spawning module into the browser bundle (0.6.63: the client build
+ * denies a `.server.ts` import, and youtube.ts now has one).
+ */
+export const MEETING_KEYWORDS = [
+  "council",
+  "meeting",
+  "session",
+  "board",
+  "commission",
+  "hearing",
+  "work session",
+  "study session",
+  "neighborhood",
+  "planning",
+  "zoning",
+  "pre-session",
+];
+
+/** The city's own channels, shipped as the default watch list. */
+export const LONGMONT_YOUTUBE_CHANNELS = [
+  "https://www.youtube.com/@CityofLongmont",
+  "https://www.youtube.com/@LongmontPublicMedia",
+];
+
 export const SEED_SOURCES: {
   url: string;
   title: string;

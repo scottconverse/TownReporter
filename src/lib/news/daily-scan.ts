@@ -3,9 +3,14 @@ import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware, assertOwner } from "./desk-auth.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
-import { PICKER_PROVIDER_IDS, modelEffort, type ModelEffort } from "./provider-registry.ts";
+import {
+  PICKER_PROVIDER_IDS,
+  modelEffort,
+  type AutomaticRungId,
+  type ModelEffort,
+} from "./provider-registry.ts";
 
-export type DailyScanRuntime = Exclude<StoryModelChoice, "auto">;
+export type DailyScanRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 type LegacyDailyScanRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
 export type StoredDailyScanRuntime = DailyScanRuntime | LegacyDailyScanRuntime;
 export type DailyScanPolicy = {

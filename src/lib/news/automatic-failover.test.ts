@@ -2,9 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   planAutomaticFailover,
+  automaticFailoverReason,
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
+import { unreadableReplyError } from "./ai.ts";
 
 /**
  * Live case 2026-09-02, job 41: Automatic pinned to Claude Opus, and Claude
@@ -23,12 +25,24 @@ const LIVE_401 =
  */
 const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
 
+/**
+ * The Codex-then-Sonnet hop both 2026-09-02 live cases walked. It is no longer
+ * the shared Automatic ladder -- 0.6.63 Unit Y moved Story and Scan to
+ * DeepSeek, then Qwen, then Terra -- but it is still the ladder a forced
+ * surface (draft batch, scheduled scan, meeting redraft) and a hand-picked
+ * Claude run fail over along. Naming it here keeps the two incidents
+ * regression-tested against the ladder they actually happened on, instead of
+ * asserting the old contents through the default.
+ */
+const CODEX_TO_SONNET = ["codex-balanced", "claude-sonnet"] as const;
+
 describe("planAutomaticFailover", () => {
   it("moves Automatic to Claude Sonnet when Codex login lapses mid-run", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "codex-balanced",
+      ladder: CODEX_TO_SONNET,
       error: "Codex authentication has expired or Codex is signed out.",
       probe: async (choice) => {
         calls.push(choice);
@@ -44,6 +58,7 @@ describe("planAutomaticFailover", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "codex-balanced",
+      ladder: CODEX_TO_SONNET,
       error: "Codex request timed out after 150s, 0 bytes out",
       probe: async (choice) => {
         calls.push(choice);
@@ -58,6 +73,7 @@ describe("planAutomaticFailover", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "codex-balanced",
+      ladder: CODEX_TO_SONNET,
       error: "Codex API error 429: usage limit reached; resets 11:30pm (America/Denver).",
       probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
     });
@@ -68,6 +84,7 @@ describe("planAutomaticFailover", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "codex-balanced",
+      ladder: CODEX_TO_SONNET,
       error: "Codex is unreachable on this machine.",
       probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
     });
@@ -82,6 +99,7 @@ describe("planAutomaticFailover", () => {
       const plan = await planAutomaticFailover({
         source: "auto",
         current: "codex-balanced",
+        ladder: CODEX_TO_SONNET,
         error,
         probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
       });
@@ -110,7 +128,7 @@ describe("planAutomaticFailover", () => {
     assert.deepEqual(calls, ["codex-balanced"]);
   });
 
-  it("routes an editor's preferred model around the same login lapse", async () => {
+  it("routes an editor's preferred model to the Automatic ladder's first rung around the same login lapse", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "editor",
@@ -118,14 +136,14 @@ describe("planAutomaticFailover", () => {
       error: LIVE_401,
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "DeepSeek v4.1 Flash", choice: "deepseek-flash" };
       },
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "auth" });
-    assert.deepEqual(calls, ["codex-balanced"]);
+    assert.deepEqual(plan, { next: "deepseek-flash", label: "DeepSeek v4.1 Flash", reason: "auth" });
+    assert.deepEqual(calls, ["deepseek-flash"]);
   });
 
-  it("routes an editor's preferred model around the same timeout", async () => {
+  it("routes an editor's preferred model to the Automatic ladder's first rung around the same timeout", async () => {
     const calls: string[] = [];
     const plan = await planAutomaticFailover({
       source: "editor",
@@ -133,11 +151,15 @@ describe("planAutomaticFailover", () => {
       error: LIVE_TIMEOUT_NO_OUTPUT,
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "DeepSeek v4.1 Flash", choice: "deepseek-flash" };
       },
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
-    assert.deepEqual(calls, ["codex-balanced"]);
+    assert.deepEqual(plan, {
+      next: "deepseek-flash",
+      label: "DeepSeek v4.1 Flash",
+      reason: "timeout",
+    });
+    assert.deepEqual(calls, ["deepseek-flash"]);
   });
 
   it("returns null when Automatic's next rung is not ready either", async () => {
@@ -176,6 +198,7 @@ describe("planAutomaticFailover", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "claude-sonnet",
+      ladder: CODEX_TO_SONNET,
       error: LIVE_TIMEOUT_NO_OUTPUT,
       probe: async (choice) => {
         calls.push(choice);
@@ -215,11 +238,11 @@ describe("planAutomaticFailover", () => {
   it("fails over on an empty model response", async () => {
     const plan = await planAutomaticFailover({
       source: "auto",
-      current: "claude-frontier",
+      current: "deepseek-flash",
       error: "empty model response",
-      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+      probe: async () => ({ ok: true, label: "Qwen 3.6 35B", choice: "qwen-local" }),
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+    assert.deepEqual(plan, { next: "qwen-local", label: "Qwen 3.6 35B", reason: "timeout" });
   });
 
   it("returns null once the ladder's last rung has already failed", async () => {
@@ -227,6 +250,7 @@ describe("planAutomaticFailover", () => {
     const plan = await planAutomaticFailover({
       source: "auto",
       current: "claude-sonnet",
+      ladder: CODEX_TO_SONNET,
       error:
         "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
       probe: async (choice) => {
@@ -253,6 +277,58 @@ describe("failoverReasonPhrase", () => {
 
   it("reads as a lapsed sign-in for reason 'auth'", () => {
     assert.equal(failoverReasonPhrase("Claude Opus", "auth"), "Claude Opus sign-in lapsed");
+  });
+
+  it("reads as a reply the desk could not read for reason 'unreadable'", () => {
+    assert.equal(
+      failoverReasonPhrase("DeepSeek v4.1 Flash", "unreadable"),
+      "DeepSeek v4.1 Flash sent a reply the desk could not read",
+    );
+  });
+});
+
+/**
+ * Unit Y item 3's second half. The bake-off (2026-09-24) caught DeepSeek
+ * answering with JSON missing one comma; `readableReplyOrRetry` (./ai.ts)
+ * retries that once on the SAME provider and then reports it with
+ * `unreadableReplyError`'s wording. Until this classifier existed that
+ * sentence matched nothing here, so the ladder treated a stutter as terminal
+ * -- the whole point of the item was that the reply, not the socket, was the
+ * failure, and a failure of either kind gets the one hop.
+ */
+describe("an unreadable reply is a provider failure like any other", () => {
+  it("classifies the sentence the retry reports as 'unreadable'", () => {
+    assert.equal(automaticFailoverReason(unreadableReplyError("DeepSeek v4.1 Flash")), "unreadable");
+    assert.equal(
+      automaticFailoverReason("The writing model sent a reply the desk could not read (unreadable JSON)."),
+      "unreadable",
+    );
+  });
+
+  it("moves Automatic to the next rung after two unreadable replies from rung 1", async () => {
+    const calls: string[] = [];
+    const plan = await planAutomaticFailover({
+      source: "auto",
+      current: "deepseek-flash",
+      error: unreadableReplyError("DeepSeek v4.1 Flash"),
+      probe: async (choice) => {
+        calls.push(choice);
+        return choice === "qwen-local"
+          ? { ok: false, error: "Qwen 3.6 35B skipped: not loaded" }
+          : { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+      },
+    });
+
+    assert.deepEqual(plan, {
+      next: "codex-balanced",
+      label: "Codex Terra",
+      reason: "unreadable",
+    });
+    assert.deepEqual(calls, ["qwen-local", "codex-balanced"]);
+  });
+
+  it("still treats a content refusal as terminal, not as an unreadable reply", async () => {
+    assert.equal(automaticFailoverReason("EDITORIAL_REFUSAL: I cannot write this."), null);
   });
 });
 

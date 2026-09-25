@@ -65,6 +65,46 @@ test("a local-model job receipt pins the endpoint and model that preflight appro
   });
 });
 
+/*
+  Unit Y item 2: the reason a rung was passed over belongs to the job, not to
+  a log line. A receipt that says only "codex-balanced" cannot tell a skipped
+  rung apart from one that was never in the ladder.
+*/
+test("a job receipt records the rungs Automatic passed over, and omits the key when none were", () => {
+  const skipped = initialModelRuntimeReceipt({
+    requestedRuntime: "auto",
+    requestedEffort: null,
+    actualRuntime: "codex-balanced",
+    actualEffort: null,
+    skippedRungs: ["Qwen 3.6 35B skipped: not loaded"],
+  });
+  assert.deepEqual(skipped.skippedRungs, ["Qwen 3.6 35B skipped: not loaded"]);
+  assert.equal(skipped.actualRuntime, "codex-balanced");
+
+  const clean = initialModelRuntimeReceipt({
+    requestedRuntime: "auto",
+    requestedEffort: null,
+    actualRuntime: "deepseek-flash",
+    actualEffort: null,
+  });
+  assert.equal("skippedRungs" in clean, false);
+
+  // The caller may hand it a null meaning "nothing to say"; the key must not
+  // appear as an empty array either, or every ordinary receipt grows a field
+  // that says nothing.
+  assert.equal(
+    "skippedRungs" in
+      initialModelRuntimeReceipt({
+        requestedRuntime: "auto",
+        requestedEffort: null,
+        actualRuntime: "deepseek-flash",
+        actualEffort: null,
+        skippedRungs: null,
+      }),
+    false,
+  );
+});
+
 test("Opinion's first document-stage switch records the immutable request and document attribution", () => {
   assert.match(
     editorialSource,

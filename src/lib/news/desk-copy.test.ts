@@ -590,8 +590,21 @@ describe("Worth a Look presentation", () => {
     assert.equal(tierFromKind("official"), "A");
     assert.equal(tierFromKind("news"), "B");
     assert.equal(tierFromKind("social"), "C");
-    assert.equal(topicFromText("St. Vrain Valley Schools board packet"), "schools");
-    assert.equal(topicFromText("NextLight fiber upgrade"), "utilities");
+    /*
+      Both shapes are asserted, not just the key: `topic` is the section the
+      text names, `unchosen` is whether it named one at all. `topicFromText`
+      now returns {topic, unchosen} (Unit P item 2) and these two texts are
+      the ones the old keyword list was written for, so they must come back
+      chosen.
+    */
+    assert.deepEqual(topicFromText("St. Vrain Valley Schools board packet"), {
+      topic: "schools",
+      unchosen: false,
+    });
+    assert.deepEqual(topicFromText("NextLight fiber upgrade"), {
+      topic: "utilities",
+      unchosen: false,
+    });
   });
 
   it("collapses the Longmont quiet-zone pair, keeping the longer body", () => {
@@ -1265,7 +1278,7 @@ describe("buildScanUserMessage resident coverage contract", () => {
       reread: false,
       memory: [],
       payload: "source text",
-      topics: ["libraries"],
+      topics: [{ key: "libraries", name: "Libraries", brief: "Library access and programs" }],
       section: { name: "Libraries", brief: "Library access and programs", instructions: "Prefer dated changes" },
     });
     assert.match(prompt, /Editor-selected section: Libraries/);

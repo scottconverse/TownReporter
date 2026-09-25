@@ -685,6 +685,17 @@
 .desk-ltr .lead-flags .chip.dup {margin:0}
 .desk-ltr .chip.seen-again {border-color:var(--adeep);color:var(--adeep)}
 .desk-ltr .lead-flags .chip.seen-again {margin:0}
+/* The scan filed this lead under a section the model never chose. Dashed
+   because nothing is settled, accent because it is the editor's to settle --
+   and wrapping, like the possible-duplicate chip, since the words are the
+   point and the rail is not wide enough for them on one line. */
+.desk-ltr .chip.topic-unchosen {border-style:dashed;border-color:var(--a);color:var(--a);display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.desk-ltr .lead-flags .chip.topic-unchosen {margin:0}
+/* An imported story was not written by the desk and was not found by the
+   scanner. It says so on the row, so "where did this come from?" is answered
+   without opening the lead. */
+.desk-ltr .chip.imported {border-style:solid;border-color:var(--fg2);color:var(--fg2)}
+.desk-ltr .lead-flags .chip.imported {margin:0}
 .desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--adeep);color:var(--adeep);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .chip.maybe-same:hover {color:var(--a)}
 .desk-ltr .lead-flags .chip.maybe-same {margin:0}
@@ -1065,7 +1076,17 @@
   full-width row (grid-column:1/-1) instead of a cramped ~180px column.
 */
 .desk-ltr .model-picker {display:grid;grid-template-columns:auto minmax(260px,420px);align-items:center;gap:4px 9px;max-width:100%;min-width:0;margin:12px 0}
-.desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,230px)}
+/*
+  Unit P item 7 (0.6.63): the compact select's 230px cap left 191px of text
+  box, and the shipped default option ("Automatic — Recommended ladder",
+  222px in the select's own font) needed 31px more -- the browser clipped the
+  selected line to "Automatic — Recommende" on the Scan and Dark Desk pages.
+  The track now reaches the 260px the roomier non-compact select already had,
+  so the default fits at desktop; at 375px the 720px rule below already
+  collapses this to one full-width column. Option text stays short by the
+  measurement in components/model-picker.tsx, not by hoping it fits.
+*/
+.desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,300px)}
 .desk-ltr .model-picker-label {font-size:calc(0.875rem * var(--ts));letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
 .desk-ltr .model-picker select {min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
 .desk-ltr .model-picker select:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}

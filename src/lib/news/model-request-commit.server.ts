@@ -18,7 +18,8 @@ import { parseWriteStoryInput } from "./write-story.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
-import { sectionScanSnapshot, ensureSectionsSchema, getSections, resolvedSectionKey } from "./sections.server.ts";
+import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey } from "./sections.server.ts";
+import type { TopicSection } from "./desk-copy.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 
 async function resolveTechnicalPreflight(
@@ -152,6 +153,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
       localModel: providerProbe.ok ? providerProbe.localModel : undefined,
+      skippedRungs: providerProbe.skippedRungs,
       preflightFailover: preflight.switchReceipt,
     })),
   });
@@ -315,6 +317,7 @@ export async function commitScanForAuthenticatedEditor(
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
       localModel: providerProbe.ok ? providerProbe.localModel : undefined,
+      skippedRungs: providerProbe.skippedRungs,
       preflightFailover: preflight.switchReceipt,
     })),
   });
@@ -633,17 +636,43 @@ export async function writeStoryForAuthenticatedEditor(
 ) {
   if ((input.documentIds?.length??0)>20 || new Set(input.documentIds??[]).size!==(input.documentIds?.length??0)) return {ok:false as const,error:"Choose up to 20 different documents."};
   if (input.text.length > 20_000_000) return {ok:false as const,error:"Pasted text exceeds 20 million characters. Attach it in separate volumes."};
-  const parsed = parseWriteStoryInput(input.text || (input.documentIds?.length ? "Write a story from the attached documents." : ""));
+  /*
+    The text is read against THIS newsroom's sections: `topicFromText` prefers
+    their names and reporting briefs over its shipped vocabulary, and reports
+    when the text named none of them (Unit P item 2). An explicit sectionKey --
+    the editor choosing on the form -- overrides both and is never "unchosen".
+
+    `readTopicSections` is the light reader: it answers with the newsroom's own
+    rows and never installs the sections schema or seeds a newsroom, so a
+    newsroom that cannot be read here costs nothing -- the shipped vocabulary
+    decides rather than the write being refused. When the editor DID name a
+    section, the same read is how it is validated, and there a failure IS a
+    refusal, because filing under a section nobody checked is worse.
+  */
+  let sections: TopicSection[] | undefined;
+  try {
+    sections = deps.getSections
+      ? (await deps.getSections(input.context.newsroomId)).sections
+      : await readTopicSections(input.context.newsroomId);
+  } catch {
+    sections = undefined;
+  }
+  const parsed = parseWriteStoryInput(
+    input.text || (input.documentIds?.length ? "Write a story from the attached documents." : ""),
+    sections,
+  );
   if (!parsed.ok) return { ok: false as const, error: parsed.error };
   const { headline, why, urls, scratch, editorialAssignment } = parsed.value;
   let topic = parsed.value.topic;
+  let topicUnchosen = parsed.value.topicUnchosen;
   if (input.sectionKey !== undefined) {
     try {
       if (typeof input.sectionKey !== "string" || !input.sectionKey.trim()) throw new Error("Choose an active reporting section.");
-      const config = await (deps.getSections ?? getSections)(input.context.newsroomId);
-      const key = resolvedSectionKey(config.sections, input.sectionKey);
+      if (!sections) throw new Error("Could not read this newsroom's sections. Reload and retry.");
+      const key = resolvedSectionKey(sections, input.sectionKey);
       if (key !== input.sectionKey || key === "about" || key === "opinion") throw new Error("Choose an active reporting section.");
       topic = key;
+      topicUnchosen = false;
     } catch (error) {
       return { ok: false as const, error: error instanceof Error ? error.message : "Could not validate the selected section. Reload sections and retry." };
     }
@@ -661,10 +690,10 @@ export async function writeStoryForAuthenticatedEditor(
   const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
-    insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
+    insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json, topic_unchosen)
     values (
       ${input.context.userId}, ${input.context.newsroomId}, ${headline}, ${why}, ${topic},
-      ${urlsJson}, ${why.slice(0, 400)}, 0, 'new', ${notesJson}
+      ${urlsJson}, ${why.slice(0, 400)}, 0, 'new', ${notesJson}, ${topicUnchosen}
     )
     returning id
   `;

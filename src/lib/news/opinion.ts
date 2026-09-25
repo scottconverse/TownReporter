@@ -8,7 +8,13 @@ import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { opinionModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
-import { cleanPublishId } from "./request-input.ts";
+import {
+  cleanPublishId,
+  editorialDraftInput,
+  editorialStartInput,
+  editorialText,
+  rowId,
+} from "./request-input.ts";
 
 /**
  * The Opinion desk.
@@ -52,7 +58,7 @@ export type EditorialRow = {
 
 export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((requestId: number) => requestId)
+  .validator((requestId: number) => rowId.parse(requestId))
   .handler(async ({ context, data: requestId }) => {
     const { ensureEditorialRequestSchema } = await import("./editorial.server");
     await ensureEditorialRequestSchema();
@@ -122,7 +128,7 @@ export const listEditorials = createServerFn({ method: "GET" })
 
 export const getEditorial = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((draftId: number) => draftId)
+  .validator((draftId: number) => rowId.parse(draftId))
   .handler(async ({ context, data: draftId }) => {
     const { ensureEditorialSchema } = await import("./editorial.server");
     await ensureEditorialSchema();
@@ -160,7 +166,7 @@ export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
     (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number }) =>
-      input,
+      editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
     const modelChoice = opinionModelChoice(data.modelChoice);
@@ -204,7 +210,7 @@ export type EditorialDraft = {
 
 export const getEditorialDraft = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((draftId: number) => draftId)
+  .validator((draftId: number) => rowId.parse(draftId))
   .handler(async ({ context, data: draftId }): Promise<EditorialDraft | null> => {
     const { ensureEditorialSchema } = await import("./editorial.server");
     await ensureEditorialSchema();
@@ -227,7 +233,7 @@ export const getEditorialDraft = createServerFn({ method: "GET" })
 
 export const saveEditorialDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { draftId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string }) => input)
+  .validator((input: { draftId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string }) => editorialDraftInput.parse(input))
   .handler(async ({ context, data }) => {
     const { saveOpinionDraft } = await import("./opinion-draft.server.ts");
     return saveOpinionDraft(owned(context), data);
@@ -309,7 +315,7 @@ export const publishEditorial = createServerFn({ method: "POST" })
  */
 export const deleteEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((draftId: number) => draftId)
+  .validator((draftId: number) => rowId.parse(draftId))
   .handler(async ({ context, data: draftId }) => {
     const sql = await getSql();
     const { keepACopy, snapshotDraft } = await import("./trash");
@@ -367,7 +373,7 @@ export const deleteEditorial = createServerFn({ method: "POST" })
  */
 export const fileWrittenEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((text: string) => text)
+  .validator((text: string) => editorialText.parse(text))
   .handler(async ({ context, data: text }) => {
     const body = String(text ?? "").trim();
     if (!body) return { ok: false as const, error: "Nothing to file yet." };
@@ -450,7 +456,7 @@ export const fileWrittenEditorial = createServerFn({ method: "POST" })
  */
 export const discardEditorialRequest = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((requestId: number) => requestId)
+  .validator((requestId: number) => rowId.parse(requestId))
   .handler(async ({ context, data: requestId }) => {
     const { ensureEditorialRequestSchema } = await import("./editorial.server");
     await ensureEditorialRequestSchema();

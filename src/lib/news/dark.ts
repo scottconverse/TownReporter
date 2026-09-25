@@ -1,3 +1,13 @@
+import {
+  artifactIdInput,
+  darkCountyInput,
+  darkOpenInput,
+  darkRunInput,
+  darkSignalInput,
+  darkStepInput,
+  redditTipInput,
+  rowId,
+} from "./request-input.ts";
 import { subredditFromSources } from "./dark-place.ts";
 import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
@@ -427,13 +437,29 @@ async function probeDarkProvider(choice?: string, newsroomId?: number) {
       },
     };
   }
+  /*
+    0.6.63 (Unit Y item 2). Dark Desk walks the registry ladder now (item 1),
+    so it inherits the rule that a rung whose model has to be ALREADY loaded is
+    skipped rather than pinned -- and it inherits it from the rung's own probe
+    (ai.ts), the same one Story, Scan and the mid-run hop use. A rung that was
+    passed over is not a failure: it is carried out on the receipt, so a round
+    that ran on Terra says Qwen was skipped and why, rather than looking like a
+    round that never offered it.
+  */
   const failures: string[] = [];
+  const skippedRungs: string[] = [];
   for (const rung of ["configured", ...DARK_AUTOMATIC_LADDER]) {
     const result = await probeProvider(rung, newsroomId, undefined, "dark");
-    if (result.ok) return result;
-    failures.push(result.error);
+    if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
+    if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+    else failures.push(result.error);
   }
-  return { ok: false as const, error: `No Dark Desk Automatic provider is ready. ${failures.join(" ")}` };
+  const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
+  return {
+    ok: false as const,
+    error: `No Dark Desk Automatic provider is ready. ${failures.join(" ")}${skippedNote}`,
+    ...(skippedRungs.length ? { skippedRungs } : {}),
+  };
 }
 
 async function darkPreflightRefusal(
@@ -1001,7 +1027,7 @@ export const listWorthALook = createServerFn({ method: "GET" })
 
 export const getInvestigation = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -1277,7 +1303,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
 
 export const getArtifact = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -1373,7 +1399,7 @@ export const queueArtifactOcr = createServerFn({ method: "POST" })
 
 export const getArtifactOcrJob = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((artifactId: number) => Number(artifactId))
+  .validator((artifactId: unknown) => artifactIdInput.parse(artifactId))
   .handler(async ({ context, data: artifactId }) => {
     const sql = await getSql();
     const rows = await sql<{ id: number; status: string; stage: string; error: string | null; result_json: string }>`
@@ -2036,7 +2062,7 @@ async function executeDarkRun(
 
 export const runDarkDesk = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { paste: string; investigationId?: number; modelChoice?: string }) => input)
+  .validator((input: unknown) => darkRunInput.parse(input))
   .handler(async ({ context, data }) => {
     /*
       The editor's pick decides which provider is probed, and an unresolvable
@@ -2064,7 +2090,7 @@ export const runDarkDesk = createServerFn({ method: "POST" })
 
 export const openDarkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { paste: string; title?: string }) => input)
+  .validator((input: unknown) => darkOpenInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
       await ensureDarkSchema();
@@ -2197,6 +2223,13 @@ export async function startDarkRound(
       actualEffort: modelEffort,
       localModel: probe.ok ? probe.localModel : undefined,
       preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
+      /*
+        A rung the desk passed over on the way to the one that answered
+        (0.6.63, Unit Y item 2). Omitted when empty -- see
+        `initialModelRuntimeReceipt` -- so every receipt that has nothing to
+        report reads exactly as it did before.
+      */
+      skippedRungs: probe.skippedRungs,
     })),
   });
   if ("switchReceipt" in probe) {
@@ -2214,7 +2247,7 @@ export async function startDarkRound(
 
 export const continueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; modelChoice?: string; modelEffort?: unknown }) => input)
+  .validator((input: unknown) => darkStepInput.parse(input))
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startDarkRound(context, data)
@@ -2872,9 +2905,7 @@ export async function sendDarkSignalToQueueFor(
 
 export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; asTip?: boolean }) =>
-    typeof input === "number" ? { id: input } : input,
-  )
+  .validator((input: unknown) => darkSignalInput.parse(input))
   .handler(async ({ context, data }) =>
     sendDarkSignalToQueueFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
@@ -2933,7 +2964,18 @@ export async function queueInvestigationFor(
     order by id desc limit 12
   `;
   const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
-  const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
+  /*
+    Same reading as the Write box (Unit P item 2): this newsroom's own section
+    names and briefs decide the beat, and a file that names none of them is
+    marked not-chosen instead of silently landing in the first section. The
+    light reader never installs the sections schema -- a handoff must not fail
+    over a label.
+  */
+  const { readTopicSections } = await import("./sections.server.ts");
+  const { topic, unchosen: topicUnchosen } = topicFromText(
+    `${inv[0].title}\n${inv[0].summary}`,
+    await readTopicSections(newsroomId),
+  );
   // Keep uncertainty ahead of the summary: a long brief must not crowd out
   // the opposing account when a whole file becomes a lead.
   const signalNotes = await sql<{
@@ -2990,7 +3032,7 @@ export async function queueInvestigationFor(
     .join("\n\n");
   const evidence = `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`;
   const created = await sql<{ id: number }>`
-    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen)
     values (
       ${userId},
       ${newsroomId},
@@ -3001,7 +3043,8 @@ export async function queueInvestigationFor(
       ${urls},
       ${evidence},
       ${12},
-      ${id}
+      ${id},
+      ${topicUnchosen}
     )
     returning id
   `;
@@ -3011,9 +3054,7 @@ export async function queueInvestigationFor(
 
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; asTip?: boolean }) =>
-    typeof input === "number" ? { id: input } : input,
-  )
+  .validator((input: unknown) => darkSignalInput.parse(input))
   .handler(async ({ context, data }) =>
     queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
@@ -3022,7 +3063,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
 
 export const parkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -3039,7 +3080,7 @@ export const parkInvestigation = createServerFn({ method: "POST" })
 
 export const reopenParkedInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((id: number) => id)
+  .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     const sql = await getSql();
@@ -3229,7 +3270,7 @@ export async function fileRedditTipFor(
 
 export const fileRedditTip = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: { url: string; title: string; excerpt?: string; updated?: string; author?: string }) => data)
+  .validator((data: unknown) => redditTipInput.parse(data))
   .handler(async ({ context, data }) => fileRedditTipFor(context.userId, owned(context), data));
 
 /**
@@ -3320,7 +3361,7 @@ export async function saveDarkCountyFor(newsroomId: number, county: string): Pro
 
 export const saveDarkCounty = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { county: string }) => input)
+  .validator((input: unknown) => darkCountyInput.parse(input))
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     const county = await saveDarkCountyFor(owned(context), data.county);
@@ -3540,6 +3581,13 @@ export async function startBriefJob(
       actualEffort: modelEffort,
       localModel: probe.ok ? probe.localModel : undefined,
       preflightFailover: "switchReceipt" in probe ? probe.switchReceipt : null,
+      /*
+        A rung the desk passed over on the way to the one that answered
+        (0.6.63, Unit Y item 2). Omitted when empty -- see
+        `initialModelRuntimeReceipt` -- so every receipt that has nothing to
+        report reads exactly as it did before.
+      */
+      skippedRungs: probe.skippedRungs,
     })),
   });
   if ("switchReceipt" in probe) {
@@ -3614,7 +3662,7 @@ export async function performBriefWork(job: DeskJob) {
 
 export const refreshBrief = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: number | { id: number; modelChoice?: string; modelEffort?: unknown }) => input)
+  .validator((input: unknown) => darkStepInput.parse(input))
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startBriefJob(context, data)

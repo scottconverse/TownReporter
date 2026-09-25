@@ -53,7 +53,20 @@ export const ScanResultSchema = z.object({
     .default([]),
 });
 
-export type ParsedScanLead = Omit<z.infer<typeof ScanLeadSchema>, "topic"> & { topic: string };
+/*
+  A lead whose `topic` the desk chose rather than the model.
+
+  `parseScanResult` must always return a section key -- every row, chip and
+  filter downstream assumes one -- but when the model's reply names no section
+  this newsroom accepts, the key in `topic` is the desk's fallback, not a
+  decision. This flag is the record of that difference, so the Queue row and
+  the story page can say "Section not chosen -- pick one" instead of showing a
+  guessed section as though the scan had chosen it.
+*/
+export type ParsedScanLead = Omit<z.infer<typeof ScanLeadSchema>, "topic"> & {
+  topic: string;
+  topicUnchosen: boolean;
+};
 
 export type ParsedScanResult = {
   editor_summary: string;
@@ -62,8 +75,19 @@ export type ParsedScanResult = {
   parseError: string | null;
 };
 
-/** One bad lead must not dump the whole scan. */
-export function parseScanResult(raw: unknown, allowedTopics: readonly string[] = TOPICS): ParsedScanResult {
+/*
+  One bad lead must not dump the whole scan.
+
+  `allowedTopics` is the set of section keys this run may file under, and
+  `topicNames` is how the prompt named those sections: the model is shown each
+  section's display name as well as its key, so a reply that answers with the
+  name has still chosen a section and must not be recorded as a guess.
+*/
+export function parseScanResult(
+  raw: unknown,
+  allowedTopics: readonly string[] = TOPICS,
+  topicNames: readonly { key: string; name: string }[] = [],
+): ParsedScanResult {
   const empty: ParsedScanResult = {
     editor_summary: "",
     leads: [],
@@ -84,11 +108,20 @@ export function parseScanResult(raw: unknown, allowedTopics: readonly string[] =
     const parsed = ScanLeadSchema.safeParse(item);
     if (parsed.success) {
       const rawTopic = item && typeof item === "object" && "topic" in item ? String(item.topic).trim().toLowerCase() : "";
-      const topic = allowedTopics.includes(rawTopic) ? rawTopic : allowedTopics.includes(parsed.data.topic) ? parsed.data.topic : allowedTopics[0];
+      /*
+        The model chose a section only when it named one this run accepts --
+        by key, or by the display name the prompt showed it. A name is matched
+        case-insensitively and only against the sections this run may file
+        under, so a name the newsroom does not have cannot pick one.
+      */
+      const chosen =
+        (allowedTopics.includes(rawTopic) ? rawTopic : undefined) ??
+        topicNames.find((s) => s.name.trim().toLowerCase() === rawTopic && allowedTopics.includes(s.key))?.key;
+      const topic = chosen ?? (allowedTopics.includes(parsed.data.topic) ? parsed.data.topic : allowedTopics[0]);
       if (topic) {
         const score = item && typeof item === "object" ? (item as Record<string, unknown>).newsworthiness : undefined;
         const ranked = typeof score === "number" && Number.isInteger(score) && score >= 0 && score <= 20;
-        leads.push({...parsed.data, topic, newsworthiness: ranked ? score : 0});
+        leads.push({...parsed.data, topic, topicUnchosen: chosen === undefined, newsworthiness: ranked ? score : 0});
         if (!ranked) unrankedLeads += 1;
       }
     }

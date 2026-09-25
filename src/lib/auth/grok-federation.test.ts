@@ -11,6 +11,7 @@ import {
   authEnforced,
   grokFederation,
   grokFederationWarning,
+  previewHostsTrusted,
   GROK_PREVIEW_OPT_IN,
 } from "./grok-federation.ts";
 
@@ -73,6 +74,7 @@ function post(
   base: string,
   path: string,
   body: unknown,
+  origin: string = base,
 ): Promise<{ status: number; text: string }> {
   const payload = JSON.stringify(body);
   return new Promise((resolve, reject) => {
@@ -89,7 +91,12 @@ function post(
           // which the same middleware reads as a browser request and then
           // demands an Origin for -- a 403 that says nothing about the provider
           // question this file is asking.
-          origin: base,
+          //
+          // `origin` is a parameter because the origin check is what the
+          // host-allow-list question turns on: see the sandbox-origin cases
+          // below, which send a `*.grok-sandbox.com` Origin to a server on
+          // loopback and read the status back.
+          origin,
           // No keep-alive pool. Node's global agent holds its sockets open, and
           // a socket to a server this file is about to kill is a handle the test
           // runner waits on before it will exit.
@@ -165,6 +172,16 @@ describe("the broker client is a decision, and it is made here", () => {
     assert.match(String(grokFederationWarning({ GROK_AUTH_CLIENT_ID: "own-id" })), /GROK_AUTH_CLIENT_SECRET/);
     assert.equal(grokFederationWarning({}), null);
   });
+
+  it("trusts the sandbox host wildcard only under the same opt-in", () => {
+    // The host list and the client are two decisions but ONE switch. Without
+    // it, `*.grok-sandbox.com` is not in Better Auth's `trustedOrigins` and is
+    // not in the dynamic baseURL's `allowedHosts`.
+    assert.equal(previewHostsTrusted({}), false);
+    assert.equal(previewHostsTrusted({ [GROK_PREVIEW_OPT_IN]: "" }), false);
+    assert.equal(previewHostsTrusted({ [GROK_PREVIEW_OPT_IN]: "0" }), false);
+    assert.equal(previewHostsTrusted({ [GROK_PREVIEW_OPT_IN]: "1" }), true);
+  });
 });
 
 describe("the built server neither federates nor loses email sign-in", () => {
@@ -201,6 +218,32 @@ describe("the built server neither federates nor loses email sign-in", () => {
       });
       assert.equal(signUp.status, 200, signUp.text.slice(0, 300));
       assert.match(signUp.text, /"token"/, "email sign-up returned no session");
+
+      /*
+        The host half of the same decision, on the same server.
+
+        `PREVIEW_ALLOWED_HOSTS` was spread into `trustedOrigins` for every
+        install, so an operator who never set the opt-in still accepted a
+        credentialed auth POST whose Origin was a `*.grok-sandbox.com` host --
+        a host that operator does not own. This is that request, against a real
+        server that has no Grok configuration of any kind.
+      */
+      const sandboxOrigin = await post(
+        base,
+        "/api/auth/sign-in/email",
+        { email: "nobody@example.test", password: "an-operator-password-1234" },
+        "https://one.grok-sandbox.com",
+      );
+      assert.equal(
+        sandboxOrigin.status,
+        403,
+        `a sandbox Origin was not refused: ${sandboxOrigin.status} ${sandboxOrigin.text.slice(0, 200)}`,
+      );
+      assert.match(
+        sandboxOrigin.text,
+        /invalid origin/i,
+        `refused for some other reason: ${sandboxOrigin.text.slice(0, 200)}`,
+      );
     } finally {
       // In `finally`, not on the success path: an assertion that fails is
       // exactly when the server most needs stopping, and a failed run that
@@ -223,6 +266,27 @@ describe("the built server neither federates nor loses email sign-in", () => {
       const oauth = await startGrokSignIn(base);
       assert.equal(oauth.status, 200, oauth.text.slice(0, 300));
       assert.match(oauth.text, /client_id=grok_preview/);
+
+      /*
+        The other direction of the host decision: under the opt-in the sandbox
+        origin IS trusted, so this is a door and not a wall -- the sandbox
+        preview signs in on a `*.grok-sandbox.com` Origin, and a host list that
+        refused it would break the one environment the wildcard exists for.
+
+        The user does not exist, so a 401 is the expected outcome; what is
+        asserted is that the refusal is not the origin check.
+      */
+      const sandboxOrigin = await post(
+        base,
+        "/api/auth/sign-in/email",
+        { email: "nobody@example.test", password: "an-operator-password-1234" },
+        "https://one.grok-sandbox.com",
+      );
+      assert.doesNotMatch(
+        sandboxOrigin.text,
+        /invalid origin/i,
+        `the sandbox Origin was refused under the opt-in: ${sandboxOrigin.status} ${sandboxOrigin.text.slice(0, 200)}`,
+      );
     } finally {
       server.kill();
       server = undefined;

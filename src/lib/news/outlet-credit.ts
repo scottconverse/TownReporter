@@ -29,16 +29,20 @@ export type NamedOutlet = {
 };
 
 /*
-  The outlets that cover this town, as a constant rather than a per-newsroom
-  setting.
+  The outlets that cover this town, as the shipped default.
 
-  TODO(0.6.63): make this a per-newsroom list. It should be, and it is not:
-  every other configurable surface in this app (sections, sources, scan
-  policies) reads from a table keyed by newsroom_id through the settings
-  pattern, and copying that pattern for one list is a schema, a settings UI, a
-  loader and a migration -- not the small change this fix is. The list is a
-  constant so that the check can ship, and the newsroom_id column below is
-  already there so that the override records survive the move.
+  0.6.63: this is a per-newsroom setting now. A newsroom's own list lives on its
+  `paper_settings` row (`named_outlets`, migration 0088), the same nullable
+  override-row pattern as every other shipped constant in this app, and it
+  falls back to this list field-by-field: a newsroom that never sets it checks
+  exactly what it checked before. Every function below takes the list it should
+  use, defaulting to this one, because the gate has to judge the draft against
+  the newsroom that is printing it.
+
+  The override records in named_outlet_overrides are unchanged: they are keyed
+  by newsroom, draft and the outlet's printed name, so an override recorded
+  against a list stays valid when the list is edited -- and an outlet that is
+  no longer listed simply stops being named by this check.
 */
 export const NAMED_OUTLETS: NamedOutlet[] = [
   {
@@ -79,10 +83,13 @@ export const NAMED_OUTLETS: NamedOutlet[] = [
 ];
 
 /** Find a listed outlet by the name an editor used, case insensitive. */
-export function namedOutlet(name: string): NamedOutlet | null {
+export function namedOutlet(
+  name: string,
+  outlets: NamedOutlet[] = NAMED_OUTLETS,
+): NamedOutlet | null {
   const wanted = normalize(name);
   if (!wanted) return null;
-  for (const outlet of NAMED_OUTLETS) {
+  for (const outlet of outlets) {
     if (normalize(outlet.name) === wanted) return outlet;
     if (outlet.aliases.some((alias) => normalize(alias) === wanted)) return outlet;
   }
@@ -94,23 +101,101 @@ export function namedOutlet(name: string): NamedOutlet | null {
  *
  * Markdown emphasis is dropped first: `*Denver Post*` and `_Denver Post_` are
  * how these names are actually written in a story body and both must match.
- * Everything that is not a letter or a digit becomes a space, so punctuation
- * between two names cannot join them -- and a hyphen inside one (`Times-Call`)
- * does not split it. The result is padded with spaces so that a match is a
- * whole run of words: "the camera" does not contain " daily camera ".
+ * Everything that is not a letter, a digit or a hyphen becomes a space, so
+ * punctuation between two names cannot join them -- and the result is padded
+ * with spaces so that a match is a whole run of words: "the camera" does not
+ * contain " daily camera ".
+ *
+ * A HYPHEN IS KEPT (0.6.63). It joins words into one name, so keeping it is
+ * what stops the ordinary words "at times call" in a sentence from reading as
+ * the Longmont Times-Call -- the false positive that made this check refuse a
+ * story that named no outlet at all. A hyphen that is not joining a name is
+ * still punctuation and goes: a typed dash ("--" or a lone hyphen with spaces
+ * around it) and a hyphen at either edge of a word all fold to a space, so
+ * "the Times-Call -- reported" and "the -Denver Post" still read as names.
+ *
+ * The trade is deliberate and one-sided: a body that writes a hyphenated
+ * outlet's name WITH A SPACE instead of the hyphen ("Times Call", "Denver
+ * Post" for "Denver-Post") is a name this fold no longer sees. A missed outlet
+ * costs the reader the source link; a false one refuses a story that did
+ * nothing wrong, which is how a gate stops being believed.
  */
 function normalize(text: string): string {
-  return ` ${text
+  const folded = text
     .replace(/[*_]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()} `;
+    .replace(/-{2,}/g, " ")
+    .replace(/[^a-z0-9-]+/g, " ")
+    .replace(/(^|\s)-+|-+(?=\s|$)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return ` ${folded} `;
 }
 
 function names(text: string, outlet: NamedOutlet): boolean {
   const folded = normalize(text);
   if (folded.trim() === "") return false;
   return outlet.aliases.some((alias) => folded.includes(normalize(alias)));
+}
+
+/**
+ * The fold above, exposed as a comparison key.
+ *
+ * The rules an owner's list has to pass are the mirror of this function: two
+ * outlets whose names fold to one key are two outlets the gate cannot tell
+ * apart, so the editor has to refuse them rather than store a list where one
+ * row's credit silently lands on the other. It is exported rather than
+ * re-implemented for the same reason the matcher is the only place that
+ * decides what counts as naming an outlet -- a second fold would drift.
+ *
+ * Trimmed, because equality does not need the padding that `includes` does.
+ */
+export function outletNameKey(text: string): string {
+  return normalize(text).trim();
+}
+
+/**
+ * A stored per-newsroom outlet list, or null when the value is missing or
+ * malformed -- the two states that fall back to NAMED_OUTLETS.
+ *
+ * An EMPTY ARRAY is an answer, not a gap: a newsroom that says it credits no
+ * outlets at all is saying so, the same way an empty youtubeChannels says this
+ * paper has no meeting video channel (paper-settings.ts). It does mean the
+ * named-outlet check never fires for that newsroom, which is a decision an
+ * owner has to make on purpose -- not one a typo in a stored value makes.
+ * An entry with no name is dropped rather than kept as an outlet called "".
+ */
+export function asNamedOutlets(raw: unknown): NamedOutlet[] | null {
+  if (raw == null) return null;
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(value)) return null;
+  const list: NamedOutlet[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Partial<NamedOutlet>;
+    const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+    if (!name) continue;
+    const listOfStrings = (input: unknown) =>
+      Array.isArray(input)
+        ? input.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean)
+        : [];
+    const aliases = listOfStrings(candidate.aliases);
+    list.push({
+      name,
+      // An outlet listed by its name alone is named by that name: aliases are
+      // the *other* spellings, never the only way to match.
+      aliases: aliases.length ? aliases : [name],
+      domains: listOfStrings(candidate.domains),
+    });
+  }
+  return list;
 }
 
 /** A source URL points at the outlet when its host is the outlet's own. */
@@ -136,26 +221,29 @@ export type OutletCheck = {
    * in named_outlet_overrides. An override clears that outlet only.
    */
   overridden?: string[];
+  /** The newsroom's own outlet list; the shipped list when it has none. */
+  outlets?: NamedOutlet[];
 };
 
 /**
  * The outlets this draft names in its body and does not show the reader.
  *
- * Ordered as NAMED_OUTLETS so the desk and the refusal read the same way twice,
- * and de-duplicated: a body that names the Camera three times is one outlet to
- * resolve.
+ * Ordered as the list it was given so the desk and the refusal read the same
+ * way twice, and de-duplicated: a body that names the Camera three times is one
+ * outlet to resolve.
  */
 export function unresolvedNamedOutlets({
   body,
   sourceUrls,
   sourceTitles = [],
   overridden = [],
+  outlets = NAMED_OUTLETS,
 }: OutletCheck): string[] {
   const cleared = new Set(
-    overridden.map((name) => namedOutlet(name)?.name ?? normalize(name).trim()),
+    overridden.map((name) => namedOutlet(name, outlets)?.name ?? normalize(name).trim()),
   );
   const unresolved: string[] = [];
-  for (const outlet of NAMED_OUTLETS) {
+  for (const outlet of outlets) {
     if (cleared.has(outlet.name)) continue;
     if (!names(body, outlet)) continue;
     const covered =

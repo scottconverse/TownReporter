@@ -10,6 +10,7 @@ test("filing stamps the exact killed repeat instead of inserting behind a possib
       id serial primary key, user_id text, newsroom_id integer, scan_run_id integer,
       headline text, why text, topic text, source_urls text, evidence text,
       newsworthiness integer, status text, possible_duplicate_of integer,
+      topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
       last_resurfaced_scan_run_id integer
     )`);
@@ -83,6 +84,7 @@ test("a possible repeat of a killed lead is held, while a possible open match st
       id serial primary key, user_id text, newsroom_id integer, scan_run_id integer,
       headline text, why text, topic text, source_urls text, evidence text,
       newsworthiness integer, status text, possible_duplicate_of integer,
+      topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
       last_resurfaced_scan_run_id integer
     )`);

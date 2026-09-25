@@ -18,9 +18,23 @@ import { createServerFn } from "@tanstack/react-start";
 */
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
-import { PAPER, COUNCIL_VOTES_URL, SEED_SOURCES, EDITOR_EMAIL } from "../paper.ts";
+/*
+  MEETING_KEYWORDS and LONGMONT_YOUTUBE_CHANNELS come from ../paper.ts, not
+  from ./youtube.ts where they were written: this module is loaded by the
+  root route, and youtube.ts spawns python through a `.server.ts` module, so
+  importing it here put a server-only file in the client build (0.6.63).
+*/
+import {
+  PAPER,
+  COUNCIL_VOTES_URL,
+  SEED_SOURCES,
+  EDITOR_EMAIL,
+  MEETING_KEYWORDS,
+  LONGMONT_YOUTUBE_CHANNELS,
+} from "../paper.ts";
 import type { PaperIdentity } from "../paper-identity.ts";
-import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "./youtube.ts";
+/* Pure constants + folds, no database: the outlet list and its parser. */
+import { NAMED_OUTLETS, asNamedOutlets, type NamedOutlet } from "./outlet-credit.ts";
 /* Pure zod + constants, no database: safe to load from a plain node test. */
 import { LIMITS } from "./request-input.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -44,6 +58,12 @@ export type PaperConfig = {
   seedSources: SeedSource[];
   /** Runtime override for EDITOR_EMAIL (src/lib/paper.ts). Null means "use the build-time value." */
   editorEmail: string | null;
+  /**
+   * The outlets whose reporting a story must show its reader, overriding
+   * NAMED_OUTLETS (src/lib/news/outlet-credit.ts). An empty list means this
+   * newsroom credits no outlets; only a NULL column falls back.
+   */
+  namedOutlets: NamedOutlet[];
 };
 
 type PaperSettingsRow = {
@@ -60,6 +80,7 @@ type PaperSettingsRow = {
   youtube_channels: unknown;
   meeting_keywords: unknown;
   seed_sources: unknown;
+  named_outlets: unknown;
   editor_email: string | null;
 };
 
@@ -98,6 +119,12 @@ export async function ensurePaperSettingsSchema() {
   await sql.query(`alter table paper_settings add column if not exists onboarded boolean not null default false`);
   // CITY-SETUP release-walkthrough Critical fix: mirrors migrations/0024_paper_settings_editor_email.sql
   await sql.query(`alter table paper_settings add column if not exists editor_email text`);
+  // Unit P item 5: mirrors migrations/0088_paper_settings_named_outlets.sql
+  await sql.query(`alter table paper_settings add column if not exists named_outlets jsonb`);
+  // Unit W item 3: mirrors migrations/0089_paper_settings_named_outlets_revision.sql
+  await sql.query(
+    `alter table paper_settings add column if not exists named_outlets_revision integer not null default 0`,
+  );
 }
 
 function defaultConfig(): PaperConfig {
@@ -116,6 +143,7 @@ function defaultConfig(): PaperConfig {
     meetingKeywords: [...MEETING_KEYWORDS],
     seedSources: SEED_SOURCES.map((s) => ({ ...s })),
     editorEmail: EDITOR_EMAIL,
+    namedOutlets: NAMED_OUTLETS.map((o) => ({ ...o, aliases: [...o.aliases], domains: [...o.domains] })),
   };
 }
 
@@ -153,6 +181,12 @@ const UNCONFIGURED_PAPER_CONFIG: PaperConfig = {
   meetingKeywords: [],
   seedSources: [],
   editorEmail: null,
+  /*
+    No outlets, like the other lists above: this shape is what a
+    not-yet-configured install shows the PUBLIC, and the named-outlet gate
+    never reads it (getPaperConfig is the desk-only read performPublish uses).
+  */
+  namedOutlets: [],
 };
 
 /**
@@ -233,6 +267,14 @@ function mergeRow(row: PaperSettingsRow | undefined, base: PaperConfig): PaperCo
     meetingKeywords: asStringArray(row.meeting_keywords) ?? base.meetingKeywords,
     seedSources: asSeedSources(row.seed_sources) ?? base.seedSources,
     /*
+      An empty list is an answer, exactly as an empty seed_sources is ("this
+      newsroom credits no outlets"), and only a NULL column -- nothing stored
+      -- falls back to the shipped list. A malformed value falls back too; see
+      asNamedOutlets. A gate that stops firing over a typo in a stored row is
+      worse than one that checks the shipped outlets.
+    */
+    namedOutlets: asNamedOutlets(row.named_outlets) ?? base.namedOutlets,
+    /*
       Same rule as councilVotesUrl: an empty string is a real answer ("this
       paper has no editor contact address"), which lets an owner turn off an
       inherited build-time address. Only a NULL column -- never set -- falls
@@ -250,7 +292,8 @@ async function loadPaperConfig(newsroomId: number): Promise<PaperConfig> {
   const sql = await getSql();
   const rows = await sql<PaperSettingsRow>`
     select name, city, state, location, timezone, tagline, kicker, deck, trust,
-           council_votes_url, youtube_channels, meeting_keywords, seed_sources, editor_email
+           council_votes_url, youtube_channels, meeting_keywords, seed_sources,
+           named_outlets, editor_email
     from paper_settings
     where newsroom_id = ${newsroomId}
     limit 1
@@ -327,6 +370,7 @@ export type PaperConfigPatch = Partial<{
   meetingKeywords: string[] | null;
   seedSources: SeedSource[] | null;
   editorEmail: string | null;
+  namedOutlets: NamedOutlet[] | null;
 }>;
 
 const COLUMN_BY_FIELD: Record<keyof PaperConfigPatch, string> = {
@@ -344,12 +388,14 @@ const COLUMN_BY_FIELD: Record<keyof PaperConfigPatch, string> = {
   meetingKeywords: "meeting_keywords",
   seedSources: "seed_sources",
   editorEmail: "editor_email",
+  namedOutlets: "named_outlets",
 };
 
 const JSONB_FIELDS = new Set<keyof PaperConfigPatch>([
   "youtubeChannels",
   "meetingKeywords",
   "seedSources",
+  "namedOutlets",
 ]);
 
 /**

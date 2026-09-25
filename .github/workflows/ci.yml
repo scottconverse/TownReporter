@@ -453,17 +453,19 @@ jobs:
           }
           node scripts/provider-signin-e2e.mjs
 
-  # Automatic uses Codex first and makes one bounded move to Claude Sonnet if
-  # the first provider's login
-  # lapses mid-draft, the desk moves to the next rung of the ladder itself
-  # and finishes the job on it. It shipped with unit tests only -- never
-  # driven through the desk. Model-free, same trick as provider-signin:
-  # fake-codex answers readiness but every `exec` call returns a provider-shaped
-  # auth failure; fake-claude answers with a plausible JSON draft. Nothing here spends or
-  # touches a real credential. See the walk under scripts/, named for what
-  # it proves.
+  # Automatic walks its ladder in rank order -- DeepSeek v4.1 Flash, then Qwen
+  # 3.6 35B if it is loaded, then Codex Terra -- and finishes on the first rung
+  # that is ready. It shipped with unit tests only -- never driven through the
+  # desk. Model-free, same trick as provider-signin: the walk starts
+  # fake-deepseek-endpoint.mjs (an OpenAI-compatible rung 1 that can answer its
+  # readiness probe and then fail a real call the way the test needs),
+  # fake-lmstudio-endpoint.mjs (rung 2's server, on 1234 because that is how
+  # local discovery recognises an LM Studio one, listing no rung-2 model), and
+  # fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1 as the last rung. Nothing
+  # here spends allowance or touches a real credential. See the walk under
+  # scripts/, named for what it proves.
   failover:
-    name: Automatic fails over to Claude Sonnet when Codex login lapses, in a browser
+    name: Automatic's ladder skips a dead rung and fails over on quota, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -475,19 +477,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: A lapsed Codex login fails the draft over to Claude Sonnet
+      - name: A dead first rung and a quota failure both land on Codex Terra
         env:
           BETTER_AUTH_SECRET: ci-failover-secret-not-for-production
           PORT: "3317"
           HOST: 127.0.0.1
           FAILOVER_BASE_URL: http://127.0.0.1:3317
-          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          TOWNREPORTER_DEEPSEEK_BASE_URL: http://127.0.0.1:3318/v1
           CODEX_CLI_PATH: scripts/fakes/fake-codex-cli.mjs
           FAKE_CODEX_SIGNED_IN: "1"
-          FAKE_CODEX_FAIL_PROMPTS: "1"
-          FAKE_CLAUDE_SIGNED_IN: "1"
-          FAKE_CLAUDE_VALID_DRAFT: "1"
-          FAKE_CLAUDE_DELAY_MS: "1500"
+          FAKE_CODEX_VALID_DRAFT: "1"
+          FAKE_CODEX_DELAY_MS: "1500"
         run: |
           npm start > /tmp/failover.log 2>&1 &
           DEV_PID=$!
@@ -513,7 +513,7 @@ jobs:
           kill_tree "$DEV_PID"
 
   story-quota-failover:
-    name: Story upload survives Codex quota failover to Claude Sonnet
+    name: Story upload survives a first-rung quota failover to Codex Terra
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -525,19 +525,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: A Codex quota failure preserves the uploaded document through Claude Sonnet
+      - name: A first-rung quota failure preserves the uploaded document through Codex Terra
         env:
           BETTER_AUTH_SECRET: ci-story-quota-secret-not-for-production
           PORT: "3320"
           HOST: 127.0.0.1
           STORY_QUOTA_FAILOVER_BASE_URL: http://127.0.0.1:3320
+          TOWNREPORTER_DEEPSEEK_BASE_URL: http://127.0.0.1:3321/v1
           CODEX_CLI_PATH: scripts/fakes/fake-codex-cli.mjs
-          CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
           FAKE_CODEX_SIGNED_IN: "1"
-          FAKE_CODEX_QUOTA_PROMPTS: "1"
-          FAKE_CLAUDE_SIGNED_IN: "1"
-          FAKE_CLAUDE_VALID_DRAFT: "1"
-          FAKE_CLAUDE_DELAY_MS: "1500"
+          FAKE_CODEX_VALID_DRAFT: "1"
+          FAKE_CODEX_DELAY_MS: "1500"
         run: |
           npm start > /tmp/story-quota-failover.log 2>&1 &
           DEV_PID=$!
@@ -986,3 +984,227 @@ jobs:
             foreach ($owner in $owners) { Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue }
           }
 
+
+  # ==========================================================================
+  # 0.6.63 walks. Each of these scripts existed and was run by hand before this
+  # release; none was gated by CI. A walk nobody runs is a claim, not a check --
+  # the same gap scan-desk and sources-desk were added for. Every one of them
+  # runs on its own port (scripts/integration-ports-are-unique.test.mjs enforces
+  # that), with DATABASE_URL empty so it uses in-memory PGlite and never the
+  # shared Postgres, and with no real model: the desk's own deterministic reader
+  # does the work these walks prove.
+  # ==========================================================================
+
+  # S: adding a source to a section without leaving the page. Both halves are
+  # checked separately, including across a reload, because half-landed state is
+  # the failure this walk exists for: the row is on the watch list the moment it
+  # is added, while the assignment to the section only lands on "Confirm and
+  # apply".
+  sections-source-add:
+    name: A source added inside a section lands on the watch list first
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Add a source from inside a section, then assign it
+        env:
+          BETTER_AUTH_SECRET: ci-sections-source-add-secret-not-for-production
+          PORT: "3492"
+          HOST: 127.0.0.1
+          SECTIONS_SOURCE_ADD_BASE_URL: http://127.0.0.1:3492
+          DATABASE_URL: ""
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm start > /tmp/sections-source-add.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3492/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3492/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/sections-source-add.log; exit 1;
+          }
+          node scripts/sections-source-add-e2e.mjs
+          # By PID, never by name -- see the same comment in the
+          # provider-signin job above for why a bare `kill "$DEV_PID"` is not
+          # enough (npm/with-app-env.mjs/vite are all separate descendants).
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
+  # W: the owner's named-outlet list on Server. The sharp stake is that the list
+  # decides which published stories the paper refuses to print while the reader
+  # is not shown the source, so the walk publishes a story the gate would have
+  # blocked first (through the desk's own override path, not a database poke),
+  # and only then asserts on the removal preview's sentence and the headline
+  # beside it. The three stored states -- built-in list, the owner's own list,
+  # "checks no outlet names" -- are each read back after a reload.
+  named-outlets:
+    name: The named-outlet list, its removal preview, and its three states
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Edit the outlet list and read every state back
+        env:
+          BETTER_AUTH_SECRET: ci-named-outlets-secret-not-for-production
+          PORT: "3493"
+          HOST: 127.0.0.1
+          NAMED_OUTLETS_BASE_URL: http://127.0.0.1:3493
+          DATABASE_URL: ""
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm start > /tmp/named-outlets.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3493/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3493/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/named-outlets.log; exit 1;
+          }
+          node scripts/named-outlets-e2e.mjs
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
+  # X: import finished stories. These four walks boot the built server in their
+  # own process (they import .output/server/index.mjs and set their own PORT,
+  # HOST and empty DATABASE_URL), so the job builds and then runs the script --
+  # no `npm start` step to keep alive, and nothing left listening afterwards.
+  import-stories:
+    name: Import finished stories, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Paste a report, review every card, import the ticked ones, publish one
+        env:
+          BETTER_AUTH_SECRET: ci-import-stories-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/import-stories-e2e.mjs
+
+  # X2: paste one story. The Desk's second box, for a single finished story
+  # rather than a report -- and the section it opens with comes from the same
+  # chooser the write box uses, so a story the chooser cannot place opens
+  # "Section not chosen -- pick one" instead of a section nobody chose.
+  paste-one-story:
+    name: Paste one story, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Paste one finished story and file it
+        env:
+          BETTER_AUTH_SECRET: ci-paste-one-story-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/paste-one-story-e2e.mjs
+
+  # X3: import any format. The owner's own report as the outside tool wrote it
+  # (a Claude-authored civic scanner report), plus the other shapes an editor
+  # actually pastes -- plain text with no headings, markdown, a saved page.
+  import-any-format:
+    name: Import a report in any of the formats an editor pastes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Read the same report in every format the box accepts
+        env:
+          BETTER_AUTH_SECRET: ci-import-any-format-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/import-any-format-e2e.mjs
+
+  # T/T2: the front-page river. The reader-facing front page shows the paper's
+  # own stories in the order an editor sees them, with the section fix, and this
+  # is the walk that pins the reader's page rather than the desk's.
+  front-page-river:
+    name: The front-page river, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: The front page shows the river a reader sees
+        env:
+          BETTER_AUTH_SECRET: ci-front-page-river-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/front-page-river-e2e.mjs
+
+  # X5: import a civic-scanner v2.6 report. The report's own readiness statement
+  # decides the card -- Tier 1 ticked, Tier 2 developing with its gaps marked,
+  # Tier 3 and the Black Desk unverified ideas that are never a draft -- the
+  # claims ledger travels as an editor note and is never published, and a
+  # PARTIAL run is bannered with its own "what remains" list. Port 3323, which
+  # no other integration file may bind.
+  import-civic-scanner-v26:
+    name: Import a civic-scanner v2.6 report, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Read a v2.6 report tier by tier and import only what it stands behind
+        env:
+          BETTER_AUTH_SECRET: ci-import-civic-scanner-v26-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/import-civic-scanner-v26-e2e.mjs

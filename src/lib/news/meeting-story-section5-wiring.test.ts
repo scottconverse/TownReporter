@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -7,6 +7,29 @@ import { join } from "node:path";
 import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
+
+/*
+  `runMeetingAwareness` writes its yt-dlp download-archive via
+  `meetingArchivePath()`, which roots at `meetingRuntimeRoot()`
+  (`src/lib/news/meeting-capture.ts`): TOWNREPORTER_DATA_ROOT, else
+  TOWNREPORTER_DATA_DIR, else `process.cwd()`. These tests call the real
+  pipeline, so with neither variable set a run left `meeting-capture/
+  newsroom-1/yt-dlp-archive.txt` in whatever directory the runner started in --
+  a stray untracked folder at the repo root. Pin the root to a temp dir for
+  this file (same pattern as meeting-capture-slice2.behavior.test.ts) and put
+  the environment back afterwards.
+*/
+let priorDataRoot: string | undefined;
+
+before(() => {
+  priorDataRoot = process.env.TOWNREPORTER_DATA_ROOT;
+  process.env.TOWNREPORTER_DATA_ROOT = mkdtempSync(join(tmpdir(), "townreporter-s5-root-"));
+});
+
+after(() => {
+  if (priorDataRoot === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
+  else process.env.TOWNREPORTER_DATA_ROOT = priorDataRoot;
+});
 
 /**
  * Exercises the REAL pipeline boundary: runMeetingAwareness must invoke

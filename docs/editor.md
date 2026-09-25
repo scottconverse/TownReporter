@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current software version: [0.6.62](releases/0.6.62.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.63](releases/0.6.63.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -68,11 +68,27 @@ The owner manages sections in **Server → Sections** (**Newspaper sections** pa
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
+A section with no sources says so and opens its list by itself: **Sources this section reads (0) — choose or add below**. **Add a new source to this section** takes a URL and an optional label without leaving the page. It is the same add the Sources page runs — the same checks, the same duplicate detection — so the page goes on the watch list straight away; the section's use of it belongs to the section draft, and lands when you **Confirm and apply**. The panel says which half is which, and says so plainly. A URL already on watch is ticked rather than added twice, and the message tells you that instead of claiming a new source. Once a section reads sources, its list goes back to collapsed and its summary line names the first few.
+
 Choose **Review changes** before saving, or **Preview changes** when retiring a section. The unsaved review shows every changed section's name, section order, visibility, replacement, reporting brief, scan instructions, and accepted sources with both names and URLs. **Back to editing** preserves the draft, and **Cancel changes** discards it. Only **Confirm and apply** or **Confirm retirement and apply** writes the reviewed configuration. A failed or stale save keeps the draft available for correction; **Reload saved configuration** explicitly replaces it with the saved version.
+
+While the draft differs from the saved configuration, a bar sits at the bottom of the window: **You have unsaved section changes**, with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Navigating away with a draft — a desk link or closing the tab — asks first; **Stay on this page** keeps both the page and the draft. The older buttons above still work.
 
 Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
 
 Editors can use configured sections when filing and scanning; only the owner changes their configuration. Existing legacy topic keys are preserved during migration. These changes require a normal release and local-operator promotion; this repository does not establish the deployed version.
+
+## Named outlets
+
+The owner manages the outlets this paper checks by name in **Server → Named outlets**, below Sections. A published story that names one of these outlets has to show the reader where it came from; if it does not, printing stops until an editor adds the source or overrides that outlet for that one draft. Editors can read the list there; only the owner changes it, and anyone else is told so instead of being shown a form.
+
+The panel always says which of three states the paper is in. **Using the built-in list (7 outlets)** means nothing has been stored: the paper checks the outlets it shipped with. Their names, aliases and websites are readable, and **Customize** copies them into an editable draft. **This paper checks no outlet names** means the owner has decided to check none; it is shown as a decision, with a warning that printing no longer stops when a story names another newsroom's work and does not show the reader that source. A count — **This paper checks 9 outlets** — means the paper checks the owner's own list.
+
+Editing works like the sections panel: rows you can rename, give aliases and a website domain, remove, and add. Aliases are the other ways a story may write the outlet's name, separated by commas. A domain decides only what counts as showing the reader the source, so changing one never stops the paper checking a story. A refusal appears beside the field it is about, in words: an empty name, a name or alias another row already answers to (capitals, and a doubled hyphen or punctuation between the words, do not hide a clash), or a domain written as a web address. **Review changes** will not run while a row is refused.
+
+**Review changes** reads the published paper before anything is written: what is added, what is removed, what changed, and — for every removal and every alias dropped — the published stories whose credit stops being checked, by headline and link, newest first, up to 20 with "and N more". That sentence is the point of the screen: *3 published stories credit Times-Call. After this change the paper will no longer check that credit.* Only **Confirm and apply** writes the list, and it writes against the version the preview actually read, so a stale preview is refused and the draft stays for correction. A story that already shows the reader the source is never listed: the change costs the paper a check only where a check was still stopping the story.
+
+While a draft differs from what is stored, the same bar as the sections panel sits at the bottom of the window — **You have unsaved outlet list changes** — with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Leaving with a draft, by a desk link or by closing the tab, asks first; **Stay on this page** keeps both the page and the draft. **Reload saved configuration** discards the draft and reads the stored list back. **Use the built-in list** asks for the shipped list again, as its own change to review; **Check no outlet names** is the empty list, and it is the one setting here that can only lose the paper a check.
 
 ## Two rooms
 
@@ -142,11 +158,60 @@ It fills the same fields **File a lead yourself** (Queue) asks for by hand, so u
 
 ---
 
+## Import finished stories
+
+Some stories arrive already written — a report from a research tool, a document a colleague sent, a piece you wrote somewhere else. **Write a story** is not for those: it treats what you paste as source material and has a model write a new draft from it. **Import finished stories** is the other way in. It is on the desk landing page under the paste box, on the Queue's empty state, and at **Import** in the sidebar.
+
+**Paste one story, or a whole report.** You can also choose a saved page (`.md`, `.txt`, `.html`). Nothing is kept in the box; the text you pasted is what gets saved.
+
+**Read the stories.** The desk reads the text and shows you what it found. It does not rewrite anything: every paragraph it shows you is a paragraph of your paste, word for word, and it will not put a sentence in a story that was not in the text you gave it. A report with headings is split by those headings. A report or story with no usable structure is read once by the writing model you have set up, which is asked only where the stories start and end, what each headline is, and which paragraphs are the body — never to write a line. If that pass changes a single paragraph, the desk throws it away and falls back to splitting on blank lines, and the card says **Could not split this cleanly — check it** so you look before importing.
+
+**Check every story.** One card per story, and everything on it is yours to change:
+
+| On the card                          | What it does                                                                                                            |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| The tick box                         | Import this one. Sections that are not stories (beat context, watch lists, dates) arrive unticked.                       |
+| **Headline**                         | The heading, with any leading number (`7.`) taken off. That heading line is the headline, so the text below never opens by repeating it. |
+| **Section**                          | Your newsroom's sections, suggested from the text. **Section not chosen — pick one** until you choose one yourself.      |
+| **Dek**                              | The line under the headline.                                                                                            |
+| **The text this story carries**      | The body as written, or the report's plain-language brief, or both with the brief first. The text is shown underneath.   |
+| **Sources**                          | Every link the story cited, each with its own tick box. Links also stay in the body where they were written.            |
+| **Who wrote this**                   | The line readers see. For a report from an outside research tool the default is "An outside AI research tool wrote this from public records; an editor reviewed it." |
+| **Editor notes — never published**   | Score, triage and the reporter next step the report carried. On a v2.6 report, also the readiness tier's own qualifier and the claims ledger with its statuses. |
+| **Import as**                        | **Finished story** — a draft holding the text it carries, ready to edit and publish. **Story idea** — a lead with the description as its why, for someone to write. |
+
+A **Hold** in the report is shown on the card as a Hold. If a story looks like one already on the desk or already printed, the card says so and links to the printed one — you decide whether to import it anyway.
+
+**Finished story or story idea.** A civic-scanner v2.6 report says how ready each story is, and that statement is read before anything else. **Tier 1, ready for edit** imports as a finished story, ticked. **Tier 2, developing** also imports as a finished story, but arrives unticked and wearing a **Developing — gaps marked** flag, with the gaps the report admits to written into its editor notes. **Tier 3**, anything the report files under a **Black Desk** or **Possible Stories to Investigate (Unverified)** heading, and every row of a held-and-potential table, is a **Story idea** and never a draft — however many words it runs — flagged **Unverified — Black Desk**, and it carries a link that opens the Dark Desk's start box with the hypothesis and its own next check already in it. The desk reads the tier wherever the report states it: in a heading, in a table column, or inline in a paragraph (**Editorial readiness:** **Tier 1, ready for edit** as a service story…), and the sentence it came in is kept as an editor note.
+
+Only when nothing in the report states a tier or a section does the desk fall back to length: a body of two paragraphs or more and 120 words or more is a **Finished story**, and a short block or a single paragraph is a lead to write rather than a draft to edit. That fallback is what a v2.5 or older report gets, and it is why a long paragraph of speculation must never be the thing that decides: on a v2.6 report the tier decides, so a 200-word Black Desk hypothesis stays a story idea and cannot arrive as publication copy. A lead the report itself flagged **DEMOTE** arrives as a story idea rather than a draft, unticked: the desk is not going to file a one-line note as a finished story, and you can tick it either way. **Import as** on the card overrules the desk whenever it guessed wrong.
+
+A paste that is nothing but a list of ideas — bullets or numbered lines shaped **Headline — description**, or **Headline**: description — is read as one card per idea, headline and description, with no model involved.
+
+A v2.6 full-pipeline run pasted as JSON, in the shape of the tool's `report-schema.json`, is read the same way as its markdown: same cards, same tiers, same claims. Fields the desk does not know are ignored rather than refused, so a later version of the tool still imports; a paste that is not a report at all falls back to the ordinary reading of plain text.
+
+**Import.** The ticked stories go to the **Queue**, each as a lead marked **Imported** with a saved draft holding your paste exactly, its sources attached, and a note of who imported it, when, and from which text. A ticked story idea goes to the Queue as a lead marked **Imported** with the description as its why, waiting to be written — there is no draft, because nobody has written it. An unverified lead arrives as that and nothing more: **Unverified — Black Desk** on its card, a story idea, a lead with no draft under it. Copies of the cited pages are fetched in the background; if one will not load, the import still goes through. **Nothing is published by an import.**
+
+**The claims ledger.** A v2.6 report attaches claims to each story, each one **VERIFIED**, **UNVERIFIED** or **CONTESTED**, with the source IDs behind it. The ledger travels with the story into its editor notes — **never into the published text** — and a card carrying a claim the run could not verify raises a warning where you can see it, before you import anything. Read it: it is the report telling you which sentences it stands behind and which it does not.
+
+**A run that stopped early.** A report whose run says **PARTIAL** shows a banner above the cards, quoting the run's own list of what it did not get to. The cards below are the ones it finished. Nothing on that screen says the rest of the period was covered, and if you need the rest you run the scan again rather than reading the finished cards as a full sweep.
+
+From there an imported story is a story like any other: open it, edit it, redraft it if you want to, and **Publish** it when it is right. A well-formed imported story — headline, section, body, at least one source — is not held back by the checks that exist for AI drafts, such as matching passages to cited records. The checks that protect readers still run.
+
+**One story you already have.** When what you have is a single finished story rather than a report full of them, the desk landing page has a shorter way in, under the import panel: **Paste a story I already have**. Paste it, leave the headline empty and its first line becomes the headline, choose the section, and press **Add to Queue**. The line the headline came from is the headline and not the first line of the body: the paste that follows it is the draft, word for word, line for line, and nothing else is moved or trimmed. Type a headline of your own and the whole paste is the body instead. There is no review screen and no model reads it — its links come across as the story's sources, and it lands in the Queue marked **Imported** as a regular news story. **Nothing is published**, and the section you choose there is not the confirmation: that still happens in the story editor, on the ordinary button, before the story can publish.
+
+---
+
 ## Sources (`/desk/sources`)
 
 The watch list chosen during Paper setup. The Longmont edition ships with city, council, agendas, PrimeGov, planning, NextLight, St. Vrain Valley Schools, Boulder County, the library, `@CityofLongmont`, and `@LongmontPublicMedia`; a new installation starts with the sources its owner enters.
 
-**Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A.
+**Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A. The add form also carries an optional **Assign to sections** list: tick the newspaper sections this source should feed and it is filed under them as it is saved, in the same step. Opinion and About are not on that list — they are reserved pages.
+
+**Accept one:** accepting a proposed source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A proposed source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
+
+Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list; adding and accepting are still yours to do.
+
 
 **Add many:** bulk paste. Formats the toolkit already taught people:
 
@@ -182,7 +247,8 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 Scan has the same **Writing model** picker Story and the queue have, next to
 **Run scan**: Automatic (the default), every named Codex and Claude model, or
 Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it tries Codex Terra, then Claude Sonnet. If the first one's login
+otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is
+loaded, then Codex Terra. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
 A named choice is the recorded first provider. A recognized technical failure
@@ -216,8 +282,9 @@ Statuses you will use:
 
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
-operator's configured gateway when one is set; otherwise it tries Codex Terra,
-then Claude Sonnet. If the first one's login lapses partway through the
+operator's configured gateway when one is set; otherwise it uses DeepSeek v4.1
+Flash first, then Qwen on this computer if it is loaded, then Codex Terra. If
+the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
 which provider took over and why. A named choice is the first recorded provider;
 the same technical-only retry rule applies. The result appears on the same
@@ -229,14 +296,14 @@ list.
 
 The **Draft selected leads** bar prepares up to five eligible Queue leads as
 one atomic batch. Tick the leads, then choose exactly one named **Codex**,
-**Claude**, **Grok (SuperGrok)**, **Local model**, or saved **Custom AI** connection,
+**Claude**, **Local model**, or saved **Custom AI** connection,
 including Gemini. It deliberately does not offer Automatic. Each lead keeps its
 saved research scope. If the named runtime fails technically, only the unfinished
 call can move to the next ready cloud runtime; a refusal remains terminal. If no
 runtime is ready, or one selected lead cannot be queued, the batch does not start
 and the Queue explains why.
 
-Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+Daily Scan uses the same named model choices and saved Custom
 AI connections. It does not offer Automatic. The named model is tried first;
 technical preflight or mid-call switches are recorded, and refusals remain
 terminal. OCR uses the same technical-only rule and considers only
@@ -334,8 +401,9 @@ During public-source reporting, a captured recurring record such as an agenda, m
 Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
 
 The picker beside it controls this run. **Automatic** uses a configured
-`LLM_*` gateway exclusively when present; otherwise it tries Codex Terra,
-then Claude Sonnet, chooses the first ready one before enqueueing, and keeps it
+`LLM_*` gateway exclusively when present; otherwise it uses DeepSeek v4.1 Flash
+first, then Qwen on this computer if it is loaded, then Codex Terra —
+choosing the first ready one before enqueueing, and keeping it
 for every reporting and writing pass unless it reaches a usage limit, becomes
 unavailable, loses its login, or times out. Automatic moves the unfinished work
 once to the next ready provider and shows the switch in the workbench. A model
@@ -459,6 +527,43 @@ How they join: a council video titled like `08/25/2026` joins that day’s packe
 
 Dark Desk is told: search the whole tape; names may be wrong; quotes need a check. It will still guess. You are the check.
 
+### Meetings with no captions (speech-to-text)
+
+Some tapes have no captions at all, so capture ends at the audio. If the owner
+has installed **textflowkit** on this machine and named it, the desk can listen
+to that recording and write a transcript from it. The pass you already run —
+**Run meetings now**, or the scheduled one — queues that work; there is nothing
+extra to press. One recording is transcribed at a time, it can be stopped, and
+if the machine restarts mid-run the desk picks the work up again. What the desk
+does with it afterwards is the same as for a caption transcript: alignment,
+citations with timestamps, drafts, and the publish checks all read it the same
+way.
+
+Two things to keep straight.
+
+**It is not the city’s record.** The desk labels these rows, next to the
+transcript’s hashes, as *speech-to-text (Whisper via textflowkit), not official
+captions*. Everything already said about auto-captions applies, and more
+sharply: a machine listened to audio and wrote down what it thought it heard.
+Names, numbers, and ordinance titles are exactly where it is most confident and
+most wrong. Play the tape before you print a quote or a name from one.
+
+**The desk says whether it is available.** **Server → Meeting capture** shows
+one line: *Speech-to-text: textflowkit 0.1.6 (model small, language en)* when it
+is there, or *not installed … meetings without captions stay audio-only* when it
+is not. If that line says not installed, a captionless meeting staying
+audio-only is the honest outcome, not a fault.
+
+A transcription that fails — the tool missing, the audio unreadable, or the run
+running past its allowance — leaves a named reason on the meeting row and keeps
+the recording exactly where it was. The next pass retries it. Nothing is written
+over: the audio is never deleted, and a transcript is never stored unless the
+recording it came from still matches the hash the desk recorded for those bytes.
+
+If captions turn up later, they are a new revision like any other, and the
+same rules apply — including the review step when a transcript changes after
+publication. Speech-to-text never overwrites a caption transcript.
+
 ### From a meeting recording to a story
 
 After channels and title keywords are saved in **Paper setup**, an owner can
@@ -548,8 +653,9 @@ Keep the file open while its research job is running and Dark Desk refreshes tha
 Next to **Keep digging** there is a **Digging model** picker, the same one the
 queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
 Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
-Dark Desk Automatic uses a configured gateway when present; otherwise it tries
-Codex Terra, then Claude Sonnet. Planning uses Claude Haiku or the cheaper Codex
+Dark Desk Automatic uses a configured gateway when present; otherwise it uses
+DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then
+Codex Terra. Planning uses Claude Haiku or the cheaper Codex
 planning model. If synthesis times out, only synthesis moves to the next model;
 completed searches and document reads do not run again. A model you name is the
 recorded first choice. A recognized technical failure can move only the failed
@@ -650,8 +756,12 @@ Where the paper says what it thinks.
 Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
 Choose **Automatic**, any named Codex or Claude model, or **Local model**;
-saved custom connections are offered too. Codex Sol is selected by default. Automatic tries
-Codex Sol, then Claude Sonnet once if Codex is unavailable. An explicit choice
+saved custom connections are offered too. Codex Sol is selected by default.
+**Opinion's own Automatic** tries
+Codex Sol, then Claude Sonnet once if Codex is unavailable — that order belongs
+to Opinion. Stories, scans and Dark Desk walk the desk's own Automatic ladder:
+DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then
+Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
 A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
@@ -690,10 +800,11 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Automatic can move from Codex Sol to Claude Sonnet once. A named choice is tried
+Opinion's Automatic can move from Codex Sol to Claude Sonnet once. A named
+choice is tried
 first and the same technical-only unfinished-call rule applies. A finished row
 names the requested and actual model and effort. Opus is never selected by an
-unattended ladder.
+unattended ladder, on any surface.
 
 **Edit** opens the piece in its own editor. That is where you change the
 headline, fix a line, print it, or throw it away. The fact sheet and the image

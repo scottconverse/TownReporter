@@ -1,0 +1,2179 @@
+/**
+ * Reading finished stories out of a pasted report.
+ *
+ * The owner's need, 2026-09-24: "I should be able to just dump something like
+ * that into the desk somewhere and it should be smart enough to read it all,
+ * parse out the stories, headline them and paste the body of the story and the
+ * claims/sources links in the right place in the story and put it in the queue.
+ * I DO NOT want to run AI's multiple times to find stories."
+ *
+ * Two rules shape this file.
+ *
+ * 1. PARSE, NEVER REWRITE. Every body paragraph, dek and brief this module
+ *    returns is a byte-for-byte slice of the input. Nothing is summarised,
+ *    reordered, re-cased or joined. `containsVerbatim()` is the check that
+ *    enforces it, and it is applied to the model's reply too, so a model that
+ *    "tidies" a sentence has its whole split rejected rather than published.
+ *
+ * 2. DETERMINISTIC FIRST. A report with headings and labelled parts is read
+ *    with no model call at all -- `parseFinishedStories()` returns
+ *    `method: "structured"`, and the caller must not reach for a model when it
+ *    sees that. A model is asked ONLY for structure (which paragraphs belong to
+ *    which story), never for prose, and only when the text carries no usable
+ *    structure of its own.
+ *
+ * Kept client-safe (no db import) so the review screen can re-parse a paste
+ * without a round trip and so this can be unit tested on its own, in the style
+ * of `write-story.ts`.
+ */
+
+import { topicFromText } from "./desk-copy.ts";
+
+export type ImportLink = { text: string; url: string };
+
+/**
+ * What a card is offered as on the review screen. A finished story is a story
+ * the report already wrote; a story idea is a lead the report raised without
+ * the reporting behind it, and it becomes a lead in the Queue with no draft.
+ */
+export type ImportKind = "story" | "idea";
+
+/**
+ * The word count under which a card is an idea rather than a story.
+ *
+ * The owner, 2026-09-24: "what if it's other formats, like a list of stories
+ * with short paragraph descriptions of what was found?" A paragraph of notes
+ * about something seen is a lead to chase; several paragraphs are a story that
+ * has been written. 120 words is where the two reports actually divide: the
+ * Claude scan's eight HOLD leads sit between 34 and 83 words, its ten written
+ * leads between 150 and 263, so the threshold has room on both sides of it.
+ */
+export const IDEA_WORD_LIMIT = 120;
+
+/**
+ * Whether a card's text is a written story or the description of an idea.
+ *
+ * Two paragraphs or more AND 120 words or more is a story; anything else is an
+ * idea. The paragraph test is the one that matters for the shape a report
+ * actually writes (a lead with a single paragraph of body is a note, not a
+ * story), and the word test catches the long single paragraph.
+ */
+export function defaultImportKind(body: string): ImportKind {
+  const paragraphs = splitParagraphs(body);
+  if (paragraphs.length < 2) return "idea";
+  const words = normalizeForVerbatim(body).split(" ").filter(Boolean).length;
+  return words < IDEA_WORD_LIMIT ? "idea" : "story";
+}
+
+/**
+ * The report's own editorial readiness tier -- Civic Scanner v2.6's "Editorial
+ * readiness" statement, which is a different thing from the source tiers A/B/C
+ * and from the newsworthiness score.
+ *
+ *  1  ready for edit     a nearly finished draft
+ *  2  developing         a verified core with the gaps marked
+ *  3  potential          a weak lead, or a Black Desk hypothesis
+ *  0  the report stated no tier at all
+ *
+ * The owner's rule, 2026-09-25: "Tier 3 and anything under a Black Desk ...
+ * heading -> Story idea, never a draft." This is the statement that OUTRANKS
+ * the word count, and 0 is the only value that lets the count decide.
+ */
+export type ReadinessTier = 0 | 1 | 2 | 3;
+
+/** The flag a card wears when the report called it developing or unverified. */
+export const DEVELOPING_FLAG = "Developing — gaps marked";
+export const UNVERIFIED_FLAG = "Unverified — Black Desk";
+
+export type ClaimStatus = "VERIFIED" | "CONTESTED" | "UNVERIFIED";
+
+/**
+ * One line of a story's claims ledger. The report states, per claim, whether the
+ * run verified it against a record and which receipt did the verifying. The
+ * ledger is the editor's, never the reader's: it is carried into the editor
+ * notes and never into the published text.
+ */
+export type ImportClaim = {
+  /** "C1".."Cn" within one story; the JSON shape's own `id` when it has one. */
+  id: string;
+  /** The claim itself, in the report's words. */
+  text: string;
+  /** "" when the report's status cell named no state the desk understands. */
+  status: ClaimStatus | "";
+  /** The receipt / next-check cell, in the report's words ("" when absent). */
+  receipt: string;
+  /** The source IDs the receipt names, e.g. ["S1-A1"]. */
+  sources: string[];
+};
+
+/** The words a report uses instead of a number, and the tier each one means. */
+const TIER_NAMED_WORDS: [RegExp, ReadinessTier][] = [
+  [/\bready for edit\b|\bready to edit\b|\bready for publication\b/i, 1],
+  [/\bdeveloping\b/i, 2],
+  [/\bpotential\b/i, 3],
+];
+
+/**
+ * Whether a piece states a named tier, as opposed to merely containing the word.
+ *
+ * "Ready for edit" is a phrase only a report uses about its own filing, so it
+ * is read anywhere in the piece. "Developing" and "potential" are ordinary
+ * English -- "the council is developing a plan" states no tier, and reading it
+ * as one would silently demote a finished story to a lead -- so those two are
+ * read only where the report sets a tier OUT: bolded, at the head of the piece,
+ * or behind the word "tier" or "readiness" and a colon.
+ */
+function namesATier(raw: string, word: RegExp): boolean {
+  if (word.source.includes("ready")) return word.test(raw);
+  const setOut = "(?:^\\s*|\\*\\*\\s*|\\b(?:tier|readiness)\\s*[:\\-]?\\s*)";
+  return new RegExp(`${setOut}(?:${word.source})`, "i").test(raw);
+}
+
+/**
+ * The tier a piece of the report states, plus the qualifier sentence that came
+ * with it (the owner, 2026-09-25: "read the tier and keep the qualifier
+ * sentence as an editor note").
+ *
+ * Two statements of tier in one piece take the more cautious of the two: a row
+ * that says "Tier 2 service brief / Tier 3 deeper angle" is a Tier 3 packet
+ * with a Tier 2 use, and the desk must not offer it as the finished thing.
+ *
+ * A tier is only ever read from a place the report SETS ONE OUT -- a labelled
+ * readiness piece, a table's tier column, a heading. Never from mid-sentence
+ * prose, or an ordinary sentence like "the council is developing a plan" would
+ * silently demote a finished story.
+ */
+export function readinessFromText(text: string): { tier: ReadinessTier; note: string } {
+  const raw = String(text ?? "").trim();
+  if (!raw) return { tier: 0, note: "" };
+  let tier: ReadinessTier = 0;
+  for (const match of raw.matchAll(/\btiers?\s*([123])\b/gi)) {
+    const seen = Number(match[1]) as ReadinessTier;
+    if (seen > tier) tier = seen;
+  }
+  if (tier === 0) {
+    for (const [word, value] of TIER_NAMED_WORDS) {
+      if (namesATier(raw, word)) {
+        tier = value;
+        break;
+      }
+    }
+  }
+  if (tier === 0) return { tier: 0, note: "" };
+  return { tier, note: readinessNoteOf(raw) };
+}
+
+/**
+ * The qualifier that came with a tier statement, with the tier phrase itself
+ * taken off. The report bolds that phrase (`**Tier 1, ready for edit**`), so
+ * lifting the bolded run leaves exactly the instruction the editor needs.
+ */
+function readinessNoteOf(raw: string): string {
+  return raw
+    .replace(/\*\*[^*]*\btiers?\s*[123]\b[^*]*\*\*/gi, " ")
+    .replace(/\*\*/g, "")
+    .replace(/\btiers?\s*[123]\b[^.;—–\n]*[.;—–]?/gi, " ")
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.,;:—–-]+/, "")
+    .trim();
+}
+
+/**
+ * What a card is offered as, given what the report said about it.
+ *
+ * The order is the point. A Black Desk hypothesis or an unverified section is
+ * an idea whatever its length, and so is a Tier 3 packet. A Tier 1 packet is a
+ * story the report already wrote. A Tier 2 packet is a story only if a draft is
+ * actually under it -- a developing ROW in the report's held table has no draft
+ * and is a lead -- and it never opens ticked. Only a card with no tier at all
+ * falls through to the word count X3 wrote.
+ */
+export function kindForTier(input: {
+  tier: ReadinessTier;
+  unverified: boolean;
+  body: string;
+  isStory: boolean;
+}): { kind: ImportKind; includeByDefault: boolean } {
+  const written = defaultImportKind(input.body);
+  if (input.unverified || input.tier === 3) return { kind: "idea", includeByDefault: false };
+  if (input.tier === 1) return { kind: "story", includeByDefault: true };
+  if (input.tier === 2) return { kind: written, includeByDefault: false };
+  // No tier stated: the word count decides the kind, and the shape of the filing
+  // decides the tick, exactly as it did before tiers were read at all.
+  return { kind: written, includeByDefault: input.isStory };
+}
+
+/**
+ * The flag a card wears on the review screen for what the report called it.
+ *
+ * The words are the owner's (2026-09-25): a Tier 2 card is "Developing — gaps
+ * marked" and a Tier 3 card, or anything under a Black Desk heading, is
+ * "Unverified — Black Desk". A Tier 1 card wears nothing.
+ */
+export function readinessFlagOf(story: {
+  readiness: ReadinessTier;
+  unverified: boolean;
+}): string {
+  if (story.unverified || story.readiness === 3) return UNVERIFIED_FLAG;
+  if (story.readiness === 2) return DEVELOPING_FLAG;
+  return "";
+}
+
+/**
+ * The warning a card wears when its ledger carries a claim the run could not
+ * stand behind. Empty when every claim is verified, or when there is no ledger.
+ */
+export function claimsWarning(claims: ImportClaim[]): string {
+  const shaky = claims.filter((claim) => claim.status === "UNVERIFIED" || claim.status === "CONTESTED");
+  if (shaky.length === 0) return "";
+  const what = shaky.length === 1 ? "1 claim is" : `${shaky.length} claims are`;
+  return `${what} unverified or contested — read the claims ledger in the editor notes before publishing.`;
+}
+
+/** True for a heading that says its contents are hypotheses, not findings. */
+export function sectionIsUnverified(heading: string): boolean {
+  return /\bblack\s*desk\b|\bunverified\b|possible stories to investigate/i.test(
+    String(heading ?? ""),
+  );
+}
+
+/**
+ * The report's own filing label, taken off the headline and kept for the notes.
+ * `L1 — New Longmont–airport bus begins Sunday` is the L1 packet, not a
+ * headline about an "L1". The label is kept (`storyId`) so the editor can find
+ * the packet again in the report the run wrote.
+ */
+export function storyIdFromHeading(heading: string): { id: string; headline: string } {
+  const text = String(heading ?? "").trim();
+  /*
+    `L1 — …`, `**H3** SVVSD achievement and growth` and `S1: …` all carry the
+    label; what follows it is a separator or a space. A headline that merely
+    starts with capitals ("BNSF completes rail safety work") has no digit after
+    the letters and is left alone.
+  */
+  const match = /^\*{0,2}([A-Z]{1,3}\d{1,3})\*{0,2}(?![A-Za-z0-9])/.exec(text);
+  if (!match) return { id: "", headline: text };
+  const rest = text
+    .slice(match[0].length)
+    .replace(/^\s*[—–:-]+\s*/, "")
+    .replace(/^\*+|\*+$/g, "")
+    .trim();
+  if (!rest) return { id: match[1]!, headline: text };
+  return { id: match[1]!, headline: rest };
+}
+
+/**
+ * The editor's notes for one card: what the report filed it as, what the run
+ * said about its readiness, the ledger it attached, and the next step. None of
+ * this is published -- `performImportFinishedStories` files it on the lead's
+ * `notes_json`.
+ */
+export function editorNotesFor(story: {
+  storyId: string;
+  readiness: ReadinessTier;
+  readinessNote: string;
+  claims: ImportClaim[];
+  reporterNextStep: string;
+  triage: string;
+}): string {
+  const lines: string[] = [];
+  const filed = [
+    story.storyId ? `Report ID: ${story.storyId}.` : "",
+    story.readiness ? `Editorial tier ${story.readiness}.` : "",
+    story.triage ? `Triage: ${story.triage}.` : "",
+  ].filter(Boolean);
+  if (filed.length > 0) lines.push(filed.join(" "));
+  if (story.readinessNote) lines.push(`Readiness note: ${story.readinessNote}`);
+  if (story.claims.length > 0) {
+    lines.push("Claims ledger — never published:");
+    for (const claim of story.claims) {
+      const status = claim.status || "UNSTATED";
+      const by = claim.sources.length > 0 ? ` [${claim.sources.join(", ")}]` : "";
+      const receipt = claim.receipt ? ` — ${claim.receipt}` : "";
+      lines.push(`- ${status}${by}: ${claim.text}${receipt}`);
+    }
+  }
+  if (story.reporterNextStep) lines.push(`Next step: ${story.reporterNextStep}`);
+  return lines.join("\n").trim();
+}
+
+export type ImportedStory = {
+  /** Stable within one parse: "s1".."sN" for stories, "n1".."nN" for the rest. */
+  key: string;
+  order: number;
+  headline: string;
+  /** False for a section of the report that is not a story (brief says: default OFF). */
+  isStory: boolean;
+  /** What the review screen offers it as: "Finished story" or "Story idea". */
+  kind: ImportKind;
+  /** The tick the review screen starts with. False for the report's own sections. */
+  includeByDefault: boolean;
+  /** The report's own filing label, e.g. "L1"; "" when the report filed it under no ID. */
+  storyId: string;
+  /** The report's editorial readiness tier, or 0 when it stated none. */
+  readiness: ReadinessTier;
+  /** The qualifier sentence that came with the tier statement ("" when there was none). */
+  readinessNote: string;
+  /** True under a Black Desk / "Possible Stories to Investigate (Unverified)" heading. */
+  unverified: boolean;
+  /** The story's claims ledger, in the report's words. Editor notes, never published. */
+  claims: ImportClaim[];
+  score: string;
+  triage: string;
+  /** True when the triage word is "Hold" — imports with a visible Hold flag. */
+  holds: boolean;
+  /** `**Why it matters:**` */
+  dek: string;
+  /** The body paragraphs, exactly as written. */
+  body: string;
+  /** `**Plain-language brief:**` */
+  plainBrief: string;
+  /** `**Reporter next step:**` — editor notes, never published. */
+  reporterNextStep: string;
+  /** The line naming the official sources, exactly as written ("" when absent). */
+  scoreLine: string;
+  /**
+   * The sources the report cited as documents rather than links, one per entry,
+   * in its own words: `Sept 22 packet p. 819 (Tier A)`. A packet page or a
+   * council recording has no URL, and the desk must not print a made-up one --
+   * so these are carried as the text they are, beside the real links in
+   * `links` (`provenanceFromCitations` files them that way).
+   */
+  citations: string[];
+  /** Every link in the block, deduped by URL, in the order they appear. */
+  links: ImportLink[];
+  /** The whole block as it arrived — what "the text is kept exactly as written" means. */
+  raw: string;
+  /**
+   * A section suggestion from the same topic chooser the write box uses, or ""
+   * when that chooser says the text named no section (see
+   * `suggestedSectionFromText`).
+   */
+  sectionSuggestion: string;
+  /** Default disclosure wording; the editor can change it on the review screen. */
+  disclosureKey: DisclosureKey;
+  /**
+   * False when this story came from the fallback path and could not be split
+   * cleanly — the review screen must show "could not split this cleanly — check it".
+   */
+  cleanSplit: boolean;
+  warning: string;
+};
+
+export type ParsedReport = {
+  /** The document's own title (`# ...`), or "" when it has none. */
+  title: string;
+  /** The `**Scan date:**` line when the source tool wrote one. */
+  scanDate: string;
+  /**
+   * Front matter that is not a story and that the brief does not want a card
+   * for (title, scan line, intro/methodology, verification boundary). Shown
+   * muted above the cards, never imported and never silently dropped.
+   */
+  headerNote: string;
+  /** Name of the tool that produced the report, when the title names one. */
+  detectedTool: string;
+  stories: ImportedStory[];
+  /**
+   * The paste with its display damage taken off (see `precleanMarkdown`). Every
+   * card's text is a slice of this, and the verbatim check accepts a paragraph
+   * found here or in the raw paste, so the two always agree.
+   */
+  cleanedText: string;
+  method: "structured" | "ideas" | "plain" | "json" | "none";
+  /**
+   * The run's own status line -- "PARTIAL" when the run says so, "" when it
+   * says nothing. A partial run is a run that stopped early, and the review
+   * screen shows the editor what it did not finish before anything is imported.
+   */
+  runStatus: string;
+  /** The run's "what remains" / "remaining critical gap" list, one line each. */
+  runRemains: string[];
+  warnings: string[];
+};
+
+export type DisclosureKey = "outside-ai" | "person" | "other";
+
+export const IMPORT_DISCLOSURES: { key: DisclosureKey; label: string; line: string }[] = [
+  {
+    key: "outside-ai",
+    label: "An outside AI tool",
+    line: "An outside AI research tool wrote this from public records; an editor reviewed it.",
+  },
+  {
+    key: "person",
+    label: "A person",
+    line: "A person wrote this from public records; an editor reviewed it.",
+  },
+  { key: "other", label: "Other wording", line: "" },
+];
+
+export function disclosureLine(key: DisclosureKey, other = ""): string {
+  if (key === "other") return other.trim();
+  return IMPORT_DISCLOSURES.find((d) => d.key === key)?.line ?? "";
+}
+
+/** The word the source tool used for a story it wants held. */
+const HOLD = /^hold$/i;
+
+/**
+ * The word it used for a story it wants dropped to a lower tier. Demote is not
+ * the same request as Hold, but it is the same flag for the desk: a lead that
+ * may not be published as it stands, and one the editor should look at first.
+ */
+const DEMOTE = /^demote$/i;
+
+const LINK_RE = /\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)/g;
+const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
+const LEADING_ORDINAL = /^(?:\d+|[ivxlc]+)[.)]\s+/i;
+
+/**
+ * Which part of a story a label names, in the words of whichever tool wrote it.
+ *
+ * The Codex scan writes `**Plain-language brief:**`; the very same scan run
+ * inside Claude writes `**Plain-language version:**`, and writes `**Why it
+ * matters for Longmont:**` where Codex writes `**Why it matters:**`. The editor
+ * should not have to care which one they ran, so the synonyms live here in one
+ * table: adding a wording is one line, and the list is read by
+ * `labelGroupOf()` for every label in every report.
+ *
+ * `score` is its own group rather than a kind of note because that one line
+ * carries the score and the verdict the desk files the lead under; the rest of
+ * the notes group is editorial guidance that is never published.
+ */
+export type ImportLabelGroup =
+  | "score"
+  | "readiness"
+  | "brief"
+  | "dek"
+  | "notes"
+  | "sources";
+
+export const IMPORT_LABELS: { group: ImportLabelGroup; label: RegExp; why: string }[] = [
+  { group: "score", label: /^(?:score|triage(?:\s+score)?)$/i, why: "the score line: score + verdict" },
+  {
+    group: "readiness",
+    label: /^(?:editorial\s+readiness|readiness(?:\s+tier)?|editorial\s+tier)$/i,
+    why: "the editorial readiness tier and its qualifier",
+  },
+  { group: "brief", label: /^plain[- ]language(?:\s+(?:brief|version|summary))?$/i, why: "plain-language brief" },
+  { group: "dek", label: /^why (?:it|this) matters(?:\s+for\s+.+)?$/i, why: "why it matters" },
+  {
+    group: "notes",
+    label: /^(?:reporter next step|next step|what would elevate|what elevates this|verification|editors?'? note)$/i,
+    why: "editor guidance, never published",
+  },
+  {
+    group: "sources",
+    label: /^(?:official\s+)?sources?(?:\s+and\s+records)?$|^citations?$/i,
+    why: "the report's own source list",
+  },
+];
+
+/** Which part of a story this label names, or "" when the table does not know it. */
+export function labelGroupOf(label: string): ImportLabelGroup | "" {
+  const text = String(label ?? "")
+    .trim()
+    .replace(/[*_]+$/g, "")
+    .trim();
+  if (!text) return "";
+  return IMPORT_LABELS.find((entry) => entry.label.test(text))?.group ?? "";
+}
+
+/**
+ * A labelled run inside a paragraph: `**Score: 16/20**`, `**Why it matters:**`.
+ *
+ * Both shapes the exports use -- the label's value inside the bold and the value
+ * after it -- and both in one document, which is why this splits a paragraph
+ * rather than matching a whole one. A Claude lead carries two labels inside a
+ * single paragraph (`… **What would elevate:** … **Plain language:** …`), and a
+ * bold phrase that is not a label (`**Water Fund:** $51.01 million`) matches
+ * nothing here and stays in the body, exactly as the editor wrote it.
+ */
+const LABEL_RUN = /\*\*\s*([A-Za-z][^*:\n]{0,40}?)\s*:\s*([^*\n]*?)\s*\*\*/g;
+
+/**
+ * A part label v2.6 writes as a bold sentence fragment rather than a bold
+ * `Label:`: `**Draft (about 220 words).** Longmont's city council gave …` and
+ * `**Plain-language summary (about 100 words).** The city council approved …`.
+ *
+ * The older exports write `**Plain-language brief:**`, so the same two parts
+ * arrive with the label punctuated differently; the word count in the
+ * parentheses is the report's note about its own draft, not part of the story.
+ * A bold phrase this table does not know is left in the text untouched.
+ */
+const PART_LABEL = /^\*\*\s*([A-Za-z][A-Za-z-]*(?:\s+[A-Za-z-]+){0,3})\s*(?:\([^)\n]{0,60}\))?\s*\.\s*\*\*\s*/;
+
+const PART_LABEL_GROUPS: [RegExp, ImportLabelGroup | "body"][] = [
+  [/^drafts?$/i, "body"],
+  [/^plain[- ]language(?:\s+(?:brief|version|summary))?$/i, "brief"],
+];
+
+/** Which part a sentence-fragment label names, or "" when the table does not know it. */
+export function partLabelGroupOf(label: string): ImportLabelGroup | "body" | "" {
+  const text = String(label ?? "").trim();
+  if (!text) return "";
+  return PART_LABEL_GROUPS.find(([pattern]) => pattern.test(text))?.[1] ?? "";
+}
+
+/**
+ * The report's own source list, as its own paragraph: `*Sources: Sept 22 packet
+ * p. 819 (Tier A); …*`, `**Official sources:** …`, `Citations: …`.
+ *
+ * Italic rather than bold, which is why it is matched here and not by
+ * `LABEL_RUN`; anchored at the start of the paragraph, so a sentence that merely
+ * mentions the word cannot become the source list.
+ */
+const SOURCES_LINE = /^\s*[*_]{0,2}\s*((?:official\s+)?sources?(?:\s+and\s+records)?|citations?)\s*:\s*[*_]{0,2}\s*([\s\S]*?)\s*[*_]{0,6}\s*$/i;
+
+const NAMED_SECTION = /^\*\*(?:Date|Scan date|Run|Mode|Status|Verification boundary):\*\*/i;
+
+export const IMPORT_LIMITS = { text: 400_000, headline: 180, stories: 200 };
+
+/**
+ * Whitespace-normalised text, for comparing two copies of the same sentence.
+ * Newlines, tabs and runs of spaces collapse to one space; leading and trailing
+ * space goes. Nothing else is touched — no punctuation, no case, no words.
+ */
+export function normalizeForVerbatim(text: string): string {
+  return String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * True when `paragraph` appears in `input` as written.
+ *
+ * Deliberately a containment check on whitespace-normalised text and nothing
+ * cleverer: re-wrapping a paragraph across lines is not a rewrite, but changing,
+ * adding or dropping even one word is. An empty paragraph is not "contained" —
+ * it is nothing, and every caller treats nothing as a failure.
+ */
+export function containsVerbatim(input: string, paragraph: string): boolean {
+  const needle = normalizeForVerbatim(paragraph);
+  if (!needle) return false;
+  return normalizeForVerbatim(input).includes(needle);
+}
+
+/**
+ * A URL the report pasted without its scheme: `youtube.com/watch?v=jhsFsEz0P5A`,
+ * `longmont.primegov.com/api/v2/PublicPortal/ListArchivedMeetings`.
+ *
+ * The reports cite bare domains in running text and in source-access tables, and
+ * an editor who wants the recording should get a link they can click. The
+ * boundary group is what keeps this off a URL that is already inside a markdown
+ * link (`](https://…` puts `/` before the host, which is not a boundary), and the
+ * scheme is added, never guessed: the host is what the report wrote.
+ */
+const BARE_URL_RE =
+  /(?:^|[\s([|,])((?:[a-z0-9-]+\.)+(?:com|org|net|gov|edu|io|ai|us|co|info|biz|dev)(?:\/[^\s)\]"'<>]*)?)/gi;
+
+/** The markdown links and the bare domains in a stretch of text. */
+export function extractLinks(text: string): ImportLink[] {
+  const body = String(text ?? "");
+  const found: ImportLink[] = [];
+  const seen = new Set<string>();
+  for (const match of body.matchAll(LINK_RE)) {
+    const url = match[2]!;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push({ text: (match[1] || url).trim(), url });
+  }
+  for (const match of body.matchAll(BARE_URL_RE)) {
+    const host = match[1]!.replace(/[.,;:]+$/, "");
+    const url = `https://${host}`;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push({ text: host, url });
+  }
+  return found;
+}
+
+/**
+ * Split on blank lines. Paragraphs keep their internal line breaks exactly.
+ *
+ * CRLF is folded to LF first, the way `precleanMarkdown` already folds it. A
+ * blank line in a Windows-saved `.md` or `.txt` is `\r\n\r\n`, and `\n[ \t]*\n`
+ * does not match across the `\r` -- so without this the whole document came
+ * back as ONE paragraph. Measured on the real civic-scanner fixture from a
+ * fresh Windows checkout (`core.autocrlf=true` puts it on disk as CRLF):
+ * `splitParagraphs` returned 1 paragraph instead of 61, which is what made six
+ * of this module's tests fail there while passing on LF. Nothing above is
+ * affected: every caller inside the reader is handed text `precleanMarkdown`
+ * already normalised.
+ */
+export function splitParagraphs(text: string): string[] {
+  return String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split(/\n[ \t]*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+/** `### 1. Some headline` -> `Some headline`. The heading number is not part of it. */
+export function stripOrdinal(heading: string): string {
+  const text = String(heading ?? "").trim();
+  const stripped = text.replace(LEADING_ORDINAL, "").trim();
+  return stripped || text;
+}
+
+/* ------------------------------------------------------------------ *
+ * Labels: what the report called each part, and where it said it.
+ * ------------------------------------------------------------------ */
+
+type LabelledPiece = { group: ImportLabelGroup | ""; text: string };
+
+/**
+ * One paragraph, split at every label the table knows -- in order, words
+ * untouched. A paragraph with no known label comes back whole.
+ *
+ * The label's own value belongs to the label either way: `**Score: 16/20**` and
+ * `**Score:** 17/20` both leave the score as the first thing after the label.
+ */
+export function splitLabelled(paragraph: string): LabelledPiece[] {
+  const text = String(paragraph ?? "");
+  const runs: { start: number; end: number; group: ImportLabelGroup | ""; value: string }[] = [];
+  for (const match of text.matchAll(LABEL_RUN)) {
+    const group = labelGroupOf(match[1]!);
+    // An unknown bold label is the editor's own words: it stays where it is.
+    if (!group) continue;
+    runs.push({
+      start: match.index!,
+      end: match.index! + match[0].length,
+      group,
+      value: (match[2] ?? "").trim(),
+    });
+  }
+  const part = PART_LABEL.exec(text);
+  const partGroup = part ? partLabelGroupOf(part[1]!) : "";
+  if (part && partGroup) {
+    runs.unshift({
+      start: 0,
+      end: part[0].length,
+      group: partGroup === "body" ? "" : partGroup,
+      value: "",
+    });
+  }
+  const first = runs[0];
+  if (!first) return [{ group: "", text }];
+
+  const pieces: LabelledPiece[] = [];
+  const head = text.slice(0, first.start).trim();
+  if (head) pieces.push({ group: "", text: head });
+  runs.forEach((run, index) => {
+    const until = index + 1 < runs.length ? runs[index + 1]!.start : text.length;
+    const after = text.slice(run.end, until).trim();
+    pieces.push({ group: run.group, text: [run.value, after].filter(Boolean).join(" ") });
+  });
+  return pieces;
+}
+
+/** The text of a paragraph that is the report's own `Sources:` list, or "". */
+export function sourcesLineOf(paragraph: string): string {
+  const match = SOURCES_LINE.exec(String(paragraph ?? ""));
+  return match ? (match[2] ?? "").trim() : "";
+}
+
+/**
+ * A source entry as v2.6 writes it: `**S1-A1** [Ordinance O-2026-63](url)`, and
+ * the same with the ID bare (`S1-A1: …`) or the list comma-separated.
+ */
+const SOURCE_ENTRY_ID = /^\**\s*[A-Z]{1,3}\d{1,3}(?:-[A-Z]\d{1,3})?\s*\**[:\s—–-]/;
+
+/** The ID at the head of a source entry, e.g. "S1-A1"; "" when it has none. */
+function sourceEntryId(entry: string): string {
+  return /^\**\s*([A-Z]{1,3}\d{1,3}(?:-[A-Z]\d{1,3})?)\s*\**/.exec(entry)?.[1] ?? "";
+}
+
+/**
+ * The entries in a sources line, one per `;`, each with its trailing full stop
+ * taken off. They are the report's own words: a citation of a packet page or a
+ * recording has no URL to invent, and nothing here guesses one.
+ *
+ * v2.6 writes each source with a filing ID and follows the list with a
+ * countercheck sentence -- `Sources: **L1-A1** [RTD final service changes](url)
+ * (Tier A); **L1-A2** [schedules](url) (Tier A). Countercheck: a targeted search
+ * found no newer cancellation notice; that is not proof none exists.` Splitting
+ * on every `;` filed that countercheck prose as a third citation, and the URL in
+ * a linked entry is already carried in `links` where the editor ticks it -- so an
+ * entry is rewritten to `ID · document (locator)`, and once any entry carries an
+ * ID, anything that is not an entry is the report's prose about its own search,
+ * not a source.
+ */
+export function citationsFromText(text: string): string[] {
+  const parts = String(text ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const withIds = parts.filter((part) => SOURCE_ENTRY_ID.test(part));
+  const entries = withIds.length > 0 ? withIds : parts;
+  return entries.map(citationEntryOf).filter(Boolean);
+}
+
+/** Where the report stops naming sources and starts describing its own search. */
+const COUNTERCHECK = /\bCounter-?checks?\b/i;
+
+/** One entry, in the words the desk prints it in: `L1-A1 · RTD final service changes (Tier A)`. */
+function citationEntryOf(entry: string): string {
+  const id = sourceEntryId(entry);
+  const rest = String(entry ?? "")
+    .split(COUNTERCHECK)[0]!
+    .replace(/^\**\s*[A-Z]{1,3}\d{1,3}(?:-[A-Z]\d{1,3})?\s*\**[:\s—–-]*/, "")
+    // The entry's own markdown link becomes its document title; its URL is
+    // carried in `links`, where the review screen can tick it as a real link.
+    .replace(LINK_RE, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[·—–-]\s*/, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.\s;]+$/, "")
+    .trim();
+  return [id, rest].filter(Boolean).join(" · ").trim();
+}
+
+const TRIAGE_BOLD = /\*\*\s*(advance|hold|demote|kill|suppress|skip|watch|monitor)\s*\*\*/i;
+const TRIAGE_BARE = /\b(advance|hold|demote|kill|suppress)\b/i;
+
+/** The report's verdict word, in the casing the desk shows it: "Advance", "Hold". */
+export function triageWordOf(text: string): string {
+  const raw = String(text ?? "");
+  const word = TRIAGE_BOLD.exec(raw)?.[1] ?? TRIAGE_BARE.exec(raw)?.[1] ?? "";
+  if (!word) return "";
+  return word[0]!.toUpperCase() + word.slice(1).toLowerCase();
+}
+
+/** `## LEADS (HOLD)` / `## HOLD` — a section that states its verdict in its name. */
+const SECTION_VERDICT = /^(?:leads?|stories|items|cards?)?\s*\(?\s*(advance|hold|demote|kill|suppress|skip)\s*\)?\s*$/i;
+
+/** The verdict a section's name states, or "". Deliberately strict: only a
+ *  section whose *whole* name is the verdict, so "Signals and watch list" is
+ *  a section of the report and not a Watch on every lead under it. */
+export function sectionVerdictOf(heading: string): string {
+  const word = SECTION_VERDICT.exec(cleanHeadingText(String(heading ?? "")))?.[1] ?? "";
+  if (!word) return "";
+  return word[0]!.toUpperCase() + word.slice(1).toLowerCase();
+}
+
+/** The `(9/20: …)` code a report puts on a heading, by the heading's own words. */
+function headingScoreCodes(text: string): Map<string, string> {
+  const codes = new Map<string, string>();
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    const heading = HEADING_RE.exec(line);
+    if (!heading) continue;
+    // The bold around the heading comes off first: the code sits inside it.
+    const raw = unescapeMarkdown(heading[2]!.trim())
+      .replace(/[*_]+$/, "")
+      .trim();
+    const code = /\(\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+)\s*:[^)]*\)\s*$/.exec(raw);
+    if (!code) continue;
+    codes.set(cleanHeadingText(heading[2]!), `${code[1]}/${code[2]}`);
+  }
+  return codes;
+}
+
+/* ------------------------------------------------------------------ *
+ * Pre-clean: the display damage a markdown export leaves behind.
+ * ------------------------------------------------------------------ */
+
+/**
+ * A backslash before any ASCII punctuation — `\$`, `\#`, `\.`, `\&`, `\(`.
+ *
+ * Markdown lets an author escape a punctuation mark so it prints as itself, and
+ * a Google Docs export escapes far more than it needs to. To a reader `\$4.5
+ * million` and `$4.5 million` are the same three words; only one of them is what
+ * the editor wants on a page. Removing the backslash, and nothing else, is the
+ * whole of this step.
+ */
+const MARKDOWN_ESCAPE = /\\([!-/:-@[-`{-~])/g;
+
+/**
+ * A bold the export escaped on one side only: `\*\*$4,513,469**`.
+ *
+ * Google Docs writes this when it loses track of where the emphasis started.
+ * Repaired here, before the general unescape, so the marks go without the text
+ * between them being touched. Deliberately narrow — `**bold**` written on
+ * purpose inside a paragraph is left exactly as the editor wrote it.
+ */
+const ESCAPED_BOLD_OPEN = /\\\*\\\*([^\n]+?)\*\*/g;
+const ESCAPED_BOLD_CLOSE = /\*\*([^\n]+?)\\\*\\\*/g;
+
+/** The report's own filing label on a heading: `LEAD 12:`, `Story 3.`, `Item 4 —`. */
+const HEADING_FILING_LABEL = /^(?:LEAD|STORY|ITEM)\s*\d+\s*[:.)—-]\s*/i;
+
+/** The report's triage arithmetic, appended to some headings: `(9/20: I3 Im1 C3 N2)`. */
+const HEADING_SCORE_CODE = /\s*\(\s*\d+(?:\.\d+)?\s*\/\s*\d+\s*:[^)]*\)\s*$/;
+
+/** A heading wrapped in `**bold**`, `*italic*` or `***both***`. */
+const WRAPPED_EMPHASIS = /^([*_]{1,3})([\s\S]+?)\1$/;
+
+/** A horizontal rule: `---`, `***`, `___`. It separates cards; it is not text. */
+const HORIZONTAL_RULE = /^\s*(?:[-*_]\s*){3,}$/;
+
+function unescapeMarkdown(line: string): string {
+  return line
+    .replace(ESCAPED_BOLD_OPEN, "$1")
+    .replace(ESCAPED_BOLD_CLOSE, "$1")
+    .replace(MARKDOWN_ESCAPE, "$1");
+}
+
+/**
+ * A heading's own words, with the markup, the filing label and the score code
+ * taken off — never anything else. `### **LEAD 12: Hangar lease … (9/20: I3 Im1
+ * C3 N2)**` becomes `Hangar lease …`.
+ */
+function cleanHeadingText(heading: string): string {
+  let text = unescapeMarkdown(String(heading ?? "").trim()).trim();
+  const wrapped = WRAPPED_EMPHASIS.exec(text);
+  if (wrapped) text = wrapped[2]!.trim();
+  text = stripOrdinal(text);
+  text = text.replace(HEADING_FILING_LABEL, "").trim();
+  text = text.replace(HEADING_SCORE_CODE, "").trim();
+  return text;
+}
+
+/**
+ * Take the display damage off a pasted report: escapes, bold and italic around
+ * headings, the report's `LEAD n:` filing labels and `(9/20: …)` score codes,
+ * and its `---` rules.
+ *
+ * **Structure and display only — never words.** A line comes out of here either
+ * the same line or with punctuation marks removed around words that stay in
+ * place, in order, one line per line. That is what lets the review screen show
+ * a clean headline while the verbatim check still compares a body paragraph
+ * against the editor's own paste.
+ *
+ * The reports Unit X already reads have no escapes, no bold headings and no
+ * rules, so on those this is a no-op and their reading is unchanged.
+ */
+export function precleanMarkdown(text: string): string {
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    if (HORIZONTAL_RULE.test(line)) {
+      out.push("");
+      continue;
+    }
+    const heading = HEADING_RE.exec(line);
+    if (heading) {
+      out.push(`${heading[1]} ${cleanHeadingText(heading[2]!)}`);
+      continue;
+    }
+    out.push(unescapeMarkdown(line));
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * True when `paragraph` is in the paste as the editor typed it, or in the paste
+ * with its display damage removed. The two readings of the same paste: a
+ * paragraph the reader cleaned is still the editor's own text, word for word.
+ */
+export function containsVerbatimEither(input: string, paragraph: string): boolean {
+  return containsVerbatim(input, paragraph) || containsVerbatim(precleanMarkdown(input), paragraph);
+}
+
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  rsquo: "’",
+  lsquo: "‘",
+  ldquo: "“",
+  rdquo: "”",
+  mdash: "—",
+  ndash: "–",
+  hellip: "…",
+  copy: "©",
+  deg: "°",
+};
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
+    const named = ENTITIES[body.toLowerCase()];
+    if (named) return named;
+    if (body[0] === "#") {
+      const code = body[1]!.toLowerCase() === "x" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) return String.fromCodePoint(code);
+    }
+    return whole;
+  });
+}
+
+/**
+ * A saved web page as text, before anything reads it.
+ *
+ * The file path accepts `.html`, and raw markup fed to the reader would be
+ * worse than useless: `<h3>` is exactly the structure `parseStructure` looks
+ * for, and a tag soup has none. So the page is turned into the markdown the
+ * reader already understands — headings become `#`…`######`, list items become
+ * `-` lines, `<br>` and the block-closing tags become paragraph breaks — and
+ * script, style and the page's own `<title>` are dropped rather than imported
+ * as text nobody wrote for the story. Anything still in angle brackets is
+ * removed, so no markup reaches the body of an imported story.
+ *
+ * Deliberately not a general-purpose HTML parser: it reads the shape a saved
+ * report has, and a page whose text only appears inside a script or a nested
+ * table will come out with less than a browser would show. The review screen is
+ * where an editor sees that before anything is saved.
+ */
+export function htmlToText(html: string): string {
+  const text = String(html ?? "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|title|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<h([1-6])\b[^>]*>/gi, (_m, level: string) => `\n\n${"#".repeat(Number(level))} `)
+    .replace(/<\/h[1-6]\s*>/gi, "\n\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/(p|div|li|ul|ol|tr|table|section|article|blockquote|pre)\s*>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "");
+  return decodeEntities(text)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+type RawBlock = { level: number; heading: string; text: string };
+
+function splitBlocks(text: string): RawBlock[] {
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const blocks: RawBlock[] = [];
+  let current: RawBlock = { level: 0, heading: "", text: "" };
+  const push = () => {
+    if (current.heading || current.text.trim()) blocks.push(current);
+  };
+  for (const line of lines) {
+    const heading = HEADING_RE.exec(line);
+    if (heading) {
+      push();
+      current = { level: heading[1]!.length, heading: heading[2]!.trim(), text: "" };
+      continue;
+    }
+    current.text += (current.text ? "\n" : "") + line;
+  }
+  push();
+  return blocks;
+}
+
+/** A labelled part, appended when a report states the same part twice. */
+function joinPart(previous: string, text: string): string {
+  return previous ? `${previous}\n\n${text}` : text;
+}
+
+function partsOf(paragraphs: string[]) {
+  const out = {
+    score: "",
+    scoreLine: "",
+    triage: "",
+    readiness: "",
+    why: "",
+    brief: "",
+    next: "",
+    sources: "",
+    body: [] as string[],
+  };
+  for (const paragraph of paragraphs) {
+    const sources = sourcesLineOf(paragraph);
+    if (sources) {
+      out.sources = joinPart(out.sources, sources);
+      continue;
+    }
+    for (const piece of splitLabelled(paragraph)) {
+      switch (piece.group) {
+        case "":
+          out.body.push(piece.text);
+          break;
+        case "score":
+          out.scoreLine = paragraph;
+          // The bold markers around a score the report itself bolded inside the
+          // line (`… = **14, advance**.`) are formatting, not words: the score
+          // field is a note the editor reads, so they come off.
+          out.score ||= piece.text.split(/[·|]/)[0]!.replace(/\*+/g, "").trim();
+          out.triage ||= triageWordOf(paragraph);
+          break;
+        case "readiness":
+          // The tier's own piece, which is why `**Editorial readiness:**` had to
+          // become a label: unlabelled, it was swallowed by the score piece and
+          // the card's whole score field became a readiness sentence.
+          out.readiness = joinPart(out.readiness, piece.text);
+          break;
+        case "dek":
+          out.why = joinPart(out.why, piece.text);
+          break;
+        case "brief":
+          out.brief = joinPart(out.brief, piece.text);
+          break;
+        case "notes":
+          out.next = joinPart(out.next, piece.text);
+          break;
+        case "sources":
+          out.sources = joinPart(out.sources, piece.text);
+          break;
+      }
+    }
+  }
+  return { ...out, citations: citationsFromText(out.sources) };
+}
+
+/**
+ * The section an imported card opens with: the one `topicFromText` read out of
+ * the text, or "" when that chooser says the text named no section at all.
+ *
+ * Lane 1's Unit P rewrote `topicFromText` (desk-copy.ts) to read whole words
+ * and this newsroom's own section names, and to answer with a `TopicMatch` --
+ * the column's fallback key plus whether the text actually named a section.
+ * The import keeps those two states apart for the same reason the scan does
+ * (`topic_unchosen`, migrations/0087): a story the chooser could not place must
+ * open "Section not chosen -- pick one" and make the editor pick, rather than
+ * opening on a section nobody chose. `""` is the review screen's own marker for
+ * that state (`NO_SECTION`), so the two lanes' words for it are the same words.
+ */
+function suggestedSectionFromText(text: string): string {
+  const match = topicFromText(text);
+  return match.unchosen ? "" : match.topic;
+}
+
+function makeStory(input: {
+  key: string;
+  order: number;
+  headline: string;
+  isStory: boolean;
+  raw: string;
+  paragraphs: string[];
+  disclosureKey: DisclosureKey;
+  /** The `(9/20: …)` code off the heading, when the lead states no score of its own. */
+  scoreCode?: string;
+  /** The verdict the section above the lead states, when the lead states none. */
+  sectionVerdict?: string;
+  /** Overridden for a card this module already knows the kind of (an idea list). */
+  kind?: ImportKind;
+  /** Overridden for a card the report itself dropped (a demoted lead's bullet). */
+  includeByDefault?: boolean;
+  /** The report's own filing label, when the headline did not carry it. */
+  storyId?: string;
+  /** True under a Black Desk / "Unverified" heading. */
+  unverified?: boolean;
+  /** The tier, when the report filed it outside the card's own text (a table row). */
+  readiness?: { tier: ReadinessTier; note: string };
+  /** The claims ledger, already lifted out of the body by `liftClaims`. */
+  claims?: ImportClaim[];
+  /**
+   * Overridden for a paste that states its sources as data rather than as
+   * prose: a JSON packet carries a `sourceList`, and there is no `Sources:`
+   * paragraph for `partsOf` to read one out of.
+   */
+  citations?: string[];
+  links?: ImportLink[];
+}): ImportedStory {
+  const parts = partsOf(input.paragraphs);
+  const triage = (parts.triage || input.sectionVerdict || "").trim();
+  const body = parts.body.join("\n\n");
+  const stated = input.readiness ?? readinessFromText(parts.readiness);
+  /*
+    A Tier 3 packet is unverified by the report's own statement -- "potential",
+    a weak lead, never publication copy -- so the flag follows the tier as well
+    as the section. Without this a Tier 3 packet outside a Black Desk heading
+    would reach the desk wearing no warning at all.
+  */
+  const unverified = (input.unverified ?? false) || stated.tier === 3;
+  const chosen = kindForTier({
+    tier: stated.tier,
+    unverified,
+    body,
+    isStory: input.isStory,
+  });
+  return {
+    key: input.key,
+    order: input.order,
+    headline: input.headline,
+    isStory: input.isStory,
+    kind: input.kind ?? chosen.kind,
+    includeByDefault: input.includeByDefault ?? chosen.includeByDefault,
+    storyId: input.storyId ?? "",
+    readiness: stated.tier,
+    readinessNote: stated.note,
+    unverified,
+    claims: input.claims ?? [],
+    score: parts.score || input.scoreCode || "",
+    triage,
+    holds: HOLD.test(triage) || DEMOTE.test(triage),
+    dek: parts.why,
+    body,
+    plainBrief: parts.brief,
+    reporterNextStep: parts.next,
+    scoreLine: parts.scoreLine,
+    citations: input.citations ?? parts.citations,
+    links: input.links ?? extractLinks(input.raw),
+    raw: input.raw,
+    sectionSuggestion: suggestedSectionFromText(
+      [input.headline, parts.why, body].join("\n"),
+    ),
+    disclosureKey: input.disclosureKey,
+    cleanSplit: true,
+    warning: "",
+  };
+}
+
+/**
+ * Does this block carry the labelled parts a story has -- a score line, a dek,
+ * a brief, a next step?
+ *
+ * A sources line deliberately does not count. Both reports have sections that
+ * name their own source in prose (`## COVERAGE LEDGER: … **Source:** official
+ * recording …`) and none of them is a story; a section with a citation list and
+ * no claim of its own is a record of the scan, which is what the desk already
+ * shows it as.
+ */
+function looksLikeStory(text: string): boolean {
+  return splitParagraphs(text).some((p) =>
+    splitLabelled(p).some((piece) => piece.group !== "" && piece.group !== "sources"),
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Tables: the claims ledger, and the held-lead table.
+ *
+ * v2.6 states two things per story in a markdown table rather than in prose --
+ * which of its claims were verified against a record, and which leads it is
+ * holding with the tier it filed them under. Both were reaching the reader:
+ * the claims table landed inside the body (it would have been published), and
+ * the nine-row held table arrived as ONE card with the nine leads inside it.
+ * ------------------------------------------------------------------ */
+
+const TABLE_ROW = /^\s*\|(.+)\|\s*$/;
+const TABLE_RULE = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
+
+/** The cells of a markdown table paragraph, or null when it is not one. */
+function tableRows(paragraph: string): string[][] | null {
+  const lines = String(paragraph ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return null;
+  const rows: string[][] = [];
+  for (const line of lines) {
+    const match = TABLE_ROW.exec(line);
+    if (!match) return null;
+    if (TABLE_RULE.test(line)) continue;
+    rows.push(
+      match[1]!
+        .split("|")
+        .map((cell) => cell.trim())
+        .map((cell) => cell.replace(/\\\|/g, "|")),
+    );
+  }
+  return rows.length >= 2 ? rows : null;
+}
+
+/** The source IDs a receipt names: `S1-A1, ordinance title`. */
+function sourceIdsIn(text: string): string[] {
+  const found = String(text ?? "").match(/\b[A-Z]{1,3}\d{1,3}-[A-Z]\d{1,3}\b/g) ?? [];
+  return [...new Set(found)];
+}
+
+/** The claim state the report's status cell names, or "" when it names none. */
+function claimStatusOf(text: string): ClaimStatus | "" {
+  const match = /^\**\s*(VERIFIED|CONTESTED|UNVERIFIED)\b/i.exec(String(text ?? "").trim());
+  if (!match) return "";
+  return match[1]!.toUpperCase() as ClaimStatus;
+}
+
+/**
+ * The claims ledger off a story, or null when the paragraph is not one.
+ *
+ * Read by its header -- a `Claim` column and a `Status` column -- so a table of
+ * something else (a meeting ledger, a source inventory) is left where it is.
+ * The status cell may carry a qualifier ("VERIFIED as the council's final
+ * action"); the state is the first word, which is the part the desk acts on.
+ */
+export function claimsFromParagraph(paragraph: string): ImportClaim[] | null {
+  const rows = tableRows(paragraph);
+  if (!rows) return null;
+  const head = rows[0]!.map((cell) => cell.toLowerCase().replace(/[*_\s]+/g, " ").trim());
+  const textAt = head.findIndex((cell) => cell === "claim" || cell.startsWith("claim "));
+  const statusAt = head.findIndex((cell) => cell.startsWith("status"));
+  if (textAt < 0 || statusAt < 0) return null;
+  const receiptAt = head.findIndex((cell) => /^(receipt|source|evidence|check|next)/.test(cell));
+  return rows.slice(1).flatMap((cells, index) => {
+    const text = (cells[textAt] ?? "").replace(/\*\*/g, "").trim();
+    if (!text) return [];
+    const receiptCell = receiptAt >= 0 ? (cells[receiptAt] ?? "") : "";
+    return [
+      {
+        id: `C${index + 1}`,
+        text,
+        status: claimStatusOf(cells[statusAt] ?? ""),
+        receipt: receiptCell.replace(/\*\*/g, "").trim(),
+        sources: sourceIdsIn(receiptCell),
+      },
+    ];
+  });
+}
+
+/**
+ * A paragraph that only names the ledger under it (`**Claims and sources
+ * attached to S1**`). It is a label for the table, not a paragraph of the story.
+ */
+const CLAIMS_LABEL = /^\*\*[^*\n]{0,60}\bclaims?\b[^*\n]{0,60}\*\*\.?$/i;
+
+/**
+ * Split a story's paragraphs into the ones that are body and the ledger that is
+ * not. The ledger is carried on the story instead, where the review screen puts
+ * it in the editor's notes and never in the published text.
+ */
+export function liftClaims(paragraphs: string[]): {
+  paragraphs: string[];
+  claims: ImportClaim[];
+} {
+  const kept: string[] = [];
+  const claims: ImportClaim[] = [];
+  for (const paragraph of paragraphs) {
+    const ledger = claimsFromParagraph(paragraph);
+    if (ledger) {
+      // The label above the table ("Claims and sources attached to S1") names
+      // the ledger, and the ledger is no longer a paragraph of the story.
+      const previous = kept[kept.length - 1];
+      if (previous !== undefined && CLAIMS_LABEL.test(previous.trim())) kept.pop();
+      claims.push(...ledger);
+      continue;
+    }
+    kept.push(paragraph);
+  }
+  return { paragraphs: kept, claims };
+}
+
+/** Whether this paragraph is the report's held-lead table (one row per lead). */
+export function isHeldTable(paragraph: string): boolean {
+  return heldTableShape(paragraph) !== null;
+}
+
+/** The columns of a held-lead table, or null when the paragraph is not one. */
+function heldTableShape(
+  paragraph: string,
+): { rows: string[][]; idAt: number; leadAt: number; tierAt: number } | null {
+  const rows = tableRows(paragraph);
+  if (!rows) return null;
+  const head = rows[0]!.map((cell) => cell.toLowerCase().replace(/[*_\s]+/g, " ").trim());
+  const idAt = head.findIndex((cell) => cell === "id");
+  if (idAt !== 0) return null;
+  const leadAt = head.findIndex((cell) => /^(lead|story|headline|item)/.test(cell));
+  const tierAt = head.findIndex((cell) => /tier|readiness/.test(cell));
+  if (leadAt < 0 || tierAt < 0) return null;
+  return { rows, idAt, leadAt, tierAt };
+}
+
+export function heldRowsFromTable(paragraph: string): ImportedStory[] | null {
+  const shape = heldTableShape(paragraph);
+  if (!shape) return null;
+  const { rows, idAt, leadAt, tierAt } = shape;
+  const held = rows.slice(1).flatMap((cells) => {
+    const id = (cells[idAt] ?? "").replace(/\*\*/g, "").trim();
+    const lead = (cells[leadAt] ?? "").trim();
+    if (!id || !lead) return [];
+    const tierCell = cells[tierAt] ?? "";
+    const bold = /^\*\*(.+?)\*\*\s*([\s\S]*)$/.exec(lead);
+    const headline = (bold ? bold[1]! : lead.split(/(?<=[.!?])\s/)[0]!)
+      .replace(/[.:;]+$/, "")
+      .trim();
+    const rest = (bold ? bold[2]! : lead.slice(headline.length)).trim();
+    return [{ id, headline, rest, tierCell }];
+  });
+  if (held.length === 0) return null;
+  return held.map((row, index) => {
+    const stated = readinessFromText(row.tierCell);
+    return makeStory({
+      key: `h${index + 1}`,
+      order: 0,
+      headline: row.headline,
+      // A held row is a lead the report raised: "Story idea: …" on the card.
+      isStory: true,
+      raw: `${row.headline}\n\n${row.rest}`,
+      paragraphs: row.rest ? [row.rest] : [],
+      disclosureKey: "outside-ai",
+      storyId: row.id,
+      readiness: stated,
+      unverified: stated.tier === 3,
+      kind: "idea",
+      includeByDefault: false,
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Story ideas: a bullet, its headline and the description under it.
+ * ------------------------------------------------------------------ */
+
+/** A list item: `* …`, `- …`, `+ …`, `1. …`, `2) …`. */
+const BULLET_LINE = /^\s*(?:[-*+]|\d+[.)])\s+(.+?)\s*$/;
+
+/**
+ * The report's own filing label at the head of a bullet: `**LEAD 20** (6/20):`.
+ *
+ * The demoted leads in the Claude scan are written this way — one bullet per
+ * lead, its number in bold, its score in the report's `(6/20: …)` code. Both
+ * come off before the bullet is read, so the card's headline is the lead and the
+ * score still reaches the card.
+ */
+const BULLET_FILING_LABEL =
+  /^\*\*\s*(?:LEAD|STORY|ITEM|IDEA)\s*\d+\s*\*\*\s*(?:\(\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+)[^)]*\))?\s*[:.)—–-]?\s*/i;
+
+/** The dash or the colon that separates an idea's headline from its description. */
+const IDEA_DASH = /[—–]|\s-\s/;
+/** `**Headline**: description` — the label's own colon. */
+const IDEA_BOLD_LABEL = /^\*\*(.+?)\*\*\s*:\s*([\s\S]+)$/;
+/** `Headline: description`, unbolded. Narrow, so a body colon is not a headline. */
+const IDEA_PLAIN_LABEL = /^([^:]{4,140}?)\s*:\s+([\s\S]+)$/;
+
+/**
+ * A word the scan uses before a full stop that is not the end of a sentence:
+ * `206 S. Main`, `Filing No. 1`, `St. Vrain`. A single letter is the initial in
+ * a street name, which is why the first alternative is one capital letter.
+ */
+const NOT_A_SENTENCE_END =
+  /^(?:[A-Z]|No|Nos|St|Ave|Blvd|Rd|Dr|Mr|Mrs|Ms|Fig|Inc|Ltd|Co|Corp|Jr|Sr|vs|etc|approx|Dept|Univ)$/;
+
+/**
+ * Where the first sentence of `text` ends, or -1 when it has only one.
+ *
+ * Used for the bullets that state a lead and then describe it without a dash:
+ * `Water Board, Sept 21, "Action Required" conveyance plats for 701 S. Main …
+ * (1st and Main parcels). Outcome not confirmed.` The headline is the first
+ * sentence and the description is everything after it, one contiguous slice of
+ * the line — never a rewrite.
+ */
+function firstSentenceEnd(text: string): number {
+  for (const match of text.matchAll(/[.!?]\s+(?=[A-Z"“'])/g)) {
+    const index = match.index!;
+    const token = /([A-Za-z][A-Za-z.]*)$/.exec(text.slice(0, index))?.[1] ?? "";
+    if (NOT_A_SENTENCE_END.test(token.replace(/\.$/, ""))) continue;
+    return index;
+  }
+  return -1;
+}
+
+/** The markup off an idea's headline: nothing but `*`/`_` and a `n.` ordinal. */
+function cleanIdeaHeadline(text: string): string {
+  const wrapped = WRAPPED_EMPHASIS.exec(text.trim());
+  const bare = (wrapped ? wrapped[2]! : text).replace(/[*_]+/g, "").trim();
+  return stripOrdinal(bare).replace(/[.\s]+$/, "").trim();
+}
+
+export type IdeaItem = {
+  /** The lead's own words, with no bullet, filing label or score code on it. */
+  headline: string;
+  /** The report's description of it, a contiguous slice of the line. */
+  description: string;
+  /** The `(6/20)` code off the filing label, when the bullet carried one. */
+  score: string;
+  /** The line as it arrived, so the card's links and text stay traceable. */
+  raw: string;
+};
+
+/**
+ * Read one bullet as a story idea, or null when it is not one.
+ *
+ * The shape the owner asked about — "a list of stories with short paragraph
+ * descriptions of what was found" — is a bullet whose headline and description
+ * are separated by a dash, by a bold label's colon, or by nothing more than the
+ * end of the first sentence. Anything else (a bullet that is a whole sentence
+ * with no description, or one that carries no separator and no second sentence)
+ * is not an idea and comes back null rather than being guessed at.
+ */
+export function ideaItemFromLine(line: string): IdeaItem | null {
+  const bullet = BULLET_LINE.exec(String(line ?? ""));
+  if (!bullet) return null;
+  const raw = String(line).trim();
+  let text = bullet[1]!.trim();
+  const label = BULLET_FILING_LABEL.exec(text);
+  let score = "";
+  if (label) {
+    score = label[1] && label[2] ? `${label[1]}/${label[2]}` : "";
+    text = text.slice(label[0].length).trim();
+  }
+  if (!text) return null;
+
+  const boldLabel = IDEA_BOLD_LABEL.exec(text);
+  const dashAt = IDEA_DASH.exec(text)?.index ?? -1;
+  const plainLabel = IDEA_PLAIN_LABEL.exec(text);
+  let head = "";
+  let description = "";
+
+  if (boldLabel && (dashAt < 0 || boldLabel[0].length < dashAt)) {
+    head = boldLabel[1]!;
+    description = boldLabel[2]!;
+  } else if (dashAt >= 0) {
+    head = text.slice(0, dashAt);
+    description = text.slice(dashAt).replace(/^[\s—–-]+/, "");
+  } else if (plainLabel) {
+    head = plainLabel[1]!;
+    description = plainLabel[2]!;
+  } else {
+    const end = firstSentenceEnd(text);
+    if (end < 0) return null;
+    head = text.slice(0, end);
+    description = text.slice(end + 1);
+  }
+
+  const headline = cleanIdeaHeadline(head);
+  const body = description.trim();
+  if (!headline || !body) return null;
+  return { headline, description: body, score, raw };
+}
+
+/** Every line of `text` that is a bullet, or null when one line is not. */
+function allBullets(text: string): string[] | null {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  return lines.every((line) => BULLET_LINE.test(line)) ? lines : null;
+}
+
+/** One idea card from one bullet, with no paragraph invented for it. */
+function ideaCard(
+  item: IdeaItem,
+  input: {
+    key: string;
+    order: number;
+    disclosureKey: DisclosureKey;
+    sectionVerdict?: string;
+    /** False for a bullet the report itself filed as demoted. */
+    includeByDefault: boolean;
+  },
+): ImportedStory {
+  return makeStory({
+    key: input.key,
+    order: input.order,
+    headline: item.headline,
+    isStory: true,
+    raw: item.raw,
+    paragraphs: [item.description],
+    disclosureKey: input.disclosureKey,
+    scoreCode: item.score,
+    sectionVerdict: input.sectionVerdict,
+    kind: "idea",
+    includeByDefault: input.includeByDefault,
+  });
+}
+
+/**
+ * Read a paste that is nothing but a list of story ideas.
+ *
+ * Each bullet or numbered line is one idea: `Headline — description`,
+ * `**Headline**: description`, or `Headline: description`. The headline is
+ * structure (the card's name, the lead's headline) and the description is the
+ * body, word for word — so an idea imported this way is a lead the editor can
+ * write from, never a story that looks finished.
+ *
+ * Fewer than two items is not a list: a single bullet inside prose is a bullet,
+ * and the paste falls through to the plain-story and model paths instead.
+ */
+export function parseIdeaList(
+  text: string,
+  opts: { disclosureKey?: DisclosureKey } = {},
+): ImportedStory[] {
+  const disclosureKey = opts.disclosureKey ?? "outside-ai";
+  const stories: ImportedStory[] = [];
+  for (const line of precleanMarkdown(text).split("\n")) {
+    const item = ideaItemFromLine(line);
+    if (!item) continue;
+    stories.push(
+      ideaCard(item, {
+        key: `s${stories.length + 1}`,
+        order: stories.length + 1,
+        disclosureKey,
+        includeByDefault: true,
+      }),
+    );
+  }
+  return stories.length >= 2 ? stories : [];
+}
+
+/**
+ * Read a report that has its own structure. No model is consulted.
+ *
+ * Every heading below the title is one card. That is the rule the real
+ * civic-scanner report needs: its `##` sections — "Beat context and source
+ * access", "Signals and watch list", "Upcoming dates to monitor" — are sections
+ * of the report rather than stories, and its `### 1.`–`### 7.` blocks are the
+ * seven stories, giving the seven story cards and three non-story cards the
+ * desk is meant to show. Nothing is nested away.
+ *
+ * Inside a block the labelled parts are recognised — the Score/Triage line, the
+ * official-source line, `**Why it matters:**`, `**Plain-language brief:**`,
+ * `**Reporter next step:**` — and every other paragraph is body, kept verbatim.
+ * A `##` block carrying none of those parts is not a story: it is recognised as
+ * a section of the report, left unticked by default, and its own text is still
+ * kept on the card so an editor who disagrees can import it.
+ *
+ * The heading itself never becomes a body paragraph — it becomes the headline.
+ */
+export function parseStructure(text: string, opts: { disclosureKey?: DisclosureKey } = {}): ImportedStory[] {
+  const blocks = splitBlocks(precleanMarkdown(text));
+  // The `(9/20: I3 Im1 C3 N2)` codes come off the headings before pre-cleaning
+  // strips them, so a lead that carries no score line of its own -- every HOLD
+  // lead in the Claude report -- still shows the score the report gave it.
+  const scoreCodes = headingScoreCodes(text);
+  const stories: ImportedStory[] = [];
+  const disclosureKey = opts.disclosureKey ?? "outside-ai";
+  let sectionVerdict = "";
+  let unverified = false;
+
+  const push = (headline: string, isStory: boolean, raw: string, bodyText: string, verdict: string) => {
+    const filed = storyIdFromHeading(stripOrdinal(headline));
+    const lifted = liftClaims(splitParagraphs(bodyText));
+    stories.push(
+      makeStory({
+        key: isStory ? `s${stories.length + 1}` : `n${stories.length + 1}`,
+        order: stories.length + 1,
+        headline: filed.headline,
+        // The report's own filing label goes to the notes, not to the headline
+        // ("L1 — New Longmont–airport bus begins Sunday" is not about an L1).
+        storyId: filed.id,
+        isStory,
+        unverified,
+        claims: lifted.claims,
+        // `raw` keeps the heading so the story's links are complete; the body
+        // paragraphs come from `bodyText`, so the heading never lands in body.
+        raw,
+        paragraphs: lifted.paragraphs,
+        disclosureKey,
+        scoreCode: scoreCodes.get(headline) ?? "",
+        sectionVerdict: verdict,
+      }),
+    );
+  };
+
+  for (const block of blocks) {
+    if (block.level < 2) continue;
+    // A section states the verdict for the leads under it: "## LEADS (HOLD)".
+    // The section card carries it too, so the card itself shows the flag.
+    if (block.level === 2) {
+      sectionVerdict = sectionVerdictOf(block.heading);
+      // A Black Desk section is inherited by every card under it, the way a
+      // section's verdict is: v2.6 files hypotheses under
+      // "## Black Desk — Possible Stories to Investigate (Unverified)", and a
+      // hypothesis is not a story at any length.
+      unverified = sectionIsUnverified(block.heading);
+    }
+    /*
+      A section that states a verdict and whose text is nothing but bullets is a
+      list of leads the report filed one by one: "## LEADS (DEMOTE)" followed by
+      "**LEAD 20** (6/20): …" three times. One card for the whole section would
+      hide three leads inside it, so each bullet gets its own card, carrying the
+      section's verdict — and none of them is ticked, because the report itself
+      said not to run them.
+    */
+    const bullets = sectionVerdict ? allBullets(block.text) : null;
+    if (bullets && bullets.every((line) => ideaItemFromLine(line))) {
+      for (const line of bullets) {
+        const item = ideaItemFromLine(line)!;
+        stories.push(
+          ideaCard(item, {
+            key: `s${stories.length + 1}`,
+            order: stories.length + 1,
+            disclosureKey,
+            sectionVerdict,
+            includeByDefault: false,
+          }),
+        );
+      }
+      continue;
+    }
+    /*
+      The held-lead table: one row per lead, each its own card. Left as one card
+      it was nine leads the editor never saw (Scott's nine H-rows, 2026-09-25).
+
+      The table is detected per PARAGRAPH rather than per block, because the
+      report puts its closing prose in the same section as the table
+      ("These are possible deeper investigations, not a completed Black Desk
+      run."). That prose is not a row and must survive as the section's own
+      card -- the module parses, it never rewrites.
+    */
+    const held = splitParagraphs(block.text).filter(isHeldTable);
+    if (held.length > 0) {
+      for (const paragraph of held) {
+        for (const row of heldRowsFromTable(paragraph) ?? []) {
+          stories.push({ ...row, key: `h${stories.length + 1}`, order: stories.length + 1 });
+        }
+      }
+      const rest = splitParagraphs(block.text).filter((paragraph) => !isHeldTable(paragraph));
+      if (rest.length === 0) continue;
+      push(block.heading, false, [block.heading, rest.join("\n\n")].join("\n\n"), rest.join("\n\n"), sectionVerdict);
+      continue;
+    }
+    const isStory = block.level === 3 || looksLikeStory(block.text);
+    push(block.heading, isStory, [block.heading, block.text].join("\n\n"), block.text, sectionVerdict);
+  }
+  return stories;
+}
+
+/**
+ * A single finished story pasted on its own: headline on the first line, then
+ * paragraphs, then a `Sources:` list. No markdown headings involved.
+ *
+ * Returns null unless the shape is actually there — a first line that reads as
+ * a headline and at least one paragraph under it. A wall of text with no
+ * headline falls through to the caller, which may ask a model for structure.
+ */
+export function parsePlainStory(
+  text: string,
+  opts: { disclosureKey?: DisclosureKey } = {},
+): ImportedStory | null {
+  const cleaned = precleanMarkdown(text);
+  const paragraphs = splitParagraphs(cleaned);
+  if (paragraphs.length < 2) return null;
+  const first = paragraphs[0]!;
+  if (first.includes("\n")) return null;
+  const headline = first.replace(/^#+\s*/, "").trim();
+  if (!headline || headline.length > IMPORT_LIMITS.headline) return null;
+  if (/[.!?:;,]$/.test(headline)) return null;
+  if (headline.split(/\s+/).length > 25) return null;
+
+  const rest = paragraphs.slice(1);
+  const sourcesParagraph = rest.findIndex((p) => sourcesLineOf(p) !== "");
+  if (sourcesParagraph === 0) return null;
+
+  // The whole remainder goes in: the reader takes the `Sources:` paragraph out
+  // of the body itself (`sourcesLineOf`), so a plain story's cited documents
+  // land in `citations` instead of being dropped on the way here.
+  return makeStory({
+    key: "s1",
+    order: 1,
+    headline,
+    isStory: true,
+    raw: text,
+    paragraphs: rest,
+    disclosureKey: opts.disclosureKey ?? "person",
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * The run's own status, and the run pasted as JSON.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The run's status word: `**Run status: PARTIAL.**` -> "PARTIAL".
+ *
+ * A run that stopped early is not a failed run -- v2.6 says PARTIAL and lists
+ * what it did not finish, and that list is the difference between an editor
+ * trusting eight cards and an editor checking them. "" when the run says nothing
+ * (every report before v2.6 did not).
+ */
+export function runStatusFrom(text: string): string {
+  const match = /\*\*\s*Run status\s*:\s*([A-Za-z]+)/i.exec(String(text ?? ""));
+  return match ? match[1]!.toUpperCase() : "";
+}
+
+const REMAINS_LABEL =
+  /\*\*\s*(?:what remains|remaining critical gaps?|still to (?:do|check)|what is (?:still )?missing)\s*:\s*\*\*/gi;
+
+/**
+ * What the run says it did not finish: the `**What remains:**` list, the
+ * `**Remaining critical gap:**` line in the reporting notes, or both. Split at
+ * the semicolons the reports use, so the review screen can show the editor a
+ * list rather than one 400-character sentence.
+ */
+export function runRemainsFrom(text: string): string[] {
+  const out: string[] = [];
+  const body = String(text ?? "");
+  for (const match of body.matchAll(REMAINS_LABEL)) {
+    const rest = body.slice(match.index! + match[0].length);
+    const paragraph = rest.split(/\n[ \t]*\n/)[0] ?? "";
+    for (const item of paragraph.split(";")) {
+      const line = normalizeForVerbatim(item);
+      if (line) out.push(line);
+    }
+  }
+  return out;
+}
+
+/** A JSON value as text: "" for anything that is not a string or a number. */
+function jsonText(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
+
+/** A JSON value as a list of objects, skipping anything that is not one. */
+function jsonObjects(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === "object" && entry !== null && !Array.isArray(entry),
+  );
+}
+
+/**
+ * The run's own source list, as the citations and links the card carries.
+ *
+ * v2.6's `sourceList` gives each document an ID, a title, a source tier, and
+ * either a `url` or a `recordRef` -- and, in the JSON shape, a `locator` naming
+ * the page, item or section the claim sits in. A source with a URL is a link the
+ * editor can tick; a source without one is a document with no URL, which the
+ * desk carries as the text it is rather than inventing one.
+ */
+function jsonSources(value: unknown): { citations: string[]; links: ImportLink[] } {
+  const citations: string[] = [];
+  const links: ImportLink[] = [];
+  for (const entry of jsonObjects(value)) {
+    const id = jsonText(entry.id);
+    const title = jsonText(entry.title) || id;
+    if (!title) continue;
+    const locator = jsonText(entry.locator);
+    citations.push(`${id ? `${id} · ` : ""}${title}${locator ? ` (${locator})` : ""}`);
+    const url = jsonText(entry.url);
+    if (url) links.push({ text: title, url });
+  }
+  return { citations, links };
+}
+
+/** A packet's or a hypothesis's claims ledger, in the JSON shape's own field names. */
+function jsonClaims(value: unknown): ImportClaim[] {
+  return jsonObjects(value).map((entry, index) => ({
+    id: jsonText(entry.id) || `C${index + 1}`,
+    text: jsonText(entry.text),
+    status: claimStatusOf(jsonText(entry.status)),
+    receipt: jsonText(entry.note),
+    sources: Array.isArray(entry.sourceIds)
+      ? entry.sourceIds.map(jsonText).filter(Boolean)
+      : sourceIdsIn(jsonText(entry.receipt)),
+  }));
+}
+
+/** The `agent25_gate` rows, by packet ID: the tier and the next step for each. */
+function gateById(root: Record<string, unknown>): Map<string, Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+  for (const row of jsonObjects(root.agent25_gate)) {
+    const id = jsonText(row.id);
+    if (id) map.set(id, row);
+  }
+  return map;
+}
+
+/**
+ * A full-pipeline run pasted as the JSON its schema describes.
+ *
+ * The same run the markdown packets describe, in the shape
+ * `report-schema.json` fixes: `agent2_stories` are the written packets (their
+ * tier and next step live in the matching `agent25_gate` row),
+ * `agent3_blackDesk` are the unverified hypotheses, and `heldStories` are the
+ * leads the run filed without writing them. Extra fields a later version adds
+ * are ignored rather than rejected, and a paste that is JSON but is not one of
+ * these reports returns null, so the caller can say so instead of showing an
+ * empty review screen.
+ */
+export function parseCivicScannerJson(
+  text: string,
+  opts: { disclosureKey?: DisclosureKey } = {},
+): ParsedReport | null {
+  let root: unknown;
+  try {
+    root = JSON.parse(String(text ?? ""));
+  } catch {
+    return null;
+  }
+  if (typeof root !== "object" || root === null || Array.isArray(root)) return null;
+  const report = root as Record<string, unknown>;
+  const packets = jsonObjects(report.agent2_stories);
+  const leads = jsonObjects(report.agent1_leads);
+  const black = jsonObjects(report.agent3_blackDesk);
+  const held = jsonObjects(report.heldStories);
+  const dashboard =
+    typeof report.trustDashboard === "object" && report.trustDashboard !== null
+      ? (report.trustDashboard as Record<string, unknown>)
+      : {};
+  if (packets.length + black.length + held.length + leads.length === 0) return null;
+
+  const disclosureKey = opts.disclosureKey ?? "outside-ai";
+  const gate = gateById(report);
+  const stories: ImportedStory[] = [];
+  const add = (story: ImportedStory) =>
+    stories.push({ ...story, key: `${story.kind === "idea" ? "j" : "s"}${stories.length + 1}`, order: stories.length + 1 });
+
+  for (const packet of packets) {
+    const id = jsonText(packet.id);
+    const row = gate.get(id) ?? {};
+    const { citations, links } = jsonSources(packet.sourceList);
+    add(
+      makeStory({
+        key: "",
+        order: 0,
+        headline: jsonText(packet.headline),
+        isStory: true,
+        // The draft is the report's own paragraphs; the JSON keeps them as one
+        // block with the blank lines the markdown wrote, so splitting is exact.
+        raw: jsonText(packet.draft),
+        paragraphs: splitParagraphs(jsonText(packet.draft)),
+        disclosureKey,
+        storyId: id,
+        readiness: {
+          tier: jsonTier(row.editorialTier) || jsonTier(packet.editorialTier),
+          note: jsonText(row.aiNextStep) || jsonText(row.whatCannotSay),
+        },
+        claims: jsonClaims(packet.claims),
+        citations,
+        links,
+      }),
+    );
+    const one = stories[stories.length - 1]!;
+    one.plainBrief = jsonText(packet.plainLanguage) || one.plainBrief;
+    one.reporterNextStep = jsonText(row.aiNextStep) || one.reporterNextStep;
+  }
+
+  for (const signal of black) {
+    const id = jsonText(signal.signalId);
+    add(
+      makeStory({
+        key: "",
+        order: 0,
+        headline: jsonText(signal.title),
+        isStory: true,
+        raw: jsonText(signal.speculativeAngle),
+        paragraphs: splitParagraphs(jsonText(signal.speculativeAngle)),
+        disclosureKey,
+        storyId: id,
+        unverified: true,
+        readiness: { tier: 3, note: jsonText(signal.agent4Target) || jsonText(signal.investigationQuestion) },
+        kind: "idea",
+        includeByDefault: false,
+      }),
+    );
+  }
+
+  for (const lead of held) {
+    const tier = jsonTier(lead.scoring);
+    add(
+      makeStory({
+        key: "",
+        order: 0,
+        headline: jsonText(lead.headline),
+        isStory: true,
+        raw: jsonText(lead.details),
+        paragraphs: splitParagraphs(jsonText(lead.details)),
+        disclosureKey,
+        storyId: jsonText(lead.storyId),
+        unverified: tier === 3,
+        readiness: { tier, note: jsonText(lead.elevate) || jsonText(lead.reason) },
+        kind: "idea",
+        includeByDefault: false,
+      }),
+    );
+  }
+
+  /*
+    A run that stopped before its gate has leads and no packets. They are the
+    raw agent-1 output -- not written, not scored -- so they arrive as unticked
+    ideas rather than as nothing at all.
+  */
+  if (packets.length === 0) {
+    for (const lead of leads) {
+      add(
+        makeStory({
+          key: "",
+          order: 0,
+          headline: jsonText(lead.headline),
+          isStory: true,
+          raw: jsonText(lead.details),
+          paragraphs: splitParagraphs(jsonText(lead.details)),
+          disclosureKey,
+          storyId: jsonText(lead.id),
+          unverified: true,
+          readiness: { tier: 3, note: jsonText(lead.details) },
+          kind: "idea",
+          includeByDefault: false,
+        }),
+      );
+    }
+  }
+
+  const whatRemains = Array.isArray(dashboard.whatRemains)
+    ? dashboard.whatRemains.map(jsonText).filter(Boolean)
+    : [];
+  const meta =
+    typeof report.meta === "object" && report.meta !== null
+      ? (report.meta as Record<string, unknown>)
+      : {};
+  const city = jsonText(meta.city);
+  return {
+    title: city ? `Civic Scanner full pipeline — ${city}` : "",
+    scanDate: jsonText(meta.date),
+    headerNote: "",
+    detectedTool: "Civic Scanner",
+    stories,
+    cleanedText: String(text ?? ""),
+    method: "json",
+    runStatus: jsonText(dashboard.runStatus).toUpperCase(),
+    runRemains: whatRemains,
+    warnings: [],
+  };
+}
+
+/** A tier stated as a number or as a word (`"Tier 2"`), or 0 when it states none. */
+function jsonTier(value: unknown): ReadinessTier {
+  if (typeof value === "number") {
+    return value === 1 || value === 2 || value === 3 ? value : 0;
+  }
+  return readinessFromText(jsonText(value)).tier;
+}
+
+/** The tool named in the document's title, e.g. "Civic Source Scanner". */
+export function detectedToolFromTitle(title: string): string {
+  const text = String(title ?? "").trim();
+  if (!text) return "";
+  const cut = text.split(/\s+[—–-]\s+/)[0] ?? text;
+  return cut.trim().slice(0, 80);
+}
+
+/**
+ * Read a pasted report. Deterministic: this never calls a model.
+ *
+ * `method` tells the caller what happened, and the caller is expected to act on
+ * it: "structured" and "plain" mean the stories were found and no model may be
+ * asked; "none" means the text has no usable structure and the caller may make
+ * ONE structure-only model call.
+ */
+export function parseFinishedStories(
+  text: string,
+  opts: { disclosureKey?: DisclosureKey } = {},
+): ParsedReport {
+  const raw = String(text ?? "");
+  /*
+    The JSON shape first, and only for a paste that is JSON: a full-pipeline run
+    exported as `report-schema.json` describes it carries the same cards with
+    their tiers, claims and sources as data rather than as prose. A paste that is
+    JSON but is not that report returns null here and is read as text, which is
+    what the "no headings to read" answer is for.
+  */
+  const json = parseCivicScannerJson(raw, opts);
+  if (json) return json;
+  const cleaned = precleanMarkdown(raw);
+  const runStatus = runStatusFrom(raw);
+  const runRemains = runRemainsFrom(cleaned);
+  const blocks = splitBlocks(cleaned);
+  const titleBlock = blocks.find((b) => b.level === 1);
+  const title = titleBlock?.heading ?? "";
+  const headerParagraphs = splitParagraphs(titleBlock?.text ?? "");
+  const scanDate =
+    headerParagraphs.find((p) => /^\*\*Scan date:\*\*/i.test(p)) ??
+    headerParagraphs.find((p) => NAMED_SECTION.test(p)) ??
+    "";
+  // The paste as the reader cleaned it: the report's own rules dropped, its
+  // escapes gone, the filing labels and score codes off the headings.
+
+  // The title is reported separately, so it is not repeated in here.
+  const headerNote = [
+    scanDate,
+    ...headerParagraphs.filter((p) => p !== scanDate),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const detectedTool = detectedToolFromTitle(title);
+
+  const structured = parseStructure(raw, opts);
+  if (structured.length > 0) {
+    /*
+      A report whose structure carries no story at all is not a report of
+      stories: a paste shaped "## Story ideas" and eight bullets is a list, and
+      reading it as one section card would hand the editor a single card where
+      eight leads are. The list is consulted only here -- a report that does
+      carry stories is read from its own structure, every time.
+    */
+    const ideas = structured.some((s) => s.isStory) ? [] : parseIdeaList(raw, opts);
+    if (ideas.length > 0) {
+      return {
+        title,
+        scanDate,
+        headerNote,
+        detectedTool,
+        stories: ideas,
+        cleanedText: cleaned,
+        method: "ideas",
+        runStatus,
+        runRemains,
+        warnings: [],
+      };
+    }
+    return {
+      title,
+      scanDate,
+      headerNote,
+      detectedTool,
+      stories: structured,
+      cleanedText: cleaned,
+      method: "structured",
+      runStatus,
+      runRemains,
+      warnings: [],
+    };
+  }
+
+  const ideas = parseIdeaList(raw, opts);
+  if (ideas.length > 0) {
+    return {
+      title,
+      scanDate,
+      headerNote,
+      detectedTool,
+      stories: ideas,
+      cleanedText: cleaned,
+      method: "ideas",
+      runStatus,
+      runRemains,
+      warnings: [],
+    };
+  }
+
+  const plain = parsePlainStory(raw, opts);
+  if (plain) {
+    return {
+      title,
+      scanDate: "",
+      headerNote,
+      detectedTool,
+      stories: [plain],
+      cleanedText: cleaned,
+      method: "plain",
+      runStatus,
+      runRemains,
+      warnings: [],
+    };
+  }
+
+  return {
+    title,
+    scanDate,
+    headerNote,
+    detectedTool,
+    stories: [],
+    cleanedText: cleaned,
+    method: "none",
+    runStatus,
+    runRemains,
+    warnings: ["This text has no headings to read."],
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * The one model call: structure only, checked word for word.
+ * ------------------------------------------------------------------ */
+
+export const STRUCTURE_SYSTEM = [
+  "You are reading a finished news report and returning its STRUCTURE only.",
+  "You must never write, rewrite, summarise, shorten or correct any sentence.",
+  "Return ONLY JSON in this shape:",
+  '{"stories":[{"headline":"...","body":["paragraph","paragraph"],"dek":"","notes":""}]}',
+  "Rules:",
+  "- Each story's headline is copied from the text, or written as a short label if the text has none.",
+  "- Every string in body MUST be an exact copy of a paragraph in the input, character for character.",
+  "- Put a summary paragraph that the report labelled as such in dek, not in body.",
+  "- notes is for editorial guidance (scores, triage, next steps), never published.",
+  "- Do not return a story for a section that is only context, a watch list or a calendar.",
+  "- Return ONLY JSON.",
+].join("\n");
+
+export function structureUserPrompt(text: string): string {
+  return ["Here is the report. Return its structure as JSON.", "", String(text ?? "")].join("\n");
+}
+
+type ModelStory = { headline?: unknown; body?: unknown; dek?: unknown; notes?: unknown };
+
+/**
+ * Turn a model's structure reply into stories, checking every sentence.
+ *
+ * A story is accepted only when each of its body and dek paragraphs appears in
+ * the input as written (`containsVerbatim`). A reply that alters one sentence
+ * fails the check for that story, and the caller falls back to the
+ * deterministic split with a visible flag — never to the model's wording.
+ */
+export function verifyModelSplit(
+  input: string,
+  reply: unknown,
+  opts: { disclosureKey?: DisclosureKey } = {},
+): { stories: ImportedStory[]; rejected: number; reason: string } {
+  const raw = reply as { stories?: unknown } | null;
+  const list = Array.isArray(raw?.stories) ? (raw!.stories as ModelStory[]) : [];
+  if (list.length === 0) {
+    return { stories: [], rejected: 0, reason: "The model did not find any stories in this text." };
+  }
+  const stories: ImportedStory[] = [];
+  let rejected = 0;
+  let reason = "";
+  for (const candidate of list) {
+    const headline = String(candidate?.headline ?? "").trim().slice(0, IMPORT_LIMITS.headline);
+    const bodyParagraphs = (Array.isArray(candidate?.body) ? candidate.body : [])
+      .map((p) => String(p ?? "").trim())
+      .filter(Boolean);
+    const dek = String(candidate?.dek ?? "").trim();
+    const notes = String(candidate?.notes ?? "").trim();
+    if (!headline || bodyParagraphs.length === 0) {
+      rejected += 1;
+      reason ||= "The model returned a story with no headline or no body.";
+      continue;
+    }
+    const altered = [...bodyParagraphs, ...(dek ? [dek] : [])].filter(
+      (paragraph) => !containsVerbatimEither(input, paragraph),
+    );
+    if (altered.length > 0) {
+      rejected += 1;
+      reason ||= `The model changed wording that is not in your text: “${altered[0]!.slice(0, 120)}”`;
+      continue;
+    }
+    stories.push(
+      makeStory({
+        key: `s${stories.length + 1}`,
+        order: stories.length + 1,
+        headline,
+        isStory: true,
+        raw: [headline, ...bodyParagraphs, dek, notes].filter(Boolean).join("\n\n"),
+        paragraphs: bodyParagraphs,
+        disclosureKey: opts.disclosureKey ?? "outside-ai",
+      }),
+    );
+  }
+  return { stories, rejected, reason };
+}
+
+/**
+ * The one wording the review screen shows for a story that was not split
+ * cleanly. The specific reason ("the model changed wording ...") is appended to
+ * it rather than replacing it, so the flag is always recognisable on the card.
+ */
+export const CLEAN_SPLIT_FLAG = "Could not split this cleanly — check it.";
+
+/**
+ * The fallback when a model split is rejected or the text has no structure at
+ * all: one story holding the whole paste, flagged so the editor can see it was
+ * not split cleanly. Nothing is invented and nothing is dropped.
+ */
+export function fallbackSingleStory(
+  text: string,
+  opts: { disclosureKey?: DisclosureKey; reason?: string } = {},
+): ImportedStory {
+  const paragraphs = splitParagraphs(text);
+  const story = makeStory({
+    key: "s1",
+    order: 1,
+    headline: "Imported text — give this a headline",
+    isStory: true,
+    raw: String(text ?? ""),
+    paragraphs,
+    disclosureKey: opts.disclosureKey ?? "outside-ai",
+  });
+  const reason = opts.reason?.trim() ?? "";
+  story.cleanSplit = false;
+  story.warning = reason.includes(CLEAN_SPLIT_FLAG)
+    ? reason
+    : [CLEAN_SPLIT_FLAG, reason].filter(Boolean).join(" ");
+  return story;
+}
+
+/** True when `body` is the exact text of the story's own paragraphs. */
+export function bodyIsVerbatim(input: string, story: ImportedStory): boolean {
+  const paragraphs = splitParagraphs(story.body);
+  return paragraphs.length > 0 && paragraphs.every((p) => containsVerbatimEither(input, p));
+}

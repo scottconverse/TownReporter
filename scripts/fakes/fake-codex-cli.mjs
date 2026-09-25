@@ -11,6 +11,13 @@
  *   FAKE_CODEX_MODE        exit-ok | exit-fail | hang   (default exit-ok)
  *   FAKE_CODEX_FAIL_PROMPTS "1" returns an authentication failure for every exec call
  *   FAKE_CODEX_QUOTA_PROMPTS "1" returns a usage-limit failure for every exec call
+ *   FAKE_CODEX_VALID_DRAFT "1" answers every pass with content that describes
+ *                           the CURRENT ladder (0.6.63 Unit Y: DeepSeek, then
+ *                           Qwen, then Codex Terra) instead of the retired
+ *                           Claude-then-Codex one. The shapes and the marker
+ *                           handling are identical either way, so a walk that
+ *                           does not set this knob reads exactly what it read
+ *                           before.
  *
  * A third command, `exec`, matches what src/lib/news/ai-codex.server.ts's
  * `buildCodexArgs` actually spawns for a draft call: `exec --model <m>
@@ -95,6 +102,7 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
     process.stderr.write("Codex usage limit reached. It resets 7pm (America/Denver).\n");
     process.exit(1);
   }
+  const ladderDraft = process.env.FAKE_CODEX_VALID_DRAFT === "1";
   const documentMarker = prompt.match(/AUTOMATIC_DOCUMENT_MARKER_[A-Z0-9_]+/)?.[0] ?? "";
   // report.ts's research-pass user message opens with "Lead: "; the write
   // pass's opens with "NEWS ANGLE: ". Anything else (the occasional edit
@@ -119,8 +127,10 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
     process.stdout.write(
       JSON.stringify({
         news: "The council approved the item on a fake-CLI test drive.",
-        why_it_matters: "It shows Automatic failing over from Claude to Codex, in a browser.",
-        angle: "A one-shot fail-over, proven end to end.",
+        why_it_matters: ladderDraft
+          ? "It shows Automatic walking the ladder from its first rung to Codex Terra, in a browser."
+          : "It shows Automatic failing over from Claude to Codex, in a browser.",
+        angle: ladderDraft ? "One Automatic ladder, walked end to end." : "A one-shot fail-over, proven end to end.",
         form: "brief",
         questions: [],
         unknowns: [],
@@ -131,13 +141,22 @@ if (argv[0] === "login" && argv.includes("--device-auth")) {
   } else {
     process.stdout.write(
       JSON.stringify({
-        headline: "Codex Terra drafted this after Claude's login lapsed",
-        dek: "A one-shot Automatic fail-over, proven in a real browser.",
-        body:
-          "The newsroom's Automatic writing model started this draft on Claude Opus. Its " +
-          "login had lapsed, so the desk moved to the next rung of the ladder on its own.\n\n" +
-          "Codex Terra finished the draft from the retained uploaded document. The evidence marker is " +
-          `${documentMarker || "missing"}. The desk explained the provider switch and kept working.`,
+        headline: ladderDraft
+          ? "Codex Terra drafted this after the earlier rungs were unavailable"
+          : "Codex Terra drafted this after Claude's login lapsed",
+        dek: ladderDraft
+          ? "The desk walked its Automatic ladder and finished on the last rung."
+          : "A one-shot Automatic fail-over, proven in a real browser.",
+        body: ladderDraft
+          ? "The newsroom's Automatic writing model started this draft on the first rung of the " +
+            "ladder. That rung did not answer, and the second was not loaded, so the desk moved on " +
+            "its own.\n\n" +
+            "Codex Terra finished the draft from the retained uploaded document. The evidence marker is " +
+            `${documentMarker || "missing"}. The desk explained the provider switch and kept working.`
+          : "The newsroom's Automatic writing model started this draft on Claude Opus. Its " +
+            "login had lapsed, so the desk moved to the next rung of the ladder on its own.\n\n" +
+            "Codex Terra finished the draft from the retained uploaded document. The evidence marker is " +
+            `${documentMarker || "missing"}. The desk explained the provider switch and kept working.`,
         topic: "council",
         source_urls: [],
         integrity_notes: "",

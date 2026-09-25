@@ -188,7 +188,6 @@ async function dailySettingsJourney(context, observePage) {
     "Claude Opus",
     "Claude Sonnet",
     "Claude Haiku",
-    "Grok (SuperGrok)",
     "Local model",
   ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
@@ -422,7 +421,6 @@ async function draftBatchJourney() {
     "Claude Opus",
     "Claude Sonnet",
     "Claude Haiku",
-    "Grok (SuperGrok)",
     "Local model",
   ];
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {

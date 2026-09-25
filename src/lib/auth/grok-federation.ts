@@ -95,6 +95,30 @@ export function grokFederation(
 }
 
 /**
+ * Whether the live-preview host allow-list is trusted at all.
+ *
+ * `PREVIEW_ALLOWED_HOSTS` names `*.grok-sandbox.com`, and `server.ts` spread it
+ * into Better Auth's `trustedOrigins` and into the dynamic baseURL's
+ * `allowedHosts` on every install, whatever the operator configured. That is
+ * the same coupling §2 removes for the *client*, one layer down: a paper that
+ * never asked for the sandbox still trusted a wildcard of hosts it does not own
+ * for credentialed auth POSTs and for deriving its own origin from a request's
+ * `Host` header.
+ *
+ * It is a host list, not a secret, and the wildcard only ever matches a sandbox
+ * preview URL -- but "nothing here trusts a host the operator did not name
+ * unless the operator asked for the sandbox" is the honest rule, and it is the
+ * rule the preview client already follows. Same switch, so there is one thing
+ * to set and one thing to read: `TOWNREPORTER_GROK_PREVIEW=1`.
+ *
+ * Email and password sign-in do not read this: loopback origins are appended by
+ * `server.ts` independently, and they are what a self-hosted install uses.
+ */
+export function previewHostsTrusted(env: Env = process.env): boolean {
+  return trimmed(env, GROK_PREVIEW_OPT_IN) === "1";
+}
+
+/**
  * The half-configured case, as a sentence, or null when there is nothing to say.
  *
  * Half a client is the one failure here that is silent by construction: the

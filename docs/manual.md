@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.62 · publication and deployment are recorded separately**
+**Version 0.6.63 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.62 release guide and evidence boundaries](releases/0.6.62.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.63 release guide and evidence boundaries](releases/0.6.63.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -95,7 +95,11 @@ The owner manages sections in **Server → Sections** (**Newspaper sections** pa
 
 For reporting sections, enter a reporting brief and scan instructions, then select accepted Sources. **Scan → Scan scope** offers General or a section. A section run uses only its assigned accepted sources and saves the guidance and source IDs with the queued run. Later configuration edits do not change that run; a source dropped before execution is excluded. A section without accepted sources cannot start. General retains all accepted sources.
 
+A section with no sources says so and opens its list by itself: **Sources this section reads (0) — choose or add below**. **Add a new source to this section** takes a URL and an optional label without leaving the page. It is the same add the Sources page runs, so the page goes on the watch list straight away; the section's use of it belongs to the section draft, and lands when you **Confirm and apply**. The panel says which half is which. A URL already on watch is ticked rather than added twice, and the message tells you that instead of claiming a new source.
+
 Choose **Review changes** before saving, or **Preview changes** when retiring a section. The unsaved review shows every changed section's name, section order, visibility, replacement, reporting brief, scan instructions, and accepted sources with both names and URLs. **Back to editing** preserves the draft, and **Cancel changes** discards it. Only **Confirm and apply** or **Confirm retirement and apply** writes the reviewed configuration. A failed or stale save keeps the draft available for correction; **Reload saved configuration** explicitly replaces it with the saved version.
+
+While the draft differs from the saved configuration, a bar sits at the bottom of the window: **You have unsaved section changes**, with **Review changes** (and **Confirm and apply** once the preview is open) and **Cancel changes**. Navigating away with a draft — a desk link or closing the tab — asks first; **Stay on this page** keeps both the page and the draft.
 
 Retire a section only into an active reporting section. Review the count of affected leads, drafts and articles, then use **Confirm retirement and apply**. Their section changes; their identities, article URLs and text remain. Old section links follow the replacement, including later retirements. Opinion and About remain reserved page routes: they cannot retire and do not run section scans. Their section-list labels and visibility do not remove the permanent page links.
 
@@ -274,8 +278,7 @@ Server page. It starts disabled. The
 owner selects accepted sources from any reporting beat, a local time
 in the paper's timezone, and one explicit model: Codex Astra, Sol, Terra, or
 Luna; Claude Fable, Opus, Sonnet, or Haiku; the selected local model; or a
-saved Custom AI connection such as an OpenAI-compatible Gemini endpoint; or
-the newsroom's direct Grok (SuperGrok) connection.
+saved Custom AI connection such as an OpenAI-compatible Gemini endpoint.
 Legacy "Claude Code subscription" settings migrate to Claude Sonnet instead of
 Opus. The selected scheduled runtime is tried first; a recognized technical
 failure can move only unfinished work, and the job records requested and actual
@@ -334,7 +337,7 @@ guidance, not an automatic installer or sign-in button.
 ### Draft selected leads
 
 The Queue can start one atomic batch of one to five eligible leads. Select the
-rows, choose one explicit named **Codex**, **Claude**, **Grok (SuperGrok)**, or **Local model**, and
+rows, choose one explicit named **Codex**, **Claude**, or **Local model**, and
 use **Draft selected**. The picker offers every named Codex and Claude model,
 Local model, and saved Custom AI connections such as Gemini. The batch does
 not use Automatic. It preserves each lead's stored research scope. A recognized
@@ -342,7 +345,7 @@ technical provider failure can move only the unfinished call; a refusal remains
 terminal. A missing runtime or ineligible selected lead refuses the whole
 start, before any partial batch is created.
 
-Daily Scan uses the same named model choices, Grok (SuperGrok), and saved Custom
+Daily Scan uses the same named model choices and saved Custom
 AI connections, with no Automatic. The selected runtime is tried first;
 technical preflight and mid-call switches are recorded. OCR applies the same
 technical-only rule and considers only vision-capable destinations.
@@ -445,8 +448,11 @@ paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
 Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
-Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
-once if Codex is unavailable. Explicit choices remain the requested first
+Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Opinion's own Automatic tries Codex Sol, then Claude Sonnet
+once if Codex is unavailable; that order belongs to Opinion. Stories, scans and
+Dark Desk walk the desk's own Automatic ladder instead — DeepSeek v4.1 Flash,
+then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra.
+Explicit choices remain the requested first
 runtime and use the same technical-only unfinished-call retry. Claude Code
 and Codex both read the complete configured voice through their native instruction-file options. The page
 lists every missing voice, installation, or login prerequisite and stays
@@ -455,11 +461,11 @@ disabled while readiness is unknown.
 A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
 bodies before draft storage. A provider refusal or invalid delivery reports a
-failed run without creating a draft. Automatic can move from Codex Sol to
-Claude Sonnet once; an explicit choice is tried first and can switch only for a
-recognized technical failure. A failed row has no Read, Edit, or Publish
+failed run without creating a draft. Opinion's Automatic can move from Codex Sol
+to Claude Sonnet once; an explicit choice is tried first and can switch only for
+a recognized technical failure. A failed row has no Read, Edit, or Publish
 action; a finished row shows the requested and actual model and effort. An
-unattended ladder never selects Opus.
+unattended ladder never selects Opus, on any surface.
 
 **Edit**, on the row, opens the piece in its own workbench at
 `/desk/story/draft/:id`: headline, dek, topic and the piece itself, plus the two
@@ -469,7 +475,8 @@ It fetches records before it writes. Historical runs took **ten to forty
 minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
 Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
 each research or writing pass, with a default of 45 minutes per pass. A pair
-can take about 90 minutes, excluding document intake. Automatic can try a Claude Sonnet pair after Codex fails, so its total can be longer.
+can take about 90 minutes, excluding document intake. Opinion's Automatic can
+try a Claude Sonnet pair after Codex fails, so its total can be longer.
 Explicit Local model performs one writing call using the supplied material;
 it does not run the frontier research pass. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
@@ -648,17 +655,20 @@ the registry is the canonical picker definition; provider adapters still impleme
 
 | Feature                               | Provider                                                                                                                                                                                                                                                                 | Model                                                                                                           |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Scan                                  | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
-| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise first ready Codex Terra → Claude Sonnet rung; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Grok, Local model, or saved custom connection |
-| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Grok, Local model, or saved custom connection                                  |
+| Scan                                  | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
+| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
+| **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Local model, or saved custom connection                                  |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
 | **Opinion (editorials)**              | Default: Codex Sol. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, all four named Codex
-models, all four named Claude models, Grok, Local model and custom connections. Automatic tries Codex Sol
-then Claude Sonnet once when needed. Explicit choices remain the requested
+models, all four named Claude models, Local model and custom connections. Opinion's Automatic tries Codex Sol
+then Claude Sonnet once when needed; the desk's own Automatic ladders for
+stories, scans and Dark Desk run DeepSeek v4.1 Flash, then Qwen 3.6 35B on this
+computer when it is loaded, then Codex Terra, and do not select Claude on their
+own. Explicit choices remain the requested
 first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
@@ -1117,7 +1127,7 @@ flowchart TB
     CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
     Q1 -->|yes| OAI["Try that gateway first"]
-    Q1 -->|no| READY["First ready<br/>Codex Terra → Claude Sonnet"]
+    Q1 -->|no| READY["First ready<br/>DeepSeek v4.1 Flash → Qwen 3.6 35B if loaded → Codex Terra"]
     KIND -->|yes: named choice| ONE["Try that recorded provider first"]
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
@@ -1312,11 +1322,11 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 notes
 
-0.6.52 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders put Claude Sonnet last and never select Opus. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
+0.6.52 adds model-specific Codex/Claude effort control, technical-failure recovery with an explicit runtime switch, and terminal handling for provider refusals. A named runtime or Automatic stays the recorded first choice; technical recovery retries only the unfinished call and records requested and actual model and effort. Unattended ladders never select Opus; Claude Sonnet is Opinion's last rung. Neither a refusal nor an invalid provider response is a successful draft. Queue batches can be redrafted with another selected runtime and remain review-only.
 
 The Daily scan panel is owner-editable for schedule time, runtime, supported effort, accepted sources, and a source cap of 1–12. Its result remains leads for the Queue, never direct publication. The Server health queue now separates retained failures from current queued/running work and the latest terminal workflow result.
 

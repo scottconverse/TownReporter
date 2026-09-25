@@ -25,6 +25,7 @@ import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as DeskDarkRouteImport } from './routes/desk.dark'
 import { Route as DeskFollowUpsRouteImport } from './routes/desk.follow-ups'
+import { Route as DeskImportRouteImport } from './routes/desk.import'
 import { Route as DeskLegalRemovalsRouteImport } from './routes/desk.legal-removals'
 import { Route as DeskMemoryRouteImport } from './routes/desk.memory'
 import { Route as DeskOpinionRouteImport } from './routes/desk.opinion'
@@ -120,6 +121,11 @@ const DeskDarkRoute = DeskDarkRouteImport.update({
 const DeskFollowUpsRoute = DeskFollowUpsRouteImport.update({
   id: '/follow-ups',
   path: '/follow-ups',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskImportRoute = DeskImportRouteImport.update({
+  id: '/import',
+  path: '/import',
   getParentRoute: () => DeskRoute,
 } as any)
 const DeskLegalRemovalsRoute = DeskLegalRemovalsRouteImport.update({
@@ -219,6 +225,7 @@ export interface FileRoutesByFullPath {
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
+  '/desk/import': typeof DeskImportRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/opinion': typeof DeskOpinionRoute
@@ -252,6 +259,7 @@ export interface FileRoutesByTo {
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
+  '/desk/import': typeof DeskImportRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/opinion': typeof DeskOpinionRoute
@@ -287,6 +295,7 @@ export interface FileRoutesById {
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
+  '/desk/import': typeof DeskImportRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/opinion': typeof DeskOpinionRoute
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/follow-ups'
+    | '/desk/import'
     | '/desk/legal-removals'
     | '/desk/memory'
     | '/desk/opinion'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/follow-ups'
+    | '/desk/import'
     | '/desk/legal-removals'
     | '/desk/memory'
     | '/desk/opinion'
@@ -390,6 +401,7 @@ export interface FileRouteTypes {
     | '/articles/$slug'
     | '/desk/dark'
     | '/desk/follow-ups'
+    | '/desk/import'
     | '/desk/legal-removals'
     | '/desk/memory'
     | '/desk/opinion'
@@ -543,6 +555,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskFollowUpsRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/import': {
+      id: '/desk/import'
+      path: '/import'
+      fullPath: '/desk/import'
+      preLoaderRoute: typeof DeskImportRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/legal-removals': {
       id: '/desk/legal-removals'
       path: '/legal-removals'
@@ -661,6 +680,7 @@ declare module '@tanstack/react-router' {
 interface DeskRouteChildren {
   DeskDarkRoute: typeof DeskDarkRoute
   DeskFollowUpsRoute: typeof DeskFollowUpsRoute
+  DeskImportRoute: typeof DeskImportRoute
   DeskLegalRemovalsRoute: typeof DeskLegalRemovalsRoute
   DeskMemoryRoute: typeof DeskMemoryRoute
   DeskOpinionRoute: typeof DeskOpinionRoute
@@ -679,6 +699,7 @@ interface DeskRouteChildren {
 const DeskRouteChildren: DeskRouteChildren = {
   DeskDarkRoute: DeskDarkRoute,
   DeskFollowUpsRoute: DeskFollowUpsRoute,
+  DeskImportRoute: DeskImportRoute,
   DeskLegalRemovalsRoute: DeskLegalRemovalsRoute,
   DeskMemoryRoute: DeskMemoryRoute,
   DeskOpinionRoute: DeskOpinionRoute,

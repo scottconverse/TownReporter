@@ -1,5 +1,29 @@
 import { assertPublicHttpUrl, fetchPublicHttp } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
+/* The shipped defaults moved to src/lib/paper.ts in 0.6.63 (see the comment
+   there): this module reads a channel by spawning python, so it imports a
+   `.server.ts` file, and a screen that only wants the keyword list must not
+   pull that into the browser bundle. Re-exported below because this is where
+   every existing importer reads them from. */
+import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "../paper.ts";
+import { createServerOnlyFn } from "@tanstack/react-start";
+
+/*
+  The python runner that hands yt-dlp its allow-list is a `.server` module, and
+  this module is reachable from the browser: ingest.ts imports it for YouTube
+  sources, and ingest.ts is in the /desk bundle. A plain `await import()` of the
+  runner therefore made the client build resolve a server-only file, which
+  import-protection refuses outright -- the build went red in 0.6.63 even though
+  the call itself only ever happens on the server.
+
+  A function handed to createServerOnlyFn is a boundary the client build prunes,
+  so the runner is loaded on the server, which is the only place a spawn may run
+  anyway. The two channel readers below call through this loader; nothing else in
+  this file starts a child process.
+*/
+const loadMediaToolSpawner = createServerOnlyFn(
+  async () => (await import("./media-tool-process.server.ts")).spawnMediaTool,
+);
 
 /** Same ceiling as ingest ARCHIVE_TEXT_CAP. Retrieval slices; storage does not. */
 const TEXT_CAP = 2_000_000;
@@ -99,27 +123,9 @@ export type ListedVideo = {
   tab: "streams" | "videos" | "rss";
 };
 
-export const MEETING_KEYWORDS = [
-  "council",
-  "meeting",
-  "session",
-  "board",
-  "commission",
-  "hearing",
-  "work session",
-  "study session",
-  "neighborhood",
-  "planning",
-  "zoning",
-  "pre-session",
-];
+export { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS };
 
 const SKIP_TITLES = /\bthis week in council\b|^twic\b|\btldw\b|block part(y|ies)|cruise night/i;
-
-export const LONGMONT_YOUTUBE_CHANNELS = [
-  "https://www.youtube.com/@CityofLongmont",
-  "https://www.youtube.com/@LongmontPublicMedia",
-];
 
 export function normalizeMeetingTitle(title: string): string {
   return title
@@ -337,7 +343,7 @@ export function parseYtDlpChannelJson(raw: string, tab: ListedVideo["tab"]): Lis
 }
 
 async function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos"): Promise<ListedVideo[]> {
-  const { spawn } = await import("node:child_process");
+  const spawnMediaTool = await loadMediaToolSpawner();
   const base = channelUrl.replace(/\/(videos|streams|featured|playlists|about)\/?$/, "").replace(/\/$/, "");
   const target = `${base}/${tab}`;
   return new Promise((resolveRows) => {
@@ -349,7 +355,7 @@ async function runYtDlpChannelTab(channelUrl: string, tab: "streams" | "videos")
       "--js-runtimes", "node",
       target,
     ];
-    const child = spawn("python", argv, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnMediaTool(argv, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -486,7 +492,7 @@ export function parseYtDlpCaptureReadiness(raw: string): YoutubeCaptureReadiness
 }
 
 async function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
-  const { spawn } = await import("node:child_process");
+  const spawnMediaTool = await loadMediaToolSpawner();
   return new Promise((resolveReadiness) => {
     let stdout = "";
     let settled = false;
@@ -496,7 +502,7 @@ async function readYtDlpCaptureReadiness(videoId: string): Promise<YoutubeCaptur
       clearTimeout(timer);
       resolveReadiness(readiness);
     };
-    const child = spawn("python", buildYtDlpCaptureReadinessArgs(videoId), { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawnMediaTool(buildYtDlpCaptureReadinessArgs(videoId), { stdio: ["ignore", "pipe", "ignore"] });
     child.stdout?.on("data", (chunk: Buffer | string) => {
       if (stdout.length < 2_000_000) stdout += chunk.toString();
     });

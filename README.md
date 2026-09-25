@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.62](docs/releases/0.6.62.md).** Every published story now says plainly how it was made; a draft's section must be confirmed before the story prints; and a story that names a news outlet its Sources do not cover is refused unless an editor records the override. Spawned provider CLIs receive a named environment allow-list rather than the server's environment, the URL guard reads the IPv4 transition and translation ranges, and Grok federation is opt-in only. GitHub remains the authority for publication state. [0.6.61 release guide](docs/releases/0.6.61.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.63](docs/releases/0.6.63.md).** An editor can now paste a finished report and get one card per story to check and import, paste a single finished story, add a source without leaving the section it belongs to, edit the owner's named-outlet list on Server, and read the paper's own front page as a river. A section the chooser cannot place says "Section not chosen — pick one" instead of guessing, meeting audio is transcribed through textflowkit with its provenance recorded, and stories, scans and Dark Desk run DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra. GitHub remains the authority for publication state. [0.6.62 release guide](docs/releases/0.6.62.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.62 release guide](docs/releases/0.6.62.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.63 release guide](docs/releases/0.6.63.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -122,7 +122,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.62 package adds the public-trust and security fixes recorded in its release guide; the 0.6.61 package added the complete transcript-to-editor path and the Scan-page refresh repair. The current package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
+Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.63 package adds the import, paste-one-story and section-source surfaces recorded in its release guide; the 0.6.62 package added the public-trust and security fixes. The current package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first manual editorial workflow within an hour with working internet; that is a goal, not a measured fresh-machine result, and no fresh-machine human acceptance is documented. Release evidence records only the stated automated installer and package checks and their limits. Public hosting is separate from this local installation.
 
@@ -179,34 +179,41 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic records that gateway as the preferred first runtime.
-Otherwise it tries Codex Terra, then Claude Sonnet, chooses the first ready
-provider before enqueueing, and stores that effective choice on the job. A
+Otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it
+is loaded, then Codex Terra — choosing the first ready provider before
+enqueueing, and storing that effective choice on the job. A
 named model is also the recorded first choice. If that model reaches a usage
 limit, becomes unavailable, loses its login, times out, or returns no output,
 TownReporter can move only the unfinished model call to the next ready runtime
 and records the requested and actual model and effort. Earlier calls in that
 active run are not repeated. A later restarted job retains uploaded source
-material but may read it again. A content refusal stops the run. Unattended
-ladders put Claude last and use Sonnet; Opus is available
-only when an editor selects it.
+material but may read it again. A content refusal stops the run.
+
+There are **two Automatic ladders**, and they are not the same order:
+
+| Automatic covers       | The order it walks                                                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Stories, scans, Dark Desk | DeepSeek v4.1 Flash → Qwen 3.6 35B **on this computer, when it is loaded** → Codex Terra                    |
+| Opinion                | Codex Sol → Claude Sonnet                                                                                        |
+
+Opinion is the only surface whose Automatic ends at Claude Sonnet. Opus, Codex
+Astra and Claude Haiku are available only when an editor selects them by hand.
 
 The Queue also offers **Draft selected** for one editor-chosen batch of up to
-five eligible leads. That batch requires one named Codex, Claude, Grok
-(SuperGrok), Local model, or saved Custom AI connection, including a configured
+five eligible leads. That batch requires one named Codex, Claude, Local model,
+or saved Custom AI connection, including a configured
 Gemini endpoint. It never uses Automatic. It retains each lead's saved research
 scope, shows each lead's durable result and workbench link, and never publishes
 a story. Technical provider failures can move the unfinished call to the next
 ready cloud runtime; a provider refusal remains terminal.
 
-Daily Scan uses the same named choices, including Grok (SuperGrok) and saved
-Custom AI connections. It stores the requested model with the schedule and the
+Daily Scan uses the same named choices and saved Custom AI connections. It stores the requested model with the schedule and the
 runtime actually used on each job. Technical preflight or mid-call failures can
 move unfinished work to the next ready cloud runtime and are recorded; a
 provider refusal stops the run. For image OCR, the same technical-only rule
 applies and only vision-capable candidates are considered.
 
-Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku;
-**Grok (SuperGrok)** through the newsroom's direct OAuth connection; or
+Pick Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; or
 **Local model** as the preferred provider for one run. A named choice remains
 the first choice; only a recognized technical failure can move the unfinished
 call. The endpoint/model compatibility overrides are
@@ -245,7 +252,7 @@ For **Automatic**, a configured gateway is tried first; named choices in Story, 
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | `ANTHROPIC_API_KEY`                             | credentials for selected Claude models or the final Sonnet retry            |
-| _nothing_                                       | signed-in Codex first; signed-in Claude Sonnet is the last unattended rung  |
+| _nothing_                                       | stories, scans and Dark Desk walk the Automatic ladder above (DeepSeek → local Qwen → Codex Terra); Opinion walks Codex Sol → Claude Sonnet |
 | `XAI_API_KEY`                                   | Grok                                                                        |
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
@@ -253,11 +260,13 @@ The CLI is slower than an API — it reloads a fixed preamble per call, so a dra
 **Opinion offers the native providers and local model.** The picker offers
 Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
 Haiku, Local model, and saved custom connections. Codex Sol is selected by
-default. Automatic tries Codex Sol first and moves to Claude Sonnet once if
-Codex is unavailable. An explicit choice remains the recorded first choice;
-a recognized technical failure can move only the unfinished call. The writer
-reads the configured private voice file, and a provider refusal or invalid
-delivery leaves the request failed without a draft.
+default. **Opinion's own Automatic** tries Codex Sol first and moves to Claude
+Sonnet once if Codex is unavailable — that is the Opinion ladder, not the desk's
+global order; stories, scans and Dark Desk walk DeepSeek v4.1 Flash → local Qwen
+3.6 35B when it is loaded → Codex Terra. An explicit choice remains the recorded
+first choice; a recognized technical failure can move only the unfinished call.
+The writer reads the configured private voice file, and a provider refusal or
+invalid delivery leaves the request failed without a draft.
 
 ### Other models — one OpenAI-compatible URL
 
@@ -434,10 +443,14 @@ Created by **Scott Converse**. Companion civic tools: [civic-transparency-toolki
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
 
 Dark Desk uses a separate cost-aware Automatic path: a configured gateway wins;
-otherwise Codex Terra synthesizes and Claude Sonnet is the one eligible retry.
+otherwise it walks the desk's own Automatic ladder — DeepSeek v4.1 Flash, then
+Qwen 3.6 35B on this computer when it is loaded, then Codex Terra — and only the
+unfinished stage moves to the next provider if a login has lapsed or synthesis
+does not respond in time. Claude Sonnet is not on that ladder; it is a hand pick,
+and Opinion is the only surface whose Automatic ends there.
 Claude Haiku plans Claude runs and Codex Luna plans Astra/Luna runs. Research is
 checkpointed before synthesis, so a synthesis retry does not repeat completed
 searches or document reads. Each round enforces one wall-time, model-call,
@@ -471,6 +484,6 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-**0.6.62** is the current version. Published stories state how they were made, a draft's section must be confirmed before it prints, and a story naming a news outlet its Sources do not cover is refused until an editor records the override. The first-owner claim is one locked transaction, provider CLIs receive a named environment, the URL guard blocks the IPv4 transition and translation ranges, and Grok federation is opt-in only. Read the [0.6.62 release guide](docs/releases/0.6.62.md) for what it claims and what it does not.
+**0.6.63** is the current version. An editor can paste a finished report and get one card per story to check and import, paste a single finished story, add a source inside the section it belongs to, edit the named-outlet list on Server, and read the paper's own front page as a river. A section the chooser cannot place says "Section not chosen — pick one" instead of guessing, meeting audio is transcribed through textflowkit with the run's provenance recorded, and imported leads carry where they came from. Read the [0.6.63 release guide](docs/releases/0.6.63.md) for what it claims and what it does not.
 
 Release notes for every earlier version, moved verbatim out of this README, are in the [release history](docs/releases/README.md). Line-by-line detail is in [CHANGELOG.md](CHANGELOG.md).

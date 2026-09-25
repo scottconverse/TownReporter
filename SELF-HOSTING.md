@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.62**. See the [0.6.62 release guide](docs/releases/0.6.62.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
+Repository documentation version: **0.6.63**. See the [0.6.63 release guide](docs/releases/0.6.63.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -178,9 +178,12 @@ trusted automatically.
 
 ### Claude Code, no key
 
-No API key. When an editor selects a Claude model, or an unattended run reaches
-its final Claude Sonnet rung, the desk shells out to the local **Claude Code**
-login, so the subscription powers it. Automatic never selects Opus; Opus is an
+No API key. When an editor selects a Claude model, or Opinion's Automatic
+reaches its final Claude Sonnet rung, the desk shells out to the local **Claude
+Code** login, so the subscription powers it. Claude Sonnet is on Opinion's
+ladder only; stories, scans and Dark Desk walk DeepSeek v4.1 Flash, then Qwen
+3.6 35B on this computer when it is loaded, then Codex Terra, and do not select
+Claude on their own. No automatic ladder selects Opus; Opus is an
 explicit editor choice. The CLI may also make a small internal Haiku call that
 cannot be turned off from here.
 
@@ -200,10 +203,10 @@ the run.
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or Codex Terra → Claude Sonnet; named choices are tried first   | technical recovery retries only the unfinished call and records requested/actual model and effort             |
-| Daily scan          | one named Codex or Claude model, Local model, Grok, or saved Custom AI connection is tried first; technical switches are recorded | repair provider credentials when no ready fallback exists and resume the schedule |
-| Story — Automatic   | configured `LLM_*` first when present; otherwise Codex Terra → Claude Sonnet readiness ladder | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
-| Story — named       | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; Grok; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
+| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or the shared ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; named choices are tried first   | technical recovery retries only the unfinished call and records requested/actual model and effort             |
+| Daily scan          | one named Codex or Claude model, Local model, or saved Custom AI connection is tried first; technical switches are recorded | repair provider credentials when no ready fallback exists and resume the schedule |
+| Story — Automatic   | configured `LLM_*` first when present; otherwise the shared readiness ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
+| Story — named       | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
 | Opinion             | Automatic starts Codex Sol → Claude Sonnet; named choices are tried first; technical retry is per unfinished call | the completed row records the provider that delivered; refusals stop |
 
 For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
@@ -217,7 +220,7 @@ does not read or store the token.
 Opinion rejects provider refusals, assistant notes, implausible headlines, and
 incomplete bodies before draft storage. The Opinion picker offers Automatic,
 Codex Astra, Sol, Terra, and Luna; Claude Fable, Opus, Sonnet, and Haiku; Local model; and custom connections;
-Automatic can move from Codex Sol to Claude Sonnet once when Codex is unavailable. A failed request has no draft
+Opinion's Automatic can move from Codex Sol to Claude Sonnet once when Codex is unavailable. A failed request has no draft
 or Publish action.
 
 `npm test` makes no model call and costs nothing: it runs the whole suite with
@@ -348,4 +351,4 @@ jobs. That is why self-hosting is the default.
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](docs/editor-desk.md) for the complete editor flow.

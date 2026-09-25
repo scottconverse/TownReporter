@@ -2,6 +2,7 @@
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { nonStoplistedProperNouns } from "./lead-match.ts";
+import { TOPICS } from "../paper.ts";
 
 export function organizationFromUrl(url: string): string {
   try {
@@ -1153,16 +1154,210 @@ export function tierFromKind(kind: string): "A" | "B" | "C" {
   return "C";
 }
 
-export function topicFromText(text: string): string {
-  const t = text.toLowerCase();
-  if (/school|svvsd|st\.?\s*vrain|education/i.test(t)) return "schools";
-  if (/nextlight|water|utility|utilities|wastewater|power/i.test(t)) return "utilities";
-  if (/housing|zoning|land use|affordable/i.test(t)) return "housing";
-  if (/\bbudget\b|sales tax|mill levy|property tax/i.test(t)) return "budget";
-  if (/planning|comp plan|annex/i.test(t)) return "planning";
-  if (/road|bridge|infrastructure|pothole|transit/i.test(t)) return "infrastructure";
-  if (/election|ballot|mayor|council race/i.test(t)) return "elections";
-  return "council";
+/*
+  The chooser for the two paths with no model reply to read a section out of:
+  the Write a story box (write-story.ts) and the Dark Desk handoff (dark.ts).
+
+  What it replaced was ordered substring regexes ending in `return "council"`,
+  and both answers were wrong on live leads: a cat-rescue fundraiser came out
+  `budget` and a nonprofit's new executive director came out `schools`, because
+  /education/ matched a degree in the hire's biography and `budget` was the
+  first section left after the others missed. Two rules follow from that.
+
+  Whole words, and no section as the answer. A term matches only as a word
+  ("school" is not in "Unschooling", "budget" is not in "budgeteers"), weak
+  terms need two of them before they count as a beat, and a text that names no
+  beat comes back `unchosen` -- the same "not chosen" state the scan records
+  (schema.ts, migrations/0087_lead_topic_unchosen.sql), instead of a section
+  nobody picked. The `topic` field still carries a real key, because the
+  leads.topic column needs one and resolve_story_section() rejects an unknown
+  one; it is the *first section this newsroom files under*, not a guess.
+
+  The newsroom's own sections win. Its section names and reporting briefs are
+  read as strong terms before the built-in vocabulary below, so a newsroom
+  that writes "Public safety -- Police, fire and emergency response" gets that
+  section on a fire story ahead of anything the shipped list recognizes.
+*/
+export type TopicSection = {
+  key: string;
+  name: string;
+  brief: string;
+  replacementKey?: string | null;
+};
+
+/** A section and whether the text named it, or only whether the column needed a value. */
+export type TopicMatch = { topic: string; unchosen: boolean };
+
+/**
+ * Words that appear all over the section settings and would match everything.
+ * Filtered out of a newsroom's own section names and briefs -- "City Council"
+ * must contribute "council", not "city".
+ */
+const TOPIC_STOPWORDS = new Set([
+  "and", "the", "for", "with", "from", "into", "this", "that", "these", "those",
+  "about", "over", "under", "your", "their", "its", "our", "all", "more", "most",
+  "area", "areas", "city", "county", "general", "local", "news", "other", "page",
+  "press", "public", "section", "sections", "story", "stories", "town", "state",
+]);
+
+/**
+ * The shipped vocabulary, by section. `strong` names the beat outright and wins
+ * on its own; `weak` words only count when two of them land, which is what
+ * keeps "a school of thought" and "her degree in education" out of schools.
+ */
+const BUILT_IN_TOPIC_TERMS: readonly { topic: string; strong: readonly string[]; weak: readonly string[] }[] = [
+  {
+    topic: "schools",
+    strong: ["svvsd", "st. vrain", "st vrain", "school board", "school district", "school funding", "high school", "middle school", "elementary school", "public school", "public schools", "superintendent"],
+    weak: ["school", "schools", "education", "teacher", "teachers", "student", "students"],
+  },
+  {
+    topic: "utilities",
+    strong: ["nextlight", "wastewater", "water treatment", "water rates", "water plant", "water main", "water bill", "xcel energy", "electric rates", "sewer rates"],
+    weak: ["water", "power", "utility", "utilities", "sewer", "electric", "fiber", "broadband", "outage"],
+  },
+  {
+    topic: "housing",
+    strong: ["affordable housing", "accessory dwelling", "zoning", "rezoning", "land use", "eviction", "renters", "mobile home park", "short-term rental", "rent control"],
+    weak: ["rent", "rents", "apartment", "apartments", "tenant", "tenants", "housing", "homeless"],
+  },
+  {
+    topic: "budget",
+    strong: ["sales tax", "mill levy", "property tax", "budget hearing", "budget shortfall", "budget deficit", "tax increase", "spending plan"],
+    weak: ["budget", "tax", "taxes", "revenue", "spending", "fee", "fees"],
+  },
+  {
+    topic: "planning",
+    strong: ["comp plan", "comprehensive plan", "planning board", "planning commission", "site plan", "annexation", "subdivision"],
+    weak: ["permit", "permits", "annex", "plat", "growth"],
+  },
+  {
+    topic: "infrastructure",
+    strong: ["pothole", "potholes", "quiet zone", "intersection", "sidewalk", "crosswalk", "road construction", "street light", "street lights"],
+    weak: ["road", "roads", "street", "streets", "bridge", "transit", "bus", "traffic", "curb", "trail"],
+  },
+  {
+    topic: "elections",
+    strong: ["ballot", "ballot measure", "ballot initiative", "voters", "candidate filing", "recall election", "election results", "polling place"],
+    weak: ["mayor", "candidate", "candidates", "campaign", "election", "elections", "vote", "voting"],
+  },
+  {
+    topic: "council",
+    strong: ["council", "city council", "council meeting", "council vote", "councilmember", "executive session", "public hearing", "ordinance", "first reading", "second reading"],
+    weak: ["resolution", "agenda", "meeting", "vote", "city"],
+  },
+];
+
+const escapeTopicTerm = (term: string): string => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A term's whole-word pattern. Lookarounds rather than `\b` so a hyphenated or
+ * apostrophed neighbour is still a neighbour: in "city-council" the word
+ * stands, in "budgeteers" and "Unschooling" it does not.
+ */
+function topicTermPattern(term: string): RegExp {
+  const escaped = escapeTopicTerm(term.trim().toLowerCase()).replace(/\s+/g, "\\s+");
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i");
+}
+
+/** A section's own words: name tokens and brief tokens, minus the words that match everything. */
+function configuredTopicTerms(section: TopicSection): string[] {
+  const terms = new Set<string>();
+  for (const source of [section.name, section.brief]) {
+    for (const token of String(source ?? "").toLowerCase().split(/[^a-z0-9']+/)) {
+      if (token.length < 4 || TOPIC_STOPWORDS.has(token)) continue;
+      terms.add(token);
+    }
+  }
+  return [...terms];
+}
+
+/**
+ * Every word the shipped vocabulary already knows, as a weak or strong term.
+ * A newsroom's own section named "Budget" is not new information about the
+ * word "budget" -- the shipped list already reads it, weakly -- and counting
+ * it at the configured tier would let that one word outrank a text that names
+ * schools twice over ("school board ... SVVSD budget line"). Only a word the
+ * shipped list has never heard ("police", "neighbors") is evidence about the
+ * newsroom's own sections.
+ */
+const SHIPPED_TOPIC_TERMS = new Set<string>(
+  BUILT_IN_TOPIC_TERMS.flatMap((entry) => [...entry.strong, ...entry.weak]),
+);
+
+/**
+ * The sections a lead can actually file under: not the reserved pages, and not
+ * a retired section, whose leads the trigger rewrites to its replacement.
+ */
+export function filingTopicSections(sections: readonly TopicSection[]): TopicSection[] {
+  return sections.filter(
+    (section) =>
+      section.key !== "about" && section.key !== "opinion" && !section.replacementKey,
+  );
+}
+
+export function topicFromText(
+  text: string,
+  sections: readonly TopicSection[] = DEFAULT_TOPIC_OPTIONS,
+): TopicMatch {
+  const body = String(text ?? "");
+  const candidates = filingTopicSections(sections);
+  const candidateKeys = new Set(candidates.map((section) => section.key));
+  const best = new Map<string, { configured: number; strong: number; weak: number }>();
+  const score = (key: string) => {
+    const row = best.get(key) ?? { configured: 0, strong: 0, weak: 0 };
+    best.set(key, row);
+    return row;
+  };
+
+  const seen = new Set<string>();
+  const record = (key: string, term: string, weight: "configured" | "strong" | "weak") => {
+    const stamp = `${key}\u0000${term}`;
+    if (!term || seen.has(stamp)) return;
+    if (!topicTermPattern(term).test(body)) return;
+    seen.add(stamp);
+    const row = score(key);
+    if (weight === "configured") row.configured += 1;
+    else if (weight === "strong") row.strong += 1;
+    else row.weak += 1;
+  };
+
+  for (const section of candidates) {
+    for (const term of configuredTopicTerms(section)) {
+      record(section.key, term, SHIPPED_TOPIC_TERMS.has(term) ? "weak" : "configured");
+    }
+  }
+  for (const entry of BUILT_IN_TOPIC_TERMS) {
+    if (!candidateKeys.has(entry.topic)) continue;
+    for (const term of entry.strong) record(entry.topic, term, "strong");
+    for (const term of entry.weak) record(entry.topic, term, "weak");
+  }
+
+  /*
+    A newsroom's own words outrank the shipped list (one configured hit beats
+    any number of built-in ones -- that is the whole point of the setting), and
+    a hit on the beat's own name outranks a pile of weak words. Ties keep the
+    order the newsroom configured, which is also what makes the fallback below
+    the section an editor would expect.
+  */
+  let winner: string | null = null;
+  let winnerScore = 0;
+  for (const section of candidates) {
+    const row = best.get(section.key);
+    if (!row) continue;
+    const names = row.configured > 0 || row.strong > 0 || row.weak >= 2;
+    if (!names) continue;
+    const total = row.configured * 10_000 + row.strong * 100 + row.weak;
+    if (total > winnerScore) {
+      winner = section.key;
+      winnerScore = total;
+    }
+  }
+  if (winner) return { topic: winner, unchosen: false };
+  return {
+    topic: candidates[0]?.key ?? DEFAULT_TOPIC_OPTIONS[0]!.key,
+    unchosen: true,
+  };
 }
 
 /** True when the workbench should paint a draft that arrived after Draft with AI. */
@@ -1241,6 +1436,51 @@ export function humanFrontierLabel(label: string): string {
   string-building only -- no behaviour change from the inline template it
   replaced.
 */
+/*
+  How much of a section's reporting brief reaches the scanning model.
+
+  A brief is the editor's own description of the section and can run to 3000
+  characters (`sections.server.ts` caps it there). The General scan lists EVERY
+  active section in one prompt, so an uncapped brief would let one long one
+  crowd out the rest of the list -- and the list is what the model uses to pick
+  a section at all. The cap is stated here, once, so the prompt and the test
+  that measures it cannot drift apart.
+*/
+export const SCAN_TOPIC_BRIEF_CAP = 240;
+
+/** One section as the scan prompt shows it: the key it must return, and how to tell what it means. */
+export type ScanTopicOption = { key: string; name: string; brief: string };
+
+/**
+ * The sections named when a caller passes none.
+ *
+ * Every production caller passes the newsroom's own configured sections
+ * (`desk.ts` reads them from `sections.server.ts`). This list is the shipped
+ * fallback, named the way migration 0045 seeds a new newsroom, so a prompt
+ * built without a section list still names sections rather than printing keys.
+ */
+const DEFAULT_TOPIC_OPTIONS: readonly ScanTopicOption[] = TOPICS.filter(
+  (key) => key !== "about" && key !== "opinion",
+).map((key) => ({ key, name: key[0]!.toUpperCase() + key.slice(1), brief: "" }));
+
+/**
+ * The section list, one line each: the key the model must return, the display
+ * name the editor sees, and the editor's own reporting brief (capped, above).
+ */
+function scanTopicBlock(options: readonly ScanTopicOption[]): string {
+  if (!options.length) return "";
+  const lines = options.map((section) => {
+    const brief = (section.brief ?? "").trim().slice(0, SCAN_TOPIC_BRIEF_CAP);
+    const name = (section.name ?? "").trim();
+    const label = name && name.toLowerCase() !== section.key.toLowerCase() ? ` (${name})` : "";
+    return `- ${section.key}${label}${brief ? `: ${brief}` : ""}`;
+  });
+  return `Sections this newsroom files under:
+${lines.join("\n")}
+Set "topic" to the exact key of the section that fits, never the display name alone.
+`;
+}
+
 export function buildScanUserMessage(opts: {
   city: string;
   state: string;
@@ -1248,7 +1488,7 @@ export function buildScanUserMessage(opts: {
   memory: { entity: string; last_angle: string }[];
   published?: { headline: string; dek: string; source_urls: string[]; published_at: string }[];
   payload: string;
-  topics?: readonly string[];
+  topics?: readonly ScanTopicOption[];
   section?: {name:string;brief:string;instructions:string}|null;
 }): string {
   const { city, state, reread, memory, payload } = opts;
@@ -1293,7 +1533,7 @@ Return JSON:
     { "url": "https://...", "title": "", "why": "page worth investigating further" }
   ]
 }
-topic must be exactly one of: ${(opts.topics??["council","budget","housing","utilities","schools","planning","infrastructure","elections"]).join(", ")}.
+${scanTopicBlock(opts.topics ?? DEFAULT_TOPIC_OPTIONS)}
 ${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler or manufacture a lead to earn a score. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
 }
 

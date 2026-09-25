@@ -158,7 +158,7 @@ it("passes custom coverage instructions to the scanner and carries the key throu
     reread: false,
     memory: [],
     payload: "SOURCE: Library\nA neighborhood choir welcomes new members.",
-    topics: ["community-life"],
+    topics: [{ key: "community-life", name: "Community life", brief: "Neighborhood clubs and local arts" }],
     section: {
       name: "Community life",
       brief: "Neighborhood clubs and local arts",
@@ -168,7 +168,11 @@ it("passes custom coverage instructions to the scanner and carries the key throu
   const transport = async (user: string) => {
     assert.match(user, /Neighborhood clubs and local arts/);
     assert.match(user, /access barriers to participation/);
-    assert.match(user, /topic must be exactly one of: community-life/);
+    // The prompt now names the section it files under -- key plus display name
+    // -- instead of printing the bare key alone, so the model is choosing from
+    // something a person wrote rather than from a word.
+    assert.match(user, /- community-life \(Community life\): Neighborhood clubs and local arts/);
+    assert.match(user, /Set "topic" to the exact key of the section that fits/);
     return {
       leads: [
         {
@@ -323,6 +327,89 @@ it("manual saves reuse the newsroom row while discovery preserves rejected decis
   assert.equal(await insertProposedNewsroomSource(sql, { userId: "source-editor", newsroomId: 755, url, title: "Discovery" }), false);
   const rows = await sql<{ status: string; title: string }>`select status,title from sources where newsroom_id=755 and url=${url}`;
   assert.deepEqual(rows, [{ status: "rejected", title: "Updated" }]);
+});
+
+/*
+  The empty label is not a rename.
+
+  Both add boxes -- the Sources page's and the one inside a section -- send the
+  label the editor typed, and the Sources page's "Name" field is optional. An
+  empty one used to arrive as a real title and overwrite the row's name, so
+  re-adding a URL already on watch renamed the source to its own host. The
+  editor did not name anything; nothing should have been renamed.
+
+  A label that *was* given still renames the row: that is today's Sources-page
+  behaviour, and the test above pins it ("Original" -> "Updated"). Only the
+  empty label is inert.
+*/
+it("an empty label never renames a source already on watch", async () => {
+  const sql = await getSql();
+  const url = "https://www.example-city-council.test/packets-757";
+  const named = await saveAcceptedNewsroomSource({
+    userId: "source-owner",
+    newsroomId: 757,
+    url,
+    title: "City Council packets",
+    kind: "official",
+    tier: "A",
+  });
+  assert.equal(named?.title, "City Council packets");
+
+  // The re-add: same URL, no label at all.
+  const relabelled = await saveAcceptedNewsroomSource({
+    userId: "source-editor",
+    newsroomId: 757,
+    url,
+    title: "",
+    kind: "official",
+    tier: "A",
+  });
+  assert.equal(relabelled?.id, named?.id, "a URL already on watch reuses its row");
+  assert.equal(
+    relabelled?.title,
+    "City Council packets",
+    "an empty label must not overwrite an existing title",
+  );
+
+  // Whitespace is not a label either.
+  const blank = await saveAcceptedNewsroomSource({
+    userId: "source-editor",
+    newsroomId: 757,
+    url,
+    title: "   ",
+    kind: "official",
+    tier: "A",
+  });
+  assert.equal(blank?.title, "City Council packets", "a blank label must not overwrite either");
+
+  // A label that was actually given still updates the name.
+  const renamed = await saveAcceptedNewsroomSource({
+    userId: "source-editor",
+    newsroomId: 757,
+    url,
+    title: "  Council packets  ",
+    kind: "official",
+    tier: "A",
+  });
+  assert.equal(renamed?.title, "Council packets");
+
+  // And a first-time source with no label still gets a name rather than an
+  // empty one: the host, which is what the Sources page showed before.
+  const fresh = await saveAcceptedNewsroomSource({
+    userId: "source-editor",
+    newsroomId: 757,
+    url: "https://www.example-city-council.test/minutes-757",
+    title: "",
+    kind: "official",
+    tier: "A",
+  });
+  assert.equal(fresh?.title, "www.example-city-council.test");
+
+  const rows = await sql<{ title: string }>`select title from sources where newsroom_id=757 order by id`;
+  assert.deepEqual(
+    rows.map((r) => r.title),
+    ["Council packets", "www.example-city-council.test"],
+  );
 });
 
 it("renames and retires stable keys without deleting article identities or crossing newsrooms", async () => {

@@ -6,7 +6,7 @@ import { withTransaction } from "../db.ts";
 import { listChannelVideos, pickMeetingVideos, youtubeCaptureReadiness, type ListedVideo, type YoutubeCaptureReadiness } from "./youtube.ts";
 import { captureMeetingCaptions, captureMeetingAudio, requiresAudioFallback, type CaptionCaptureFailure, type CaptionCaptureResult, type AudioCaptureResult } from "./meeting-capture-ytdlp.ts";
 import { storeMeetingAudioArtifact } from "./meeting-audio-artifacts.ts";
-import { computeEndedAt } from "./meeting-capture-info.ts";
+import { computeEndedAt, wholeDurationSeconds } from "./meeting-capture-info.ts";
 import { applyDraftRevision, captureDisposition, detectRevision, dueForRecheck, nextCheckState } from "./meeting-revision.ts";
 import { storeMeetingTranscriptArtifact } from "./meeting-transcript-artifacts.ts";
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
@@ -158,7 +158,7 @@ async function recordAudioCaptureSuccess(
        audio_path=excluded.audio_path,audio_format=excluded.audio_format,audio_sha256=excluded.audio_sha256,
        audio_bytes=excluded.audio_bytes,audio_captured_at=now(),audio_trigger_reason=excluded.audio_trigger_reason,
        updated_at=now()`,
-    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", endedAt, disposition, result.info.durationSeconds, storedPath, result.audio.format, result.audio.sha256, result.audio.byteSize, triggerReason],
+    [newsroomId, video.id, channelUrl, video.title, video.published ?? "", endedAt, disposition, wholeDurationSeconds(result.info.durationSeconds), storedPath, result.audio.format, result.audio.sha256, result.audio.byteSize, triggerReason],
   );
 }
 
@@ -539,6 +539,13 @@ export async function applyCapturedMeetingTranscript(
     result: Extract<CaptionCaptureResult, { ok: true }>;
     forced?: boolean;
     now?: Date;
+    /**
+     * Unit R: this revision is speech-to-text, not the publisher's captions.
+     * Both fields travel together into the artifact row so the desk can label
+     * it for a reader and an editor can see which model read the audio.
+     */
+    sourceMethod?: string;
+    provenance?: Record<string, unknown> | null;
   },
   deps: Pick<MeetingAwarenessDeps, "storeMeetingTranscriptArtifact" | "runSection5" | "withTransaction"> = {},
 ): Promise<{ revised: boolean; settled: boolean; artifactId: number; warnings: string[] }> {
@@ -546,8 +553,15 @@ export async function applyCapturedMeetingTranscript(
   const storeTranscript = deps.storeMeetingTranscriptArtifact ?? storeMeetingTranscriptArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
   const now = input.now ?? new Date();
+  /*
+    Whole seconds, once, for the three things that read it: the integer column
+    this is written to, the revision comparison, and `computeEndedAt`. See
+    `wholeDurationSeconds` -- textflowkit reports a float and the column does not
+    accept one, which is what the real run found.
+  */
+  const durationSeconds = wholeDurationSeconds(input.result.info.durationSeconds);
   const endedAt = computeEndedAt({
-    durationSeconds: input.result.info.durationSeconds,
+    durationSeconds,
     videoTimestamp: input.result.info.videoTimestamp,
   });
   const initialDisposition = captureDisposition({ endedAt, now });
@@ -576,7 +590,7 @@ export async function applyCapturedMeetingTranscript(
           priorRevisionTimestamp: prior.caption_revision_timestamp,
           nextRevisionTimestamp: input.result.info.captionRevisionTimestamp,
           priorDuration: prior.duration_seconds,
-          nextDuration: input.result.info.durationSeconds,
+          nextDuration: durationSeconds,
         })
       : null;
     const state = hadCapture
@@ -605,6 +619,8 @@ export async function applyCapturedMeetingTranscript(
       videoId: input.video.id,
       parsed: input.result.parsed,
       infoSourcePath: input.result.infoPath,
+      sourceMethod: input.sourceMethod,
+      provenance: input.provenance ?? null,
     });
     const section5 = await (deps.runSection5 ?? runSection5ForArtifact)(tx, {
       newsroomId: input.newsroomId,
@@ -674,7 +690,7 @@ export async function applyCapturedMeetingTranscript(
       [
         input.video.channelUrl, input.video.title, input.video.published,
         stored.storagePath, input.result.parsed.format, input.result.parsed.sha256, endedAt,
-        input.result.info.captionRevisionTimestamp, input.result.info.durationSeconds,
+        input.result.info.captionRevisionTimestamp, durationSeconds,
         state.status, state.consecutiveUnchanged, state.settledUnderChurn,
         (prior.revision_count ?? 0) + (signal ? 1 : 0), signal ? now.toISOString() : null,
         input.forced === true, prior.caption_sha256, input.newsroomId, input.video.id, now.toISOString(),

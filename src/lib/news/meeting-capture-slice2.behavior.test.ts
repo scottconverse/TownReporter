@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -7,6 +7,28 @@ import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
 
 type Row = Record<string, unknown>;
+
+/*
+  Only one test in this file pinned the root for itself; the rest drive
+  `runMeetingAwareness` with TOWNREPORTER_DATA_ROOT unset, and its yt-dlp
+  download-archive roots at `meetingRuntimeRoot()` -- TOWNREPORTER_DATA_ROOT,
+  else TOWNREPORTER_DATA_DIR, else `process.cwd()` -- so a run left
+  `meeting-capture/newsroom-1/yt-dlp-archive.txt` in whatever directory the
+  runner started in. Pin a temp root for the whole file. The stale-archive test
+  still overrides it with its own storage root, as it must, and puts that value
+  back afterwards.
+*/
+let priorDataRoot: string | undefined;
+
+before(() => {
+  priorDataRoot = process.env.TOWNREPORTER_DATA_ROOT;
+  process.env.TOWNREPORTER_DATA_ROOT = mkdtempSync(join(tmpdir(), "townreporter-slice2-root-"));
+});
+
+after(() => {
+  if (priorDataRoot === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
+  else process.env.TOWNREPORTER_DATA_ROOT = priorDataRoot;
+});
 
 function statefulSql(storageRoot: string, channels = [{ channel_url: "https://youtube.com/@city", position: 0 }]): {
   sql: Sql;

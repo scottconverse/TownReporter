@@ -66,6 +66,7 @@ import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review
 import {
   modelChoiceLabel,
   rememberedStoryModelChoice,
+  retiredModelChoiceNote,
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -339,6 +340,14 @@ function StoryPage() {
       setModelEffort(defaultModelEffort(remembered));
     }
   }, [data?.job]);
+
+  /*
+    0.6.63 (Unit Y item 4): a job row that still holds the retired Grok choice
+    runs on Automatic -- `modelChoice` above is already normalised, so the note
+    has to be read from the stored row, or the editor would see "Automatic"
+    with no explanation of where their pick went.
+  */
+  const retiredModelNote = retiredModelChoiceNote(data?.job?.model_choice);
 
   useEffect(() => {
     if (!waitingSince) {
@@ -925,6 +934,11 @@ function StoryPage() {
         >
           Model & research · {modelChoiceLabel(modelChoice)}
         </button>
+        {retiredModelNote ? (
+          <p className="note" role="status">
+            {retiredModelNote}
+          </p>
+        ) : null}
         <span className="astra-save-state" role="status">
           {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
         </span>
@@ -1510,6 +1524,24 @@ function StoryPage() {
                     ) : null}
                   </select>
                 </Field>
+                {/*
+                  A lead the scan filed under a section the model never chose.
+
+                  The desk still had to write a key (`schema.ts`), so the row
+                  and this select show one -- but it is the desk's fallback,
+                  not a decision, and printing it as though it were is how a
+                  guessed section reaches the paper. The notice is the same
+                  words the Queue row carries, and it goes away when somebody
+                  confirms a section below.
+                */}
+                {!onPaper && data.lead.topic_unchosen && !topicConfirmed ? (
+                  <p className="note publish-blocked">
+                    Section not chosen — pick one. The scan filed this lead under{" "}
+                    {sections.find((s) => s.key === data.lead.topic)?.name ?? data.lead.topic} because
+                    the model named no section this newsroom files under. Choose the section above,
+                    save the draft, then confirm it.
+                  </p>
+                ) : null}
                 {onPaper ? null : topicConfirmed ? (
                   <p className="note">
                     Section confirmed for this saved draft:{" "}

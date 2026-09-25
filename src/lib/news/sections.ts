@@ -4,6 +4,7 @@ import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID } from "./membership
 import { getSql } from "../db.ts";
 import { getSections, saveSections } from "./sections.server.ts";
 import type { SectionConfig } from "./section-types.ts";
+import { sectionConfigInput } from "./request-input.ts";
 
 export const publicSections = createServerFn({ method: "GET" }).handler(async () => {
   const config = await getSections(DEFAULT_NEWSROOM_ID);
@@ -36,7 +37,7 @@ export const editorSections = createServerFn({ method: "GET" })
   });
 export const applySections = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((data: SectionConfig) => data)
+  .validator((data: SectionConfig) => sectionConfigInput.parse(data))
   .handler(async ({ context, data }) => {
     try {
       const me = await requireEditor(context.userId);

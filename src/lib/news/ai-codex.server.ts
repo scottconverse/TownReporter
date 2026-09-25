@@ -44,6 +44,30 @@ function emitCodexDiagnostic(event: Record<string, unknown>): void {
 
 export const CODEX_CLI_MISSING =
   "Codex is not installed. Install the Codex CLI, then sign in from Codex and try again.";
+
+/**
+ * The operator named a Codex and it is not there.
+ *
+ * Not the same failure as "no Codex anywhere", and it must not be answered
+ * with a fallback to whatever else is on the machine: the install that set
+ * `CODEX_CLI_PATH` did so to choose WHICH Codex runs, and quietly running a
+ * different one instead is a different program than the operator asked for
+ * (a different version, a different account, a different sandbox). On a
+ * reporting path that is worse than not running at all.
+ *
+ * The Claude CLI already reads its `CLAUDE_CLI_PATH` this way -- it returns
+ * the named path whether or not a file is there, so the spawn fails on the
+ * path the operator wrote. Codex has a discovery chain behind the path, so
+ * it needs the refusal spelled out.
+ */
+export function codexCliPathMissing(path: string): string {
+  return (
+    `CODEX_CLI_PATH is set to ${path}, but there is no file there. ` +
+    `TownReporter will not run a different Codex installation instead: ` +
+    `correct the path, or unset CODEX_CLI_PATH to let TownReporter find Codex itself.`
+  );
+}
+
 const CODEX_AUTH_REQUIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 const CODEX_STARTUP_PERMISSION =
@@ -92,12 +116,25 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
-export async function findCodexCli(): Promise<string | null> {
+/**
+ * Where the Codex CLI is, or why the operator's own setting cannot be used.
+ *
+ * A discriminated result rather than `string | null` because "there is no
+ * Codex here" and "the Codex you named is not there" are different facts and
+ * need different sentences -- the second one is the operator's own setting
+ * being wrong, and it is the case that must never fall through to discovery.
+ */
+export type CodexCliLookup = { ok: true; bin: string } | { ok: false; error: string };
+
+export async function findCodexCli(): Promise<CodexCliLookup> {
   const named = process.env.CODEX_CLI_PATH?.trim();
-  // `exists()` resolves a relative path against this process's cwd; every
-  // draft call is spawned with `cwd: tmpdir()`. Absolute before it leaves
-  // here, or the two disagree and the CLI is never actually started.
-  if (named && (await exists(named))) return resolveCliPath(named);
+  if (named) {
+    // `exists()` resolves a relative path against this process's cwd; every
+    // draft call is spawned with `cwd: tmpdir()`. Absolute before it leaves
+    // here, or the two disagree and the CLI is never actually started.
+    if (await exists(named)) return { ok: true, bin: resolveCliPath(named) };
+    return { ok: false, error: codexCliPathMissing(named) };
+  }
   const appData = process.env.APPDATA?.trim();
   if (appData) {
     const vendor = path.join(
@@ -114,11 +151,13 @@ export async function findCodexCli(): Promise<string | null> {
       "bin",
       "codex.exe",
     );
-    if (await exists(vendor)) return vendor;
+    if (await exists(vendor)) return { ok: true, bin: vendor };
     const shim = path.join(appData, "npm", process.platform === "win32" ? "codex.cmd" : "codex");
-    if (await exists(shim)) return shim;
+    if (await exists(shim)) return { ok: true, bin: shim };
   }
-  return "codex";
+  // The bare name, not a path: a PATH lookup that has not been confirmed. The
+  // callers already treat it as "nothing found here until a probe agrees".
+  return { ok: true, bin: "codex" };
 }
 
 function terminateExactTree(child: { pid?: number; kill: (signal?: NodeJS.Signals) => boolean }) {
@@ -251,8 +290,9 @@ export function runCodexProcessForTest(
 export async function probeCodex(
   label = "Codex",
 ): Promise<{ ok: true; label: string } | { ok: false; error: string }> {
-  const bin = await findCodexCli();
-  if (!bin) return { ok: false, error: CODEX_CLI_MISSING };
+  const lookup = await findCodexCli();
+  if (!lookup.ok) return { ok: false, error: lookup.error };
+  const bin = lookup.bin;
   const result = await run(bin, ["login", "status"], "", 10_000);
   if (result.code === 0) return { ok: true, label };
   if (result.timedOut) return { ok: false, error: "Codex login check timed out." };
@@ -413,8 +453,9 @@ export async function codexChat(input: {
   imagePaths?: string[];
   reasoningEffort?: ModelEffort | null;
 }): Promise<ChatResult> {
-  const bin = await findCodexCli();
-  if (!bin) return { ok: false, error: CODEX_CLI_MISSING };
+  const lookup = await findCodexCli();
+  if (!lookup.ok) return { ok: false, error: lookup.error };
+  const bin = lookup.bin;
   if (!/^[A-Za-z0-9._-]+$/.test(input.model)) {
     return { ok: false, error: "Codex model name is invalid." };
   }

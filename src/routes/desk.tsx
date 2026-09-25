@@ -55,6 +55,9 @@ function editorPaperIdentity(config: PaperConfig): PaperIdentity {
     youtubeChannels: _youtubeChannels,
     meetingKeywords: _meetingKeywords,
     seedSources: _seedSources,
+    // The list settings are read by name from the settings path, not carried
+    // in the identity payload (Unit P item 5 added namedOutlets here).
+    namedOutlets: _namedOutlets,
     ...identity
   } = config;
   return identity;

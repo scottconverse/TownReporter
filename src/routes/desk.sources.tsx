@@ -5,6 +5,7 @@ import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
 import { editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
+import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { SourceRow } from "@/lib/news/types";
 
@@ -30,6 +31,44 @@ function SourcesPage() {
   const [bulk, setBulk] = useState("");
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [addedId, setAddedId] = useState<number | null>(null);
+  /*
+    Which sections a source joins, chosen here at the moment the source is
+    added or accepted.
+
+    Assigning a source to a section is a `SectionConfig` write, and
+    `applySections` refuses anyone but the owner ("Only the owner can configure
+    newspaper sections.") -- so this chooser is shown only when that same
+    server function says `canEdit`. Adding and accepting a source stay
+    editor-level, exactly as they were; nothing about who may do what changed,
+    only where the owner can do it from.
+  */
+  const sectionsQuery = useQuery({
+    queryKey: ["editor-sections"],
+    queryFn: () => editorSections(),
+  });
+  const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
+  const reportingSections = (sectionsQuery.data?.sections ?? []).filter(
+    (s) => !["opinion", "about"].includes(s.key) && !s.replacementKey,
+  );
+  const [assignKeys, setAssignKeys] = useState<string[]>([]);
+  const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
+  const sectionNames = (keys: string[]) =>
+    keys.map((key) => reportingSections.find((s) => s.key === key)?.name ?? key).join(", ");
+  /** Write the section assignments for one source; a no-op for a non-owner. */
+  const assignSourceToSections = async (sourceId: number, keys: string[]) => {
+    const saved = sectionsQuery.data;
+    if (!saved?.canEdit || keys.length === 0) return { ok: true as const };
+    const result = await applySections({
+      data: {
+        revision: saved.revision,
+        sections: saved.sections.map((s) =>
+          keys.includes(s.key) ? { ...s, sourceIds: [...new Set([...s.sourceIds, sourceId])] } : s,
+        ),
+      },
+    });
+    if (result.ok) await qc.invalidateQueries({ queryKey: ["editor-sections"] });
+    return result;
+  };
   const add = useMutation({
     mutationFn: () =>
       addSource({
@@ -49,6 +88,7 @@ function SourcesPage() {
       setTitle("");
       setAddedId(res.source.id);
       setSourceTab("accepted");
+      const keys = assignKeys;
       setNotice({
         kind: "ok",
         text: `On watch: ${res.source.title} — ${res.source.url}`,
@@ -61,6 +101,24 @@ function SourcesPage() {
         ];
       });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      // The section assignment is a second write, so it can fail on its own
+      // (a stale revision, an expired session). Say which half landed.
+      void assignSourceToSections(res.source.id, keys).then((assignment) => {
+        if (!assignment.ok) {
+          setNotice({
+            kind: "err",
+            text: `On watch: ${res.source.title} — ${res.source.url}. The section assignment failed: ${assignment.error}`,
+          });
+          return;
+        }
+        if (keys.length) {
+          setAssignKeys([]);
+          setNotice({
+            kind: "ok",
+            text: `On watch: ${res.source.title} — ${res.source.url}. Assigned to ${sectionNames(keys)}.`,
+          });
+        }
+      });
       requestAnimationFrame(() => {
         document.getElementById("on-watch")?.scrollIntoView({ block: "start", behavior: "smooth" });
       });
@@ -97,10 +155,45 @@ function SourcesPage() {
       });
     },
   });
+  /** Tick or untick one reporting section for one row's pending assignment. */
+  const toggleRowKey = (rowId: number, key: string) =>
+    setRowKeys((map) => {
+      const keys = map[rowId] ?? [];
+      return {
+        ...map,
+        [rowId]: keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key],
+      };
+    });
+  const clearRowKey = (rowId: number) =>
+    setRowKeys((map) => {
+      if (!(rowId in map)) return map;
+      const next = { ...map };
+      delete next[rowId];
+      return next;
+    });
   const setStatus = useMutation({
     mutationFn: (input: { id: number; status: "accepted" | "rejected" }) =>
       setSourceStatus({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
+    onSuccess: async (_res, input) => {
+      await qc.invalidateQueries({ queryKey: ["sources"] });
+      const keys = rowKeys[input.id] ?? [];
+      if (input.status !== "accepted" || !keys.length) {
+        clearRowKey(input.id);
+        return;
+      }
+      // Accept first, assign second: applySections refuses a source that is
+      // not accepted yet, so this order is the only one that works.
+      const assignment = await assignSourceToSections(input.id, keys);
+      clearRowKey(input.id);
+      setNotice(
+        assignment.ok
+          ? { kind: "ok", text: `Accepted and filed under ${sectionNames(keys)}.` }
+          : {
+              kind: "err",
+              text: `Accepted, but filing it under ${sectionNames(keys)} failed: ${assignment.error}`,
+            },
+      );
+    },
   });
 
   const groups: {
@@ -176,6 +269,29 @@ function SourcesPage() {
           <InkButton type="submit" small disabled={add.isPending || !url.trim()}>
             {add.isPending ? "Adding…" : "Add source"}
           </InkButton>
+          {/* The form is a three-column grid, so this spans it rather than
+              becoming a fourth column. */}
+          <div className="[grid-column:1/-1]">
+            {canAssignSections ? (
+              <SectionPicker
+                legend="Assign to sections (optional)"
+                hint="Tick the newspaper sections this source should feed. Saved with the source, in the same step."
+                options={reportingSections}
+                picked={assignKeys}
+                disabled={add.isPending}
+                onToggle={(key) =>
+                  setAssignKeys((keys) =>
+                    keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key],
+                  )
+                }
+              />
+            ) : sectionsQuery.isSuccess ? (
+              <p className="meta">
+                Only the owner can file a source under a section. Adding and accepting are yours to
+                do; an owner can tick the sections here, or on Server → Sections.
+              </p>
+            ) : null}
+          </div>
         </form>
       </details>
       <details className="file-form">
@@ -264,6 +380,17 @@ function SourcesPage() {
                   acts={g.acts}
                   addedId={addedId}
                   onStatus={(id, status) => setStatus.mutate({ id, status })}
+                  /* Only where an Accept button sits, because only there can
+                     the tick be saved in the same step. */
+                  assignUI={
+                    canAssignSections && g.acts.includes("accepted")
+                      ? {
+                          options: reportingSections,
+                          picked: (rowId) => rowKeys[rowId] ?? [],
+                          toggle: toggleRowKey,
+                        }
+                      : null
+                  }
                 />
               )}
             </section>
@@ -274,16 +401,70 @@ function SourcesPage() {
   );
 }
 
+/**
+ * A multi-select of the newspaper sections a source can feed.
+ *
+ * A `fieldset`/`legend` rather than a bare list of checkboxes, so a screen
+ * reader announces the group before each section name; each box keeps its own
+ * `<label>`, so a click on the word works and the name is the accessible name.
+ *
+ * Reporting sections only: Opinion and About are written by people, and a
+ * replacement section is a merged-away key that no longer reads anything.
+ */
+function SectionPicker({
+  legend,
+  hint,
+  options,
+  picked,
+  onToggle,
+  disabled,
+}: {
+  legend: string;
+  hint: string;
+  options: { key: string; name: string }[];
+  picked: string[];
+  onToggle: (key: string) => void;
+  disabled?: boolean;
+}) {
+  if (!options.length) return null;
+  return (
+    <fieldset className="src-sections mt-2 min-w-0 rounded border border-rule px-3 py-2">
+      <legend className="px-1 font-semibold">{legend}</legend>
+      <p className="meta">{hint}</p>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {options.map((s) => (
+          <label key={s.key} className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={picked.includes(s.key)}
+              disabled={disabled}
+              onChange={() => onToggle(s.key)}
+            />
+            {s.name}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function SourceTable({
   rows,
   acts,
   addedId,
   onStatus,
+  assignUI,
 }: {
   rows: SourceRow[];
   acts: ("accepted" | "rejected")[];
   addedId?: number | null;
   onStatus: (id: number, status: "accepted" | "rejected") => void;
+  /** Absent for a non-owner, and on the On watch list, where a source is already accepted. */
+  assignUI?: {
+    options: { key: string; name: string }[];
+    picked: (rowId: number) => string[];
+    toggle: (rowId: number, key: string) => void;
+  } | null;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   return (
@@ -327,6 +508,27 @@ function SourceTable({
               {s.last_fetched_at ? formatShortDate(s.last_fetched_at) : "—"}
             </td>
             <td className="td-acts" data-label="Actions">
+              {assignUI ? (
+                /* Not `.file-form`: that is the page-level accordion, and this
+                   one lives in a table cell. */
+                <details className="row-sections">
+                  <summary className="inline-block cursor-pointer">
+                    {(() => {
+                      const picked = assignUI.picked(s.id);
+                      return picked.length
+                        ? `Sections: ${picked.length} ticked`
+                        : "Assign to sections";
+                    })()}
+                  </summary>
+                  <SectionPicker
+                    legend="Sections this source feeds"
+                    hint="Tick now, then Accept: both are saved in one step."
+                    options={assignUI.options}
+                    picked={assignUI.picked(s.id)}
+                    onToggle={(key) => assignUI.toggle(s.id, key)}
+                  />
+                </details>
+              ) : null}
               <span className="row-acts">
                 {acts.includes("accepted") ? (
                   <InkButton tone="quiet" small onClick={() => onStatus(s.id, "accepted")}>

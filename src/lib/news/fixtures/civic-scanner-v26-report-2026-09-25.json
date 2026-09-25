@@ -1,0 +1,191 @@
+{
+  "meta": {
+    "city": "Longmont",
+    "state": "CO",
+    "date": "2026-09-25",
+    "runNumber": 41,
+    "version": "2.6.0",
+    "workflows": ["full-pipeline"]
+  },
+  "stats": {
+    "scanned": 9,
+    "advanced": 2,
+    "held": 2,
+    "killed": 0,
+    "suppressed": 1,
+    "tierACounts": 6,
+    "tierBCounts": 2,
+    "tierCCounts": 1
+  },
+  "meetingCoverage": {
+    "status": "PARTIAL",
+    "sourceInventory": [
+      { "source": "City council calendar", "tier": "A", "access": "checked" },
+      { "source": "PrimeGov council packet", "tier": "A", "access": "blocked" }
+    ],
+    "meetings": [
+      { "body": "City Council", "date": "2026-09-22", "reviewed": "agenda only" }
+    ],
+    "actions": [{ "id": "C22-01", "item": "9A, O-2026-62 Dry Creek annexation", "outcome": "Unverified" }],
+    "agendaReconciliation": "Every C22 candidate is matched to the cached agenda; none is matched to verified minutes.",
+    "unresolvedGaps": [
+      "The Sept. 22 council recording was not reviewed through any chronological range.",
+      "No posted approved minutes were located."
+    ]
+  },
+  "agent1_leads": [
+    { "id": "L1", "tier": "A", "headline": "On-bill financing appears on the Sept. 22 agenda", "details": "Ordinance O-2026-63, first reading." },
+    { "id": "L2", "tier": "B", "headline": "Secondary report describes Dry Creek amendments", "details": "Tier B crosscheck only; not promoted to a finding." }
+  ],
+  "agent2_stories": [
+    {
+      "id": "S1",
+      "headline": "Council approves on-bill financing for efficiency upgrades",
+      "draft": "Longmont's city council gave final approval to an on-bill financing program that lets property owners repay the cost of efficiency work through the utility bill rather than in one payment. The ordinance covers insulation, air sealing, heat pumps, and the electrical work those upgrades require, and it applies to owners and, with the owner's consent, to renters.\n\nThe program's administrator is Longmont Power & Communications, which already bills most addresses in the city. Participants sign a repayment agreement that follows the meter: the balance transfers with the property if it is sold, and the city has said participation is voluntary and tied to a credit check. The council set the interest rate in the ordinance rather than leaving it to staff.\n\nStaff told the council the program responds to owners who want to cut energy use but cannot carry the full cost in one season. The council asked for a report after the first year covering how many projects were completed, in which neighborhoods, and how many applicants were turned down. The program begins after the ordinance is published; owners should wait for the city's own application page before signing anything with a contractor.",
+      "plainLanguage": "The city council approved a program that lets owners pay for insulation, heat pumps, and related electrical work a little at a time on their utility bill. It is voluntary, and the city says the debt follows the property if it is sold. The city has not published the application page yet.",
+      "claims": [
+        { "id": "S1-C1", "text": "On-bill financing for efficiency work was approved.", "status": "VERIFIED", "sourceIds": ["S1-A1"] },
+        { "id": "S1-C2", "text": "Repayment follows the meter on sale; participation is voluntary and credit-checked.", "status": "VERIFIED", "sourceIds": ["S1-A1"] },
+        { "id": "S1-C3", "text": "The interest rate and the effective date.", "status": "UNVERIFIED", "sourceIds": [], "note": "Confirm in the published ordinance text before publication." }
+      ],
+      "sourceList": [
+        { "id": "S1-A1", "title": "City of Longmont ordinance O-2026-63", "tier": "A", "url": "https://longmontcolorado.gov/agendas/ordinance-o-2026-63/", "locator": "Ordinance O-2026-63, final reading" },
+        { "id": "S1-A2", "title": "Sept. 22 council agenda packet", "tier": "A", "recordRef": "cached agenda copy, run 41", "locator": "Item 9B, first reading" }
+      ],
+      "reportingNotes": "The ordinance number and the effective date are the two facts an editor must confirm in the published text."
+    },
+    {
+      "id": "S3",
+      "headline": "Students to prepare free evening meals for Longmont seniors",
+      "draft": "Longmont's Senior Center plans to begin offering free take-home evening meals on Friday, Oct. 2, through a partnership with St. Vrain Valley Schools' ProStart and Culinary Arts program. Students at the district's Career Elevation and Technology Center will make chilled dinners designed with seniors' dietary needs in mind, according to the city's Sept. 24 announcement. The same school program will also provide meals for young people in city Children, Youth and Families programming.\n\nMeals will be available at 3 p.m. on select dates at the Senior Center, 910 Longs Peak Avenue. The city lists Fridays Oct. 2, 16 and 30; Nov. 13; and Dec. 11, plus Tuesdays Nov. 24 and Dec. 22. Residents can call Senior Services at 303-651-8411 for current details before making a trip.\n\nSenior Services Manager Ronnie Maynes says funding currently runs through the end of 2026 and the city is exploring ways to continue in 2027.",
+      "plainLanguage": "Beginning Oct. 2, the Longmont Senior Center says it will give out free evening meals for people to take home. Students in a St. Vrain Valley Schools culinary program will prepare the chilled dinners.",
+      "claims": [
+        { "id": "S3-C1", "text": "Free dinner partnership and student preparation.", "status": "VERIFIED", "sourceIds": ["S3-A1"] },
+        { "id": "S3-C2", "text": "The number of meals per date, eligibility, and registration.", "status": "UNVERIFIED", "sourceIds": [], "note": "Not given in the notice." },
+        { "id": "S3-C3", "text": "Whether the school district has confirmed the first pickup date.", "status": "CONTESTED", "sourceIds": ["S3-A1"], "note": "The city announcement is the only side this run read." }
+      ],
+      "sourceList": [
+        { "id": "S3-A1", "title": "City of Longmont meal announcement, Sept. 24", "tier": "A", "url": "https://longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/", "locator": "Program details" }
+      ],
+      "reportingNotes": "The gaps are the meal count and any eligibility rule; the city has not published either."
+    }
+  ],
+  "agent25_gate": [
+    {
+      "id": "S1",
+      "headline": "Council approves on-bill financing for efficiency upgrades",
+      "immediacy": 4,
+      "impact": 5,
+      "conflict": 2,
+      "novelty": 3,
+      "total": 14,
+      "decision": "ADVANCE",
+      "editorialTier": 1,
+      "editorRecommendation": "EDIT",
+      "whatCannotSay": "The interest rate and the effective date are unverified in this packet.",
+      "aiNextStep": "Confirm the ordinance number and the effective date against the published text.",
+      "reportingNotes": "A service story; keep the credit-check terms in the copy."
+    },
+    {
+      "id": "S3",
+      "headline": "Students to prepare free evening meals for Longmont seniors",
+      "immediacy": 4,
+      "impact": 3,
+      "conflict": 1,
+      "novelty": 3,
+      "total": 11,
+      "decision": "ADVANCE",
+      "editorialTier": 2,
+      "editorRecommendation": "MORE_REPORTING",
+      "whatCannotSay": "The number of meals available per date, any eligibility rule, and whether registration is required.",
+      "aiNextStep": "Ask Senior Services for the meal count, the eligibility rule, and whether the school district has confirmed Oct. 2.",
+      "reportingNotes": "Developing: the partnership is announced and the dates are published, and those three gaps remain."
+    }
+  ],
+  "agent3_blackDesk": [
+    {
+      "signalId": "BD1",
+      "source": "Tier B secondary report on the Sept. 22 council meeting",
+      "sourceTier": "B",
+      "confidence": 0.3,
+      "title": "The Dry Creek annexation may have been amended to shrink the bike-share condition",
+      "speculativeAngle": "The hypothesis is that the ordinance the council actually advanced is not the ordinance in the cached agenda, and that the difference sits in the bike-share and traffic-condition language rather than in the annexation itself. A change of that kind would be invisible to anyone reading the agenda alone, and it would matter to the residents on the affected streets, who were told at the first reading what the conditions were. This run could not confirm any part of it: the original PrimeGov packet timed out, the video captions came back empty, and no posted minutes were located, so the only account of an amendment is a Tier B secondary report that could not be checked against a record. Nothing here establishes that an amendment happened, what it said, or who moved it.",
+      "investigationQuestion": "Did the ordinance the council advanced on Sept. 22 differ from the ordinance in the cached agenda, and if so, what exactly changed between the two texts?",
+      "vulnerabilityTypes": ["single-source", "record-not-read"],
+      "vulnerabilityDetail": "The only account of the amendment is a secondary report; the primary record was not read at all.",
+      "agent4Target": "Compare the cached ordinance text with the posted minutes and the Oct. 6 second reading."
+    },
+    {
+      "signalId": "BD2",
+      "source": "Sept. 22 council agenda resolutions",
+      "sourceTier": "A",
+      "confidence": 0.2,
+      "title": "The police and fire union agreements may set a pay pattern the 2027 budget cannot hold",
+      "speculativeAngle": "The hypothesis is that the two 2027-28 union agreements, taken together, set a compensation pattern across the two largest departments that the 2027 proposed budget does not fund at the level the agreements imply, and that the gap would surface later as either a mid-year appropriation or a service reduction rather than as a tax question put to voters. It is a hypothesis and nothing more: this run has not read the agreements' salary schedules, has not matched them to a budget line, and does not know whether the council approved them, amended them, or continued them. The reason to write it down anyway is that the same council received a 2027 budget presentation the same evening, in the same meeting, and no account this run read connects the two.",
+      "investigationQuestion": "Do the police and fire agreements' salary schedules fit inside the 2027 proposed budget's public-safety line, or do they imply a gap?",
+      "vulnerabilityTypes": ["unread-document", "unconnected-records"],
+      "vulnerabilityDetail": "Neither the resolutions nor the budget document were read.",
+      "agent4Target": "Read both resolutions and match their schedules to the 2027 proposed budget."
+    }
+  ],
+  "agent4_adversarial": [
+    {
+      "id": "S1",
+      "headline": "Council approves on-bill financing for efficiency upgrades",
+      "gate1": "The ordinance text is the city's own document.",
+      "gate2": "The rate is stated in the ordinance.",
+      "gate3_counterNarrative": "A landlord could pass the charge to a tenant.",
+      "severity": "medium",
+      "verdict": "PASS WITH NOTE"
+    }
+  ],
+  "agent5_completeness": [
+    {
+      "id": "S1",
+      "headline": "Council approves on-bill financing for efficiency upgrades",
+      "attribution": "pass",
+      "balance": "pass",
+      "harm": "none identified",
+      "legalFlag": false,
+      "verdict": "PASS"
+    }
+  ],
+  "agent6_legal": [
+    { "id": "S1", "headline": "Council approves on-bill financing for efficiency upgrades", "riskLevel": "low", "analysis": "An ordinance and a program page.", "recommendation": "No change." }
+  ],
+  "agent7_plainLanguage": [
+    { "id": "S1", "headline": "Council approves on-bill financing for efficiency upgrades", "rewrite": "The city council approved a program that lets owners pay for insulation, heat pumps, and related electrical work a little at a time on their utility bill." }
+  ],
+  "agent75_distribution": [
+    {
+      "id": "S1",
+      "headline": "Council approves on-bill financing for efficiency upgrades",
+      "seo": "Longmont on-bill financing approved",
+      "twitter": "Longmont approves on-bill financing for efficiency work.",
+      "facebook": "Longmont approves on-bill financing for efficiency work.",
+      "linkedin": "Longmont approves on-bill financing for efficiency work.",
+      "nextdoor": "Longmont approves on-bill financing for efficiency work.",
+      "newsletter": "On-bill financing is approved.",
+      "emailSubjects": ["Longmont approves on-bill financing"]
+    }
+  ],
+  "agent8_hygiene": {
+    "sourceChecks": "Every sourceList entry resolves or is a record reference.",
+    "headlineAudit": "No headline states an outcome the claims do not support.",
+    "originalityCheck": "No text reused from a Tier B report."
+  },
+  "agent9_research": [],
+  "heldStories": [
+    { "storyId": "H1", "headline": "Growing Shade free trees", "source": "Boulder County announcement", "details": "200 trees on eligible east Longmont properties.", "scoring": "Tier 2", "reason": "Boundary complaints are signals only.", "elevate": "Compare the county's eligibility map and canopy method." },
+    { "storyId": "H2", "headline": "Election service and ballot explainer", "source": "City ballot page", "details": "Four Nov. 3 measures.", "scoring": "Tier 3", "reason": "No measure text read.", "elevate": "Compare full measure texts and the printed arguments." }
+  ],
+  "suppressionLedger": [],
+  "upcomingMeetings": ["2026-09-29 council study session"],
+  "trustDashboard": {
+    "runStatus": "PARTIAL",
+    "whatRemains": [
+      "The Sept. 22 council recording was not reviewed through any chronological range.",
+      "The P&Z staff packet for 206 S. Main was not read."
+    ]
+  }
+}

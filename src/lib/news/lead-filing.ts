@@ -30,6 +30,12 @@ export type ScanAiLead = {
   source_urls?: string[];
   evidence?: string;
   newsworthiness?: number;
+  /**
+   * True when `topic` is the desk's fallback rather than the section the model
+   * named (`parseScanResult`, ./schema.ts). Absent means the model chose the
+   * section, which is what every caller written before this flag meant.
+   */
+  topicUnchosen?: boolean;
 };
 
 /**
@@ -125,7 +131,7 @@ export async function fileScanLeads(
 
     const urls = JSON.stringify(candidateUrls);
     const inserted = await sql<{ id: number; status: string; headline: string }>`
-        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of)
+        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen)
         values (
           ${context.userId}, ${newsroomId}, ${runId}, ${lead.headline.slice(0, 180)},
           ${String(lead.why ?? "").slice(0, 800)},
@@ -134,7 +140,8 @@ export async function fileScanLeads(
           ${String(lead.evidence ?? "").slice(0, 2000)},
           ${Number(lead.newsworthiness) || 0},
           ${initialStatus},
-          ${possibleDuplicateOf}
+          ${possibleDuplicateOf},
+          ${lead.topicUnchosen === true}
         )
         returning id, status, headline
       `;

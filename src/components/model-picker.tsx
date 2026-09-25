@@ -6,6 +6,9 @@ import {
   localModelOptionLabel,
   isCustomModelChoice,
   modelChoiceHelp,
+  pickerOptionText,
+  pickerOptionTitle,
+  retiredModelChoiceNote,
   type DarkModelChoice,
   type ModelChoiceOption,
   type OpinionModelChoice,
@@ -184,8 +187,21 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
             {reachable.map((server) => (
               <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
                 {server.models.map((model) => (
-                  <option key={model.id} value={`${server.baseUrl} ${model.id}`}>
-                    {localModelOptionLabel(model)}
+                  /*
+                    The id alone: a catalog label is the model id plus up to
+                    four facts ("deepseek-v4.1-flash:cloud · Ollama Cloud ·
+                    1M context · thinking off · vision" measured 465px), which
+                    no select this wide can show -- and the id is the part an
+                    editor is choosing between. The facts stay in the title
+                    and, for the model actually selected, in the help line
+                    directly under this select.
+                  */
+                  <option
+                    key={model.id}
+                    value={`${server.baseUrl} ${model.id}`}
+                    title={localModelOptionLabel(model)}
+                  >
+                    {model.id}
                   </option>
                 ))}
               </optgroup>
@@ -242,7 +258,15 @@ export function ModelPicker(props: Props) {
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
     label: connection.name,
-    detail: connection.modelId ?? "Choose a model in Server settings",
+    /*
+      A connection with no model yet has nothing to say in a half-line: the
+      option already reads "— not set up" (isAvailable() is false without a
+      model), and the help line under the picker spells out what to do. The
+      old fallback detail said "Choose a model in Server settings", which
+      turned the option into 56 characters of text in a 260px box -- clipped
+      on a phone, and a duplicate of the sentence beside it.
+    */
+    detail: connection.modelId ?? "",
   }));
   const options = [
     ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
@@ -255,7 +279,24 @@ export function ModelPicker(props: Props) {
       detail: connections.isPending ? "Loading…" : "Unavailable — choose another model",
     });
   }
-  const selected = options.find((option) => option.value === props.value) ?? options[0];
+  /*
+    0.6.63 (Unit Y item 4): a stored choice this build retired normalises to
+    Automatic when it runs (`storyModelChoice`, src/lib/news/model-choice.ts),
+    so the control has to show Automatic too -- a `<select value>` left on an
+    id no option carries renders EMPTY, which reads as "no model chosen" --
+    and the help line has to say why, in the one sentence model-choice.ts
+    owns. A retired id is in no option list, so the only way it arrives here
+    is a row read straight out of the database (a newsroom, a `desk_jobs`
+    row, or a page-watch row from a build that still offered it); a menu that
+    offered it again would be the bug this is the fallback for.
+  */
+  const retiredNote = retiredModelChoiceNote(props.value);
+  const shownValue = retiredNote
+    ? options.some((option) => option.value === "auto")
+      ? "auto"
+      : options[0]?.value ?? "auto"
+    : props.value;
+  const selected = options.find((option) => option.value === shownValue) ?? options[0];
   const helpId = useId();
   const effortId = useId();
   const flagId = useId();
@@ -291,29 +332,31 @@ export function ModelPicker(props: Props) {
   const unavailable = options.filter(
     (option) => option.value !== "auto" && !isAvailable(option.value),
   );
-  const selectedUnavailable = !isAvailable(props.value);
+  const selectedUnavailable = !isAvailable(shownValue);
   // The one un-set-up option gets flagged even when it is not the current
   // selection, so an editor sees "not set up" before picking it rather than
   // after a failed draft.
   const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
-  const help = isCustomModelChoice(props.value)
-    ? selectedUnavailable
-      ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
-      : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
-    : selectedUnavailable
-      ? notSetUpHelp(selected)
-      : modelChoiceHelp(selected.value, props.scope ?? "story");
-  const customConnection = isCustomModelChoice(props.value)
-    ? connections.data?.find((row) => `custom:${row.id}` === props.value)
+  const help = retiredNote
+    ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
+    : isCustomModelChoice(shownValue)
+      ? selectedUnavailable
+        ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+        : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
+      : selectedUnavailable
+        ? notSetUpHelp(selected)
+        : modelChoiceHelp(selected.value, props.scope ?? "story");
+  const customConnection = isCustomModelChoice(shownValue)
+    ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
     : null;
-  const exactModel = props.value === "local-model"
+  const exactModel = shownValue === "local-model"
     ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
     : customConnection?.modelId ?? null;
-  const effortOptions = modelEffortsFor(props.value, exactModel);
+  const effortOptions = modelEffortsFor(shownValue, exactModel);
   const selectedEffort =
     props.effort && effortOptions.includes(props.effort)
       ? props.effort
-      : defaultModelEffort(props.value, exactModel);
+      : defaultModelEffort(shownValue, exactModel);
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
@@ -321,16 +364,27 @@ export function ModelPicker(props: Props) {
       </label>
       <select
         id={selectId}
-        value={props.value}
+        value={shownValue}
         disabled={props.disabled}
         aria-describedby={flagged ? `${helpId} ${flagId}` : helpId}
+        /*
+          The closed control shows the selected option's SHORT line (see
+          pickerOptionText), so the full sentence goes here as a title: a
+          select clips its own text and there is no CSS that can recover it.
+        */
+        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? " — not set up" : ""}` : undefined}
         onChange={(event) => props.onChange(event.target.value as never)}
       >
         {options.map((option) => {
           const available = isAvailable(option.value);
           return (
-            <option key={option.value} value={option.value} disabled={!available}>
-              {option.label} — {option.detail}
+            <option
+              key={option.value}
+              value={option.value}
+              disabled={!available}
+              title={`${pickerOptionTitle(option)}${available ? "" : " — not set up"}`}
+            >
+              {pickerOptionText(option)}
               {available ? "" : " — not set up"}
             </option>
           );

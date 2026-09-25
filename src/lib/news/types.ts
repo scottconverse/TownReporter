@@ -16,11 +16,20 @@ export type LeadRow = {
   headline: string;
   why: string;
   topic: string;
+  /** The scan filed this lead under a section the model never named, so the
+   * section shown is the desk's fallback rather than a decision. Set by
+   * `parseScanResult` (lib/news/schema.ts), cleared when an editor confirms a
+   * section on the draft (`performConfirmDraftTopic`, lib/news/desk.ts). */
+  topic_unchosen?: boolean;
   status: string;
   source_urls: string;
   evidence: string | null;
   newsworthiness: number | null;
   created_at: string;
+  /** How this lead entered the desk (migration 0091). "import" = read out of
+   * a report the editor pasted; null = not recorded, which includes every lead
+   * filed before 0091 and every scanner lead (those carry scan_run_id). */
+  origin?: string | null;
   article_slug?: string | null;
   investigation_id?: number | null;
   notes_json?: string | null;
@@ -55,6 +64,9 @@ export type DraftRow = {
   found_note?: string | null;
   unanswered?: string | null;
   research_json?: string | null;
+  /** Migration 0091. The reader-facing line the import review screen chose.
+   * Empty = the publish path falls back to the standard line. */
+  disclosure_text?: string | null;
 };
 
 export type ArticleRow = {
@@ -71,6 +83,9 @@ export type ArticleRow = {
   form?: string | null;
   found_note?: string | null;
   unanswered?: string | null;
+  /** Migration 0091. The disclosure line this article prints. Empty = the
+   * standard line from src/components/ai-disclosure.tsx. */
+  disclosure_text?: string | null;
   provenance?: import("./findings").ProvenanceItem[];
   findings?: import("./findings").StoryFinding[];
   corrections?: { date: string; body: string }[];

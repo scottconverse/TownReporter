@@ -100,6 +100,22 @@ describe("draft batch validation", () => {
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.runtime, runtime);
   });
+
+  /*
+    0.6.63 (Unit Y item 4). Grok is removed from every picker, so a stored
+    batch runtime of `grok-oauth` -- a `draft_batches` row from a build that
+    still offered it -- has to be refused here. The refusal is also the copy
+    the editor reads, so it must not name a model the batch dialog cannot
+    offer: a refusal that says "choose Grok" points at nothing.
+  */
+  it("refuses a stored SuperGrok batch runtime without naming Grok as a choice", () => {
+    const result = cleanDraftBatchInput({ items: [{ leadId: 1 }], runtime: "grok-oauth" });
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("a retired runtime must not be accepted");
+    assert.equal(result.code, "invalid-input");
+    assert.doesNotMatch(result.error, /grok/i);
+    assert.match(result.error, /Codex, Claude, Local, or saved Custom AI/);
+  });
 });
 
 describe("draft batch transaction and read", () => {

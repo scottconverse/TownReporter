@@ -114,12 +114,18 @@ describe("parseWriteStoryInput", () => {
     assert.equal(res.ok, true);
     if (!res.ok) return;
     assert.equal(res.value.topic, "schools");
+    assert.equal(res.value.topicUnchosen, false, "a text that names a beat is not un-chosen");
   });
 
-  it("defaults to council when nothing in the text points elsewhere", () => {
+  it("fills the column with council but says nobody chose it when the text names no beat", () => {
     const res = parseWriteStoryInput("Something happened downtown yesterday afternoon.");
     assert.equal(res.ok, true);
     if (!res.ok) return;
     assert.equal(res.value.topic, "council");
+    assert.equal(
+      res.value.topicUnchosen,
+      true,
+      "the text named no section, so the lead must carry the not-chosen mark",
+    );
   });
 });

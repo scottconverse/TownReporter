@@ -3,6 +3,21 @@ import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { parseCaptionFile, type ParsedCaptionFile } from "./caption-parse.ts";
 import { parseInfoSidecar, type ParsedInfoSidecar } from "./meeting-capture-info.ts";
+import { createServerOnlyFn } from "@tanstack/react-start";
+
+/*
+  The allow-listed python runner is a `.server` module, and this module is
+  reachable from the browser through the /desk/ops settings component, so a
+  plain `await import()` of the runner made the client build resolve a
+  server-only file -- a build error in 0.6.63, and the same shape of leak the
+  note at the top of meeting-manual-run.ts describes.
+
+  createServerOnlyFn marks the boundary: the client build prunes this body and
+  the runner is loaded on the server, where the capture actually runs.
+*/
+const loadMediaToolSpawner = createServerOnlyFn(
+  async () => (await import("./media-tool-process.server.ts")).spawnMediaTool,
+);
 
 export type CaptureControl = {
   /** N-5 Stop: aborting kills the in-flight yt-dlp child. */
@@ -239,12 +254,10 @@ async function runYtdlp(
   cwd: string,
   control: CaptureControl = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }> {
-  const { spawn } = await import("node:child_process");
+  const spawnMediaTool = await loadMediaToolSpawner();
   return await new Promise<{ code: number | null; stdout: string; stderr: string; stopped: boolean }>((resolvePromise, reject) => {
-    const child = spawn("python", argv, {
+    const child = spawnMediaTool(argv, {
       cwd,
-      shell: false,
-      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

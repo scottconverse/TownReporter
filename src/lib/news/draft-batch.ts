@@ -2,9 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
-import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-registry.ts";
+import { cleanOrRaw, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
 
-export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto">;
+export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 export type DraftBatchStoredRuntime =
   | DraftBatchRuntime
   | "local"
@@ -65,7 +66,12 @@ export function cleanDraftBatchInput(
     return {
       ok: false,
       code: "invalid-input",
-      error: "Choose one named Codex, Claude, Grok, Local, or saved Custom AI model for this batch.",
+      /*
+        0.6.63 (Unit Y item 4): Grok is gone from every picker, so a refusal
+        that names it as a thing to choose would be advertising a model the
+        batch dialog cannot offer.
+      */
+      error: "Choose one named Codex, Claude, Local, or saved Custom AI model for this batch.",
     };
   }
   if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 5) {
@@ -109,7 +115,10 @@ export function cleanDraftBatchInput(
 
 export const startDraftBatch = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((value: unknown) => value)
+  // `cleanDraftBatchInput` owns the answer here -- it names the refusal
+  // ("Choose between one and five leads.") -- so the boundary bounds and
+  // passes the value through rather than throwing over its head.
+  .validator((value: unknown) => cleanOrRaw(draftBatchStartInput)(value))
   .handler(async ({ data, context }) => {
     const input = cleanDraftBatchInput(data);
     if (!input.ok) return input;
@@ -137,7 +146,7 @@ export const startDraftBatch = createServerFn({ method: "POST" })
 
 export const getDraftBatch = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((value: unknown) => value)
+  .validator((value: unknown) => cleanOrRaw(draftBatchGetInput)(value))
   .handler(async ({ data, context }) => {
     const row =
       data && typeof data === "object" && !Array.isArray(data)

@@ -11,6 +11,7 @@ import {
   ForbiddenError,
   leaveAsEditor,
 } from "./membership";
+import { claimEmail, claimToken } from "./request-input.ts";
 
 export const deskClaimState = createServerFn({ method: "GET" }).handler(async () => {
   // tokenRequired stays in the shape, always false: the setup token is gone
@@ -26,7 +27,10 @@ export const myDesk = createServerFn({ method: "GET" })
 
 export const claimDesk = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((token: string) => String(token ?? ""))
+  // Bounded at the boundary, then answered as text: `String(7)` used to
+  // become a token lookup of "7"; now anything that is not a real token is ""
+  // and the caller gets the same "that link is not valid" it always gave.
+  .validator((token: unknown) => claimToken.parse(token))
   .handler(async ({ context }) => {
     try {
       const editor = await claimOwner(context.userId);
@@ -65,7 +69,7 @@ export const claimDesk = createServerFn({ method: "POST" })
  */
 export const leaveEditor = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((confirmEmail: unknown) => String(confirmEmail ?? ""))
+  .validator((confirmEmail: unknown) => claimEmail.parse(confirmEmail))
   .handler(async ({ context, data: confirmEmail }) => {
     try {
       const sql = await getSql();
@@ -97,7 +101,7 @@ export const leaveEditor = createServerFn({ method: "POST" })
 */
 export const inviteEditor = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((email: unknown) => String(email ?? ""))
+  .validator((email: unknown) => claimEmail.parse(email))
   .handler(async ({ context, data: email }) => {
     try {
       const token = await createInvite(context.userId, email);
@@ -110,12 +114,12 @@ export const inviteEditor = createServerFn({ method: "POST" })
 
 /** Anonymous: is this invite link live? Names only the invited address. */
 export const inviteState = createServerFn({ method: "GET" })
-  .validator((token: unknown) => String(token ?? ""))
+  .validator((token: unknown) => claimToken.parse(token))
   .handler(async ({ data: token }) => checkInvite(token));
 
 export const acceptEditorInvite = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((token: unknown) => String(token ?? ""))
+  .validator((token: unknown) => claimToken.parse(token))
   .handler(async ({ context, data: token }) => {
     try {
       const editor = await acceptInvite(context.userId, token);

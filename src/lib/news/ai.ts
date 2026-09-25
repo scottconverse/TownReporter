@@ -14,21 +14,36 @@ import {
   KIND_BUDGETS,
   automaticLadder,
   effectiveBudget,
+  isAutomaticRungId,
   plannerModelFor,
   openAiCompatibleModelEfforts,
   defaultModelEffort,
   providerEntry,
   providerModel,
   type ProviderBudget,
+  type ProviderEntry,
   type ProviderOverrides,
   type ModelEffort,
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
 import { normalizeProviderModelId } from "./provider-model-id.ts";
+import type { LocalCatalog } from "./local-models.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
-  { ok: true; label: string; choice: EffectiveProviderChoice; localModel?: LocalModelOverride } | { ok: false; error: string };
+  | {
+      ok: true;
+      label: string;
+      choice: EffectiveProviderChoice;
+      localModel?: LocalModelOverride;
+      /**
+       * Rungs Automatic passed over before the one that answered, in the words
+       * the job's receipt shows ("Qwen 3.6 35B skipped: not loaded"). Absent
+       * when nothing was skipped, which is the ordinary case.
+       */
+      skippedRungs?: string[];
+    }
+  | { ok: false; error: string; skippedRungs?: string[] };
 
 /*
   What the desk says when no provider can answer. This used to be the v1-v4
@@ -118,6 +133,13 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
   }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
+  /**
+   * Test-only seam for the local-models catalog. Automatic asks it whether a
+   * rung that must already be loaded actually is (see `skippedRungReason`),
+   * and the real answer comes from probing this machine's local ports -- which
+   * a test must not do.
+   */
+  resolveLocalCatalog?: () => Promise<LocalCatalog>;
 };
 
 function trimSlash(url: string): string {
@@ -179,6 +201,37 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
     baseUrl: trimSlash(customBase),
     model: customModel || "gpt-4o-mini",
     label: "LLM",
+  };
+}
+
+/**
+ * One rung of the Automatic ladder's own endpoint.
+ *
+ * A rung is a model with a FIXED home -- DeepSeek v4.1 Flash on the Ollama
+ * server, Qwen 3.6 35B on LM Studio's OpenAI-compatible port. Both are local,
+ * and `localGateway()` above can only describe ONE of them: with no resolved
+ * override it reads `LLM_BASE_URL`, so a second rung would be sent to the first
+ * rung's server (0.6.63, Unit Y item 1: "use the existing local/custom-connection
+ * machinery so two local endpoints can coexist"). The registry entry carries its
+ * base URL, model and env overrides, so this reads them and NEVER falls back to
+ * `LLM_BASE_URL` -- a rung with no endpoint is not a rung, it is a misconfigured
+ * install, and returns null so the ladder moves on rather than silently talking
+ * to whatever the operator last pointed `LLM_BASE_URL` at.
+ *
+ * Only for entries with a `ladderRank`; everything else keeps the gateway it has
+ * always had.
+ */
+function rungGateway(entry: ProviderEntry): LlmConfig | null {
+  const overrideBase = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
+  const baseUrl = overrideBase || entry.baseUrl;
+  if (!baseUrl) return null;
+  const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
+  const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
+  return {
+    apiKey: apiKey || "not-needed",
+    baseUrl: trimSlash(baseUrl),
+    model: providerModel(entry),
+    label: entry.label,
   };
 }
 
@@ -301,7 +354,11 @@ function explicitProvider(
   }
 
   if (entry.kind === "local") {
-    const llm = localGateway(localOverride);
+    // A rung carries its own endpoint (see `rungGateway`); the "Local model"
+    // entry keeps the resolved-override-or-LLM_BASE_URL behaviour it has always
+    // had. The two coexist because the rung never reads LLM_BASE_URL.
+    const llm =
+      entry.ladderRank === undefined ? localGateway(localOverride) : rungGateway(entry);
     return llm ? { kind: "openai", ...llm } : null;
   }
 
@@ -517,10 +574,48 @@ async function probeAnthropic(
  */
 export const AUTOMATIC_LADDER = automaticLadder();
 
+/**
+ * Why Automatic must pass over a rung BEFORE trying it, or null to try it.
+ *
+ * A rung whose model has to be ALREADY loaded (see `requiresLoadedLocalModel`)
+ * cannot be checked the ordinary way. LM Studio answers `/v1/models` with every
+ * model it has on disk, loaded or not, and paging a 35B into memory takes
+ * minutes -- so "the endpoint replied" would pin a draft to a model that is
+ * still coming off the disk while the editor watches a job that looks stuck.
+ * The desk never loads or unloads a model on the paper's behalf (owner rule:
+ * Qwen is used "if it is loaded"), so it skips the rung and records why.
+ *
+ * Only rungs that carry the requirement are checked here; every other rung is
+ * checked the ordinary way, by asking its endpoint to answer.
+ */
+async function skippedRungReason(
+  entry: ProviderEntry,
+  readCatalog?: () => Promise<LocalCatalog>,
+): Promise<string | null> {
+  if (!entry.requiresLoadedLocalModel) return null;
+  const gateway = rungGateway(entry);
+  if (!gateway) return null; // No endpoint named for it: the probe reports that.
+  const catalog = readCatalog
+    ? await readCatalog()
+    : await (await import("./local-models.ts")).discoverLocalModels();
+  const server = catalog.servers.find(
+    (s) => trimSlash(s.baseUrl) === gateway.baseUrl && s.reachable,
+  );
+  if (!server) return "its server did not answer";
+  const model = server.models.find((m) => m.id === gateway.model);
+  if (!model || model.loaded === false) return "not loaded";
+  // A server that does not report load state cannot answer the question, and
+  // the rule is that Qwen is used only when it IS loaded -- so unknown skips.
+  return model.loaded === true ? null : "load state unknown";
+}
+
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
-  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveXaiOauth">,
+  adapters?: Pick<
+    GrokChatAdapters,
+    "resolveCustom" | "resolveLocal" | "resolveXaiOauth" | "resolveLocalCatalog"
+  >,
   scope?: "story" | "scan" | "opinion" | "dark" | "forced",
   exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
@@ -550,6 +645,28 @@ export async function probeProvider(
       };
     }
   }
+  /*
+    0.6.63 (Unit Y item 2), at the rung itself.
+
+    A rung is probed by name in three places: Automatic's own loop below, the
+    mid-run hop in automatic-failover.ts, and Dark Desk's preflight. The rule
+    "a model that has to be loaded is used only when it IS loaded" is one rule,
+    so it is answered where the rung is probed rather than re-implemented by
+    each caller. A skipped rung is a refusal with a reason attached: the
+    callers pass the reason on to the receipt and move to the next rung, so
+    the editor reads which model actually wrote the draft and what was passed
+    over on the way.
+  */
+  if (typeof choice === "string" && isAutomaticRungId(choice)) {
+    const entry = providerEntry(choice);
+    const skipped = entry
+      ? await skippedRungReason(entry, adapters?.resolveLocalCatalog)
+      : null;
+    if (entry && skipped) {
+      const note = `${entry.label} skipped: ${skipped}`;
+      return { ok: false, error: `${note}.`, skippedRungs: [note] };
+    }
+  }
   if (choice === "auto") {
     const configured = customGateway();
     if (configured) {
@@ -568,14 +685,27 @@ export async function probeProvider(
       2026-09-02: Zen and Local Qwen removed from the picker entirely ("it's
       not working it seems" -- Claude/Codex only for now). The ladder is just
       Claude, then Codex.
+
+      0.6.63 (Unit Y item 1): DeepSeek v4.1 Flash, then Qwen on this computer,
+      then Codex Terra. The skip of a rung that has to be already loaded is NOT
+      written here: it lives at the rung, in the `isAutomaticRungId` branch
+      above, so the mid-run hop (automatic-failover.ts) and Dark Desk's own
+      preflight get the same rule instead of each re-implementing it.
     */
     const failures: string[] = [];
+    const skippedRungs: string[] = [];
     for (const rung of AUTOMATIC_LADDER) {
-      const result = await probeProvider(rung);
-      if (result.ok) return result;
-      failures.push(result.error);
+      const result = await probeProvider(rung, newsroomId, adapters);
+      if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
+      if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+      else failures.push(result.error);
     }
-    return { ok: false, error: `No model in the Automatic ladder is ready. ${failures.join(" ")}` };
+    const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
+    return {
+      ok: false,
+      error: `No model in the Automatic ladder is ready. ${failures.join(" ")}${skippedNote}`,
+      ...(skippedRungs.length ? { skippedRungs } : {}),
+    };
   }
   let provider = resolveProvider(choice);
   let localOverride: LocalModelOverride | null = null;
@@ -1132,6 +1262,58 @@ export function plannerModel(choice?: EffectiveProviderChoice | string): string 
   return "";
 }
 
+/**
+ * Insert the commas a model forgot, WITHOUT touching string contents.
+ *
+ * The 2026-09-24 research bake-off (`oversight/design/
+ * research-bakeoff-results-2026-09-24.md`) recorded DeepSeek returning JSON
+ * with one missing comma. Every JSON-shaped reply in the desk already goes
+ * through `parseJsonBlock`, so one repair here covers story drafting, scan,
+ * Dark Desk and the meeting paths at once -- the alternative was a second
+ * tolerant parser per call site, which is how the two parsers in
+ * `research-actions.ts` and `meeting-evidence-retrieval.ts` came to exist.
+ *
+ * String-aware on purpose: a draft body is a JSON string that may contain
+ * `{`, `[`, digits and prose, and a regex that inserts commas on "value then
+ * value" would silently rewrite the sentence the editor is about to publish.
+ * The walk therefore tracks whether it is inside a string (and whether the
+ * last character was a backslash escape) and only ever inserts BETWEEN two
+ * values that are both outside strings.
+ *
+ * Called only after a strict `JSON.parse` has already failed, so a reply that
+ * is valid JSON is never rewritten.
+ */
+function repairMissingCommas(slice: string): string {
+  const ENDS_VALUE = /["}\]0-9a-z]/;
+  const STARTS_VALUE = /["{[\-0-9a-z]/;
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let lastSignificant = "";
+  for (const ch of slice) {
+    if (!inString) {
+      const significant = ch.trim() !== "";
+      const betweenValues =
+        significant &&
+        lastSignificant !== "" &&
+        ENDS_VALUE.test(lastSignificant) &&
+        STARTS_VALUE.test(ch) &&
+        !/[,:}\]]/.test(ch);
+      if (betweenValues) out += ",";
+      if (significant) lastSignificant = ch;
+    }
+    out += ch;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+    }
+  }
+  return out;
+}
+
 export function parseJsonBlock<T>(raw: string): T | null {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = (fenced?.[1] ?? raw).trim();
@@ -1148,8 +1330,69 @@ export function parseJsonBlock<T>(raw: string): T | null {
   try {
     return JSON.parse(slice) as T;
   } catch {
-    return null;
+    try {
+      return JSON.parse(repairMissingCommas(slice)) as T;
+    } catch {
+      return null;
+    }
   }
+}
+
+/**
+ * The sentence a run reports when a model's reply cannot be read at all.
+ *
+ * One wording, built here, so the classifier in ./automatic-failover.ts can
+ * recognise it and move the unfinished call to the next rung. The word
+ * "unreadable" is the token that classifier matches; keep the two together.
+ */
+export function unreadableReplyError(label?: string): string {
+  const who = label ? `${label} ` : "The model ";
+  return `${who}sent a reply the desk could not read (unreadable JSON).`;
+}
+
+/**
+ * One JSON-shaped model call, retried ONCE on the same provider.
+ *
+ * Item 3 of 0.6.63's Unit Y: a malformed reply retries once on the same rung,
+ * then falls to the next. `parseJsonBlock` above repairs what it can, but a
+ * reply that is not JSON at all is still unreadable, and every path that ends
+ * a run used to stop there -- "Draft came back unreadable. Try again." matched
+ * no failover classifier, so Automatic died on a stutter instead of moving on.
+ *
+ * The retry is on the SAME provider on purpose: a truncated or mis-commaed
+ * stream usually comes back whole on a second ask, and the caller's own
+ * failover seam (./automatic-failover.ts) owns the hop to the next rung. The
+ * failure it returns carries `unreadableReplyError`'s wording so that seam
+ * recognises it.
+ *
+ * `attempt` is the caller's own transport (`chat`, `grokChat`, `runChat`),
+ * and `read` is the caller's own parser, so this stays hermetic: the two
+ * functions are injected, and no model is called here.
+ */
+export async function readableReplyOrRetry<T>(input: {
+  attempt: () => Promise<GrokOk | GrokErr>;
+  read: (text: string) => T | null;
+  label?: string;
+}): Promise<
+  | { ok: true; value: T; text: string; meta?: ChatResultMetadata; retried: boolean }
+  | { ok: false; error: string; meta?: ChatResultMetadata; retried: boolean }
+> {
+  const first = await input.attempt();
+  if (!first.ok) return { ok: false, error: first.error, meta: first.meta, retried: false };
+  const value = input.read(first.text);
+  if (value !== null) return { ok: true, value, text: first.text, meta: first.meta, retried: false };
+
+  const second = await input.attempt();
+  if (!second.ok) return { ok: false, error: second.error, meta: second.meta, retried: true };
+  const recovered = input.read(second.text);
+  if (recovered !== null)
+    return { ok: true, value: recovered, text: second.text, meta: second.meta, retried: true };
+  return {
+    ok: false,
+    error: unreadableReplyError(input.label),
+    meta: second.meta,
+    retried: true,
+  };
 }
 
 /*

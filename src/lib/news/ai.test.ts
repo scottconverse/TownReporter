@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import {
   plannerModel,
   GROK_UNAVAILABLE,
@@ -7,6 +8,8 @@ import {
   isGrokAvailable,
   parseJsonBlock,
   probeProvider,
+  readableReplyOrRetry,
+  unreadableReplyError,
   providerBudget,
   resolveAnthropic,
   resolveLlm,
@@ -31,6 +34,21 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     "TOWNREPORTER_CODEX",
     "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
+    // The two Automatic rungs added in 0.6.63 (Unit Y item 1). A rung's
+    // enabledness reads its own off switch and its own endpoint, so a test
+    // that means to control the ladder has to own both -- and clearing them
+    // is also what keeps an ambient shell value out of every other test here.
+    "TOWNREPORTER_DEEPSEEK",
+    "TOWNREPORTER_QWEN",
+    "TOWNREPORTER_DEEPSEEK_BASE_URL",
+    "TOWNREPORTER_QWEN_BASE_URL",
+    "TOWNREPORTER_DEEPSEEK_MODEL",
+    "TOWNREPORTER_QWEN_MODEL",
+    // The ladder's last rung is Codex, so a test that reaches it must point at
+    // the fake CLI (scripts/fakes/fake-codex-cli.mjs, which never calls a
+    // model) rather than at whatever `codex` this machine has.
+    "CODEX_CLI_PATH",
+    "FAKE_CODEX_SIGNED_IN",
   ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
@@ -66,6 +84,21 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
     "TOWNREPORTER_CODEX",
     "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
+    // The two Automatic rungs added in 0.6.63 (Unit Y item 1). A rung's
+    // enabledness reads its own off switch and its own endpoint, so a test
+    // that means to control the ladder has to own both -- and clearing them
+    // is also what keeps an ambient shell value out of every other test here.
+    "TOWNREPORTER_DEEPSEEK",
+    "TOWNREPORTER_QWEN",
+    "TOWNREPORTER_DEEPSEEK_BASE_URL",
+    "TOWNREPORTER_QWEN_BASE_URL",
+    "TOWNREPORTER_DEEPSEEK_MODEL",
+    "TOWNREPORTER_QWEN_MODEL",
+    // The ladder's last rung is Codex, so a test that reaches it must point at
+    // the fake CLI (scripts/fakes/fake-codex-cli.mjs, which never calls a
+    // model) rather than at whatever `codex` this machine has.
+    "CODEX_CLI_PATH",
+    "FAKE_CODEX_SIGNED_IN",
   ];
   for (const k of keys) prev[k] = process.env[k];
   for (const k of keys) delete process.env[k];
@@ -84,6 +117,16 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
 
 /** No keys AND no local CLI — the genuinely unconfigured desk. */
 const BARE = { TOWNREPORTER_CLAUDE_CODE: "0" };
+
+/**
+ * The Codex rung's own stand-in. `probeCodex` runs `codex login status` and
+ * nothing else, so pointing this at the fake is the difference between "the
+ * ladder reached Codex Terra" and "this test started a real agent CLI on the
+ * machine". Absolute, because the probe spawns with `cwd: tmpdir()`.
+ */
+const FAKE_CODEX = fileURLToPath(
+  new URL("../../../scripts/fakes/fake-codex-cli.mjs", import.meta.url),
+);
 
 describe("isGrokAvailable", () => {
   it("is false with no key and the local CLI ruled out", () => {
@@ -1030,31 +1073,159 @@ describe("model-picker provider readiness", () => {
     });
   });
 
-  it("Automatic falls through to Claude Sonnet when Codex is switched off", async () => {
-        const originalFetch = globalThis.fetch;
-    const urls: string[] = [];
-    globalThis.fetch = async (input) => {
-      urls.push(String(input));
-      return new Response(JSON.stringify({}), { status: 200 });
+  /*
+    Unit Y item 2: a rung that must already be loaded is passed over BEFORE it
+    is probed, and the job's receipt records why.
+
+    Before this, the ladder asked the Qwen endpoint "did you answer?" -- and
+    LM Studio answers that with every model it has on DISK, loaded or not. The
+    probe would therefore pin a draft to a 35B that then has to be paged into
+    memory while the editor watches a job that looks stuck. The desk never
+    loads a model (owner rule: "if it is loaded"), so the rung is skipped and
+    the ladder moves to Codex Terra.
+  */
+  it("skips a rung whose local model is not loaded and runs the next one instead", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetched = 0;
+    globalThis.fetch = async () => {
+      fetched += 1;
+      throw new TypeError("connection refused");
     };
     try {
-      await withEnvAsync({ ANTHROPIC_API_KEY: "sk-ant-test", TOWNREPORTER_CODEX: "0" }, async () => {
-        const result = await probeProvider("auto");
-        assert.equal(result.ok, true);
-        if (result.ok) assert.equal(result.choice, "claude-sonnet");
-      });
-      // Codex was skipped by its off switch, so the first network probe is the
-      // lower-cost Claude fallback.
-      assert.deepEqual(urls, ["https://api.anthropic.com/v1/models?limit=1"]);
+      await withEnvAsync(
+        {
+          ...BARE,
+          // Rung 1 out of the way by its own off switch, so rung 2 is the one
+          // under test; rung 3 is Codex, reached through the fake CLI.
+          TOWNREPORTER_DEEPSEEK: "0",
+          TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+          CODEX_CLI_PATH: FAKE_CODEX,
+          FAKE_CODEX_SIGNED_IN: "1",
+        },
+        async () => {
+          const result = await probeProvider("auto", undefined, {
+            resolveLocalCatalog: async () => ({
+              servers: [
+                {
+                  kind: "lmstudio",
+                  baseUrl: "http://127.0.0.1:1234/v1",
+                  reachable: true,
+                  models: [
+                    {
+                      id: "halo/qwen3.6-35b-a3b",
+                      label: "Qwen 3.6 35B",
+                      loaded: false,
+                      // LM Studio reports a text model as `chat`; "lmstudio"
+                      // is the SERVER kind and is not a `LocalModelKind`.
+                      kind: "chat",
+                      thinking: false,
+                      vision: false,
+                      cloud: false,
+                      // A real LM Studio entry carries its context window;
+                      // `LocalModelEntry` requires the field, absent or not.
+                      contextLength: null,
+                    },
+                  ],
+                },
+              ],
+              defaultModel: null,
+              checkedAt: Date.now(),
+            }),
+          });
+          assert.equal(result.ok, true);
+          if (result.ok) {
+            assert.equal(result.choice, "codex-balanced");
+            assert.equal(result.label, "Codex Terra");
+            assert.deepEqual(result.skippedRungs, ["Qwen 3.6 35B skipped: not loaded"]);
+          }
+        },
+      );
+      // The skipped rung was never asked anything: not its catalog, and not
+      // its endpoint. A probe of the Qwen rung is what used to pin the draft.
+      assert.equal(fetched, 0);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
+  it("keeps saying which rungs Automatic passed over when the ladder runs out", async () => {
+    await withEnvAsync(
+      {
+        ...BARE,
+        TOWNREPORTER_DEEPSEEK: "0",
+        TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        TOWNREPORTER_CODEX: "0",
+      },
+      async () => {
+        const result = await probeProvider("auto", undefined, {
+          resolveLocalCatalog: async () => ({
+            servers: [
+              {
+                kind: "lmstudio",
+                baseUrl: "http://127.0.0.1:1234/v1",
+                reachable: true,
+                models: [
+                  {
+                    id: "halo/qwen3.6-35b-a3b",
+                    label: "Qwen 3.6 35B",
+                    // A server that cannot say whether it is loaded cannot
+                    // answer the question, and the rule is "only when it IS
+                    // loaded" -- so unknown skips too.
+                    loaded: null,
+                    kind: "chat",
+                    thinking: false,
+                    vision: false,
+                    cloud: false,
+                    contextLength: null,
+                  },
+                ],
+              },
+            ],
+            defaultModel: null,
+            checkedAt: Date.now(),
+          }),
+        });
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.match(result.error, /No model in the Automatic ladder is ready/);
+          assert.match(result.error, /Qwen 3.6 35B skipped: load state unknown/);
+          assert.deepEqual(result.skippedRungs, ["Qwen 3.6 35B skipped: load state unknown"]);
+        }
+      },
+    );
+  });
+
+  it("skips a rung whose own server is not answering at all", async () => {
+    await withEnvAsync(
+      {
+        ...BARE,
+        TOWNREPORTER_DEEPSEEK: "0",
+        TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        TOWNREPORTER_CODEX: "0",
+      },
+      async () => {
+        const result = await probeProvider("auto", undefined, {
+          // The catalog was read, and it holds no server at that address.
+          resolveLocalCatalog: async () => ({
+            servers: [],
+            defaultModel: null,
+            checkedAt: Date.now(),
+          }),
+        });
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.deepEqual(result.skippedRungs, [
+            "Qwen 3.6 35B skipped: its server did not answer",
+          ]);
+        }
+      },
+    );
+  });
+
   it("Automatic reports failure once the operator's own providers are all out", async () => {
-    // Claude off (BARE) and Codex off: nothing is left in the ladder. Zen and
-    // Local Qwen were removed from Automatic 2026-09-02 ("Claude/Codex only
-    // for now"), so there is no free-cloud rung left to fall through to.
+    // Claude off (BARE) and Codex off, and neither local rung has an endpoint
+    // named for it (Unit Y's rungs are enabled by their own base URL or by a
+    // discovery probe, and a test process has neither): nothing is left.
     await withEnvAsync({ ...BARE, TOWNREPORTER_CODEX: "0" }, async () => {
       const result = await probeProvider("auto");
       assert.equal(result.ok, false);
@@ -1086,6 +1257,139 @@ describe("parseJsonBlock", () => {
   it("parses a fenced object", () => {
     const raw = '```json\n{"headline":"Hi"}\n```';
     assert.deepEqual(parseJsonBlock<{ headline: string }>(raw), { headline: "Hi" });
+  });
+
+  /**
+   * The bake-off (2026-09-24) recorded DeepSeek emitting JSON with one missing
+   * comma. Unit Y item 3 asks for that reply to be usable, and the repair has
+   * to be string-aware: a draft body is a JSON string that may itself contain
+   * braces, digits and prose, and a repair that inserts commas there would
+   * rewrite the sentence on its way to publication.
+   */
+  it("repairs a missing comma between two values", () => {
+    assert.deepEqual(parseJsonBlock<{ headline: string; dek: string }>('{"headline":"Hi" "dek":"There"}'), {
+      headline: "Hi",
+      dek: "There",
+    });
+    assert.deepEqual(parseJsonBlock<number[]>("[1 2 3]"), [1, 2, 3]);
+    assert.deepEqual(
+      parseJsonBlock<{ claims: unknown[]; form: string }>('{"claims":[] "form":"news"}'),
+      { claims: [], form: "news" },
+    );
+  });
+
+  it("never inserts a comma inside a string, and leaves valid JSON alone", () => {
+    const body = '{"body":"The council met 4 2 and left {a b} 1 2"}';
+    assert.deepEqual(parseJsonBlock<{ body: string }>(body), {
+      body: "The council met 4 2 and left {a b} 1 2",
+    });
+    // A missing comma INSIDE the prose is still only repaired if a strict
+    // parse failed -- and here it must be, because the value is a string.
+    const broken = '{"headline":"Hi" "body":"He said \\"no\\" 1 2 {x}"}';
+    assert.deepEqual(parseJsonBlock<{ headline: string; body: string }>(broken), {
+      headline: "Hi",
+      body: 'He said "no" 1 2 {x}',
+    });
+  });
+
+  it("still returns null for a reply that is not JSON at all", () => {
+    assert.equal(parseJsonBlock("I could not write that draft."), null);
+    assert.equal(parseJsonBlock('{"headline": '), null);
+  });
+});
+
+/**
+ * Unit Y item 3's first half: a malformed reply retries ONCE on the same
+ * provider, and the failure it finally reports is the wording the failover
+ * classifier reads ("unreadable" -- see automatic-failover.ts).
+ */
+describe("readableReplyOrRetry", () => {
+  const readObject = (text: string) => parseJsonBlock<{ headline: string }>(text);
+
+  it("uses the first reply when it is readable, without a second call", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return { ok: true as const, text: '{"headline":"Hi"}' };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 1);
+    assert.equal(reply.ok, true);
+    assert.deepEqual(reply.ok && reply.value, { headline: "Hi" });
+    assert.equal(reply.retried, false);
+  });
+
+  it("retries the same provider once when the first reply cannot be read", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return calls === 1
+          ? { ok: true as const, text: '{"headline":"Hi" "dek"' }
+          : { ok: true as const, text: '{"headline":"Hi","dek":"There"}' };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 2);
+    assert.equal(reply.ok, true);
+    assert.deepEqual(reply.ok && reply.value, { headline: "Hi", dek: "There" });
+    assert.equal(reply.retried, true);
+  });
+
+  it("reports unreadable after two replies the reader cannot use, in the classifier's words", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return { ok: true as const, text: "I could not write that draft." };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 2);
+    assert.equal(reply.ok, false);
+    assert.equal(reply.retried, true);
+    assert.equal(
+      reply.ok === false && reply.error,
+      "DeepSeek v4.1 Flash sent a reply the desk could not read (unreadable JSON).",
+    );
+    assert.equal(unreadableReplyError("DeepSeek v4.1 Flash"), reply.ok === false && reply.error);
+  });
+
+  it("passes a transport failure straight through without retrying it", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return { ok: false as const, error: "DeepSeek v4.1 Flash request timed out" };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 1);
+    assert.equal(reply.ok, false);
+    assert.equal(reply.retried, false);
+    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash request timed out");
+  });
+
+  it("keeps the second attempt's own transport error rather than inventing one", async () => {
+    let calls = 0;
+    const reply = await readableReplyOrRetry({
+      attempt: async () => {
+        calls += 1;
+        return calls === 1
+          ? { ok: true as const, text: "not json" }
+          : { ok: false as const, error: "DeepSeek v4.1 Flash was unavailable" };
+      },
+      read: readObject,
+      label: "DeepSeek v4.1 Flash",
+    });
+    assert.equal(calls, 2);
+    assert.equal(reply.ok === false && reply.error, "DeepSeek v4.1 Flash was unavailable");
   });
 });
 

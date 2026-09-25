@@ -7,6 +7,8 @@ import {
   terminalPlannerStartupFailure,
 } from "./dark.ts";
 import type { DeskJob } from "./jobs.ts";
+import type { EffectiveProviderChoice, ProviderProbe } from "./ai.ts";
+import { modelChoiceLabel } from "./model-choice.ts";
 
 /**
  * `performDarkRound`'s failover block had no regression test, old or new
@@ -21,7 +23,39 @@ const LIVE_401 =
 const LIVE_TIMEOUT_NO_OUTPUT = "Claude Code request timed out after 150s, 0 bytes out";
 const CODEX_AUTH_FAILURE =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
-const CODEX_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
+/*
+  The same two failures in the first rung's own words (0.6.63, Unit Y item 1).
+  `probeOpenAi`'s credential refusal and the transport's zero-output timeout are
+  what DeepSeek actually reports, and only rung 1 has a rung after it now.
+*/
+const DEEPSEEK_AUTH_FAILURE =
+  "DeepSeek v4.1 Flash rejected its credentials. Sign in or update its key.";
+const DEEPSEEK_TIMEOUT_NO_OUTPUT = "DeepSeek request timed out after 150s, 0 bytes out";
+
+/**
+ * A ready probe for whichever rung it is handed, naming that rung.
+ *
+ * These tests are about the ORDER a hop walks, so the fake answers about the
+ * rung it was actually asked for instead of returning one hardcoded provider:
+ * a constant label and the ladder's own next rung disagreed the moment the
+ * ladder changed under them (Unit Y item 1), and a test that reads as "the
+ * switch was worded for the provider that answered" must not be able to pass
+ * while naming a different one. `seen` records the rungs probed, so a test can
+ * also assert that the hop stopped at the first ready rung.
+ */
+function readyProbe(
+  seen: string[] = [],
+): (choice?: EffectiveProviderChoice | string) => Promise<ProviderProbe> {
+  return async (choice) => {
+    const rung = choice ?? "";
+    seen.push(rung);
+    return {
+      ok: true,
+      label: modelChoiceLabel(rung),
+      choice: rung as EffectiveProviderChoice,
+    };
+  };
+}
 
 function job(overrides: Partial<DeskJob> = {}): DeskJob {
   return {
@@ -49,103 +83,118 @@ describe("planDarkRoundFailover", () => {
   it("fails over on an auth-lapse error: picks the next rung and words the switch as 'sign-in lapsed'", async () => {
     const modelChoiceCalls: [number, string][] = [];
     const stageMessages: string[] = [];
+    const probed: string[] = [];
 
-    const result = await planDarkRoundFailover(job(), CODEX_AUTH_FAILURE, {
-      probe: async (choice) => ({
-        ok: true,
-        label: "Claude Sonnet",
-        choice: choice as "claude-sonnet",
-      }),
-      setModelChoice: async (id, choice) => {
-        modelChoiceCalls.push([id, choice]);
+    /*
+      The job sits on rung 1, which is the first rung a hop can leave now that
+      Codex Terra is the LAST rung (0.6.63, Unit Y item 1). Before the ladder
+      changed this fixture was Terra, whose next rung was Claude Sonnet.
+    */
+    const result = await planDarkRoundFailover(
+      job({ model_choice: "deepseek-flash" }),
+      DEEPSEEK_AUTH_FAILURE,
+      {
+        probe: readyProbe(probed),
+        setModelChoice: async (id, choice) => {
+          modelChoiceCalls.push([id, choice]);
+        },
+        setStage: async (_id, stage) => {
+          stageMessages.push(stage);
+        },
       },
-      setStage: async (_id, stage) => {
-        stageMessages.push(stage);
-      },
-    });
+    );
 
     assert.deepEqual(result, {
-      next: "claude-sonnet",
-      label: "Claude Sonnet",
-      switchedBecause: "Codex Terra sign-in lapsed",
+      next: "qwen-local",
+      label: "Qwen 3.6 35B",
+      switchedBecause: "DeepSeek v4.1 Flash sign-in lapsed",
     });
-    assert.deepEqual(modelChoiceCalls, [[99, "claude-sonnet"]]);
-    assert.deepEqual(stageMessages, ["Switched to Claude Sonnet: Codex Terra sign-in lapsed"]);
+    assert.deepEqual(probed, ["qwen-local"], "a hop stops at the first ready rung");
+    assert.deepEqual(modelChoiceCalls, [[99, "qwen-local"]]);
+    assert.deepEqual(stageMessages, [
+      "Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash sign-in lapsed",
+    ]);
   });
 
   it("fails over on a timeout / zero-output error: picks the next rung and words the switch as 'timed out'", async () => {
     const modelChoiceCalls: [number, string][] = [];
     const stageMessages: string[] = [];
+    const probed: string[] = [];
 
-    const result = await planDarkRoundFailover(job(), CODEX_TIMEOUT_NO_OUTPUT, {
-      probe: async (choice) => ({
-        ok: true,
-        label: "Claude Sonnet",
-        choice: choice as "claude-sonnet",
-      }),
-      setModelChoice: async (id, choice) => {
-        modelChoiceCalls.push([id, choice]);
+    const result = await planDarkRoundFailover(
+      job({ model_choice: "deepseek-flash" }),
+      DEEPSEEK_TIMEOUT_NO_OUTPUT,
+      {
+        probe: readyProbe(probed),
+        setModelChoice: async (id, choice) => {
+          modelChoiceCalls.push([id, choice]);
+        },
+        setStage: async (_id, stage) => {
+          stageMessages.push(stage);
+        },
       },
-      setStage: async (_id, stage) => {
-        stageMessages.push(stage);
-      },
-    });
+    );
 
     assert.deepEqual(result, {
-      next: "claude-sonnet",
-      label: "Claude Sonnet",
-      switchedBecause: "Codex Terra timed out",
+      next: "qwen-local",
+      label: "Qwen 3.6 35B",
+      switchedBecause: "DeepSeek v4.1 Flash timed out",
     });
-    assert.deepEqual(modelChoiceCalls, [[99, "claude-sonnet"]]);
-    assert.deepEqual(stageMessages, ["Switched to Claude Sonnet: Codex Terra timed out"]);
+    assert.deepEqual(probed, ["qwen-local"]);
+    assert.deepEqual(modelChoiceCalls, [[99, "qwen-local"]]);
+    assert.deepEqual(stageMessages, ["Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash timed out"]);
   });
 
   it("routes an editor's explicit model choice around a technical failure", async () => {
-    let probed = false;
+    const probed: string[] = [];
     let modelChoiceSet = false;
     let stageSet = false;
 
-    const result = await planDarkRoundFailover(job({ model_choice_source: "editor" }), LIVE_401, {
-      probe: async () => {
-        probed = true;
-        return { ok: true, label: "Claude Sonnet", choice: "claude-sonnet" };
+    /*
+      An explicit choice on the ladder's LAST rung has no rung after it, so the
+      hop falls back to the whole ladder -- the same "an editor's pick is a
+      preference, not a pin" rule as before, read off a ladder whose last rung
+      moved (Unit Y item 1).
+    */
+    const result = await planDarkRoundFailover(
+      job({ model_choice_source: "editor" }),
+      CODEX_AUTH_FAILURE,
+      {
+        probe: readyProbe(probed),
+        setModelChoice: async () => {
+          modelChoiceSet = true;
+        },
+        setStage: async () => {
+          stageSet = true;
+        },
       },
-      setModelChoice: async () => {
-        modelChoiceSet = true;
-      },
-      setStage: async () => {
-        stageSet = true;
-      },
-    });
+    );
 
     assert.deepEqual(result, {
-      next: "claude-sonnet",
-      label: "Claude Sonnet",
+      next: "deepseek-flash",
+      label: "DeepSeek v4.1 Flash",
       switchedBecause: "Codex Terra sign-in lapsed",
     });
-    assert.equal(probed, true);
+    assert.deepEqual(probed, ["deepseek-flash"]);
     assert.equal(modelChoiceSet, true);
     assert.equal(stageSet, true);
   });
 
   it("routes a configured gateway around a technical failure", async () => {
-    let probed = false;
+    const probed: string[] = [];
     let saved = "";
     const result = await planDarkRoundFailover(
       job({ model_choice: "configured" }),
       LIVE_TIMEOUT_NO_OUTPUT,
       {
-        probe: async () => {
-          probed = true;
-          return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
-        },
+        probe: readyProbe(probed),
         setModelChoice: async (_id, choice) => { saved = choice; },
         setStage: async () => undefined,
       },
     );
-    assert.equal(result?.next, "codex-balanced");
-    assert.equal(probed, true);
-    assert.equal(saved, "codex-balanced");
+    assert.equal(result?.next, "deepseek-flash");
+    assert.deepEqual(probed, ["deepseek-flash"]);
+    assert.equal(saved, "deepseek-flash");
   });
 
   it("returns null when Automatic's next rung is not ready either, without writing anything", async () => {

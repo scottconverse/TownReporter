@@ -1,8 +1,10 @@
 # Reading TownReporter
 
-For TownReporter 0.6.62. The publication uses its configured name, town and visible sections. **Editor’s desk** stays in the public header on desktop and phones; it opens the desk for a signed-in editor and the sign-in flow for everyone else.
+For TownReporter 0.6.63. The publication uses its configured name, town and visible sections. **Editor’s desk** stays in the public header on desktop and phones; it opens the desk for a signed-in editor and the sign-in flow for everyone else.
 
 The front page leads with the latest published story, more recent coverage, sections, local resources and Opinion. Select the publication name to return here from any reader page. **Editor’s desk** in the footer opens the signed-in desk or its sign-in screen. **Public news page** and the TownReporter logo in the desk return to the newspaper.
+
+Below the front page's lead and Opinion there is a **Latest stories** list: every story we have published, newest first, each row showing its section, headline, a line of summary, the date, the read time and the bookmark. It brings in more as you scroll, and a **Load more stories** button stays under the list for a keyboard, a slow connection or a browser without scripting; when you reach the oldest story it says you are at the first story we published.
 
 ## Find and save stories
 

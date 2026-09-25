@@ -77,12 +77,12 @@ export type ProviderBudget = {
 /*
   The ids, spelled out as literals so TypeScript keeps them as a union.
 
-  Two lists, not one, because they answer different questions. A
+  Three lists, not one, because they answer different questions. A
   PICKER_PROVIDER_ID is something an editor can select by name; an
-  INTERNAL_PROVIDER_ID is a provider the desk resolves on its own (today only
-  the configured gateway, which Automatic pins when LLM_BASE_URL is set). The
-  split is what lets `StoryModelChoice` stay exactly "auto" plus the pickable
-  ids, the way it has always been, while the registry still owns the gateway.
+  INTERNAL_PROVIDER_ID is a provider the desk resolves on its own and no menu
+  offers (the configured gateway, and Automatic's own local rungs); a
+  RETIRED_PROVIDER_ID is one a menu used to offer and a stored row may still
+  hold.
 
   Adding a provider: add its id here, add its entry to PROVIDER_REGISTRY
   below, and set `offeredFor`. Nothing else in the codebase names providers.
@@ -97,13 +97,67 @@ export const PICKER_PROVIDER_IDS = [
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
-  "grok-oauth",
   "local-model",
 ] as const;
-export const INTERNAL_PROVIDER_IDS = ["configured"] as const;
 
-export type PickerProviderId = (typeof PICKER_PROVIDER_IDS)[number];
+/*
+  Registered, still transport-real, offered nowhere.
+
+  0.6.63 (Unit Y item 4) took `grok-oauth` out of every picker and out of
+  Automatic at the owner's standing instruction, but did NOT touch the
+  `xai-oauth` transport its entry describes. A newsroom, a `desk_jobs` row, a
+  draft batch or a page-watch row that stored the string must still type-check,
+  still resolve that transport, and still be able to write the value back; what
+  must change is only that no menu offers it. Hence the split between this list
+  and `PickerProviderId` below: `offeredFor: NO_SURFACE` and `providersFor()`
+  keep it out of the menus, `isAutomaticChoiceId` keeps it out of Automatic,
+  and the union still admits it.
+*/
+export const RETIRED_PROVIDER_IDS = ["grok-oauth"] as const;
+export type RetiredProviderId = (typeof RETIRED_PROVIDER_IDS)[number];
+
+/*
+  The ladder's own rungs, as literals, for the types below.
+
+  These are the ids Automatic may pin on a job (0.6.63, Unit Y item 1: DeepSeek
+  v4.1 Flash, then Qwen 3.6 35B on this computer, then Codex Terra). They are
+  INTERNAL ids -- no menu shows them -- but a job still has to be able to hold
+  one, because `planAutomaticFailover` returns `storyModelChoice(rung)` and a
+  value this type rejected would silently degrade to "auto" and re-probe the
+  ladder from the top. `automaticLadder()` is the runtime source of truth for
+  the ORDER; `provider-registry.test.ts` asserts the two agree.
+*/
+export const AUTOMATIC_RUNG_IDS = ["deepseek-flash", "qwen-local"] as const;
+export type AutomaticRungId = (typeof AUTOMATIC_RUNG_IDS)[number];
+
+export const INTERNAL_PROVIDER_IDS = ["configured", ...AUTOMATIC_RUNG_IDS] as const;
+
+export type PickerProviderId = (typeof PICKER_PROVIDER_IDS)[number] | RetiredProviderId;
 export type ProviderId = PickerProviderId | (typeof INTERNAL_PROVIDER_IDS)[number];
+/** An id a job may store as its `model_choice`. */
+export type AutomaticChoiceId = (typeof PICKER_PROVIDER_IDS)[number] | AutomaticRungId;
+
+/** True for an id only Automatic can pin. */
+export function isAutomaticRungId(id: unknown): id is AutomaticRungId {
+  return typeof id === "string" && (AUTOMATIC_RUNG_IDS as readonly string[]).includes(id);
+}
+
+/**
+ * Could a job hold this id?
+ *
+ * Every id a menu can produce, plus Automatic's own rungs -- but NOT
+ * `configured` (resolved separately by `effectiveStoryModelChoice`) and NOT
+ * `grok-oauth`, which is registered for its transport's sake and no longer a
+ * choice anyone can make. This is the function a stored choice of Grok falls
+ * through: it returns false, `storyModelChoice` answers "auto", and the run
+ * goes to the ladder.
+ */
+export function isAutomaticChoiceId(id: unknown): id is AutomaticChoiceId {
+  return (
+    typeof id === "string" &&
+    ((PICKER_PROVIDER_IDS as readonly string[]).includes(id) || isAutomaticRungId(id))
+  );
+}
 
 export type ProviderEntry = {
   /** Stable id. Also the value persisted in `desk_jobs.model_choice`. */
@@ -112,6 +166,21 @@ export type ProviderEntry = {
   label: string;
   /** The half-line under the label in the picker. */
   detail: string;
+  /**
+   * The half-line a native SELECT can actually show, when `detail` is a
+   * clause rather than a phrase.
+   *
+   * Unit P item 7: a `<select>` clips the selected option's text at its own
+   * content box and no CSS rule wraps or ellipsizes it, because the closed
+   * control is drawn by the browser. So "Local model — llama.cpp, LM Studio,
+   * or another OpenAI-compatible server" reached an editor as "Local model —
+   * llama.cpp, LM Studio, or anot" (measured 464px of text in a 191px box).
+   * Providers whose `detail` is a clause declare the short half-line here;
+   * `detail` remains the full sentence, which is what the help line under
+   * the picker and each option's `title` say. See `pickerOptionText` in
+   * ./model-choice.ts for the two of them put back together.
+   */
+  optionDetail?: string;
   kind: ProviderKind;
   /** Default model identifier, before `envOverrides.model` is consulted. */
   model: string;
@@ -132,6 +201,19 @@ export type ProviderEntry = {
   plannerModel?: string;
   /** Is this entry usable on this machine right now? Reads the environment. */
   enabled: () => boolean;
+  /**
+   * True when the entry must not be called unless the local server reports
+   * THIS model LOADED, not merely downloaded.
+   *
+   * LM Studio's `/v1/models` lists models that exist on disk, loaded or not,
+   * so "the endpoint answered" is not the same question as "the model is
+   * ready to answer" -- and the paper must never load or unload a model to
+   * find out (owner rule, 0.6.63 Unit Y item 2: "never load or unload a model
+   * from the paper"). The preflight consults local-models.ts's `loaded` flag
+   * for an entry with this flag, records the rung as SKIPPED when it is not
+   * loaded, and moves on.
+   */
+  requiresLoadedLocalModel?: boolean;
   /** The variable an operator sets to `0` to take this entry out entirely. */
   offSwitchEnv?: string;
   /** Which pickers offer it. */
@@ -241,6 +323,23 @@ const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
   forced: true,
 };
 
+/** No menu offers these; the desk resolves them on its own. */
+const NO_SURFACE: Record<ProviderSurface, boolean> = {
+  story: false,
+  scan: false,
+  opinion: false,
+  dark: false,
+  forced: false,
+};
+
+/*
+  Measured on the exact Ollama model the DeepSeek rung names: off/low/high/max,
+  and an OMITTED effort means the provider default rather than "thinking off".
+  Declared here rather than beside the other effort lists at the foot of the
+  file because the rung entry below carries it as `efforts`.
+*/
+const DEEPSEEK_V4_1_FLASH_EFFORTS: readonly ModelEffort[] = ["none", "low", "high", "max"];
+
 /**
  * Every provider this desk can be pointed at, in picker order.
  *
@@ -291,9 +390,15 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     // Earlier refusals remain delivery failures; they were not a reason to
     // erase an otherwise available native subscription provider.
     offeredFor: EVERY_SURFACE,
-    // Automatic starts on the operator's OpenAI subscription. Claude is the
-    // limited fallback on this installation, not the default writer.
-    ladderRank: 1,
+    /*
+      0.6.63 (Unit Y item 1): Automatic starts on the DeepSeek and Qwen
+      entries below and reaches Codex Terra LAST. Terra was rank 1 before
+      this; the measured blind research bake-off (2026-09-24) put DeepSeek
+      v4.1 Flash at 30.9 against Terra's 15.3 with zero wrong facts, and the
+      owner's decision that followed was "make deepseek first for research and
+      drafting". Terra stays a named pick on every surface.
+    */
+    ladderRank: 3,
   },
   {
     id: "claude-fable",
@@ -320,9 +425,13 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
-    // Keep Claude last and use the balanced tier rather than spending Opus
-    // allowance on ordinary newsroom work.
-    ladderRank: 3,
+    /*
+      No ladderRank as of 0.6.63 (Unit Y item 1). Sonnet was Automatic's
+      rank-3 rung; Claude leaves the ladder and stays a hand pick on every
+      surface -- the bake-off scored it 13.1 against DeepSeek's 30.9, and the
+      owner's ladder is DeepSeek, then Qwen on this computer, then Codex
+      Terra. It is still offered everywhere an editor chooses a model.
+    */
   },
   {
     id: "claude-haiku",
@@ -387,20 +496,38 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     id: "grok-oauth",
     label: "Grok (SuperGrok)",
     detail: "TownReporter OAuth · selected account model",
+    // The select's own line: 42 characters of detail became 60 in the option
+    // text, which no picker on a phone can show. The OAuth sentence stays in
+    // `detail`, so the help line and the option's title still say it.
+    optionDetail: "account model",
     kind: "xai-oauth",
     model: "grok-4.6",
     envOverrides: {},
     budget: KIND_BUDGETS["xai-oauth"],
     enabled: () => notSwitchedOff("TOWNREPORTER_GROK_OAUTH"),
     offSwitchEnv: "TOWNREPORTER_GROK_OAUTH",
-    offeredFor: EVERY_SURFACE,
-    // The owner asked to preserve current defaults. Grok is an explicit
-    // subscription choice until a later routing policy deliberately adds it.
+    /*
+      RETIRED from every picker and from Automatic (0.6.63, Unit Y item 4;
+      the owner's standing instruction is "REMOVE Grok"). The entry itself
+      stays: `xai-oauth` is the transport the Server page's SuperGrok sign-in
+      card reads, and sign-in/auth is explicitly NOT part of this change --
+      nothing under src/lib/auth/ imports this module or this id at all.
+      `offeredFor` is all-false, so no picker, no batch list and no Server
+      "writing models" row can offer it, and `isAutomaticChoiceId` refuses
+      it, so a stored choice of it normalises to Automatic with a note
+      (see ./model-choice.ts's `retiredModelChoiceNote`).
+    */
+    offeredFor: NO_SURFACE,
   },
   {
     id: "local-model",
     label: "Local model",
     detail: "llama.cpp, LM Studio, or another OpenAI-compatible server",
+    // The select's own line: the clause above is 56 characters, which even a
+    // full-width phone select cuts. "on this computer" is the one thing the
+    // option has to say -- the servers it can mean are in the help line, on
+    // the Server page, and in docs/local-models.md.
+    optionDetail: "on this computer",
     kind: "local",
     /*
       Same env wiring as the `configured` gateway below, on purpose. The
@@ -482,7 +609,91 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       the ladder runs (see `probeProvider`). It is in the registry so its
       label, budget and env overrides live with everyone else's.
     */
-    offeredFor: { story: false, scan: false, opinion: false, dark: false, forced: false },
+    offeredFor: NO_SURFACE,
+  },
+  /*
+    Automatic's own local rungs (0.6.63, Unit Y item 1).
+
+    Rank 1 is DeepSeek v4.1 Flash on the Ollama endpoint the live paper
+    already points its "Local model" pick at; rank 2 is Qwen 3.6 35B on LM
+    Studio. Both are `kind: "local"`, which is the same OpenAI-compatible
+    transport the "Local model" entry uses -- they add no third config
+    system, no new table and no new wire format. What makes two local
+    endpoints coexist is exactly what this registry is for: each rung carries
+    its OWN `baseUrl`, `model` and env overrides, so neither one can read
+    `LLM_BASE_URL` and end up talking to the other's server (see `./ai.ts`
+    `rungGateway`, which never falls back to it the way `localGateway` does
+    for the entry NAMED "Local model").
+
+    Neither rung is in PICKER_PROVIDER_IDS: an editor picks "Automatic" and
+    the desk resolves which of these answers. An install that wants to
+    repoint one sets its own variable (`TOWNREPORTER_DEEPSEEK_BASE_URL`,
+    `TOWNREPORTER_QWEN_MODEL`), and `automaticLadder()` is the one place
+    their order lives.
+  */
+  {
+    id: "deepseek-flash",
+    label: "DeepSeek v4.1 Flash",
+    detail: "Ollama · research and drafting",
+    kind: "local",
+    model: "deepseek-v4.1-flash:cloud",
+    // Ollama's OpenAI-compatible face. The bake-off ran this model through
+    // Ollama Cloud; the endpoint is the same one `localDiscoveryReachable`
+    // probes for.
+    baseUrl: "http://127.0.0.1:11434/v1",
+    envOverrides: {
+      model: "TOWNREPORTER_DEEPSEEK_MODEL",
+      baseUrl: "TOWNREPORTER_DEEPSEEK_BASE_URL",
+      apiKey: "TOWNREPORTER_DEEPSEEK_API_KEY",
+    },
+    budget: KIND_BUDGETS.local,
+    // Same shape as "Local model": ready once discovery has found a local
+    // server, or once an operator has named this rung's endpoint by hand.
+    // Reachability at run time is the preflight's job, not this flag's -- a
+    // rung that turns out to be down makes the ladder move on.
+    enabled: () =>
+      notSwitchedOff("TOWNREPORTER_DEEPSEEK") &&
+      (Boolean(env("TOWNREPORTER_DEEPSEEK_BASE_URL")) || localDiscoveryReachable),
+    offSwitchEnv: "TOWNREPORTER_DEEPSEEK",
+    offeredFor: NO_SURFACE,
+    ladderRank: 1,
+    // Same list `openAiCompatibleModelEfforts` returns for this model id.
+    efforts: DEEPSEEK_V4_1_FLASH_EFFORTS,
+    // No plannerModel: a local server serves one model and has never heard of
+    // anyone else's identifier. Audit finding TW-001 -- see `plannerModelFor`.
+  },
+  {
+    id: "qwen-local",
+    label: "Qwen 3.6 35B",
+    detail: "on this computer",
+    kind: "local",
+    model: "halo/qwen3.6-35b-a3b",
+    baseUrl: "http://127.0.0.1:1234/v1",
+    envOverrides: {
+      model: "TOWNREPORTER_QWEN_MODEL",
+      baseUrl: "TOWNREPORTER_QWEN_BASE_URL",
+      apiKey: "TOWNREPORTER_QWEN_API_KEY",
+    },
+    budget: KIND_BUDGETS.local,
+    enabled: () =>
+      notSwitchedOff("TOWNREPORTER_QWEN") &&
+      (Boolean(env("TOWNREPORTER_QWEN_BASE_URL")) || localDiscoveryReachable),
+    offSwitchEnv: "TOWNREPORTER_QWEN",
+    offeredFor: NO_SURFACE,
+    ladderRank: 2,
+    /*
+      The one rung with a LOADED requirement: LM Studio lists downloaded
+      models on `/v1/models` whether or not they are in memory, so a probe
+      that only asks "did the endpoint answer" would pin a draft to a model
+      that then has to be paged in from disk -- which can take minutes on a
+      big model. The preflight checks local-models.ts's `loaded` flag instead
+      and records "Qwen 3.6 35B skipped: not loaded" in the job's receipt.
+    */
+    requiresLoadedLocalModel: true,
+    // No `efforts`: this exact LM Studio model id has not been measured for a
+    // run-scoped reasoning setting, and this file's rule is that an
+    // unmeasured model gets the provider default rather than a made-up list.
+    // No plannerModel, same reason as the DeepSeek rung.
   },
 ];
 
@@ -497,7 +708,6 @@ const CODEX_56_EFFORTS: readonly ModelEffort[] = ["none", "low", "medium", "high
 export const CLAUDE_CLI_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const AUTOMATIC_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const GROK_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high"];
-const DEEPSEEK_V4_1_FLASH_EFFORTS: readonly ModelEffort[] = ["none", "low", "high", "max"];
 const QWEN_3_8_EFFORTS: readonly ModelEffort[] = ["none"];
 const QWEN_3_5_CLOUD_EFFORTS: readonly ModelEffort[] = ["none"];
 
@@ -648,6 +858,25 @@ export function automaticLadder(): readonly ProviderId[] {
 export function enabledAutomaticLadder(): readonly ProviderId[] {
   return automaticLadder().filter((id) => providerEntry(id)?.enabled());
 }
+
+/**
+ * The ladder a run that must name ONE exact provider fails over along: a
+ * draft batch, the scheduled daily scan, a meeting redraft.
+ *
+ * Deliberately NOT `automaticLadder()`. Those surfaces cannot stand on a rung:
+ * `deepseek-flash` and `qwen-local` are what Automatic resolved to on the day,
+ * not something an editor picked, and `validateForcedRuntime` refuses them
+ * ("The selected batch model is unavailable in this build"). A plan naming one
+ * would kill the run instead of moving it. Unit Y (0.6.63) changed which
+ * models Automatic tries; it did not change where an explicitly chosen batch
+ * moves, so this stays the order those surfaces have used since 0.6.1 --
+ * Balanced, then Sonnet -- and DeepSeek and Qwen reach a batch only when an
+ * editor picks them by hand.
+ */
+export const FORCED_FAILOVER_LADDER = [
+  "codex-balanced",
+  "claude-sonnet",
+] as const satisfies readonly PickerProviderId[];
 
 /** The model id an entry should actually use, after its env override. */
 export function providerModel(entry: ProviderEntry): string {

@@ -10,8 +10,8 @@ import {
   type ForcedRuntimeSnapshot,
 } from "./forced-runtime.server.ts";
 import {
+  FORCED_FAILOVER_LADDER,
   PICKER_PROVIDER_IDS,
-  automaticLadder,
   modelEffort,
   type ModelEffort,
   type PickerProviderId,
@@ -32,12 +32,17 @@ export async function validateDailyRuntime(
     const detail = firstError instanceof Error ? firstError.message : String(firstError);
     const reason = automaticFailoverReason(detail);
     if (!reason) throw firstError;
-    const ladder = automaticLadder();
-    const at = ladder.indexOf(runtime as any);
+    // A scheduled run names one exact provider, so it fails over along the
+    // hand-pick ladder, never onto one of Automatic's own rungs (0.6.63, Unit
+    // Y item 1): `validateDailyRuntime` refuses a rung the same way the batch
+    // validator does. The membership filter is belt-and-braces for a stored
+    // runtime that is no longer offered.
+    const ladder: readonly string[] = FORCED_FAILOVER_LADDER;
+    const at = ladder.indexOf(runtime);
     const forward = at >= 0 ? ladder.slice(at + 1) : ladder;
     const candidates = (forward.length ? forward : ladder).filter(
-      (choice): choice is PickerProviderId =>
-        choice !== runtime && PICKER_PROVIDER_IDS.includes(choice as PickerProviderId),
+      (choice): choice is Exclude<PickerProviderId, "grok-oauth"> =>
+        choice !== runtime && (PICKER_PROVIDER_IDS as readonly string[]).includes(choice),
     );
     for (const choice of candidates) {
       try {

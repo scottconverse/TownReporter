@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.6.62](releases/0.6.62.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.6.63](releases/0.6.63.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -14,7 +14,7 @@ To publish the landing: GitHub repo **Settings → Pages → Deploy from a branc
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node**                    | 22 or newer (`node -v`). Types in this repo are Node 22.                                                                                                                                                                               |
 | **npm**                     | Comes with Node. `npm install` is enough.                                                                                                                                                                                              |
-| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Grok (SuperGrok); Local model; and saved custom connections.     |
+| **A model**                 | Every writing picker offers Codex Astra, Sol, Terra and Luna; Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.     |
 | **Chromium via Playwright** | Once: `npx playwright install chromium`. Meeting transcripts and JS civic sites need it.                                                                                                                                               |
 | **A database**              | Optional for a look (embedded PGLite). Required for a real newsroom (Postgres).                                                                                                                                                        |
 
@@ -123,8 +123,8 @@ The following is the low-level configured-provider resolution. Story, Scan and D
 | #   | Set this                                      | What runs                                                                   |
 | --- | --------------------------------------------- | --------------------------------------------------------------------------- |
 | 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
-| 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models or the final Sonnet retry            |
-| 3   | _nothing_                                     | signed-in Codex first; local Claude Code Sonnet is the last unattended rung |
+| 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models; Claude Sonnet is the last rung of Opinion's Automatic only |
+| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra; Opinion walks Codex Sol, then Claude Sonnet |
 | 4   | `XAI_API_KEY`                                 | Grok                                                                        |
 
 #### Claude Code — configured-provider default, no key
@@ -251,8 +251,9 @@ sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-tries Codex Terra, then Claude Sonnet, and stores the first ready provider on
-the job before it is enqueued. Every pass in that Story run uses the same
+uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded,
+then Codex Terra, and stores the first ready provider on the job before it is
+enqueued. Every pass in that Story run uses the same
 effective provider unless it reaches a usage limit, becomes unavailable,
 loses its login, or times out mid-run. Automatic then moves the unfinished
 model call to the next ladder rung once, if it is ready. Earlier calls in that
@@ -301,8 +302,12 @@ pages, transcripts and documents as evidence, never as instructions to expand
 the reporting task.
 
 Opinion displays Automatic, all named Codex and Claude models, Local model,
-plus saved custom connections. Codex Sol is selected by default. Automatic tries Codex Sol, then Claude Sonnet
-once if Codex is unavailable. Explicit choices remain the requested first
+plus saved custom connections. Codex Sol is selected by default. **Opinion's own
+Automatic** tries Codex Sol, then Claude Sonnet once if Codex is unavailable.
+That is the Opinion ladder only. Stories, scans and Dark Desk walk the desk's
+own Automatic ladder: DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer
+when it is loaded, then Codex Terra. Claude Sonnet is a hand pick on those
+surfaces. Explicit choices remain the requested first
 runtime and can move only an unfinished call after a recognized technical
 failure. An invalid
 delivery -- a refusal, an assistant note, an incomplete piece --
@@ -619,6 +624,44 @@ citations, redrafting against a newer transcript, publication review, and the
 limits of captions—see [From a meeting recording to a story in the editor’s
 manual](editor.md#from-a-meeting-recording-to-a-story).
 
+#### Speech-to-text for tapes with no captions (optional)
+
+TownReporter does not ship this tool and the Windows installer does not add
+it. Without it, a meeting that has no captions stays audio-only, which is what
+the app did before this existed. If you want those tapes transcribed, install
+**[textflowkit](https://github.com/scottconverse/textflowkit)** on the machine
+that runs TownReporter:
+
+```
+python -m pip install textflowkit
+```
+
+It calls **ffmpeg** to read the audio, so ffmpeg has to be installed and on
+`PATH` as well. Then tell TownReporter where it is, either in the environment
+of the service that runs the app:
+
+```
+TEXTFLOWKIT_CLI_PATH=C:\path\to\textflowkit.exe
+```
+
+or by leaving that unset and putting `textflowkit` on `PATH`. Two more
+environment variables are optional: `TEXTFLOWKIT_MODEL` (default `small`) and
+`TEXTFLOWKIT_LANGUAGE` (default `en`). A larger model is more accurate and
+takes longer; run a meeting by hand first and watch the row before you turn it
+loose on a schedule.
+
+To check, open **Server → Meeting capture**. One line tells you what the desk
+found: the version, the model and the language, or that it is not installed.
+That line is the answer to "why did this captionless meeting stay audio-only".
+
+The tool reads the recording the capture already downloaded and writes its own
+JSON into the meeting’s storage folder; the desk stores that JSON as the
+transcript, hashed, beside the audio. It is labeled in the desk as
+speech-to-text, not official captions. A run that cannot finish — no tool, no
+audio, a recording that no longer matches the hash the desk recorded for it, or
+a run past its allowance — leaves a named reason on the meeting and keeps the
+recording, so the next pass can try again.
+
 ### 4. PrimeGov
 
 If the city uses PrimeGov, add the public portal:
@@ -675,7 +718,7 @@ TownReporter/
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 operator notes
 

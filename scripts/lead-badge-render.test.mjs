@@ -233,6 +233,40 @@ test("a lead with no possible_duplicate_of shows no possible-duplicate chip", ()
   assert.doesNotMatch(html, /maybe-same/);
 });
 
+// Unit P item 1: a General Scan can name no section this newsroom files
+// under, and the leads.topic column still needs a value -- schema.ts falls
+// back to the first allowed key and records the fallback in topic_unchosen.
+// That fallback is not a decision. On the Queue the row must say so, in the
+// badge rail an editor actually reads, so nobody writes or publishes on a
+// section the model never picked (see lib/news/schema.ts's parseScanResult,
+// migrations/0087_lead_topic_unchosen.sql).
+test("a lead filed under a section the scan never chose says so on the Queue row", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "new", topic_unchosen: true }),
+    }),
+  );
+  assert.match(html, /Section not chosen — pick one/);
+  assert.match(html, /class="chip topic-unchosen"/);
+  // Same rail as the status chip, after the meta line: a dashed pill an editor
+  // notices, not bookkeeping text scrolled past.
+  const metaIdx = html.indexOf('class="meta"');
+  const flagsIdx = html.indexOf('class="lead-flags"');
+  const chipIdx = html.indexOf('class="chip topic-unchosen"');
+  assert.ok(
+    metaIdx >= 0 && metaIdx < flagsIdx && flagsIdx < chipIdx,
+    "the not-chosen notice belongs in the lead-flags rail, after the meta line",
+  );
+});
+
+test("a lead whose section the scan did choose shows no not-chosen notice", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, { lead: baseLead({ status: "new", topic_unchosen: false }) }),
+  );
+  assert.doesNotMatch(html, /Section not chosen/);
+  assert.doesNotMatch(html, /topic-unchosen/);
+});
+
 test("batch selection is separated from the headline and writing keeps its primary action visible", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {

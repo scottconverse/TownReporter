@@ -5,6 +5,7 @@ import { setOcrImpl, type OcrOptions } from "./ingest.ts";
 import { defaultFetch } from "./investigate.ts";
 import { OCR_TOTAL_BUDGET_MS, productionOcr } from "./ocr.ts";
 import { singleRenderedPdfFixture, twoRenderedPdfFixture } from "./pdf-test-fixture.ts";
+import { automaticLadder } from "./provider-registry.ts";
 import { reportAndDraft } from "./report.ts";
 import type { LeadRow } from "./types.ts";
 
@@ -315,6 +316,46 @@ describe("ordinary public-document OCR model routing", () => {
       else process.env.ANTHROPIC_API_KEY = priorKey;
       if (priorModel === undefined) delete process.env.ANTHROPIC_MODEL;
       else process.env.ANTHROPIC_MODEL = priorModel;
+      if (priorTerraModel === undefined) delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
+      else process.env.TOWNREPORTER_CODEX_TERRA_MODEL = priorTerraModel;
+    }
+  });
+
+  it("reaches Claude after Codex fails even though the writing ladder changed", async () => {
+    const priorTerraModel = process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
+    try {
+      delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
+      // The writing/research ladder exactly as 0.6.63 ships it: DeepSeek, then
+      // Qwen on this computer, then Codex Terra. OCR must not follow it.
+      assert.deepEqual([...automaticLadder()], ["deepseek-flash", "qwen-local", "codex-balanced"]);
+
+      const selected: string[] = [];
+      const result = await productionOcr(singleRenderedPdfFixture(), {
+        provider: "auto",
+        // A ready local vision model is offered as well: it must come AFTER
+        // Claude, exactly as in 0.6.62, not before it as a writing-ladder rung.
+        localModel: { baseUrl: "http://127.0.0.1:9500/v1", id: "qwen3-vl-32b" },
+        adapters: {
+          codex: async (_image, _timeoutMs, selectedChoice) => {
+            assert.ok(selectedChoice);
+            selected.push(selectedChoice.model);
+            throw new Error("Codex request timed out after 90s, 0 bytes out");
+          },
+          "claude-code": async (_image, _timeoutMs, selectedChoice) => {
+            assert.ok(selectedChoice);
+            selected.push(selectedChoice.model);
+            return OCR_TEXT;
+          },
+          local: async () => {
+            selected.push("local");
+            return OCR_TEXT;
+          },
+        },
+      });
+
+      assert.match(result.text, /water contract was approved/);
+      assert.deepEqual(selected, ["gpt-5.6-terra", "sonnet"]);
+    } finally {
       if (priorTerraModel === undefined) delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
       else process.env.TOWNREPORTER_CODEX_TERRA_MODEL = priorTerraModel;
     }

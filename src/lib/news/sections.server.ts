@@ -1,6 +1,7 @@
 import { getSql, ensureSchemaOnce, withTransaction, type Sql } from "../db.ts";
 import { TOPICS } from "../paper.ts";
-import type { Section, SectionConfig, SectionScanSnapshot } from "./section-types.ts";
+import type { TopicSection } from "./desk-copy.ts";
+import type { SectionConfig, SectionScanSnapshot } from "./section-types.ts";
 
 // Mirror migration 0045 for direct-node tests and existing schema recovery.
 export const SECTION_SCHEMA = [
@@ -130,6 +131,43 @@ async function readConfig(sql: Sql, newsroomId: number): Promise<SectionConfig> 
   };
 }
 
+/**
+ * The newsroom's own section names and briefs, read for the filing paths
+ * (the Write box, the Dark Desk handoff) that ask `topicFromText` what this
+ * newsroom calls its beats. Deliberately NOT `getSections`: that reader
+ * ensures the sections schema, seeds a newsroom that has none, and so
+ * installs the section-resolution triggers and can refuse. A label the text
+ * reader wants must never cost an editor the write, so a read that cannot
+ * answer -- no table, no rows -- returns undefined and the shipped
+ * vocabulary decides. Reserved and retired keys stay in the list: they are
+ * filtered where that rule belongs, by `filingTopicSections`.
+ */
+export async function readTopicSections(
+  newsroomId: number,
+): Promise<TopicSection[] | undefined> {
+  try {
+    const sql = await getSql();
+    const rows = await sql<{
+      key: string;
+      name: string;
+      brief: string;
+      replacement_key: string | null;
+    }>`
+      select key,name,brief,replacement_key from newsroom_sections
+      where newsroom_id=${newsroomId} order by position,key
+    `;
+    if (!rows.length) return undefined;
+    return rows.map((r) => ({
+      key: r.key,
+      name: r.name,
+      brief: r.brief,
+      replacementKey: r.replacement_key,
+    }));
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getSections(newsroomId: number): Promise<SectionConfig> {
   await ensureSectionsSchema();
   return withTransaction(async (sql) => {
@@ -238,7 +276,16 @@ export async function saveSections(
   });
 }
 
-export function resolvedSectionKey(sections: Section[], key: string): string {
+/*
+  Follows a retired section to whatever replaced it, which needs only the key
+  and its replacement -- so it takes the least it reads. Callers hold either the
+  desk's full `Section` rows or the light `TopicSection` rows the Write box
+  validates an editor's choice against (Unit P item 2).
+*/
+export function resolvedSectionKey(
+  sections: readonly { key: string; replacementKey?: string | null }[],
+  key: string,
+): string {
   const seen = new Set<string>();
   for (let current = key; ;) {
     if (seen.has(current)) throw new Error("Section replacement cycle.");

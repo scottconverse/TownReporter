@@ -1,0 +1,17 @@
+-- Named outlets, per newsroom (0.6.63, Unit P item 5).
+--
+-- The outlets whose reporting a story must show its reader: NAMED_OUTLETS in
+-- src/lib/news/outlet-credit.ts was a constant, and a newsroom that reads a
+-- different set of papers than the one it shipped with had no way to say so.
+-- Nullable like every other column of this table, and NULL means "use the
+-- shipped list" -- a newsroom that never writes this column checks exactly
+-- what it checked before, and an existing install is untouched.
+--
+-- An empty array is an answer, not a gap: it says this newsroom credits no
+-- outlets, which turns the check off for that newsroom. That is a decision an
+-- owner has to make on purpose (see asNamedOutlets in outlet-credit.ts).
+--
+-- The override records in named_outlet_overrides (0086) are unchanged. They
+-- are keyed by newsroom, draft and the outlet's printed name, so an override
+-- granted against this list stays valid when the list is edited.
+alter table paper_settings add column if not exists named_outlets jsonb;

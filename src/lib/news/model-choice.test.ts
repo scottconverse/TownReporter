@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DARK_AUTOMATIC_LADDER,
   effectiveStoryModelChoice,
   darkModelChoice,
   localModelOptionLabel,
@@ -11,12 +12,13 @@ import {
   opinionModelChoice,
   opinionProviderProblem,
   rememberedStoryModelChoice,
+  retiredModelChoiceNote,
   STORY_MODEL_CHOICES,
   storyModelChoice,
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
 import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
-import { providersFor } from "./provider-registry.ts";
+import { automaticLadder, providersFor } from "./provider-registry.ts";
 
 const STORY_VALUES = [
   "auto",
@@ -28,9 +30,14 @@ const STORY_VALUES = [
   "claude-frontier",
   "claude-sonnet",
   "claude-haiku",
-  "grok-oauth",
   "local-model",
 ] as const;
+
+/**
+ * Automatic's own rungs: not options in any menu, but valid on a job row
+ * (0.6.63, Unit Y item 1). A job Automatic pinned to one has to keep it.
+ */
+const RUNG_VALUES = ["deepseek-flash", "qwen-local"] as const;
 
 describe("model choice contract", () => {
   it("offers every named subscription model in the shared Story picker", () => {
@@ -46,10 +53,20 @@ describe("model choice contract", () => {
         "Claude Opus",
         "Claude Sonnet",
         "Claude Haiku",
-        "Grok (SuperGrok)",
         "Local model",
       ],
     );
+  });
+  it("runs Automatic on DeepSeek, then Qwen, then Codex Terra", () => {
+    assert.deepEqual([...automaticLadder()], [
+      "deepseek-flash",
+      "qwen-local",
+      "codex-balanced",
+    ]);
+    // Claude Sonnet left the ladder in 0.6.63 (Unit Y item 1) and is a hand
+    // pick only; the frontier Codex stays off it as it always has.
+    assert.ok(!automaticLadder().includes("claude-sonnet"));
+    assert.ok(!automaticLadder().includes("codex-frontier"));
   });
   it("never converts a missing or malformed custom connection into Automatic", () => {
     for (const value of ["custom:", "custom:deleted", "custom:untrusted/input"]) {
@@ -112,9 +129,36 @@ describe("model choice contract", () => {
   });
 
   it("round-trips every valid Story choice and defaults invalid input safely", () => {
-    for (const value of STORY_VALUES) assert.equal(storyModelChoice(value), value);
+    for (const value of [...STORY_VALUES, ...RUNG_VALUES]) {
+      assert.equal(storyModelChoice(value), value);
+    }
     for (const invalid of [undefined, null, "", "codex", "local; rm", 0, {}, []]) {
       assert.equal(storyModelChoice(invalid), "auto");
+    }
+  });
+
+  it("labels a pinned rung with the model that actually wrote the draft", () => {
+    // "Automatic" would be a lie on the line the editor reads to find out.
+    assert.equal(modelChoiceLabel("deepseek-flash"), "DeepSeek v4.1 Flash");
+    assert.equal(modelChoiceLabel("qwen-local"), "Qwen 3.6 35B");
+  });
+
+  it("falls a stored SuperGrok choice back to Automatic and says so", () => {
+    // Sign-in is untouched by the retirement, so the note says so.
+    assert.equal(modelChoiceLabel("grok-oauth"), "Automatic");
+    assert.equal(storyModelChoice("grok-oauth"), "auto");
+    assert.equal(opinionModelChoice("grok-oauth"), "codex-frontier");
+    assert.equal(darkModelChoice("grok-oauth"), "auto");
+    assert.equal(
+      retiredModelChoiceNote("grok-oauth"),
+      "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected.",
+    );
+    for (const value of [...STORY_VALUES, ...RUNG_VALUES, undefined, null, "custom:x"]) {
+      assert.equal(retiredModelChoiceNote(value), null);
+    }
+    // Retired means retired: no menu offers it on any surface.
+    for (const surface of ["story", "scan", "opinion", "dark", "forced"] as const) {
+      assert.ok(!providersFor(surface).some((entry) => entry.id === "grok-oauth"));
     }
   });
 
@@ -145,12 +189,11 @@ describe("model choice contract", () => {
       "claude-frontier",
       "codex-balanced",
       "codex-frontier",
-      "grok-oauth",
       "local-model",
     ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
-    for (const invalid of ["local", "zen", "codex", undefined, null, {}]) {
+    for (const invalid of ["local", "zen", "codex", "grok-oauth", undefined, null, {}]) {
       assert.equal(opinionModelChoice(invalid), "codex-frontier");
     }
   });
@@ -166,20 +209,44 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Qwen 3.6 35B, then Codex Terra. A model on this computer is used only when it is already loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
       "Tries Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.",
     );
+    /*
+      0.6.63 (Unit Y item 1). Dark Desk's Automatic ladder used to be a typed
+      out Terra -> Sonnet tuple, so the owner's "DeepSeek first for research"
+      decision did not reach the surface that does the most research. It is the
+      registry ladder now, and this sentence is read from it -- including the
+      half-line that says a rung on this computer is used only when it is
+      already loaded.
+    */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries Codex Terra, then Claude Sonnet. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Qwen 3.6 35B, then Codex Terra. A model on this computer is used only when it is already loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
       "Prefers Codex Sol for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
+  });
+
+  it("walks Dark Desk's Automatic down the same ladder as Story and Scan", () => {
+    /*
+      0.6.63, Unit Y item 1: "Ladder for every Automatic surface that drafts or
+      researches ... Dark Desk". Dark's ladder is derived, not typed out, so a
+      rung added, removed or reordered for Story cannot leave Dark Desk -- or
+      `probeDarkProvider`'s loop, which spreads this list -- describing a
+      different order.
+    */
+    assert.deepEqual(
+      [...DARK_AUTOMATIC_LADDER],
+      [...automaticLadder()],
+      "Dark Desk's Automatic ladder must be the registry's, in order",
+    );
+    assert.equal(DARK_AUTOMATIC_LADDER[0], "deepseek-flash");
   });
 
   it("names the local model in every picker and says an unavailable selection stops", () => {
@@ -198,14 +265,14 @@ describe("model choice contract", () => {
     );
   });
 
-  it("names SuperGrok in every picker with technical fallback", () => {
-    assert.equal(modelChoiceLabel("grok-oauth"), "Grok (SuperGrok)");
+  it("no longer names SuperGrok as a writing model in any picker", () => {
+    // Retired 0.6.63, Unit Y item 4. A stored choice reads as Automatic and
+    // the help says why, rather than describing a provider the menu dropped.
     for (const surface of [undefined, "opinion", "dark"] as const) {
-      assert.equal(
-        modelChoiceHelp("grok-oauth", surface),
-        "Prefers Grok (SuperGrok) for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
-      );
+      const help = modelChoiceHelp("grok-oauth", surface);
+      assert.doesNotMatch(help, /Prefers Grok/);
     }
+    assert.match(modelChoiceHelp("grok-oauth"), /^Uses your configured gateway/);
   });
 
   it("gives Opinion setup steps for its one provider, and does not send anyone to Codex", () => {
@@ -269,5 +336,46 @@ describe("localModelOptionLabel", () => {
       }),
       "deepseek-v4.1-flash:cloud · Ollama Cloud · 1M context · thinking off · vision",
     );
+  });
+});
+
+/*
+  0.6.63 (Unit Y item 5). The Server page's Writing models panel has to say
+  the order in plain words, and it reads the sentence from here so the panel
+  cannot describe a ladder the desk no longer has. The word "Qwen" is the
+  owner's -- plain rather than the picker's full model id -- because what the
+  operator has to check is that a Qwen is LOADED on this machine, not which
+  version number the label carries.
+
+  Imported through a variable on purpose: the test runner loads this file
+  whole, so a name that does not exist yet would fail every test in it rather
+  than the one that is actually red.
+*/
+const ORDER_MODULE = "./model-choice.ts";
+
+async function orderSentenceFn(): Promise<(ladder?: readonly string[]) => string> {
+  const module = (await import(ORDER_MODULE)) as unknown as Record<string, unknown>;
+  const fn = module.automaticOrderSentence;
+  assert.equal(typeof fn, "function", "model-choice.ts must export automaticOrderSentence");
+  return fn as (ladder?: readonly string[]) => string;
+}
+
+describe("the Writing models panel's ladder sentence", () => {
+  it("says the order in plain words, first to last", async () => {
+    const sentence = await orderSentenceFn();
+    assert.equal(
+      sentence(),
+      "Automatic uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then Codex Terra.",
+    );
+  });
+
+  it("follows the ladder it is given, and says so when there is none", async () => {
+    const sentence = await orderSentenceFn();
+    assert.equal(sentence(["codex-balanced"]), "Automatic uses Codex Terra.");
+    assert.equal(
+      sentence(["codex-balanced", "deepseek-flash"]),
+      "Automatic uses Codex Terra first, then DeepSeek v4.1 Flash.",
+    );
+    assert.equal(sentence([]), "Automatic has no writing model set up on this machine.");
   });
 });

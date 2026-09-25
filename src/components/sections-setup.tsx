@@ -2,8 +2,22 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "./desk-chrome";
 import { inputClass } from "./desk-chrome-utils";
+import { UnsavedChangesGuard } from "./unsaved-changes-guard";
+import {
+  UNSAVED_SECTION_BAR_MESSAGE,
+  sourceAddHint,
+  sourceAddNotice,
+  sourcesSummaryLabel,
+} from "./sections-setup-copy";
 import { editorSections, applySections } from "@/lib/news/sections";
-import { sectionPreviewChanges, type Section, type SectionConfig } from "@/lib/news/section-types";
+import { addSource } from "@/lib/news/desk";
+import { kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
+import {
+  sectionPreviewChanges,
+  type Section,
+  type SectionConfig,
+  type SectionSourceLabel,
+} from "@/lib/news/section-types";
 
 export function SectionsSetup() {
   const query = useQuery({ queryKey: ["editor-sections"], queryFn: () => editorSections() });
@@ -14,6 +28,14 @@ export function SectionsSetup() {
   const [message, setMessage] = useState("");
   const [newName, setNewName] = useState("");
   const [newKey, setNewKey] = useState("");
+  const [addedSources, setAddedSources] = useState<SectionSourceLabel[]>([]);
+  const [addUrl, setAddUrl] = useState<Record<string, string>>({});
+  const [addLabel, setAddLabel] = useState<Record<string, string>>({});
+  const [addOpen, setAddOpen] = useState<Record<string, boolean>>({});
+  const [addingKey, setAddingKey] = useState<string | null>(null);
+  const [addNotice, setAddNotice] = useState<{ key: string; kind: "ok" | "err"; text: string } | null>(
+    null,
+  );
   const config = draft ?? query.data;
   if (query.isPending) return <p className="mt-8 text-sm">Loading newspaper sections…</p>;
   if (query.error)
@@ -26,7 +48,15 @@ export function SectionsSetup() {
   const retiring = config.sections.some(
     (s) => s.replacementKey && !query.data!.sections.find((p) => p.key === s.key)?.replacementKey,
   );
-  const previewChanges = draft ? sectionPreviewChanges(query.data, draft, query.data.sources) : [];
+  // Sources added from inside a section, ahead of the saved list, so a source
+  // the owner just ticked is visible in the checkbox list and named in Review
+  // changes instead of printing as "Source #N" until the next refetch.
+  const knownSources: SectionSourceLabel[] = [
+    ...addedSources.filter((row) => !query.data!.sources.some((s) => s.id === row.id)),
+    ...query.data!.sources,
+  ];
+  const titlesById = new Map(knownSources.map((s) => [s.id, s.title]));
+  const previewChanges = draft ? sectionPreviewChanges(query.data, draft, knownSources) : [];
   const edit = (key: string, patch: Partial<Section>) => {
     setDraft({
       ...config,
@@ -70,7 +100,67 @@ export function SectionsSetup() {
       setBusy(false);
     }
   };
+  /**
+   * Add one source to one section, from inside that section.
+   *
+   * This is the Sources page's own write, deliberately not a second one: it
+   * calls the same `addSource` server function, so the URL guard, the SSRF
+   * check, the kind/tier inference and the upsert-on-URL duplicate detection
+   * are the same code that runs on /desk/sources. Only the second half -- the
+   * assignment -- is new, and that half rides the section draft until the
+   * owner confirms it.
+   */
+  const addSourceToSection = async (s: Section) => {
+    const url = (addUrl[s.key] ?? "").trim();
+    if (!url || busy || addingKey) return;
+    setAddingKey(s.key);
+    setAddNotice(null);
+    try {
+      const wasOnWatch = new Set(knownSources.map((row) => row.id));
+      const res = await addSource({
+        data: {
+          url,
+          title: (addLabel[s.key] ?? "").trim(),
+          kind: kindFromSourceUrl(url),
+          tier: tierFromKind(kindFromSourceUrl(url)),
+        },
+      });
+      if (!res.ok) {
+        setAddNotice({ key: s.key, kind: "err", text: res.error });
+        return;
+      }
+      setAddedSources((rows) => [res.source, ...rows.filter((row) => row.id !== res.source.id)]);
+      edit(s.key, { sourceIds: [...new Set([...s.sourceIds, res.source.id])] });
+      setAddOpen((open) => ({ ...open, [s.key]: true }));
+      setAddUrl((values) => ({ ...values, [s.key]: "" }));
+      setAddLabel((values) => ({ ...values, [s.key]: "" }));
+      setAddNotice({
+        key: s.key,
+        kind: "ok",
+        text: sourceAddNotice({
+          sectionName: s.name,
+          title: res.source.title,
+          url: res.source.url,
+          // The add path upserts on the newsroom's URL, so a URL already on
+          // watch comes back as the same row id. That id being known before the
+          // click is the duplicate signal -- not a string compare on the URL.
+          alreadyOnWatch: wasOnWatch.has(res.source.id),
+        }),
+      });
+      void cache.invalidateQueries({ queryKey: ["editor-sections"] });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not add that source.";
+      setAddNotice({
+        key: s.key,
+        kind: "err",
+        text: msg === "Unauthorized" ? "Session expired. Sign in again, then retry." : msg,
+      });
+    } finally {
+      setAddingKey(null);
+    }
+  };
   return (
+    <>
     <section className="mt-10 border-t border-rule pt-6 text-sm" aria-label="Newspaper sections">
       <h3 className="font-display text-2xl">Newspaper sections</h3>
       <p className="mt-2 max-w-2xl">
@@ -259,10 +349,27 @@ export function SectionsSetup() {
                   its section listing; the permanent Opinion and About page links remain available.
                 </p>
               ) : (
-                <details className="mt-4">
+                <details
+                  className="mt-4"
+                  // An empty section opens itself: a collapsed "0" is the line
+                  // the owner read past and then found no way to act on. Once a
+                  // source is ticked, the default is collapsed again, but the
+                  // summary keeps the count and the first few names.
+                  open={addOpen[s.key] ?? s.sourceIds.length === 0}
+                  onToggle={(e) => {
+                    // React writing `open` back also fires this event, so only
+                    // record a real change of state.
+                    const next = e.currentTarget.open;
+                    setAddOpen((openMap) =>
+                      openMap[s.key] === next ? openMap : { ...openMap, [s.key]: next },
+                    );
+                  }}
+                >
                   <summary>
-                    Assigned accepted sources ({s.sourceIds.length})
-                    {s.sourceIds.length === 0 ? " — none assigned yet" : ""}
+                    {sourcesSummaryLabel(
+                      s.sourceIds.length,
+                      s.sourceIds.map((id) => titlesById.get(id) ?? ""),
+                    )}
                   </summary>
                   {/*
                     P0-6: make a zero-source section visible and explain why its
@@ -272,21 +379,21 @@ export function SectionsSetup() {
                   {s.sourceIds.length === 0 ? (
                     <p className="mt-2" role="status">
                       <b>No sources assigned.</b> A section scan for “{s.name}” would refuse to run
-                      because it has no accepted assigned sources. Assign sources below, or leave it
-                      and use General Scan.
+                      because it has no accepted assigned sources. Tick one below, or add a new one
+                      without leaving this page.
                     </p>
                   ) : null}
                   <p className="mt-2">
                     Section scans use only checked sources. General Scan continues to use all
                     accepted sources.
                   </p>
-                  {!query.data!.sources.length ? (
+                  {!knownSources.length ? (
                     <p className="mt-2">
-                      No accepted sources.{" "}
+                      No accepted sources yet. Add one below, or{" "}
                       <a href="/desk/sources" className="underline">
-                        Open Sources
+                        open Sources
                       </a>{" "}
-                      to accept sources first.
+                      to accept a whole registry.
                     </p>
                   ) : (
                     <>
@@ -300,7 +407,7 @@ export function SectionsSetup() {
                           onClick={() =>
                             edit(s.key, {
                               sourceIds: [
-                                ...new Set([...s.sourceIds, ...query.data!.sources.map((x) => x.id)]),
+                                ...new Set([...s.sourceIds, ...knownSources.map((x) => x.id)]),
                               ],
                             })
                           }
@@ -331,7 +438,7 @@ export function SectionsSetup() {
                           Copy from other sections
                         </InkButton>
                       </div>
-                      {query.data!.sources.map((source) => (
+                      {knownSources.map((source) => (
                       <label className="mt-2 flex items-start gap-2" key={source.id}>
                         <input
                           type="checkbox"
@@ -351,6 +458,55 @@ export function SectionsSetup() {
                       ))}
                     </>
                   )}
+                  <div className="mt-4 border-t border-rule pt-3">
+                    <h5 className="font-semibold">Add a new source to this section</h5>
+                    <p className="mt-1 max-w-xl">{sourceAddHint(s.name)}</p>
+                    <div className="mt-2 grid max-w-xl gap-3 sm:grid-cols-2">
+                      <label>
+                        New source URL
+                        <input
+                          className={`${inputClass} mt-1 w-full`}
+                          type="text"
+                          inputMode="url"
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          value={addUrl[s.key] ?? ""}
+                          onChange={(e) =>
+                            setAddUrl((values) => ({ ...values, [s.key]: e.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Label (optional)
+                        <input
+                          className={`${inputClass} mt-1 w-full`}
+                          value={addLabel[s.key] ?? ""}
+                          maxLength={120}
+                          onChange={(e) =>
+                            setAddLabel((values) => ({ ...values, [s.key]: e.target.value }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <p className="mt-3">
+                      <InkButton
+                        tone="ghost"
+                        disabled={busy || addingKey === s.key || !(addUrl[s.key] ?? "").trim()}
+                        onClick={() => void addSourceToSection(s)}
+                      >
+                        {addingKey === s.key ? "Adding…" : "Add and tick for this section"}
+                      </InkButton>
+                    </p>
+                    {addNotice?.key === s.key ? (
+                      <p
+                        role="status"
+                        className={"note mt-2" + (addNotice.kind === "err" ? " err" : "")}
+                      >
+                        {addNotice.text}
+                      </p>
+                    ) : null}
+                  </div>
                 </details>
               )}
               <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -504,6 +660,50 @@ export function SectionsSetup() {
           Reload saved configuration
         </InkButton>
       </div>
+      {draft ? (
+        // Nothing else in this panel is fixed, so this spacer is what keeps the
+        // last fieldset reachable above the bar on a 375px screen.
+        <div aria-hidden="true" className="h-28" />
+      ) : null}
     </section>
+    {/*
+      The unsaved bar and the leave-page prompt sit outside the
+      `Newspaper sections` section: they are page-level states, and keeping
+      them out of the panel keeps `panel.getByRole(...)` unambiguous for the
+      walkers that drive this screen. Both are the shared guard
+      (unsaved-changes-guard.tsx), so the Named outlets panel cannot drift
+      from this one.
+    */}
+    <UnsavedChangesGuard
+      unsaved={draft !== null}
+      barLabel="Section changes not saved"
+      message={UNSAVED_SECTION_BAR_MESSAGE}
+      leaveLabel="Leave with unsaved section changes?"
+      primary={{
+        tone: preview && retiring ? "danger" : "solid",
+        ariaLabel: preview
+          ? "Confirm and apply, from the unsaved changes bar"
+          : "Review changes, from the unsaved changes bar",
+        label: busy
+          ? "Applying…"
+          : preview
+            ? retiring
+              ? "Confirm retirement and apply"
+              : "Confirm and apply"
+            : "Review changes",
+        onClick: () => {
+          if (!preview) {
+            setPreview(true);
+            return;
+          }
+          void apply();
+        },
+      }}
+      cancelLabel="Cancel changes"
+      cancelAriaLabel="Cancel changes, from the unsaved changes bar"
+      onCancel={cancel}
+      busy={busy}
+    />
+    </>
   );
 }

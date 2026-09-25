@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
 /* N-5: an in-flight manual meeting pass can be stopped. One controller per newsroom. */
 const runningPasses = new Map<number, AbortController>();
@@ -31,7 +31,21 @@ import type { MeetingAwarenessResult } from "./meeting-capture.ts";
   A server function's handler body becomes an RPC stub in the client build, so
   `await import()` inside one never pulls the engine into the browser. Same
   repair as the 0.6.61 `node:child_process` fix.
+
+  0.6.63: the loop below is not a handler, so its `await import()` of the engine
+  was resolved in the client build after all -- and the engine now reaches a
+  `.server` module (the allow-listed python runner), which import-protection
+  refuses. The shared pass loads the engine through `loadMeetingEngine` instead:
+  a body handed to createServerOnlyFn is a boundary the client build prunes, so
+  this file keeps its one engine loading point and the browser sees none of it.
 */
+
+/** The meeting engine, loaded only ever on the server: see the note above. */
+const loadMeetingEngine = createServerOnlyFn(async () => {
+  const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
+  const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
+  return { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions };
+});
 
 export type MeetingManualRunResult =
   | {
@@ -57,19 +71,33 @@ export type MeetingManualRunResult =
  */
 export async function runMeetingPassWritesRow(
   sql: Sql,
-  input: { newsroomId: number; runId: number; signal?: AbortSignal },
+  input: { newsroomId: number; userId: string; runId: number; signal?: AbortSignal },
 ): Promise<MeetingAwarenessResult> {
   let awareness: MeetingAwarenessResult;
   const failures: string[] = [];
   try {
-    // Loaded here, not at module scope: see the note at the top of this file.
-    const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
-    const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
+    // Loaded through the server-only boundary above: see the note at the top.
+    const { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions } = await loadMeetingEngine();
     awareness = await runMeetingAwareness(sql, input.newsroomId, { captureMeeting: (ci) => captureMeetingCaptions({ ...ci, signal: input.signal }) });
     const recheck = await recheckProvisionalMeetings(sql, input.newsroomId);
     if (recheck.failures.length) {
       awareness.failures.push(...recheck.failures);
       awareness.coverageLine = `${awareness.coverageLine} (recheck: ${recheck.checked} checked, ${recheck.revised} revised, ${recheck.settled} settled)`;
+    }
+    /*
+      Speech-to-text (unit R), queued for the same reason the scheduler queues
+      it: this pass is what discovers a meeting that ended at audio, and the
+      transcription itself is durable work the desk drains. Wrapped so an
+      optional external tool can add a named line but never fail a capture pass.
+    */
+    try {
+      const { enqueueMissingTranscriptions } = await import("./textflowkit-transcribe.server.ts");
+      const speech = await enqueueMissingTranscriptions(sql, { newsroomId: input.newsroomId, userId: input.userId });
+      if (speech.queued > 0) {
+        awareness.coverageLine = `${awareness.coverageLine} (speech-to-text: ${speech.queued} queued)`;
+      }
+    } catch (e) {
+      awareness.failures.push(`speech-to-text: ${e instanceof Error ? e.message : String(e)}`);
     }
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
@@ -133,7 +161,7 @@ export const runMeetingsNow = createServerFn({ method: "POST" })
     const controller = new AbortController();
     runningPasses.set(newsroomId, controller);
     try {
-      const awareness = await runMeetingPassWritesRow(sql, { newsroomId, runId, signal: controller.signal });
+      const awareness = await runMeetingPassWritesRow(sql, { newsroomId, userId: context.userId, runId, signal: controller.signal });
       return {
         ok: true, scanRunId: runId,
         found: awareness.found.length,

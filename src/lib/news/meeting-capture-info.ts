@@ -39,3 +39,23 @@ export function computeEndedAt(input: {
   if (input.durationSeconds == null || input.videoTimestamp == null) return null;
   return new Date((input.videoTimestamp + input.durationSeconds) * 1000).toISOString();
 }
+
+/**
+ * A duration as `meeting_capture_records.duration_seconds` can hold it.
+ *
+ * Both tools this app reads report a duration as a float -- yt-dlp writes
+ * `duration` from the media header, and the real textflowkit reported 69.9935
+ * for a 70-second clip. The column is an `integer`, so handing either one
+ * straight to the write raises `invalid input syntax for type integer:
+ * "69.9935"` and the ENTIRE capture write is lost, transcript included, over a
+ * rounding detail. Found by unit R's real run; no fake-based test could see it.
+ *
+ * Rounded rather than floored because the nearest whole second is the honest
+ * reading of "how long is this recording", and because the result is also what
+ * `detectRevision` compares: if the stored value were rounded while the compared
+ * one stayed fractional, an unchanged meeting would look revised on every scan.
+ */
+export function wholeDurationSeconds(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return Math.round(value);
+}

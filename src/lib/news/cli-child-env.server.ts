@@ -13,6 +13,7 @@
   temp directory, proxy and TLS trust, the locale.
 */
 import path from "node:path";
+import { tmpdir } from "node:os";
 
 /** Names a provider CLI genuinely needs. Windows variable names are case-insensitive. */
 const ALLOWED = [
@@ -82,6 +83,43 @@ export const CLAUDE_CREDENTIAL_ENV = [
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_MODEL",
+];
+
+/**
+ * What a python media tool needs that an agent CLI does not.
+ *
+ * The desk starts yt-dlp -- and through it ffmpeg -- as a child of this server,
+ * from a URL fetched from the open web. Same class of child, same allow-list,
+ * but a different installer behind it: an operator who put yt-dlp in a virtual
+ * environment, or who set the python encoding on a Windows host, has told this
+ * machine how to run python, and dropping those silently changes which
+ * interpreter the capture uses. `PATH` already carries a venv's `Scripts`
+ * directory; `VIRTUAL_ENV` and these `PYTHON*` names are how the rest of that
+ * decision is expressed.
+ *
+ * `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` are here for the same reason
+ * `SSL_CERT_FILE` is in the list above: yt-dlp fetches over TLS through python's
+ * own trust store, and a newsroom behind a private CA has to name its bundle
+ * once, in the form the fetcher reads.
+ *
+ * No home is derived here, unlike `withCodexHome`. That derivation exists
+ * because a Codex sign-in is keyed to a home directory and a child handed a
+ * different one writes credentials the desk never reads. yt-dlp's home is a
+ * cache and a cookies file; a host without one gets no cache, not a capture
+ * that silently fails.
+ */
+export const MEDIA_TOOL_EXTRA = [
+  "PYTHONPATH",
+  "PYTHONHOME",
+  "PYTHONUTF8",
+  "PYTHONIOENCODING",
+  "PYTHONUNBUFFERED",
+  "PYTHONWARNINGS",
+  "PYTHONNOUSERSITE",
+  "PYTHONDONTWRITEBYTECODE",
+  "VIRTUAL_ENV",
+  "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE",
 ];
 
 /**
@@ -157,4 +195,71 @@ export function codexChildEnv(): NodeJS.ProcessEnv {
 /** The environment for a Claude child: the allow-list plus its own credentials. */
 export function claudeChildEnv(): NodeJS.ProcessEnv {
   return cliChildEnv(CLAUDE_CREDENTIAL_ENV);
+}
+
+/** The names a temp directory can be named by, in any case a host may use. */
+const TEMP_NAMES = new Set(["TEMP", "TMP", "TMPDIR"]);
+
+/**
+ * Name a temp directory, because a host is allowed to have none.
+ *
+ * `TEMP`, `TMP` and `TMPDIR` are on the allow-list, so a parent that has one
+ * hands it through and this does nothing. A parent that has none is not
+ * hypothetical: a systemd unit, a container, and the ubuntu CI runner all start
+ * this server with the three unset, and a child handed none of them is a child
+ * that cannot write its scratch files: yt-dlp writes its fragments and its cache
+ * through one, and python's own `tempfile` falls back to a directory it does not
+ * have. The desk names the directory rather than leaving it to the child's
+ * fallback, the same way `withCodexHome` names a home for a server launched by
+ * the installer.
+ *
+ * The name is the host's, chosen by `process.platform`: TMPDIR is what a POSIX
+ * child reads, and a Windows child reads TEMP and TMP. Both Windows names are
+ * set there because the two are read by different programs -- ffmpeg and the
+ * python runtime do not agree on which one they trust.
+ */
+export function withTempDir(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const named = Object.keys(env).some((name) => TEMP_NAMES.has(name.toUpperCase()));
+  if (named) return env;
+  const dir = tmpdir();
+  return process.platform === "win32" ? { ...env, TEMP: dir, TMP: dir } : { ...env, TMPDIR: dir };
+}
+
+/**
+ * The environment for a python media tool: the allow-list plus what running
+ * python on this host means here. No provider credential -- yt-dlp is not a
+ * model client, and `ANTHROPIC_API_KEY` is Claude's own, not a media tool's.
+ *
+ * It does carry a temp directory on every host, derived when the parent has
+ * none: see `withTempDir`.
+ */
+export function mediaToolChildEnv(): NodeJS.ProcessEnv {
+  return withTempDir(cliChildEnv(MEDIA_TOOL_EXTRA));
+}
+
+/**
+ * The environment for a textflowkit child (unit R).
+ *
+ * A transcription needs no credential at all -- it runs a downloaded model
+ * over a local audio file -- so this adds only what a Python CLI genuinely
+ * cannot resolve for itself: where the operator said the tool is, where the
+ * model weights are cached (Whisper keeps them under `XDG_CACHE_HOME` or
+ * `~/.cache/whisper`, and a server with neither re-downloads hundreds of
+ * megabytes on every run), and the two names that decide how Python encodes
+ * the transcript it prints on Windows.
+ *
+ * It deliberately adds NO credential name, no DATABASE_URL and no provider
+ * key. `TEXTFLOWKIT_CLI_PATH` is passed because it names a program path, the
+ * same way `CODEX_CLI_PATH` and `CLAUDE_CLI_PATH` already are -- not because a
+ * child needs to read it.
+ */
+export function textflowkitChildEnv(): NodeJS.ProcessEnv {
+  return cliChildEnv([
+    "TEXTFLOWKIT_CLI_PATH",
+    "XDG_CACHE_HOME",
+    "HF_HOME",
+    "TORCH_HOME",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+  ]);
 }
