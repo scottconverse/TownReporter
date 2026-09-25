@@ -1183,3 +1183,28 @@ jobs:
           BETTER_AUTH_SECRET: ci-front-page-river-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/front-page-river-e2e.mjs
+
+  # X5: import a civic-scanner v2.6 report. The report's own readiness statement
+  # decides the card -- Tier 1 ticked, Tier 2 developing with its gaps marked,
+  # Tier 3 and the Black Desk unverified ideas that are never a draft -- the
+  # claims ledger travels as an editor note and is never published, and a
+  # PARTIAL run is bannered with its own "what remains" list. Port 3323, which
+  # no other integration file may bind.
+  import-civic-scanner-v26:
+    name: Import a civic-scanner v2.6 report, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Read a v2.6 report tier by tier and import only what it stands behind
+        env:
+          BETTER_AUTH_SECRET: ci-import-civic-scanner-v26-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/import-civic-scanner-v26-e2e.mjs
