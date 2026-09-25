@@ -633,4 +633,25 @@ describe("a v2.6 card's tier, label and ledger, through the write path", () => {
       "Confirm the ordinance number against the published text.",
     );
   });
+
+  it("keeps a next step the editor typed beside the report's own notes", async () => {
+    const sql = await ensureSchema();
+    await performImportFinishedStories(
+      { userId: "editor", newsroomId: 99 },
+      {
+        text: PASTE,
+        tool: "",
+        stories: [
+          { ...V26_CARD, reporterNextStep: "Ask the city clerk for the signed ordinance." },
+        ],
+      },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    const [lead] = await sql.query("select notes_json from leads where newsroom_id=99") as {
+      notes_json: string;
+    }[];
+    const text: string = JSON.parse(lead!.notes_json).editorialAssignment.text;
+    assert.match(text, /Claims ledger — never published/, "the ledger is still there");
+    assert.match(text, /Ask the city clerk for the signed ordinance\./, "and so is the editor's");
+  });
 });

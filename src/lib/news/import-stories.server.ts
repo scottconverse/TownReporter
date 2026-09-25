@@ -429,7 +429,19 @@ export async function performImportFinishedStories(
       scale rather than the 1000 a sentence needed: a ledger cut off mid-row
       would drop the very claims it exists to warn about.
     */
-    const editorNotes = String(story.notes ?? "").trim() || story.reporterNextStep.trim();
+    const reportNotes = String(story.notes ?? "").trim();
+    const nextStep = story.reporterNextStep.trim();
+    /*
+      A sentence the editor typed on the review screen is never dropped and
+      never printed twice. The report's own notes are preferred, because they
+      already carry the next step when the report wrote one -- and when the
+      editor typed a different one beside them, it is appended rather than
+      silently discarded, which is what "prefer the notes" did on its own.
+    */
+    const editorNotes =
+      reportNotes && nextStep && !reportNotes.includes(nextStep)
+        ? `${reportNotes}\n\nNext step: ${nextStep}`
+        : reportNotes || nextStep;
     if (editorNotes) {
       await sql`
         update leads

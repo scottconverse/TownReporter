@@ -12,7 +12,8 @@ import {
   storyIdFromHeading,
   type ImportedStory,
 } from "./import-stories.ts";
-import { cardsFromReport, type ReviewCard } from "./import-review.ts";
+import { cardsFromReport, runBanner, type ReviewCard } from "./import-review.ts";
+import { darkSeedFromCard } from "./dark-seed.ts";
 
 /**
  * The v2.6 reports. `precleanMarkdown`/`splitParagraphs` fold CRLF to LF, so
@@ -342,6 +343,32 @@ describe("a full-pipeline JSON paste", () => {
     const notAReport = parseFinishedStories('{"hello":"world"}');
     assert.equal(notAReport.method, "none");
     assert.equal(notAReport.stories.length, 0);
+  });
+});
+
+describe("the Dark Desk handoff an unverified card carries", () => {
+  it("seeds the start box with the hypothesis, its label and its next check", () => {
+    const seed = darkSeedFromCard(card("H2"));
+    assert.equal(
+      seed.split("\n")[0],
+      "Unverified — Black Desk · H2 — Election service and ballot explainer",
+    );
+    assert.match(seed, /lists four Nov\. 3 measures/);
+    assert.match(seed, /Next check: Compare full measure texts/);
+  });
+
+  it("never writes a second next check over one the hypothesis already carries", () => {
+    const seed = darkSeedFromCard(card("BD1"));
+    assert.match(seed, /^Unverified — Black Desk · BD1 — The Dry Creek annexation/);
+    assert.equal(seed.split("Next check:").length - 1, 1, "the report's own check, once");
+    assert.match(seed, /obtain a usable official recording/);
+  });
+
+  it("banners a run that stopped early, and stays quiet on a whole one", () => {
+    const banner = runBanner(parseFinishedStories(FULL));
+    assert.equal(banner?.status, "PARTIAL");
+    assert.ok(banner!.remains.some((line) => /council recording/.test(line)));
+    assert.equal(runBanner(parseFinishedStories("A report with no status at all.")), null);
   });
 });
 

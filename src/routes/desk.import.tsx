@@ -28,6 +28,7 @@ import {
   findDuplicate,
   keptLinks,
   readSummary,
+  runBanner,
   selectionFromCard,
   tickedCards,
   IMPORT_PASTE_KEY,
@@ -35,6 +36,7 @@ import {
   type DuplicateWarning,
   type ReviewCard,
 } from "@/lib/news/import-review";
+import { DARK_SEED_KEY, darkSeedFromCard } from "@/lib/news/dark-seed";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
@@ -112,6 +114,12 @@ function ImportPage() {
     setCards((current) => current.map((c) => (c.key === key ? { ...c, ...changes } : c)));
 
   const ticked = tickedCards(cards);
+  /*
+    Whether the run that wrote this paste says it stopped early. The cards below
+    are exactly the cards it finished; the banner is about the part of the sweep
+    it never ran, which nothing else on this screen can tell an editor.
+  */
+  const banner = report ? runBanner(report) : null;
   const ready = ticked.filter((c) => cardProblems(c).length === 0);
   const blocked = ticked.length - ready.length;
   const storyCount = cards.filter((c) => c.isStory).length;
@@ -380,6 +388,29 @@ function ImportPage() {
             count={cards.length}
             sub={`${ticked.length} ticked · ${ready.length} ready to import${blocked ? ` · ${blocked} need a look first` : ""}. Everything here is yours to change.`}
           />
+          {banner ? (
+            <div className="mt-4 max-w-3xl border-2 border-rust p-4">
+              <p className="text-sm tracking-[0.14em] text-rust uppercase">
+                Run status: {banner.status}
+              </p>
+              <p className="mt-1 text-sm text-ink-2">
+                The scan that wrote this paste stopped before it finished. The cards below are the ones
+                it did finish — nothing here says the rest of the period was covered.
+              </p>
+              {banner.remains.length > 0 ? (
+                <>
+                  <p className="mt-2 text-sm font-medium">What the run says remains:</p>
+                  <ul className="mt-1 list-disc pl-5 text-sm">
+                    {banner.remains.map((line, index) => (
+                      <li key={`remains-${index}`} className="wrap-anywhere">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </div>
+          ) : null}
           <ul className="mt-4 space-y-6">
             {cards.map((card) => {
               const problems = cardProblems(card);
@@ -419,6 +450,23 @@ function ImportPage() {
                       <span className="mt-0.5 block text-base font-medium">{cardLabel(card)}</span>
                     </label>
                     <span className="flex flex-wrap items-center gap-2">
+                      {/*
+                        The report's own readiness statement, in the report's own
+                        words: "Developing — gaps marked" for a Tier 2 packet,
+                        "Unverified — Black Desk" for a Tier 3 one or a
+                        hypothesis. It is the one flag that changes what the card
+                        is, so it sits with the headline and not in the notes.
+                      */}
+                      {card.readinessFlag ? (
+                        <span
+                          className={
+                            "text-sm tracking-[0.14em] uppercase " +
+                            (card.unverified ? "text-rust" : "text-ink-2")
+                          }
+                        >
+                          {card.readinessFlag}
+                        </span>
+                      ) : null}
                       {card.hold ? (
                         <span className="text-sm tracking-[0.14em] text-rust uppercase">Hold</span>
                       ) : null}
@@ -435,6 +483,33 @@ function ImportPage() {
                     </p>
                   ) : null}
                   {card.warning ? <p className="mt-2 text-sm text-rust">{card.warning}</p> : null}
+                  {/*
+                    A ledger with a claim the run could not verify is a visible
+                    warning, not a line in a collapsed panel: the whole point of
+                    the ledger is that the editor reads it before printing.
+                  */}
+                  {card.claimsWarning ? (
+                    <p className="mt-2 text-sm text-rust">{card.claimsWarning}</p>
+                  ) : null}
+                  {card.unverified ? (
+                    <p className="mt-2 text-sm text-ink-2">
+                      The report says this is unverified, so it is not publication copy in any form.{" "}
+                      <Link
+                        to="/desk/dark"
+                        className="inline-link"
+                        onClick={() => {
+                          try {
+                            sessionStorage.setItem(DARK_SEED_KEY, darkSeedFromCard(card));
+                          } catch {
+                            /* a browser that will not keep it opens its own empty box */
+                          }
+                        }}
+                      >
+                        Send it to Dark Desk
+                      </Link>{" "}
+                      to have it dug out, with the hypothesis and its next check already in the box.
+                    </p>
+                  ) : null}
                   {warning ? (
                     <p className="mt-2 text-sm text-rust">
                       {duplicateNote(warning)}{" "}
@@ -681,6 +756,7 @@ function ImportPage() {
                   <details className="mt-3">
                     <summary className="cursor-pointer text-sm text-muted">
                       Editor notes — never published
+                      {card.notes ? " · the report's notes and claims ledger" : ""}
                       {card.reporterNextStep ? " · a next step is written down" : ""}
                     </summary>
                     <div className="mt-2 space-y-3">
@@ -704,6 +780,24 @@ function ImportPage() {
                           />
                         </label>
                       </div>
+                      {/*
+                        What the report itself attached to this card: the tier's
+                        qualifier and the claims ledger with its statuses. Shown
+                        here because this screen is the only place an editor can
+                        read it -- it is stored on the lead as an editor note and
+                        is never published. Read-only on purpose: it is the
+                        report's record, and the sentence below is the editor's.
+                      */}
+                      {card.notes ? (
+                        <div>
+                          <p className="text-sm tracking-[0.14em] text-muted uppercase">
+                            From the report
+                          </p>
+                          <pre className="mt-1 max-h-64 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap wrap-anywhere">
+                            {card.notes}
+                          </pre>
+                        </div>
+                      ) : null}
                       <label className="block">
                         <span className="text-sm tracking-[0.14em] text-muted uppercase">
                           Reporter next step
