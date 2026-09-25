@@ -35,6 +35,7 @@ async function ensureLeadsTable() {
       newsworthiness integer not null default 0,
       notes_json text not null default '{}',
       investigation_id integer,
+      topic_unchosen boolean not null default false,
       created_at timestamptz not null default now()
     )
   `);

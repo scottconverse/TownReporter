@@ -2933,7 +2933,18 @@ export async function queueInvestigationFor(
     order by id desc limit 12
   `;
   const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
-  const topic = topicFromText(`${inv[0].title}\n${inv[0].summary}`);
+  /*
+    Same reading as the Write box (Unit P item 2): this newsroom's own section
+    names and briefs decide the beat, and a file that names none of them is
+    marked not-chosen instead of silently landing in the first section. The
+    light reader never installs the sections schema -- a handoff must not fail
+    over a label.
+  */
+  const { readTopicSections } = await import("./sections.server.ts");
+  const { topic, unchosen: topicUnchosen } = topicFromText(
+    `${inv[0].title}\n${inv[0].summary}`,
+    await readTopicSections(newsroomId),
+  );
   // Keep uncertainty ahead of the summary: a long brief must not crowd out
   // the opposing account when a whole file becomes a lead.
   const signalNotes = await sql<{
@@ -2990,7 +3001,7 @@ export async function queueInvestigationFor(
     .join("\n\n");
   const evidence = `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`;
   const created = await sql<{ id: number }>`
-    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen)
     values (
       ${userId},
       ${newsroomId},
@@ -3001,7 +3012,8 @@ export async function queueInvestigationFor(
       ${urls},
       ${evidence},
       ${12},
-      ${id}
+      ${id},
+      ${topicUnchosen}
     )
     returning id
   `;

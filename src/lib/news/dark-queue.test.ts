@@ -29,6 +29,7 @@ async function ensureLeadsTable() {
       newsworthiness integer not null default 0,
       notes_json text not null default '{}',
       investigation_id integer,
+      topic_unchosen boolean not null default false,
       created_at timestamptz not null default now()
     )
   `);
@@ -159,7 +160,17 @@ it(
     const rows = await sql<{
       why: string;
       evidence: string;
-    }>`select why, evidence from leads where id = ${result.leadId}`;
+      topic: string;
+      topic_unchosen: boolean;
+    }>`select why, evidence, topic, topic_unchosen from leads where id = ${result.leadId}`;
+    /*
+      "A procurement question" names no beat, and this test's fixture has no
+      `newsroom_sections` table at all (Unit P item 2): the handoff still files,
+      into the first section the shipped vocabulary offers, and records that
+      nobody chose it.
+    */
+    assert.equal(rows[0]!.topic, "council");
+    assert.equal(rows[0]!.topic_unchosen, true);
     for (const text of [rows[0]!.why, rows[0]!.evidence]) {
       assert.match(text, /lead handoff, not publication/i);
       assert.match(text, /Emergency exemption 0/);

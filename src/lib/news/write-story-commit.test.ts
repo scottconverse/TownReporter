@@ -20,6 +20,7 @@ async function ensureWriteStorySchema() {
       evidence text not null default '',
       newsworthiness integer not null default 0,
       notes_json text not null default '{}',
+      topic_unchosen boolean not null default false,
       created_at timestamptz not null default now()
     )
   `);
@@ -59,6 +60,15 @@ async function ensureWriteStorySchema() {
 }
 
 describe("writeStoryForAuthenticatedEditor", () => {
+  /*
+    Two kinds of case here. Most inject `getSections` and a fixed section list,
+    which is how this file names a newsroom's beats without the sections
+    machinery. The last three leave the reader alone: they build only the
+    `newsroom_sections` table the light reader selects from, and pin what this
+    newsroom's own words do to the topic, what the shipped vocabulary does
+    when that table cannot be read, and that an unvalidatable section choice
+    is refused.
+  */
   const sectionConfig = {
     revision: 1,
     sections: ["community-life", "council", "hidden", "retired", "about", "opinion"].map(key => ({
@@ -80,9 +90,21 @@ describe("writeStoryForAuthenticatedEditor", () => {
         enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
       });
       assert.ok(result.ok);
-      const [lead] = await sql<{topic:string}>`select topic from leads where id=${result.leadId}`;
+      const [lead] = await sql<{topic:string;topic_unchosen:boolean}>`select topic, topic_unchosen from leads where id=${result.leadId}`;
       const [draft] = await sql<{topic:string}>`select topic from drafts where lead_id=${result.leadId}`;
-      assert.equal(lead.topic, sectionKey ?? "council");
+      /*
+        No sectionKey: the pasted text names no beat this newsroom files under
+        (Unit P item 2), so the column takes the FIRST SECTION THIS NEWSROOM
+        FILES UNDER -- community-life here, because sectionConfig lists it
+        first -- and the lead records that nobody chose it. `council` was the
+        old hard-wired answer and is not the newsroom's first section.
+      */
+      assert.equal(lead.topic, sectionKey ?? "community-life");
+      assert.equal(
+        lead.topic_unchosen,
+        sectionKey === undefined,
+        "only the editor's own choice clears the not-chosen mark",
+      );
       assert.equal(draft.topic, lead.topic);
     });
   }
@@ -110,7 +132,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     const sql = await ensureWriteStorySchema();
     const text = "Write a short local item about upcoming library programs.";
     const result = await writeStoryForAuthenticatedEditor({ context: { userId: "assignment-editor", newsroomId: 813 }, text, modelChoice: "claude-frontier" }, {
-      getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+      getSql: async () => sql, getSections: async () => sectionConfig, audit: async () => {}, assertRate: async () => {},
       probeProvider: async () => ({ ok: true, choice: "claude-frontier", label: "Claude" }),
       enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
     });
@@ -121,7 +143,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
   it("persists supplied-material scope on both the lead and immutable queued job", async () => {
     const sql = await ensureWriteStorySchema();
     const res = await writeStoryForAuthenticatedEditor({ context: { userId: "scope-editor", newsroomId: 811 }, text: "Library hours change Tuesday. Opens at noon.", researchScope: "supplied", modelChoice: "claude-frontier" }, {
-      getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+      getSql: async () => sql, getSections: async () => sectionConfig, audit: async () => {}, assertRate: async () => {},
       probeProvider: async () => ({ ok: true, choice: "claude-frontier", label: "Claude" }),
       enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
     });
@@ -135,7 +157,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     const sql = await ensureWriteStorySchema();
     let enqueued = false;
     const res = await writeStoryForAuthenticatedEditor({ context: { userId: "scope-codex", newsroomId: 812 }, text: "Library hours change Tuesday. Opens at noon.", researchScope: "supplied", modelChoice: "auto" }, {
-      getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+      getSql: async () => sql, getSections: async () => sectionConfig, audit: async () => {}, assertRate: async () => {},
       probeProvider: async () => ({ ok: true, choice: "codex-balanced", label: "Codex" }),
       enqueueJob: async (opts) => { enqueued = true; return enqueueJob({ ...opts, kick: false }); },
     });
@@ -151,7 +173,10 @@ describe("writeStoryForAuthenticatedEditor", () => {
     let probeCalls = 0;
     const res = await writeStoryForAuthenticatedEditor(
       { context: { userId, newsroomId: 1 }, text: "   " },
-      { probeProvider: async () => { probeCalls += 1; return { ok: false as const, error: "unused" }; } },
+      {
+        getSections: async () => sectionConfig,
+        probeProvider: async () => { probeCalls += 1; return { ok: false as const, error: "unused" }; },
+      },
     );
     assert.equal(res.ok, false);
     if (res.ok) return assert.fail("empty input must be refused");
@@ -173,6 +198,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     const res = await writeStoryForAuthenticatedEditor(
       { context: { userId, newsroomId: 1 }, text, modelChoice: "auto" },
       {
+        getSections: async () => sectionConfig,
         probeProvider: async (choice) => {
           probeCalls += 1;
           assert.equal(choice, "auto");
@@ -224,6 +250,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
         modelChoice: "codex-balanced",
       },
       {
+        getSections: async () => sectionConfig,
         probeProvider: async () => ({ ok: false as const, error: NOT_INSTALLED }),
       },
     );
@@ -238,5 +265,78 @@ describe("writeStoryForAuthenticatedEditor", () => {
       select count(*) as count from leads where id = ${res.leadId}
     `;
     assert.equal(Number(count), 1);
+  });
+
+  it("lets this newsroom's own section name and brief decide the beat", async () => {
+    const sql = await ensureWriteStorySchema();
+    await sql.query(`
+      create table if not exists newsroom_sections (
+        newsroom_id integer not null, key text not null, name text not null,
+        position integer not null default 0, brief text not null default '', replacement_key text
+      )
+    `);
+    await sql.query(`
+      insert into newsroom_sections (newsroom_id, key, name, brief, replacement_key)
+      values (817, 'local-media', 'Local media', 'Nonprofit newsrooms, hires and fundraisers', null)
+    `);
+    const res = await writeStoryForAuthenticatedEditor(
+      {
+        context: { userId: "own-words", newsroomId: 817 },
+        text: "Longmont Public Media hires a new executive director\nThe nonprofit said Tuesday it hired Ana Duarte, who spent eight years at a community radio station in Greeley and holds a degree in education from Colorado State University.",
+        modelChoice: "claude-frontier",
+      },
+      {
+        getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+        probeProvider: async () => ({ ok: true as const, label: "Claude Frontier", choice: "claude-frontier" as const }),
+        enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
+      },
+    );
+    assert.ok(res.ok);
+    const [lead] = await sql<{ topic: string; topic_unchosen: boolean }>`
+      select topic, topic_unchosen from leads where id=${res.leadId}
+    `;
+    assert.equal(lead.topic, "local-media", "the newsroom's own brief names the hire, not the degree in education");
+    assert.equal(lead.topic_unchosen, false);
+  });
+
+  it("files with the shipped vocabulary when this newsroom's sections cannot be read", async () => {
+    const sql = await ensureWriteStorySchema();
+    const res = await writeStoryForAuthenticatedEditor(
+      {
+        context: { userId: "sections-unreadable", newsroomId: 815 },
+        text: "St. Vrain Valley Schools board packet posted",
+        modelChoice: "claude-frontier",
+      },
+      {
+        getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+        probeProvider: async () => ({ ok: true as const, label: "Claude Frontier", choice: "claude-frontier" as const }),
+        enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
+      },
+    );
+    assert.ok(res.ok, "an unreadable section list must not cost the editor the write");
+    const [lead] = await sql<{ topic: string; topic_unchosen: boolean }>`
+      select topic, topic_unchosen from leads where id=${res.leadId}
+    `;
+    assert.equal(lead.topic, "schools", "the shipped vocabulary still reads a schools story");
+    assert.equal(lead.topic_unchosen, false);
+  });
+
+  it("refuses a section choice it cannot validate rather than filing the wrong one", async () => {
+    const sql = await ensureWriteStorySchema();
+    const res = await writeStoryForAuthenticatedEditor(
+      {
+        context: { userId: "sections-unreadable-choice", newsroomId: 816 },
+        text: "St. Vrain Valley Schools board packet posted",
+        sectionKey: "schools",
+        modelChoice: "claude-frontier",
+      },
+      {
+        getSql: async () => sql,
+        getSections: async () => { throw new Error("sections are unreadable right now"); },
+      },
+    );
+    assert.equal(res.ok, false);
+    if (res.ok) return assert.fail("an unvalidatable section choice must be refused");
+    assert.match(res.error, /section/i);
   });
 });
