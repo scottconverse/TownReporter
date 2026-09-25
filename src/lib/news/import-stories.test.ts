@@ -13,7 +13,6 @@ import {
   splitParagraphs,
   stripOrdinal,
   verifyModelSplit,
-  type ImportedStory,
 } from "./import-stories.ts";
 
 const FIXTURE = readFileSync(
@@ -137,6 +136,34 @@ describe("parseFinishedStories on the real civic-scanner report", () => {
     // The unambiguous one must not be missed: a school board packet.
     assert.equal(stories[6]!.sectionSuggestion, "schools");
   });
+
+  /*
+    Coordinator review of the Unit X screenshots, 2026-09-24: the marijuana
+    hospitality story was suggested "Budget". It is a council story that
+    mentions what sales tax revenue might be in one paragraph, and the chooser
+    this branch carries (`topicFromText`, desk-copy.ts:1156) matches
+    /sales tax|mill levy|property tax/ before any council term.
+
+    Lane 1's Unit P rewrites that same function so it reads whole words and the
+    newsroom's own section names, and says "not chosen" when it is unsure. Unit
+    P is on `deepseek/0663-accuracy` and is NOT merged into this branch, so this
+    test cannot pass yet and is marked todo rather than weakened to match the
+    wrong answer. When P lands, un-todo it and expect P's own shape: the story
+    files under council, or comes back unchosen -- never Budget.
+  */
+  it(
+    "never suggests Budget for the marijuana hospitality story",
+    { todo: "Unit P's rewrite of topicFromText is not merged into this branch yet" },
+    () => {
+      const guess = stories[0]!.sectionSuggestion;
+      assert.match(stories[0]!.headline, /^Council votes to bring marijuana hospitality rules back/);
+      assert.notEqual(guess, "budget");
+      assert.ok(
+        ["council", ""].includes(guess),
+        `expected council or the not-chosen marker, got "${guess}"`,
+      );
+    },
+  );
 
   it("recognises the three non-story sections and leaves them off", () => {
     assert.deepEqual(
