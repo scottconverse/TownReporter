@@ -43,13 +43,16 @@ const DEEPSEEK_TIMEOUT_NO_OUTPUT = "DeepSeek request timed out after 150s, 0 byt
  * while naming a different one. `seen` records the rungs probed, so a test can
  * also assert that the hop stopped at the first ready rung.
  */
-function readyProbe(seen: string[] = []): (choice: string) => Promise<ProviderProbe> {
+function readyProbe(
+  seen: string[] = [],
+): (choice?: EffectiveProviderChoice | string) => Promise<ProviderProbe> {
   return async (choice) => {
-    seen.push(choice);
+    const rung = choice ?? "";
+    seen.push(rung);
     return {
       ok: true,
-      label: modelChoiceLabel(choice),
-      choice: choice as EffectiveProviderChoice,
+      label: modelChoiceLabel(rung),
+      choice: rung as EffectiveProviderChoice,
     };
   };
 }

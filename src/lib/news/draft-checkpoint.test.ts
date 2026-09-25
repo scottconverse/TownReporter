@@ -5,6 +5,7 @@ import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
 import type { ReportedDraftResult } from "./desk-model-run.ts";
+import type { EffectiveProviderChoice } from "./ai.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -12,6 +13,7 @@ let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let ensureStoryDocuments: typeof import("./story-documents.server.ts").ensureStoryDocuments;
 let readStoryDocuments: typeof import("./story-documents.server.ts").readStoryDocuments;
+let modelChoiceLabel: typeof import("./model-choice.ts").modelChoiceLabel;
 let withClaimedLeadDraftCheckpointLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftCheckpointLock;
 let withClaimedLeadDraftLock: typeof import("./draft-order.server.ts").withClaimedLeadDraftLock;
 
@@ -22,6 +24,7 @@ before(async () => {
   ({performDraftWork}=await vite.ssrLoadModule("/src/lib/news/desk.ts"));
   ({ensureStoryDocuments,readStoryDocuments}=await vite.ssrLoadModule("/src/lib/news/story-documents.server.ts"));
   ({withClaimedLeadDraftCheckpointLock,withClaimedLeadDraftLock}=await vite.ssrLoadModule("/src/lib/news/draft-order.server.ts"));
+  ({modelChoiceLabel}=await vite.ssrLoadModule("/src/lib/news/model-choice.ts"));
 });
 after(async()=>vite?.close());
 
@@ -79,7 +82,7 @@ test("document reading retries only the failed chunk and keeps completed chunks"
   const evidence = await readStoryDocuments(
     room,
     lead.id,
-    "codex-balanced",
+    "deepseek-flash",
     "Read the packet",
     async () => undefined,
     [],
@@ -89,13 +92,26 @@ test("document reading retries only the failed chunk and keeps completed chunks"
     {
       modelEffort: "none",
       source: "auto",
-      probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
+      /*
+        0.6.63 Unit Y: the ladder is DeepSeek v4.1 Flash -> Qwen 3.6 35B ->
+        Codex Terra. This fixture used to start on Codex Terra -- the old
+        ladder's last rung -- and hop to Claude Sonnet. A hop only ever goes
+        FORWARD, so a row on the last rung has nowhere to go and the retry
+        never happens at all; the row starts at the first rung now, and the
+        probe answers about the rung it was handed instead of naming one
+        provider for every rung.
+      */
+      probe: async (choice) => ({
+        ok: true,
+        label: modelChoiceLabel(choice),
+        choice: choice as EffectiveProviderChoice,
+      }),
       chat: async (_system, prompt, _tokens, opts) => {
         const choice = String(opts?.choice);
         const marker = prompt.includes("Characters 1-24000") ? "first" : "second";
         calls.push({ choice, marker });
-        if (choice === "codex-balanced" && marker === "second") {
-          return { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" };
+        if (choice === "deepseek-flash" && marker === "second") {
+          return { ok: false as const, error: "DeepSeek request timed out after 150s, 0 bytes out" };
         }
         return { ok: true as const, text: `${marker} evidence from ${choice}` };
       },
@@ -103,13 +119,13 @@ test("document reading retries only the failed chunk and keeps completed chunks"
     },
   );
   assert.deepEqual(calls, [
-    { choice: "codex-balanced", marker: "first" },
-    { choice: "codex-balanced", marker: "second" },
-    { choice: "claude-sonnet", marker: "second" },
+    { choice: "deepseek-flash", marker: "first" },
+    { choice: "deepseek-flash", marker: "second" },
+    { choice: "qwen-local", marker: "second" },
   ]);
-  assert.deepEqual(switches, ["claude-sonnet"]);
-  assert.match(evidence, /first evidence from codex-balanced/);
-  assert.match(evidence, /second evidence from claude-sonnet/);
+  assert.deepEqual(switches, ["qwen-local"]);
+  assert.match(evidence, /first evidence from deepseek-flash/);
+  assert.match(evidence, /second evidence from qwen-local/);
 });
 test("Story retries only the failed writer call and keeps completed research", async () => {
   await ensureJobsSchema();
@@ -153,7 +169,11 @@ test("Story retries only the failed writer call and keeps completed research", a
         ? { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" }
         : { ok: true as const, text: "writer result" };
     },
-    probe: async () => ({ ok: true, label: "Claude Sonnet", choice: "claude-sonnet" }),
+    probe: async (choice) => ({
+      ok: true,
+      label: modelChoiceLabel(choice),
+      choice: choice as EffectiveProviderChoice,
+    }),
     setJobStage: async () => undefined,
     setJobModelChoice: async (_id, choice) => { job.model_choice = choice; },
     setJobFailoverNote: async () => undefined,
@@ -161,9 +181,18 @@ test("Story retries only the failed writer call and keeps completed research", a
 
   assert.equal(reportCalls, 1, "the reporting pipeline must not restart");
   assert.equal(upstreamResearchCalls, 1, "completed ingestion/search/report gathering must be reused");
+  /*
+    0.6.63 Unit Y: the ladder is DeepSeek v4.1 Flash -> Qwen 3.6 35B -> Codex
+    Terra, and Claude Sonnet left it. This row is an explicit pick sitting on
+    the ladder's LAST rung, so no rung follows it and -- for an explicit pick
+    that is not on the ladder -- `planAutomaticFailover` restarts the walk
+    from the ladder's top: DeepSeek. The fixture used to expect Claude Sonnet
+    because its probe named that one provider for every rung it was handed;
+    the probe now answers about the rung it actually got.
+  */
   assert.deepEqual(providerCalls, [
     { choice: "codex-balanced", effort: "none" },
-    { choice: "claude-sonnet", effort: "medium" },
+    { choice: "deepseek-flash", effort: "none" },
   ]);
 });
 

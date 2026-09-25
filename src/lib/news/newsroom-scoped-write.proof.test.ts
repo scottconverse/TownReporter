@@ -37,6 +37,10 @@ async function ensureScratchSchema() {
       evidence text not null default '',
       newsworthiness integer not null default 0,
       notes_json text not null default '{}',
+      /* 0.6.63 (migrations/0087_lead_topic_unchosen.sql). The shipped INSERTs
+         in lead-filing.ts and model-request-commit.server.ts name this column,
+         so this scratch table has to carry it. */
+      topic_unchosen boolean not null default false,
       created_at timestamptz not null default now()
     )
   `);

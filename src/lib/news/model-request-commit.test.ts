@@ -300,8 +300,21 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(storyExpired.kind, "provider-auth");
     assert.match(storyExpired.error, /Codex needs you to sign in again/i);
     assert.equal(storyExpired.detail, EXPIRED);
-    assert.equal(storyProbeCalls, 3);
-    assert.deepEqual(storyProbeChoices, ["codex-frontier", "codex-balanced", "claude-sonnet"]);
+    /*
+      0.6.63 Unit Y: the fallback ladder is DeepSeek v4.1 Flash -> Qwen 3.6
+      35B -> Codex Terra, and Claude Sonnet left it. An explicit
+      `codex-frontier` pick is not a rung of it, so the walk starts from the
+      ladder's top and probes all three rungs before giving up -- four probes
+      counting the pick itself. The pre-0.6.63 fixture saw three: its ladder
+      was codex-frontier, codex-balanced, claude-sonnet.
+    */
+    assert.equal(storyProbeCalls, 4);
+    assert.deepEqual(storyProbeChoices, [
+      "codex-frontier",
+      "deepseek-flash",
+      "qwen-local",
+      "codex-balanced",
+    ]);
     assert.equal(storyEnqueueCalls, 0);
     assert.deepEqual(await countsFor(userId), before);
 

@@ -7,6 +7,7 @@ import {
   parseEditorial,
 } from "./editorial.ts";
 import type { EditorialOrchestrationRuntime as EditorialRuntime, WriteEditorialInput } from "./editorial-orchestration.ts";
+import { opinionModelChoice, retiredModelChoiceNote } from "./model-choice.ts";
 
 /** The shape the voice file says it delivers, in its stated order. */
 const DELIVERED = `The rail district wants your money twice
@@ -669,16 +670,33 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     assert.deepEqual(events, ["voice:locate", "custom", "file"]);
   });
 
-  it("sends an explicit SuperGrok choice only to the direct OAuth pair", async () => {
+  /*
+    0.6.63 Unit Y item 4 retired `grok-oauth` from every picker ("REMOVE
+    Grok"), so an "explicit SuperGrok choice" is no longer a thing an editor
+    can make: `opinionModelChoice` no longer accepts the string, and the run
+    falls to Opinion's Automatic ladder (Codex Sol first). What this test
+    still proves is the safety half of that retirement -- a stored
+    `desk_jobs.model_choice` of "grok-oauth" cannot sneak into the OAuth pair
+    through the orchestrator's custom branch; it normalises to Automatic and
+    the editor is told so. `claudeRuntime`'s `runCustomPair` is the poison
+    pill here.
+  */
+  it("falls a stored SuperGrok choice back to Opinion's default instead of the OAuth pair", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
+    assert.equal(
+      opinionModelChoice("grok-oauth"),
+      "codex-frontier",
+      "a retired pick is not an Opinion choice, so it falls to Opinion's default -- Codex Sol",
+    );
+    assert.match(retiredModelChoiceNote("grok-oauth") ?? "", /no longer offered/);
     const result = await orchestrateEditorial(
       { ...ORCHESTRATION_INPUT, modelChoice: "grok-oauth" },
-      customRuntime(events, { ok: true, text: DELIVERED }),
+      claudeRuntime(events, { ok: true, text: DELIVERED }),
     );
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
-    assert.equal(result.modelChoice, "grok-oauth");
-    assert.deepEqual(events, ["voice:locate", "custom", "file"]);
+    assert.equal(result.modelChoice, "codex-frontier", "the run took Automatic's first rung");
+    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
 });

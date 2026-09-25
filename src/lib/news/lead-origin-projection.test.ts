@@ -52,12 +52,27 @@ function projectionQuery(name: "listLeads" | "getLead"): string {
 
 /** Pin one projection to one lead. The two queries filter differently
  * (`l.newsroom_id` in the queue, `l.id` in the story view), so both spellings
- * are narrowed; a query that stops matching either assertion below fails
- * loudly rather than silently returning the wrong row. */
+ * are narrowed; a query that stops matching either spelling fails loudly
+ * rather than silently returning the wrong row.
+ *
+ * The anchors are matched against LF text because `desk.ts` is read from the
+ * working tree, and a Windows checkout with `core.autocrlf=true` writes it
+ * with CRLF. Without the normalization below the first anchor never matched,
+ * the queue query stayed unpinned, and its `order by (l.scan_run_id is null)
+ * desc` returned the imported null-provenance lead first -- so the assertion
+ * that caught this read a true bug as a missing column.
+ */
 function forLead(query: string, id: number): string {
-  return query
+  const pinned = query
+    .replace(/\r\n/g, "\n")
     .replace("where l.newsroom_id = 1\n", `where l.newsroom_id = 1 and l.id = ${id}\n`)
     .replace("where l.id = 1 and", `where l.id = ${id} and`);
+  assert.match(
+    pinned,
+    new RegExp(`l\\.id = ${id}\\b`),
+    `this projection does not filter on lead ${id}: its filter spelling changed, so the pin above did nothing`,
+  );
+  return pinned;
 }
 
 test("real queue and story projections carry persisted scanner provenance and import origin", async () => {
@@ -70,7 +85,8 @@ test("real queue and story projections carry persisted scanner provenance and im
       newsworthiness integer, created_at timestamptz, investigation_id integer, notes_json text,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
       last_resurfaced_scan_run_id integer, possible_duplicate_of integer,
-      origin text, provenance_json text
+      origin text, provenance_json text,
+      topic_unchosen boolean not null default false
     );
     create table articles (id integer primary key, lead_id integer, status text, slug text, headline text);
     create table drafts (id integer primary key, lead_id integer, newsroom_id integer, headline text, updated_at timestamptz);

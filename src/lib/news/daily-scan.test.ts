@@ -9,6 +9,8 @@ import {
 } from "./daily-scan.ts";
 import { getSql } from "../db.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
+import { modelChoiceLabel } from "./model-choice.ts";
+import type { EffectiveProviderChoice } from "./ai.ts";
 import { readFileSync } from "node:fs";
 
 describe("daily scan wall clock", () => {
@@ -63,18 +65,35 @@ describe("scheduled scan trust boundaries", () => {
     assert.doesNotMatch(server, /ANTHROPIC_API_KEY|configured gateway|resolveProvider/);
   });
   it("routes a scheduled run around a technical provider failure", async () => {
-    let probes = 0;
+    /*
+      0.6.63 Unit Y: the ladder is now DeepSeek v4.1 Flash -> Qwen 3.6 35B ->
+      Codex Terra. Two things in this fixture followed it, and neither one is
+      an assertion being relaxed:
+
+       - `claude-frontier` is no longer a rung, so a scheduled run has no rung
+         "after" it and the walk restarts from the ladder's top -- DeepSeek.
+       - The probe answers about the rung it was handed instead of returning
+         one hardcoded provider. The old constant probe ("Codex Terra for
+         everything") made the plan read `next: "codex-balanced"` while the
+         merged planner returns `next: <the rung it probed>`; a plan whose
+         `next` and `label` disagree is not a shape this desk can act on.
+    */
+    const probed: string[] = [];
     const plan = await planAutomaticFailover({
       source: "scheduled",
       current: "claude-frontier",
       error: "Claude Code request timed out after 150s, 0 bytes out",
-      probe: async () => {
-        probes += 1;
-        return { ok: true, choice: "codex-balanced", label: "Codex Terra" };
+      probe: async (choice) => {
+        probed.push(choice);
+        return { ok: true, choice: choice as EffectiveProviderChoice, label: modelChoiceLabel(choice) };
       },
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
-    assert.equal(probes, 1);
+    assert.deepEqual(probed, ["deepseek-flash"], "the walk starts at the ladder's first rung");
+    assert.deepEqual(plan, {
+      next: "deepseek-flash",
+      label: "DeepSeek v4.1 Flash",
+      reason: "timeout",
+    });
   });
 });
 

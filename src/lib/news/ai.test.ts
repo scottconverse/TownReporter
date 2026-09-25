@@ -1115,10 +1115,15 @@ describe("model-picker provider readiness", () => {
                       id: "halo/qwen3.6-35b-a3b",
                       label: "Qwen 3.6 35B",
                       loaded: false,
-                      kind: "lmstudio",
+                      // LM Studio reports a text model as `chat`; "lmstudio"
+                      // is the SERVER kind and is not a `LocalModelKind`.
+                      kind: "chat",
                       thinking: false,
                       vision: false,
                       cloud: false,
+                      // A real LM Studio entry carries its context window;
+                      // `LocalModelEntry` requires the field, absent or not.
+                      contextLength: null,
                     },
                   ],
                 },
@@ -1167,10 +1172,11 @@ describe("model-picker provider readiness", () => {
                     // answer the question, and the rule is "only when it IS
                     // loaded" -- so unknown skips too.
                     loaded: null,
-                    kind: "lmstudio",
+                    kind: "chat",
                     thinking: false,
                     vision: false,
                     cloud: false,
+                    contextLength: null,
                   },
                 ],
               },
