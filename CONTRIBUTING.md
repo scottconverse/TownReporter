@@ -35,6 +35,22 @@ The ordinary test suite is offline and never calls a paid model. Real Postgres,
 browser-flow and live-model lanes are separate; GitHub Actions runs the
 repository's required integration lanes on every push.
 
+`npm test` on your own machine runs the complete suite. CI runs that same
+command on several machines at once, each with a shard index in its
+environment, and the single `test` check is green only when every shard is. To
+reproduce one shard exactly as CI ran it:
+
+```bash
+TOWNREPORTER_TEST_SHARD=3 TOWNREPORTER_TEST_SHARD_TOTAL=6 npm test
+```
+
+Both variables must be set together, and a shard is never a substitute for the
+complete suite before you push. Adding a test file needs no bookkeeping: the
+launcher discovers files by glob and hands each one to exactly one shard. If
+you change how many machines the suite runs on, change the shard count in
+`.github/workflows/ci.yml` in both places at once, which
+`scripts/test-shards-cover-the-suite.test.mjs` requires.
+
 ## Pull requests
 
 Explain the user-visible outcome, the failure the test reproduces, and the
