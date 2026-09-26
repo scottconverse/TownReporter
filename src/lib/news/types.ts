@@ -195,6 +195,13 @@ export type CorrectionRow = {
  * The Follow-ups object (Direction A, stage 1): who the editor asked and
  * what they owe. One row per ask; `lead_id`/`article_id` link it to the
  * story it belongs to when known. See migrations/0042_follow_ups.sql.
+ *
+ * Redesign phase 6 (migrations/0101_ai_follow_ups.sql) added a second kind of
+ * row to the same table: an AI follow-up, where an agent keeps working on the
+ * question instead of the editor. `agent_kind` null is a manual ask -- the
+ * 0042 shape, and every row written before 0101 -- and is drawn as a Manual
+ * card. The two vocabularies coexist in `status`: open/answered/dropped for a
+ * manual ask, active/paused/stopped/done for an agent.
  */
 export type FollowUpRow = {
   id: number;
@@ -203,12 +210,51 @@ export type FollowUpRow = {
   who: string;
   what: string;
   due_on: string | null;
-  status: "open" | "answered" | "dropped";
+  status: FollowUpStatus;
   nudged_at: string | null;
   answered_at: string | null;
   reply_text: string | null;
   created_at: string;
+  /** null on a manual row; recheck | search | agenda on an agent (0101). */
+  agent_kind: FollowUpAgentKind | null;
+  /** JSON array of URL strings -- see followUpTargets() in ./follow-ups.ts. */
+  targets_json: string;
+  /** 2h | 6h | 12h | daily | weekly | posting-days, or '' on a manual row. */
+  schedule: string;
+  /** A provider id, `auto`, or `custom:<uuid>`. `auto` = the phase 5 order. */
+  model_choice: string;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  /** The agent's last outcome; null on a manual row that has never run. */
+  last_state: FollowUpState | null;
+  /** JSON object -- see FollowUpFinding in ./follow-ups.ts. `{}` when none. */
+  finding_json: string;
   lead_headline?: string | null;
   article_slug?: string | null;
   article_headline?: string | null;
 };
+
+/** What an AI follow-up's agent does. Text + check in the database (0101). */
+export type FollowUpAgentKind = "recheck" | "search" | "agenda";
+
+/**
+ * `last_state`. `no-change` and `could-not-check` are deliberately separate:
+ * an agent that ran and found nothing is working, one that could not reach the
+ * page is not, and a quietly failing follow-up must not look like a quietly
+ * working one. The reason behind a `could-not-check` is in the finding.
+ */
+export type FollowUpState = "found" | "no-change" | "could-not-check" | "running" | "waiting";
+
+/**
+ * The union of both vocabularies: a manual ask (0042) and an agent (0101).
+ * The database's check constraint is this union too -- see 0101's note on why
+ * it was widened rather than rewritten.
+ */
+export type FollowUpStatus =
+  | "open"
+  | "answered"
+  | "dropped"
+  | "active"
+  | "paused"
+  | "stopped"
+  | "done";
