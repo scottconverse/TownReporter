@@ -301,7 +301,12 @@ if ($PSCmdlet.ShouldProcess("the app on port $port", "stop")) {
 }
 
 # --- 5. fetch and fast-forward ---------------------------------------------
-$lockBefore = if (Test-Path "package-lock.json") { (Get-FileHash "package-lock.json").Hash } else { "" }
+# Get-FileHash lives in Microsoft.PowerShell.Utility, which a PowerShell 5.1
+# session that inherited PowerShell 7's PSModulePath cannot reach (measured
+# 2026-09-26: CommandNotFoundException). lib-backup.ps1 is dot-sourced above
+# and has a module-free SHA256, so use that instead -- a promote that dies on
+# the lockfile hash dies with the paper already stopped.
+$lockBefore = if (Test-Path "package-lock.json") { Get-TownReporterFileHash -Path "package-lock.json" } else { "" }
 if ($PSCmdlet.ShouldProcess("origin/main", "fast-forward")) {
   & git fetch origin --quiet
   $head = (& git rev-parse HEAD).Trim()
@@ -316,7 +321,7 @@ if ($PSCmdlet.ShouldProcess("origin/main", "fast-forward")) {
 }
 
 # --- 6. dependencies, only if the lockfile moved ---------------------------
-$lockAfter = if (Test-Path "package-lock.json") { (Get-FileHash "package-lock.json").Hash } else { "" }
+$lockAfter = if (Test-Path "package-lock.json") { Get-TownReporterFileHash -Path "package-lock.json" } else { "" }
 if ($lockBefore -ne $lockAfter) {
   Say "the lockfile changed; installing dependencies"
   if ($PSCmdlet.ShouldProcess("dependencies", "npm ci")) { & npm ci }

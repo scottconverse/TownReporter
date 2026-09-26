@@ -1730,3 +1730,111 @@ test(
   },
 );
 
+
+/**
+ * A file hash must not depend on a module being reachable.
+ *
+ * Measured on this machine on 2026-09-26: a Windows PowerShell 5.1 session
+ * that inherited PowerShell 7's PSModulePath cannot call Get-FileHash at all
+ * -- `Get-Command` still lists it, the call throws CommandNotFoundException.
+ * Two places hashed a file that way. ops\promote.ps1 checks the lockfile in
+ * step 5, with the live paper already stopped by step 4; installer\
+ * Install.ps1 checks a downloaded archive's digest. Both now use .NET
+ * SHA256 -- ops\promote.ps1 through Get-TownReporterFileHash in
+ * ops\lib-backup.ps1, which it already dot-sources, and the installer
+ * inline, because it cannot dot-source ops\.
+ *
+ * The scan below is the cheap half and catches a third one being added
+ * anywhere the paper runs. scripts\ci-hash-no-module.ps1 is the half that
+ * executes the real changed code inside a session where the cmdlet is
+ * genuinely gone -- and refuses to pass unless the sabotage itself worked.
+ */
+test("no script the paper runs hashes a file with a cmdlet that a 5.1 session may not have", () => {
+  const dirs = [
+    ["ops", OPS],
+    ["installer", join(ROOT, "installer")],
+  ];
+  const callers = [];
+  for (const [label, dir] of dirs) {
+    for (const name of readdirSync(dir).filter((f) => f.endsWith(".ps1"))) {
+      const text = readFileSync(join(dir, name), "utf8");
+      // Comments may name the cmdlet -- the explanation of why it is gone
+      // belongs next to the code. Only a real call is the defect, so strip
+      // both comment forms first.
+      let inBlock = false;
+      text.split("\n").forEach((line, i) => {
+        let code = line;
+        if (inBlock) {
+          const end = code.indexOf("#>");
+          if (end === -1) return;
+          code = code.slice(end + 2);
+          inBlock = false;
+        }
+        const open = code.indexOf("<#");
+        if (open !== -1) {
+          const end = code.indexOf("#>", open + 2);
+          if (end === -1) {
+            code = code.slice(0, open);
+            inBlock = true;
+          } else {
+            code = code.slice(0, open) + code.slice(end + 2);
+          }
+        }
+        if (code.trimStart().startsWith("#")) return;
+        if (/Get-FileHash\b/.test(code)) callers.push(`${label}/${name}:${i + 1}`);
+      });
+    }
+  }
+  assert.deepEqual(
+    callers,
+    [],
+    `Get-FileHash is unreachable when PSModulePath comes from PowerShell 7 -- use Get-TownReporterFileHash (ops/) or inline .NET SHA256 (installer/) at ${callers.join(", ")}`,
+  );
+});
+
+test(
+  "the changed hash paths run in a PowerShell 5.1 session that cannot reach Get-FileHash",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The real code, in the broken session: the two lockfile lines lifted out
+      of ops\promote.ps1 and evaluated, and installer\Install.ps1's
+      Get-VerifiedDependency extracted the same way
+      scripts\windows-installer-contract.ps1 extracts it -- so no Common.ps1
+      repair is in scope for the installer either. Both must produce the same
+      answers they produce with the module present, including refusing a
+      mismatched download.
+    */
+    const fixture = join(ROOT, "scripts", "ci-hash-no-module.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-hash-no-module.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-hash-no-module.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.doesNotMatch(
+      text,
+      /Start-Process|Get-NetTCPConnection|Invoke-WebRequest|Invoke-RestMethod|Invoke-Command/,
+      "the fixture must touch nothing live -- a temp directory only",
+    );
+    assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a hash check failed:\n${out}`);
+    assert.match(out, /file hashing without a module: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
