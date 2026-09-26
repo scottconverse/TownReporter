@@ -134,6 +134,7 @@ import {
   setJobModelChoice,
   setJobModelRuntime,
   setJobStage,
+  waitForModel,
   type DeskJob,
 } from "./jobs";
 import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.server.ts";
@@ -1882,9 +1883,21 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   }
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);
-  const reported = await runReportWithCheckpoint({
-    ...draftInput,
-    modelChoice: effectiveStoryModelChoice(job.model_choice),
+  /*
+    The single longest await in the app: one call covering report.ts's plan,
+    write, verify and sourcing passes, four sequential model calls that
+    routinely run past the 60s stall window. Without the ticker the card would
+    call a working draft stalled and offer the editor a retry that spends the
+    model budget twice.
+  */
+  const reported = await waitForModel({
+    jobId: job.id,
+    label: modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
+    run: () =>
+      runReportWithCheckpoint({
+        ...draftInput,
+        modelChoice: effectiveStoryModelChoice(job.model_choice),
+      }),
   });
   if ("error" in reported) throw new Error(reported.error);
 
