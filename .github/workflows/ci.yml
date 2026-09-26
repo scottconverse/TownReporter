@@ -222,6 +222,16 @@ jobs:
             echo "dev server did not come up"; tail -n 80 /tmp/dev.log; exit 1;
           }
           node scripts/smoke-built-server.mjs
+      # The shared dialog's focus trap, Escape, scroll lock and focus return
+      # cannot be proved by reading the source, and this repository has no DOM
+      # test environment -- so the walk mounts the component into a page from
+      # the dev server already running above and drives it with real keys. It
+      # builds its own harness elements and claims no desk, so it can share this
+      # job's server with no risk of two walks signing up on one newsroom.
+      - name: The shared dialog opens, traps focus and closes on Escape
+        env:
+          DIALOG_BASE_URL: http://127.0.0.1:8080
+        run: node scripts/astra-dialog-e2e.mjs
 
   # The unit suite runs against PGLite, which has no pg_trgm and no admin
   # connection to create a scratch database from, so three files that need a

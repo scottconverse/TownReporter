@@ -266,30 +266,41 @@ test("desk-rendered files do not hardcode a sub-14px font-size or use a banned s
 
 // Staging finding, 0.6.20 -> 0.6.21: Kill (tone="quiet-danger" on InkButton,
 // desk-leads.tsx) rendered as class="btn quiet danger small". `.btn.quiet`
-// (border-color: transparent) and `.btn.danger` (border-color: var(--warn))
-// are equal specificity, and the built stylesheet let `.btn.quiet` win --
-// Kill showed no warn signal at all, a fully transparent border. The fix
-// adds a combined `.btn.quiet.danger` selector, which has strictly higher
-// specificity and wins the tie regardless of declaration order. This
-// parses styles.css with the same brace-depth-aware rule parser used above
-// and asserts that combined selector exists with a real warn border, so a
-// future edit that drops or renames it fails loudly instead of quietly
-// reintroducing the invisible-border bug.
-test(".btn.quiet.danger (Kill) resolves a real, non-transparent warn border regardless of declaration order", () => {
+// (border-color: transparent) and `.btn.danger` are equal specificity, and the
+// built stylesheet let `.btn.quiet` win -- Kill showed no signal at all, a
+// fully transparent border. The fix adds a combined `.btn.quiet.danger`
+// selector, which has strictly higher specificity and wins the tie regardless
+// of declaration order. This parses styles.css with the same brace-depth-aware
+// rule parser used above and asserts that combined selector exists with a real
+// border, so a future edit that drops or renames it fails loudly instead of
+// quietly reintroducing the invisible-border bug.
+//
+// The token it asserts on was `--warn` when this was written, because the old
+// palette pointed both names at one colour (`--warn: var(--color-danger)`), so
+// `--warn` was how a rule spelled "red". The redesign separates them -- amber
+// `--warn` for attention, red `--danger` for failure -- and
+// `design-system/README.md` names the colour for this exact button: "Danger |
+// 2px danger border and text | Kill, Stop, Cancel a job, Legal removal." So the
+// assertion follows the name to `--danger`; the rendered colour is unchanged,
+// and the guard still fails on `transparent` or on a dropped selector.
+test(".btn.quiet.danger (Kill) resolves a real, non-transparent danger border regardless of declaration order", () => {
   const css = readFileSync(CSS_PATHS[0], "utf8");
   const rules = parseRules(css);
   const rule = rules.find(
     (r) => r.selector.split(",").map((s) => s.trim()).includes(".desk-ltr .btn.quiet.danger"),
   );
   assert.ok(rule, "expected a .desk-ltr .btn.quiet.danger rule (it may share a selector list with .btn.danger)");
+  // Either spelling passes: the redesign writes the shorthand the README
+  // describes ("Danger | 2px danger border and text"), where the original wrote
+  // `border-color`. What must not come back is `transparent`.
   assert.match(
     rule.body.replace(/\s+/g, ""),
-    /border-color:var\(--warn\)/,
-    "the combined .btn.quiet.danger selector must set border-color: var(--warn) so it always wins the tie with .btn.quiet's transparent border",
+    /border(?:-color)?:(?:2pxsolid)?var\(--danger\)/,
+    "the combined .btn.quiet.danger selector must set a 2px danger border so it always wins the tie with .btn.quiet's transparent border",
   );
   assert.match(
     rule.body.replace(/\s+/g, ""),
-    /color:var\(--warn\)/,
-    "the combined .btn.quiet.danger selector must also set the warn text color",
+    /color:var\(--danger\)/,
+    "the combined .btn.quiet.danger selector must also set the danger text color",
   );
 });
