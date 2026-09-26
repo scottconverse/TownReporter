@@ -121,9 +121,27 @@ export function editorStatus(status: string): string {
   }
 }
 
-export function editorError(raw: string | null | undefined): string | null {
+/**
+ * One plain sentence for a failed Dark Desk action.
+ *
+ * `what` names the action for the boundary-check branch below ("start that
+ * file", "find something"); the rest of the copy is about what a provider
+ * did, so the default only ever reaches a dump.
+ */
+export function editorError(raw: string | null | undefined, what = "continue with that"): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  /*
+    Every test below is about what a provider did -- a refusal, a quota, a
+    login, a socket. A boundary check that throws before anything is called
+    matches none of them, and would fall out the bottom as `plainEditorText(t)`,
+    which hands its input back unchanged: the Dark Desk's paste box took 200,000
+    characters and `openDarkInvestigation` capped it there, so a longer paste
+    printed the issues array (0.6.67). Same branch as `editorActionError` and
+    `editorDraftError`, and it has to come before the provider tests because a
+    dump carries neither a login nor a model failure.
+  */
+  if (looksLikeValidationDump(t)) return editorActionError(t, what);
   // Login first: a mid-round 401 also matches the "writing model did not
   // finish" branch below (it contains "Claude Code" and "API Error"), which
   // used to send the editor back into "Click Keep digging to continue" — the
@@ -669,6 +687,16 @@ function fieldLabelFromPath(path: string): string {
       400,001 characters wants to be told it was the paste.
     */
     text: "the text you pasted",
+    /*
+      The Dark Desk's paste box (`darkOpenInput`, 200,000) is the only schema
+      with a `paste`, so the leaf is unambiguous. Its `title` -- the paste's
+      first line, sent alongside -- is NOT named here: three schemas in
+      request-input.ts carry a `title` with three different caps
+      (`sourceTitle`, `leadHeadline`, `redditTitle`), so naming it would be a
+      guess. A paste whose first line is over 180 characters is caught by the
+      guard and reads as the anonymous field, which is a sentence either way.
+    */
+    paste: "the text you pasted",
     topic: "the section",
     scratch: "the working notes",
     storyDirection: "the direction you wrote",

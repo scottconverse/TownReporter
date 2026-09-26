@@ -66,7 +66,7 @@ import {
   suggestFocusLeads,
   validationFieldLabel,
 } from "./desk-copy.ts";
-import { importStoriesInput, reportingNotesInput } from "./request-input.ts";
+import { darkOpenInput, importStoriesInput, reportingNotesInput } from "./request-input.ts";
 import { STALE_RUNNING_SECONDS } from "./jobs.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -1420,6 +1420,14 @@ const importDump = importStoriesInput.safeParse({
   stories: [],
 }).error!.message;
 
+/*
+  The Dark Desk's paste box, capped at 200,000 characters and validated in the
+  browser like every other input. `editorError` is the formatter that box goes
+  through (`desk.dark.tsx`), and it used to answer a dump with
+  `plainEditorText(raw)` -- its input, unchanged.
+*/
+const darkPasteDump = darkOpenInput.safeParse({ paste: "x".repeat(200_001) }).error!.message;
+
 describe("a validation dump never reaches the editor", () => {
   it("knows a real zod message for what it is, and a sentence for what it is", () => {
     assert.equal(looksLikeValidationDump(elementDump), true);
@@ -1436,6 +1444,8 @@ describe("a validation dump never reaches the editor", () => {
     assert.equal(validationFieldLabel(listDump), "the to-do list");
     // The Import paste is one field the editor typed, so it is named.
     assert.equal(validationFieldLabel(importDump), "the text you pasted");
+    // So is the Dark Desk's paste box, whose field is spelled `paste`.
+    assert.equal(validationFieldLabel(darkPasteDump), "the text you pasted");
     // A field this file does not know is named as nothing rather than guessed.
     assert.equal(validationFieldLabel('{"code":"too_big","path":["somethingElse"]}'), "");
     assert.equal(validationFieldLabel("no path here"), "");
@@ -1474,6 +1484,38 @@ describe("a validation dump never reaches the editor", () => {
       assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
     }
     assert.match(editorActionError("The desk could not read that text.", "read that text") ?? "", /could not read that text/);
+  });
+
+  it("catches a dump on the Dark Desk's path too, where the copy names the paste", () => {
+    /*
+      `editorError` guarded every provider failure (a refusal, a quota, a
+      login, a socket) but not the boundary check that throws before anything
+      is called -- a dump matched none of those patterns and fell out the
+      bottom as `plainEditorText(t)`, which hands its input back unchanged. The
+      Dark Desk's paste box takes 200,000 characters, so this is the sentence
+      it printed instead of the one below (0.6.67).
+    */
+    const said = editorError(darkPasteDump, "start that file");
+    assert.ok(said, "a dump must produce a sentence, not null");
+    assert.match(said, /could not start that file/);
+    assert.match(said, /the text you pasted is longer than the desk can store/);
+    assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
+    /*
+      The other refusal from the same box: `darkOpenInput` also carries the
+      paste's first line as `title`, capped at 180. `title` is a leaf three
+      schemas share with three different caps, so it is deliberately not
+      named -- the point of this assertion is that an unnamed field is still a
+      sentence and not a dump.
+    */
+    const longFirstLine = darkOpenInput.safeParse({
+      paste: "x".repeat(181),
+      title: "x".repeat(181),
+    }).error!.message;
+    const saidTitle = editorError(longFirstLine, "start that file");
+    assert.ok(saidTitle, "a dump must produce a sentence, not null");
+    assert.doesNotMatch(saidTitle, /too_big|"path"|"code"|[{}[\]]|maximum/);
+    // The provider sentences are unaffected by the new guard.
+    assert.match(editorError("xAI API error 403") ?? "", /Keep digging/i);
   });
 
   it("turns a bare server failure into something the editor can act on", () => {
