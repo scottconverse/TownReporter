@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { STORY_AREAS } from "../story-area.ts";
 import type { ReaderStory } from "../reader.ts";
 
 /**
@@ -25,6 +26,13 @@ export const readerArticlesInput = z.object({
   page: z.number().int().min(1).max(100000).default(1),
   oldest: z.boolean().default(false),
   saved: z.array(z.string().max(300)).max(500).optional(),
+  /*
+    The geography pill the reader pressed. Absent means the whole paper, which
+    is what the front page shows before anyone presses one. `longmont` matches
+    a null or unrecognised stored value too -- see `readStoryArea` in
+    `story-area.ts` for why the home town is a bucket rather than a value.
+  */
+  area: z.enum([...STORY_AREAS]).optional(),
   /*
     The latest-stories river reads this same query, one batch at a time, BELOW
     A CURSOR rather than at a page offset: with 12-per-page offsets, a story
