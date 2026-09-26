@@ -113,6 +113,16 @@ const deskCopyStub = inlineModule(`
   }
   export function kindFromSourceUrl() { return "official"; }
   export function tierFromKind() { return "A"; }
+  /*
+    The add box's catch runs this on a failure (0.6.67). No click can happen in
+    a static render, so the real formatter's dump branch -- which needs the
+    schemas in request-input.ts -- is not what this file is about; the
+    pass-through is its other, contract-visible half.
+  */
+  export function editorActionError(raw, what) {
+    if (!raw || !String(raw).trim()) return null;
+    return String(raw).trim();
+  }
 `);
 // The same server function the Sources page calls. In this static render it is
 // never invoked -- no click can happen -- so it only has to exist and be shaped
