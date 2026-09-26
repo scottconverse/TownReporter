@@ -439,13 +439,15 @@ async function oneImportedStoryPublishes(chosen) {
   await page.getByText(MARKS, { exact: false }).first().waitFor({ timeout: 30_000 });
 
   await confirmSectionAndWaitForPublishable(page);
-  await page.getByRole("button", { name: "Publish to the paper", exact: true }).click();
-  // The desk asks once more before it goes out, as it does for every story.
-  await page.getByRole("button", { name: "Yes, print it", exact: true }).click();
+  // 0.6.67: the Publish button names the section and the press confirms it, so
+  // there is no separate Confirm step to take first.
+  await page.getByRole("button", { name: /^Publish in / }).click();
+  // The desk asks once more before it goes out, and names the section again.
+  await page.getByRole("button", { name: /^Yes, print it in / }).click();
 
   const read = page.getByRole("link", { name: "Read it on the paper", exact: true });
   await read.waitFor({ timeout: 60_000 });
-  step("an imported story confirms its section and publishes on the normal button");
+  step("an imported story confirms its section by the press that names it, and publishes");
   await read.click();
   await page.waitForURL(/\/articles\//, { timeout: 30_000 });
 }

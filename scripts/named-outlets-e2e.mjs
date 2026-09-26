@@ -144,10 +144,12 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Dek").fill(why);
   await page.getByLabel("Body").fill(body);
-  // The section still has to be confirmed -- the override records against a
-  // saved draft -- but the Publish button is down on purpose from here.
+  // The section still has to be saved before the server will read the body
+  // against the Sources -- the notice below is computed from the saved draft --
+  // but the Publish button is down on purpose from here (0.6.67: pressing it
+  // is what confirms the section, so there is no Confirm button to press).
   await confirmSectionAndWaitForPublishable(page, { publishable: false });
-  step("the draft is written and its section is confirmed");
+  step("the draft is written and its body saved");
 
   // The gate holds the button down and says why. The sentence is the desk's,
   // not this walk's: it is the same report the server refuses on.
@@ -155,7 +157,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await outlets.getByText(/The body names Denver Post and the Sources do not show it/).waitFor({
     timeout: 45_000,
   });
-  const print = page.getByRole("button", { name: "Publish to the paper" });
+  const print = page.getByRole("button", { name: /^Publish in / });
   assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
   await page.getByText("Deal with the named outlet first").waitFor();
   step("printing is held down, in words, while Denver Post is named and uncovered");
@@ -166,7 +168,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll("button")].some(
-        (button) => button.textContent?.trim() === "Publish to the paper" && !button.disabled,
+        (button) => /^Publish in /.test(button.textContent?.trim() ?? "") && !button.disabled,
       ),
     null,
     { timeout: 45_000 },
@@ -174,7 +176,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   step("the override is recorded and printing opens again");
 
   await print.click();
-  await page.getByRole("button", { name: "Yes, print it" }).click();
+  await page.getByRole("button", { name: /^Yes, print it in / }).click();
   await page.getByText("On the paper").waitFor({ timeout: 45_000 });
   step(`"${headline}" is on the paper, crediting Denver Post`);
 }
