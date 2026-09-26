@@ -45,6 +45,7 @@ import { DailyScanSettings } from "@/components/daily-scan-settings";
 import { MeetingCaptureSettings } from "@/components/meeting-capture-settings";
 import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
 import { CustomAiConnections } from "@/components/custom-ai-connections";
+import { YoutubeKeySettings } from "@/components/youtube-key";
 import { XaiOauthConnection } from "@/components/xai-oauth-connection";
 import {
   getCustomAiConnectionsFn,
@@ -108,6 +109,7 @@ const SETTINGS_PANELS = [
   "Custom connections",
   "Daily scan",
   "Meeting capture",
+  "YouTube",
   "Routine notices",
   "Paper identity",
   "Sections",
@@ -123,6 +125,9 @@ function OpsPage() {
   useEffect(() => {
     if (signin) setPanel("Writing models");
     else if (hash === "custom-ai-connections") setPanel("Custom connections");
+    // "#youtube-key" is the key box; checked before the substring tests below
+    // so a link to it cannot be swallowed by a wider match.
+    else if (hash === "youtube-key") setPanel("YouTube");
     // "#named-outlets" opens the outlet list; a link that wants Sections still
     // says "section", which the outlets hash does not contain.
     else if (hash.includes("outlet")) setPanel("Named outlets");
@@ -213,6 +218,9 @@ function OpsPage() {
           </div>
           <div hidden={panel !== "Meeting capture"}>
             <MeetingCaptureSettings />
+          </div>
+          <div hidden={panel !== "YouTube"}>
+            <YoutubeKeySettings />
           </div>
           <div hidden={panel !== "Routine notices"}>
             <RoutineNoticePermissions />

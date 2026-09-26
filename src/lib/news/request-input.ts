@@ -499,6 +499,51 @@ export function cleanConnectionId(raw: unknown): { id: string } {
   return { id: trimmed };
 }
 
+/*
+  ---------------------------------------------------------------------------
+  The YouTube key box (src/components/youtube-key.tsx, 0.6.70)
+  ---------------------------------------------------------------------------
+
+  Three shapes: save a key, remove the saved key, test a key. The test call
+  accepts a key so an editor can find out that a key works before committing
+  it, which means this validator sees the key on its way through. It is not
+  logged, not echoed back, and not stored by the test path -- but it is here,
+  so the ceiling is the same one the custom-connection box uses for the same
+  kind of value.
+*/
+
+export type CleanYoutubeKeyInput = { apiKey: string };
+
+export function cleanYoutubeKeyInput(raw: unknown): CleanYoutubeKeyInput {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Invalid YouTube key request.");
+  }
+  const apiKey = (raw as { apiKey?: unknown }).apiKey;
+  if (typeof apiKey !== "string") throw new Error("A YouTube key must be text.");
+  const trimmed = apiKey.trim();
+  if (!trimmed) throw new Error("Paste the key first.");
+  if (trimmed.length > LIMITS.apiKey) {
+    throw new Error(`A YouTube key must be ${LIMITS.apiKey} characters or fewer.`);
+  }
+  return { apiKey: trimmed };
+}
+
+/** The YouTube key box's Test call: an optional key, tested where it stands. */
+export function cleanYoutubeKeyTestInput(raw: unknown): { apiKey?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Invalid YouTube key request.");
+  }
+  const apiKey = (raw as { apiKey?: unknown }).apiKey;
+  if (apiKey === undefined || apiKey === null || apiKey === "") return {};
+  if (typeof apiKey !== "string") throw new Error("A YouTube key must be text.");
+  const trimmed = apiKey.trim();
+  if (trimmed.length > LIMITS.apiKey) {
+    throw new Error(`A YouTube key must be ${LIMITS.apiKey} characters or fewer.`);
+  }
+  return trimmed ? { apiKey: trimmed } : {};
+}
+
 export function cleanConnectionEnabled(raw: unknown): { id: string; enabled: boolean } {
   const enabled = (raw && typeof raw === "object" ? (raw as { enabled?: unknown }).enabled : undefined);
   if (typeof enabled !== "boolean") throw new Error("Enabled must be true or false.");
