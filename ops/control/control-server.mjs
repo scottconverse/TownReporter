@@ -172,7 +172,10 @@ export const ACTIONS = {
 export const CONFIRM_WORD = "offline";
 
 export const LINKS = [
-  { id: "desk", label: "Open the desk", href: "http://127.0.0.1:3000/desk" },
+  // The public address, not 127.0.0.1:3000: the sign-in cookie belongs to
+  // townreporter.org, so the loopback address is a different site to the
+  // browser and asks the editor to sign in again.
+  { id: "desk", label: "Open the desk", href: "https://townreporter.org/desk" },
   { id: "site", label: "Open the public site", href: "https://townreporter.org" },
   { id: "test", label: "Open the test copy", href: "http://127.0.0.1:3100" },
 ];

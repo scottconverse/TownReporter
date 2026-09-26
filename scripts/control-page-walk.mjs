@@ -492,7 +492,7 @@ async function theWording(server) {
     );
   }
   const hrefs = await page.locator("#links a").evaluateAll((els) => els.map((e) => e.getAttribute("href")));
-  for (const want of ["http://127.0.0.1:3000/desk", "https://townreporter.org", "http://127.0.0.1:3100"]) {
+  for (const want of ["https://townreporter.org/desk", "https://townreporter.org", "http://127.0.0.1:3100"]) {
     must(hrefs.includes(want), `the page links nowhere near ${want}; it links ${JSON.stringify(hrefs)}`);
   }
   facts.push({ buttons: labels.length, links: hrefs });
