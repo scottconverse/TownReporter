@@ -4,7 +4,12 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   blockedDigBannerText,
+  cameBackLabel,
   composeZeroLeadSummary,
+  duplicateKillReason,
+  killRecordLine,
+  printedDuplicateLine,
+  DEVELOPING_LABEL,
   editorError,
   editorActionError,
   editorDraftError,
@@ -1641,5 +1646,91 @@ describe("a validation dump never reaches the editor", () => {
       /returned nothing this pass/,
     );
     assert.equal(editorDraftError(""), null);
+  });
+});
+
+/*
+ * Unit AK items 2, 4, 6, 7 (2026-09-26): the words an editor reads about a
+ * lead the desk thinks is already printed, and about a lead that was killed.
+ *
+ * Every one of these strings replaces something the owner could not act on:
+ * "≈ PRINTED" (a badge with no story name and no button), "Possible duplicate
+ * · compare" (a link into a dead end), "Nothing to draft." (a killed lead's
+ * page saying nothing else) and "seen again ×3" (a count in shorthand).
+ */
+describe("Unit AK: duplicate and kill wording", () => {
+  it("names the story the badge thinks is already printed", () => {
+    assert.equal(
+      printedDuplicateLine("Longmont Senior Center to begin free evening meal program Oct. 2"),
+      "Looks already printed: Longmont Senior Center to begin free evening meal program Oct. 2",
+    );
+    // The scan's headlines carry stray whitespace; the line must not show it.
+    assert.equal(printedDuplicateLine("  Housing plan advances  "), "Looks already printed: Housing plan advances");
+  });
+
+  it("records a kill as a duplicate in a sentence that carries the other headline", () => {
+    assert.equal(
+      duplicateKillReason("Longmont Senior Center to begin free evening meal program Oct. 2"),
+      "Duplicate of Longmont Senior Center to begin free evening meal program Oct. 2",
+    );
+    assert.equal(duplicateKillReason(" Council OKs the budget "), "Duplicate of Council OKs the budget");
+  });
+
+  it("says the developing label in words an editor can act on", () => {
+    // Item 2's wording is the brief's, verbatim -- pinned so a later copy edit
+    // has to be deliberate.
+    assert.equal(DEVELOPING_LABEL, "Developing: new facts on a story you killed");
+  });
+
+  it("counts a lead's returns in words, and stays silent at zero", () => {
+    assert.equal(cameBackLabel(1), "Came back 1 time");
+    assert.equal(cameBackLabel(3), "Came back 3 times");
+    assert.equal(cameBackLabel(0), "", "a lead that never came back says nothing");
+    assert.equal(cameBackLabel(null), "");
+    assert.equal(cameBackLabel(undefined), "");
+    // A defensive floor: the count is a counter, and a broken one must not
+    // render "Came back -2 times" on a Queue row.
+    assert.equal(cameBackLabel(-2), "");
+  });
+
+  it("shows when and why a lead was killed", () => {
+    // A local Date so the rendered calendar day is the same in every timezone
+    // the suite runs in.
+    const killedAt = new Date(2026, 8, 25, 12, 0);
+    assert.equal(
+      killRecordLine({ killedAt, reason: "Duplicate of Council OKs the budget" }),
+      "Killed Sep 25, 2026 — Duplicate of Council OKs the budget",
+    );
+    // Killed with a record of when but no reason.
+    assert.equal(killRecordLine({ killedAt }), "Killed Sep 25, 2026 — no reason was recorded");
+    assert.equal(killRecordLine({ killedAt, reason: "   " }), "Killed Sep 25, 2026 — no reason was recorded");
+    // Killed with a reason but no timestamp cannot happen after migration
+    // 0094, but the two columns are independent and the sentence must still
+    // read.
+    assert.equal(killRecordLine({ reason: "Duplicate of X" }), "Killed — Duplicate of X");
+  });
+
+  it("tells the truth about a kill the desk kept no record of", () => {
+    // Every lead killed before migration 0094 has neither column. The page
+    // must not render an empty line an editor would read as a bug.
+    assert.equal(
+      killRecordLine({}),
+      "Killed before the desk started recording why — no reason was kept",
+    );
+    assert.equal(killRecordLine({ killedAt: null, reason: null }), killRecordLine({}));
+    // A killed_at the desk cannot parse is the same as no killed_at.
+    assert.equal(killRecordLine({ killedAt: "not a date" }), killRecordLine({}));
+  });
+
+  it("says a kill was undone rather than letting the record vanish", () => {
+    const killedAt = new Date(2026, 8, 25, 12, 0);
+    assert.equal(
+      killRecordLine({ killedAt, reason: "Duplicate of Council OKs the budget", reopened: true }),
+      "Reopened — it was killed Sep 25, 2026 — Duplicate of Council OKs the budget",
+    );
+    assert.equal(
+      killRecordLine({ reopened: true }),
+      "Reopened — no record of when or why it was killed",
+    );
   });
 });

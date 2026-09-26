@@ -4,7 +4,13 @@ import { Chip, InkButton, Score } from "@/components/desk-chrome";
 import { leadOrigin } from "@/components/desk-chrome-utils";
 import { formatAge } from "@/lib/paper";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
-import type { PrintedDup } from "@/lib/news/desk-copy";
+import {
+  cameBackLabel,
+  DEVELOPING_LABEL,
+  killRecordLine,
+  printedDuplicateLine,
+  type PrintedDup,
+} from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 import { ModelPicker } from "@/components/model-picker";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
@@ -23,7 +29,7 @@ import { Notice } from "@/components/states";
  * (wired in desk.queue.tsx using this same copy).
  */
 export const SEEN_AGAIN_EXPLAINER =
-  "Seen again: the scanner found this story again after you killed it. It was not refiled. Back returns it to New.";
+  "Came back: the scanner found this story again after you killed it. It was not refiled. Back returns it to New.";
 
 export function LeadRowView({
   lead,
@@ -31,6 +37,7 @@ export function LeadRowView({
   onHold,
   onBack,
   onKill,
+  onKillAsDuplicate,
   onDelete,
   deleteSelected = false,
   onDeleteSelect,
@@ -47,6 +54,13 @@ export function LeadRowView({
   onHold?: () => void;
   onBack?: () => void;
   onKill?: () => void;
+  /**
+   * Unit AK item 4: kill this lead as a duplicate of the piece it is flagged
+   * against, in one press, recording why. Rejects to say it failed -- the row
+   * shows saving/saved/failed in place, because a press that silently does
+   * nothing is what this unit was opened about.
+   */
+  onKillAsDuplicate?: () => Promise<void>;
   /**
    * Remove the lead entirely.
    *
@@ -70,6 +84,13 @@ export function LeadRowView({
   const [confirming, setConfirming] = useState(false);
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  /*
+   * Unit AK item 4: "Kill as duplicate" says what it is doing. The press used
+   * to have no equivalent at all -- the badge said "≈ PRINTED" and there was
+   * nothing to press -- so the three states are pinned here rather than left
+   * to the row vanishing on the next refetch.
+   */
+  const [dupKill, setDupKill] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const score = lead.newsworthiness ?? 0;
   return (
     <div
@@ -109,10 +130,14 @@ export function LeadRowView({
         ) : null}
         {lead.possible_duplicate_of ? (
           <p className="meta dup-context">
-            {lead.status === "held" ? "Held for review — " : ""}
+            {lead.status === "held"
+              ? lead.dup_kind === "developing"
+                ? `${DEVELOPING_LABEL} — `
+                : "Held for review — "
+              : ""}
             {lead.possible_duplicate ? (
               <>
-                possible duplicate of{" "}
+                {lead.dup_kind === "developing" ? "new facts against " : "possible duplicate of "}
                 <Link
                   to="/desk/story/$leadId"
                   params={{ leadId: String(lead.possible_duplicate.id) }}
@@ -121,6 +146,18 @@ export function LeadRowView({
                   {lead.possible_duplicate.headline}
                 </Link>{" "}
                 · {lead.possible_duplicate.status}
+                {/*
+                  Unit AK item 2: the old kill reason travels with the finding,
+                  so the editor judging "is this new?" reads what the desk
+                  killed the first time without opening the other lead.
+                */}
+                {lead.dup_kind === "developing" &&
+                (lead.possible_duplicate.killed_at || lead.possible_duplicate.kill_reason) ? (
+                  <> · {killRecordLine({
+                    killedAt: lead.possible_duplicate.killed_at,
+                    reason: lead.possible_duplicate.kill_reason,
+                  })}</>
+                ) : null}
               </>
             ) : "the earlier lead is unavailable; compare it only if it is restored."}
           </p>
@@ -160,6 +197,54 @@ export function LeadRowView({
             <InkButton tone="quiet-danger" small onClick={onKill}>
               Kill
             </InkButton>
+          ) : null}
+          {/*
+            Unit AK item 4: the badge used to be a dead end. If the desk thinks
+            this lead is already printed, the row offers the press that
+            settles it, and records why: the reason names the piece it matched.
+          */}
+          {dup && lead.status !== "killed" && lead.status !== "published" && onKillAsDuplicate ? (
+            dupKill === "saved" ? (
+              <span className="meta dup-kill-note" role="status">
+                Killed as a duplicate of {dup.headline}.
+              </span>
+            ) : dupKill === "failed" ? (
+              <>
+                <span className="meta dup-kill-note" role="status">
+                  That did not save.
+                </span>
+                <InkButton
+                  tone="quiet-danger"
+                  small
+                  onClick={() => {
+                    setDupKill("saving");
+                    void Promise.resolve(onKillAsDuplicate()).then(
+                      () => setDupKill("saved"),
+                      () => setDupKill("failed"),
+                    );
+                  }}
+                  ariaLabel={`Try killing ${lead.headline} as a duplicate again`}
+                >
+                  Try again
+                </InkButton>
+              </>
+            ) : (
+              <InkButton
+                tone="quiet-danger"
+                small
+                disabled={dupKill === "saving"}
+                onClick={() => {
+                  setDupKill("saving");
+                  void Promise.resolve(onKillAsDuplicate()).then(
+                    () => setDupKill("saved"),
+                    () => setDupKill("failed"),
+                  );
+                }}
+                ariaLabel={`Kill ${lead.headline} as a duplicate of ${dup.headline}`}
+              >
+                {dupKill === "saving" ? "Saving…" : "Kill as duplicate"}
+              </InkButton>
+            )
           ) : null}
           {onDelete ? (
             confirming ? (
@@ -256,27 +341,48 @@ export function LeadRowView({
           </span>
         ) : null}
         {dup ? (
-          <span
+          /*
+            Unit AK item 4: "≈ PRINTED" named nothing and went nowhere. The
+            badge now says what it means and links the piece it means, which is
+            the whole of the complaint that opened this unit.
+          */
+          <Link
+            to="/articles/$slug"
+            params={{ slug: dup.slug }}
             className="chip dup"
-            title={`Covers ground published ${formatShortDate(dup.publishedAt)}: ${dup.headline}`}
+            title={`Covers ground published ${formatShortDate(dup.publishedAt)}. Open the piece, or kill this lead as a duplicate.`}
           >
-            ≈ printed
-          </span>
+            {printedDuplicateLine(dup.headline)}
+          </Link>
         ) : null}
         {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
+          /*
+            Unit AK item 7: the same count, in words. A killed lead that came
+            back says "Came back 3 times" instead of "seen again ×3".
+          */
           <span className="chip seen-again">
-            seen again ×{lead.resurfaced_count}
+            {cameBackLabel(lead.resurfaced_count)}
             {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
           </span>
         ) : null}
         {lead.possible_duplicate ? (
+          /*
+            Unit AK item 5: this opens THIS lead's page, where both sides of the
+            pair are loaded and the Compare view renders -- the old chip opened
+            the other lead, whose page knew nothing about the pair and said so
+            by saying nothing at all.
+          */
           <Link
             to="/desk/story/$leadId"
-            params={{ leadId: String(lead.possible_duplicate.id) }}
+            params={{ leadId: String(lead.id) }}
             className="chip maybe-same"
-            title={`Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`}
+            title={
+              lead.dup_kind === "developing"
+                ? `This story came back with facts the killed lead "${lead.possible_duplicate.headline}" did not have. Open it to compare.`
+                : `Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`
+            }
           >
-            Possible duplicate · compare
+            {lead.dup_kind === "developing" ? "New facts · compare" : "Possible duplicate · compare"}
           </Link>
         ) : lead.possible_duplicate_of ? (
           <span className="chip maybe-same" title="The earlier lead is unavailable.">

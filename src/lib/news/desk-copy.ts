@@ -1320,6 +1320,77 @@ export function nearDuplicate(
   return null;
 }
 
+/*
+ * Unit AK items 2, 4, 6 and 7 (2026-09-26): the words the desk uses about a
+ * lead that may already be printed, and about a lead that was killed.
+ *
+ * The owner's complaint that started this unit: a lead stayed NEW with a badge
+ * reading "≈ PRINTED" and no way to act on it, and a "POSSIBLE DUPLICATE ·
+ * COMPARE" link opened a killed lead whose page said only "This lead was
+ * killed. Nothing to draft." Every string below exists to replace a badge or a
+ * dead end with a sentence that names the story and offers the next press.
+ */
+
+/** Unit AK item 4: what the row says instead of "≈ PRINTED". It names the
+ * headline it thinks the lead matches, so an editor can judge it without
+ * opening anything. */
+export function printedDuplicateLine(headline: string): string {
+  return `Looks already printed: ${headline.trim()}`;
+}
+
+/** Unit AK item 4: the reason recorded when an editor kills a lead as a
+ * duplicate. Kept as a sentence because it is shown verbatim on the Queue, in
+ * the Compare view and on the story page -- one string, three places. */
+export function duplicateKillReason(headline: string): string {
+  return `Duplicate of ${headline.trim()}`;
+}
+
+/** Unit AK item 2: the plain-words label on a finding filed HELD against a
+ * killed lead because it carries facts the killed lead did not have. */
+export const DEVELOPING_LABEL = "Developing: new facts on a story you killed";
+
+/** Unit AK item 7: how many times a lead came back after the desk had already
+ * dealt with it. "Seen again ×3" was the old chip; the count is the same fact,
+ * said in words. Empty for a lead that never came back, so callers can render
+ * unconditionally. */
+export function cameBackLabel(count: number | null | undefined): string {
+  const n = Math.max(0, Math.trunc(count ?? 0));
+  if (n === 0) return "";
+  return n === 1 ? "Came back 1 time" : `Came back ${n} times`;
+}
+
+/**
+ * Unit AK item 6: the record of a kill, in one sentence -- when, and why.
+ *
+ * Before migration 0094 the desk stored neither, so a lead killed earlier has
+ * no record at all; that case says so in as many words rather than showing an
+ * empty line an editor would read as "the desk forgot".
+ *
+ * `reopened` is for the story page of a lead whose kill was undone by the
+ * Compare view's "Newer facts — reopen the old one": the record stays, and it
+ * says it was undone, because a kill that silently disappears is exactly the
+ * kind of hidden state this unit exists to remove.
+ */
+export function killRecordLine(input: {
+  killedAt?: string | Date | null;
+  reason?: string | null;
+  reopened?: boolean;
+}): string {
+  const at = input.killedAt ? new Date(input.killedAt) : null;
+  const when = at && !Number.isNaN(at.getTime())
+    ? at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+  const reason = input.reason?.trim();
+  const why = reason ? reason : "no reason was recorded";
+  const lead = input.reopened ? "Reopened — it was killed" : "Killed";
+  if (when && reason) return `${lead} ${when} — ${reason}`;
+  if (when) return `${lead} ${when} — ${why}`;
+  if (reason) return `${lead} — ${reason}`;
+  return input.reopened
+    ? "Reopened — no record of when or why it was killed"
+    : "Killed before the desk started recording why — no reason was kept";
+}
+
 function properNounOverlap(a: string, b: string): boolean {
   const pa = nonStoplistedProperNouns(a);
   const pb = nonStoplistedProperNouns(b);

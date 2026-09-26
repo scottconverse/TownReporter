@@ -52,6 +52,7 @@ import {
   jobIdInput,
   leadIdInput,
   leadStatusInput,
+  leadDuplicateResolutionInput,
   meetingArticleReviewInput,
   outletInput,
   packDeleteInput,
@@ -305,9 +306,16 @@ export const listLeads = createServerFn({ method: "GET" })
                where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
                order by d.updated_at desc,d.id desc limit 1)) as story_headline,
              l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
-             l.possible_duplicate_of,
+             l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+             -- Unit AK item 5: the Compare view shows both leads side by side
+             -- without a second round trip, so the prior lead's why, sources,
+             -- dates and kill record travel with the row.
              case when prior.id is null then null else jsonb_build_object(
-               'id', prior.id, 'headline', prior.headline, 'status', prior.status
+               'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+               'why', prior.why, 'source_urls', prior.source_urls,
+               'created_at', prior.created_at,
+               'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
+               'killed_at', prior.killed_at
              ) end as possible_duplicate
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
@@ -434,9 +442,16 @@ export const getLead = createServerFn({ method: "GET" })
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.origin,
-             l.possible_duplicate_of,
+             l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+             -- Unit AK item 5: the Compare view shows both leads side by side
+             -- without a second round trip, so the prior lead's why, sources,
+             -- dates and kill record travel with the row.
              case when prior.id is null then null else jsonb_build_object(
-               'id', prior.id, 'headline', prior.headline, 'status', prior.status
+               'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+               'why', prior.why, 'source_urls', prior.source_urls,
+               'created_at', prior.created_at,
+               'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
+               'killed_at', prior.killed_at
              ) end as possible_duplicate
       from leads l
       left join leads prior on prior.id = l.possible_duplicate_of
@@ -2380,11 +2395,76 @@ export const setLeadStatus = createServerFn({ method: "POST" })
   .validator((input: unknown) => leadStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    const reason = data.killReason?.trim();
+    if (data.status === "killed") {
+      // Unit AK items 4 and 6 (migration 0094): a kill keeps a record. The
+      // timestamp is always written -- "when was this killed" has an answer
+      // the moment the kill happens -- and the reason is written when the
+      // editor's press stated one ("Kill as duplicate" and the Compare view's
+      // "Same story" both do). A plain Kill from the Queue states none, and
+      // the page says so in words rather than showing an empty line
+      // (killRecordLine, lib/news/desk-copy.ts).
+      await sql`
+        update leads set status = 'killed', killed_at = now(),
+                kill_reason = ${reason || null},
+                kill_reason_url = ${data.killReasonUrl?.trim() || null}
+        where id = ${data.id} and newsroom_id = ${owned(context)}
+      `;
+      return { ok: true as const };
+    }
     await sql`
       update leads set status = ${data.status}
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
+  });
+
+/**
+ * Unit AK item 5: the two Compare-view presses that are not a kill.
+ *
+ * "Not a duplicate — move to New" clears the link the scanner filed the lead
+ * with, so the lead stops claiming a twin and stops sitting in Held for a
+ * question the editor has just answered. "Newer facts — reopen the old one"
+ * puts the KILLED lead it was linked to back on the desk as New, because the
+ * finding carried facts the killed lead did not have and the story is live
+ * again. Neither press deletes anything: the kill record on the old lead
+ * stays, and `killRecordLine` says on its page that the kill was undone
+ * rather than letting it disappear.
+ *
+ * Both are scoped to the newsroom twice over -- the lead being resolved, and
+ * the prior lead it points at -- so a link that crosses newsrooms (which the
+ * schema does not allow, but which a stale row could still carry) can only
+ * ever touch this newsroom's rows.
+ */
+export const resolveLeadDuplicate = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => leadDuplicateResolutionInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const room = owned(context);
+    if (data.action === "not-a-duplicate") {
+      const rows = await sql<{ id: number }>`
+        update leads
+        set possible_duplicate_of = null, dup_kind = null,
+            status = case when status = 'held' then 'new' else status end
+        where id = ${data.id} and newsroom_id = ${room}
+        returning id
+      `;
+      if (!rows.length) return { ok: false as const, error: "That lead is no longer on the desk." };
+      return { ok: true as const, action: data.action };
+    }
+    const reopened = await sql<{ id: number }>`
+      update leads
+      set status = 'new'
+      where newsroom_id = ${room}
+        and id = (select possible_duplicate_of from leads
+                  where id = ${data.id} and newsroom_id = ${room})
+      returning id
+    `;
+    if (!reopened.length) {
+      return { ok: false as const, error: "There is no earlier lead to reopen for this one." };
+    }
+    return { ok: true as const, action: data.action, priorId: reopened[0]!.id };
   });
 
 export {

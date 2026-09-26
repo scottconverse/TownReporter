@@ -1004,6 +1004,10 @@
 
 /* A delete says what it costs, in the row, before it happens. */
 .desk-ltr .del-warn {display:block;font-size:calc(0.875rem * var(--ts));color:var(--adeep);margin-top:6px;max-width:60ch}
+/* Unit AK item 4: "Kill as duplicate" reports itself in the row -- saving,
+   saved, failed -- because the press that used to have no equivalent here is
+   exactly the one an editor needs to know landed. */
+.desk-ltr .dup-kill-note {display:inline-block;color:var(--adeep);align-self:center;white-space:normal;max-width:46ch}
 @media (max-width:640px) {
 .desk-ltr .needs {flex-direction:column;align-items:flex-start;gap:8px}
 .desk-ltr .needs-item {white-space:normal;text-align:left}
@@ -1095,6 +1099,16 @@
 .desk-ltr .queue-delete-select {display:block}
 .desk-ltr .filter {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.1em;border:1px solid var(--line);padding:4px 12px;color:var(--mut);white-space:nowrap}
 .desk-ltr .filter.on {background:var(--fg);color:var(--bg);border-color:var(--fg)}
+/* Unit AK item 7: a count of leads waiting on the editor, not one more
+   number in a row of numbers. It sits inside the tab's own words, so the
+   visible text of the button is still "held 3" and anything that finds the
+   tab by its label keeps working. */
+.desk-ltr .filter .filter-badge {display:inline-block;min-width:1.6em;padding:0 5px;border-radius:99px;background:var(--paper-2);color:var(--mut);font-size:calc(0.75rem * var(--ts));letter-spacing:0;text-align:center;font-variant-numeric:tabular-nums}
+.desk-ltr .filter.on .filter-badge {background:transparent;color:var(--bg)}
+/* --a is dark rust by day (#9b2915) and light rust at night (#d2764f), so
+   --bg is the readable ink on it in both; white would fail AA at night, the
+   same reason .score.hot swaps. */
+.desk-ltr .filter .filter-badge.waiting {background:var(--a);color:var(--bg);font-weight:700}
 .desk-ltr .file-form {margin-top:16px;border:1px solid var(--line);padding:0 16px}
 .desk-ltr .file-form summary {font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));padding:10px 0;cursor:pointer;list-style-position:inside}
 .desk-ltr .file-form>*:last-child {margin-bottom:14px}

@@ -39,15 +39,29 @@ function inlineModule(source) {
 
 const reactRouterStub = inlineModule(`
   import { createElement } from "react";
+  // Unit AK item 5: params are rendered as a data attribute so a test can tell
+  // WHICH lead a link targets -- the compare chip and the "possible duplicate
+  // of" link share one route template, so href alone cannot tell them apart.
   export function Link({ to, params, children, ...rest }) {
-    return createElement("a", { href: String(to ?? "#"), ...rest }, children);
+    return createElement(
+      "a",
+      { href: String(to ?? "#"), "data-params": JSON.stringify(params ?? null), ...rest },
+      children,
+    );
   }
 `);
 
 const deskChromeStub = inlineModule(`
   import { createElement } from "react";
-  export function InkButton({ children, onClick }) {
-    return createElement("button", { type: "button", onClick }, children);
+  // ariaLabel -> aria-label, matching the real InkButton (desk-chrome.tsx):
+  // the accessible name of a press is part of what these tests pin, so the
+  // stub must carry it through instead of dropping it.
+  export function InkButton({ children, onClick, ariaLabel, disabled }) {
+    return createElement(
+      "button",
+      { type: "button", onClick, "aria-label": ariaLabel, disabled: disabled || undefined },
+      children,
+    );
   }
   export function Score({ v }) {
     return createElement("span", { className: "score" }, String(v));
@@ -96,6 +110,36 @@ const providerRegistryStub = inlineModule(`
   export function defaultModelEffort() { return null; }
 `);
 
+/*
+ * Unit AK items 2/4/6/7 (2026-09-26): the row's copy for a "looks already
+ * printed" lead and for a lead that came back now comes from the real
+ * desk-copy.ts -- printedDuplicateLine, cameBackLabel, killRecordLine and
+ * DEVELOPING_LABEL. A stub would let the row and the Queue explainer drift
+ * apart, which is the bug class this unit is about, so the real module is
+ * loaded with its three own imports stubbed (it reaches preflight.ts,
+ * lead-match.ts and paper.ts for other functions this row never calls).
+ */
+const preflightStub = inlineModule(`
+  export function looksLikeProviderAuthFailure() { return false; }
+  export function providerAuthTarget() { return ""; }
+`);
+const leadMatchStubForCopy = inlineModule(`
+  export function nonStoplistedProperNouns() { return new Set(); }
+`);
+const paperModuleStub = inlineModule(`
+  export const TOPICS = [];
+`);
+const deskCopy = moduleUrl(
+  await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
+  "desk-copy.ts",
+  {
+    "./preflight.ts": preflightStub,
+    "./lead-match.ts": leadMatchStubForCopy,
+    "../paper.ts": paperModuleStub,
+    react: import.meta.resolve("react"),
+  },
+);
+
 const { LeadRowView } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
@@ -110,6 +154,7 @@ const { LeadRowView } = await import(
       "@/components/model-picker": modelPickerStub,
       "@/lib/news/model-choice": modelChoiceStub,
       "@/lib/news/provider-registry": providerRegistryStub,
+      "@/lib/news/desk-copy": deskCopy,
       "@/components/states": statesStub,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
@@ -135,13 +180,16 @@ function baseLead(overrides = {}) {
   };
 }
 
-test("a lead with resurfaced_count > 0 shows the seen-again badge with its count and date, in the lead-flags badge rail (not the muted meta line)", () => {
+test("a lead with resurfaced_count > 0 shows the came-back badge with its count and date, in the lead-flags badge rail (not the muted meta line)", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({ resurfaced_count: 3, last_resurfaced_at: "2026-09-03T12:00:00.000Z" }),
     }),
   );
-  assert.match(html, /seen again ×3/);
+  // Unit AK item 7: the count is the same fact, in words. "seen again ×3" was
+  // shorthand an editor had to decode; the row says "Came back 3 times".
+  assert.match(html, /Came back 3 times/);
+  assert.doesNotMatch(html, /seen again/);
   assert.match(html, /Sep 3/);
   assert.match(html, /class="chip seen-again"/);
   // The badge lives in the same "lead-flags" rail as the KILLED/PRINTED
@@ -160,13 +208,13 @@ test("a lead with resurfaced_count > 0 shows the seen-again badge with its count
   );
 });
 
-test("a lead with resurfaced_count of 0 shows no seen-again badge", () => {
+test("a lead with resurfaced_count of 0 shows no came-back badge", () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({ resurfaced_count: 0, last_resurfaced_at: null }),
     }),
   );
-  assert.doesNotMatch(html, /seen again/);
+  assert.doesNotMatch(html, /Came back/);
 });
 
 test("an open (non-killed) lead with a resurfaced stamp still shows the badge", () => {
@@ -179,7 +227,7 @@ test("an open (non-killed) lead with a resurfaced stamp still shows the badge", 
       }),
     }),
   );
-  assert.match(html, /seen again ×1/);
+  assert.match(html, /Came back 1 time/);
 });
 
 // QA-1 round 3: matchStrength's "possible" tier files the new lead linked to
@@ -317,7 +365,12 @@ test("a held possible duplicate keeps the held-review prefix and names the actua
 // (desk-copy.ts) now carries the matched published story's headline, and the
 // chip row must name it and link to the real published story so it's
 // judgeable in one click (see PrintedDup in src/lib/news/desk-copy.ts).
-test('a lead with a printed-duplicate match names and links the matched story next to the "≈ printed" chip', () => {
+// Unit AK item 4 (2026-09-26): the owner's complaint opened this unit -- a
+// lead stayed NEW behind a badge reading "≈ PRINTED", which named no story and
+// offered no press. The chip now says "Looks already printed: <headline>" and
+// links the published piece it means, and the row carries a one-press "Kill as
+// duplicate" that records why.
+test('a lead with a printed-duplicate match says "Looks already printed: <headline>" and links the piece', () => {
   const html = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({ status: "new" }),
@@ -330,20 +383,22 @@ test('a lead with a printed-duplicate match names and links the matched story ne
     }),
   );
   assert.match(html, /class="chip dup"/);
-  assert.match(html, /≈ printed/);
+  assert.match(
+    html,
+    /Looks already printed: Bohn Farm rezoning heads to planning board with staff blessing/,
+  );
+  assert.doesNotMatch(html, /≈ printed/, "the badge that said nothing must be gone");
   // The matched headline must appear as real, readable text near the chip...
   assert.match(html, /Bohn Farm rezoning heads to planning board with staff blessing/);
   assert.match(html, /published/);
-  // ...and it must be a real link to the published story, not color-only text.
-  const headlineIdx = html.indexOf(
-    "Bohn Farm rezoning heads to planning board with staff blessing",
-  );
-  const tagStart = html.lastIndexOf("<a", headlineIdx);
-  assert.ok(tagStart >= 0, "the matched headline should render inside an <a> link");
-  const tagEnd = html.indexOf(">", tagStart);
+  // ...and the chip itself must be a real link to the published story, not
+  // color-only text with a date on hover.
+  const chipIdx = html.indexOf('class="chip dup"');
+  const tagStart = html.lastIndexOf("<a", chipIdx);
+  assert.ok(tagStart >= 0, "the printed chip should render as an <a> link");
+  const tagEnd = html.indexOf(">", chipIdx);
   const openingTag = html.slice(tagStart, tagEnd + 1);
   assert.match(openingTag, /href="\/articles\/\$slug"/);
-  assert.match(openingTag, /class="inline-link"/);
 });
 
 test("a lead with no dup shows no printed chip and no matched-story line", () => {
@@ -352,6 +407,136 @@ test("a lead with no dup shows no printed chip and no matched-story line", () =>
   );
   assert.doesNotMatch(html, /chip dup/);
   assert.doesNotMatch(html, /matches:/);
+});
+
+test("a printed-duplicate match offers one press that kills it as a duplicate, with an accessible name", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "new" }),
+      dup: {
+        slug: "bohn-farm-rezoning",
+        publishedAt: "2026-08-19T12:00:00Z",
+        note: "Bohn Farm rezoning heads to planning board with staff blessing",
+        headline: "Bohn Farm rezoning heads to planning board with staff blessing",
+      },
+      onKillAsDuplicate: async () => {},
+    }),
+  );
+  assert.match(html, />Kill as duplicate</);
+  assert.match(
+    html,
+    /aria-label="Kill Longmont council has two closed-door executive sessions on the books as a duplicate of Bohn Farm rezoning heads to planning board with staff blessing"/,
+  );
+});
+
+test("a killed lead shows no kill-as-duplicate press, and a lead with no match shows none either", () => {
+  const dup = {
+    slug: "bohn-farm-rezoning",
+    publishedAt: "2026-08-19T12:00:00Z",
+    note: "Bohn Farm rezoning heads to planning board with staff blessing",
+    headline: "Bohn Farm rezoning heads to planning board with staff blessing",
+  };
+  const killed = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "killed" }),
+      dup,
+      onKillAsDuplicate: async () => {},
+    }),
+  );
+  assert.doesNotMatch(killed, /Kill as duplicate/, "a killed lead cannot be killed again");
+  const unmatched = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "new" }),
+      dup: null,
+      onKillAsDuplicate: async () => {},
+    }),
+  );
+  assert.doesNotMatch(unmatched, /Kill as duplicate/);
+});
+
+// Unit AK item 2's UI half: a finding filed HELD against a KILLED lead because
+// it carries facts the killed lead did not have (dup_kind === "developing").
+// The row has to say that in plain words, name the lead it is linked to, and
+// carry the old kill reason so the editor judging it does not have to open the
+// other lead to find out what was killed and why.
+test("a developing finding says so in words, links the killed lead, and carries the old kill reason", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({
+        status: "held",
+        dup_kind: "developing",
+        possible_duplicate_of: 42,
+        possible_duplicate: {
+          id: 42,
+          headline: "Police investigate a fight reported in northwest Longmont",
+          status: "killed",
+          killed_at: new Date(2026, 8, 22, 12, 0).toISOString(),
+          kill_reason: "Duplicate of Council OKs the budget",
+        },
+      }),
+    }),
+  );
+  assert.match(html, /Developing: new facts on a story you killed/);
+  assert.match(html, /new facts against/);
+  assert.match(html, /Police investigate a fight reported in northwest Longmont/);
+  assert.match(html, /Killed Sep 22, 2026 — Duplicate of Council OKs the budget/);
+  assert.match(html, /New facts · compare/);
+  // The old "possible duplicate" wording would be a lie about this row: it is
+  // not a maybe-same, it is a story that came back with more to it.
+  assert.doesNotMatch(html, /Possible duplicate/);
+  assert.doesNotMatch(html, /Held for review —/);
+});
+
+test("a held possible duplicate that is not a development keeps the held-review prefix", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({
+        status: "held",
+        dup_kind: "possible",
+        possible_duplicate_of: 42,
+        possible_duplicate: {
+          id: 42,
+          headline: "Earlier council executive-session lead",
+          status: "killed",
+        },
+      }),
+    }),
+  );
+  assert.match(html, /Held for review —/);
+  assert.match(html, /possible duplicate of/);
+  assert.match(html, /Possible duplicate · compare/);
+  assert.doesNotMatch(html, /Developing:/);
+});
+
+// Unit AK item 5: the compare chip must open THIS lead's page -- the page that
+// has both sides of the pair loaded -- not the other lead's page, which is
+// where the old chip went and why it landed an editor on a page that said
+// "This lead was killed. Nothing to draft."
+test("the compare chip opens this lead's own page, where both sides are loaded", () => {
+  const html = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({
+        id: 77,
+        status: "held",
+        possible_duplicate_of: 42,
+        possible_duplicate: { id: 42, headline: "Earlier council executive-session lead", status: "killed" },
+      }),
+    }),
+  );
+  const chipIdx = html.indexOf("chip maybe-same");
+  const tagStart = html.lastIndexOf("<a", chipIdx);
+  const openingTag = html.slice(tagStart, html.indexOf(">", chipIdx) + 1);
+  assert.match(openingTag, /href="\/desk\/story\/\$leadId"/);
+  // lead 77 is this row; 42 is the prior lead the row is linked to. The chip
+  // must point at 77.
+  assert.match(openingTag, /data-params="\{&quot;leadId&quot;:&quot;77&quot;\}"/);
+  assert.match(html, /Possible duplicate · compare/);
+  // And the "possible duplicate of <headline>" sentence still points at the
+  // other lead, so an editor can open either one.
+  const contextIdx = html.indexOf("possible duplicate of");
+  const contextTagStart = html.lastIndexOf("<a", contextIdx);
+  const contextTag = html.slice(contextTagStart, html.indexOf(">", contextIdx) + 1);
+  assert.match(contextTag, /data-params="\{&quot;leadId&quot;:&quot;42&quot;\}"/);
 });
 
 // Owner audit, 2026-09-05: "held", "aside", "closed" and "exhausted" used to
