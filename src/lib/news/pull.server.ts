@@ -26,7 +26,7 @@ import {
   siteOwnDocLinks,
 } from "./pull-plan.ts";
 import { audit } from "./ops.ts";
-import type { DeskJob } from "./jobs.ts";
+import { setJobStage, throwIfJobCancelled, type DeskJob } from "./jobs.ts";
 
 export const PULL_RUN_DEADLINE_MS = 120_000;
 
@@ -207,6 +207,22 @@ export type PullPipelineDeps = {
   ) => Promise<SearchAttempt>;
   ingest: (url: string, signal?: AbortSignal) => Promise<IngestDocument>;
   saveReceipt: (receipt: PullReceipt) => Promise<void>;
+  /*
+    Mirrors the receipt's stage onto the JOB row. Without it a Pull's `beat_at`
+    is written once when the queue claims the row and never again, so every pull
+    longer than a minute reads as stalled (redesign phase 3) -- the receipt
+    stage exists at these boundaries already and the desk just was not being
+    told about it. Optional so the pipeline's own tests need not supply a job.
+  */
+  reportStage?: (stage: string) => Promise<void>;
+  /*
+    The desk's Cancel, as a check the caller owns: this pipeline has no job row
+    of its own to read (`runPullPipeline` is driven by receipts, and its tests
+    build no job), so `performPullWork` supplies `throwIfJobCancelled`. Called
+    at each query boundary -- the same place `stopRequested` is, and distinct
+    from it: that one ends a finished pull, this one ends a stopped job.
+  */
+  assertNotCancelled?: () => Promise<void>;
   stopRequested: () => Promise<boolean>;
   saveDocument: (document: PulledDocument, receipt: PullReceipt) => Promise<void>;
 };
@@ -234,6 +250,7 @@ export async function runPullPipeline(
     receipt.stage = stage;
     receipt.updatedAt = new Date(now()).toISOString();
     await deps.saveReceipt(receipt);
+    await deps.reportStage?.(stage);
   };
   const checkpoint = receipt.checkpoint;
   const queryResults = (checkpoint.queryResults ??= []);
@@ -282,6 +299,7 @@ export async function runPullPipeline(
       if (await shouldStop()) {
         return finish("stopped", stoppedStage("editor"));
       }
+      await deps.assertNotCancelled?.();
       const current = receipt.checkpoint.queryIndex;
       const query = receipt.checkpoint.queries[current]!;
       if (queryResults[current] != null) {
@@ -683,6 +701,12 @@ export async function performPullWork(job: DeskJob) {
       // `needs-ocr` for the editor instead of silently spending any model.
       ingest: (url, signal) => ingestDocument(url, { allowModelOcr: false }, signal),
       saveReceipt: (next) => saveJobReceipt(job, next),
+      // Every receipt boundary is also a beat: the search loop, the index
+      // pages and the document fetches all pass through `save`.
+      reportStage: (stage) => setJobStage(job.id, stage),
+      // The editor's Cancel ends the job with "Cancelled by the editor" like
+      // every other kind, so the card shows one state for one act.
+      assertNotCancelled: () => throwIfJobCancelled(job.id),
       stopRequested: () => jobStopRequested(job),
       saveDocument: (document, next) => savePulledDocument(job, next, document),
     });
