@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,14 @@ const REQUIRED = [
   "lib-redlib.ps1",
   "lib-ollama.ps1",
   "lib-env.ps1",
+  // The two steps between "Postgres is listening" and "serve the paper", and
+  // the one-time Redlib move. lib-migrate.ps1 is why the 2026-09-25 logon task
+  // died at 20:01 with the site on 502 (a native command's stderr under 2>&1
+  // TERMINATES a script whose preference is Stop); losing that file, or the
+  // relocator that gets an MSIX-redirected install somewhere a scheduled task
+  // can see, fails on the machine that keeps the paper online.
+  "lib-migrate.ps1",
+  "redlib-relocate.ps1",
   // The Control page, and the launcher the Desktop icon runs. The page is the
   // operator's non-terminal way in now, so the same argument that put
   // status.ps1 in this list applies twice over: a missing file fails on the
@@ -967,4 +975,492 @@ test("no new scheduled task is registered for either optional service", () => {
   );
   assert.doesNotMatch(list[1], /[Rr]edlib|[Oo]llama/, "neither optional service may get its own task");
 });
+
+/* ------------------------------------------------------------------------- *
+ * The 2026-09-25 reboot, in four parts.
+ *
+ * The logon task ran at 20:01, wrote its own "=== started ===" line, and then
+ * nothing: no [migrate] line, no app, 502 until someone ran the task by hand.
+ * Two lines did it -- `$ErrorActionPreference = "Stop"` and a native command's
+ * stderr under `2>&1`, which in Windows PowerShell 5.1 arrives as a TERMINATING
+ * ErrorRecord. At boot Postgres answers the TCP port before it accepts queries,
+ * migrate wrote "the database system is starting up" to stderr, and the script
+ * died on the first line of it.
+ *
+ * Four fixes, four groups of tests, none of which needs a reboot:
+ *   1. the start path waits for a QUERY and runs migrate where stderr cannot
+ *      reach a PowerShell stream -- proven without a database by
+ *      scripts/ci-boot-recovery.ps1
+ *   2. the watchdog gives a failed logon start its registered task back, after
+ *      a three-minute boot grace, instead of launching a second copy
+ *   3. the Redlib install root is a setting (.env) a scheduled task can read
+ *   4. the one-time move out of MSIX's redirected AppData
+ * ------------------------------------------------------------------------- */
+
+test("start-townreporter.ps1 cannot be killed by a child's stderr any more", () => {
+  /*
+    The regression itself. `2>&1` on a native command is the idiom that did it,
+    and it is gone: the redirect now belongs to cmd.exe, inside
+    ops\lib-migrate.ps1. What must survive here is the ORDER -- the query wait,
+    then migrate, then the app, then the "start finished" line, which is the
+    only thing in the log that distinguishes a script that ran to the end from
+    one that died in the middle.
+  */
+  const code = stripComments(read("start-townreporter.ps1"));
+  assert.doesNotMatch(code, /2>&1/, "the idiom that terminated the logon task must not come back");
+  assert.doesNotMatch(code, /migrate\.mjs/, "migrate is run by lib-migrate.ps1, where stderr cannot reach a PowerShell stream");
+  assert.match(code, /\. \(Join-Path \$PSScriptRoot "lib-migrate\.ps1"\)/, "the two steps must be dot-sourced");
+  assert.match(code, /Wait-TownReporterDatabase -Bin \$bin -ConnectionString \$dbUrl -Log \$appLog/, "the start must wait for a query");
+  assert.match(code, /Invoke-TownReporterMigrate -App \$app -Log \$appLog -Node \$node/, "the start must run migrate through it");
+  // Neither failure may fall through to starting the app: a paper served
+  // against a half-migrated schema is worse than one plainly not up, and the
+  // watchdog cannot tell the difference.
+  assert.match(code, /if \(-not \(Wait-TownReporterDatabase[\s\S]{0,600}?\n {2}exit 1/, "a query that never gets answered must exit non-zero");
+  assert.match(code, /if \(-not \(Invoke-TownReporterMigrate[\s\S]{0,600}?\n {2}exit 1/, "migrations that never apply must exit non-zero");
+  assert.match(code, /the paper was not started: Postgres is listening/, "the reason must be in the log in plain words");
+  assert.match(code, /the paper was not started: the database migrations did not apply/, "and so must a failed migrate");
+  const started = code.indexOf("=== started ");
+  const finished = code.indexOf("=== start finished");
+  assert.ok(started > 0 && finished > started, "the log must keep both ends of the run");
+});
+
+test("lib-migrate.ps1 hands the redirect to cmd.exe, retries migrate three times, and reports rather than throws", () => {
+  const raw = read("lib-migrate.ps1");
+  const code = stripComments(raw);
+  // The whole repair: cmd /c owns the redirection and Start-Process points it
+  // at two FILES, so no PowerShell stream ever carries the child's stderr,
+  // whatever the caller's preference is.
+  // `/s` plus one outer pair of quotes: plain `/c` strips the first and last
+  // quote of a line that starts with one, which broke the quoted psql probe on
+  // the live paper (2026-09-25 9:25 PM). scripts/ci-boot-recovery.ps1 2b runs it.
+  assert.match(
+    code,
+    /ArgumentList\s*=\s*@\("\/s", "\/c", \("`"" \+ \$CommandLine \+ "`""\)\)/,
+    "cmd /s /c must take the command line as ONE quoted argument",
+  );
+  assert.match(code, /RedirectStandardOutput\s+= \$StdOutFile/, "stdout must go to a file, not a pipe");
+  assert.match(code, /RedirectStandardError\s+= \$StdErrFile/, "and so must stderr -- this is the line that matters");
+  assert.match(code, /ErrorActionPreference = "Continue"/, "and the preference is flipped for the duration as well");
+  assert.match(code, /\[int\]\$Attempts = 3/, "three migrate attempts");
+  assert.match(code, /\[int\]\$DelaySeconds = 10/, "ten seconds apart");
+  assert.match(code, /for \(\$attempt = 1; \$attempt -le \$Attempts; \$attempt\+\+\)/, "every attempt is a loop iteration, so every one is logged");
+  assert.match(code, /\[migrate\] attempt \$attempt of \$Attempts/, "each attempt must say which one it is");
+  assert.match(code, /\[migrate\] {3}\(stderr\) \$line/, "the child's stderr must land in the log, marked as stderr");
+  assert.match(code, /attempt \$attempt failed with exit code \$\(\$result\.Code\)/, "the exit code must be logged");
+  assert.match(code, /\[migrate\] applied, exit code 0/, "and so must the success");
+  assert.match(
+    code,
+    /the database schema is NOT current after \$Attempts attempts, so the paper was NOT started/,
+    "a migrate that never applies must say so in plain words",
+  );
+  assert.match(code, /return \$false/, "and RETURN false rather than throwing, so the caller can exit non-zero");
+  assert.match(code, /boot-migrate\.out\.log and boot-migrate\.err\.log/, "and point at the whole of the last attempt");
+  // The wait asks a QUERY, not the port. A listening port is what let the
+  // 20:01 boot through: Postgres opens it while it is still in crash recovery.
+  assert.match(code, /-tAc "select 1"/, "the probe must ask Postgres a real question");
+  assert.match(code, /\[int\]\$TimeoutSeconds = 180/, "three minutes, because a cold boot's crash recovery is slow");
+  assert.match(code, /\[Math\]::Min\(\$attempt, \$MaxIntervalSeconds\)/, "the retry must back off, so a three-minute recovery is a handful of lines");
+  assert.match(code, /not answering queries yet \(\$reason\)/, "what Postgres itself said while it was not ready is worth more than any sentence written here");
+  assert.match(code, /would not answer a query within/, "and running out of budget must be reported, not thrown");
+});
+
+test("the watchdog gives a failed logon start its registered task back, after a boot grace", () => {
+  /*
+    Problem 2, and the answer to it. When 3000 was down right after boot the
+    watchdog did the only thing it knew: launched a DETACHED COPY of
+    start-townreporter.ps1 and watched it 45 seconds later. The copy died at
+    exactly the same line as the logon task had, so the "repair" failed the
+    same way every five minutes and the log said only "FAILED to come up
+    healthy". Now: for three minutes after the task last ran the start is
+    already in progress and this run leaves it alone and says so; after that,
+    if the task's own LastTaskResult is non-zero, the run starts the TASK --
+    the ownership-checked entry point, whose LastTaskResult becomes the receipt
+    for the repair. Never both.
+  */
+  const wd = read("watchdog.ps1");
+  assert.match(wd, /\$startTaskName = 'TownReporter'/, "the repair must be the registered task, not a script path");
+  assert.match(wd, /Get-ScheduledTaskInfo -TaskName \$startTaskName/, "the task's own result is the receipt");
+  assert.match(wd, /LastTaskResult -ne 0/, "a failed start is what the repair acts on");
+  assert.match(wd, /LastRunTime\.Year -gt 1900/, "a task that has NEVER run (0x41303) is not a failure");
+  assert.match(wd, /\$startAge -ge 180/, "the boot grace is three minutes");
+  assert.match(wd, /inside the three-minute boot grace, leaving its start alone/, "and the grace must say so in the log");
+  assert.match(
+    wd,
+    /Assert-TownReporterTaskOwnership \$startTaskName 'start-townreporter\.ps1'/,
+    "the task must be proven to point at THIS checkout before it is run",
+  );
+  assert.match(wd, /Start-ScheduledTask -TaskName \$startTaskName/, "the task itself must be started");
+  assert.match(wd, /\$env:WATCHDOG_TEST_MODE -ne '1'/, "test mode must never run the real task");
+  assert.match(
+    wd,
+    /\$verifySeconds = if \(\$runTheTask\) \{ 300 \} else \{ 45 \}/,
+    "the task path needs five minutes -- it has its own DB wait and three migrate attempts",
+  );
+
+  // One path or the other. The boot-grace branch may start nothing at all.
+  const graceAt = wd.indexOf("} elseif ($startFailed) {");
+  assert.ok(graceAt > 0, "could not find the boot-grace branch");
+  const grace = stripComments(wd.slice(graceAt, wd.indexOf("} else {", graceAt)));
+  assert.ok(grace.length > 0, "could not slice the boot-grace branch");
+  assert.doesNotMatch(
+    grace,
+    /Start-ScheduledTask|Start-Process|Stop-Process|throw /,
+    "inside the grace the run only waits and says so -- it must not repair",
+  );
+
+  // And the repair branch must not also launch a detached copy of the script:
+  // that is the second starter the whole fix exists to remove.
+  const taskAt = wd.indexOf("if ($runTheTask) {");
+  assert.ok(taskAt > 0, "could not find the repair branch");
+  const repair = stripComments(wd.slice(taskAt, graceAt));
+  assert.ok(repair.length > 0, "could not slice the repair branch");
+  assert.match(repair, /Assert-TownReporterTaskOwnership[\s\S]{0,160}?Start-ScheduledTask/, "ownership is proven first, then the task runs");
+  assert.doesNotMatch(repair, /Start-Process/, "running the task and starting a detached copy are the same repair twice");
+
+  // The detached path is still there for the case it is right for -- down, but
+  // the logon task never failed (it was started by hand, or never ran).
+  assert.match(stripComments(wd.slice(graceAt)), /Start-Process/, "the detached start must survive for the case it is right for");
+});
+
+test("the Redlib install root is a setting a scheduled task can read, outside AppData", () => {
+  /*
+    Problem 3. Redlib was installed into %LOCALAPPDATA%\RedditSearch\Redlib
+    from inside an MSIX-packaged app, and MSIX redirects those writes into
+    %LOCALAPPDATA%\Packages\<package>\LocalCache\Local\RedditSearch\Redlib --
+    per process. Claude's packaged shell saw the merged view and started the
+    reader by hand; the watchdog, which Task Scheduler starts unpackaged, saw
+    an empty directory and logged "redlib: not installed here" every five
+    minutes while Redlib ran. The .env is the one place both kinds of process
+    read the same value, and the path it names has to be outside AppData.
+  */
+  const lib = read("lib-redlib.ps1");
+  const root = lib.slice(lib.indexOf("function Get-RedlibInstallRoot"), lib.indexOf("function Get-RedlibSandboxedRoots"));
+  assert.ok(root.length > 0, "could not find Get-RedlibInstallRoot");
+  // Priority, in this order, checked by position rather than by presence.
+  const rungs = [
+    "if ($InstallRoot) { return $InstallRoot }",
+    "if ($env:REDLIB_INSTALL_ROOT) { return $env:REDLIB_INSTALL_ROOT }",
+    'Read-OpsEnvValue -EnvFile $EnvFile -Name "REDLIB_INSTALL_ROOT"',
+    "return (Join-Path $env:LOCALAPPDATA",
+  ];
+  let previous = -1;
+  for (const rung of rungs) {
+    const at = root.indexOf(rung);
+    assert.ok(at > previous, `the install-root priority is missing or out of order at: ${rung}`);
+    previous = at;
+  }
+  assert.match(root, /RedditSearch\\Redlib/, "the last rung must stay the skill's own default");
+  assert.match(lib, /run ops\\redlib-relocate\.ps1/, "an absent reader that exists in a sandbox must say what to run");
+  assert.match(lib, /Get-RedlibSandboxedRoots/, "the sandboxed copies must be findable at all");
+
+  // ops\redlib.ps1 resolves the root ONCE, in its body. A parameter default is
+  // evaluated before the library loads, which is how the old %LOCALAPPDATA%
+  // default survived into the scheduled-task path.
+  const redlib = read("redlib.ps1");
+  assert.doesNotMatch(
+    stripComments(redlib),
+    /\[string\]\$InstallRoot\s*=\s*\(Join-Path \$env:LOCALAPPDATA/,
+    "the install root must not be defaulted at parameter-binding time",
+  );
+  assert.match(redlib, /if \(-not \$InstallRoot\) \{\s*\$InstallRoot = Get-RedlibInstallRoot/, "the body must resolve it");
+  assert.match(redlib, /"-File", \$script, "-InstallRoot", \$InstallRoot/, "the skill's script must be told the same root as an argument");
+  assert.match(
+    redlib,
+    /\$env:REDLIB_INSTALL_ROOT = \$InstallRoot/,
+    "and the child must inherit it as an environment variable -- the rung the skill falls back to",
+  );
+  // The detached start must hand its own root down too: it is a bare `start`
+  // with nothing reading what the child says, so the variable is the only way
+  // the child can land on the same install the caller asked about.
+  const startIfDown = lib.slice(lib.indexOf("function Start-RedlibIfDown"), lib.indexOf("function Stop-Redlib"));
+  assert.match(
+    startIfDown,
+    /\$env:REDLIB_INSTALL_ROOT = \(Get-RedlibInstallRoot -InstallRoot \$InstallRoot -EnvFile \$EnvFile\)/,
+    "Start-RedlibIfDown must pass the caller's root to the detached child",
+  );
+
+  // The console -- and the Control page, which renders these rows -- must not
+  // report a machine that has no reader when the reader is running and merely
+  // invisible to it.
+  assert.match(read("status.ps1"), /Get-RedlibAbsenceNote/, "status must use the shared absence wording");
+  assert.match(read("watchdog.ps1"), /'absent' {2}\{ Write-Log "redlib: \$\(Get-RedlibAbsenceNote\)" \}/, "so must the watchdog");
+});
+
+test("redlib-relocate.ps1 copies rather than moves, refuses a live reader, and never edits .env", () => {
+  /*
+    Problem 3's one-time repair. Its promises are the timid kind and they are
+    exactly the properties worth protecting: it COPIES (the old install is left
+    untouched, so a mistake costs nothing), it refuses to touch an install that
+    is running (Redlib's executable is what is being copied), it does nothing
+    when the target is inside AppData unless told -Force, and it never edits
+    .env -- it prints the line, because .env is the file the paper and every
+    scheduled task read.
+  */
+  const raw = read("redlib-relocate.ps1");
+  const code = stripComments(raw);
+  assert.match(raw, /\[switch\]\$Force/, "-Force must exist for a deliberate AppData target");
+  assert.match(raw, /\[switch\]\$DryRun/, "-DryRun must exist");
+  const toDefault = raw.match(/\$To\s*=\s*"([^"]+)"/);
+  assert.ok(toDefault, "could not find the -To default");
+  assert.doesNotMatch(toDefault[1], /AppData/i, "the default -To must be OUTSIDE AppData, or the redirect applies to the copy too");
+
+  assert.match(code, /Copy-Item -LiteralPath \$item\.FullName -Destination \$target -Recurse -Force/, "it must copy");
+  assert.doesNotMatch(code, /Move-Item/, "and must not move: the original stays where it was");
+  assert.doesNotMatch(code, /Remove-Item[^\n]*\$source/, "nothing may delete the source install");
+  assert.doesNotMatch(code, /Add-Content|Out-File|Set-Content/, "it must write no file by text -- .env above all");
+  assert.match(code, /REDLIB_INSTALL_ROOT=/, "it must print the .env line instead");
+  assert.match(code, /Refusing to copy an install out from under a live reader/, "a running reader must be refused, not copied");
+  assert.match(code, /-in @\('live', 'unverified', 'other'\)/, "and the same for a pid it could not identify");
+  assert.doesNotMatch(code, /Stop-Process|Stop-Redlib|taskkill/, "it stops nothing -- stopping the reader is ops\\redlib.ps1's job");
+
+  // install.json is rewritten at the OBJECT level. A text replace finds
+  // nothing: the paths in the file are written with doubled backslashes.
+  assert.match(raw, /ConvertFrom-Json[\s\S]{0,300}?Convert-PathInValue/, "the rewrite must walk the parsed object");
+  assert.match(code, /ConvertTo-Json -Depth 10/, "and write it back as JSON");
+  assert.match(code, /\[IO\.File\]::WriteAllText\([\s\S]{0,160}?UTF8Encoding\(\$false\)/, "UTF-8 with no BOM, readable by both PowerShells");
+  assert.match(code, /Get-RedlibSandboxedRoots/, "it must look in the MSIX LocalCache copies, which is where the install really was");
+  assert.ok(
+    code.includes("RedditSearch\\Redlib"),
+    "and at the skill's own default, so a bare run finds a broken machine's install",
+  );
+});
+
+test(
+  "the logon start survives a database that refuses queries, proven without a reboot",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      Fix 1's proof, and the brief's "prove it without a reboot". The fixture
+      runs the REAL code -- Wait-TownReporterDatabase and
+      Invoke-TownReporterMigrate out of ops\lib-migrate.ps1, the exact functions
+      ops\start-townreporter.ps1 calls between "the port is open" and "serve the
+      paper" -- against .cmd stubs in a temp directory: a probe that refuses
+      twice with "the database system is starting up" on stderr and then
+      answers, a migrate that fails twice and then applies, under
+      $ErrorActionPreference = "Stop" in the caller. It also runs the old
+      `2>&1` idiom once to show it really does die, which is the regression.
+
+      No reboot, no Postgres, no port, no network, no live service: the two
+      assertions below about what the fixture may contain are as load-bearing
+      as the ones about what it prints.
+    */
+    const fixture = join(ROOT, "scripts", "ci-boot-recovery.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-boot-recovery.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-boot-recovery.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.doesNotMatch(
+      text,
+      /Start-Process|Get-NetTCPConnection|Invoke-WebRequest|Invoke-RestMethod/,
+      "the fixture must touch nothing live -- stubs in a temp directory only",
+    );
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a boot-recovery check failed:\n${out}`);
+    assert.match(out, /boot recovery: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
+
+test(
+  "REDLIB_INSTALL_ROOT comes from the app's .env, and the environment wins over it",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The .env rung read for real, and the priority around it. The probe is a
+      file rather than an inline -Command: nested quoting through `powershell
+      -Command` is a class of bug in its own right. Nothing here starts,
+      stops or looks for a Redlib -- it resolves a path and prints it.
+    */
+    const dir = mkdtempSync(join(tmpdir(), "redlib-root-"));
+    try {
+      const fromFile = join(dir, "from-file");
+      const fromEnv = join(dir, "from-env");
+      const explicit = join(dir, "explicit");
+      const envFile = join(dir, "app.env");
+      writeFileSync(envFile, `# the install's settings\nREDLIB_INSTALL_ROOT=${fromFile}\n`, "utf8");
+      const quote = (p) => `'${p}'`;
+      const probe = join(dir, "probe.ps1");
+      writeFileSync(
+        probe,
+        [
+          '$ErrorActionPreference = "Continue"',
+          `. ${quote(join(OPS, "lib-redlib.ps1"))}`,
+          `$EnvFile = ${quote(envFile)}`,
+          '$env:REDLIB_INSTALL_ROOT = ""',
+          '"file=" + (Get-RedlibInstallRoot -EnvFile $EnvFile)',
+          `$env:REDLIB_INSTALL_ROOT = ${quote(fromEnv)}`,
+          '"env=" + (Get-RedlibInstallRoot -EnvFile $EnvFile)',
+          '$env:REDLIB_INSTALL_ROOT = ""',
+          `"explicit=" + (Get-RedlibInstallRoot -InstallRoot ${quote(explicit)} -EnvFile $EnvFile)`,
+          '$env:REDLIB_INSTALL_ROOT = ""',
+          '"default=" + (Get-RedlibInstallRoot -EnvFile (Join-Path $PSScriptRoot "nothing.env"))',
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", probe],
+        { encoding: "utf8", timeout: 120_000 },
+      );
+      const value = (key) => {
+        const line = out.split(/\r?\n/).find((l) => l.startsWith(`${key}=`));
+        assert.ok(line, `the probe printed no ${key}= line:\n${out}`);
+        return line.slice(key.length + 1).trim();
+      };
+      const same = (a, b) => assert.equal(a.toLowerCase(), b.toLowerCase(), `expected ${b}, got ${a}`);
+      same(value("file"), fromFile);
+      same(value("env"), fromEnv);
+      same(value("explicit"), explicit);
+      // The last rung is the skill's own default, and it is the one path a
+      // scheduled task cannot see -- which is why the .env rung exists.
+      same(value("default"), join(process.env.LOCALAPPDATA ?? "", "RedditSearch", "Redlib"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "redlib-relocate.ps1 on a fake install: copies it, rewrites its paths, refuses a live one",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The helper run for real, against a FAKE install in a temp directory. It
+      is never pointed at this machine's Redlib: the brief asks for a fake
+      install and that is what `plant` builds -- a directory with an
+      install.json, a stub executable and a config, on a port nothing listens
+      on (65533), so the liveness probe is refused locally and no service is
+      touched. The temp directory lives under %LOCALAPPDATA%, which is why
+      every copy here passes -Force: the AppData warning is exactly the branch
+      this fixture exercises.
+
+      install.json is written as JSON TEXT, never as an inline PSCustomObject
+      literal. `"built at " + $root, "unrelated"` parses as
+      `"built at " + ($root, "unrelated")` -- the comma binds tighter than + --
+      so a literal built that way is ONE space-joined string, and the array
+      assertion below would pass for the wrong reason.
+    */
+    const script = join(OPS, "redlib-relocate.ps1");
+    const base = mkdtempSync(join(tmpdir(), "redlib-relocate-"));
+    const run = (args) => {
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
+            { encoding: "utf8", timeout: 120_000 },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
+    const plant = (root, opts = {}) => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "install.json"),
+        `${JSON.stringify(
+          {
+            installRoot: root,
+            executable: join(root, "redlib.exe"),
+            baseUrl: "http://127.0.0.1:65533",
+            logPath: join(root, "redlib.log"),
+            notes: [`built at ${root}`, "unrelated"],
+            commit: "b6a2a5e",
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      writeFileSync(join(root, "redlib.exe"), "stub, never run\n", "utf8");
+      writeFileSync(join(root, "config.toml"), "port = 65533\n", "utf8");
+      if (opts.pid !== undefined) writeFileSync(join(root, "redlib.pid"), String(opts.pid), "utf8");
+    };
+    const noEnv = join(base, "absent.env");
+    try {
+      // 1. The copy. -Force because the target is under %LOCALAPPDATA%.
+      const src = join(base, "from");
+      const dst = join(base, "to");
+      plant(src);
+      const copy = run(["-From", src, "-To", dst, "-Force", "-EnvFile", noEnv]);
+      assert.equal(copy.code, 0, `the copy exited ${copy.code}:\n${copy.out}`);
+      assert.ok(
+        copy.out.toLowerCase().includes(`redlib_install_root=${dst}`.toLowerCase()),
+        `the .env line must be printed:\n${copy.out}`,
+      );
+      assert.match(copy.out, /inside AppData/, "a target under AppData must be called out");
+      assert.match(copy.out, /was not changed or deleted/, "the run must say the original is still there");
+      const moved = JSON.parse(readFileSync(join(dst, "install.json"), "utf8"));
+      assert.equal(moved.installRoot.toLowerCase(), dst.toLowerCase(), "installRoot must name the new place");
+      assert.equal(moved.executable.toLowerCase(), join(dst, "redlib.exe").toLowerCase(), "so must executable");
+      assert.equal(moved.logPath.toLowerCase(), join(dst, "redlib.log").toLowerCase(), "and any other path in it");
+      assert.deepEqual(moved.notes, [`built at ${dst}`, "unrelated"], "a path inside an ARRAY must be rewritten, and the array must stay an array");
+      assert.equal(moved.commit, "b6a2a5e", "a value that is not a path must be left alone");
+      assert.ok(existsSync(join(dst, "config.toml")), "the whole install must be copied");
+      assert.ok(!existsSync(join(dst, "redlib.pid")), "the pid file belongs to a process, not to an install");
+      assert.ok(
+        !readFileSync(join(dst, "install.json"), "utf8").toLowerCase().includes(src.toLowerCase()),
+        "the copy must not still name the old root anywhere",
+      );
+      const kept = JSON.parse(readFileSync(join(src, "install.json"), "utf8"));
+      assert.equal(kept.installRoot, src, "the original install.json must be untouched");
+      assert.ok(existsSync(join(src, "redlib.exe")), "and the original executable must still be there -- this copies, it does not move");
+
+      // 2. A live reader is refused. This process's own pid is alive but is not
+      //    running redlib.exe, so the helper cannot identify it -- also a
+      //    refusal, and the more dangerous of the two to get wrong.
+      const liveSrc = join(base, "live");
+      const liveDst = join(base, "live-copy");
+      plant(liveSrc, { pid: process.pid });
+      const refused = run(["-From", liveSrc, "-To", liveDst, "-Force", "-EnvFile", noEnv]);
+      assert.equal(refused.code, 1, `a live reader must be refused:\n${refused.out}`);
+      assert.match(refused.out, /Refusing to copy an install out from under a live reader/);
+      assert.ok(!existsSync(liveDst), "nothing may be copied when the reader is running");
+
+      // 3. An existing install at the target, without -Force.
+      const someSrc = join(base, "somewhere");
+      const takenDst = join(base, "taken");
+      plant(someSrc);
+      plant(takenDst);
+      const taken = run(["-From", someSrc, "-To", takenDst, "-EnvFile", noEnv]);
+      assert.equal(taken.code, 1, `an occupied target must be refused without -Force:\n${taken.out}`);
+      assert.match(taken.out, /There is already a Redlib install at/);
+
+      // 4. -DryRun prints the plan and changes nothing.
+      const drySrc = join(base, "dry-src");
+      const dryDst = join(base, "dry-dst");
+      plant(drySrc);
+      const dry = run(["-From", drySrc, "-To", dryDst, "-Force", "-DryRun", "-EnvFile", noEnv]);
+      assert.equal(dry.code, 0, `the dry run exited ${dry.code}:\n${dry.out}`);
+      assert.match(dry.out, /dry run: nothing below this line happens/);
+      assert.ok(!existsSync(dryDst), "-DryRun must not create the target");
+
+      // 5. A -From that holds no install is an error, not a silent search.
+      const missing = run(["-From", join(base, "nothere"), "-To", join(base, "x"), "-Force", "-EnvFile", noEnv]);
+      assert.equal(missing.code, 1);
+      assert.match(missing.out, /no Redlib install at -From/);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
 

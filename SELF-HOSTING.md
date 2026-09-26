@@ -52,10 +52,10 @@ restart.
 
 | Task                          | When        | Does                                                                                                                                |
 | ----------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `TownReporter`                | at logon    | starts Postgres, applies migrations, serves the app                                                                                 |
+| `TownReporter`                | at logon    | starts Postgres, waits for a real query, applies migrations, serves the app; exits non-zero if it cannot |
 | `TownReporter Tunnel`         | at logon    | connects the Cloudflare Tunnel                                                                                                      |
 | `TownReporter Monitors`       | every 5 min | rechecks watched sources, drains desk jobs                                                                                          |
-| `TownReporter Watchdog`       | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; appends to `logs/watchdog.log` when there is something to say |
+| `TownReporter Watchdog`       | every 5 min | checks the app, the tunnel and the public URL; restarts what is down; runs the logon task itself if it failed at boot; appends to `logs/watchdog.log` when there is something to say |
 | `TownReporter Restart`        | on demand   | stops and starts the paper                                                                                                          |
 | `TownReporter Nightly Proof`  | daily 03:30 | runs a real Scan and Draft against `townreporter_dev`; never publishes ([nightly proof](docs/nightly-proof.md))                      |
 | `TownReporter Tunnel Restart` | on demand   | stops and starts the tunnel                                                                                                         |
@@ -110,15 +110,29 @@ In order, once you log in. Nothing here runs before the logon.
 | What                             | Started by                                   | When                          |
 | -------------------------------- | -------------------------------------------- | ----------------------------- |
 | Postgres on 5433                 | the `TownReporter` task (`ops/start-townreporter.ps1`) | logon, first                  |
-| The paper                        | the same task, after Postgres accepts connections | logon, a few seconds later    |
+| The paper                        | the same task, after Postgres **answers a query** | logon, a few seconds later    |
 | The Reddit reader (Redlib)       | the same task, detached, then the watchdog   | logon, in the background      |
 | Ollama                           | your own Startup shortcut (`Ollama.lnk`)     | logon, by Windows, not by us  |
 | The Cloudflare Tunnel            | the `TownReporter Tunnel` task               | logon                         |
 | Whatever has stopped since       | the `TownReporter Watchdog` task             | every 5 minutes               |
+| A logon start that failed        | the `TownReporter Watchdog` task, by running `\TownReporter` again | 3 minutes after the failure |
 | LM Studio                        | nothing here                                 | not started or touched at all |
 
 Three of these are optional and their absence is a supported state, not a
 fault. The paper serves either way.
+
+**The wait is for a query, not a port.** Postgres opens the TCP port before it
+will accept a query, so a start that only checked the port could sail past a
+database still in crash recovery and die on the first thing `migrate` said.
+The logon start now asks `select 1` for up to three minutes with backoff, and
+writes what Postgres said while it was not ready into `logs/townreporter.log`.
+Migrations then run through `cmd.exe`, which owns the redirection, so a child
+process's stderr can never terminate the script; each of three attempts and its
+exit code is in the log. If the schema is still not current, the start says so
+in plain words and **exits non-zero** rather than appearing to have served the
+paper — and the watchdog, after a three-minute grace, acts on that by running
+the `\TownReporter` task itself. It runs that one registered task, never a
+second copy of the start script.
 
 - **Redlib** is the only way the desk reads a Reddit thread in full — post
   body, scores, replies. Without it the desk reads the subreddit through
@@ -127,6 +141,25 @@ fault. The paper serves either way.
   `ops/redlib.ps1 status`; stop it with `ops/redlib.ps1 stop`. It is stopped
   through the pid file the installation wrote, never by image name. Set
   `TOWNREPORTER_REDLIB=0` in `.env` to leave it alone entirely.
+  - **Where it lives matters.** An install made from inside the app sandbox is
+    redirected by Windows into
+    `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\…`. A scheduled
+    task is not a packaged process, so it does not see that merged view: it
+    looked at the real path, found nothing, and reported "not installed here"
+    while the reader was on disk. The install root is therefore a setting:
+    `REDLIB_INSTALL_ROOT` in the app's `.env`, which the tasks can read because
+    it is outside AppData. An environment variable with that name wins over the
+    `.env` value, and the old AppData path is only the last resort when neither
+    is set. Point it at `C:\Users\scott\TownReporterTools\Redlib` and run
+    `ops\redlib.ps1 setup` there.
+  - **Moving an existing install:** `powershell -ExecutionPolicy Bypass -File
+    ops\redlib-relocate.ps1 -To C:\Users\scott\TownReporterTools\Redlib`. It
+    copies rather than moves, rewrites the absolute paths inside `install.json`,
+    refuses to copy out from under a live reader, and prints the `.env` line to
+    add — it never edits `.env` itself. `-DryRun` prints what it would do.
+    When the reader is absent but a copy is sitting under a
+    `Packages\*\LocalCache` path, `ops/status.ps1` and the Control page say
+    exactly that instead of "not installed".
 - **Ollama** serves the first rung of the *Automatic* model ladder (DeepSeek
   v4.1 Flash). With it down, *Automatic* walks to the next rung and the paper
   keeps drafting. The watchdog starts it by reading your `Ollama.lnk` target,

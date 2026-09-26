@@ -9,10 +9,23 @@
   says so in the source text rather than pretending it read the thread.
 
   The installation is the reddit-search skill's, not ours. That skill builds
-  Redlib from the pinned commit with native Rust/MSVC under
-  %LOCALAPPDATA%\RedditSearch\Redlib and runs it loopback-only on 18080; this
-  script only drives it from this repo, in the shape the other ops scripts
-  use, so the operator does not have to remember where the skill lives.
+  Redlib from the pinned commit with native Rust/MSVC and runs it
+  loopback-only on 18080; this script only drives it from this repo, in the
+  shape the other ops scripts use, so the operator does not have to remember
+  where the skill lives.
+
+  WHERE the install is is a setting now, not an assumption: REDLIB_INSTALL_ROOT
+  in this process's environment, then in the install's .env, then the skill's
+  own default under %LOCALAPPDATA%. The note above Get-RedlibInstallRoot in
+  lib-redlib.ps1 says why -- an install made from inside an MSIX-packaged app
+  lands where Task Scheduler's processes cannot see it, so the scheduled tasks
+  read the root from .env instead. ops\redlib-relocate.ps1 moves an existing
+  install out of AppData and prints the .env line to add.
+
+  Every child this script starts is handed the resolved root twice: as
+  -InstallRoot, which the skill's scripts take, and as REDLIB_INSTALL_ROOT in
+  its environment, which is what the Redlib process they launch inherits. One
+  answer, so the script, the skill and the running reader cannot disagree.
 
   The skill's scripts need PowerShell 7 (`$IsWindows`); this repo's ops
   scripts are Windows PowerShell 5.1. So status is answered here directly,
@@ -34,6 +47,12 @@
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 check        # full usability test
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 setup        # build/install only
     powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 start -SkillRoot <path>
+    powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 status -InstallRoot <path>
+
+  -InstallRoot overrides where the install is looked for. Leave it off (the
+  usual case) and the root comes from REDLIB_INSTALL_ROOT in the environment or
+  in the install's .env, which is the only setting a scheduled task and a
+  packaged process read the same way. See the note at the top of this file.
 
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 script as ANSI.
 #>
@@ -43,12 +62,28 @@ param(
   [ValidateSet("status", "start", "stop", "restart", "check", "setup")]
   [string]$Action = "status",
   [string]$SkillRoot,
-  [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "RedditSearch\Redlib"),
+  [string]$InstallRoot,
   [int]$Port = 18080
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "lib-redlib.ps1")
+
+<#
+  Resolve the root ONCE, here, rather than defaulting the parameter to
+  %LOCALAPPDATA% at binding time.
+
+  A parameter default is evaluated before this script's own dot-sourced library
+  has a say, and the default it used to carry -- the skill's %LOCALAPPDATA%
+  path -- is exactly the path a scheduled task cannot see when the install was
+  made from inside a packaged app (2026-09-25). Resolving it here means the
+  order in lib-redlib.ps1 applies: -InstallRoot, then REDLIB_INSTALL_ROOT in
+  the environment, then in .env, then that default. Status, the child scripts
+  and the log lines all then use one value.
+#>
+if (-not $InstallRoot) {
+  $InstallRoot = Get-RedlibInstallRoot -EnvFile (Join-Path (Split-Path -Parent $PSScriptRoot) ".env")
+}
 $baseUrl = "http://127.0.0.1:$Port"
 
 function Find-SkillRoot {
@@ -89,6 +124,12 @@ function Invoke-SkillScript {
   $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $script, "-InstallRoot", $InstallRoot)
   if ($Name -eq "setup_redlib_windows.ps1") { $arguments += @("-Port", [string]$Port) }
   $arguments += $ExtraArgs
+  # Twice on purpose. -InstallRoot is what the skill's own scripts read; the
+  # environment variable is what the Redlib process THEY launch inherits, and it
+  # is also the rung the skill's scripts fall back to when they are run without
+  # the argument. Nothing here passes the path on the command line only for the
+  # next process down to guess at a different one.
+  $env:REDLIB_INSTALL_ROOT = $InstallRoot
   & $pwsh @arguments
   return $LASTEXITCODE
 }

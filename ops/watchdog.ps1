@@ -16,6 +16,34 @@
   up against a dead database produces a site that answers 200 with no stories,
   which is worse than a site that is plainly unreachable.
 
+  What it does when the app port is down right after a boot, asked and answered
+  because the 2026-09-25 boot exposed it (the answer used to be: "restarts the
+  start script, detached, and gives it 45 seconds"):
+
+  * Postgres is checked FIRST, and the app is not touched at all when 5433 is
+    down. No retry count for Postgres: pg_ctl is started once and the port is
+    watched for three minutes.
+  * Then the port, then a real HTTP 200 -- a socket is not a paper.
+  * Then the logon task's own result, from Get-ScheduledTaskInfo. If that task
+    ran less than three minutes ago and failed, this run is inside the BOOT
+    GRACE: it logs the failure and leaves the start alone, because the logon
+    task may still be in Postgres recovery and three migrate attempts.
+  * Outside the grace, with the task's last result non-zero, it runs the TASK
+    itself -- Assert-TownReporterTaskOwnership, then Start-ScheduledTask --
+    never a second copy of the start script, and never a second copy of the app.
+    That is one repair path or the other, chosen by the task's own result.
+  * Otherwise (no task record, a task that has never run, or a good task result
+    with the app still down) it starts the start script detached, as before.
+  * Then it waits for a real 200: 45 seconds on the script path, five minutes on
+    the task path, because the task does its own DB wait and migrate retries.
+  * No max tries. The watchdog runs every five minutes and each run is
+    independent; a repair that needs to happen three times to stick will happen
+    three times. What it will NOT do is fire again during the grace window.
+
+  This is only why it acts. The reason the paper did not come back on
+  2026-09-25 is the start path itself, and that is fixed in
+  ops\lib-migrate.ps1.
+
   It also keeps two optional services alive, and keeps them separate from the
   paper. Redlib (the Reddit reader) and Ollama (the first Automatic rung's
   model server) are each started if down and never started, stopped or
@@ -190,48 +218,110 @@ if (-not $appHealthy) {
       Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
     }
     <#
-      Launch the start script as a DETACHED process, not with `&`.
+      Before repairing, ask whether the logon task is still working -- and if
+      it is the thing that FAILED, run that task rather than a second copy of
+      its script.
 
-      Called inline, the server it spawns inherits this script's console
-      handles, so the watchdog never returns -- it sits holding the pipe for as
-      long as the app runs. The scheduled task is set to skip a new run while
-      one is active, so a single hung run silently ends the watching. Found by
-      killing the app and watching the repair itself hang for seven minutes.
+      This is the 2026-09-25 boot. The logon task ran at 20:01, died inside
+      migrate (see ops\lib-migrate.ps1 for why), and left the site on 502. This
+      watchdog noticed on its next run and did the only thing it knew: started
+      start-townreporter.ps1 again, detached, and watched it 45 seconds later.
+      That script died at exactly the same line, so the repair failed the same
+      way every five minutes for as long as nobody looked, and the log read
+      "FAILED to come up healthy" with no hint that the start path itself was
+      the fault. Two things were missing: a reason to wait, and a repair that
+      reports the task's own result.
 
-      Detached, the watchdog only polls the port and exits.
+      The wait: a cold boot spends a minute or more in Postgres crash recovery
+      and three migrate attempts. Repairing a start that is already in progress
+      is how a good boot gets trampled, so for three minutes after the task last
+      ran this run leaves its start alone and says so.
+
+      The repair: the registered task, not a detached copy of its script. The
+      task is the ownership-checked entry point the logon and the operator both
+      use, Assert-TownReporterTaskOwnership proves it points at THIS checkout,
+      and running it makes its own LastTaskResult the receipt for this repair.
+      Never both -- one path or the other.
+
+      Test mode never reaches here: the seam points the app port at a
+      disposable instance, and the real task starts the real paper.
     #>
-    try {
-      $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
-      $exe = if ($shell) { $shell.Source } else { "powershell.exe" }
-      Start-Process -FilePath $exe `
-        -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
-                      "-File", $startScript `
-        -WindowStyle Hidden
+    $startTaskName = 'TownReporter'
+    $startInfo = Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue
+    # Never run at all is not a failure: LastTaskResult for a task that has not
+    # run yet is 0x41303 (267009), which would otherwise read as a fault and put
+    # a machine whose paper was started by hand into the grace branch forever.
+    $startHasRun = [bool]($startInfo -and $startInfo.LastRunTime -and $startInfo.LastRunTime.Year -gt 1900)
+    $startFailed = [bool]($startHasRun -and $startInfo.LastTaskResult -ne 0)
+    $startAge = -1
+    if ($startHasRun) { $startAge = [int]((Get-Date) - $startInfo.LastRunTime).TotalSeconds }
+    $runTheTask = ($startFailed -and $startAge -ge 180 -and $env:WATCHDOG_TEST_MODE -ne '1')
+
+    # Five minutes, not forty-five seconds, on the task path: that task has its
+    # own DB wait (up to three minutes) and three migrate attempts to get
+    # through, and calling it failed while it is still working is how the
+    # watchdog would log a FAILED that never happened. The scheduled task skips
+    # a run while one is active, so waiting here delays the next run rather than
+    # stacking one on top of it.
+    $verifySeconds = if ($runTheTask) { 300 } else { 45 }
+
+    if ($runTheTask) {
+      Write-Log "app: the $startTaskName task last exited $($startInfo.LastTaskResult) $startAge second(s) ago; running the task itself"
+      try {
+        Assert-TownReporterTaskOwnership $startTaskName 'start-townreporter.ps1'
+        Start-ScheduledTask -TaskName $startTaskName
+      } catch {
+        Write-Log "app: running the $startTaskName task failed: $($_.Exception.Message)"
+      }
+    } elseif ($startFailed) {
+      Write-Log "app: the $startTaskName task failed $startAge second(s) ago; inside the three-minute boot grace, leaving its start alone"
+    } else {
       <#
-        Verify the app actually answers on 127.0.0.1, not just that a socket
-        is listening: a listener with no page behind it, or one on the wrong
-        address family, is not a repair. 45s budget, explicit FAILED on the
-        way out either way -- a silent "did not repair" reads the same as no
-        check at all, which is exactly how this app's port check went blind
-        to an IPv6-only foreign listener before.
+        Launch the start script as a DETACHED process, not with `&`.
+
+        Called inline, the server it spawns inherits this script's console
+        handles, so the watchdog never returns -- it sits holding the pipe for as
+        long as the app runs. The scheduled task is set to skip a new run while
+        one is active, so a single hung run silently ends the watching. Found by
+        killing the app and watching the repair itself hang for seven minutes.
+
+        Detached, the watchdog only polls the port and exits.
       #>
-      $repairedOk = $false
-      for ($i = 0; $i -lt 45; $i++) {
-        if (Test-TownReporterPort $port) {
-          try {
-            $code = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5).StatusCode
-            if ($code -eq 200) { $repairedOk = $true; break }
-          } catch { }
-        }
-        Start-Sleep -Seconds 1
+      try {
+        $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
+        $exe = if ($shell) { $shell.Source } else { "powershell.exe" }
+        Start-Process -FilePath $exe `
+          -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
+                        "-File", $startScript `
+          -WindowStyle Hidden
+      } catch {
+        Write-Log "app: start failed: $($_.Exception.Message)"
       }
-      if ($repairedOk) {
-        $repaired += "app"
-      } else {
-        Write-Log "app: FAILED to come up healthy on 127.0.0.1:$port within 45s of starting it"
+    }
+
+    <#
+      Verify the app actually answers on 127.0.0.1, not just that a socket is
+      listening: a listener with no page behind it, or one on the wrong address
+      family, is not a repair. Explicit FAILED on the way out either way -- a
+      silent "did not repair" reads the same as no check at all, which is
+      exactly how this app's port check went blind to an IPv6-only foreign
+      listener before.
+    #>
+    $repairedOk = $false
+    for ($i = 0; $i -lt $verifySeconds; $i++) {
+      if (Test-TownReporterPort $port) {
+        try {
+          $code = (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5).StatusCode
+          if ($code -eq 200) { $repairedOk = $true; break }
+        } catch { }
       }
-    } catch {
-      Write-Log "app: start failed: $($_.Exception.Message)"
+      Start-Sleep -Seconds 1
+    }
+    if ($repairedOk) {
+      $repaired += "app"
+    } else {
+      Write-Log "app: FAILED to come up healthy on 127.0.0.1:$port within ${verifySeconds}s of starting it"
+      if ($runTheTask) { Write-Log "app: the $startTaskName task is what was run; its own log is townreporter.log and its result is $((Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue).LastTaskResult)" }
     }
   }
 }
@@ -257,14 +347,18 @@ if ($env:WATCHDOG_TEST_MODE -ne '1') {
   try {
     . (Join-Path $PSScriptRoot "lib-redlib.ps1")
     $redlibSwitch = Get-RedlibOffSwitch -EnvFile (Join-Path $app ".env")
-    $redlibState = Get-RedlibState
-    $redlibAction = Start-RedlibIfDown -OffSwitch $redlibSwitch
+    $redlibState = Get-RedlibState -EnvFile (Join-Path $app ".env")
+    $redlibAction = Start-RedlibIfDown -OffSwitch $redlibSwitch -EnvFile (Join-Path $app ".env")
     switch ($redlibAction) {
       'up'      { Write-Log "redlib: up (state=$redlibState)" }
       # Deliberately NOT added to $repaired: the start is detached, so this run
       # cannot yet say it worked. The next run's "redlib: up" is the receipt.
       'started' { Write-Log "redlib: not answering (state=$redlibState), starting it" }
-      'absent'  { Write-Log "redlib: not installed here; the desk reads Reddit through RSS alone" }
+      # The wording is lib-redlib.ps1's, because "absent" has two causes and
+      # this log is where the difference was invisible on 2026-09-25: every five
+      # minutes it said "not installed here" while Redlib was running, installed
+      # inside an app sandbox that Task Scheduler cannot look into.
+      'absent'  { Write-Log "redlib: $(Get-RedlibAbsenceNote)" }
       'off'     { Write-Log "redlib: switched off by TOWNREPORTER_REDLIB=0; leaving it alone" }
     }
   } catch {

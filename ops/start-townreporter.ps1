@@ -7,6 +7,18 @@
   Postgres lives on 5433, NOT the default 5432 - another Postgres that does not
   belong to this project already owns 5432 on this machine. Do not "fix" that by
   moving back; the split is what stops the desk writing to the wrong cluster.
+
+  The order of the two waits, and why there are two, is in ops\lib-migrate.ps1.
+  The short version: on 2026-09-25 this task ran at 20:01, logged its own start
+  line, and then died on the first byte of stderr from migrate -- because
+  `2>&1` under $ErrorActionPreference = "Stop" makes a native command's stderr
+  TERMINATING in Windows PowerShell 5.1, and a Postgres that has opened its
+  port but is still in crash recovery says "the database system is starting up"
+  on stderr. A listening port is not a database. This script now waits for a
+  query to be answered before migrating, then runs migrate through cmd.exe so
+  its stderr cannot reach a PowerShell stream at all, retries it three times,
+  and -- when it still cannot serve -- says so in plain words in the log and
+  exits non-zero, which is the signal ops\watchdog.ps1 acts on.
 #>
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
@@ -69,7 +81,36 @@ if ((Test-Path $appLog) -and ((Get-Item $appLog).Length -gt 5MB)) {
 
 "=== started $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" | Add-Content $appLog
 
-& node scripts/with-app-env.mjs node scripts/migrate.mjs 2>&1 | Add-Content $appLog
+<#
+  Both waits, and the log lines that make a failed boot readable, live in
+  ops\lib-migrate.ps1. They are in a file of their own so the recovery can be
+  TESTED without a reboot and without a database: scripts\ops-scripts.test.mjs
+  drives the real functions against a stub that refuses queries for a while and
+  a migrate that fails twice, and checks that the script keeps going.
+
+  Nothing below may be reached when either step fails: a paper served against a
+  half-migrated schema is worse than a paper that is plainly not up, and the
+  watchdog cannot tell the difference. Exit non-zero instead, so the task's own
+  LastTaskResult says what happened.
+#>
+. (Join-Path $PSScriptRoot "lib-migrate.ps1")
+
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCommand) {
+  "the paper was not started: node.exe is not on this machine's PATH." | Add-Content $appLog
+  exit 1
+}
+$node = $nodeCommand.Source
+
+$dbUrl = Get-TownReporterDatabaseUrl -App $app
+if (-not (Wait-TownReporterDatabase -Bin $bin -ConnectionString $dbUrl -Log $appLog)) {
+  "the paper was not started: Postgres is listening on $OwnedPgPort but would not answer a query. This is almost always crash recovery after an unclean shutdown; the next five-minute watchdog run will try again." | Add-Content $appLog
+  exit 1
+}
+if (-not (Invoke-TownReporterMigrate -App $app -Log $appLog -Node $node)) {
+  "the paper was not started: the database migrations did not apply after three attempts. Nothing about the app was touched." | Add-Content $appLog
+  exit 1
+}
 
 <#
   2026-09-02 incident: an unrelated dev server held [::1]:$port (IPv6 only).
@@ -94,7 +135,7 @@ if (-not (Test-TownReporterPort $port)) {
   #
   # node.exe directly rather than the `npm` shim - Start-Process cannot execute
   # a .cmd shim, and this is exactly what `npm start` runs anyway.
-  $node = (Get-Command node -ErrorAction Stop).Source
+  "[app] starting the paper on port $port" | Add-Content $appLog
   Start-Process -FilePath $node `
     -ArgumentList "scripts/with-app-env.mjs","node",('"' + (Join-Path $app '.output\server\index.mjs') + '"') `
     -WorkingDirectory $app `
@@ -124,3 +165,12 @@ try {
 } catch {
   "redlib: not started: $($_.Exception.Message)" | Add-Content $appLog
 }
+
+<#
+  The line whose absence identified the 2026-09-25 failure.
+
+  The log had "=== started 20:01 ===" and then nothing at all, and there was no
+  way from the log alone to tell a script that died at migrate from one that ran
+  to the end. This is written last, and only on the path that reaches the end.
+#>
+"=== start finished $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===" | Add-Content $appLog
