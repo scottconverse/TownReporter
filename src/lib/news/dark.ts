@@ -11,7 +11,7 @@ import {
 import { subredditFromSources } from "./dark-place.ts";
 import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import {
   grokChat,
@@ -384,6 +384,32 @@ const saveDarkSettingsFor = createServerOnlyFn(async (
 const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, runId: number) =>
   (await import("./dark-preferences.server.ts")).snapshotDarkSettingsFor(newsroomId, runId),
 );
+/*
+  The seed writer is a `.server` module and this file is reachable from the
+  browser -- `routes/desk.ops.tsx` imports it -- so a plain import of it is
+  refused outright by import-protection, which is what turned the 0.6.63 client
+  build red. The other three server modules above cross the same boundary the
+  same way.
+
+  A plain import was not pruned here the way the ones inside a `createServerFn`
+  handler are: `queueInvestigationFor` below is exported as a plain function so
+  a test can call it without `deskMiddleware`'s request plumbing, and the client
+  build has no server-fn boundary to prune its body at. A body handed to
+  `createServerOnlyFn` IS such a boundary, so the client drops it and the write
+  still happens on the server, which is the only place `getSql()` can be called.
+*/
+const proposePassSourcesFor = createServerOnlyFn(async (
+  sql: Sql,
+  input: {
+    userId: string;
+    newsroomId: number;
+    proposedBy: "scan" | "research" | "dark" | "editor";
+    leadId?: number | null;
+    scanRunId?: number | null;
+    section?: string | null;
+    pages: { url: string; title?: string; reason?: string }[];
+  },
+) => (await import("./source-seeds.server.ts")).proposePassSources(sql, input));
 
 /**
  * Same question Scan asks before it spends anything: is a model actually
@@ -2958,8 +2984,8 @@ export async function queueInvestigationFor(
     await audit(userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, newsroomId);
     return { ok: true as const, leadId: already[0].id, alreadyQueued: true as const };
   }
-  const arts = await sql<{ url: string }>`
-    select url from artifacts
+  const arts = await sql<{ url: string; title: string }>`
+    select url, title from artifacts
     where newsroom_id = ${newsroomId} and investigation_id = ${id}
     order by id desc limit 12
   `;
@@ -3049,6 +3075,39 @@ export async function queueInvestigationFor(
     returning id
   `;
   await audit(userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`, newsroomId);
+  /*
+    The pass ends here -- the captured file becomes a story lead and the editor
+    is looking at it -- and the pages it read come with it.
+
+    `arts` above is exactly "the pages the pass actually fetched": the loop
+    writes an artifact row only for a document it retrieved, so the suggestion
+    is evidence the page exists in the form the desk would fetch tomorrow. They
+    are offered as candidates, never as sources; nothing is fetched until
+    someone accepts one, and the editor can still add a source by hand.
+
+    The section guess is the one `topicFromText` just made for the lead, kept
+    only when the file's own words named a section this newsroom files under.
+    `topicUnchosen` is precisely that answer, so a guess that came from the
+    fallback is not offered -- the review screen starts its picker at its own
+    default rather than at a decision nobody made.
+
+    The single-signal handoff (`sendDarkSignalToQueueFor`) deliberately does not
+    propose as well: it reads the same investigation's artifacts, so every page
+    it could offer the file handoff has already offered, and the duplicate guard
+    would return nothing.
+  */
+  await proposePassSourcesFor(sql, {
+    userId,
+    newsroomId,
+    proposedBy: "dark",
+    leadId: created[0]!.id,
+    section: topicUnchosen ? null : topic,
+    pages: arts.map((art) => ({
+      url: art.url,
+      title: art.title,
+      reason: `Read while developing "${inv[0].title.slice(0, 120)}" on the Dark Desk.`,
+    })),
+  });
   return { ok: true as const, leadId: created[0]!.id, alreadyQueued: false as const };
 }
 

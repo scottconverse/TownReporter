@@ -9,6 +9,8 @@ import {
   listMemory,
   listPublishedDesk,
   resolveMeetingArticleReview,
+  suggestCorrectionTemplate,
+  suggestCorrectionWording,
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import { editorActionError } from "@/lib/news/desk-copy";
@@ -33,6 +35,26 @@ function PublishedPage() {
   const [corrFor, setCorrFor] = useState<string | null>(null);
   const [corrReviewFor, setCorrReviewFor] = useState<Record<string, number | undefined>>({});
   const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
+  /*
+    0.6.70: the two lines an editor types -- what the story got wrong, and what
+    is right -- so the desk can write the note for them. They are kept apart
+    from the note in `corrBySlug` on purpose: the note is what gets published
+    and the editor may rewrite every word of it, while these two are the fact
+    the note is about, and pressing Suggest twice should not append to them.
+  */
+  const [corrWrongBySlug, setCorrWrongBySlug] = useState<Record<string, string>>({});
+  const [corrRightBySlug, setCorrRightBySlug] = useState<Record<string, string>>({});
+  /*
+    "Also fix the story text", per slug, and the text being worked on. The
+    printed body is seeded from the row when the box is opened, so the editor
+    is editing the words on the paper rather than a blank page.
+  */
+  const [corrFixBySlug, setCorrFixBySlug] = useState<Record<string, boolean>>({});
+  const [corrBodyBySlug, setCorrBodyBySlug] = useState<Record<string, string>>({});
+  // Working / done / failed, and why, for the wording suggestion only.
+  const [wordingFor, setWordingFor] = useState<
+    { slug: string; kind: "working" | "ok" | "err"; text: string } | null
+  >(null);
   const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Which story is asking to be taken off the paper. Null when none is.
   const [killFor, setKillFor] = useState<string | null>(null);
@@ -50,19 +72,63 @@ function PublishedPage() {
   const [undo, setUndo] = useState<number | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
   const [reviewChecks, setReviewChecks] = useState<Record<number, number[]>>({});
+  /*
+    Post the correction, and -- when the editor asked for it -- the story text
+    that goes with it.
+
+    Both are one call because they are one act: the note says the paper got
+    something wrong and the text is the paper no longer saying it. Two calls
+    could land one and not the other, which leaves a published correction
+    promising a fix the story does not carry.
+
+    The default is what it always was: the note alone, above a story whose text
+    is untouched.
+  */
   const corr = useMutation({
-    mutationFn: (slug: string) =>
+    /*
+      The flag travels with the call rather than being read back off state in
+      `onSuccess`: the message the editor gets afterwards has to describe the
+      post that actually happened, not the one the next render would make.
+    */
+    mutationFn: (input: { slug: string; fixing: boolean }) =>
       addCorrection({ data: {
-        articleSlug: slug,
-        body: (corrBySlug[slug] ?? "").trim(),
-        meetingReviewId: corrReviewFor[slug],
+        articleSlug: input.slug,
+        body: (corrBySlug[input.slug] ?? "").trim(),
+        meetingReviewId: corrReviewFor[input.slug],
+        alsoFixBody: input.fixing,
+        storyBody: input.fixing ? (corrBodyBySlug[input.slug] ?? "") : undefined,
       } }),
-    onSuccess: (res, slug) => {
+    onSuccess: (res, input) => {
+      const { slug } = input;
       if (res.ok) {
         setCorrBySlug((prev) => ({ ...prev, [slug]: "" }));
+        setCorrWrongBySlug((prev) => ({ ...prev, [slug]: "" }));
+        setCorrRightBySlug((prev) => ({ ...prev, [slug]: "" }));
+        setCorrFixBySlug((prev) => ({ ...prev, [slug]: false }));
+        /*
+          DELETED, not set to "". An empty string is still a KEY, and the box's
+          value is `corrBodyBySlug[slug] ?? p.body` -- `??` only falls through
+          on null and undefined, so a key holding "" wins over the story's own
+          text. That is the blank box the walk caught: after a note-only
+          correction, the next "Also fix the story text" opened on nothing, and
+          the editor would have been editing an empty page over a story that
+          already printed. Absent is what "not touched since the last post"
+          means, so the next open seeds itself from the freshly refetched row.
+        */
+        setCorrBodyBySlug((prev) => {
+          const next = { ...prev };
+          delete next[slug];
+          return next;
+        });
+        setWordingFor(null);
         setCorrFor(null);
         setCorrReviewFor((previous) => ({ ...previous, [slug]: undefined }));
-        setNote({ kind: "ok", text: "Correction is public." });
+        setNote({
+          kind: "ok",
+          text: input.fixing
+            ? "Correction is public, and the story now reads the corrected text."
+            : "Correction is public.",
+        });
         void qc.invalidateQueries({ queryKey: ["published-desk"] });
         void qc.invalidateQueries({ queryKey: ["corrections"] });
         void qc.invalidateQueries({ queryKey: ["article", slug] });
@@ -79,6 +145,85 @@ function PublishedPage() {
         text:
           editorActionError(err instanceof Error ? err.message : "", "post that correction") ??
           "Could not post that correction.",
+      });
+    },
+  });
+
+  /**
+   * Have the story model draft the note from the editor's two lines.
+   *
+   * It goes through the same provider ladder as every other story call, and it
+   * changes nothing: the answer lands in the box the editor is already looking
+   * at, and the post button is still the only thing that publishes. A failure
+   * leaves the box exactly as they left it and says why, because a suggestion
+   * that silently did nothing looks the same as one that worked.
+   */
+  const suggestWording = useMutation({
+    mutationFn: (slug: string) =>
+      suggestCorrectionWording({ data: {
+        articleSlug: slug,
+        wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
+        isRight: (corrRightBySlug[slug] ?? "").trim(),
+      } }),
+    onMutate: (slug) => {
+      setWordingFor({ slug, kind: "working", text: "Writing a correction note…" });
+    },
+    onSuccess: (res, slug) => {
+      if (res.ok) {
+        setCorrBySlug((prev) => ({ ...prev, [slug]: res.wording }));
+        setWordingFor({
+          slug,
+          kind: "ok",
+          text: "Suggested below. Read it, change any of it, then post it.",
+        });
+      } else {
+        setWordingFor({ slug, kind: "err", text: res.error });
+      }
+    },
+    onError: (err, slug) => {
+      setWordingFor({
+        slug,
+        kind: "err",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "suggest the wording") ??
+          "Could not reach the story model. Your box is exactly as you left it.",
+      });
+    },
+  });
+
+  /**
+   * The plain note, written on the desk from the same two lines.
+   *
+   * No model and no network, so this is the path that always works -- the
+   * owner's complaint was an empty box, and this fills it on a machine where
+   * nothing is configured at all.
+   */
+  const useTemplate = useMutation({
+    mutationFn: (slug: string) =>
+      suggestCorrectionTemplate({ data: {
+        articleSlug: slug,
+        wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
+        isRight: (corrRightBySlug[slug] ?? "").trim(),
+      } }),
+    onSuccess: (res, slug) => {
+      if (res.ok) {
+        setCorrBySlug((prev) => ({ ...prev, [slug]: res.wording }));
+        setWordingFor({
+          slug,
+          kind: "ok",
+          text: "Plain note written from your two lines. Change any of it, then post it.",
+        });
+      } else {
+        setWordingFor({ slug, kind: "err", text: res.error });
+      }
+    },
+    onError: (err, slug) => {
+      setWordingFor({
+        slug,
+        kind: "err",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "write the note") ??
+          "Could not write the note.",
       });
     },
   });
@@ -452,7 +597,78 @@ function PublishedPage() {
                 ) : null}
                 {corrFor === p.slug ? (
                   <div className="corr-form">
+                    {/*
+                      The two lines the note is made of. An editor correcting a
+                      story knows both of them -- they are looking at the wrong
+                      number and the right one -- and the empty box the owner
+                      hit asked them to turn that into house style by hand.
+                    */}
+                    <label htmlFor={`pub-corr-wrong-${p.slug}`}>What was wrong</label>
+                    <input
+                      id={`pub-corr-wrong-${p.slug}`}
+                      type="text"
+                      value={corrWrongBySlug[p.slug] ?? ""}
+                      onChange={(e) =>
+                        setCorrWrongBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
+                      }
+                      placeholder="The fee was $4,200"
+                    />
+                    <label htmlFor={`pub-corr-right-${p.slug}`}>What is right</label>
+                    <input
+                      id={`pub-corr-right-${p.slug}`}
+                      type="text"
+                      value={corrRightBySlug[p.slug] ?? ""}
+                      onChange={(e) =>
+                        setCorrRightBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
+                      }
+                      placeholder="The fee is $2,400"
+                    />
+                    <div className="row-acts static">
+                      <InkButton
+                        small
+                        disabled={
+                          !(corrWrongBySlug[p.slug] ?? "").trim() ||
+                          !(corrRightBySlug[p.slug] ?? "").trim() ||
+                          suggestWording.isPending
+                        }
+                        onClick={() => suggestWording.mutate(p.slug)}
+                      >
+                        {suggestWording.isPending && wordingFor?.slug === p.slug
+                          ? "Suggesting…"
+                          : "Suggest wording"}
+                      </InkButton>
+                      {/*
+                        The same note, written on the desk with no model at all.
+                        Kept as its own button so "the model is unreachable" and
+                        "here is your note" are never the same event: the first
+                        leaves the box alone, the second fills it.
+                      */}
+                      <InkButton
+                        tone="quiet"
+                        small
+                        disabled={
+                          !(corrWrongBySlug[p.slug] ?? "").trim() ||
+                          !(corrRightBySlug[p.slug] ?? "").trim() ||
+                          useTemplate.isPending
+                        }
+                        onClick={() => useTemplate.mutate(p.slug)}
+                      >
+                        {useTemplate.isPending && wordingFor?.slug === p.slug
+                          ? "Writing…"
+                          : "Use a plain note"}
+                      </InkButton>
+                    </div>
+                    {wordingFor?.slug === p.slug ? (
+                      <p
+                        className="meta"
+                        role={wordingFor.kind === "err" ? "alert" : "status"}
+                      >
+                        {wordingFor.text}
+                      </p>
+                    ) : null}
+                    <label htmlFor={`pub-corr-note-${p.slug}`}>The correction</label>
                     <textarea
+                      id={`pub-corr-note-${p.slug}`}
                       rows={3}
                       value={corrBySlug[p.slug] ?? ""}
                       onChange={(e) =>
@@ -460,15 +676,73 @@ function PublishedPage() {
                       }
                       placeholder="What was wrong, and what is right."
                     />
+                    {/*
+                      The second choice. Off by default, so the common case is
+                      still a note above an untouched story; on, it opens the
+                      printed text so the editor changes the words they can see
+                      rather than retyping the story from memory. The two are
+                      posted together, in one transaction.
+                    */}
+                    <label className="check-line">
+                      <input
+                        type="checkbox"
+                        checked={corrFixBySlug[p.slug] === true}
+                        onChange={(e) => {
+                          const opened = e.target.checked;
+                          setCorrFixBySlug((prev) => ({ ...prev, [p.slug]: opened }));
+                          /*
+                            Opening the box puts the story's printed text in it,
+                            as state rather than only as a render fallback: the
+                            POST reads this state, so a box that showed the
+                            story while the post carried "" would be the editor
+                            pressing Publish on words the desk never sent. Seeded
+                            only when the key is absent -- a box the editor has
+                            already typed in, or deliberately cleared to an empty
+                            string, keeps what they left there.
+                          */
+                          if (opened) {
+                            setCorrBodyBySlug((prev) =>
+                              prev[p.slug] === undefined ? { ...prev, [p.slug]: p.body } : prev,
+                            );
+                          }
+                        }}
+                      />
+                      Also fix the story text
+                    </label>
+                    {corrFixBySlug[p.slug] === true ? (
+                      <>
+                        <label htmlFor={`pub-corr-body-${p.slug}`}>
+                          The story text as it should read. The link does not change, and the
+                          paper keeps the words that printed.
+                        </label>
+                        <textarea
+                          id={`pub-corr-body-${p.slug}`}
+                          rows={10}
+                          value={corrBodyBySlug[p.slug] ?? p.body}
+                          onChange={(e) =>
+                            setCorrBodyBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
+                          }
+                        />
+                      </>
+                    ) : null}
                     <div className="row-acts static">
                       <InkButton
                         small
                         disabled={!(corrBySlug[p.slug] ?? "").trim() || corr.isPending}
-                        onClick={() => corr.mutate(p.slug)}
+                        onClick={() =>
+                          corr.mutate({ slug: p.slug, fixing: corrFixBySlug[p.slug] === true })
+                        }
                       >
-                        Publish correction
+                        {corr.isPending ? "Publishing…" : "Publish correction"}
                       </InkButton>
-                      <InkButton tone="quiet" small onClick={() => setCorrFor(null)}>
+                      <InkButton
+                        tone="quiet"
+                        small
+                        onClick={() => {
+                          setCorrFor(null);
+                          setWordingFor(null);
+                        }}
+                      >
                         Cancel
                       </InkButton>
                     </div>

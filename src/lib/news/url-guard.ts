@@ -152,6 +152,94 @@ export function assertHttpUrl(raw: string): URL {
   return url;
 }
 
+/**
+ * The page a URL names, with the three spellings that are not a difference
+ * ignored: the scheme, a leading `www.`, and a trailing slash.
+ *
+ * `https://www.example-city-council.test/packets/` and
+ * `http://example-city-council.test/packets` are one source. The sources table
+ * keys on the raw string (0002's `unique (user_id, url)`, reindexed by 0056 as
+ * `sources_user_newsroom_url_key`), so as URLs those are three rows -- and the
+ * scan, which sees the same page linked from a dozen different articles, will
+ * happily propose all three. This is the identity the duplicate guard compares
+ * on: the host and the path, nothing else.
+ *
+ * The query string is deliberately not part of it, which is the stricter
+ * reading of "the same host+path is not proposed again": two URLs that differ
+ * only in their query name the same page as far as this is concerned. That is
+ * what keeps a re-run from proposing `?utm_source=` variants of a page already
+ * waiting, at the cost of collapsing genuinely different rows behind one path
+ * (`/feed?year=2025` and `/feed?year=2026` look alike here). Suggestions are
+ * cheap and the editor can add a source by hand; a review list that grows 175
+ * rows per scan is not. If that trade ever bites, this is the one place to
+ * change.
+ *
+ * Null for anything that is not a fetchable public http(s) page, so a caller
+ * cannot use this to smuggle in a `javascript:` or private-host URL.
+ */
+export function sourceIdentity(raw: string): string | null {
+  let url: URL;
+  try {
+    url = assertHttpUrl(raw);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const path = url.pathname.replace(/\/+$/, "");
+  return `${host}${path}`;
+}
+
+/**
+ * A search-results page, or a search engine's redirector. Never a source.
+ *
+ * The scan, the research pass and the Dark Desk all read pages they did not
+ * choose -- the model was handed a search result and cites the page it landed
+ * on. When it cites the result LIST instead, the row is unusable: a source has
+ * to be a page the desk can fetch tomorrow and get the same thing, and a
+ * results page is a different document every hour and a different one for
+ * every reader. The same goes for the wrappers the engines put around their
+ * results (`bing.com/ck/a?...`, `duckduckgo.com/l/?uddg=...`), which are not
+ * pages at all.
+ *
+ * Two ways in, because either alone misses cases that happen:
+ *
+ *  - one of the host's labels is a search engine's name, so `google.com`,
+ *    `www.google.co.uk`, `html.duckduckgo.com` and `search.brave.com` are all
+ *    caught without a list of every country domain. The rule is the LABEL, not
+ *    the whole host, which is why `news.google.com` is refused too -- and why
+ *    `news.yahoo.com` is, deliberately: an aggregator's front page is not a
+ *    page this paper can watch for its own filings. A false positive here costs
+ *    a suggestion the editor can still make by hand from the Sources page, so
+ *    the rule leans wide.
+ *  - the path is a search endpoint AND the URL carries a `q`, which catches
+ *    site search on any host (`reddit.com/r/longmont/search?q=...`,
+ *    `example.gov/search?q=...`).
+ *
+ * A homepage or a section front is NOT a search page and is not refused here:
+ * an agenda index or a newsroom front is exactly the kind of page the owner
+ * wants on the watch list, and `report.ts`'s `isIndexUrl` asks the different
+ * question of whether a URL is good enough to cite as a story.
+ */
+export function isSearchResultUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  const labels = url.hostname.toLowerCase().split(".");
+  const engines = new Set([
+    "google", "bing", "duckduckgo", "startpage", "ecosia", "mojeek",
+    "yandex", "baidu", "qwant", "searx", "searxng", "brave", "yahoo", "yep",
+  ]);
+  if (labels.some((label) => engines.has(label))) return true;
+  const path = url.pathname.toLowerCase().replace(/\/+$/, "");
+  if (/^\/(search|results|find|suche|buscar)(\/|$)/.test(path) && url.searchParams.has("q")) {
+    return true;
+  }
+  return false;
+}
+
 export async function sha256(text: string) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(buf))

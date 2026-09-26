@@ -139,7 +139,7 @@ This is the loop. Skip steps that have nothing in them.
 5. **Workbench** — draft, notes, check the documents, publish or don’t.
 6. **Dark Desk** — only when something doesn’t add up, disappeared, or was never posted.
 7. **Opinion** — when the paper should say what it thinks about something it has reported.
-8. **Published** — if you got it wrong, post a correction. It is public.
+8. **Published** — if you got it wrong, post a correction, and fix the story text too when the words themselves were wrong. Both are public.
 9. **Server** — a glance, when something feels slow or the site looks down.
 
 Scan does not publish. Draft does not publish. Dark Desk does not publish. **Publish** on the workbench remains the gate for ordinary reporting; approved routine notices use their separate fixed-template path.
@@ -208,9 +208,18 @@ The watch list chosen during Paper setup. The Longmont edition ships with city, 
 
 **Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A. The add form also carries an optional **Assign to sections** list: tick the newspaper sections this source should feed and it is filed under them as it is saved, in the same step. Opinion and About are not on that list — they are reserved pages.
 
-**Accept one:** accepting a proposed source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A proposed source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
+**Accept one:** accepting a suggested source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A suggested source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
 
-Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list; adding and accepting are still yours to do.
+**Suggested sources.** The third group — **Suggested sources: N** — is everything the desk found while it worked and has not decided yet. It is built for volume: 175 waiting suggestions was normal before this screen existed, and clicking each one to read its page was the only way to decide. Each row now carries the material a decision needs, and several rows can be decided at once.
+
+- **The reason** the pass recorded — what the page offers the paper, in the model's one sentence. A row suggested before this was recorded says *No reason was recorded when this was suggested* rather than showing a blank.
+- **Suggested by** — the scan, the research pass, or the Dark Desk — and, when the pass was working on a lead, a link to it. **Anyone / The scan / The research pass / The Dark Desk / Not recorded** filter the list by suggester.
+- **Section** — the model's guess, shown as the section picker's starting value. A guess for a section this paper no longer files under starts the picker empty instead, because accepting into it would be refused.
+- Per row: **Accept to <section>** (or **Accept** when no section is set), **Reject**, and an optional **Note** saved with either one.
+- For several: tick **Select <title>** on each row, or **Select all N**, then **Accept selected** or **Reject selected**. The batch section picker files the whole selection under one section; leave it at **No section** to accept without filing.
+- Every press says **Saving…**, then what it did — *Accepted 3 suggestions and filed them under Council* — or **Nothing was changed:** and why. A batch is one transaction: either every row in it is decided, or none is, and the message says which.
+
+Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list and the accept path does not offer the picker; adding, accepting and rejecting are still yours to do.
 
 
 **Add many:** bulk paste. Formats the toolkit already taught people:
@@ -228,7 +237,7 @@ Neighborhood group: https://www.facebook.com/groups/…
 - **Tier B** — news. Attributed, not gospel.
 - **Tier C** — community. Scanned as a discovery clue, **never treated as fact.**
 
-Proposed sources from a scan wait here until you accept or reject them. Accepting puts them on the next scan. Rejecting drops them.
+Suggested sources wait here until you accept or reject them. All three passes file what they find: the **scan** (from `proposed_sources` in its reply), the **research pass** (the public pages it actually read under a lead), and the **Dark Desk** (the pages it read while developing a file). Each one records why it suggested the page, which pass it was, and, when there was one, the lead it was working on. A page this paper already has — same host and path, however it is spelled — is never proposed again, and a search-results page is never proposed at all. A social profile is proposed only to a paper that already watches a social source: this edition ships with the city's and public media's accounts on watch, so a scan finding one is proposing what you asked for, while a paper watching no social sources will not have a Facebook group arrive on its list because a pass opened one on the way to a story. Accepting puts it on the next scan. Rejecting drops it.
 
 Newly discovered public records are fair game even if they were not on this list. Dark Desk does not have to ask the watch list for permission to fetch a public URL.
 
@@ -1164,6 +1173,16 @@ What is live on the paper, with its corrections.
 
 If you got it wrong: open the story here, write the correction in the open, post it. It appears on `/corrections` and with the article. Do not silently rewrite a published piece and hope nobody notices. We would rather look careful than look first.
 
+The correction box no longer starts empty. Above it are two short lines — **What was wrong** and **What is right** — and you type the fact, not the sentence: *the fee was $4,200* / *the fee is $2,400*. Then either button fills the box below.
+
+**Suggest wording** asks the story model to write the note, in the paper's voice, from those two lines and the story it can see. It is asked not to add a fact, a number, a name or a date that is not in your two lines, and the note it writes is put in the box, not published. You read it, change any word of it, and post it yourself. The button says **Suggesting…** while it waits, then **Suggested below. Read it, change any of it, then post it.** If the model cannot be reached, the desk says so and leaves the box exactly as you left it — your typing is never replaced by a partial or guessed note.
+
+**Use a plain note** writes the same note on the desk, with no model and no network: *An earlier version of this story said the fee was $4,200. In fact, the fee is $2,400.* It works when nothing else does, and it is the button to press if you would rather not spend a model call. Both buttons need both lines, because a note built from half a fact reads finished and says nothing.
+
+Nothing posts until you press **Publish correction**, and you can always ignore both buttons and type the note yourself; that path is unchanged.
+
+**Also fix the story text** is the second choice, and it is off unless you turn it on. Left off, the correction is exactly what it has always been: a public note above a story whose words do not change. Turned on, it opens the printed body in a box that already holds the story as it printed, so you are editing the words on the paper rather than retyping them, and you press **Publish correction** once. The corrected text and the note go public together, in one act. The URL does not change and no link breaks. The desk keeps the text the story used to carry, with your account, the time and the correction that justified the change, so the paper can always answer what it printed and who changed it. Readers see the corrected story and the note; the replaced words are never printed again. If the box holds the same text the story already has, or is empty, the desk refuses rather than recording a change that did not happen.
+
 A correction can attach only to a published story in your newsroom. If the selected story is no longer available, the desk refuses the correction instead of saving an unattached note. Return to Published and select the current story before posting again.
 
 ---
@@ -1253,7 +1272,7 @@ The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Sta
 
 **Edit and review:** the story workspace keeps headline, summary and body on the writing surface. Its toolbar has Save, Preview, Redraft, Check draft against evidence and Publish. Checks contains the existing name results and evidence entry points; Sources contains documents and download links; Reporting contains the model/research choices, reporting notes and claim-of-absence controls. The full finding/evidence review remains below the editor. Preview shows the current text without publishing it. Existing evidence and publication checks still apply.
 
-**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Proposed and Dropped groups. Server has twelve panels, in this order: Writing models, Custom connections, Daily scan, Meeting capture, YouTube, Routine notices, Paper identity, Sections, Named outlets, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
+**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Suggested sources and Dropped groups. Server has twelve panels, in this order: Writing models, Custom connections, Daily scan, Meeting capture, YouTube, Routine notices, Paper identity, Sections, Named outlets, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
 
 
 ### Recheck a draft against uploaded documents

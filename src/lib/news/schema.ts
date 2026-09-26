@@ -46,6 +46,10 @@ export const ScanResultSchema = z.object({
         url: z.string().max(500),
         title: z.string().max(200).optional().default(""),
         why: z.string().max(400).optional().default(""),
+        // Which section the page looks like it belongs to. Optional, so a
+        // reply written before 0.6.70 still parses as a suggestion with no
+        // guess rather than as a bad reply.
+        section: z.string().max(120).optional().default(""),
       }),
     )
     .max(12)
@@ -71,7 +75,7 @@ export type ParsedScanLead = Omit<z.infer<typeof ScanLeadSchema>, "topic"> & {
 export type ParsedScanResult = {
   editor_summary: string;
   leads: ParsedScanLead[];
-  proposed_sources: { url: string; title: string; why: string }[];
+  proposed_sources: { url: string; title: string; why: string; section: string }[];
   parseError: string | null;
 };
 
@@ -136,15 +140,29 @@ export function parseScanResult(
   }
 
   const proposedIn = Array.isArray(obj.proposed_sources) ? obj.proposed_sources : [];
-  const proposed_sources: { url: string; title: string; why: string }[] = [];
+  const proposed_sources: { url: string; title: string; why: string; section: string }[] = [];
   for (const item of proposedIn) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
     if (typeof row.url !== "string" || !row.url.trim()) continue;
+    /*
+      The section guess is kept only when it names a section this run accepts,
+      by key or by the display name the prompt showed the model -- the same
+      rule a lead's `topic` gets above, and for the same reason: the review
+      screen preselects the section picker with this value, and a key no
+      section has would preselect nothing while looking like a decision.
+    */
+    const guess =
+      typeof row.section === "string" ? row.section.trim().toLowerCase().slice(0, 120) : "";
+    const section =
+      guess && allowedTopics.includes(guess)
+        ? guess
+        : (topicNames.find((s) => s.name.trim().toLowerCase() === guess && allowedTopics.includes(s.key))?.key ?? "");
     proposed_sources.push({
       url: row.url.trim().slice(0, 500),
       title: typeof row.title === "string" ? row.title.slice(0, 200) : "",
       why: typeof row.why === "string" ? row.why.slice(0, 400) : "",
+      section,
     });
     if (proposed_sources.length >= 12) break;
   }

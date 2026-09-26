@@ -44,6 +44,35 @@ const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:80
   "",
 );
 
+/**
+ * Press "Post correction" and wait for the box it opens.
+ *
+ * NOT `click({ force: true })`, and the difference is not stylistic. The desk's
+ * top bar is `position: sticky` (`.astra-topbar`, src/desk-astra.css), and
+ * posting a correction closes the confirm form and swaps a notice in above the
+ * list, so the row moves up by the form's own height and the button can come to
+ * rest *under* the bar. `force: true` skips the "receives events" check, so the
+ * click is delivered to whatever is on top -- the bar -- and the button is never
+ * pressed; the next locator then fails after its timeout naming that locator,
+ * which reads like a missing element rather than a click that went nowhere.
+ * A plain click waits for the browser to give the button a point nothing covers,
+ * which is what an editor's own click implies, and the wait below turns a press
+ * that did nothing into a sentence about the press.
+ *
+ * Measured before the fix, in Chromium against the real page, with the button's
+ * centre scrolled onto the bar on purpose (centre 1134,59; scrollY 453; the bar
+ * ends at y=68; `document.elementFromPoint` on that centre answered
+ * `HEADER.astra-topbar`, not the button): the forced click left every
+ * correction box closed and the next fill timed out -- the same line CI failed
+ * on. The same press with force removed opened the box. Do not put it back.
+ */
+async function openCorrectionForm(row) {
+  const button = row.getByRole("button", { name: "Post correction" });
+  await button.scrollIntoViewIfNeeded();
+  await button.click();
+  await row.getByLabel("The correction").waitFor({ timeout: 15_000 });
+}
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   console.error(
@@ -60,6 +89,12 @@ const password = process.env.E2E_DESK_PASSWORD ?? "delete-corr-e2e-pass";
 const leadHeadline = `Water board revisits the Kimbark tap fee ${stamp}`;
 const body = "The water board revisited the Kimbark tap fee at its Tuesday session.";
 const correctionText = `The fee is $4,200, not $2,400 ${stamp}.`;
+// The second correction: the story text itself changes, with the note. The
+// fixed sentence is deliberately its own short string so the article page can
+// be asked for it by itself.
+const fixNote = `The story carried the wrong fee; the revised figure is $2,400 ${stamp}.`;
+const fixedBodySentence = `The board's revised figure is $2,400 ${stamp}.`;
+const fixedBody = `${body} ${fixedBodySentence}`;
 const locatorText = "char:14000-16000 — plan amendment adds two parcels";
 const findingUrl = "https://www.youtube.com/watch?v=_cTgf1W7188";
 const findingText = `TownReporter listened to the Aug. 18 meeting recording ${stamp}.`;
@@ -458,8 +493,34 @@ async function main() {
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
   const pubRow = page.locator(".pub-row", { hasText: leadHeadline }).first();
   await pubRow.waitFor({ timeout: 20_000 });
-  await pubRow.getByRole("button", { name: "Post correction" }).click({ force: true });
-  await pubRow.getByPlaceholder("What was wrong").fill(correctionText);
+  await openCorrectionForm(pubRow);
+
+  // 0.6.70, the owner's first real correction: the box used to start empty.
+  // The two lines go in, the desk writes the note from them, and the note
+  // lands in the box the editor then edits. "Use a plain note" and not
+  // "Suggest wording" on purpose: this walk's CI job has no model provider
+  // configured (no fake endpoint, TOWNREPORTER_CLAUDE_CODE=0), and the desk's
+  // own sentence is the path that must work with none. The model path is held
+  // by correction-fix-body.test.ts against the fake endpoint.
+  await pubRow.getByLabel("What was wrong").fill("the fee was $4,200");
+  await pubRow.getByLabel("What is right").fill("the fee is $2,400");
+  await pubRow.getByRole("button", { name: "Use a plain note" }).click();
+  /*
+    The box's own value, not the page's text: a filled textarea is text
+    Playwright's getByText matches, which is the false-positive shape this walk
+    already warns about below. waitForFunction reads the value the editor would
+    actually post.
+  */
+  await page.waitForFunction(
+    (expected) => {
+      const box = document.querySelector('textarea[id^="pub-corr-note-"]');
+      return box instanceof HTMLTextAreaElement && box.value === expected;
+    },
+    "An earlier version of this story said the fee was $4,200. In fact, the fee is $2,400.",
+  );
+  step("the desk writes the correction note from the editor's two lines, with no model");
+
+  await pubRow.getByLabel("The correction").fill(correctionText);
   // Deliberately NOT force-clicked: the button is disabled until React's
   // controlled-input state catches up with the fill above, and forcing the
   // click races that update. Plain click() waits for actionable (enabled,
@@ -485,6 +546,87 @@ async function main() {
   */
   await pubRow.locator(".pub-corr").getByText(correctionText).waitFor({ timeout: 20_000 });
   step("a correction can be posted from the desk");
+
+  // ── Fix the printed text too, under a note that says why ──────────────────
+  // The owner's second half: "the printed body cannot be changed", so a story
+  // that said $4,200 kept saying it under a note saying it did not. The default
+  // is still note-only -- the checkbox above starts unchecked -- and this step
+  // takes the other path deliberately.
+  // Posting closed the form; the same button reopens it, with the two lines
+  // cleared, which is what the owner's empty-box complaint is about.
+  await openCorrectionForm(pubRow);
+  await page.getByLabel("The correction").fill(fixNote);
+  await pubRow.getByLabel("Also fix the story text").check();
+  const fixBodyBox = pubRow.getByLabel(/The story text as it should read/);
+  await fixBodyBox.waitFor({ timeout: 10_000 });
+  const fixBodyShown = await fixBodyBox.inputValue();
+  if (fixBodyShown !== body) {
+    /*
+      The editor edits the words on the paper, not a blank page: the box opens
+      on the printed text, and a value that did not match would mean the fix
+      was about to overwrite the story with something nobody looked at.
+
+      Both sides are printed, with their lengths, because the first form of
+      this message ("did not open on the story's printed text") could not tell
+      a blank box from a truncated one from a re-wrapped one -- and those are
+      three different bugs. 80 characters is enough to name which text the box
+      actually held without dumping a whole story into the log.
+    */
+    throw new Error(
+      "the fix box did not open on the story's printed text: box held " +
+        `${fixBodyShown.length} chars ${JSON.stringify(fixBodyShown.slice(0, 80))}, ` +
+        `printed text is ${body.length} chars ${JSON.stringify(body.slice(0, 80))}`,
+    );
+  }
+  await fixBodyBox.fill(fixedBody);
+  await pubRow.getByRole("button", { name: "Publish correction" }).click();
+  await pubRow.locator(".pub-corr").getByText(fixNote).waitFor({ timeout: 20_000 });
+  step("a correction can change the printed story text as well as publish the note");
+
+  /*
+    Read back from the database rather than the screen, because the screen
+    cannot show the two things that make this safe: the text the story USED to
+    have (nothing prints it, by design -- the same choice the headline history
+    made in 0.6.67) and that the history row carries the correction that
+    justified the change. One act, two records, tied by correction_id.
+  */
+  const fixRecord = await pool.query(
+    `select h.old_body, h.new_body, h.changed_by, h.correction_id, c.body as note, a.body as live
+       from article_body_history h
+       join articles a on a.id = h.article_id
+       left join corrections c on c.id = h.correction_id
+      where a.slug = $1
+      order by h.id asc`,
+    [slug],
+  );
+  const fixer = await pool.query(`select id from "user" where email = $1`, [email]);
+  if (fixRecord.rows.length !== 1 || fixRecord.rows[0].note !== fixNote) {
+    throw new Error(`the body fix and its correction are not one record: ${JSON.stringify(fixRecord.rows)}`);
+  }
+  if (
+    fixRecord.rows[0].old_body !== body ||
+    fixRecord.rows[0].new_body !== fixedBody ||
+    fixRecord.rows[0].live !== fixedBody
+  ) {
+    throw new Error(`the wrong body was kept or stored: ${JSON.stringify(fixRecord.rows[0])}`);
+  }
+  if (String(fixRecord.rows[0].changed_by) !== String(fixer.rows[0]?.id)) {
+    throw new Error(`the body fix was not recorded against the editor who made it: ${fixRecord.rows[0].changed_by}`);
+  }
+  step("the fix keeps the text it replaced, who made it, and the correction that justified it");
+
+  await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
+  await page.getByText(fixedBodySentence).waitFor({ timeout: 20_000 });
+  await page.getByText(fixNote).waitFor({ timeout: 20_000 });
+  step("the reader sees the corrected text and the note that explains it");
+  if ((await page.getByText(body, { exact: true }).count()) !== 0) {
+    throw new Error("the text the story used to carry still prints on the article page");
+  }
+  step("the text the story used to carry does not print on the article page");
+
+  await page.goto(`${base}/corrections`, { waitUntil: "networkidle" });
+  await page.getByText(fixNote).waitFor({ timeout: 20_000 });
+  step("a correction that fixed the text reaches the public corrections feed too");
 
   const owner = await pool.query(
     `select m.newsroom_id, m.user_id from newsroom_members m join "user" u on u.id = m.user_id where u.email = $1`,

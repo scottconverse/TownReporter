@@ -152,6 +152,14 @@ export const LIMITS = {
    * and the server checked only a minimum, so there was no upper bound at all.
    */
   correctionBody: 2000,
+  /**
+   * One of the two lines an editor types to have a correction note written for
+   * them ("what was wrong" / "what is right"). A line, not a paragraph: the
+   * note the desk builds puts it inside a sentence, and 400 characters is
+   * already a long sentence. `correction-wording.ts` reads this as
+   * `CORRECTION_LINE_MAX`.
+   */
+  correctionLine: 400,
   /** `finding-evidence-review.ts:867` refuses a reason over 2000. */
   reviewNote: 2000,
   /** One index per transcript segment: a long meeting has a few hundred. */
@@ -233,6 +241,17 @@ export const LIMITS = {
    * to-do. `headline-control.ts` reads this as `HEADLINE_MAX`.
    */
   headlineEdit: 2_400,
+  /**
+   * How many suggested sources one review press may decide at once.
+   *
+   * 0.6.70. The list this acts on held 175 rows on production when it was
+   * measured, and its whole point is that 175 is too many to click through one
+   * at a time -- so "Select all" has to be a real press and this has to clear
+   * the number of rows a newsroom has actually accumulated. 500 is under three
+   * times that and still one small JSON body; the press is a handful of column
+   * writes either way.
+   */
+  suggestedBatch: 500,
 } as const;
 
 /*
@@ -705,6 +724,29 @@ export const bulkSourceInput = z.object({ text: z.string().max(LIMITS.bulkSource
 export const sourceStatusValue = z.enum(["accepted", "rejected", "proposed"]);
 export const sourceStatusInput = z.object({ id: rowId, status: sourceStatusValue });
 
+/**
+ * `desk.ts` reviewSuggestedSources: one press over one or more suggestions.
+ *
+ * The decision is a separate field from the status enum above on purpose. A
+ * reviewer decides "accept" or "reject" and nothing else -- `proposed` is a
+ * state a row is in, never a decision anyone takes here, and admitting it would
+ * let a bulk press quietly un-review a batch. The section travels with an
+ * accept, because the reviewer picks it on the row they are accepting
+ * (preselected with the model's guess); it is clipped rather than refused, and
+ * a key no section has is refused by the write with a plain sentence.
+ *
+ * The note is the reviewer's optional line -- "duplicate of the county page",
+ * "paywalled" -- and is bounded at the same 2000 as every other review note in
+ * the desk, never a paragraph. An empty note is "no note", the same as the
+ * column's null.
+ */
+export const suggestedSourceReviewInput = z.object({
+  ids: z.array(rowId).min(1).max(LIMITS.suggestedBatch),
+  decision: z.enum(["accepted", "rejected"]),
+  sectionKey: z.string().max(LIMITS.sectionKey).optional(),
+  note: z.string().max(LIMITS.reviewNote).optional(),
+});
+
 /** `desk.ts:338` fileLead (`desk.ts:340-348` slice the same three fields). */
 export const fileLeadInput = z.object({
   headline: z.string().max(LIMITS.leadHeadline),
@@ -883,6 +925,32 @@ export const correctionInput = z.object({
   articleSlug: z.string().max(LIMITS.slug).optional(),
   body: z.string().max(LIMITS.correctionBody),
   meetingReviewId: rowId.optional(),
+  /*
+    0.6.70: the second half of a correction. The editor may change the printed
+    story text as well as publishing the note, and the two are one act. Absent
+    means note-only, which is what every caller written before this release
+    sends and what the desk still shows first.
+  */
+  alsoFixBody: z.boolean().optional(),
+  /**
+   * The story text the paper should carry. Bounded by `LIMITS.storyText`, the
+   * same ceiling the publish path stores a body under, so a story that could be
+   * published can always be corrected.
+   */
+  storyBody: z.string().max(LIMITS.storyText).optional(),
+});
+
+/**
+ * The two lines an editor types to have a correction note written for them
+ * (`desk.ts` `performSuggestCorrectionWording`). Both are required: a note
+ * built from one of them reads finished and is wrong, which is worse than an
+ * empty box. The ceiling is the correction line's own, so a pasted paragraph
+ * is trimmed before it reaches a prompt rather than after.
+ */
+export const correctionWordingInput = z.object({
+  articleSlug: z.string().max(LIMITS.slug),
+  wasWrong: z.string().max(LIMITS.correctionLine),
+  isRight: z.string().max(LIMITS.correctionLine),
 });
 
 /**

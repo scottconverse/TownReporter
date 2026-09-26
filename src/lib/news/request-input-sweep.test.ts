@@ -60,6 +60,7 @@ import {
   sectionConfigInput,
   slugInput,
   sourceStatusInput,
+  suggestedSourceReviewInput,
   storyDocumentDownloadInput,
   storyDocumentListInput,
   trashId,
@@ -202,6 +203,23 @@ const rows: Row[] = [
       { why: "negative id", value: { id: -1, status: "accepted" } },
       { why: "unknown status", value: { id: 42, status: "maybe" } },
       { why: "id as text", value: { id: "42", status: "accepted" } },
+    ],
+  },
+  {
+    fn: "desk.ts:331 reviewSuggestedSources",
+    run: suggestedSourceReviewInput.parse.bind(suggestedSourceReviewInput),
+    valid: { ids: [3009, 3010], decision: "accepted", sectionKey: "council", note: "duplicate of the county page" },
+    bad: [
+      { why: "no ids at all", value: { ids: [], decision: "accepted" } },
+      // A bulk press has to be one real press, not an unbounded one.
+      {
+        why: "more ids than the batch cap",
+        value: { ids: Array.from({ length: LIMITS.suggestedBatch + 1 }, (_, i) => i + 1), decision: "rejected" },
+      },
+      // `proposed` is a state, never a decision: a press cannot un-review a batch.
+      { why: "unknown decision", value: { ids: [1], decision: "proposed" } },
+      { why: "oversize note", value: { ids: [1], decision: "rejected", note: x(LIMITS.reviewNote + 1) } },
+      { why: "oversize section key", value: { ids: [1], decision: "accepted", sectionKey: x(LIMITS.sectionKey + 1) } },
     ],
   },
   {
@@ -964,6 +982,25 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * suggestions, both strict `z.object`s in the same file as the rest. The
    * calls are right; the list had not heard of them.
    *
+   * 0.6.70 brings two more names, and the two lanes met on this line. Unit AM
+   * adds `correctionWordingInput`, the editor's two lines for a correction note.
+   * Unit AK adds `leadDuplicateResolutionInput`, the Compare view's
+   * duplicate-resolution press: a strict `z.object` of a row id and an action
+   * enum in `request-input.ts`, called from `desk.ts:2441` the same way as every
+   * name beside it. Both are strict `z.object`s with real ceilings; both are
+   * added here as names, not the check relaxed, because the calls were always
+   * the right shape. The lead one is worth a note of its own: it was ALREADY
+   * missing from this list at 13b04db0 -- `git show 13b04db0:src/lib/news/desk.ts`
+   * has the call at line 2441 and this regex had never heard of it -- so the
+   * sweep was red on the news lane before either unit touched anything.
+   *
+   * Unit AO brings `suggestedSourceReviewInput`, the Suggested sources review
+   * press in `desk.ts:346`: the row ids in the batch, the decision, the section
+   * to file under and the reviewer's note. A strict `z.object` with real
+   * ceilings on all four (`LIMITS.suggestedBatch`, `LIMITS.sectionKey`,
+   * `LIMITS.reviewNote`), called the way every name beside it is. Added as a
+   * name, not as a relaxation -- the call was always the right shape.
+   *
    * `draftStyleFixInput` joined in unit AQ with the story page's "Fix these
    * with the model" press. It is `draftEditInput` with the two evidence fields
    * taken out and the picker's dials added back in (the loose effort, so a
@@ -971,17 +1008,9 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * `z.object` in `request-input.ts`, called from `desk.ts` in the shape every
    * name beside it uses. The list, not the call, lagged again; a bare cast
    * still fails below.
-   *
-   * `leadDuplicateResolutionInput` joined at 13b04db0 with the Compare view's
-   * duplicate-resolution press (unit AK item 5): a strict `z.object` of a row
-   * id and an action enum in `request-input.ts`, called from `desk.ts:2441`
-   * the same way as every name beside it. The call was always the right shape
-   * -- the list, not the call, lagged, exactly as it did for the names above:
-   * `git show 13b04db0:src/lib/news/desk.ts` has the call and this regex had
-   * never heard of it.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to
