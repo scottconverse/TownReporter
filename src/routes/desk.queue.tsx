@@ -382,6 +382,28 @@ function QueuePage() {
   const bulkSetStatus = (status: "held" | "killed") => {
     for (const lead of selectedLeads) setStatus.mutate({ id: lead.id, status });
   };
+  /*
+    Open the section a hash names.
+
+    Today's "+ Add a lead" links to /desk/queue#file-lead. A hash on its own
+    scrolls to a shut <details> and leaves it shut, so the link would land on a
+    label instead of the form it names. The one element on this page that is a
+    <details> is the file form; opening whatever the hash names is the whole
+    behaviour, and it stays correct if another one is added.
+  */
+  useEffect(() => {
+    const reveal = () => {
+      const hash = window.location.hash.slice(1);
+      if (!hash) return;
+      const target = document.getElementById(hash);
+      if (!(target instanceof HTMLDetailsElement)) return;
+      target.open = true;
+      target.scrollIntoView({ block: "start" });
+    };
+    reveal();
+    window.addEventListener("hashchange", reveal);
+    return () => window.removeEventListener("hashchange", reveal);
+  }, []);
 
   return (
     <DeskShell title="The queue" kicker="Leads">
@@ -391,7 +413,9 @@ function QueuePage() {
         and publish it.
       </p>
 
-      <details className="file-form">
+      {/* id: Today's "+ Add a lead" lands here rather than at the top of the
+          Queue, so the link opens the form it names (redesign phase 2a). */}
+      <details className="file-form" id="file-lead">
         <summary>File a lead yourself</summary>
         <p>Have a transcript, packet or documents? <Link to="/desk">Write a story from text or uploaded documents on the Desk.</Link></p>
         <p>

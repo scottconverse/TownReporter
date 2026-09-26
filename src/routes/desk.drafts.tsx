@@ -70,6 +70,9 @@ function stateTone(state: DeskDraftState): string {
 function draftOrigin(row: DraftRow, state: DeskDraftState): string {
   if (row.imported_text) return "Reprint";
   if (state.yours) return "Written by you";
+  // A row with no prose was written by nobody, and "AI" would claim a model
+  // produced the words on a lead that is still only a headline and a why.
+  if (state.key === "empty") return "";
   return "AI";
 }
 
@@ -125,6 +128,9 @@ function DraftsPage() {
       return checked ? `checked ${formatDateTime(checked)}` : `saved ${formatDateTime(row.updated_at)}`;
     }
     if (state.key === "imported") return `pasted ${formatShortDate(row.updated_at)}`;
+    // The draft row is written with the lead, so its timestamp is the filing
+    // time: "filed", not "saved", which would read as an editor's save.
+    if (state.key === "empty") return `filed ${formatDateTime(row.updated_at)}`;
     return `saved ${formatDateTime(row.updated_at)}`;
   };
 
@@ -188,8 +194,10 @@ function DraftsPage() {
                   <span className={"chip " + stateTone(state)}>{state.label}</span>
                 </span>
                 <div className="drafts-main">
+                  {/* The origin drops out rather than leaving a hanging
+                      separator when there is nothing true to say about it. */}
                   <span className="drafts-overline">
-                    {sectionName(row.topic)} · {draftOrigin(row, state)}
+                    {[sectionName(row.topic), draftOrigin(row, state)].filter(Boolean).join(" · ")}
                   </span>
                   <Link
                     to="/desk/story/$leadId"

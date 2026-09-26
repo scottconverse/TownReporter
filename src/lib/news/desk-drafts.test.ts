@@ -18,6 +18,7 @@ const quiet: DeskDraftFacts = {
   evidence_decision: null,
   imported_text: false,
   names_unresolved: 0,
+  has_body: true,
   headline: "Council delays the vote",
   model_headline: "Council delays the vote",
   headline_source: "model",
@@ -105,6 +106,25 @@ test("a headline the editor wrote makes it their draft", () => {
   );
 });
 
+test("a lead filed by hand has a draft row and no prose, so it never reads ready", () => {
+  // `fileLead` writes the draft row with body = '' the moment the lead is
+  // filed. Before this branch the row fell through to "Ready to check", so
+  // Today counted it on the Publish step and in Tonight's edition while the
+  // nav -- which counts leads whose status is `drafted` -- said zero.
+  const filed = deskDraftState({ ...quiet, has_body: false });
+  assert.equal(filed.key, "empty");
+  assert.equal(filed.label, "Nothing written yet");
+  assert.equal(filed.needsYou, false, "an unwritten lead is not the editor's to fix");
+  assert.equal(filed.running, false);
+  assert.equal(deskDraftAction(filed), "Start story");
+  // A redraft that has not written anything yet is still a job to watch.
+  assert.equal(deskDraftState({ ...quiet, has_body: false, job_status: "queued" }).key, "running");
+  assert.equal(
+    deskDraftState({ ...quiet, has_body: false, job_status: "failed" }).key,
+    "failed",
+  );
+});
+
 test("the ready row does not promise publishability, which it cannot see", () => {
   const state = deskDraftState(quiet);
   assert.equal(state.key, "ready");
@@ -131,9 +151,12 @@ test("filter counts overlap on purpose, and each one is what the filter shows", 
     deskDraftState({ ...quiet, names_unresolved: 1 }),
     deskDraftState({ ...quiet, headline_source: "editor" }),
     deskDraftState(quiet),
+    // An unwritten lead is on the list and in nothing else: it is work the
+    // desk has not started, so it belongs to no filter that means "act now".
+    deskDraftState({ ...quiet, has_body: false }),
   ];
   const counts = deskDraftFilterCounts(states);
-  assert.deepEqual(counts, { all: 5, running: 1, "needs-you": 1, yours: 1, failed: 1 });
+  assert.deepEqual(counts, { all: 6, running: 1, "needs-you": 1, yours: 1, failed: 1 });
   for (const [filter, n] of Object.entries(counts)) {
     assert.equal(
       states.filter((s) => deskDraftMatchesFilter(s, filter as keyof typeof counts)).length,

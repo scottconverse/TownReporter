@@ -2285,6 +2285,8 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
       topic: string | null;
       form: string | null;
       updated_at: string;
+      /** Has any prose been written into this draft row yet? See the CTE note. */
+      has_body: boolean;
       lead_status: string;
       origin: string | null;
       newsworthiness: number | null;
@@ -2309,6 +2311,20 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
         select distinct on (d.lead_id)
                d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
                d.model_headline, d.headline_source, d.updated_at,
+               /*
+                 IS THERE ANY PROSE YET?
+
+                 fileLead inserts a draft row alongside the lead (see
+                 insertLeadWithDraft) with body = '', so a lead filed by hand
+                 has a draft from the moment it is filed. Without this fact
+                 every such row fell through deskDraftState to its last branch
+                 and announced "Ready to check", which put unwritten leads on
+                 the Publish step and in Tonight's edition -- the desk telling
+                 an editor two stories were ready to print when nothing had
+                 been written. The boolean is projected rather than the body,
+                 so no prose is pulled across the wire.
+               */
+               coalesce(nullif(btrim(d.body), ''), '') <> '' as has_body,
                l.headline as lead_headline, l.status as lead_status, l.origin,
                l.newsworthiness, l.why,
                /*
@@ -2332,7 +2348,7 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
       select v.id, v.lead_id,
              coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
              v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
-             v.newsworthiness, v.why, v.model_headline, v.headline_source,
+             v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
              jb.status as job_status, jb.stage as job_stage,
              jb.started_at as job_started_at, jb.updated_at as job_updated_at,
              jb.model_choice as job_model_choice,

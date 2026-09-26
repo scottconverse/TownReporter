@@ -30,6 +30,14 @@ export type DeskDraftFacts = {
   imported_text: boolean;
   /** Rows in `drafts.research_json.nameCheck.rows` whose status is "unresolved". */
   names_unresolved: number;
+  /**
+   * Does this draft row hold any prose at all?
+   *
+   * Every lead filed by hand gets a draft row with an empty body (`fileLead` ->
+   * `insertLeadWithDraft`), so "the lead exists" and "the story is written" are
+   * different facts and this is the one that tells them apart.
+   */
+  has_body: boolean;
   /** `headline_source` / `model_headline`, read by `editorOwnsHeadline`. */
   headline: string | null;
   model_headline: string | null;
@@ -42,6 +50,7 @@ export type DeskDraftStateKey =
   | "names"
   | "evidence"
   | "imported"
+  | "empty"
   | "yours"
   | "ready";
 
@@ -91,7 +100,8 @@ export function deskDraftElapsed(fromIso: string | null | undefined, nowMs: numb
  *   3. A name the check could not resolve, then evidence that has not been
  *      reviewed, are the two gates that stop this draft being printable, and
  *      they are what "Needs you" means on the filter row.
- *   4. Failing all that: whose draft it is.
+ *   4. Failing all that: is there any prose at all, and if there is, whose
+ *      draft it is.
  *
  * `elapsed` is preformatted by `deskDraftElapsed` so every row measures against
  * one clock; pass "" to print the state without a time.
@@ -121,6 +131,24 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
     return { ...base, key: "evidence", label: "! Evidence to check", needsYou: true };
   }
   if (facts.imported_text) return { ...base, key: "imported", label: "Imported" };
+  /*
+    NOTHING WRITTEN YET, and this branch is why the last one can be trusted.
+
+    A lead filed by hand gets a draft row with body = '' (see
+    `insertLeadWithDraft` in desk.ts), so before this branch every such row fell
+    through to "Ready to check". The Publish step on Today then counted leads
+    nobody had written and Tonight's edition listed them, while the nav's Drafts
+    count -- leads whose status is `drafted` -- said 0: the same page saying two
+    things at once about the same two rows.
+
+    The word is deliberate. Not "Draft failed" (nothing was attempted), not
+    "Your draft" (nothing is), and not a state in the drawing at all, because
+    the drawing has no row for this case: its list is drafts, and this is a lead.
+    "Nothing written yet" is the one thing that is provably true here, and it is
+    also what the row's action points at -- the story workbench, where the
+    writing happens. Reported to the owner as a state added against the drawing.
+  */
+  if (!facts.has_body) return { ...base, key: "empty", label: "Nothing written yet" };
   /*
     "Ready to check", NOT the handoff's "Ready to publish".
 
@@ -192,6 +220,9 @@ export function deskDraftAction(state: DeskDraftState): string {
     case "imported":
     case "yours":
       return "Continue";
+    case "empty":
+      // The Queue's own word for opening a filed lead and starting its story.
+      return "Start story";
     case "ready":
       return "Review";
   }
