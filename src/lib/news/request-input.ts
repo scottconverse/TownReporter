@@ -252,6 +252,16 @@ export const LIMITS = {
    * writes either way.
    */
   suggestedBatch: 500,
+  /**
+   * How many (job, rank) rows the Models screen may save in one press.
+   *
+   * The screen holds ten jobs (`MODEL_JOB_KEYS`) and three ranks each, so 30 is
+   * the whole set and 60 is that with every job doubled. The number exists so a
+   * body that is not a set of assignments at all is refused at the boundary
+   * rather than parsed; it is not a product limit anyone can reach, because the
+   * screen has no way to send more rows than it draws.
+   */
+  modelAssignments: 60,
 } as const;
 
 /*
@@ -1314,3 +1324,33 @@ export const importStoriesInput = z.object({
   /** Only the ticked cards arrive here; the server re-checks every one. */
   stories: z.array(importStorySelection).max(LIMITS.importStories),
 });
+
+/* --- model-assignments-settings.ts (1 row) ------------------------------- */
+
+/**
+ * `saveModelAssignmentsFn`: the whole set the Models screen is holding.
+ *
+ * The body IS the array -- the screen has one thing to say and wrapping it in
+ * an object would be a shape with one key -- so a non-array is refused here
+ * rather than reaching the store. `jobKey` is bounded text and not an enum on
+ * purpose: the vocabulary is `MODEL_JOB_KEYS` in `model-assignments.ts`, and a
+ * name written out here could drift from it. The store checks the key against
+ * that list and answers a plain sentence for one it does not know, which is the
+ * same division of labour the local-model rows above use.
+ *
+ * `effort` is the loose one. It is stored, not acted on: `modelEffort()` in the
+ * registry already reads a level it does not know as "the model's own default",
+ * and a level that is valid but wrong for the model behind the id is dropped to
+ * that model's default at read time (`cleanJobEffort`). A 4 MB string, though,
+ * is not a level at all, so it is read as null here instead of being carried.
+ */
+export const modelAssignmentRowsInput = z
+  .array(
+    z.object({
+      jobKey: idText,
+      rank: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+      providerId: modelChoiceText,
+      effort: modelEffortLoose.optional(),
+    }),
+  )
+  .max(LIMITS.modelAssignments);
