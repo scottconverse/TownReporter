@@ -6,12 +6,15 @@ on:
   pull_request:
 
 jobs:
-  test:
+  # Typecheck and lint used to stand in front of the unit suite inside one job,
+  # so the suite could not begin until they had both finished -- and a lint
+  # error nobody had seen yet held back every test in the repository. They are
+  # fast, they need no database and no browser, and nothing about them depends
+  # on the tests, so they run beside the suite instead of ahead of it.
+  static:
+    name: Typecheck and lint
     runs-on: ubuntu-latest
-    # The complete serial suite now exceeds 20 minutes on hosted runners, and
-    # 0.6.64 (PR #94) was cancelled at 30 while still passing tests steadily
-    # (ok 957 at 29:54, no stall). Splitting the suite is backlogged.
-    timeout-minutes: 50
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -27,7 +30,82 @@ jobs:
       # the Server page came to match nothing and report a clean result
       # unconditionally. The linter would have caught it in thirty seconds.
       - run: npm run lint
+
+  # The unit gate, on several machines at once.
+  #
+  # The `src/**` group runs one file at a time on purpose: several of those
+  # tests each stand up an embedded PGLite, and running them together exhausts
+  # the runner's memory (scripts/suite-runs-serially.test.mjs, gate finding
+  # TEST-04). That is not negotiable, so the only honest way to make the gate
+  # finish sooner is to give the files more machines. The complete serial suite
+  # had passed 20 minutes; 0.6.64 (PR #94) was cancelled at 30 while still
+  # passing tests steadily -- ok 957 at 29:54, no stall -- and the answer then
+  # was a 50-minute timeout, which makes a slow gate official rather than fast.
+  #
+  # Each machine runs the SAME `npm test`, with a shard index in its
+  # environment; the launcher passes it to `node --test-shard`, which hands
+  # every discovered file to exactly one shard. Nothing is filtered and nothing
+  # is skipped -- the shards together are the whole suite, and each one still
+  # runs its own files serially, so the memory ceiling that made the suite
+  # serial is respected inside every shard.
+  #
+  # `TOWNREPORTER_TEST_SHARD_TOTAL` must equal the number of entries in
+  # `matrix.shard`, or the files in the missing slices would never run anywhere.
+  # scripts/test-shards-cover-the-suite.test.mjs fails the build if they ever
+  # disagree, and `fail-fast: false` keeps one shard's failure from cancelling
+  # the others, so a red run still reports every failure it found.
+  unit-tests:
+    name: Unit suite, shard ${{ matrix.shard }} of 6
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
+      TOWNREPORTER_TEST_SHARD_TOTAL: "6"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
       - run: npm test
+
+  # One check that is green only when the whole unit gate is green.
+  #
+  # A sharded suite reports six results instead of one, and a branch rule that
+  # requires a check called `test` -- the name this job had when it ran the
+  # suite itself -- would otherwise be satisfied by nothing at all. So this job
+  # keeps the id `test` and DELIBERATELY has no `name:`, because the check a
+  # branch rule matches is the job's name when it has one and its id when it
+  # does not. It keeps the old meaning too: `if: always()` so it still runs when
+  # a shard fails, and an explicit look at each result, because a skipped or
+  # cancelled dependency is not a pass.
+  test:
+    needs: [static, unit-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every shard and the static checks must have passed
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          SHARDS_RESULT: ${{ needs.unit-tests.result }}
+        run: |
+          echo "typecheck and lint: $STATIC_RESULT"
+          # A matrix job reports success only when every one of its shards did.
+          echo "unit suite shards: $SHARDS_RESULT"
+          failed=0
+          for result in "$STATIC_RESULT" "$SHARDS_RESULT"; do
+            [ "$result" = "success" ] || failed=1
+          done
+          if [ "$failed" = "1" ]; then
+            echo "the unit gate is not green -- open the job above that is red"
+            exit 1
+          fi
 
   lifecycle:
     runs-on: ubuntu-latest

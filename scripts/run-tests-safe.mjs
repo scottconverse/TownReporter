@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { safeTestEnvironment } from "./test-environment.mjs";
+import { shardArgs, shardNotice } from "./test-shard.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
@@ -12,6 +13,22 @@ if (process.argv.length > 2) {
   );
   process.exit(2);
 }
+
+/**
+ * CI runs this command on several machines at once, each taking one slice of
+ * the discovered files (scripts/test-shard.mjs). A developer sets neither
+ * variable and gets the complete suite. A half-set pair is refused here rather
+ * than quietly running the wrong files.
+ */
+let slice;
+try {
+  slice = shardArgs(process.env);
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+const notice = shardNotice(process.env);
+if (notice) console.log(notice);
 
 /**
  * The ordinary suite is destructive by design inside its disposable database:
@@ -36,8 +53,8 @@ function run(args) {
 }
 
 for (const args of [
-  ["--test", "scripts/**/*.test.mjs"],
-  ["--experimental-strip-types", "--test", "--test-concurrency=1", "src/**/*.test.ts"],
+  ["--test", ...slice, "scripts/**/*.test.mjs"],
+  ["--experimental-strip-types", "--test", "--test-concurrency=1", ...slice, "src/**/*.test.ts"],
 ]) {
   const code = await run(args);
   if (code !== 0) process.exit(code);
