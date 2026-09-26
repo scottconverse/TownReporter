@@ -269,8 +269,8 @@ export function withCustomConnections(
  * The design draws these selects with short lines -- "Codex Sol · sign-in",
  * "None", "Default" -- and the build was showing the registry's full sentence
  * plus "Not set — use the desk's default" instead. A native `<select>` clips
- * the selected option at its own content box and no CSS wraps it, so the
- * ceiling below is measured rather than chosen: see `JOB_OPTION_LABEL_MAX`.
+ * the selected option and no CSS wraps it, so the lines below are measured
+ * rather than chosen: see `JOB_OPTION_LABEL_MAX`.
  * ------------------------------------------------------------------------- */
 
 /** The three slots of a job's plan, in the order the design draws them. */
@@ -282,8 +282,8 @@ export type JobSlotName = (typeof JOB_SLOT_NAMES)[number];
  *
  * An empty first choice is not "unset" -- it is the desk's default at work,
  * so it reads "Default". An empty fallback is genuinely nothing, so it reads
- * "None". Both are one word on purpose: the old sentence was 203px of text in
- * a box that measures about 162px at 1280.
+ * "None". Both are one word on purpose: the old sentence was 203px of text, and
+ * the selects are 200px at 1280.
  */
 export function jobSlotEmptyLabel(slot: JobSlotName): string {
   return slot === "first" ? "Default" : "None";
@@ -310,13 +310,15 @@ export function connectionWord(kind: ProviderKind): string {
 /**
  * The longest option line a who-does-what select is known to show.
  *
- * Measured, not guessed (unit BG2): the first-choice select's content box is
- * about 162px at 1280 in Bricolage Grotesque 700 at 15px, and the longest
- * line the design draws there -- "Claude Sonnet · sign-in", 23 characters --
- * measures 150px. 24 keeps that headroom and still leaves room for a wider
- * glyph mix. `model-assignments.test.ts` walks every option of every job
- * against this, so a new provider with a long name fails there rather than
- * reaching a screenshot.
+ * Measured, not guessed (unit BG2): every model select on that row is now at
+ * least 200px wide, which is what the longest line the design draws there --
+ * "Claude Sonnet · sign-in" -- needs to be painted whole (166.7px of advance
+ * width at Bricolage Grotesque 700 15px, plus the 16px of side padding, the
+ * 2px of border and the 15px of dropdown arrow Chromium keeps back). The
+ * ceiling is the second line of defence: a provider whose name is long enough
+ * to overflow even that box loses its "· sign-in" half rather than its last
+ * letters. `model-assignments.test.ts` walks every option of every job against
+ * this, so such a provider fails there rather than reaching a screenshot.
  */
 export const JOB_OPTION_LABEL_MAX = 24;
 

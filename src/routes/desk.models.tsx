@@ -480,13 +480,7 @@ function AssignmentsTab({
 
       <div
         className="text-sm font-extrabold tracking-[0.05em] text-ink-2 uppercase"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) auto",
-          gap: "0 14px",
-          padding: "10px 0",
-          borderBottom: "2px solid var(--fg)",
-        }}
+        style={{ ...ROW_GRID, gap: "0 14px", padding: "10px 0", borderBottom: "2px solid var(--fg)" }}
       >
         <span>Job</span>
         <span>First choice · effort</span>
@@ -643,10 +637,7 @@ function JobRow({
   return (
     <div
       style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) auto",
-        gap: "6px 14px",
-        alignItems: "center",
+        ...ROW_GRID,
         padding: "12px 0",
         borderBottom: "1px solid var(--line)",
       }}
@@ -766,18 +757,19 @@ function JobRow({
 /**
  * The prototype's select box (`sel` in `design/Desk Models.dc.html`), shared by
  * the model select and the effort select beside it: 44px tall, one ink rule,
- * 15px at weight 700 on the page's own background.
+ * 15px at weight 700 on the page's own background, and the prototype's own 8px
+ * side padding.
  *
- * Not `inputClass`, for two measured reasons. Its 14px text and 12px side
- * padding are sized for a form, and this row's first column has to hold the
- * design's own line "Claude Sonnet · sign-in" -- 150px at 700@15px -- in a box
- * about 185px wide at 1280. The right padding is 18px rather than the
- * prototype's 8px so the browser's dropdown arrow is drawn in padding instead
- * of over the last word.
+ * Not `inputClass`, whose 14px text and 12px side padding are sized for a form.
+ * The 8px is measured rather than copied: an earlier version used 18px on the
+ * right to keep the browser's arrow off the last word, and the probe in
+ * `models-screen-shots.mjs` showed that 10px bought nothing -- Chromium paints
+ * the arrow in the text's own box and clips the text before it -- while costing
+ * 10px of the room the longest option needs.
  */
 const SELECT_STYLE: CSSProperties = {
   minHeight: "44px",
-  padding: "0 18px 0 9px",
+  padding: "0 8px",
   background: "var(--bg)",
   color: "var(--ink)",
   border: "1px solid var(--ink)",
@@ -787,8 +779,61 @@ const SELECT_STYLE: CSSProperties = {
   fontSize: "15px",
 };
 
-/** The prototype's `selSmall` width for the effort box, as drawn. */
-const EFFORT_WIDTH = "130px";
+/**
+ * Where a native `<select>` stops painting text, measured on this build at 1280
+ * by cloning the control into the live page at fourteen widths, twice each
+ * (with and without `appearance`), and finding the rightmost column of ink.
+ *
+ * The answer is not the content box. With `appearance: none` the text is
+ * clipped exactly at the padding edge -- 180px of box paints 162px of text --
+ * but a select that SHIPS has the browser's dropdown arrow inside it, and that
+ * arrow costs 15px of the row as well. So the whole of "Claude Sonnet ·
+ * sign-in", 166.7px of advance width at 15px/700, is painted only once the
+ * border box reaches 200px: at 195px the last nine pixels of the word are gone.
+ * Both halves of the model row therefore start from a measured FLOOR rather
+ * than from a share of whatever width is left over.
+ */
+const SELECT_ARROW_RESERVE = 15;
+const LONGEST_OPTION_ADVANCE = 166.7;
+const MODEL_COLUMN_MIN = Math.ceil(
+  2 /* borders */ + 16 /* the 8px side padding */ + SELECT_ARROW_RESERVE + LONGEST_OPTION_ADVANCE,
+);
+
+/**
+ * The effort box, narrower than the prototype's 130px `selSmall` by exactly what
+ * the three model columns need: at 1280 the panel is 968px, and 200px of floor
+ * for each model select plus 56px of gaps, the status column and a job column
+ * that can still hold "Story drafting" leaves 112px. The drawn effort words are
+ * "none" to "medium", the longest 60.2px.
+ */
+const EFFORT_MIN_WIDTH = 112;
+const EFFORT_WIDTH = `${EFFORT_MIN_WIDTH}px`;
+
+/** The first cell is its model select, the 6px gap, then the effort box. */
+const FIRST_CELL_MIN = MODEL_COLUMN_MIN + 6 + EFFORT_MIN_WIDTH;
+
+/**
+ * The row grid: the prototype's five columns (`rows` in `Desk Models.dc.html`,
+ * `minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) auto`) with the
+ * weights replaced by those measured floors, so what the design guarantees at
+ * 1440 holds at 1280 too.
+ *
+ * The prototype's own weights do not, and this is the one place this build
+ * departs from it. At 1280 they hand the first-choice cell 249px -- 113px for
+ * its select, which paints "Claude Sonnet · sign-in" as "Claude Sonnet · sig",
+ * and 192px for each fallback, 4px short of the same word. The job column takes
+ * the squeeze instead: its note wraps and nothing in it is clipped. At 968px
+ * the four `fr`s leave it 125px, and every one of the eight model options is
+ * whole in all three boxes.
+ */
+const ROW_GRID: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns:
+    `minmax(72px, 1fr) minmax(${FIRST_CELL_MIN}px, 1fr) ` +
+    `minmax(${MODEL_COLUMN_MIN}px, 1fr) minmax(${MODEL_COLUMN_MIN}px, 1fr) auto`,
+  gap: "6px 14px",
+  alignItems: "center",
+};
 
 /** Why the effort box has nothing to choose, on its `title`. */
 const PROVIDER_DEFAULT_HELP =
@@ -798,10 +843,10 @@ const PROVIDER_DEFAULT_HELP =
  * One model select.
  *
  * The line it shows is the desk's own short line (`jobOptionLabel`: "Codex Sol
- * · sign-in", "Automatic (ladder)"), not the registry's sentence: a native
- * `<select>` clips the closed control at its content box and no CSS wraps it,
- * and the full line -- provider half-line and all -- is the option's and the
- * select's `title`.
+ * · sign-in", "Automatic (ladder)"), not the registry's sentence: no CSS wraps
+ * or scrolls a native `<select>`, it clips the closed control 15px short of its
+ * content box, and the full line -- provider half-line and all -- is the
+ * option's and the select's `title`.
  *
  * The empty value is the SLOT's word, not one sentence for both: an empty first
  * choice means the desk's default runs the job, and an empty fallback means
