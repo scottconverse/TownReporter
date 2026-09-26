@@ -169,10 +169,18 @@ function echoedNotes(prompt) {
  * classified as "write" would therefore be answered with a draft and rejected
  * as "Writing pass returned no usable JSON." (Unit AA2: that is exactly what
  * happened before this class existed.)
+ *
+ * A correction-wording call (0.6.70) is a fifth: the desk asks for a note the
+ * editor will read before posting, in plain text, with its own closing line
+ * ("Write the correction note now."). Answered as JSON like a draft, it would
+ * be read back as the note itself -- parseCorrectionWording refuses only what is
+ * too short, too long or list-shaped -- so this class exists to keep the stub's
+ * answer the shape the product actually asks for.
  */
 function classify(prompt) {
   if (/UNTRUSTED SOURCE TEXT:/.test(prompt)) return "document";
   if (/["']editor_summary["']\s*:/.test(prompt)) return "scan";
+  if (/Write the correction note now\./.test(prompt)) return "correction";
   if (/\bLead:\s/.test(prompt) && !/NEWS ANGLE:/.test(prompt)) return "research";
   return "write";
 }
@@ -237,6 +245,20 @@ function scanAnswer(prompt) {
   };
 }
 
+/**
+ * The note a correction-wording call is answered with (0.6.70): ONE plain-text
+ * note built out of the two lines the desk put in the prompt, in a form that is
+ * deliberately NOT the sentence the desk writes itself (`correctionTemplate`,
+ * src/lib/news/correction-wording.ts). A walk or test can therefore tell a
+ * suggested note from the one that needs no model -- and can see the editor's
+ * own two lines travelling to the model and coming back.
+ */
+function correctionAnswer(prompt) {
+  const wrong = prompt.match(/^What was wrong: (.*)$/m)?.[1] ?? "";
+  const right = prompt.match(/^What is right: (.*)$/m)?.[1] ?? "";
+  return `Correction needed: the story said ${wrong}. The truth: ${right}.`;
+}
+
 /** Prose with no JSON in it at all -- parseJsonBlock cannot read this. */
 const UNREADABLE =
   "The item passed after public discussion, and the council will revisit it next month.";
@@ -280,11 +302,16 @@ function payload(klass, prompt = "") {
           content:
             klass === "ocr"
               ? ocrPageText(Number(prompt) || 1)
-              : klass === "research" || klass === "write" || klass === "scan"
-                ? JSON.stringify(body)
-                : klass === "document" && ECHO_EVIDENCE
-                  ? echoedNotes(prompt)
-                  : "ok",
+              : klass === "correction"
+                ? // Plain text, not JSON: the correction writer is asked for a
+                  // note it can put in the editor's box, and reads the answer
+                  // back with parseCorrectionWording, which refuses JSON.
+                  correctionAnswer(prompt)
+                : klass === "research" || klass === "write" || klass === "scan"
+                  ? JSON.stringify(body)
+                  : klass === "document" && ECHO_EVIDENCE
+                    ? echoedNotes(prompt)
+                    : "ok",
         },
         finish_reason: "stop",
       },
