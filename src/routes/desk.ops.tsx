@@ -1,4 +1,4 @@
-import { createFileRoute, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, Field, InkButton, LeaveEditorControl, SecHead } from "@/components/desk-chrome";
@@ -17,19 +17,14 @@ import { SectionsSetup } from "@/components/sections-setup";
 import { NamedOutletsSetup } from "@/components/named-outlets-setup";
 import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
 import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
-import {
-  cancelProviderLogin,
-  getProviderStatuses,
-  pollProviderLogin,
-  startProviderLogin,
-  testProvider,
-  type ProviderLogin,
-  type ProviderStatus,
-} from "@/lib/news/provider-login";
-import {
-  getProviderTimeSettings,
-  type ProviderTimeSetting,
-} from "@/lib/news/provider-settings";
+/*
+  Only the statuses read lives here now: the sign-in card itself moved to
+  src/components/provider-status-card.tsx in unit BG, because the Models
+  screen draws the same card under "Subscription sign-ins (OAuth)" and two
+  copies of a countdown would drift.
+*/
+import { getProviderStatuses } from "@/lib/news/provider-login";
+import { getProviderTimeSettings } from "@/lib/news/provider-settings";
 /*
   The two bounds come from the PURE registry module, not from
   provider-settings.ts: this is a client component, and the registry is the
@@ -37,28 +32,16 @@ import {
   the browser bundle.
 */
 import { ProviderTimeField } from "@/components/provider-time-field";
-import { editorActionError, editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
+import { editorActionError, inviteMessage } from "@/lib/news/desk-copy";
 import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
-import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { DailyScanSettings } from "@/components/daily-scan-settings";
 import { MeetingCaptureSettings } from "@/components/meeting-capture-settings";
 import { RoutineNoticePermissions } from "@/components/routine-notice-permissions";
-import { CustomAiConnections } from "@/components/custom-ai-connections";
 import { YoutubeKeySettings } from "@/components/youtube-key";
 import { XaiOauthConnection } from "@/components/xai-oauth-connection";
-import {
-  getCustomAiConnectionsFn,
-  saveCustomAiConnectionFn,
-  enableCustomAiConnectionFn,
-  deleteCustomAiConnectionFn,
-  discoverCustomAiModelsFn,
-  removeCustomAiConnection,
-  saveCustomAiConnectionAndCache,
-  testCustomAiConnectionFn,
-  updateCustomAiConnectionEnabled,
-  type PublicCustomAiConnection,
-} from "@/lib/news/custom-ai-settings";
+import { ProviderStatusCard } from "@/components/provider-status-card";
+import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -402,71 +385,15 @@ function OpsPage() {
  * not merely hidden here.
  */
 function CustomAiSettings() {
-  const qc = useQueryClient();
-  const connections = useQuery({
-    queryKey: ["custom-ai-connections"],
-    queryFn: () => getCustomAiConnectionsFn(),
-  });
-  function refresh() {
-    void qc.invalidateQueries({ queryKey: ["custom-ai-connections"] }).catch(() => undefined);
-  }
+  /*
+    The panel itself moved to src/components/custom-ai-connections-panel.tsx in
+    unit BG, so the Models screen draws the same cards with the same wiring.
+    This wrapper keeps the section's place on the page -- the anchor an editor
+    has bookmarked, and the rule that separates it from the panel above.
+  */
   return (
     <div id="custom-ai-connections" className="mt-12 min-w-0 border-t border-rule pt-8">
-      {connections.isPending ? (
-        <p role="status">Loading your API connections…</p>
-      ) : connections.isError && !connections.data ? (
-        <div role="alert">
-          <p>Could not load your API connections. Existing writing models are unchanged.</p>
-          <InkButton tone="quiet" onClick={() => void connections.refetch()}>
-            Try again
-          </InkButton>
-        </div>
-      ) : (
-        <CustomAiConnections
-          connections={connections.data ?? []}
-          onSave={async (data) => {
-            const saved = await saveCustomAiConnectionAndCache(
-              data,
-              (input) => saveCustomAiConnectionFn({ data: input }),
-              qc,
-            );
-            await Promise.all([
-              qc.invalidateQueries({ queryKey: ["custom-ai-connections"] }),
-              qc.invalidateQueries({
-                queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
-                refetchType: "all",
-              }),
-            ]);
-            return saved;
-          }}
-          onEnable={async (id, enabled) => {
-            await enableCustomAiConnectionFn({ data: { id, enabled } });
-            qc.setQueryData<PublicCustomAiConnection[] | undefined>(
-              ["custom-ai-connections"],
-              (current) => updateCustomAiConnectionEnabled(current, id, enabled),
-            );
-            refresh();
-            void qc.invalidateQueries({
-              queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
-              refetchType: "all",
-            });
-          }}
-          onDelete={async (id) => {
-            await deleteCustomAiConnectionFn({ data: { id } });
-            qc.setQueryData<PublicCustomAiConnection[] | undefined>(
-              ["custom-ai-connections"],
-              (current) => removeCustomAiConnection(current, id),
-            );
-            refresh();
-            void qc.invalidateQueries({
-              queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
-              refetchType: "all",
-            });
-          }}
-          onDiscover={(id) => discoverCustomAiModelsFn({ data: { id } })}
-          onTest={(id) => testCustomAiConnectionFn({ data: { id } })}
-        />
-      )}
+      <CustomAiConnectionsPanel />
     </div>
   );
 }
@@ -552,6 +479,17 @@ function WritingModels() {
         cannot advertise an order the desk no longer has.
       */}
       <p className="mt-4 max-w-2xl text-sm text-ink-2">{automaticOrderSentence()}</p>
+      {/*
+        Unit BG: the summary the redesign pairs with this panel -- which model
+        runs which job, and its fallbacks, is one screen of its own now. The
+        link is how an owner gets there from Server settings; the new desk
+        navigation carries the same destination (README line 364).
+      */}
+      <p className="mt-3 text-base">
+        <Link to="/desk/models" className="inline-link">
+          Assign models to jobs →
+        </Link>
+      </p>
       {statuses.isPending ? (
         <ListSkeleton rows={2} />
       ) : statuses.isError ? (
@@ -561,7 +499,7 @@ function WritingModels() {
       ) : (
         <ul className="mt-4 space-y-3">
           {(statuses.data ?? []).map((s) => (
-            <ProviderRow
+            <ProviderStatusCard
               key={s.provider}
               status={s}
               onNote={setNote}
@@ -690,225 +628,6 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
         </table>
       </div>
     </div>
-  );
-}
-
-/** One provider: what it is, whether it works, and the two buttons. */
-function ProviderRow({
-  status,
-  onNote,
-  times,
-}: {
-  status: ProviderStatus;
-  onNote: (text: string) => void;
-  times: ProviderTimeSetting[];
-}) {
-  const qc = useQueryClient();
-  const [err, setErr] = useState("");
-  const [copied, setCopied] = useState(false);
-
-  /*
-    The row's own view of the attempt in flight.
-
-    `status.login` is whatever the last statuses read saw; the poll below is
-    what keeps it moving. Both are shown through one value so the countdown
-    never jumps backwards when the slower query lands.
-  */
-  const [login, setLogin] = useState<ProviderLogin | null>(status.login);
-  useEffect(() => {
-    setLogin(status.login);
-  }, [status.login]);
-
-  const open = login?.status === "awaiting_user" || login?.status === "starting";
-
-  const poll = useQuery({
-    queryKey: ["provider-signin", login?.id],
-    queryFn: () => pollProviderLogin({ data: login!.id }),
-    enabled: Boolean(open && login?.id),
-    refetchInterval: 3_000,
-  });
-
-  useEffect(() => {
-    if (!poll.data) return;
-    setLogin(poll.data);
-    if (poll.data.status === "done") {
-      onNote(`${status.name} is signed in.`);
-      void qc.invalidateQueries({ queryKey: ["provider-statuses"] });
-    }
-  }, [poll.data, qc, status.name, onNote]);
-
-  // A local second hand so the countdown moves between three-second polls.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!open) return;
-    const t = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(t);
-  }, [open]);
-  const anchor = login ? Date.parse(login.updated_at) : 0;
-  const left =
-    login && open ? Math.max(0, login.expiresInSeconds - Math.round((now - anchor) / 1000)) : 0;
-
-  const start = useMutation({
-    mutationFn: () => startProviderLogin({ data: status.provider }),
-    onMutate: () => {
-      setErr("");
-      onNote(`Starting the ${status.name} sign-in.`);
-    },
-    onSuccess: (row) => {
-      if (!row || "error" in row) {
-        setErr(row?.error ?? "That sign-in did not start.");
-        return;
-      }
-      setLogin(row);
-      void qc.invalidateQueries({ queryKey: ["provider-statuses"] });
-    },
-    onError: (e) => setErr(e instanceof Error ? e.message : "That sign-in did not start."),
-  });
-
-  const cancel = useMutation({
-    mutationFn: () => cancelProviderLogin({ data: login!.id }),
-    onSuccess: (row) => {
-      setLogin(row ?? null);
-      onNote(`The ${status.name} sign-in was stopped.`);
-      void qc.invalidateQueries({ queryKey: ["provider-statuses"] });
-    },
-    onError: (e) => setErr(e instanceof Error ? e.message : "That would not stop."),
-  });
-
-  const test = useMutation({
-    mutationFn: () => testProvider({ data: status.provider }),
-    onMutate: () => {
-      setErr("");
-      onNote(`Asking ${status.name} for one word.`);
-    },
-    onSuccess: (res) => {
-      if (!res || "error" in res) {
-        setErr(res?.error ?? "That check did not run.");
-        return;
-      }
-      onNote(
-        res.ok
-          ? `${status.name} answered in ${(res.ms / 1000).toFixed(1)} seconds.`
-          : `${status.name} did not answer.`,
-      );
-      void qc.invalidateQueries({ queryKey: ["provider-statuses"] });
-    },
-    onError: (e) => setErr(e instanceof Error ? e.message : "That check did not run."),
-  });
-
-  const lastTest = (test.data && !("error" in test.data) ? test.data : null) ?? status.lastTest;
-
-  const line = status.disabledByOperator
-    ? "Disabled by operator"
-    : !status.installed
-      ? "Not installed"
-      : status.signedIn
-        ? status.account && status.account !== "signed in"
-          ? `Signed in as ${status.account}`
-          : "Signed in"
-        : "Not signed in";
-
-  return (
-    <li className="border border-rule p-4" data-provider={status.provider}>
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h3 className="font-display text-lg font-semibold">{status.name}</h3>
-        <span className="row-acts static">
-          {!status.signedIn && !status.disabledByOperator && status.installed && !open ? (
-            <InkButton small disabled={start.isPending} onClick={() => start.mutate()}>
-              {start.isPending ? "Starting…" : `Sign in to ${status.name}`}
-            </InkButton>
-          ) : null}
-          {status.signedIn ? (
-            <InkButton tone="quiet" small disabled={test.isPending} onClick={() => test.mutate()}>
-              {test.isPending ? "Asking…" : "Test"}
-            </InkButton>
-          ) : null}
-        </span>
-      </div>
-
-      <p className="mt-1">
-        <span className="text-sm tracking-[0.14em] text-muted uppercase">
-          {status.installed ? "Installed" : "Not installed"}
-        </span>{" "}
-        <span>{line}</span>
-      </p>
-      {status.path ? <p className="mt-1 text-sm break-all text-muted">{status.path}</p> : null}
-      {status.detail && !open ? <p className="mt-1 text-sm text-ink-2">{status.detail}</p> : null}
-
-      {open ? (
-        <div className="mt-3 border border-rule bg-paper-2 p-3">
-          {login?.url ? (
-            <>
-              <p className="text-sm">
-                Open this page and finish the sign-in there. It opens in a new tab.
-              </p>
-              <p className="mt-2">
-                <a
-                  className="inline-link break-all"
-                  href={login.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  {login.url}
-                </a>
-              </p>
-            </>
-          ) : (
-            <p className="text-sm">Waiting for {status.name} to print its link…</p>
-          )}
-          {login?.code ? (
-            <div className="mt-3">
-              <p className="text-sm tracking-[0.14em] text-muted uppercase">
-                Enter this one-time code
-              </p>
-              <p className="mt-1 font-mono text-2xl tracking-[0.2em]" data-signin-code>
-                {login.code}
-              </p>
-              <InkButton
-                tone="quiet"
-                small
-                ariaLabel="Copy the one-time code"
-                onClick={() => {
-                  void navigator.clipboard.writeText(login.code!).then(() => setCopied(true));
-                }}
-              >
-                {copied ? "Copied" : "Copy code"}
-              </InkButton>
-            </div>
-          ) : null}
-          <p className="mt-3 text-sm text-muted">
-            {left > 0
-              ? `This link runs out in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}.`
-              : "This link has run out of time."}
-          </p>
-          <InkButton tone="quiet" small disabled={cancel.isPending} onClick={() => cancel.mutate()}>
-            {cancel.isPending ? "Stopping…" : "Cancel"}
-          </InkButton>
-        </div>
-      ) : null}
-
-      {login && !open && login.status !== "done" && login.detail ? (
-        <p className="mt-2 text-sm text-rust">{login.detail}</p>
-      ) : null}
-
-      {lastTest ? (
-        <p className="mt-2 text-sm">
-          {lastTest.ok ? (
-            <>Answered in {(lastTest.ms / 1000).toFixed(1)} s.</>
-          ) : (
-            <span className="text-rust">
-              {editorDraftError(lastTest.detail) ?? lastTest.detail}
-            </span>
-          )}
-        </p>
-      ) : null}
-
-      {err ? <p className="mt-2 text-sm text-rust">{err}</p> : null}
-
-      {times.map((row) => (
-        <ProviderTimeField key={row.providerId} row={row} onNote={onNote} />
-      ))}
-    </li>
   );
 }
 

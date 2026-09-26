@@ -15,6 +15,12 @@ import { isGeminiOpenAiEndpoint } from "@/lib/news/provider-model-id";
 
 type Props = {
   connections: PublicCustomAiConnection[];
+  /**
+   * Whether to draw the component's own "Add your own AI API" heading. The
+   * Models screen supplies its own group heading instead (unit BG) and passes
+   * false; every other caller gets it.
+   */
+  showHeading?: boolean;
   onSave(input: CustomAiConnectionInput & { id?: string }): Promise<PublicCustomAiConnection>;
   onDiscover(id: string): Promise<string[]>;
   onTest(id: string): Promise<ConnectionProbeResult>;
@@ -24,6 +30,7 @@ type Props = {
 
 export function CustomAiConnections({
   connections,
+  showHeading = true,
   onSave,
   onDiscover,
   onTest,
@@ -70,8 +77,16 @@ export function CustomAiConnections({
     }
   }
   return (
-    <section aria-labelledby="custom-ai-heading" className="grid gap-4">
-      <h2 id="custom-ai-heading">Add your own AI API</h2>
+    <section aria-labelledby={showHeading ? "custom-ai-heading" : undefined} className="grid gap-4">
+      {/*
+        Unit BG: the Models screen draws these same cards under its own group
+        heading ("Frontier · API key"), and two stacked headings for one list of
+        cards reads as two lists. Server settings keeps its heading -- the prop
+        defaults to true, so nothing there changed. The paragraph below stays
+        either way: "Saving does not call a model" is the sentence that makes
+        the form safe to use.
+      */}
+      {showHeading ? <h2 id="custom-ai-heading">Add your own AI API</h2> : null}
       <p className="meta">
         Connect an OpenAI-compatible endpoint, including LiteLLM. Saving does not call a model,
         spend provider credit, or change the desk default.
