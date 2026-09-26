@@ -921,7 +921,12 @@ function StoryPage() {
       return (
         <DeskShell title="Missing" kicker="Workbench">
           <ScreenError
-            message={error instanceof Error ? error.message : "Could not load that lead."}
+            message={
+              editorActionError(
+                error instanceof Error ? error.message : "",
+                "load that story",
+              ) ?? "Could not load that lead."
+            }
             onRetry={() => void refetch()}
             retrying={isRefetching}
           />
