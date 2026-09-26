@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The Control page, walked the way the owner will use it (0.6.65, Unit AG).
+ * The Control page, walked the way the owner will use it (0.6.66, Unit AG).
  *
  * `ops/control/control-server.mjs` replaces the terminal menu with a local page:
  * one line saying whether the paper is up, the same six buttons the menu
@@ -109,7 +109,7 @@ function fakeStatus() {
     root: "C:\\Users\\scott\\Desktop\\Code\\townreporter-web",
     checks,
     extras: [
-      { id: "version", label: "Version", state: "ok", ok: true, optional: true, detail: "0.6.65", fix: null },
+      { id: "version", label: "Version", state: "ok", ok: true, optional: true, detail: "0.6.66", fix: null },
       { id: "backup", label: "Last backup", state: "ok", ok: true, optional: true, detail: "townreporter.sql, 3 hours ago", fix: null },
       { id: "qwen", label: "Model server (Qwen)", state: "ok", ok: true, optional: true, detail: "1 model loaded", fix: null },
       // The card this walk's first new check is about: a probe that could not

@@ -66,7 +66,9 @@ import {
   slugInput,
   sourceStatusInput,
   writeStoryInput,
-  cleanPublishId,
+  cleanPublishRequest,
+  suggestHeadlinesInput,
+  updateArticleHeadlineInput,
 } from "./request-input.ts";
 import {
   evidenceNeedsReview,
@@ -77,14 +79,25 @@ import { webSearch } from "./search-web";
 import { absenceClaims } from "./absence-gate";
 import {
   applyTodoPatch,
+  clipTodoText,
   keepHumanTodos,
   machineTodosFrom,
   packNotes,
   parseNotes,
   topicConfirmationFingerprint,
+  TODO_DETAIL_MAX,
   uncheckedGateTodos,
   type NoteTodo,
 } from "./notes";
+import {
+  cleanHeadline,
+  headlineEditRecord,
+  headlineForRedraft,
+  headlineSuggestionPrompt,
+  parseHeadlineSuggestions,
+  sectionOverrideDetail,
+  sectionOverridden,
+} from "./headline-control.ts";
 import { provenanceFromUrls } from "./findings";
 import {
   namedOutlet,
@@ -434,12 +447,13 @@ export const getLead = createServerFn({ method: "GET" })
     if (!lead) return null;
     const drafts = await sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-             provenance_json, form, found_note, unanswered, research_json
+             provenance_json, form, found_note, unanswered, research_json,
+             model_headline, model_topic, headline_source
       from drafts where lead_id = ${id} and newsroom_id = ${owned(context)}
       order by updated_at desc, id desc limit 1
     `;
-    const live = await sql<{ slug: string }>`
-      select slug from articles
+    const live = await sql<{ id: number; slug: string; headline: string }>`
+      select id, slug, headline from articles
       where lead_id = ${id} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
     `;
@@ -523,6 +537,16 @@ export const getLead = createServerFn({ method: "GET" })
       namedOutlets,
       outletOverrides,
       articleSlug: live[0]?.slug ?? null,
+      /*
+        The id and the printed headline of the article, so the story page can
+        edit the headline that is actually on the paper (0.6.66). A published
+        story has no editable draft -- its words live in `articles`, and the
+        paper's headline may have been changed after it went up -- so the
+        headline box needs both the row it would be changing and the words the
+        reader is seeing now.
+      */
+      articleId: live[0]?.id ?? null,
+      articleHeadline: live[0]?.headline ?? null,
       openedExtractionByUrl: extractionByUrl,
       job,
       // Draft has no separate run table -- desk_jobs IS the record, so
@@ -1534,9 +1558,26 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         throw new Error(
           "The draft changed while the writer was working. The editor's newer draft was preserved.",
         );
+      /*
+        WHOSE HEADLINE PRINTS -- at a checkpoint too (0.6.66).
+
+        A checkpoint is a draft revision the same way the final write is: it
+        INSERTs a row. It used to take the model's headline unconditionally, so
+        a checkpoint landing after an editor's edit replaced the editor's words
+        AND left that row as the newest one -- which meant the final write's own
+        `headlineForRedraft` below then read the model's headline off it and
+        agreed with the model. The rule has to hold on both writes or it holds
+        on neither.
+
+        `model_topic` is left NULL on a checkpoint: the section here is the
+        lead's, not a choice the model has made yet, and NULL is what the desk
+        reads as "not recorded". Claiming the model chose it would put every
+        checkpoint draft into the section-override count.
+      */
+      const checkpointHeadline = headlineForRedraft(current, checkpoint.headline);
       const [saved] = await transactionSql<DraftRow>`
-        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-        values(${context.userId},${owned(context)},${leadId},${checkpoint.headline},${checkpoint.dek},${checkpoint.body},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${integrityNotes},${JSON.stringify(provenance)},${String(checkpoint.form ?? "")},${JSON.stringify(checkpoint.found ?? null)},${JSON.stringify(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : [])},${JSON.stringify({ citationPolicy: "explicit", researchScope: draftInput.researchScope, reportedClaims: { version: 1, rows: Array.isArray(checkpoint.claims) ? checkpoint.claims : [] }, writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true } })})
+        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_headline,headline_source)
+        values(${context.userId},${owned(context)},${leadId},${checkpointHeadline.headline},${checkpoint.dek},${checkpoint.body},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${integrityNotes},${JSON.stringify(provenance)},${String(checkpoint.form ?? "")},${JSON.stringify(checkpoint.found ?? null)},${JSON.stringify(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : [])},${JSON.stringify({ citationPolicy: "explicit", researchScope: draftInput.researchScope, reportedClaims: { version: 1, rows: Array.isArray(checkpoint.claims) ? checkpoint.claims : [] }, writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true } })},${checkpointHeadline.modelHeadline},${checkpointHeadline.source})
         returning *
       `;
       await transactionSql`
@@ -1794,14 +1835,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     nothing -- was false. The only cure is a human opening the city's own site.
   */
   const gateTodos: NoteTodo[] = absenceClaims(reported.research_memo?.gate).map((claim) => ({
-    t: `Claim of absence: ${claim.sentence}`.slice(0, 400),
+    t: clipTodoText(`Claim of absence: ${claim.sentence}`),
     done: false,
     src: "gate" as const,
     // 0.6.23: the summary line names every rung of the ladder the gate ran
     // ("searched <domain> and <n> more ways"), not just the first query --
     // falls back to the old one-line form for a gate record from before this
     // release that has no `summary`.
-    q: (claim.summary ?? (claim.query ? `Searched: ${claim.query}` : undefined))?.slice(0, 300),
+    q: claim.summary || claim.query
+      ? clipTodoText(claim.summary ?? `Searched: ${claim.query}`, TODO_DETAIL_MAX)
+      : undefined,
     queries: claim.steps?.map((s) => ({ query: s.query, hit: s.hit })),
   }));
   const machine = machineTodosFrom([
@@ -1857,16 +1900,33 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       throw new Error(
         "The draft changed while reporting was finishing. The editor's newer draft was preserved.",
       );
+    /*
+      WHOSE HEADLINE PRINTS (0.6.66).
+
+      A redraft inserts a new row, so the model's headline replaced the editor's
+      without anything noticing. Lead 240, 2026-09-25: the scan headline was
+      good, two redrafts rewrote it worse, and there was no way back to either
+      the editor's words or the lead's. `headlineForRedraft` keeps the headline
+      of the row being replaced when the editor owns it, and records which of
+      the two won; the model's own headline is stored either way, so the desk can
+      still show it and offer it back with "Use the lead's headline".
+
+      `current` is the row this draft replaces -- the same row the lock and
+      `draftStillExpected` above are about, read FOR UPDATE a few lines up.
+    */
+    const headline = headlineForRedraft(current, reported.headline);
     const [savedDraft] = await sql<{ id: number }>`
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
-      provenance_json, form, found_note, unanswered, research_json
+      provenance_json, form, found_note, unanswered, research_json,
+      model_headline, model_topic, headline_source
     )
     values (
-      ${context.userId}, ${owned(context)}, ${leadId}, ${reported.headline}, ${reported.dek}, ${reported.body},
+      ${context.userId}, ${owned(context)}, ${leadId}, ${headline.headline}, ${reported.dek}, ${reported.body},
       ${reported.topic}, ${sourceUrls}, ${notes},
       ${provenanceJson}, ${reported.form}, ${reported.found_note}, ${unansweredJson},
-      ${researchJson}
+      ${researchJson},
+      ${headline.modelHeadline}, ${reported.topic}, ${headline.source}
     )
     returning id
   `;
@@ -2617,6 +2677,24 @@ export const overrideNamedOutlet = createServerFn({ method: "POST" })
 export const performPublish = createServerOnlyFn(async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
+  /*
+    The section the editor saw on the button they pressed (0.6.66).
+
+    The desk used to make a person confirm the section with a second button and
+    then publish with a first, and any text edit reset the confirmation -- so the
+    two could disagree and the editor was nagged about a section they had
+    already read. Publish now carries the section it printed on its face, and
+    pressing it IS the confirmation: `performPublish` records the confirmation
+    for this exact draft version in the same transaction that prints it.
+
+    Absent means "no section was shown to me" -- a scripted call, or a client
+    from before this release -- and then the gate falls back to the stored
+    confirmation exactly as it did in 0.6.62. A section that is present but does
+    not match the draft's own is refused outright rather than confirmed: that is
+    the case where the editor pressed a button naming a section this draft does
+    not file under, and printing either one on their behalf would be a guess.
+  */
+  sectionFromEditor?: string,
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
   const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
   const already = await getSql().then(
@@ -2678,7 +2756,8 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     (sql) =>
       sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
-             provenance_json, form, found_note, unanswered, research_json, disclosure_text
+             provenance_json, form, found_note, unanswered, research_json, disclosure_text,
+             model_topic
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
       order by updated_at desc, id desc limit 1
     `,
@@ -2705,14 +2784,29 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   */
   const confirmedTopic = parseNotes(notesRows[0]?.notes_json).topicConfirmation;
   const draftTopic = String(row.topic ?? "").trim();
+  const editorTopic = String(sectionFromEditor ?? "").trim();
+  if (editorTopic && editorTopic !== draftTopic) {
+    return {
+      ok: false as const,
+      error: `This story files under "${draftTopic || "no section"}", and the button said "${editorTopic}". Reload the story, check the section, then publish again.`,
+    };
+  }
+  /*
+    The editor's own section, for this version: confirmed by the press that
+    carried it. Recorded inside the publish transaction below, so a print with
+    no confirmation row cannot happen and a confirmation with no print cannot
+    either.
+  */
+  const confirmSection = Boolean(editorTopic) && editorTopic === draftTopic;
   if (
-    !confirmedTopic ||
-    confirmedTopic.topic !== draftTopic ||
-    confirmedTopic.token !== topicConfirmationFingerprint(evidenceReviewToken(row))
+    !confirmSection &&
+    (!confirmedTopic ||
+      confirmedTopic.topic !== draftTopic ||
+      confirmedTopic.token !== topicConfirmationFingerprint(evidenceReviewToken(row)))
   ) {
     return {
       ok: false as const,
-      error: `Confirm the section before publishing — this draft files under "${draftTopic || "no section"}", and no editor has confirmed that for the version being printed. Open the story, check the section, and confirm it.`,
+      error: `This draft files under "${draftTopic || "no section"}", and no editor has confirmed that for the version being printed. Open the story, check the section, and publish from there.`,
     };
   }
 
@@ -2805,6 +2899,33 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       });
       if (stale.length) return { blocked: true as const, error: staleCitationNotice(stale) };
 
+      /*
+        THE PRESS THAT CARRIED THE SECTION IS THE CONFIRMATION (0.6.66).
+
+        Written here, in the transaction that prints the story, against the
+        token of the row actually being printed -- so the record cannot survive
+        a newer draft, and a print without its confirmation cannot happen. The
+        confirmation is what the gate above reads for any later request that
+        carries no section; the guarantee the separate button used to provide is
+        unchanged, it is just made by the same press that publishes now.
+      */
+      if (confirmSection) {
+        const noteRows = await sql<{ notes_json: string | null }>`
+          select notes_json from leads
+          where id = ${leadId} and newsroom_id = ${owned(context)} for update
+        `;
+        const printNotes = parseNotes(noteRows[0]?.notes_json);
+        printNotes.topicConfirmation = {
+          topic: draftTopic,
+          token: topicConfirmationFingerprint(evidenceReviewToken(row)),
+          at: new Date().toISOString(),
+        };
+        await sql`
+          update leads set notes_json = ${packNotes(printNotes)}, topic_unchosen = false
+          where id = ${leadId} and newsroom_id = ${owned(context)}
+        `;
+      }
+
       // `articles.slug` is UNIQUE. The old code checked once and, on a clash,
       // appended the lead id without re-checking — so a second collision (a
       // headline that slugifies to an existing "<base>-<leadId>", or a
@@ -2854,6 +2975,27 @@ export const performPublish = createServerOnlyFn(async function performPublish(
 
   if (published.blocked) return { ok: false as const, error: published.error };
 
+  /*
+    A SECTION THE MODEL DID NOT CHOOSE (0.6.66).
+
+    "the model filed this under Council, the editor published it under Schools"
+    is the fact the paper wants to be able to count. Recorded on the existing
+    audit trail rather than in a table of its own, because it is one line about
+    one decision and the trail already carries the who and the when.
+  */
+  if (published.id && sectionOverridden(row.model_topic, draftTopic)) {
+    await audit(
+      context.userId,
+      "section-override",
+      sectionOverrideDetail({
+        leadId,
+        modelTopic: String(row.model_topic ?? "").trim(),
+        editorTopic: draftTopic,
+      }),
+      owned(context),
+      { kind: "articles", id: published.id },
+    );
+  }
   await audit(context.userId, "publish", `Article ${published.id}`, owned(context), {
     kind: "articles",
     id: published.id,
@@ -2867,15 +3009,173 @@ export const publishLead = createServerFn({ method: "POST" })
     `(leadId: number) => leadId` was an annotation, not a check: the body
     arrived as whatever the client sent and went into `where id = $1` as
     itself. The query is parameterised, so this was never injection -- it was a
-    declared type that nothing enforced. `cleanPublishId` answers `null` for
-    anything that is not a positive 32-bit integer, and the handler refuses.
+    declared type that nothing enforced. `cleanPublishRequest` answers `null`
+    for anything that is not a positive 32-bit integer, and the handler refuses.
+
+    0.6.66: the request may also carry `topic`, the section the desk's Publish
+    button showed. The bare id every older caller sends is still accepted, and
+    an absent topic means "unconfirmed", never "confirmed blank".
   */
-  .validator((raw: unknown) => cleanPublishId(raw))
-  .handler(async ({ context, data: leadId }) =>
-    leadId === null
+  .validator((raw: unknown) => cleanPublishRequest(raw))
+  .handler(async ({ context, data }) =>
+    data.leadId === null
       ? { ok: false as const, error: "There is no such story." }
-      : performPublish(context, leadId),
+      : performPublish(context, data.leadId, data.topic),
   );
+
+/**
+ * Change the headline of a story that has already printed.
+ *
+ * Headlines are a primary editor's job and the desk had no way to do this at
+ * all: `articles.headline` was written once, at publish, and the input on the
+ * story page is disabled for a lead on paper. A typo, a better verb, a section
+ * editor's rewrite -- all of it needed a developer and a SQL prompt.
+ *
+ * WHAT MOVES AND WHAT DOES NOT. Only `articles.headline`. `articles.slug` is
+ * untouched, so every link, every share and every reader's open tab keeps
+ * working and the page changes under them; that is the whole reason this is an
+ * update rather than a reprint. The old headline, who changed it and when go to
+ * `article_headline_history` (migration 0093), append-only, written in the same
+ * transaction as the update so the record cannot outlive a failed change.
+ *
+ * NO CORRECTION NOTICE. `addCorrection` is a separate, explicit act and nothing
+ * in this codebase couples a headline to it -- grep for `headline` in
+ * corrections.ts and the only mentions are of the article's own. A correction
+ * says the paper got something wrong; a headline rewrite says the paper can say
+ * it better, and the story's facts are unchanged. Requiring one would also mean
+ * a headline could not be fixed without publishing a second, reader-facing
+ * change, which is a worse outcome for the reader than the fix.
+ */
+export async function performUpdateArticleHeadline(
+  context: { userId: string; newsroomId?: number },
+  articleId: number,
+  headline: string,
+): Promise<{ ok: true; headline: string } | { ok: false; error: string }> {
+  const clean = cleanHeadline(headline);
+  if (!clean) {
+    return {
+      ok: false as const,
+      error: "A headline cannot be blank. Type the headline you want the paper to print, then save.",
+    };
+  }
+  const rows = await getSql().then(
+    (sql) =>
+      sql<{ id: number; headline: string | null; status: string }>`
+      select id, headline, status from articles
+      where id = ${articleId} and newsroom_id = ${owned(context)} limit 1
+    `,
+  );
+  const article = rows[0];
+  if (!article) {
+    return { ok: false as const, error: "That story is not one of this paper's stories." };
+  }
+  if (article.status !== "published") {
+    return {
+      ok: false as const,
+      error: "That story is not on the paper yet. Edit its headline in the story workbench instead.",
+    };
+  }
+  const record = headlineEditRecord(article, clean, context.userId);
+  // Nothing changed: a second press of Save is not a second decision, and it
+  // must not leave a row that says the headline was rewritten.
+  if (!record) return { ok: true as const, headline: String(article.headline ?? "").trim() };
+
+  await withTransaction(async (sql) => {
+    await sql`
+      update articles set headline = ${record.newHeadline}
+      where id = ${articleId} and newsroom_id = ${owned(context)}
+    `;
+    await sql`
+      insert into article_headline_history (newsroom_id, article_id, old_headline, new_headline, changed_by)
+      values (${owned(context)}, ${articleId}, ${record.oldHeadline}, ${record.newHeadline}, ${context.userId})
+    `;
+  });
+  /*
+    Audited after the transaction, where the rest of the publish path's audits
+    sit: `audit` writes on the pooled connection, and on PGlite there is one
+    connection, so writing from inside a transaction deadlocks it.
+  */
+  await audit(
+    context.userId,
+    "edit_headline",
+    `Article ${articleId}: "${record.oldHeadline}" -> "${record.newHeadline}"`,
+    owned(context),
+    { kind: "articles", id: articleId },
+  );
+  return { ok: true as const, headline: record.newHeadline };
+}
+
+export const updateArticleHeadline = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => updateArticleHeadlineInput.parse(raw))
+  .handler(async ({ context, data }) => performUpdateArticleHeadline(context, data.articleId, data.headline));
+
+/**
+ * Three headlines the story model would write, offered to the editor.
+ *
+ * The desk's own answer to a headline the editor does not like used to be
+ * "Redraft", which rewrites the whole story to change one line and may come
+ * back worse -- it did, twice, on lead 240. This asks the same story model, on
+ * the same provider ladder as every other story call (Automatic, resolved once
+ * by `grokChat`), for three options and changes nothing: the desk shows them
+ * and an editor clicks one. `parseHeadlineSuggestions` drops anything that
+ * would not print, so an option that is offered is an option that can be saved.
+ *
+ * A model that cannot be reached says so in a sentence and leaves the editor's
+ * headline exactly as they typed it. A suggestion that silently did nothing
+ * would be indistinguishable from a suggestion that failed.
+ */
+export async function performSuggestHeadlines(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+  currentHeadline?: string,
+): Promise<{ ok: true; options: string[] } | { ok: false; error: string }> {
+  const sql = await getSql();
+  const leads = await sql<LeadRow>`
+    select id, headline, topic from leads
+    where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+  `;
+  const lead = leads[0];
+  if (!lead) return { ok: false as const, error: "Lead not found" };
+  const drafts = await sql<DraftRow>`
+    select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at
+    from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+    order by updated_at desc, id desc limit 1
+  `;
+  const row = drafts[0];
+  const prompt = headlineSuggestionPrompt({
+    leadHeadline: String(lead.headline ?? "").trim(),
+    section: String(row?.topic ?? lead.topic ?? "").trim(),
+    currentHeadline: String(currentHeadline ?? "").trim(),
+    dek: row?.dek,
+    body: row?.body,
+  });
+  const got = await grokChat(prompt.system, prompt.user, 700, {
+    choice: "auto",
+    newsroomId: owned(context),
+  });
+  if (!got.ok) {
+    return {
+      ok: false as const,
+      error:
+        "The story model could not be reached just now, so no headlines were suggested. Your headline is exactly as you left it.",
+    };
+  }
+  const options = parseHeadlineSuggestions(got.text);
+  if (!options.length) {
+    return {
+      ok: false as const,
+      error:
+        "The story model did not come back with anything that would print as a headline. Your headline is exactly as you left it.",
+    };
+  }
+  return { ok: true as const, options };
+}
+
+export const suggestHeadlines = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => suggestHeadlinesInput.parse(raw))
+  .handler(async ({ context, data }) => performSuggestHeadlines(context, data.leadId, data.headline));
 
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

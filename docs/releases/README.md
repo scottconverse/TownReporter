@@ -1,9 +1,13 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.65](0.6.65.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.66](0.6.66.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
+
+- **0.6.66** — Gives the editor the three controls a story was missing. A machine-written to-do longer than the desk's own reading bound no longer blocks Save or Publish: the desk clips what it writes at a word boundary, reads to-dos at that same bound, normalises a stored one instead of refusing the round trip, and reports a notes failure as a plain sentence beside a story that prints anyway; raw validation output no longer reaches an editor on any surface. The headline box looks editable, a **Redraft** keeps a headline the editor changed (the model's own attempt is filed beside it, not over it), **Use the lead's headline** and **Suggest headlines** apply only on a click, and a printed story can be re-headed from its story page or the **Published** page — words change, the slug and every link do not, and the old headline, the account and the time go to the additive `article_headline_history` table and the action log. Publish reads **Publish in \<Section\>**, confirms that section for the version being printed in the same press, is disabled with its reason when the scanner placed no section, and the server still refuses a draft whose section nobody confirmed or a carried section that is not the draft's own. Every section chosen by hand is logged and counted on Stats. One additive migration, `0093_editor_headline_control.sql`. See [the release guide](0.6.66.md); it does not assert GitHub publication, production deployment, or live-model proof.
+
+### Earlier
 
 - **0.6.51** — Adds per-runtime effort controls; named/Automatic first-choice routing that retries only a technically failed unfinished call and records requested/actual model and effort; terminal content refusals; Codex-first unattended order with Claude Sonnet last and no automatic Opus; migration of blank-model saved Gemini connections without replacing their key; Grok connection repair; editable daily-scan time/model/effort/source settings; Queue batch Redraft; and clearer retained-job health history. Direct Story/Opinion documents can retain and read all extracted PDF pages within their 20-million-character text limit. Generic capture and Dark Desk image-PDF OCR now offer **Read entire PDF**, which checkpoints bounded 12-page calls and resumes with only unread pages after interruption or a budget pause. The source repair prevents the prior Windows installer shutdown path from trying to kill a system child such as `csrss`; a root that has already crashed can still leave detached children because their ownership cannot be proved safely. See [the release guide](0.6.51.md) for evidence boundaries; it does not assert GitHub publication, production deployment, or live-model proof.
 

@@ -90,14 +90,28 @@ test("the story editor's own-note and follow-up inputs have accessible names", a
 */
 test("the story page tells the editor when the scan never chose the section", async () => {
   const story = await readFile(new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
+  /*
+    0.6.66 renamed the condition, not the rule. The desk used to hold a
+    separate `topicConfirmed` flag set by a Confirm button; that button is gone
+    and Publish itself records the confirmation for the version it prints, so
+    the one state that matters is `sectionReady` -- the model chose a section,
+    or a person has picked one, or this saved draft already has a confirmed
+    one. The notice still appears while none of those is true and the scan
+    never chose.
+  */
   assert.match(
     story,
-    /data\.lead\.topic_unchosen\s*&&\s*!topicConfirmed[\s\S]{0,400}Section not chosen — pick one/,
+    /data\.lead\.topic_unchosen\s*&&\s*!sectionReady[\s\S]{0,400}Section not chosen — pick one/,
     "the notice must be gated on the not-chosen mark and the section still being unconfirmed",
   );
+  /*
+    The sentence wraps in the source, so the space between "newsroom" and
+    "files" is a newline and its indentation. This pins the words the editor
+    reads, not the line breaks of the file they are written in.
+  */
   assert.match(
     story,
-    /Section not chosen — pick one[\s\S]{0,600}the model named no section this newsroom files under/,
+    /Section not chosen — pick one[\s\S]{0,600}the model named no section this newsroom\s+files\s+under/,
     "the notice must say why the lead carries a section nobody chose",
   );
   assert.match(

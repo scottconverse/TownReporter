@@ -215,6 +215,36 @@ test("a later writer checkpoint cannot supersede an intervening editor draft",as
   assert.deepEqual(rows.map(row=>row.headline),["Writer one","Editor saved"]);
 });
 
+/*
+  0.6.66. A writer checkpoint is a revision, not a scratch pad: it INSERTs a
+  row, and it used to take the model's headline unconditionally. So a redraft
+  after an editor had rewritten the headline replaced it -- and, because the
+  checkpoint row then became the newest one, the finished draft's own
+  keep-the-editor's-headline rule read the model's words off it and agreed with
+  the model. The rule has to hold on the checkpoint write too.
+*/
+test("a writer checkpoint keeps a headline the editor wrote",async()=>{
+  await ensureJobsSchema();
+  const sql=await getSql(),room=88406,user="checkpoint-headline-editor";
+  await sql.query("insert into newsrooms(id,name) values($1,'Checkpoint headline room') on conflict(id) do nothing",[room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')",[user,room]);
+  const [lead]=await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Headline lead','Why','council','new','[]','',1,'{}') returning id",[user,room]);
+  await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,model_headline,headline_source) values($1,$2,$3,'The editor''s line','','Editor body','council','[]','The scan''s line','editor')",[user,room,lead.id]);
+  const [jobRow]=await sql.query<{id:number}>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','public','default','running','Writing','headline-claim') returning id",[user,room,lead.id]);
+  const job={id:jobRow.id,user_id:user,newsroom_id:room,kind:"draft",subject_id:lead.id,model_choice:"local-model",model_choice_source:"editor",research_scope:"public",lane:"default",status:"running",stage:"Writing",claim_token:"headline-claim"} as DeskJob;
+  await assert.rejects(performDraftWork(job,{setJobStage:async()=>{},reportAndDraft:async(_input,deps)=>{
+    await deps!.onWriterDraft?.({headline:"The model's rewrite",dek:"",body:"Writer body",topic:"council",source_urls:[],integrity_notes:"",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[]});
+    return {error:"Later gate failed"};
+  }}),/Later gate failed/);
+  const rows=await sql.query<{headline:string;model_headline:string;headline_source:string}>("select headline,model_headline,headline_source from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
+  assert.equal(rows.length,2);
+  assert.equal(rows[0].headline_source,"editor");
+  assert.equal(rows[1].headline,"The editor's line","the checkpoint must not replace the editor's headline");
+  assert.equal(rows[1].model_headline,"The model's rewrite","and must still file what the model wrote");
+  assert.equal(rows[1].headline_source,"editor","so the finished draft knows the headline is the editor's");
+  await sql.query("delete from newsroom_members where newsroom_id=$1 and user_id=$2",[room,user]);
+});
+
 test("the atomic final-draft commit exposes a review-required terminal stage",async()=>{
   await ensureJobsSchema();
   const sql=await getSql(),room=88403,user="review-stage-editor";

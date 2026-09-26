@@ -67,6 +67,15 @@ export type DraftRow = {
   /** Migration 0091. The reader-facing line the import review screen chose.
    * Empty = the publish path falls back to the standard line. */
   disclosure_text?: string | null;
+  /** Migration 0093. The headline the model wrote, kept even when `headline`
+   * holds the editor's. Null/absent = written before 0.6.66, not recorded. */
+  model_headline?: string | null;
+  /** Migration 0093. The section the model chose, kept alongside `topic`
+   * (which is what prints and may be the editor's). */
+  model_topic?: string | null;
+  /** Migration 0093. Who last decided this row's headline: `model` or
+   * `editor`. A redraft keeps the editor's headline when this reads editor. */
+  headline_source?: string | null;
 };
 
 export type ArticleRow = {

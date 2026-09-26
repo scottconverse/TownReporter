@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current software version: [0.6.65](releases/0.6.65.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.66](releases/0.6.66.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -397,6 +397,27 @@ Before **Draft with AI**, choose **Drafting scope**. **Research public sources**
 
 Supplied-only drafting supports every Story model, including Codex. It does not run discovery or external searches. Uploaded originals remain saved; if Automatic changes providers after an eligible technical failure, the provider that takes over rereads the retained material. The draft fills the headline / dek / body fields. You can edit every word. **Save** keeps your edits without printing.
 
+#### The headline
+
+The headline is the first field on the story, inside a box with a visible edge and a small **Edit** hint. That is not decoration: the headline is yours to write, at any point.
+
+**Redraft will not replace a headline you have changed.** The desk keeps the headline the model wrote separately from the one on the page, and remembers which of the two you last decided. Once you have edited the headline — or the words on the page already differ from what the last draft wrote — a redraft keeps your headline and files the model's new attempt beside it rather than over it. If you only rewrote the body, the headline still belongs to the model and a redraft may improve it.
+
+Two buttons sit beside the box:
+
+- **Use the lead's headline** puts back the line the scan filed the lead under, in one press. Redrafts drift; the words the desk first read on the lead are often the ones you want.
+- **Suggest headlines** asks the story model for three options and shows them as a list under the box. One click puts one in the box, and nothing is applied without that click. The desk drops anything that could not be printed, rather than offering you a headline the paper would refuse.
+
+A headline you change on a draft is saved with **Save** like any other edit, and redrafts keep it from then on.
+
+#### Rewriting the headline of a story already on the paper
+
+A printed story can still be re-headed — the words were wrong, or the story moved on. Do it on the story page: the headline field loads the words that are actually on the paper, and **Save headline** changes them. The **Published** page offers the same thing: **Edit headline** beside a story opens a box under its headline.
+
+Either way the write changes the words only. **The URL does not change**, so every link anyone holds keeps working, and the search engines keep what they have. The public story page, the front page and the RSS feed all show the new headline on their next render. The desk records what the headline used to say, which account changed it and when, so "when did that change?" has an answer.
+
+No correction notice is published for a headline change. A correction is for a story that was wrong; the paper's correction rules have never applied to headlines. If the story itself was wrong, post the correction as well.
+
 During public-source reporting, a captured recurring record such as an agenda, meeting page, report, packet or RFP can start an automatic background watch for later changes or disappearance. The watch does not draft or publish. This automatic behavior is separate from the editor-created watches under **Dark Desk → Watch a page / view watches**; that manual-watch panel does not currently provide management controls for automatic watches.
 
 Changing the body of a draft with reporting evidence requires a new evidence review before publishing. Check the sources against the revised story, then choose **I checked: keep this evidence** or **Remove old evidence from public story**. Removal clears the old public source list and reporting metadata, while retaining the original in the private draft archive. It does not remove links you have written into the body. A concurrent edit invalidates an older review; reload and review the current draft.
@@ -464,7 +485,8 @@ If an older record contains incomplete or unreadable structured findings, the pa
 The notes pane is the notebook:
 
 - What’s the news, why it matters, the angle
-- To-dos you can strike and restore. **Pull** searches that line and drops the excerpt under the story. The checkbox only strikes it. Lines you type are tagged **yours**; machine-suggested checks are not
+- To-dos you can strike and restore. **Pull** searches that line and drops the excerpt under the story. The checkbox only strikes it. Lines you type are tagged **yours**; machine-suggested checks are not. A long to-do the desk wrote itself is shortened the way a sub-editor cuts a line — at a word, without leaving half a word or a dangling comma behind — and a to-do stored by an earlier version can always be saved back, however long it is. A long to-do on the list is never a reason a save or a publish is refused
+- If the notes themselves fail to save, the desk says so in one plain sentence and the story still saves and prints. Your notes are never the reason a valid draft stays off the paper
 - Claims and sources — load-bearing facts with URLs
 - What you found, what still needs a check
 - Pages you opened
@@ -480,7 +502,13 @@ application searches before asking for confirmation; review the actual records
 and the visible check rather than confirming an absence because one fetch
 failed. Tool-status language is not a report about the town.
 
-**Publish** saves, then puts the story on the paper. After that it has a public URL under `/articles/…`. Provenance (source title, organization, document date, exact URL, capture time) goes with it when the records resolve.
+**Publish in \<Section\>** saves, then puts the story on the paper. The button names the section the story will print under, because that is the decision the press carries: it records your confirmation of that section for the exact version being printed, and then publishes. There is no separate Confirm button to find first. A small **change** link beside the button puts your cursor in the section chooser if the name is not the one you want — and the button takes the new name as soon as you pick it.
+
+When the desk could not place the story, the section reads **Section not chosen — pick one** and the publish button is disabled, with that reason printed beside it. Pick a section and it lights up. The desk will not print a guess.
+
+The server enforces the same thing, not just the button: it refuses a draft whose section nobody confirmed for the version being printed, and if the section your request carried is not the one on the draft, it says so in plain words instead of printing the wrong section. Every time the section that printed is not the one the scanner chose, the desk records it — the lead, both sections and the time — and Stats counts them under **Section chosen by hand**.
+
+After that it has a public URL under `/articles/…`. Provenance (source title, organization, document date, exact URL, capture time) goes with it when the records resolve.
 
 Before you hit it:
 
@@ -936,13 +964,20 @@ Read-only, editor-only. Right after Server in the nav.
 
 Shows anonymous page loads, not unique people or completed reads — no cookies,
 no fingerprinting, just a count of how many times an instrumented page loaded.
-Two things:
+Three things:
 
 - **Site** — all-time total, last 7 calendar dates including today, and last
   30 calendar dates including today, added across the home page and published
   story pages. Other public pages are not included.
 - **Stories** — every published story, ranked by all-time story-page loads,
   linking straight to the story.
+- **Section chosen by hand** — how many published stories printed under a
+  section the scanner did not pick. Not a view count: it is here because this is
+  the page that says how the desk is doing, and the number only means something
+  next to the story counts. Each one is a decision you made, logged with the
+  lead, the section the scanner chose, the section you printed under, and when.
+  A story whose model section was never recorded is not counted — an absent
+  record is not a disagreement.
 
 A view is counted by a small beacon that fires from the reader's browser
 _after_ the page has already loaded, so it can never slow the paper down —
@@ -1064,6 +1099,8 @@ Fresh public article/feed/sitemap reads stop returning removed stories. Existing
 ![Published](images/12-published.png)
 
 What is live on the paper, with its corrections.
+
+**Edit headline** beside a story rewrites the words at the top of it without touching anything else. It opens a box under the headline that is on the paper now, so you are looking at what you are replacing. The URL does not change, no link breaks, and the desk keeps the old headline, your account and the time. This is the one part of a printed story the desk lets you change without a notice, because the words are the story's name rather than its content.
 
 If you got it wrong: open the story here, write the correction in the open, post it. It appears on `/corrections` and with the article. Do not silently rewrite a published piece and hope nobody notices. We would rather look careful than look first.
 

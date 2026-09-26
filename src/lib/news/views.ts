@@ -101,6 +101,15 @@ export type ViewStats = {
   siteTotal: number;
   site7d: number;
   site30d: number;
+  /**
+   * How many stories printed under a section the model did not choose
+   * (0.6.66). Read out of the action log, which is where the desk records the
+   * decision -- lead, the model's section, the editor's, and when. A count,
+   * not a list: the logged line is JSON for a human to read, and the number is
+   * what tells an editor whether the section the scanner picks is landing
+   * where they actually file.
+   */
+  sectionOverrides: number;
   stories: StoryViewRow[];
 };
 
@@ -162,11 +171,34 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
     order by coalesce(sum(pv.count), 0) desc, a.slug asc
   `;
 
+  /*
+    `audit_events` is created by migration 0005 and re-ensured by `audit()`,
+    but a newsroom that has never published under a changed section has never
+    written one -- and this read must not be the thing that fails a stats page.
+    The shape below is the migrated one (0005 plus 0012's `newsroom_id`), the
+    same one `audit()` ends up with, so the count is answerable at zero.
+  */
+  await sql.query(`
+    create table if not exists audit_events (
+      id serial primary key,
+      user_id text not null,
+      action text not null,
+      detail text not null default '',
+      created_at timestamptz not null default now(),
+      newsroom_id integer not null default 1
+    )
+  `);
+  const [overrides] = await sql<{ c: number | null }>`
+    select count(*)::int as c from audit_events
+    where action = 'section-override' and newsroom_id = ${newsroomId}
+  `;
+
   return {
     siteToday: Number(siteToday?.total ?? 0),
     siteTotal: Number(siteTotal?.total ?? 0),
     site7d: Number(site7d?.total ?? 0),
     site30d: Number(site30d?.total ?? 0),
+    sectionOverrides: Number(overrides?.c ?? 0),
     stories: storyRows.map((r) => ({
       slug: r.slug,
       headline: r.headline,

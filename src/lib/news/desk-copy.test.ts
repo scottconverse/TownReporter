@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 import {
   blockedDigBannerText,
   composeZeroLeadSummary,
   editorError,
+  editorActionError,
   editorDraftError,
   editorFetchError,
   editorKindLabel,
@@ -23,6 +25,7 @@ import {
   tierFromKind,
   topicFromText,
   looksLikeInternalSummary,
+  looksLikeValidationDump,
   nearDuplicate,
   openLeads,
   plainEditorText,
@@ -61,7 +64,9 @@ import {
   buildScanUserMessage,
   mergeFocusSelection,
   suggestFocusLeads,
+  validationFieldLabel,
 } from "./desk-copy.ts";
+import { reportingNotesInput } from "./request-input.ts";
 import { STALE_RUNNING_SECONDS } from "./jobs.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -1383,5 +1388,75 @@ describe("scan coverage accounting (P0-3)", () => {
       error: null,
     });
     assert.equal(legacy, null, "a pre-migration run must not claim 0 analyzed as if it were measured");
+  });
+});
+
+/*
+  The plain-language rule for a failed story-page action (0.6.66, live bug).
+
+  The editor's story page showed a raw zod array (`too_big`, maximum 200, path
+  `todos,0,t`) instead of a sentence, because `setMsg(err.message)` renders
+  whatever arrives. The fixtures below are REAL zod messages rather than
+  hand-written ones: zod v4 pretty-prints them (`"path": [\n  0,\n  "t"\n]`),
+  and a single-line fixture passed here while a real dump lost its field name.
+*/
+const elementDump = z.array(z.object({ t: z.string().max(200) })).safeParse([{ t: "x".repeat(227) }])
+  .error!.message;
+
+/** A real dump from the wire the user actually presses: 600 to-dos, cap 500. */
+const listDump = reportingNotesInput.safeParse({
+  leadId: 240,
+  todos: Array.from({ length: 600 }, () => ({ t: "x", done: false, src: "machine" })),
+}).error!.message;
+
+describe("a validation dump never reaches the editor", () => {
+  it("knows a real zod message for what it is, and a sentence for what it is", () => {
+    assert.equal(looksLikeValidationDump(elementDump), true);
+    assert.equal(looksLikeValidationDump(listDump), true);
+    assert.equal(looksLikeValidationDump("The desk could not save the notes."), false);
+    assert.equal(looksLikeValidationDump('{"leadId":240,"saved":true}'), false);
+    assert.equal(looksLikeValidationDump('{"path":"/annexation"}'), false);
+    assert.equal(looksLikeValidationDump(""), false);
+  });
+
+  it("names the field the dump names, in the editor's words", () => {
+    // The live dump named the first to-do's text -- the field that was too long.
+    assert.equal(validationFieldLabel(elementDump), "a to-do line");
+    assert.equal(validationFieldLabel(listDump), "the to-do list");
+    // A field this file does not know is named as nothing rather than guessed.
+    assert.equal(validationFieldLabel('{"code":"too_big","path":["somethingElse"]}'), "");
+    assert.equal(validationFieldLabel("no path here"), "");
+  });
+
+  it("answers the live dump with one sentence, and no JSON", () => {
+    const said = editorActionError(elementDump, "save the notes");
+    assert.ok(said);
+    assert.match(said, /^The desk could not save the notes — a to-do line is longer than the desk can store\./);
+    assert.match(said, /Nothing was lost/);
+    for (const said2 of [editorActionError(elementDump), editorActionError(listDump, "print this story")]) {
+      assert.doesNotMatch(said2 ?? "", /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
+    }
+  });
+
+  it("says which field when the dump names one, and that it was empty when that was the reason", () => {
+    const empty = z.object({ headline: z.string().min(1) }).safeParse({ headline: "" }).error!.message;
+    assert.match(editorActionError(empty, "save the headline") ?? "", /the headline is empty/);
+    // A dump naming nothing this file knows still reads as a sentence.
+    const unknown = z.object({ whatever: z.array(z.string()).max(1) }).safeParse({ whatever: ["a", "b"] }).error!.message;
+    assert.match(editorActionError(unknown, "save the notes") ?? "", /one of the fields on this page is longer than the desk can store/);
+  });
+
+  it("turns a bare server failure into something the editor can act on", () => {
+    const said = editorActionError("Unexpected Server Error", "publish");
+    assert.match(said ?? "", /^The desk could not publish just now\./);
+    assert.match(said ?? "", /Try again/);
+    assert.match(editorActionError("Internal Server Error: status code 500", "publish") ?? "", /^The desk could not publish just now\./);
+  });
+
+  it("passes a handler's own refusal through as the sentence it already is", () => {
+    const own = "This story has no section yet. Pick one and publish again.";
+    assert.equal(editorActionError(own, "publish"), own);
+    assert.equal(editorActionError(null), null);
+    assert.equal(editorActionError("   "), null);
   });
 });

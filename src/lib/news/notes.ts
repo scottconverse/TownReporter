@@ -10,6 +10,44 @@ import { editorialAssignmentFromText, type EditorialAssignment } from "./write-s
 
 export type NoteTodoQuery = { query: string; hit: boolean };
 
+/**
+ * How long a stored to-do line, and its supporting detail, may be.
+ *
+ * These are the writer's bounds, and they are what 0.6.66 made the wire's
+ * bounds too. They used to disagree: this file clamped a line at 400 while
+ * `request-input.ts`'s `noteTodo` refused anything over `LIMITS.listItem`
+ * (200). The desk sends the stored list back whole on every save, publish and
+ * redraft, so ONE line the machine wrote longer than 200 characters made the
+ * round-trip invalid -- the editor saw a raw zod array (`too_big`, maximum
+ * 200, path `todos,0,t`) and neither Save nor Publish worked again, on a story
+ * that was otherwise finished. The machine legitimately writes long lines:
+ * `Claim of absence: <the claim sentence>` and a lead's own unanswered
+ * question are sentences, not labels.
+ *
+ * One bound, in one place, read by the writer and the wire both:
+ * `notes-todo-bound.test.ts` fails if the two ever drift apart again.
+ */
+export const TODO_TEXT_MAX = 400;
+export const TODO_DETAIL_MAX = 300;
+
+/**
+ * Shorten a to-do line to what a stored item may hold, cleanly.
+ *
+ * Cuts at a word boundary whenever the last one is not so early that the line
+ * loses its meaning, and drops the punctuation a cut leaves dangling, so a
+ * shortened line still reads as the sentence it came from rather than stopping
+ * mid-word. Only ever shortens text that is already over the bound.
+ */
+export function clipTodoText(text: string, max: number = TODO_TEXT_MAX): string {
+  const whole = String(text ?? "").trim();
+  if (whole.length <= max) return whole;
+  const cut = whole.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  const kept = lastSpace >= Math.floor(max / 2) ? cut.slice(0, lastSpace) : cut;
+  const trimmed = kept.replace(/[\s,;:.—–-]+$/, "").trim();
+  return trimmed || cut.trim();
+}
+
 export type NoteTodo = {
   t: string;
   done: boolean;
@@ -114,16 +152,19 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
                     if (!qr || typeof qr !== "object") return null;
                     const query = String((qr as { query?: unknown }).query ?? "").trim();
                     if (!query) return null;
-                    return { query: query.slice(0, 300), hit: Boolean((qr as { hit?: unknown }).hit) };
+                    return {
+                      query: clipTodoText(query, TODO_DETAIL_MAX),
+                      hit: Boolean((qr as { hit?: unknown }).hit),
+                    };
                   })
                   .filter((x): x is NoteTodoQuery => Boolean(x))
                   .slice(0, 12)
               : [];
             return {
-              t: t.slice(0, 400),
+              t: clipTodoText(t),
               done: Boolean(r.done),
               src: todoSource(r.src),
-              ...(q ? { q: q.slice(0, 300) } : {}),
+              ...(q ? { q: clipTodoText(q, TODO_DETAIL_MAX) } : {}),
               ...(queries.length ? { queries } : {}),
             };
           })
@@ -434,7 +475,7 @@ export function machineTodosFrom(parts: (string | undefined | null)[]): NoteTodo
       const key = t.toLowerCase().replace(/\s+/g, " ").replace(/\.+$/, "").trim();
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ t: t.slice(0, 400), done: false, src: "machine" });
+      out.push({ t: clipTodoText(t), done: false, src: "machine" });
       if (out.length >= 16) return out;
     }
   }
@@ -450,7 +491,7 @@ export function toggleTodo(notes: ReportingNotes, index: number): ReportingNotes
 }
 
 export function addHumanLine(notes: ReportingNotes, line: string): ReportingNotes {
-  const t = line.trim().slice(0, 400);
+  const t = clipTodoText(line);
   if (!t) return notes;
   if (notes.todo.some((x) => x.t.toLowerCase() === t.toLowerCase() && x.src === "you")) return notes;
   return { ...notes, todo: [...notes.todo, { t, done: false, src: "you" as const }].slice(0, 24) };
@@ -472,16 +513,19 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
               if (!qr || typeof qr !== "object") return null;
               const query = String((qr as { query?: unknown }).query ?? "").trim();
               if (!query) return null;
-              return { query: query.slice(0, 300), hit: Boolean((qr as { hit?: unknown }).hit) };
+              return {
+                query: clipTodoText(query, TODO_DETAIL_MAX),
+                hit: Boolean((qr as { hit?: unknown }).hit),
+              };
             })
             .filter((x): x is NoteTodoQuery => Boolean(x))
             .slice(0, 12)
         : [];
       return {
-        t: t.slice(0, 400),
+        t: clipTodoText(t),
         done: Boolean(r.done),
         src: todoSource(r.src),
-        ...(q ? { q: q.slice(0, 300) } : {}),
+        ...(q ? { q: clipTodoText(q, TODO_DETAIL_MAX) } : {}),
         ...(queries.length ? { queries } : {}),
       };
     })

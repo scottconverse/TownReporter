@@ -438,8 +438,8 @@ const cardFor = (data, id) => data.extras.find((row) => row.id === id);
 function probeSet(overrides = {}) {
   return {
     status: async () => ({ ok: true, status: FAKE_STATUS }),
-    version: () => ({ version: "0.6.65", head: "abcdef12", label: "0.6.65 (abcdef12)" }),
-    publicVersion: async () => ({ ok: true, version: "0.6.65" }),
+    version: () => ({ version: "0.6.66", head: "abcdef12", label: "0.6.66 (abcdef12)" }),
+    publicVersion: async () => ({ ok: true, version: "0.6.66" }),
     testCopy: async () => ({ ok: true, up: false, version: null }),
     qwen: async () => ({ ok: true, qwen: [], detail: "LM Studio is not running" }),
     lastScan: async () => ({ ok: false, reason: "unreachable", detail: "Could not read the last scan" }),
@@ -618,7 +618,7 @@ test("a version skew is a Note that names both versions", async () => {
   assert.equal(row.ok, false);
   assert.equal(
     row.detail,
-    "This install is 0.6.65; the public site shows 0.6.64. Normal right after an update, until the site refreshes.",
+    "This install is 0.6.66; the public site shows 0.6.64. Normal right after an update, until the site refreshes.",
   );
   assert.equal(row.optional, true, "a version skew may never inflate the attention count");
   assert.equal(differing.attention, FAKE_STATUS.attention);
