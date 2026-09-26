@@ -72,7 +72,7 @@ function row(
  * in ./automatic-failover.ts -- `429` and "usage limit" are both in it -- and
  * using the real vocabulary rather than "error" is the point: the refusal rule
  * and the retry rule are decided by the same classifier, so a test that fed it
- * a string neither classifier recognises would prove nothing.
+ * a string neither classifier recognizes would prove nothing.
  */
 const QUOTA = "429 usage limit reached for this account; try again after the reset.";
 const REFUSAL = "The model declined to produce the requested editorial.";

@@ -58,11 +58,11 @@ export const Route = createFileRoute("/desk/ops")({
 });
 
 /**
- * Colour carries no information on its own here.
+ * Color carries no information on its own here.
  *
  * Every row states its condition in words as well, because "is that dot amber
  * or red" is not a thing to be squinting at when the paper is down, and a
- * colour-blind operator gets nothing from the dot at all.
+ * color-blind operator gets nothing from the dot at all.
  */
 const DOT: Record<HealthState, string> = {
   ok: "bg-emerald-600",

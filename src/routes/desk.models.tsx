@@ -890,10 +890,10 @@ function ModelSelect({
 
 /**
  * The live status chip, drawn as the design draws it: mixed case, 14px, and
- * three colours that mean something. Not the desk's `.chip` class, which
- * uppercases and letter-spaces its text for a different vocabulary. The colours
+ * three colors that mean something. Not the desk's `.chip` class, which
+ * uppercases and letter-spaces its text for a different vocabulary. The colors
  * are inline `var()`s because the `.desk-ltr` utilities remap `--ts` and the
- * paper palette but not the state colours, and these four flip in night mode.
+ * paper palette but not the state colors, and these four flip in night mode.
  */
 function StatusChip({
   kind,
@@ -910,7 +910,7 @@ function StatusChip({
 }) {
   /*
     A job's chip and a connection's are the same chip with a different word in
-    it, so they share one implementation and one colour table: the four looks
+    it, so they share one implementation and one color table: the four looks
     live in `chipLook` and the stacking lives in `Chip`, both below, and neither
     screen can drift from the other.
   */
@@ -1005,7 +1005,7 @@ function ConnectionsTab({
 /**
  * The four looks a card's chip can wear.
  *
- * Named after what the colour MEANS rather than after a provider, so the same
+ * Named after what the color MEANS rather than after a provider, so the same
  * four are available to a job's status chip and to a connection's, and neither
  * has to know the other's words.
  */
