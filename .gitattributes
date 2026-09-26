@@ -1,2 +1,3 @@
 src/lib/news/fixtures/story-documents/*.pdf binary
 src/lib/news/fixtures/story-documents/*.docx binary
+src/routeTree.gen.ts text eol=lf

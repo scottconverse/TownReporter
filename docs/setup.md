@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.6.64](releases/0.6.64.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.6.65](releases/0.6.65.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -466,6 +466,45 @@ The last three are optional. **Redlib** down, missing or switched off
 (`TOWNREPORTER_OLLAMA=0`) means *Automatic* moves to the next model on its
 ladder. **LM Studio** is never started, probed or unloaded by anything in
 `ops/`; it owns its own models.
+
+#### The Control page on this machine
+
+`ops/control.ps1` starts **TownReporter Control** at `http://127.0.0.1:3095`:
+a page served by this checkout, on this computer, that says whether the machine
+is healthy and puts the actions behind buttons. One large line reads
+**Everything is up** or **N things need attention**; under it each check is one
+card with a plain verdict and, when it is down, the single button that fixes it.
+The rows are the database, the paper, the public site, the Redlib reader,
+Ollama, the last backup, the last scan and the test copy. Redlib and Ollama are
+marked **optional**, so a machine without them still reads *Everything is up*.
+
+The six buttons carry the menu's own wording: check, restart the paper, restart
+the tunnel, start everything, stop everything, restart the Reddit reader.
+Pressing one streams its output into the page and refreshes the status when it
+finishes. **Stop everything** opens a dialog naming what it will stop, and
+cancelling does nothing at all. The page also links to the public paper, the
+desk and the test copy on 3100.
+
+Three properties to keep in mind before changing any of it:
+
+- **Loopback only, and only to itself.** It binds `127.0.0.1` and refuses a Host
+  header that is not this server. Each button press must also carry a token the
+  page holds plus a matching Origin, so another page in the same browser cannot
+  press one. It exits by itself after an hour with no requests.
+- **It cannot publish, edit or delete anything.** The six actions are a fixed
+  list — each an absolute System32 executable with a fixed argument array, no
+  shell, and no argument that comes from the page. Ollama is only asked whether
+  a model is ready; it is never loaded or unloaded.
+- **One source of truth.** The page renders `ops/status.ps1 -Json`, so the
+  console and the page cannot disagree about a row they both show.
+
+For the Desktop icon, `ops/install-shortcut.ps1` builds a shortcut that runs
+`ops/control.ps1` through `ops/run-hidden.vbs`, so no console window sits behind
+the page; `-Fallback` builds the older `cmd /k` shortcut onto
+`ops/TownReporter Control.cmd` instead. The numbered menu is unchanged as the
+fallback — it needs nothing but Windows, where the page needs the checkout and
+Node — and its entry 7 opens the Control page. Neither the page nor the
+shortcut adds a scheduled task.
 
 ---
 

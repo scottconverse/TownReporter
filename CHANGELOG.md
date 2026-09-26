@@ -1,6 +1,16 @@
 # Changelog
 
-Current software version: **0.6.64**. Publication state is recorded by GitHub.
+Current software version: **0.6.65**. Publication state is recorded by GitHub.
+
+## 0.6.65 — 2026-09-25
+
+- **The terminal menu has a Control page.** The Desktop shortcut used to open a console with a numbered menu; it now opens a page on this computer, at `http://127.0.0.1:3095`, headed TownReporter Control. One large line reads **Everything is up** or **N things need attention**, and under it each check is one card with a plain verdict and, when something is wrong, the single button that fixes it. The paper, the tunnel, the database, the Reddit reader, Ollama, the last backup, the last scan and the test copy each get a card. The numbered menu is still there — the `.cmd` is the fallback when the page cannot start, and gained a seventh entry that opens the page.
+- **The page is a read-only reader plus six fixed buttons.** It reports what `ops/status.ps1 -Json` says, and nothing about the page changes the paper until a button is pressed. The buttons are Check, Restart the paper, Restart the tunnel, Start everything, Stop everything, and Restart the Reddit reader — the same wording the menu uses, so the page and the console say the same thing about the same action. Output streams into the page while the action runs and the status refreshes when it finishes. Nothing on the page publishes, deletes or edits content, and no new scheduled task is created: the existing logon task and five-minute watchdog still do the automatic work.
+- **Stop everything asks first.** The one action that takes the paper offline opens a dialog naming what it will stop, and does nothing at all if the operator cancels. The server refuses the same action without the confirm word, so the dialog is not the only thing standing in front of it.
+- **The page only answers on loopback, and only to itself.** It binds `127.0.0.1`, refuses any Host header that is not this server, and every button press must carry a per-run token the page holds plus a matching Origin — a page open in another tab, or anything else on this machine, cannot press a button. Each action is a fixed absolute System32 executable with a fixed argument list, so nothing typed anywhere becomes a command. One action runs at a time; a second press is refused while the first is running. The page closes itself after an hour with no requests, so a shut tab does not leave a listener behind.
+- **Dark by default, and readable.** The page paints dark on the first frame with a Light toggle that is remembered, every control is at least 44 pixels tall and every piece of text at least 16 pixels, and both palettes meet WCAG AA. A browser walk checks all of that, along with the stop-everything dialog and one button press against a stub runner, without touching the running paper.
+
+The packaged release note names `v0.6.65` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.64 — 2026-09-25
 

@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { assertStagingDatabase } from "./stage-editor.mjs";
+import { ACTIONS } from "../ops/control/control-server.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -50,6 +52,14 @@ const REQUIRED = [
   "lib-redlib.ps1",
   "lib-ollama.ps1",
   "lib-env.ps1",
+  // The Control page, and the launcher the Desktop icon runs. The page is the
+  // operator's non-terminal way in now, so the same argument that put
+  // status.ps1 in this list applies twice over: a missing file fails on the
+  // machine that keeps the paper online, and CI cannot execute PowerShell to
+  // notice. A nested entry is joined, so the check reaches into ops/control/.
+  "control.ps1",
+  join("control", "control-server.mjs"),
+  join("control", "last-scan.cjs"),
 ];
 
 test("every ops script the docs promise actually exists", () => {
@@ -584,8 +594,80 @@ test("the Control menu offers the reader in plain words and still publishes noth
     /schtasks \/delete|Stop-Process|taskkill|psql|del |rmdir|robocopy/i,
     "the menu must stay read/restart only",
   );
-  assert.doesNotMatch(text, /if "%choice%"=="7"|if "%choice%"=="8"/, "no undocumented menu items");
+  assert.doesNotMatch(text, /if "%choice%"=="8"/, "no undocumented menu items");
 });
+
+test("the Control menu's line 7 opens the Control page, and the menu is still the fallback", () => {
+  /*
+    The page REPLACES the terminal menu as the way in (owner, 2026-09-25:
+    "something like mission control for DSH"), but it does not delete it. The
+    menu keeps every numbered item it had and gains one that opens the page, so
+    a machine where the page cannot start is a machine where the six familiar
+    things still are. Line 7 therefore has to be a real line, a real dispatch,
+    and a spawn of the launcher -- not a sentence in a comment.
+  */
+  const text = readFileSync(join(OPS, "TownReporter Control.cmd"), "utf8");
+  assert.match(text, /^echo {3}7 {2}/m, "the menu must have a line 7");
+  assert.match(text, /Control page/i, "line 7 must be about the Control page");
+  assert.match(text, /if "%choice%"=="7" goto control/, "and must dispatch it");
+  assert.match(text, /:control[\s\S]{0,600}?control\.ps1/, "option 7 must run the launcher");
+  assert.match(text, /^echo {3}0 {2}/m, "the close line must survive");
+  // Every number from 1 to 7 has a line and a dispatch: a menu that offers a
+  // number it does not handle is worse than a shorter menu.
+  for (const n of ["1", "2", "3", "4", "5", "6", "7"]) {
+    assert.match(text, new RegExp(`^echo {3}${n} {2}`, "m"), `the menu has no line ${n}`);
+    assert.match(text, new RegExp(`if "%choice%"=="${n}"`), `the menu does not dispatch ${n}`);
+  }
+});
+
+test("the Control page's launcher starts the page and nothing else", () => {
+  /*
+    The launcher's whole job is: is the page up, and if not start it and open a
+    browser. It is the file a double-click runs, on a machine that may be in any
+    state, so the property to protect is what it must NOT do -- no scheduled
+    task, no repair, no process killed. If the paper needs restarting, that is
+    the page's own buttons, pressed by a person.
+  */
+  const text = read("control.ps1");
+  assert.doesNotMatch(text, /Stop-Process|Stop-ScheduledTask/, "the launcher must stop nothing");
+  assert.doesNotMatch(text, /schtasks|Start-ScheduledTask/, "and must start no scheduled task");
+  assert.doesNotMatch(text, /Start-Ollama|Start-Redlib|start-townreporter\.ps1/, "and must start no service");
+  // 127.0.0.1, never localhost: the page's server binds IPv4 loopback, and
+  // TW-INC-2026-09-02 is the incident where ::1 answered for a different
+  // program's socket.
+  assert.match(text, /http:\/\/127\.0\.0\.1:\$Port\//, "the launcher must probe 127.0.0.1 on the page's port");
+  assert.match(text, /3095/, "the launcher's default must be the page's port");
+  assert.match(text, /control-server\.mjs/, "the launcher must start the page's own server");
+  assert.match(text, /\.control\.pid/, "and must know the pid file the server leaves");
+  assert.match(text, /control\\control-server\.mjs/, "the server path must be the launcher's own sibling");
+  assert.match(text, /TownReporter Control\.cmd/, "a failure must name the menu as the fallback");
+  assert.match(text, /\$PSScriptRoot/, "the launcher must resolve its own directory, not the working directory");
+});
+
+test("the Desktop icon runs the launcher through the hidden launcher, not a console", () => {
+  /*
+    The icon used to be `cmd /k <menu>`, which is the terminal window the owner
+    asked to be rid of. It now runs the launcher through wscript.exe +
+    run-hidden.vbs -- the same no-console path the watchdog uses, because
+    wscript.exe has no console to inherit. -Fallback keeps the old shortcut
+    available, as a real switch rather than a comment, for a machine where the
+    page cannot start.
+  */
+  const text = read("install-shortcut.ps1");
+  assert.match(text, /wscript\.exe/, "the icon must run wscript.exe");
+  assert.match(text, /run-hidden\.vbs/, "and must go through the hidden launcher");
+  assert.match(text, /control\.ps1/, "and must run the Control page's launcher");
+  assert.match(text, /\[switch\]\$Fallback/, "the console menu must stay available as a real option");
+  assert.match(text, /cmd\.exe[\s\S]{0,200}?\/k/, "-Fallback must still make the cmd /k shortcut");
+  // The default path must NOT be the console one. Sliced from the else branch
+  // down to the shortcut's creation, so -Fallback's cmd.exe -- which sits above
+  // it -- cannot satisfy the assertion.
+  const defaultBranch = text.slice(text.indexOf("} else {"), text.indexOf("$desktop = [Environment]"));
+  assert.ok(defaultBranch.length > 0, "could not find the default shortcut branch");
+  assert.match(defaultBranch, /wscript\.exe/, "the default shortcut must run wscript.exe");
+  assert.doesNotMatch(defaultBranch, /cmd\.exe/i, "the default shortcut must not be the console menu");
+});
+
 
 test("the watchdog repairs the reader and the model server without ever aiming at the paper", () => {
   const wd = read("watchdog.ps1");
@@ -666,6 +748,31 @@ test("status.ps1 answers for the reader and the model server in plain words, rea
   assert.match(readerLine.slice(0, 80), /\$redlibOptional/, "the reader must not be marked as a fault");
   assert.match(text, /Show "DeepSeek \(via Ollama\)"[^\n]*\$true/, "the model line must not be marked as a fault");
 
+  // Fix 2, from the coordinator's review (2026-09-25): the printed marker was
+  // derived from whether the row was OPTIONAL, so a reader that was up printed
+  // "[ NOTE ] Reddit reader (Redlib)  up" -- and the Control page, which keys on
+  // the row's own fields, then offered a "Fix this" button on a healthy card.
+  // The state is the verdict; the marker follows it. The repair each row carries
+  // must be empty exactly when there is nothing to repair.
+  assert.match(text, /if \(\$state -eq "ok"\) \{ " {2}OK {2}" \}/, "the console marker must follow the row's state");
+  assert.doesNotMatch(
+    text,
+    /optional[^\n]{0,40}" NOTE "/,
+    "an optional row must not print NOTE for being optional; only its state may",
+  );
+  assert.match(text, /'up'\s+\{\s*\$redlibState = "ok"; \$redlibDetail = "up" \}/, "a reader that answers is OK");
+  assert.match(text, /'up'\s+\{\s*\$ollamaState = "ok"; \$ollamaDetail = "ready" \}/, "a model server that answers is OK");
+  assert.match(
+    text,
+    /Show "Reddit reader \(Redlib\)" \$redlibState \$redlibDetail \$redlibOptional \$redlibFix "reddit-reader"/,
+    "the reader's fix must come from the row's own state, not from the row existing",
+  );
+  assert.match(
+    text,
+    /Show "DeepSeek \(via Ollama\)" \$ollamaState \$ollamaDetail \$true "" "model-server"/,
+    "the model row must offer no repair (there is no action that would help it)",
+  );
+
   // Read-only, in both modes, and -DryRun must SAY so rather than imply it.
   assert.match(text, /\[switch\]\$DryRun/, "status.ps1 must take -DryRun");
   assert.match(text, /\[string\]\$Root/, "status.ps1 must take -Root so it can describe the live install");
@@ -678,6 +785,155 @@ test("status.ps1 answers for the reader and the model server in plain words, rea
   assert.match(text, /Read-OpsEnvValue/, "status.ps1 must use the shared .env reader");
   assert.doesNotMatch(text, /function Read-EnvValue/, "and must not keep its own copy of it");
 });
+
+test(
+  "status.ps1 -Json prints one object the Control page can render, and the count matches the rows",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The Control page does not re-derive anything: it renders status.ps1's own
+      verdicts, so this contract is the whole of "the page and the menu can
+      never disagree". Two properties, both of which have a way to break
+      silently:
+
+        - stdout is the object and nothing else. A stray Write-Host heading
+          ahead of it would be a parse failure that looks like the paper being
+          down, which is why -Json wraps every heading in `if (-not $Json)`.
+        - the attention count is the non-optional faults, and every fix id a row
+          names is a real action. A fix id that is not in ACTIONS renders a
+          button that 404s, and an optional service counted as a fault turns a
+          supported degraded state into an outage.
+
+      -Root points at a throwaway directory with a .env naming ports nothing is
+      listening on, so this touches no live service and opens no real
+      connection: every probe is refused immediately, locally. Read-only in
+      every sense, which is the script's own promise.
+    */
+    const dir = mkdtempSync(join(tmpdir(), "control-json-"));
+    const script = join(OPS, "status.ps1");
+    try {
+      writeFileSync(
+        join(dir, ".env"),
+        "PORT=65531\nPUBLIC_SITE_URL=http://127.0.0.1:65532\n",
+        "utf8",
+      );
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Json", "-Root", dir],
+        { encoding: "utf8", timeout: 120_000 },
+      );
+
+      // Nothing from the console mode may appear ahead of the object.
+      assert.doesNotMatch(
+        out,
+        /as seen from this machine|\[ {2}OK {2}\]|\[ DOWN \]|\[ NOTE \]/,
+        "-Json leaked console output; the caller parses stdout",
+      );
+      const start = out.indexOf("{");
+      assert.ok(start >= 0, `-Json printed no object at all: ${out.slice(0, 200)}`);
+      const status = JSON.parse(out.slice(start));
+
+      assert.equal(status.app, "TownReporter");
+      assert.equal(status.root, dir, "-Root must be the install the object describes");
+      assert.equal(status.port, "65531", "the port must come from that install's .env");
+      assert.equal(status.site, "http://127.0.0.1:65532", "and so must the site URL");
+      assert.equal(typeof status.attention, "number");
+      assert.equal(typeof status.headline, "string");
+      assert.ok(status.headline.length > 0, "a headline is what the page shows first");
+      assert.ok(Array.isArray(status.checks), "checks must be a list");
+
+      // The six things the page has a card for, plus the optional two. Named
+      // rather than counted, so a row silently disappearing is caught.
+      const ids = status.checks.map((c) => c.id);
+      for (const id of ["database", "paper", "tunnel", "public-site", "watchdog", "reddit-reader", "model-server"]) {
+        assert.ok(ids.includes(id), `status.ps1 -Json is missing the "${id}" row`);
+      }
+      for (const check of status.checks) {
+        for (const key of ["id", "label", "state", "ok", "optional", "detail", "fix"]) {
+          assert.ok(key in check, `the "${check.id}" row is missing ${key}`);
+        }
+        // Fix 2: every row carries a real state, one of three words, and `ok` is
+        // derived from it here exactly as it is in the console. The page keys on
+        // the state, so a row whose two fields could disagree would put a "Fix
+        // this" button on a healthy card -- which is the bug that was reported.
+        assert.ok(
+          ["ok", "note", "down"].includes(check.state),
+          `the "${check.id}" row's state is "${check.state}", which is not one of ok/note/down`,
+        );
+        assert.equal(check.ok, check.state === "ok", `"${check.id}" says state ${check.state} and ok ${check.ok}`);
+        assert.equal(typeof check.ok, "boolean", `"${check.id}".ok must be a boolean, not a truthy string`);
+        assert.equal(typeof check.optional, "boolean", `"${check.id}".optional must be a boolean`);
+        if (check.fix) {
+          assert.ok(
+            Object.prototype.hasOwnProperty.call(ACTIONS, check.fix),
+            `the "${check.id}" row names the fix "${check.fix}", which the Control page has no action for`,
+          );
+        }
+        // Fix 1: a soft failure is never OK. "Could not" on a green row is the
+        // lie the review found; a row that could not be read is a Note.
+        if (check.detail && /^could not|could not be read/i.test(check.detail)) {
+          assert.notEqual(check.state, "ok", `the "${check.id}" row is green over "${check.detail}"`);
+        }
+      }
+
+      // The count, and the rule about the optional rows. This is the property
+      // that would turn "the Reddit reader is down" into a red headline.
+      const faults = status.checks.filter((c) => !c.ok && !c.optional);
+      assert.equal(
+        status.attention,
+        status.checks.filter((c) => c.state === "down").length,
+        "attention must be the rows whose state is down",
+      );
+      assert.equal(status.attention, faults.length, "attention must be the non-optional faults");
+      assert.ok(
+        status.checks.some((c) => c.optional),
+        "there must be at least one optional row, or this rule proves nothing",
+      );
+      assert.equal(typeof status.advice, "string");
+      assert.ok(status.checkedAt, "the object must say when it was read");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "the console never prints NOTE or DOWN in front of a row that answered",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The console half of Fix 2. The marker used to follow whether a row was
+      OPTIONAL, so a working Reddit reader printed "[ NOTE ] ... up" -- and the
+      page, which renders the row's own fields, put a Fix button under it. The
+      same throwaway install as the -Json test: two ports nothing listens on, so
+      every probe is refused locally and no live service is touched.
+
+      The assertion is about any row that answered, not about the reader on this
+      machine: whatever this box's Redlib and Ollama happen to be doing, a line
+      that ends in "up" or "ready" may not carry a NOTE or DOWN marker.
+    */
+    const dir = mkdtempSync(join(tmpdir(), "control-console-"));
+    try {
+      writeFileSync(join(dir, ".env"), "PORT=65531\nPUBLIC_SITE_URL=http://127.0.0.1:65532\n", "utf8");
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(OPS, "status.ps1"), "-Root", dir],
+        { encoding: "utf8", timeout: 120_000 },
+      );
+      assert.match(out, /TownReporter, as seen from this machine/, "console mode must still print its headings");
+      assert.match(out, /\[ {2}OK {2}\]|\[ NOTE \]|\[ DOWN \]/, "console mode must still print a marker per row");
+      for (const line of out.split(/\r?\n/)) {
+        assert.doesNotMatch(
+          line,
+          /\[ (NOTE|DOWN) \][^\n]*\b(up|ready)\s*$/,
+          `a row that answered is printed as a note or a fault: ${line.trim()}`,
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("both optional services have an off-switch the operator can throw", () => {
   const redlib = read("lib-redlib.ps1");
