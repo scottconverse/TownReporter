@@ -42,9 +42,12 @@ import {
   type ModelChoiceOption,
 } from "./model-choice.ts";
 import {
+  MODEL_EFFORT_LABELS,
   defaultModelEffort,
   modelEffortsFor,
+  providerEntry,
   type ModelEffort,
+  type ProviderKind,
   type ProviderSurface,
 } from "./provider-registry.ts";
 
@@ -260,6 +263,121 @@ export function withCustomConnections(
   return out;
 }
 
+/* ------------------------------------------------------------------------- *
+ * The lines the screen shows (unit BG2)
+ *
+ * The design draws these selects with short lines -- "Codex Sol · sign-in",
+ * "None", "Default" -- and the build was showing the registry's full sentence
+ * plus "Not set — use the desk's default" instead. A native `<select>` clips
+ * the selected option at its own content box and no CSS wraps it, so the
+ * ceiling below is measured rather than chosen: see `JOB_OPTION_LABEL_MAX`.
+ * ------------------------------------------------------------------------- */
+
+/** The three slots of a job's plan, in the order the design draws them. */
+export const JOB_SLOT_NAMES = ["first", "fallback1", "fallback2"] as const;
+export type JobSlotName = (typeof JOB_SLOT_NAMES)[number];
+
+/**
+ * What an empty slot says, as the design draws it.
+ *
+ * An empty first choice is not "unset" -- it is the desk's default at work,
+ * so it reads "Default". An empty fallback is genuinely nothing, so it reads
+ * "None". Both are one word on purpose: the old sentence was 203px of text in
+ * a box that measures about 162px at 1280.
+ */
+export function jobSlotEmptyLabel(slot: JobSlotName): string {
+  return slot === "first" ? "Default" : "None";
+}
+
+/**
+ * How a provider is connected, in the two or three words the design uses:
+ * a sign-in, an API key, or a model on this computer. The Connections tab
+ * prints the same word on each card's second line.
+ */
+export const CONNECTION_WORD: Readonly<Record<ProviderKind, string>> = {
+  "claude-code": "sign-in",
+  codex: "sign-in",
+  "xai-oauth": "sign-in",
+  openai: "API",
+  anthropic: "API",
+  local: "on this computer",
+};
+
+export function connectionWord(kind: ProviderKind): string {
+  return CONNECTION_WORD[kind];
+}
+
+/**
+ * The longest option line a who-does-what select is known to show.
+ *
+ * Measured, not guessed (unit BG2): the first-choice select's content box is
+ * about 162px at 1280 in Bricolage Grotesque 700 at 15px, and the longest
+ * line the design draws there -- "Claude Sonnet · sign-in", 23 characters --
+ * measures 150px. 24 keeps that headroom and still leaves room for a wider
+ * glyph mix. `model-assignments.test.ts` walks every option of every job
+ * against this, so a new provider with a long name fails there rather than
+ * reaching a screenshot.
+ */
+export const JOB_OPTION_LABEL_MAX = 24;
+
+/**
+ * The full drawn line for an option, before the ceiling is applied:
+ * "Codex Sol · sign-in", "Automatic (ladder)", "Gemini · API".
+ *
+ * The connection word comes from the value's OWN registry entry, so a
+ * provider added later gets the right word without this file changing -- and
+ * a value this build cannot resolve keeps its label bare rather than
+ * inventing a connection it does not know.
+ */
+function jobOptionLine(option: ModelChoiceOption): string {
+  if (option.value === "auto") return "Automatic (ladder)";
+  if (isCustomModelChoice(option.value)) {
+    return `${option.label} · ${CONNECTION_WORD.openai}`;
+  }
+  const entry = providerEntry(option.value);
+  return entry ? `${option.label} · ${connectionWord(entry.kind)}` : option.label;
+}
+
+/** The line the select shows, dropped to the bare name when it would clip. */
+export function jobOptionLabel(option: ModelChoiceOption): string {
+  const line = jobOptionLine(option);
+  return line.length <= JOB_OPTION_LABEL_MAX ? line : option.label;
+}
+
+/**
+ * The same line in full, with the provider's own half-line, for the option's
+ * `title`. Dropping the connection word must not lose it: an editor who hovers
+ * the option reads exactly what the long line said.
+ */
+export function jobOptionTitle(option: ModelChoiceOption): string {
+  const line = jobOptionLine(option);
+  const detail = option.detail?.trim();
+  return detail && !line.includes(detail) ? `${line} — ${detail}` : line;
+}
+
+/**
+ * The effort levels as the design draws them in the row: one lowercase word,
+ * because the registry's sentence ("Medium — balanced") does not fit a 130px
+ * box. The sentence is not lost -- `jobEffortOptionTitle` is the option's and
+ * the select's `title`.
+ */
+export const JOB_EFFORT_WORDS: Readonly<Record<ModelEffort, string>> = {
+  none: "none",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+};
+
+export function jobEffortLabel(effort: ModelEffort): string {
+  return JOB_EFFORT_WORDS[effort];
+}
+
+export function jobEffortOptionTitle(effort: ModelEffort): string {
+  return MODEL_EFFORT_LABELS[effort];
+}
+
 /**
  * The effort levels this exact model takes. Empty means the provider sets it
  * and the desk sends nothing -- the same answer `ModelPicker` renders as
@@ -448,10 +566,15 @@ export function nextJobFallback(input: {
 
 /**
  * The live status chip's vocabulary, as drawn: ✓ Ready, ! Slow,
- * Sign-in expired -- plus the two states the design has no chip for and the
- * desk must still say out loud.
+ * Sign-in expired -- plus the states the design has no chip for and the desk
+ * must still say out loud.
+ *
+ * "Default" is unit BG2's fix for a chip that lied: a job with nothing saved
+ * said "✓ Ready", which is a claim about a first choice that does not exist.
+ * What IS true there is that the desk's default runs the job, so the chip says
+ * so and the cell beneath it names the model that default resolves to.
  */
-export type JobStatusKind = "ready" | "slow" | "signin" | "unbuilt" | "none";
+export type JobStatusKind = "ready" | "slow" | "signin" | "unbuilt" | "none" | "default";
 
 export const JOB_STATUS_LABEL: Readonly<Record<JobStatusKind, string>> = {
   ready: "✓ Ready",
@@ -459,6 +582,7 @@ export const JOB_STATUS_LABEL: Readonly<Record<JobStatusKind, string>> = {
   signin: "Sign-in expired",
   unbuilt: "Not built yet",
   none: "—",
+  default: "Default",
 };
 
 export type JobStatusFacts = {
@@ -474,13 +598,24 @@ export type JobStatusFacts = {
   available?: boolean | null;
   /** A local first choice whose model is not in memory: the first call loads it. */
   localNotLoaded?: boolean;
+  /**
+   * `resolveJobModel({...}).source === "surface-default"`: the editor saved
+   * nothing for this job and the desk's own default is what runs.
+   */
+  fromDefault?: boolean;
 };
 
 export function jobStatusKind(input: JobStatusFacts): JobStatusKind {
   if (!input.built) return "unbuilt";
   if (!input.providerId) return "none";
+  /*
+    A broken default is still a broken default: an expired sign-in or a cold
+    local model is more useful to the editor than the fact that they did not
+    choose it themselves, so those two are answered before "Default".
+  */
   if (input.available === false) return "signin";
   if (input.localNotLoaded) return "slow";
+  if (input.fromDefault) return "default";
   return "ready";
 }
 
@@ -501,6 +636,8 @@ export function jobStatusHelp(input: JobStatusFacts): string {
       return "This machine cannot use the first choice right now: the sign-in has lapsed, or a local server is not answering. Test it on Connections, or pick another model.";
     case "slow":
       return "The first choice is a local model that is not in memory. The first call loads it, which can take a minute or more. TownReporter never loads a model for you.";
+    case "default":
+      return "Nothing saved for this job, so it runs on the desk's default model, named under this chip. Save a first choice to decide it yourself.";
     default:
       return "The first choice is ready to run.";
   }

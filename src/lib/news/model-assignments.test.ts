@@ -26,13 +26,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  JOB_EFFORT_WORDS,
+  JOB_OPTION_LABEL_MAX,
+  JOB_SLOT_NAMES,
   JOB_STATUS_LABEL,
   MODEL_JOB_KEYS,
   MODEL_JOBS,
   cleanJobEffort,
+  connectionWord,
   isOfferedForJob,
+  jobEffortLabel,
+  jobEffortOptionTitle,
   jobEffortOptions,
   jobModelOptions,
+  jobOptionLabel,
+  jobOptionTitle,
+  jobSlotEmptyLabel,
   jobStatusHelp,
   jobStatusKind,
   nextJobFallback,
@@ -41,7 +50,11 @@ import {
   withCustomConnections,
   type ModelAssignmentRow,
 } from "./model-assignments.ts";
-import { RETIRED_PROVIDER_IDS } from "./provider-registry.ts";
+import {
+  MODEL_EFFORT_LABELS,
+  RETIRED_PROVIDER_IDS,
+  type ModelEffort,
+} from "./provider-registry.ts";
 import { modelChoicesFor } from "./model-choice.ts";
 
 /** A rank-0 row, which is what most of these tests are about. */
@@ -415,6 +428,112 @@ describe("a saved assignment this build cannot offer", () => {
   });
 });
 
+/**
+ * Defect 2 (unit BG2): the selects truncated. The design's own lines are short
+ * ("Codex Sol · sign-in", "None", "Default") and the build was showing the
+ * registry's full sentence plus "Not set — use the desk's default", which is
+ * 203px of text in a ~162px box at 1280. Everything asserted here is either a
+ * line the design draws or the measured ceiling: 24 characters, from
+ * Bricolage Grotesque 700 at 15px, where the longest drawn line ("Claude
+ * Sonnet · sign-in", 23 characters) measures 150px and the box is ~162px.
+ */
+describe("the lines the who-does-what selects show", () => {
+  it("names the connection the model arrives through, as the design draws it", () => {
+    const story = jobModelOptions("story-draft");
+    const label = (value: string) => {
+      const option = story.find((one) => one.value === value);
+      assert.ok(option, `story must offer ${value}`);
+      return jobOptionLabel(option);
+    };
+    assert.equal(label("codex-frontier"), "Codex Sol · sign-in");
+    assert.equal(label("claude-frontier"), "Claude Opus · sign-in");
+    assert.equal(label("claude-sonnet"), "Claude Sonnet · sign-in");
+    assert.equal(label("auto"), "Automatic (ladder)");
+  });
+
+  it("names how every kind of provider is connected, including the retired one", () => {
+    assert.equal(connectionWord("claude-code"), "sign-in");
+    assert.equal(connectionWord("codex"), "sign-in");
+    assert.equal(connectionWord("xai-oauth"), "sign-in");
+    assert.equal(connectionWord("openai"), "API");
+    assert.equal(connectionWord("anthropic"), "API");
+    assert.equal(connectionWord("local"), "on this computer");
+  });
+
+  it("never draws a line longer than a select is known to show", () => {
+    for (const job of MODEL_JOBS) {
+      for (const option of jobModelOptions(job.key)) {
+        const line = jobOptionLabel(option);
+        assert.ok(line.length > 0, `${job.key}/${option.value} needs a line`);
+        assert.ok(
+          line.length <= JOB_OPTION_LABEL_MAX,
+          `${job.key}/${option.value}: "${line}" is ${line.length} characters`,
+        );
+      }
+    }
+  });
+
+  it("drops the connection word rather than clipping it, and keeps it on the title", () => {
+    const local = jobModelOptions("story-draft").find((one) => one.value === "local-model");
+    assert.ok(local, "story must offer the local model");
+    assert.equal(jobOptionLabel(local), "Local model");
+    assert.match(jobOptionTitle(local), /on this computer/);
+  });
+
+  it("keeps the provider's half-line out of the select and on the title", () => {
+    for (const option of jobModelOptions("story-draft")) {
+      assert.doesNotMatch(jobOptionLabel(option), /—/);
+      assert.match(jobOptionTitle(option), new RegExp(option.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
+    const frontier = jobModelOptions("story-draft").find((one) => one.value === "codex-astra");
+    assert.ok(frontier);
+    assert.equal(jobOptionLabel(frontier), "Codex Astra · sign-in");
+    assert.match(jobOptionTitle(frontier), /Most capable/);
+  });
+
+  it("calls a newsroom's own endpoint an API connection, by its name", () => {
+    const id = "11111111-2222-4333-8444-555555555555";
+    const menu = withCustomConnections(jobModelOptions("story-draft"), [
+      { id, name: "Gemini", modelId: "gemini-2.5-flash" },
+    ]);
+    const custom = menu.find((one) => one.value === `custom:${id}`);
+    assert.ok(custom);
+    assert.equal(jobOptionLabel(custom), "Gemini · API");
+    assert.match(jobOptionTitle(custom), /gemini-2\.5-flash/);
+  });
+
+  it("shows a stored value this build cannot resolve as it is, with no invented word", () => {
+    const menu = withCustomConnections(jobModelOptions("story-draft"), [], ["grok-oauth"]);
+    const stale = menu.find((one) => one.value === "grok-oauth");
+    assert.ok(stale, "a stored value must stay showable");
+    assert.equal(jobOptionLabel(stale), "No longer offered");
+  });
+
+  it("shows the drawn effort word, with the sentence on the option's title", () => {
+    assert.equal(jobEffortLabel("none"), "none");
+    assert.equal(jobEffortLabel("low"), "low");
+    assert.equal(jobEffortLabel("medium"), "medium");
+    assert.equal(jobEffortLabel("high"), "high");
+    assert.equal(jobEffortLabel("xhigh"), "xhigh");
+    assert.equal(jobEffortLabel("max"), "max");
+    const seen = new Set<string>();
+    for (const effort of Object.keys(JOB_EFFORT_WORDS) as ModelEffort[]) {
+      const word = JOB_EFFORT_WORDS[effort];
+      assert.ok(word.length > 0 && word.length <= 6, `${effort} draws "${word}"`);
+      assert.equal(jobEffortOptionTitle(effort), MODEL_EFFORT_LABELS[effort]);
+      seen.add(word);
+    }
+    assert.equal(seen.size, Object.keys(JOB_EFFORT_WORDS).length, "two levels must not share a word");
+  });
+
+  it("leaves no slot without an empty line", () => {
+    assert.deepEqual([...JOB_SLOT_NAMES], ["first", "fallback1", "fallback2"]);
+    assert.equal(jobSlotEmptyLabel("first"), "Default");
+    assert.equal(jobSlotEmptyLabel("fallback1"), "None");
+    assert.equal(jobSlotEmptyLabel("fallback2"), "None");
+  });
+});
+
 describe("the status vocabulary", () => {
   it("says Not built yet for a job with no backend, whatever else is true", () => {
     const kind = jobStatusKind({ built: false, providerId: "claude-sonnet", available: true });
@@ -436,8 +555,35 @@ describe("the status vocabulary", () => {
     );
   });
 
+  /*
+    Defect 3 (unit BG2): the chip said "✓ Ready" for a job with nothing
+    assigned, which is a claim about a first choice that does not exist. With
+    nothing saved the row says "Default" and names what the default resolves
+    to; "✓ Ready" is only for a first choice that is really there.
+  */
+  it("says Default, not Ready, for a job with nothing assigned", () => {
+    const facts = { built: true, providerId: "auto", available: true, fromDefault: true };
+    assert.equal(jobStatusKind(facts), "default");
+    assert.equal(JOB_STATUS_LABEL.default, "Default");
+    assert.match(jobStatusHelp(facts), /nothing saved for this job/i);
+    assert.doesNotMatch(JOB_STATUS_LABEL.default, /Ready/);
+    assert.notEqual(jobStatusHelp(facts), jobStatusHelp({ built: true, providerId: "auto", available: true }));
+  });
+
+  it("still reports the real problem when the default itself cannot run", () => {
+    assert.equal(
+      jobStatusKind({ built: true, providerId: "codex-astra", available: false, fromDefault: true }),
+      "signin",
+    );
+    assert.equal(
+      jobStatusKind({ built: true, providerId: "local-model", available: true, fromDefault: true, localNotLoaded: true }),
+      "slow",
+    );
+    assert.equal(jobStatusKind({ built: false, providerId: "auto", fromDefault: true }), "unbuilt");
+  });
+
   it("has a label for every kind and a reason for every label", () => {
-    for (const kind of ["ready", "slow", "signin", "unbuilt", "none"] as const) {
+    for (const kind of ["ready", "slow", "signin", "unbuilt", "none", "default"] as const) {
       assert.ok(JOB_STATUS_LABEL[kind], `${kind} needs a label`);
     }
     const ready = jobStatusHelp({ built: true, providerId: "claude-sonnet", available: true });

@@ -20,7 +20,9 @@
 import {
   FALLBACK_RANKS,
   FIRST_CHOICE_RANK,
+  JOB_SLOT_NAMES,
   MODEL_JOB_KEYS,
+  type JobSlotName,
   type ModelAssignmentRow,
   type ModelJobKey,
 } from "./model-assignments.ts";
@@ -40,10 +42,17 @@ export type JobAssignmentDraft = {
 
 export type ModelAssignmentDraft = Record<ModelJobKey, JobAssignmentDraft>;
 
-/** The slots in rank order, which is also the order the screen draws them. */
-export const DRAFT_SLOTS = ["first", "fallback1", "fallback2"] as const;
+/**
+ * The slots in rank order, which is also the order the screen draws them.
+ *
+ * The names are the desk's (`JOB_SLOT_NAMES`), not this file's: the screen
+ * needs a word for an empty first choice ("Default") versus an empty fallback
+ * ("None") and that vocabulary lives next to the resolution order in
+ * ./model-assignments.ts. One union, so the two cannot drift.
+ */
+export const DRAFT_SLOTS = JOB_SLOT_NAMES;
 
-export type DraftSlotName = (typeof DRAFT_SLOTS)[number];
+export type DraftSlotName = JobSlotName;
 
 const EMPTY_SLOT: JobAssignmentSlot = { providerId: "", effort: "" };
 
