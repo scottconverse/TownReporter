@@ -330,17 +330,42 @@ export function pickLoadedLocalModel(server: LocalServer): LocalModelEntry | nul
   return loaded[0] ?? null;
 }
 
-function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | null {
-  const priority: LocalServerKind[] = ["lmstudio", "ollama", "llamacpp", "openai-compatible"];
-  const ordered = servers
-    .filter((s) => s.reachable)
-    .slice()
-    .sort((a, b) => priority.indexOf(a.kind) - priority.indexOf(b.kind));
+const SERVER_PRIORITY: LocalServerKind[] = ["lmstudio", "ollama", "llamacpp", "openai-compatible"];
 
-  for (const server of ordered) {
+/**
+ * The one model in memory anywhere on this machine, or null.
+ *
+ * Unit BB item 2 needs exactly this answer at call time: "Use whatever is
+ * loaded" resolves the moment a run starts, to whatever is loaded then, which
+ * is the whole point of the choice (the owner switches the loaded model for
+ * other work and does not want a stored id pinned to it). Item 3 needs the
+ * same answer one step earlier, to decide what the picker calls the default.
+ *
+ * Server order is `pickDefault`'s below, unchanged: LM Studio first, then
+ * Ollama, then llama.cpp, then an LLM_BASE_URL endpoint. Two orders that
+ * drifted would mean a run that says one thing and does another.
+ */
+export function pickLoadedLocalModelAcrossServers(servers: LocalServer[]): { baseUrl: string; id: string } | null {
+  for (const server of orderedServers(servers)) {
     const loaded = pickLoadedLocalModel(server);
     if (loaded) return { baseUrl: server.baseUrl, id: loaded.id };
   }
+  return null;
+}
+
+/** Reachable servers, in pick priority order. Shared so no caller re-derives it. */
+function orderedServers(servers: LocalServer[]): LocalServer[] {
+  return servers
+    .filter((s) => s.reachable)
+    .slice()
+    .sort((a, b) => SERVER_PRIORITY.indexOf(a.kind) - SERVER_PRIORITY.indexOf(b.kind));
+}
+
+function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | null {
+  const ordered = orderedServers(servers);
+
+  const loaded = pickLoadedLocalModelAcrossServers(servers);
+  if (loaded) return loaded;
   const wantedModel = env("LLM_MODEL");
   if (wantedModel) {
     for (const server of ordered) {
