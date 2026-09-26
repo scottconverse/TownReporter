@@ -196,6 +196,51 @@ describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
       );
     });
   });
+
+  // Unit AK item 2: a finding filed against a killed lead is a filing, not a
+  // stamp, so the summary must not read as "nothing to see" -- and it must not
+  // be counted as an ordinary new lead either (desk.ts subtracts it from
+  // filedNew, and that subtraction is only honest if the bit below is printed).
+  describe("Unit AK item 2: developingFiled", () => {
+    it("says a killed story came back with new facts, in plain words", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        developingFiled: 1,
+      });
+      assert.equal(
+        sentence,
+        "1 story you killed came back with new facts — filed held for review, linked to what you killed.",
+      );
+    });
+
+    it("counts more than one, and never calls them 'new'", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        developingFiled: 2,
+      });
+      assert.match(sentence, /^2 stories you killed came back with new facts/);
+      assert.doesNotMatch(sentence, /filed as new/);
+    });
+
+    it("sits alongside the stamp bit -- a repeat and a development in one run", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        developingFiled: 1,
+      });
+      assert.match(sentence, /^1 lead matched a story you already killed and was stamped, not refiled; /);
+      assert.match(sentence, /1 story you killed came back with new facts/);
+    });
+
+    it("omitting developingFiled reproduces the pre-AK output (back-compat)", () => {
+      assert.equal(
+        resurfacedSummarySentence({ resurfacedKilled: 0, resurfacedOpen: 0, mergedSameScan: 1 }),
+        "one story was found twice in this scan and kept as one lead, with both sources.",
+      );
+    });
+  });
 });
 
 describe("editor copy", () => {

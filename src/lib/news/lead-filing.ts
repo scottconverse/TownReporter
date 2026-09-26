@@ -2,6 +2,7 @@ import { sanitizePublicUrls } from "./schema.ts";
 import {
   findMatchingLead,
   matchStrength,
+  newFactsIn,
   normalizeSourceUrl,
   sameStoryForMerge,
   type MatchCandidateLead,
@@ -117,6 +118,13 @@ export async function fileScanLeads(
    * matchStrength's doc comment in ./lead-match.ts. Included in
    * `leadsCreated`. */
   possibleMatched: number;
+  /** Unit AK item 2: candidates filed HELD, linked to a KILLED lead, because
+   * the finding carries facts that killed lead did not have (`newFactsIn`,
+   * ./lead-match.ts) -- a story the editor killed has developed, so it is back
+   * on the desk with the old kill reason next to it rather than discarded.
+   * Included in `leadsCreated`; the killed row is also stamped, which is what
+   * makes "Came back N times" true on its row. */
+  developingFiled: number;
   /** QA-1: the headline of the first AI-returned candidate this call
    * discarded as a STRONG match, so the caller can name it in the scan
    * summary rather than let a merge -- right or wrong -- pass with no
@@ -133,6 +141,7 @@ export async function fileScanLeads(
   let resurfacedKilled = 0;
   let resurfacedOpen = 0;
   let possibleMatched = 0;
+  let developingFiled = 0;
   let mergedSameScan = 0;
   let firstDiscardedHeadline: string | undefined;
   /* Leads THIS call inserted, newest last. A candidate is only ever merged
@@ -164,6 +173,7 @@ export async function fileScanLeads(
 
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
+    let dupKind: "possible" | "developing" | null = null;
     if (matchId != null) {
       const matched = existing.find((l) => l.id === matchId)!;
       const strength = matchStrength(
@@ -171,6 +181,14 @@ export async function fileScanLeads(
         { headline: matched.headline, source_urls: matched.source_urls },
       );
       if (strength === "strong") {
+        // Unit AK item 2: a strong match against a KILLED lead is normally
+        // discarded -- only the stamp below moves. When the new finding says
+        // something the killed lead never said, that would drop a real
+        // development, so it is filed for review instead (still stamped, so
+        // the killed row's "came back" count stays true).
+        const killedWithNewFacts =
+          matched.status === "killed" &&
+          newFactsIn({ why: lead.why, evidence: lead.evidence }, matched);
         await sql`
             update leads
             set resurfaced_count = resurfaced_count + 1,
@@ -178,22 +196,31 @@ export async function fileScanLeads(
                 last_resurfaced_scan_run_id = ${runId}
             where id = ${matchId} and newsroom_id = ${newsroomId}
           `;
-        if (matched.status === "killed") resurfacedKilled += 1;
-        else resurfacedOpen += 1;
-        firstDiscardedHeadline ??= lead.headline;
-        continue;
+        if (killedWithNewFacts) {
+          developingFiled += 1;
+          possibleDuplicateOf = matchId;
+          initialStatus = "held";
+          dupKind = "developing";
+        } else {
+          if (matched.status === "killed") resurfacedKilled += 1;
+          else resurfacedOpen += 1;
+          firstDiscardedHeadline ??= lead.headline;
+          continue;
+        }
+      } else {
+        // "possible" (or, defensively, a null that findMatchingLead's looser
+        // rule somehow disagreed with) -- file it, linked to the match, do
+        // NOT stamp the existing row.
+        possibleDuplicateOf = matchId;
+        if (matched.status === "killed") initialStatus = "held";
+        dupKind = "possible";
+        possibleMatched += 1;
       }
-      // "possible" (or, defensively, a null that findMatchingLead's looser
-      // rule somehow disagreed with) -- file it, linked to the match, do
-      // NOT stamp the existing row.
-      possibleDuplicateOf = matchId;
-      if (matched.status === "killed") initialStatus = "held";
-      possibleMatched += 1;
     }
 
     const urls = JSON.stringify(candidateUrls);
     const inserted = await sql<{ id: number; status: string; headline: string }>`
-        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen)
+        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen, dup_kind)
         values (
           ${context.userId}, ${newsroomId}, ${runId}, ${lead.headline.slice(0, 180)},
           ${String(lead.why ?? "").slice(0, 800)},
@@ -203,7 +230,8 @@ export async function fileScanLeads(
           ${Number(lead.newsworthiness) || 0},
           ${initialStatus},
           ${possibleDuplicateOf},
-          ${lead.topicUnchosen === true}
+          ${lead.topicUnchosen === true},
+          ${dupKind}
         )
         returning id, status, headline
       `;
@@ -214,6 +242,8 @@ export async function fileScanLeads(
       headline: inserted[0]!.headline,
       source_urls: candidateUrls,
       created_at: new Date().toISOString(),
+      why: lead.why ?? null,
+      evidence: lead.evidence ?? null,
     };
     existing.push(insertedRow);
     insertedThisRun.push(insertedRow);
@@ -224,6 +254,7 @@ export async function fileScanLeads(
     resurfacedKilled,
     resurfacedOpen,
     possibleMatched,
+    developingFiled,
     mergedSameScan,
     firstDiscardedHeadline,
   };

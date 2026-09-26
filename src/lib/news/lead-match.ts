@@ -523,6 +523,20 @@ export type MatchCandidateLead = {
    * callers that already filtered to the last 60 days by SQL can pass rows
    * without this field. */
   created_at?: string;
+  /** Unit AK item 2: the lead's own words, used by newFactsIn to decide
+   * whether a strong match against a KILLED lead carries facts that lead did
+   * not have. Optional: callers that only match (and never compare facts) can
+   * leave them out. An absent value means "this side recorded no facts", so a
+   * lead with nothing recorded is never treated as already knowing something a
+   * candidate says -- the candidate has to bring facts of its own before the
+   * comparison can fire at all (see newFactsIn). */
+  why?: string | null;
+  evidence?: string | null;
+  /** Unit AK item 2: when the lead was killed, and why, in the editor's
+   * words (migration 0094). Read only so a new finding filed against a killed
+   * lead can show the old reason; never used in matching. */
+  killed_at?: string | null;
+  kill_reason?: string | null;
 };
 
 /**
@@ -646,6 +660,76 @@ export function sameStoryForMerge(
       { headline: existingHeadline, source_urls: existing.source_urls ?? [] },
     ) === "strong"
   );
+}
+
+/**
+ * Unit AK item 2 (2026-09-26): does this finding carry facts the OTHER lead
+ * does not have?
+ *
+ * The real case: a strong match against a KILLED lead is discarded today --
+ * only `resurfaced_count` moves (lead-filing.ts:173). That is right when the
+ * finding is the same story with nothing new ("same headline and no new
+ * facts"). It is wrong when the new finding says something the killed lead
+ * never said: the owner's question is exactly "Do I miss the real 2nd story?",
+ * and a killed lead plus a new fact is the case where dropping it loses one.
+ *
+ * What counts as a fact: the CONTENT tokens of the two leads' own words
+ * (`why` and `evidence` -- deliberately NOT the headline, which the caller has
+ * already established is the same story at >= 0.85 Jaccard: letting headline
+ * wording count would make every paraphrase look like a new fact), plus the
+ * concrete anchors in the same text (dates, dollar amounts, numbers --
+ * extractAnchors, filtered by NEW_FACT_ANCHOR_KINDS).
+ *
+ * The bar is deliberately not "any new word":
+ *
+ *   - at least one new ANCHOR (a date, an amount, or a number the old lead
+ *     never carried; a new name is not by itself enough -- see
+ *     NEW_FACT_ANCHOR_KINDS), or
+ *   - at least NEW_FACT_TOKENS_MIN new content tokens (which is how a new
+ *     named place counts: contentTokens keeps non-stoplisted proper nouns).
+ *
+ * A single new content word is how a rewrite reads ("the city said" vs "city
+ * officials said"), and treating that as a new fact would refile every
+ * reworded duplicate of every killed lead -- the noise the "possible" tier
+ * already exists to avoid. Two new content tokens, or one concrete new
+ * anchor, is a fact somebody added.
+ */
+export const NEW_FACT_TOKENS_MIN = 2;
+
+/** The anchor kinds that count as a new fact. `noun:` is deliberately absent:
+ * extractAnchors() reads any capitalised word as a proper noun, so it cannot
+ * tell a name from a sentence-initial capital -- "Officials said ..." against
+ * the old "Police said ..." would read as a new named place and refile every
+ * reworded duplicate of every killed lead, which is exactly the noise this
+ * bar exists to stop. A genuinely new name still carries weight on the token
+ * path: contentTokens() keeps non-stoplisted proper nouns as content words,
+ * so a new place plus one more new word clears NEW_FACT_TOKENS_MIN. */
+const NEW_FACT_ANCHOR_KINDS = ["date:", "amount:", "num:"] as const;
+
+function factTokens(why?: string | null, evidence?: string | null): Set<string> {
+  const text = `${why ?? ""} ${evidence ?? ""}`;
+  const tokens = new Set<string>(contentTokens(text));
+  for (const anchor of extractAnchors(text)) {
+    if (NEW_FACT_ANCHOR_KINDS.some((kind) => anchor.startsWith(kind))) tokens.add(anchor);
+  }
+  return tokens;
+}
+
+export function newFactsIn(
+  candidate: { why?: string | null; evidence?: string | null },
+  existing: { why?: string | null; evidence?: string | null },
+): boolean {
+  const old = factTokens(existing.why, existing.evidence);
+  const fresh = factTokens(candidate.why, candidate.evidence);
+  if (fresh.size === 0) return false;
+  let newTokens = 0;
+  for (const token of fresh) {
+    if (old.has(token)) continue;
+    if (token.includes(":")) return true; // an anchor: date, amount, number, or named place
+    newTokens += 1;
+    if (newTokens >= NEW_FACT_TOKENS_MIN) return true;
+  }
+  return false;
 }
 
 export function findMatchingLead(

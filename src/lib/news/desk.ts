@@ -1222,8 +1222,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       headline: string;
       source_urls: string;
       created_at: string;
+      why: string | null;
+      evidence: string | null;
     }>`
-      select id, status, headline, source_urls, created_at
+      select id, status, headline, source_urls, created_at, why, evidence
       from leads
       where newsroom_id = ${owned(context)}
         and status <> 'published'
@@ -1235,6 +1237,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       headline: l.headline,
       source_urls: parseLeadSourceUrls(l.source_urls),
       created_at: l.created_at,
+      // Unit AK item 2: the killed lead's own words, so a strong match that
+      // brings new facts can be filed against it instead of discarded.
+      why: l.why,
+      evidence: l.evidence,
     }));
 
     const {
@@ -1242,6 +1248,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       resurfacedKilled,
       resurfacedOpen,
       possibleMatched,
+      developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
     } = await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
@@ -1276,7 +1283,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       resurfacedKilled,
       resurfacedOpen,
       possibleMatched,
-      filedNew: leadsCreated - possibleMatched,
+      // Unit AK item 2: a developing finding is filed too, but it is not a
+      // brand-new story for the desk -- it is an old one that came back -- so
+      // it is named by its own bit rather than counted as "filed as new".
+      filedNew: leadsCreated - possibleMatched - developingFiled,
+      developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
     });

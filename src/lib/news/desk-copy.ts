@@ -1156,6 +1156,12 @@ export function resurfacedSummarySentence(input: {
    * seconds ago. Optional so this function's pre-AK tests still pass
    * unchanged. */
   mergedSameScan?: number;
+  /** Unit AK item 2: candidates filed HELD against a KILLED lead because they
+   * carry facts that lead did not have (`newFactsIn`, ./lead-match.ts). They
+   * are a filing, not a discard, so they are named here; the editor can see
+   * the full picture of one run without opening the Queue. Optional for the
+   * same reason as `mergedSameScan`. */
+  developingFiled?: number;
 }): string {
   const bits: string[] = [];
   if (input.resurfacedKilled > 0) {
@@ -1182,6 +1188,14 @@ export function resurfacedSummarySentence(input: {
       mergedSameScan === 1
         ? "one story was found twice in this scan and kept as one lead, with both sources"
         : `${mergedSameScan} stories were each found twice in this scan and kept as one lead, with both sources`,
+    );
+  }
+  const developingFiled = input.developingFiled ?? 0;
+  if (developingFiled > 0) {
+    bits.push(
+      developingFiled === 1
+        ? "1 story you killed came back with new facts — filed held for review, linked to what you killed"
+        : `${developingFiled} stories you killed came back with new facts — filed held for review, linked to what you killed`,
     );
   }
   if (!bits.length) return "";

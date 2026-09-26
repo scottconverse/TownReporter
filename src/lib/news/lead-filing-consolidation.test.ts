@@ -50,7 +50,8 @@ const CREATE_LEADS = `create table leads (
   newsworthiness integer, status text, possible_duplicate_of integer,
   topic_unchosen boolean not null default false,
   resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-  last_resurfaced_scan_run_id integer
+  last_resurfaced_scan_run_id integer,
+  dup_kind text, kill_reason text, kill_reason_url text, killed_at timestamptz
 )`;
 
 test("the 207/212 case: the same story twice in one scan run is filed once, with the source URLs merged", async () => {
@@ -282,6 +283,197 @@ test("a merged pair inside one run does not bump the resurfaced stamp of anythin
     // `existing` is the caller's array and must reflect the single lead, so
     // desk.ts's later bookkeeping sees one new lead, not two.
     assert.equal(existing.length, 2);
+  } finally {
+    await db.close();
+  }
+});
+
+/*
+ * Unit AK item 2 (2026-09-26): a strong match against a KILLED lead is no
+ * longer discarded when the new finding says something the killed lead never
+ * said. The live case: leads 218 (held) and 209 (killed, a "juvenile
+ * altercation") both cite the Daily Camera crime INDEX page -- a section page
+ * (see isIndexPageUrl) -- which is weak evidence of "same story". When the
+ * matcher is still sure, and the finding brings facts the killed lead did not
+ * have, the desk now files it HELD with the old kill reason next to it instead
+ * of dropping a development on the floor. A same-headline, same-facts repeat
+ * keeps today's behaviour exactly: stamp the killed row, file nothing.
+ *
+ * The fact bar is newFactsIn (./lead-match.ts): at least one new anchor (date,
+ * amount, number, or named place) or two new content tokens, compared over
+ * `why` + `evidence` and never over the headline -- the headline is already
+ * the same story at >= 0.85 Jaccard, so it cannot carry the new fact.
+ */
+
+test("killed lead + new facts: the finding is filed HELD, linked to the killed lead, which is still stamped", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    // The shape of the 209/218 pair: both sightings are the crime index page,
+    // not an article, so the shared URL is not what decides this.
+    const crimeIndex = "https://www.dailycamera.com/crime/";
+    const headline = "Police investigate a fight reported in northwest Longmont";
+    await db.query(
+      `insert into leads(id,newsroom_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(7,1,$1,$2,$3,'killed',$4,0)`,
+      [
+        headline,
+        "Police said they were called about a fight and reported no arrests.",
+        "Daily Camera crime index, Sept. 19.",
+        JSON.stringify([crimeIndex]),
+      ],
+    );
+    const sql = makeSql(db);
+    const existing = [
+      {
+        id: 7,
+        status: "killed",
+        headline,
+        source_urls: [crimeIndex],
+        why: "Police said they were called about a fight and reported no arrests.",
+        evidence: "Daily Camera crime index, Sept. 19.",
+      },
+    ];
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      955,
+      [
+        {
+          headline,
+          // New facts: a named place the killed lead never mentioned and a
+          // date it never carried.
+          why: "Police arrested a 17-year-old after the Loomiller Park fight, the department said.",
+          evidence: "Department briefing, Sept. 25.",
+          topic: "council",
+          source_urls: [crimeIndex],
+        },
+      ],
+      existing,
+    );
+    assert.equal(result.leadsCreated, 1, "a development on a killed story is filed, not discarded");
+    assert.equal(result.developingFiled, 1);
+    assert.equal(result.resurfacedKilled, 0, "a filed development is not a silent stamp");
+    assert.equal(result.possibleMatched, 0, "this is a strong match, not the 'possible' tier");
+    const rows = (
+      await db.query<{
+        id: number;
+        status: string;
+        possible_duplicate_of: number | null;
+        dup_kind: string | null;
+      }>(
+        // The explicit id above does not advance the serial, so the new row's
+        // id is 1 here -- the killed row is identified by its own id instead.
+        "select id, status, possible_duplicate_of, dup_kind from leads order by id",
+      )
+    ).rows;
+    assert.deepEqual(
+      rows.filter((r) => r.id === 7),
+      [{ id: 7, status: "killed", possible_duplicate_of: null, dup_kind: null }],
+    );
+    const filed = rows.filter((r) => r.id !== 7);
+    assert.equal(filed.length, 1, "exactly one finding is filed against the killed lead");
+    assert.equal(filed[0]!.status, "held", "filed held for review, not new");
+    assert.equal(filed[0]!.possible_duplicate_of, 7, "linked to the lead it matches");
+    assert.equal(filed[0]!.dup_kind, "developing");
+    const stamped = (
+      await db.query<{ resurfaced_count: number; last_resurfaced_scan_run_id: number }>(
+        "select resurfaced_count, last_resurfaced_scan_run_id from leads where id = 7",
+      )
+    ).rows;
+    assert.equal(stamped[0]!.resurfaced_count, 1, "the killed row's came-back count stays true");
+    assert.equal(stamped[0]!.last_resurfaced_scan_run_id, 955);
+  } finally {
+    await db.close();
+  }
+});
+
+test("killed lead + the same facts: today's behaviour, stamped only, nothing filed", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    const crimeIndex = "https://www.dailycamera.com/crime/";
+    const headline = "Police investigate a fight reported in northwest Longmont";
+    const why = "Police said they were called about a fight and reported no arrests.";
+    const evidence = "Daily Camera crime index, Sept. 19.";
+    await db.query(
+      `insert into leads(id,newsroom_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(7,1,$1,$2,$3,'killed',$4,0)`,
+      [headline, why, evidence, JSON.stringify([crimeIndex])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      956,
+      [{ headline, why, evidence, topic: "council", source_urls: [crimeIndex] }],
+      [{ id: 7, status: "killed", headline, source_urls: [crimeIndex], why, evidence }],
+    );
+    assert.equal(result.leadsCreated, 0, "the same story with nothing new stays discarded");
+    assert.equal(result.developingFiled, 0);
+    assert.equal(result.resurfacedKilled, 1);
+    assert.equal(result.firstDiscardedHeadline, headline, "the discard is still named in the summary");
+    const rows = (await db.query<{ id: number }>("select id from leads order by id")).rows;
+    assert.deepEqual(rows, [{ id: 7 }]);
+    const stamped = (
+      await db.query<{ resurfaced_count: number }>("select resurfaced_count from leads where id = 7")
+    ).rows;
+    assert.equal(stamped[0]!.resurfaced_count, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+test("killed lead + a reworded but fact-free finding: not a development", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    const crimeIndex = "https://www.dailycamera.com/crime/";
+    const headline = "Police investigate a fight reported in northwest Longmont";
+    await db.query(
+      `insert into leads(id,newsroom_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(7,1,$1,$2,$3,'killed',$4,0)`,
+      [
+        headline,
+        "Police said they were called about a fight and reported no arrests.",
+        "Daily Camera crime index, Sept. 19.",
+        JSON.stringify([crimeIndex]),
+      ],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      957,
+      [
+        {
+          headline,
+          // Same fact, different words. "officials" replaces "police" and
+          // nothing concrete is added -- a reworded duplicate, which is the
+          // noise a one-new-word bar would refile every time.
+          why: "Officials said they were called about a fight and reported no arrests.",
+          evidence: "Daily Camera crime index, Sept. 19.",
+          topic: "council",
+          source_urls: [crimeIndex],
+        },
+      ],
+      [
+        {
+          id: 7,
+          status: "killed",
+          headline,
+          source_urls: [crimeIndex],
+          why: "Police said they were called about a fight and reported no arrests.",
+          evidence: "Daily Camera crime index, Sept. 19.",
+        },
+      ],
+    );
+    assert.equal(result.leadsCreated, 0);
+    assert.equal(result.developingFiled, 0, "a reworded duplicate is not new facts");
+    assert.equal(result.resurfacedKilled, 1);
   } finally {
     await db.close();
   }
