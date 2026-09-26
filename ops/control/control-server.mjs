@@ -95,10 +95,11 @@ export const POLL_MS = 15_000;
 export const DEFAULT_BACKUP_DIR = "C:\\Users\\scott\\Desktop\\Code\\townreporter-backups";
 
 /** Windows' own absolute paths; never a PATH lookup, so a poisoned PATH or a
- *  `schtasks.bat` dropped in the working directory cannot redirect an action. */
-const SYSTEM32 = path.join(process.env.WINDIR || "C:\\Windows", "System32");
-const POWERSHELL = path.join(SYSTEM32, "WindowsPowerShell", "v1.0", "powershell.exe");
-const SCHTASKS = path.join(SYSTEM32, "schtasks.exe");
+ *  `schtasks.bat` dropped in the working directory cannot redirect an action.
+ *  Always Windows separators (path.win32), so the table is the same on a Linux CI runner. */
+const SYSTEM32 = path.win32.join(process.env.WINDIR || "C:\\Windows", "System32");
+const POWERSHELL = path.win32.join(SYSTEM32, "WindowsPowerShell", "v1.0", "powershell.exe");
+const SCHTASKS = path.win32.join(SYSTEM32, "schtasks.exe");
 
 /**
  * The six menu items, by fixed id, exactly as `TownReporter Control.cmd`
