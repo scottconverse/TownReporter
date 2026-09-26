@@ -205,6 +205,14 @@ export type CorrectionRow = {
  */
 export type FollowUpRow = {
   id: number;
+  /**
+   * Owner and newsroom are part of the row because the run path needs them and
+   * has no session to read them from: `performDueFollowUps` has no editor, and
+   * the scheduler enqueues the job under the follow-up's own user. Every
+   * select in ./follow-ups.ts already returned both.
+   */
+  newsroom_id: number;
+  user_id: string;
   lead_id: number | null;
   article_id: number | null;
   who: string;

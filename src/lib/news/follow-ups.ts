@@ -155,6 +155,37 @@ export async function performCreateFollowUp(
   return { ok: true as const, id: rows[0]!.id };
 }
 
+/**
+ * One follow-up by id, in the same shape the list returns -- including the
+ * three joined display columns, so the worker can name the story in a progress
+ * line without a second query.
+ *
+ * This is the read the run path uses. `follow-up-agents.ts` and
+ * `follow-up-scheduler.ts` deliberately never select from `follow_ups`
+ * themselves: the day a column is added, this function and
+ * `performListFollowUps` are the only two places that have to learn about it.
+ * Null means "gone, or not this newsroom's".
+ */
+export async function performReadFollowUp(
+  context: { userId: string; newsroomId?: number },
+  id: number,
+): Promise<FollowUpRow | null> {
+  await ensureFollowUpsSchema();
+  const sql = await getSql();
+  const rows = await sql<FollowUpRow>`
+    select f.id, f.newsroom_id, f.user_id, f.lead_id, f.article_id, f.who, f.what, f.due_on,
+           f.status, f.nudged_at, f.answered_at, f.reply_text, f.created_at, f.updated_at,
+           f.agent_kind, f.targets_json, f.schedule, f.model_choice,
+           f.last_run_at, f.next_run_at, f.last_state, f.finding_json,
+           l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline
+    from follow_ups f
+    left join leads l on l.id = f.lead_id
+    left join articles a on a.id = f.article_id
+    where f.id = ${id} and f.newsroom_id = ${owned(context)}
+  `;
+  return rows[0] ?? null;
+}
+
 export async function performRecordFollowUpReply(
   context: { userId: string; newsroomId?: number },
   input: { id: number; replyText: string; repliedOn?: string | null },
@@ -615,6 +646,12 @@ export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter):
  * CANDIDATES, it does not claim them. `performClaimFollowUpRun` below is what
  * makes a pick exclusive, and the scheduler's open-job fence is what keeps two
  * runs from overlapping.
+ *
+ * A row already `running` is NOT due, even though its `next_run_at` is still
+ * in the past: a run in flight does not reschedule itself until it records an
+ * outcome, so without this predicate the scheduler would pick the same row on
+ * every tick for as long as the run took. `performReconcileFollowUpRuns` in
+ * ./follow-up-scheduler.ts is what clears a `running` row whose worker died.
  */
 export async function performDueFollowUps(
   newsroomId: number,
@@ -632,6 +669,7 @@ export async function performDueFollowUps(
     where f.newsroom_id = ${newsroomId}
       and f.status = 'active'
       and f.agent_kind is not null
+      and f.last_state is distinct from 'running'
       and f.next_run_at is not null
       and f.next_run_at <= ${now.toISOString()}
     order by f.next_run_at asc, f.id asc
@@ -646,11 +684,16 @@ export async function performDueFollowUps(
  *
  * The claim is the `status = 'active'` predicate on the update, so a second
  * caller -- a second tick, or the editor's Run now arriving between the select
- * and the update -- matches no row and gets `false`. The scheduler treats that
- * as "someone else has it" and moves on rather than retrying. `last_state`
- * moves to `running` here so the card renders the live state even before the
- * job row is claimed, and so a process that dies mid-run leaves a row that
- * says it was running rather than one that looks idle.
+ * and the update -- matches no row and gets `false`. The WORKER makes this
+ * call, as the first thing it does with a `follow-up` job, because that is the
+ * last moment before real work starts and the only one that closes the gap
+ * between "the scheduler chose this row" and "a run is actually happening":
+ * the queue may have held the job for minutes, and the editor may have stopped
+ * the follow-up in that time. A worker that gets `false` records nothing and
+ * returns; the fence in ./follow-up-scheduler.ts keeps the queue from holding
+ * two of them anyway. `last_state` moves to `running` here so a process that
+ * dies mid-run leaves a row that says it was running rather than one that
+ * looks idle -- `performReconcileFollowUpRuns` clears those.
  */
 export async function performClaimFollowUpRun(
   newsroomId: number,

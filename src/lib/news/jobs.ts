@@ -23,7 +23,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * (see textflowkit-transcribe.server.ts); the lane's concurrency of 2 is about
  * how many jobs may be *open*, not how many may burn CPU.
  */
-export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -285,6 +285,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "audio-transcribe") {
     const { performAudioTranscribeWork } = await import("./textflowkit-transcribe.server.ts");
     await performAudioTranscribeWork(job);
+  } else if (job.kind === "follow-up") {
+    const { performFollowUpRun } = await import("./follow-up-agents.ts");
+    await performFollowUpRun(job);
   }
 }
 
@@ -936,6 +939,17 @@ export function jobStages(
  * it simply has no chip row, which is what `stages_json` null means everywhere.
  */
 export const JOB_STAGE_LISTS: Partial<Record<JobKind, readonly string[]>> = {
+  /*
+    The follow-up list is deliberately two arrivals long and method-agnostic:
+    the three agents under this one kind (re-check, search, agenda) share the
+    sentences "Running the check" and "Recording the result" -- see
+    FOLLOW_UP_STAGES in ./follow-up-agents.ts -- and nothing else. A per-method
+    list is not expressible here, because this table is keyed by job KIND, and
+    a six-phrase list for three methods would be four chips that never light up
+    on any given run. The per-page, per-portal sentences in between move the
+    "Now:" line without moving the chip, exactly as the draft's do.
+  */
+  "follow-up": ["Running the check", "Recording the result"],
   draft: [
     "Opening source material",
     "Looking for primary sources",
