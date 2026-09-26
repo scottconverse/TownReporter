@@ -2070,12 +2070,20 @@
   background: var(--bg);
   border-bottom: 0;
 }
+/* One row: the wordmark and the town chip on the left, the geography pills on
+   the RIGHT, exactly as `Front Daily.dc.html` draws it -- `space-between` with
+   the pills as the second child, rather than the stacked block Unit BD shipped.
+   It wraps to two rows on a narrow screen, which the prototype also does. */
 .reader .mast {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 18px;
   height: auto;
   /* The 3px rule that closes the masthead. It sits on the wrap, so on a wide
      screen it stops at the gutter exactly as the rules inside the bands do. */
-  padding: 22px 0 0;
+  padding: 22px 0 16px;
   border-bottom: 3px solid var(--grid);
 }
 .reader .identity {
@@ -2083,7 +2091,6 @@
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
-  padding-bottom: 16px;
 }
 .reader .brand {
   font-family: var(--fd);
@@ -2116,7 +2123,6 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding-bottom: 16px;
 }
 .reader .geopill {
   display: inline-flex;
@@ -2133,14 +2139,12 @@
 .reader .geopill:hover {
   background: var(--soft);
 }
+/* The pressed ground is the page's own ink with the page's own background as
+   its type, which is what the prototype draws (and what flips correctly in the
+   dark theme, where `--ink` is bone and `--bg` is the dark ground). */
 .reader .geopill.on {
-  background: var(--yel);
-  color: #111;
-}
-.reader .geopill.clear {
-  border-style: dashed;
-  border-width: 2px;
-  color: var(--muted);
+  background: var(--ink);
+  color: var(--bg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -2166,6 +2170,43 @@
 .reader .navrow > .textlink,
 .reader .navrow .about-newsroom {
   font-size: 15px;
+}
+
+/* The article page's header: one compact row. The sections sit in the masthead
+   itself (`Article Daily.dc.html`), at the prototype's 8px/22px rhythm with the
+   current section's yellow inset, and there is no pill row and no second nav
+   row. `.mast-compact` is on the mast, not on `main`, because the header is
+   outside `<main>` -- `.reader-compact` cannot reach it. */
+.reader .mast-compact {
+  padding-bottom: 14px;
+}
+/* Above 760px only: below it the nav is the mobile menu's own column list, and
+   these rules (three classes, so they win) would take its padding and its
+   stacking away from it. */
+@media (min-width: 761px) {
+  /*
+    `margin-left: auto` is what keeps the links on the right when they do not
+    fit: the prototype's own list is six sections and sits beside the wordmark,
+    but this paper publishes nine, and at 1280 they are ~875px wide against the
+    ~700px the row has left. A `justify-content` cannot help there -- the nav
+    wraps as a whole to the mast's second line, which is a `space-between` row
+    with one item in it, and that puts a lone item on the left. The auto margin
+    absorbs the free space either way, so the links hug the right edge on one
+    line and on two (the section list is content, and content is what wraps).
+  */
+  .reader .mast-compact > .sections {
+    gap: 8px 22px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+  .reader .mast-compact > .sections a {
+    padding: 9px 0;
+  }
+  .reader .mast-compact > .sections a.active:after {
+    bottom: 2px;
+    height: 4px;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2205,10 +2246,19 @@
   background: var(--grid);
   border-bottom: 3px solid var(--grid);
 }
-.reader .ledgerow > .lead,
-.reader .ledgerow > .datespanel {
+.reader .ledgerow > .lead {
   background: var(--bg);
   padding: 32px var(--px) 36px;
+}
+/* The panel is the ink block in BOTH themes, and it is stated here rather than
+   left to the `.datespanel` rule below: this selector carries three classes to
+   that rule's two, so a shared `background: var(--bg)` on the row's children
+   silently repainted the panel cream and put white event text and white date
+   numbers on it (measured at 1.02:1 before Unit BD2). */
+.reader .ledgerow > .datespanel {
+  background: var(--block);
+  color: var(--blockInk);
+  padding: 32px 32px 36px;
 }
 .reader .lead h2.leadhead {
   font-family: var(--fd);
@@ -2250,10 +2300,7 @@
   color: var(--blockInk);
   padding: 32px var(--px);
 }
-.reader .ledgerow > .datespanel {
-  padding-inline: 32px;
-}
-.reader .datespanel h2 {
+/* (The front page's panel keeps the row's 32px inline padding, set above.) */.reader .datespanel h2 {
   font-family: var(--fd);
   font-size: 28px;
   font-weight: 800;
@@ -2273,6 +2320,9 @@
   align-items: baseline;
   padding: 13px 0;
   border-top: 1px solid var(--blockRule);
+  /* A flex item's automatic minimum size is its min-content width, which is how
+     a long link and its host pushed 35px past the panel's right edge. */
+  min-width: 0;
 }
 .reader .dateday {
   display: flex;
@@ -2301,6 +2351,11 @@
   font-size: 16px;
   line-height: 1.5;
   color: var(--blockInk);
+  /* The item text and its host wrap inside the panel rather than running out of
+     it. `anywhere` rather than `break-word` because only `anywhere` changes the
+     element's min-content width, which is what the flex item is measured by. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .reader .datewhat a {
   color: var(--blockInk);
@@ -2773,6 +2828,7 @@
   position: sticky;
   top: 96px;
   padding-top: 0;
+  min-width: 0;
 }
 .reader .articleaside .asidecard {
   margin-top: 22px;

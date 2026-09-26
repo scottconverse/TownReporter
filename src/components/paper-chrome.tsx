@@ -29,8 +29,20 @@ import { useReader } from "./reader-context";
  * page's search -- the article page's masthead carries no pills, per its own
  * prototype. A masthead that imported the pills would have to import the
  * front page's search shape with them.
+ *
+ * `compact` is the article page's header (`Article Daily.dc.html`): the same
+ * dateline bar, then ONE row -- wordmark and town chip on the left, the section
+ * links on the right -- with no pill row and no second nav row. Unit BD had the
+ * article repeat the front page's two-row header; this is the prototype's
+ * single row.
  */
-export function Masthead({ geography }: { geography?: ReactNode }) {
+export function Masthead({
+  geography,
+  compact = false,
+}: {
+  geography?: ReactNode;
+  compact?: boolean;
+}) {
   const paper = usePaper();
   const { sections } = usePublicSections();
   const [open, setOpen] = useState(false);
@@ -39,6 +51,53 @@ export function Masthead({ geography }: { geography?: ReactNode }) {
   const location = useRouterState({ select: (s) => s.location });
   const current = location.search as { topic?: string; q?: string; view?: string };
   useEffect(() => setOpen(false), [location.href]);
+  /*
+    The section links. On the front page this is the nav row's own list and it
+    starts with "Front page"; the article prototype's header carries the
+    sections only, so in compact mode the wordmark and the story's breadcrumb
+    are the two ways home and the list is the sections alone.
+  */
+  const sectionLinks = (
+    <>
+      {!compact && (
+        <Link
+          to="/"
+          search={{}}
+          className={
+            location.pathname === "/" && !current.topic && !current.q && !current.view
+              ? "active"
+              : ""
+          }
+        >
+          Front page
+        </Link>
+      )}
+      {sections
+        .filter((s) => s.visible)
+        .map((s) => (
+          <Link
+            key={s.key}
+            to="/"
+            search={{ topic: s.key }}
+            className={current.topic === s.key ? "active" : ""}
+          >
+            {s.name}
+          </Link>
+        ))}
+    </>
+  );
+  const mobileMenu = (
+    <button
+      className="mobilemenu"
+      type="button"
+      aria-expanded={open}
+      aria-controls="reader-sections"
+      onClick={() => setOpen(!open)}
+    >
+      Explore the publication
+      <Menu aria-hidden />
+    </button>
+  );
   return (
     <header>
       <a className="skip" href="#paper">
@@ -79,7 +138,7 @@ export function Masthead({ geography }: { geography?: ReactNode }) {
         </div>
       </div>
       <div className="wrap">
-        <div className="mast">
+        <div className={`mast ${compact ? "mast-compact" : ""}`}>
           <div className="identity">
             <Link to="/" search={{}} className="brand" aria-label={`${paper.name} home`}>
               {paper.name}
@@ -91,59 +150,43 @@ export function Masthead({ geography }: { geography?: ReactNode }) {
             */}
             <span className="locality">{paper.city}</span>
           </div>
-          {geography}
+          {compact ? (
+            <>
+              {mobileMenu}
+              <nav
+                className={`sections ${open ? "open" : ""}`}
+                id="reader-sections"
+                aria-label="News sections"
+              >
+                {sectionLinks}
+              </nav>
+            </>
+          ) : (
+            geography
+          )}
         </div>
-        <div className="navrow">
-          <button
-            className="mobilemenu"
-            type="button"
-            aria-expanded={open}
-            aria-controls="reader-sections"
-            onClick={() => setOpen(!open)}
-          >
-            Explore the publication
-            <Menu aria-hidden />
-          </button>
-          <nav
-            className={`sections ${open ? "open" : ""}`}
-            id="reader-sections"
-            aria-label="News sections"
-          >
-            <Link
-              to="/"
-              search={{}}
-              className={
-                location.pathname === "/" && !current.topic && !current.q && !current.view
-                  ? "active"
-                  : ""
-              }
+        {compact ? null : (
+          <div className="navrow">
+            {mobileMenu}
+            <nav
+              className={`sections ${open ? "open" : ""}`}
+              id="reader-sections"
+              aria-label="News sections"
             >
-              Front page
-            </Link>
-            {sections
-              .filter((s) => s.visible)
-              .map((s) => (
-                <Link
-                  key={s.key}
-                  to="/"
-                  search={{ topic: s.key }}
-                  className={current.topic === s.key ? "active" : ""}
-                >
-                  {s.name}
-                </Link>
-              ))}
-          </nav>
-          <div className="reader-nav-actions">
-            {/*
-              The nav row's one action. The desk entry used to sit beside it
-              and now sits in the dateline bar, which is where the handoff puts
-              it; printing it twice on one screen is noise, not reach.
-            */}
-            <Link to="/about" className="textlink about-newsroom">
-              About the newsroom <ArrowRight aria-hidden />
-            </Link>
+              {sectionLinks}
+            </nav>
+            <div className="reader-nav-actions">
+              {/*
+                The nav row's one action. The desk entry used to sit beside it
+                and now sits in the dateline bar, which is where the handoff puts
+                it; printing it twice on one screen is noise, not reach.
+              */}
+              <Link to="/about" className="textlink about-newsroom">
+                About the newsroom <ArrowRight aria-hidden />
+              </Link>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </header>
   );
@@ -212,7 +255,7 @@ export function PaperShell({
   const paper = usePaper();
   return (
     <ReaderProvider>
-      <Masthead geography={geography} />
+      <Masthead geography={geography} compact={compact} />
       <main
         id="paper"
         tabIndex={-1}

@@ -42,17 +42,29 @@ export const Route = createFileRoute("/")({
   loaderDeps: ({ search }) => search,
   loader: async ({ deps }) => {
     const listing = Boolean(deps.topic || deps.q || deps.view);
+    /*
+      The edition's read is the HOME TOWN's, not the whole paper. The prototype
+      draws the home pill pressed and Unit BD did not follow it, on the grounds
+      that a pressed pill over an unfiltered page would print a filtered state
+      that was not true; the claim is what was wrong, so the read is what
+      changed. `HOME_AREA` matches a null or unrecognised stored area as well
+      (`readStoryArea`), so a story printed before migration 0098 counts as
+      home. A listing screen is a search across the whole paper and has no pills
+      to press, so it keeps the old behaviour and filters only on an explicit
+      `?area=`.
+    */
+    const area = listing ? deps.area : (deps.area ?? HOME_AREA);
     const page = await readerArticles({
       data: {
         q: deps.q,
         topic: deps.topic,
         page: deps.page ?? 1,
         oldest: deps.sort === "oldest",
-        ...(deps.area ? { area: deps.area } : {}),
+        ...(area ? { area } : {}),
         ...(deps.view === "saved" ? { saved: [] } : {}),
       },
     });
-    if (listing) return { listing: page, river: null, opinion: null, week: [] };
+    if (listing) return { listing: page, river: null, opinion: null, week: [], region: [] };
     // The lead and the six cells: what is printed above the band and the river.
     const above = page.stories.slice(0, TOP_STORIES).map((s) => s.id);
     /*
@@ -71,6 +83,7 @@ export const Route = createFileRoute("/")({
       query because it sweeps the whole paper, not one section.
     */
     const week = await thisWeekDates();
+    const region = await readRegion(above);
     const river = await readerArticles({
       data: {
         limit: RIVER_BATCH,
@@ -79,10 +92,35 @@ export const Route = createFileRoute("/")({
         exclude: [...above, ...opinion.stories.map((s) => s.id)],
       },
     });
-    return { listing: page, river, opinion, week };
+    return { listing: page, river, opinion, week, region };
   },
   component: FrontPage,
 });
+
+/**
+ * "Around the region": one story per ground the paper covers beyond the home
+ * town.
+ *
+ * This used to be derived from the edition's own stories, which only worked
+ * while the edition printed the whole paper. The edition is the home town's
+ * read now, so a band derived from it would print its empty state on every
+ * front page while the paper's own `nearby` and `county` stories sat one query
+ * away. Each ground is read for itself instead: that ground's newest story,
+ * minus whatever the top of the page already printed, and a ground with nothing
+ * left is left out rather than filled with a story the reader has already read.
+ */
+async function readRegion(exclude: number[]) {
+  const grounds = STORY_AREAS.filter((area) => area !== HOME_AREA);
+  const rows = await Promise.all(
+    grounds.map(async (area) => ({
+      area,
+      story: (await readerArticles({ data: { area, limit: 1, oldest: false, exclude } })).stories[0],
+    })),
+  );
+  return rows
+    .filter((row): row is { area: StoryArea; story: ReaderStory } => Boolean(row.story))
+    .slice(0, REGION_ROWS);
+}
 /**
  * The masthead's geography row, and the page under it.
  *
@@ -116,12 +154,16 @@ function Home() {
   useEffect(() => setQ(search.q || ""), [search.q]);
   const listing = Boolean(search.topic || search.q || search.view);
   const label = sections.find((s) => s.key === search.topic)?.name ?? search.topic;
+  // The same read the loader made, including the home-town default on the
+  // edition: a client query without it would refetch the whole paper as soon as
+  // the page hydrated and print stories the pressed home pill does not cover.
+  const area = listing ? search.area : (search.area ?? HOME_AREA);
   const args = {
     q: search.q,
     topic: search.topic,
     page: search.page ?? 1,
     oldest: search.sort === "oldest",
-    ...(search.area ? { area: search.area } : {}),
+    ...(area ? { area } : {}),
     ...(search.view === "saved" ? { saved: reader.saved } : {}),
   };
   const query = useQuery({
@@ -158,22 +200,12 @@ function Home() {
    * simply prints fewer cells and the grid rules close on the last one.
    */
   const gridStories = stories.slice(1, TOP_STORIES);
-  const printed = new Set(stories.slice(0, TOP_STORIES).map((s) => s.id));
-  /**
-   * "Around the region": one row per ground the paper covers beyond the home
-   * town, carrying that ground's newest story that is not already printed
-   * above. Stories whose area was never recorded read as the home town
-   * (`readStoryArea`), so they are not here, and a ground with nothing left to
-   * print is left out rather than filled with a story the reader has already
-   * read.
-   */
-  const regionRows = STORY_AREAS.filter((area) => area !== HOME_AREA)
-    .map((area) => ({
-      area,
-      story: stories.find((s) => s.area === area && !printed.has(s.id)),
-    }))
-    .filter((row): row is { area: StoryArea; story: ReaderStory } => Boolean(row.story))
-    .slice(0, REGION_ROWS);
+  /*
+    "Around the region". The loader reads each ground for itself (`readRegion`),
+    because the edition above it is the home town's read and prints no story
+    from any other ground.
+  */
+  const regionRows = initial.region ?? [];
   /*
     "This week". The loader server-renders it and the panel takes the rows
     already split into the weekday and day columns; see `story-dates.ts` for

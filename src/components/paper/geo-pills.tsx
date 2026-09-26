@@ -1,20 +1,20 @@
 import { Link } from "@tanstack/react-router";
-import { AREA_PILLS, type StoryArea } from "@/lib/story-area";
+import { AREA_PILLS, HOME_AREA, type StoryArea } from "@/lib/story-area";
 
 /**
  * The geography switch: Longmont · Nearby · Boulder County · Colorado, in that
  * order everywhere.
  *
- * Ported from `design-system/components/paper/GeoPills.jsx`. The prototype's
- * `hrefFor` is a string builder; here the pills are router links that set the
- * front page's `area` search parameter, because the filter is the archive
- * query's own predicate and not a separate page (migration 0098, 0.6.71).
- *
- * "No pill pressed" is the whole paper, and the *home* pill is a filter that
- * matches a null stored area as the home town. Those are two different reads,
- * so pressing Longmont is not the same as pressing nothing, and the row says
- * so: the front page renders it with `active` unset until a reader chooses.
- * See `readStoryArea` for why null is the home town.
+ * Ported from `design-system/components/paper/GeoPills.jsx`, which draws the
+ * home ground pressed. Unit BD departed from the prototype here -- its report
+ * argued that an ink-filled pill on an unfiltered page would print a filtered
+ * state, so no pill was pressed until a reader chose one. Unit BD2 follows the
+ * design instead, and makes the claim true rather than decorative: the front
+ * page's unfiltered read IS the home town's read (`area: deps.area ??
+ * HOME_AREA` in `src/routes/index.tsx`), which is the same set of stories a
+ * null stored area already meant (`readStoryArea`: null is the home town). So
+ * the pressed pill and the page agree, and the home pill's href carries no
+ * `?area=` because home is what the front page is without one.
  *
  * Each pill is 44px minimum: the row is the paper's primary navigation and it
  * is held to the tap target the rest of the design system uses.
@@ -23,20 +23,22 @@ export function GeoPills({
   active,
   search,
 }: {
-  /** The pressed pill, or undefined for "the whole paper". */
+  /** The ground on the paper; defaults to the home town, which is the default read. */
   active?: StoryArea;
   /** The rest of the front page's search, so a pill does not drop the reader's filters. */
   search?: Record<string, unknown>;
 }) {
+  const pressed = active ?? HOME_AREA;
   return (
     <div className="geopills" role="group" aria-label="Geography">
       {AREA_PILLS.map((pill) => {
-        const on = pill.key === active;
+        const on = pill.key === pressed;
+        const home = pill.key === HOME_AREA;
         return (
           <Link
             key={pill.key}
             to="/"
-            search={{ ...search, area: pill.key, page: undefined }}
+            search={{ ...search, area: home ? undefined : pill.key, page: undefined }}
             aria-current={on ? "page" : undefined}
             className={on ? "geopill on" : "geopill"}
           >
@@ -44,17 +46,6 @@ export function GeoPills({
           </Link>
         );
       })}
-      {/*
-        The way back to the whole paper. A pill row with no off switch would
-        leave a reader who pressed Colorado unable to see Longmont again
-        without editing the address, and the home pill is a filter, not a
-        reset.
-      */}
-      {active ? (
-        <Link to="/" search={{ ...search, area: undefined, page: undefined }} className="geopill clear">
-          Everywhere
-        </Link>
-      ) : null}
     </div>
   );
 }
