@@ -28,6 +28,11 @@ import {
 import { PAPER } from "../paper.ts";
 import { normalizeProviderModelId } from "./provider-model-id.ts";
 import type { LocalCatalog } from "./local-models.ts";
+import {
+  LOCAL_MODEL_NOTHING_LOADED,
+  localModelNotLoadedMessage,
+  localServerName,
+} from "./preflight.ts";
 
 export type EffectiveProviderChoice = EffectiveStoryModelChoice;
 export type ProviderProbe =
@@ -423,7 +428,7 @@ function explicitProvider(
     // A rung carries its own endpoint (see `rungGateway`), and a rung that
     // picks its model at call time can only be built around the model the
     // caller resolved (`rungModel`); the "Local model" entry keeps the
-    // resolved-override-or-LLM_BASE_URL behaviour it has always had. The two
+    // resolved-override-or-LLM_BASE_URL behavior it has always had. The two
     // coexist because the rung never reads LLM_BASE_URL.
     const llm =
       entry.ladderRank === undefined
@@ -657,12 +662,38 @@ type RungResolution =
   | { ok: true; localModel: LocalModelOverride | null }
   | { ok: false; note: string };
 
-/** What the desk calls each local server it knows how to probe. */
-function localServerName(kind: string): string {
-  if (kind === "lmstudio") return "LM Studio";
-  if (kind === "ollama") return "Ollama";
-  if (kind === "llamacpp") return "llama.cpp";
-  return "the local server";
+/** What the desk calls each local server it knows how to probe. Moved to
+ * preflight.ts (Unit BB) so the picker's client-side explanation names the
+ * server the same way this refuses with it. */
+
+/**
+ * Unit BB item 4: the refusal for a hand-picked model the server says is not
+ * loaded, or null when the call may proceed.
+ *
+ * Requires a catalog -- the only place load state exists. Every path that has
+ * no catalog (`exactLocalModel`, `adapters.resolveLocal`, an LLM_BASE_URL
+ * gateway with no scope) is left exactly as it was before this guard existed.
+ *
+ * The three ways this declines to refuse, each on purpose:
+ *  - the server is not in the catalog, or is unreachable: no load state to
+ *    act on, and "unreachable" already has its own preflight message;
+ *  - the model is not listed: same, and `stillListed` owns that case;
+ *  - `model.cloud`: an Ollama-hosted model is never in this machine's memory
+ *    by design, so demanding one would make every cloud pick fail;
+ *  - `loaded !== false`: `true` is fine, and `null` means the server never
+ *    answered the question -- the pre-BB behavior is kept rather than
+ *    refusing on a server that is simply quiet.
+ */
+function localPickNotLoadedMessage(
+  pick: LocalModelOverride | null,
+  catalog: LocalCatalog | null,
+): string | null {
+  if (!pick || !catalog) return null;
+  const server = catalog.servers.find((s) => s.baseUrl === pick.baseUrl);
+  if (!server || !server.reachable) return null;
+  const model = server.models.find((m) => m.id === pick.id);
+  if (!model || model.cloud || model.loaded !== false) return null;
+  return localModelNotLoadedMessage(pick.id, server.kind);
 }
 
 /**
@@ -839,12 +870,38 @@ export async function probeProvider(
   }
   let provider = resolveProvider(choice, undefined, rungModel);
   let localOverride: LocalModelOverride | null = null;
+  /*
+    Unit BB: whether this probe is running the editor's "Use whatever is
+    loaded" choice (a stored sentinel, or item 3's own default), and the
+    catalog that resolved it -- the only source of load state in this file.
+    Only the `resolveLocalModelChoice` path can set these. The two adapter
+    paths (`exactLocalModel`, `adapters.resolveLocal`) are handed a pair by
+    their caller and stay exactly as they were: no extra fetch, same label.
+  */
+  let useLoadedLocalModel = false;
+  let localCatalog: LocalCatalog | null = null;
   if (choice === "local-model" && (exactLocalModel || scope || !provider)) {
-    localOverride = exactLocalModel ?? (adapters?.resolveLocal
-      ? await adapters.resolveLocal(newsroomId)
-      : (await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId, scope))
-          .override);
+    if (exactLocalModel) {
+      localOverride = exactLocalModel;
+    } else if (adapters?.resolveLocal) {
+      localOverride = await adapters.resolveLocal(newsroomId);
+    } else {
+      const resolved = await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId, scope);
+      localOverride = resolved.override;
+      useLoadedLocalModel = resolved.source === "loaded";
+      localCatalog = resolved.catalog;
+    }
     if (localOverride) provider = resolveProvider(choice, localOverride);
+  }
+  /*
+    Unit BB item 2, before the gateway is built and long before any model
+    call: the editor picked "Use whatever is loaded" and nothing is loaded.
+    Deliberately NOT a fall-through to the cloud default -- the whole promise
+    of the choice is "run what is on this machine, and never load one to do
+    it", so the job stops with the reason instead of spending somewhere else.
+  */
+  if (useLoadedLocalModel && !localOverride) {
+    return { ok: false, error: LOCAL_MODEL_NOTHING_LOADED };
   }
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
   if (choice === "local-model" && !localOverride && provider.kind === "openai") {
@@ -857,11 +914,25 @@ export async function probeProvider(
     return result.ok ? { ...result, choice: storyModelChoice(choice) } : result;
   }
   if (provider.kind === "openai") {
+    /*
+      Unit BB item 4: never load a model. A hand-picked on-device model that
+      the server itself says is not in memory would either fail the draft or
+      make LM Studio page a 35B in from disk, so the run stops here with a
+      sentence naming the model and the server. `loaded === null` (a server
+      that reports no load state) keeps exactly today's behavior, and a
+      hosted `cloud: true` model is never blocked -- it is not in memory
+      anywhere by design.
+    */
+    const notLoaded = localPickNotLoadedMessage(localOverride, localCatalog);
+    if (notLoaded) return { ok: false, error: notLoaded };
     const result = await probeOpenAi(provider);
     if (!result.ok) return result;
     return {
       ...result,
       choice: choice === "configured" ? "configured" : storyModelChoice(choice),
+      // Item 2: the receipt names the model this run actually got, the same
+      // way the Automatic rung's own receipt does.
+      ...(useLoadedLocalModel && localOverride ? { label: `Local model (${localOverride.id})` } : {}),
       // The editor's own pick, or the model a picking rung just verified.
       ...(localOverride
         ? { localModel: localOverride }
@@ -1512,7 +1583,7 @@ export function parseJsonBlock<T>(raw: string): T | null {
  * The sentence a run reports when a model's reply cannot be read at all.
  *
  * One wording, built here, so the classifier in ./automatic-failover.ts can
- * recognise it and move the unfinished call to the next rung. The word
+ * recognize it and move the unfinished call to the next rung. The word
  * "unreadable" is the token that classifier matches; keep the two together.
  */
 export function unreadableReplyError(label?: string): string {
@@ -1533,7 +1604,7 @@ export function unreadableReplyError(label?: string): string {
  * stream usually comes back whole on a second ask, and the caller's own
  * failover seam (./automatic-failover.ts) owns the hop to the next rung. The
  * failure it returns carries `unreadableReplyError`'s wording so that seam
- * recognises it.
+ * recognizes it.
  *
  * `attempt` is the caller's own transport (`chat`, `grokChat`, `runChat`),
  * and `read` is the caller's own parser, so this stays hermetic: the two

@@ -236,6 +236,9 @@ describe("forced runtime snapshots", () => {
     };
     const requests: string[] = [];
     let forcedModels = [forcedModel];
+    // LM Studio's native list carries each model's load state. The legacy
+    // model is loaded; Unit BB refuses a hand pick the server says is not.
+    let legacyState = "loaded";
     process.env.LLM_BASE_URL = globalBase;
     process.env.LLM_MODEL = legacyModel;
     process.env.TOWNREPORTER_LOCAL_DISCOVERY = "0";
@@ -243,6 +246,12 @@ describe("forced runtime snapshots", () => {
     globalThis.fetch = (async (input) => {
       const url = String(input);
       requests.push(url);
+      if (url === "http://127.0.0.1:1234/api/v0/models") {
+        return new Response(JSON.stringify({ data: [{ id: legacyModel, state: legacyState, type: "llm" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
       const models = url.startsWith(`${scopedBase}/`)
         ? forcedModels
         : [legacyModel];
@@ -289,6 +298,14 @@ describe("forced runtime snapshots", () => {
         requests.at(-1),
         `${globalBase}/models`,
         "without a scoped choice, the existing LM Studio setting remains the selected model",
+      );
+
+      legacyState = "not-loaded";
+      resetLocalCatalogCacheForTests();
+      await assert.rejects(
+        validateForcedRuntime(newsroomId, "local-model"),
+        new RegExp(`${legacyModel} is not loaded in LM Studio`),
+        "a saved LM Studio model that is not loaded must stop before any model call, never be paged in",
       );
     } finally {
       globalThis.fetch = originalFetch;

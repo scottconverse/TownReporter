@@ -37,7 +37,12 @@ import {
   validateProviderSeconds,
   type ProviderOverrides,
 } from "./provider-registry.ts";
-import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
+import {
+  pickLoadedLocalModelAcrossServers,
+  refreshLocalCatalog,
+  type LocalCatalog,
+} from "./local-models.ts";
+import { isUseLoadedLocalModelPick, type LocalModelSource } from "./model-choice.ts";
 import { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
 export { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
 import {
@@ -187,6 +192,24 @@ export async function readProviderOverrides(
   }
   const explicitScoped = scope ? await rawScopedLocalModel(newsroomId, scope) : null;
   const stored = explicitScoped ?? out[LOCAL_MODEL_PROVIDER_ID]?.localModel;
+  if (isUseLoadedLocalModelPick(stored)) {
+    /*
+      "Use whatever is loaded" must be resolved here, for every caller, or
+      `grokChat` would be handed the literal sentinel as a base URL. This is
+      the one pick that is resolved at call time rather than at save time, so
+      it is the one pick a run can act on differently from the one before it.
+    */
+    let loaded: { baseUrl: string; id: string } | null = null;
+    try {
+      loaded = pickLoadedLocalModelAcrossServers((await refreshLocalCatalog()).servers);
+    } catch {
+      // Discovery never throws (local-models.ts), but a budgets read must not
+      // fail a run over it: nothing loaded is the honest answer, and
+      // `probeProvider` refuses with the item-2 sentence before any call.
+    }
+    out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: loaded };
+    return out;
+  }
   if (explicitScoped) {
     // A temporary Ollama outage must never silently send the editor's chosen
     // cloud work to an unrelated LM Studio model on another server.
@@ -195,7 +218,17 @@ export async function readProviderOverrides(
   }
   try {
     const catalog = await refreshLocalCatalog();
-    const resolved = stillListed(stored, catalog) ? stored : preferredLocalModel(scope, catalog);
+    const resolved = stillListed(stored, catalog)
+      ? stored
+      : // Unit BB item 3, for a newsroom that has never picked anything:
+        // prefer whatever is in memory over any named model, so the first
+        // run after the owner loads something runs on it. A stored pick that
+        // has vanished keeps the old fallback -- an editor chose it, and
+        // silently moving them to a different local model is the failure
+        // mode this comment above is about.
+        stored
+        ? preferredLocalModel(scope, catalog)
+        : (pickLoadedLocalModelAcrossServers(catalog.servers) ?? preferredLocalModel(scope, catalog));
     // "No rows at all" must mean exactly that -- an empty object, the same
     // shipped-defaults contract every other provider id already has. A
     // newsroom with no stored row and no discovered local server (the
@@ -225,9 +258,17 @@ export async function readProviderOverrides(
  */
 export type LocalModelChoice = {
   override: { baseUrl: string; id: string } | null;
+  /**
+   * Unit BB: where `override` came from, so the picker can say so in words
+   * and `probeProvider` can tell "Use whatever is loaded" (which refuses with
+   * the item-2 sentence when nothing is loaded) from an editor's named pick
+   * that happens to have resolved to nothing.
+   */
+  source: LocalModelSource;
   notice: string | null;
   catalog: LocalCatalog;
 };
+
 
 /** The raw stored pick, with no catalog fallback applied -- for the notice only. */
 async function rawStoredLocalModel(
@@ -267,20 +308,47 @@ export async function resolveLocalModelChoice(
     rawStoredLocalModel(newsroomId, scope),
     refreshLocalCatalog(),
   ]);
-  if (!stored) return { override: preferredLocalModel(scope, catalog), notice: null, catalog };
-  if (stillListed(stored, catalog)) return { override: stored, notice: null, catalog };
+
+  /*
+    Unit BB item 2: the stored sentinel resolves NOW, not when it was saved --
+    that is the entire point of the choice. `pickLoadedLocalModelAcrossServers`
+    is the same function the Automatic rung uses, with the same server order,
+    so "Use whatever is loaded" and the ladder can never disagree about which
+    model is in memory. Nothing loaded resolves to no model; it does NOT fall
+    back to the preferred cloud model, because the editor asked for this
+    machine and the run must stop instead of quietly spending elsewhere.
+  */
+  if (isUseLoadedLocalModelPick(stored)) {
+    return { override: pickLoadedLocalModelAcrossServers(catalog.servers), source: "loaded", notice: null, catalog };
+  }
+
+  if (!stored) {
+    /*
+      Item 3: with nothing stored, a model already in memory IS the default.
+      Only when none is loaded does the older default stand -- the preferred
+      cloud model for this scope, else the catalog's own default -- and
+      `source: "default"` is what tells the picker's help line to say which
+      model that is and why.
+    */
+    const loaded = pickLoadedLocalModelAcrossServers(catalog.servers);
+    if (loaded) return { override: loaded, source: "loaded", notice: null, catalog };
+    return { override: preferredLocalModel(scope, catalog), source: "default", notice: null, catalog };
+  }
+
+  if (stillListed(stored, catalog)) return { override: stored, source: "stored", notice: null, catalog };
   if (scope && await rawScopedLocalModel(newsroomId, scope)) {
-    return { override: stored, notice: `${stored.id} is not reachable or listed right now. This job will keep your choice and report an error if it cannot connect.`, catalog };
+    return { override: stored, source: "stored", notice: `${stored.id} is not reachable or listed right now. This job will keep your choice and report an error if it cannot connect.`, catalog };
   }
   const fallback = preferredLocalModel(scope, catalog);
   if (fallback) {
     return {
       override: fallback,
+      source: "default",
       notice: `${stored.id} is no longer on the server; using ${fallback.id}.`,
       catalog,
     };
   }
-  return { override: null, notice: `${stored.id} is no longer on the server.`, catalog };
+  return { override: null, source: "default", notice: `${stored.id} is no longer on the server.`, catalog };
 }
 
 export type SaveLocalModelResult = { ok: true } | { ok: false; error: string };

@@ -23,7 +23,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   quote broken things on purpose to document them (the report from this very
   change names /desk/page-watches because that URL was the defect).
 */
-const SKIP = /[\\/](archive|operations|proofs)[\\/]/;
+/*
+  A design handoff (docs/design/handoff-*) is the designer's dated package. Its
+  component notes use sample URLs such as /evidence/2504 that stand for a real
+  captured version, and the package is kept as delivered, not rewritten.
+*/
+const SKIP = /[\\/](archive|operations|proofs)[\\/]|[\\/]design[\\/]handoff-[^\\/]+[\\/]/;
 /** Served by the server rather than a file route, or a path *prefix* only. */
 const NOT_A_FILE_ROUTE = /^\/(feed|sitemap\.xml|robots\.txt)$/;
 
