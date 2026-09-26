@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap">
+</helmet>
+<div style="{{ root }}">
+  <sc-if value="{{ showNav }}" hint-placeholder-val="{{ true }}">  <div style="grid-area:nav;min-width:0;background:var(--panel);border-right:1px solid var(--line)"><dc-import name="Desk Nav" active="Today" theme="{{ theme }}" phone="{{ phone }}" hint-size="100%,100%"></dc-import></div></sc-if>
+
+  <main style="grid-area:main;display:flex;flex-direction:column;gap:28px;padding:var(--pad);min-width:0">
+    <header style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span style="font-size:15px;font-weight:700;color:var(--ink2)">Saturday, Sept. 26 · Longmont</span>
+        <h1 style="margin:0;font-weight:800;font-size:var(--h1);letter-spacing:-.03em;line-height:1.05">Good morning. Here’s today’s paper.</h1>
+      </div>
+      <sc-if value="{{ desktop }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:8px">
+          <a href="#" onClick="{{ aLead }}" style="display:flex;align-items:center;min-height:48px;padding:0 18px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:16px">+ Add a lead</a>
+          <a href="#" onClick="{{ aNew }}" style="display:flex;align-items:center;gap:8px;min-height:48px;padding:0 20px;background:var(--yel);color:#111;font-weight:800;font-size:16px;white-space:nowrap">+ New story <span style="font-size:14px;border:1px solid #111;padding:0 5px">N</span></a>
+          <a href="#" onClick="{{ aOp }}" style="display:flex;align-items:center;min-height:48px;padding:0 18px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:16px">+ Opinion</a>
+        </div>
+      </sc-if>
+    </header>
+
+    <section style="display:grid;grid-template-columns:var(--stepCols);gap:1px;background:var(--line);border:1px solid var(--line)">
+      <sc-for list="{{ steps }}" as="s" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--bg)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="{{ s.numStyle }}">{{ s.n }}</span>
+            <span style="font-weight:800;font-size:18px">{{ s.title }}</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font-weight:800;font-size:var(--stepNum);line-height:1;letter-spacing:-.03em">{{ s.count }}</span><span style="font-size:15px;color:var(--ink2)">{{ s.unit }}</span></div>
+          <a href="#" onClick="{{ s.go }}" style="{{ s.btnStyle }}">{{ s.cta }}</a>
+        </div>
+      </sc-for>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:14px;padding:20px;border:2px solid var(--yel);background:var(--panel)">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px">
+        <h2 style="margin:0;font-weight:800;font-size:24px;letter-spacing:-.02em">Tonight’s edition</h2>
+        <span style="font-size:15px;color:var(--ink2)">Each story needs every check before it can print.</span>
+      </div>
+      <sc-for list="{{ edition }}" as="e" hint-placeholder-count="2">
+        <div style="display:grid;grid-template-columns:var(--edCols);gap:10px 20px;align-items:center;padding:12px 0;border-top:1px solid var(--line)">
+          <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+            <span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ e.section }}</span>
+            <span style="font-family:'Literata',serif;font-size:17px;line-height:1.35">{{ e.title }}</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <sc-for list="{{ e.checks }}" as="c" hint-placeholder-count="4"><span style="{{ c.style }}">{{ c.label }}</span></sc-for>
+          </div>
+          <a href="#" style="{{ e.btnStyle }}">{{ e.cta }}</a>
+        </div>
+      </sc-for>
+    </section>
+
+    <sc-if value="{{ hasJobs }}" hint-placeholder-val="{{ false }}">
+      <section style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px"><h2 style="margin:0;font-weight:800;font-size:24px;letter-spacing:-.02em">Running now</h2><span style="font-size:15px;color:var(--ink2)">Live. Each shows what it is doing and when it last did something.</span></div>
+        <div style="display:grid;grid-template-columns:var(--draftCols);gap:12px"><sc-for list="{{ jobs }}" as="j" hint-placeholder-count="2"><dc-import name="Desk Job" job="{{ j }}" compact="{{ true }}" hint-size="100%,150px"></dc-import></sc-for></div>
+      </section>
+    </sc-if>
+    <section style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px">
+        <h2 style="margin:0;font-weight:800;font-size:24px;letter-spacing:-.02em">In progress</h2>
+        <span style="font-size:15px;color:var(--ink2)">Nothing here prints until you press Publish.</span>
+      </div>
+      <div style="display:grid;grid-template-columns:var(--draftCols);gap:12px">
+        <sc-for list="{{ drafts }}" as="d" hint-placeholder-count="3">
+          <div style="{{ d.cardStyle }}">
+            <span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ d.stage }}</span>
+            <span style="font-family:'Literata',serif;font-size:17px;line-height:1.35">{{ d.title }}</span>
+            <span style="font-size:14px;color:var(--ink2)">{{ d.meta }}</span>
+            <div style="display:flex;gap:8px;margin-top:auto;padding-top:4px">
+              <a href="#" onClick="{{ aStory }}" style="{{ d.btnStyle }}">{{ d.cta }}</a>
+              <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:15px">Open</a>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-direction:column">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding-bottom:12px;border-bottom:3px solid var(--ink)">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px">
+          <h2 style="margin:0;font-weight:800;font-size:24px;letter-spacing:-.02em">New leads</h2>
+          <span style="font-size:15px;color:var(--ink2)">6:00 a.m. scan · best first</span>
+        </div>
+        <div style="display:flex;border:1px solid var(--line)">
+          <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;background:var(--ink);color:var(--bg);font-weight:700;font-size:15px">Open · {{ openCount }}</a>
+          <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;color:var(--ink);font-weight:700;font-size:15px">Held · {{ heldCount }}</a>
+        </div>
+      </div>
+      <sc-if value="{{ desktop }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 0;font-size:14px;color:var(--ink2);border-bottom:1px solid var(--line)">
+          <span style="font-weight:800;color:var(--ink)">Keyboard</span>
+          <span><b style="color:var(--ink)">J / K</b> next / previous</span><span><b style="color:var(--ink)">S</b> start story</span><span><b style="color:var(--ink)">H</b> hold</span><span><b style="color:var(--ink)">X</b> kill</span><span><b style="color:var(--ink)">U</b> undo</span><span><b style="color:var(--ink)">Enter</b> open lead</span>
+        </div>
+      </sc-if>
+      <sc-for list="{{ leads }}" as="l" hint-placeholder-count="5">
+        <div style="{{ l.rowStyle }}" onClick="{{ l.select }}">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="{{ l.scoreStyle }}">{{ l.score }}</span>
+            <span style="font-size:14px;color:var(--ink2)">score</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <sc-for list="{{ l.chips }}" as="c" hint-placeholder-count="1"><span style="{{ c.style }}">{{ c.label }}</span></sc-for>
+            </div>
+            <span style="{{ l.titleStyle }}">{{ l.title }}</span>
+            <span style="font-family:'Literata',serif;font-size:16px;line-height:1.45;color:var(--ink2)">{{ l.why }}</span>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:14px;color:var(--ink2)">
+              <span style="display:flex;gap:3px"><sc-for list="{{ l.meter }}" as="m" hint-placeholder-count="3"><span style="{{ m.style }}"></span></sc-for></span>
+              <span style="font-weight:700;color:var(--ink)">{{ l.evidence }}</span>
+              <span>· {{ l.meta }}</span>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:var(--actDir);gap:8px;align-items:flex-start;grid-column:var(--actSpan)">
+            <sc-if value="{{ l.live }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;gap:8px">
+                <a href="#" onClick="{{ l.start }}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 14px;background:var(--yel);color:#111;font-weight:800;font-size:15px;white-space:nowrap">Start story<span style="{{ keyDark }}">S</span></a>
+                <a href="#" onClick="{{ l.hold }}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Hold<span style="{{ keyInk }}">H</span></a>
+                <a href="#" onClick="{{ l.kill }}" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border:2px solid var(--danger);color:var(--danger);font-weight:700;font-size:15px">Kill<span style="{{ keyDanger }}">X</span></a>
+              </div>
+            </sc-if>
+            <sc-if value="{{ l.done }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-weight:800;font-size:15px">{{ l.doneLabel }}</span>
+                <a href="#" onClick="{{ l.undo }}" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Undo</a>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+      <a href="#" style="align-self:flex-start;display:flex;align-items:center;min-height:44px;margin-top:14px;padding:0 16px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">All leads in the Queue →</a>
+    </section>
+  </main>
+
+  <aside style="grid-area:rail;display:flex;flex-direction:column;gap:20px;padding:var(--railPad);min-width:0">
+    <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:800;font-size:20px">AI follow-ups</span><span style="font-size:15px;color:var(--ink2)">5 active</span></div>
+      <sc-for list="{{ follows }}" as="f" hint-placeholder-count="3">
+        <div style="display:flex;flex-direction:column;gap:4px;padding:10px 0;border-top:1px solid var(--line)">
+          <span style="{{ f.dueStyle }}">{{ f.due }}</span>
+          <span style="font-weight:700;font-size:16px">{{ f.who }}</span>
+          <span style="font-size:15px;color:var(--ink2)">{{ f.what }}</span>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:14px">{{ f.a }}</a>
+            <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">{{ f.b }}</a>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--dd);color:var(--ddInk);border:1px solid var(--line)">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px"><span style="font-weight:800;font-size:20px">Dark Desk</span><span style="font-size:14px;color:var(--ddInk2)">Never prints on its own</span></div>
+      <sc-for list="{{ dark }}" as="d" hint-placeholder-count="3">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--ddLine)">
+          <div style="display:flex;flex-direction:column;gap:2px"><span style="font-weight:700;font-size:16px">{{ d.pile }}</span><span style="font-size:14px;color:var(--ddInk2)">{{ d.note }}</span></div>
+          <span style="font-weight:800;font-size:24px">{{ d.n }}</span>
+        </div>
+      </sc-for>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ddInk);color:var(--ddInk);font-weight:700;font-size:15px">Open Dark Desk →</a>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:800;font-size:20px">The wire</span><span style="font-size:15px;color:var(--ink2)">Scan 6:00 a.m.</span></div>
+      <sc-for list="{{ wire }}" as="w" hint-placeholder-count="5">
+        <div style="display:flex;flex-direction:column;gap:4px;padding:8px 0;border-top:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:700;font-size:15px">{{ w.name }}</span><span style="{{ w.style }}">{{ w.state }}</span></div>
+          <span style="font-size:14px;color:var(--ink2)">{{ w.note }}</span>
+        </div>
+      </sc-for>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 12px;font-size:14px;color:var(--ink2);padding-top:6px;border-top:1px solid var(--line)"><span>Writing model: <b style="color:var(--ink)">Automatic · ready</b></span></div>
+      <div style="display:flex;gap:6px">
+        <a href="#" style="flex:1;display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px" onClick="{{ aScan }}">Run scan now</a>
+        <a href="#" style="flex:1;display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:15px">All sources</a>
+      </div>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark'|'light'&quot;},&quot;phone&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;bare&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;jobs&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;object[]&quot;},&quot;onAction&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(a: string) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  state = { sel: 0, status: {} };
+  componentDidMount() {
+    this.onKey = e => {
+      if (this.props.phone || /input|textarea/i.test((e.target && e.target.tagName) || "")) return;
+      const k = e.key.toLowerCase(), n = 5;
+      if (k === "j") this.setState(s => ({ sel: Math.min(n - 1, s.sel + 1) }));
+      else if (k === "k") this.setState(s => ({ sel: Math.max(0, s.sel - 1) }));
+      else if (k === "h" || k === "x") this.props.onAction && this.props.onAction((k === "h" ? "hold:" : "kill:") + this.state.sel);
+      else if (k === "u") this.setStat(this.state.sel, null);
+    };
+    window.addEventListener("keydown", this.onKey);
+  }
+  componentWillUnmount() { window.removeEventListener("keydown", this.onKey); }
+  componentDidUpdate(p) { const ev = this.props.leadEvent; if (ev && (!p.leadEvent || p.leadEvent.n !== ev.n)) this.setStat(ev.i, ev.v); }
+  act(k) { return e => { e.preventDefault(); this.props.onAction && this.props.onAction(k); }; }
+  setStat(i, v) { this.setState(s => ({ status: Object.assign({}, s.status, { [i]: v }) })); }
+  renderVals() {
+    const dark = (this.props.theme ?? "dark") === "dark";
+    const phone = !!this.props.phone;
+    const t = dark
+      ? { "--bg": "#1b1916", "--panel": "#27231f", "--line": "#3b3631", "--ink": "#e8e6e1", "--ink2": "#bdbab3", "--yel": "#e6c35c", "--danger": "#f0998c", "--warn": "#f0b27a", "--ok": "#9fd4a8", "--dd": "#0f0e0c", "--sel": "#e6c35c", "--ddInk": "#e8e6e1", "--ddInk2": "#bdbab3", "--ddLine": "#3b3631" }
+      : { "--bg": "#fffdf7", "--panel": "#f6f2e7", "--line": "#d8d3c4", "--ink": "#111", "--ink2": "#3a3a3a", "--yel": "#ffd23f", "--danger": "#b3261e", "--warn": "#8a4b00", "--ok": "#1e6b34", "--dd": "#111", "--sel": "#111", "--ddInk": "#fff", "--ddInk2": "#cfcfcf", "--ddLine": "#444" };
+    const l = phone
+      ? { "--pad": "18px 16px 8px", "--railPad": "0 16px 32px", "--h1": "28px", "--stepCols": "repeat(2,minmax(0,1fr))", "--stepNum": "30px", "--draftCols": "minmax(0,1fr)", "--edCols": "minmax(0,1fr)", "--actDir": "row", "--actSpan": "1 / -1" }
+      : { "--pad": "24px 32px 40px", "--railPad": "24px 24px 40px 0", "--h1": "40px", "--stepCols": "repeat(4,minmax(0,1fr))", "--stepNum": "40px", "--draftCols": "repeat(3,minmax(0,1fr))", "--edCols": "minmax(0,1.1fr) minmax(0,1.5fr) auto", "--actDir": "row", "--actSpan": "auto" };
+    const css = s => Object.fromEntries(s.split(";").filter(Boolean).map(p => { const i = p.indexOf(":"); return [p.slice(0, i).trim().replace(/-([a-z])/g, (_, c) => c.toUpperCase()), p.slice(i + 1)]; }));
+    const btn = "display:flex;align-items:center;min-height:44px;padding:0 14px;font-weight:800;font-size:15px;white-space:nowrap;";
+    const primary = css(btn + "background:var(--yel);color:#111"), outline = css(btn + "border:2px solid var(--ink);color:var(--ink)"), off = css(btn + "border:2px dashed var(--line);color:var(--ink2)");
+    const key = c => css("font-size:14px;font-weight:700;padding:0 5px;border:1px solid " + c + ";line-height:1.3");
+    const steps = [
+      { n: "1", title: "Pick leads", count: "9", unit: "new today", cta: "Review leads", on: true },
+      { n: "2", title: "Draft", count: "1", unit: "writing now", cta: "Watch progress" },
+      { n: "3", title: "Check", count: "1", unit: "ready to check", cta: "Check draft" },
+      { n: "4", title: "Publish", count: "1", unit: "ready to print", cta: "Tonight’s edition" }
+    ].map((s, i) => Object.assign(s, { go: this.act(["queue", "drafts", "story", "story"][i]), numStyle: css("width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;box-sizing:border-box;" + (s.on ? "background:var(--yel);color:#111" : "border:2px solid var(--ink)")), btnStyle: s.on ? primary : outline }));
+    const ck = (label, st) => ({ label: (st === "ok" ? "✓ " : st === "warn" ? "! " : "○ ") + label, style: css("font-size:14px;font-weight:700;padding:3px 8px;" + (st === "ok" ? "border:1px solid var(--ok);color:var(--ok)" : st === "warn" ? "border:2px solid var(--warn);color:var(--warn)" : "border:1px dashed var(--ink2);color:var(--ink2)")) });
+    const edition = [
+      { section: "Seniors", title: "Longmont Senior Center to begin free meal pickups Oct. 2", checks: [ck("Evidence checked", "ok"), ck("Names: 1 needs review", "warn"), ck("Section confirmed", "ok"), ck("Preview viewed", "ok")], cta: "Review 1 name", btnStyle: outline },
+      { section: "Environment", title: "Longmont opens sign-up for 200 free trees in east-side neighborhoods", checks: [ck("Evidence check not run", "todo"), ck("Names", "todo"), ck("Section: Environment", "ok"), ck("Preview", "todo")], cta: "Check draft", btnStyle: outline }
+    ];
+    const drafts = [
+      { stage: "Writing · Automatic", title: "Longmont Council Advances 8-Acre Dry Creek Annexation Near Airport Road", meta: "Started 7:12 a.m. · reading 3 records", cta: "Watch", bar: "var(--line)" },
+      { stage: "Ready to check", title: "Longmont opens sign-up for 200 free trees in east-side neighborhoods", meta: "Saved 7:40 a.m. · 2 sources", cta: "Check draft", bar: "var(--ink)" },
+      { stage: "Checked · 1 name to review", title: "Longmont Senior Center to begin free meal pickups Oct. 2", meta: "Evidence check passed 8:02 a.m.", cta: "Review & publish", bar: "var(--yel)" }
+    ].map((d, i) => Object.assign(d, { btnStyle: i === 2 ? primary : outline, cardStyle: css("display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--panel);border:1px solid var(--line);border-top:4px solid " + d.bar) }));
+    const chip = (label, kind) => ({ label, style: css("font-size:14px;font-weight:800;padding:1px 8px;" + (kind === "new" ? "background:var(--yel);color:#111" : kind === "dup" ? "border:1px dashed var(--ink2);color:var(--ink2)" : "border:1px solid var(--ink2);color:var(--ink2)")) });
+    const sc = n => css("width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums;box-sizing:border-box;" + (n >= 14 ? "background:var(--yel);color:#111" : n >= 10 ? "border:2px solid var(--ink)" : "border:1px solid var(--line)"));
+    const meter = (o, f) => Array.from({ length: o + f }, (_, i) => ({ style: css("width:12px;height:12px;box-sizing:border-box;" + (i < o ? "background:var(--ink)" : "border:2px solid var(--danger)")) }));
+    const L = [
+      { score: 16, chips: [chip("NEW", "new"), chip("Council")], title: "Dry Creek annexation returns Oct. 6 for public hearing and second reading", why: "Unanimous first reading added traffic and bike-share conditions; second reading is the binding vote.", o: 3, f: 0, meta: "Planning · 2 hours ago" },
+      { score: 14, chips: [chip("NEW", "new"), chip("Housing")], title: "Housing board posts Oct. 8 funding packet and a cancellation notice for the same date", why: "The two records conflict; the pages don’t say which meeting is cancelled.", o: 3, f: 1, meta: "Housing · 5 hours ago" },
+      { score: 11, chips: [chip("≈ PRINTED", "dup")], title: "OUR Center Community Market visit rules differ across its own pages", why: "Matches a story printed Sep 25. Open only if something new was posted.", o: 2, f: 0, meta: "Community · yesterday" },
+      { score: 9, chips: [chip("Seen again")], title: "St. Vrain posts updated open-house list for October", why: "Adds two schools to the list we printed Sep 24.", o: 1, f: 0, meta: "Schools · 6 hours ago" },
+      { score: 7, chips: [chip("Utilities")], title: "Water department notice: hydrant flushing on the west side next week", why: "Routine notice; affects residents west of Hover St.", o: 0, f: 1, meta: "Utilities · 3 hours ago" }
+    ];
+    const st = this.state.status;
+    const leads = L.map((x, i) => {
+      const s = st[i], selected = !phone && i === this.state.sel;
+      return Object.assign({}, x, {
+        scoreStyle: sc(x.score), meter: meter(x.o, x.f),
+        evidence: x.o + " opened" + (x.f ? " · " + x.f + " could not open" : ""),
+        rowStyle: css("display:grid;grid-template-columns:52px minmax(0,1fr) " + (phone ? "" : "auto") + ";gap:10px 18px;padding:18px 12px;border-bottom:1px solid var(--line);cursor:pointer;" + (selected ? "background:var(--panel);box-shadow:inset 4px 0 0 var(--sel)" : "box-shadow:inset 4px 0 0 transparent") + (s ? ";opacity:.6" : "")),
+        titleStyle: css("font-weight:700;font-size:19px;line-height:1.25;" + (s === "killed" ? "text-decoration:line-through" : "")),
+        live: !s, done: !!s, doneLabel: s === "held" ? "Held" : "Killed",
+        select: () => this.setState({ sel: i }), start: e => { e.preventDefault(); e.stopPropagation(); this.props.onAction && this.props.onAction("start-story"); },
+        hold: e => { e.preventDefault(); e.stopPropagation(); this.props.onAction && this.props.onAction("hold:" + i); },
+        kill: e => { e.preventDefault(); e.stopPropagation(); this.props.onAction && this.props.onAction("kill:" + i); },
+        undo: e => { e.preventDefault(); this.setStat(i, null); }
+      });
+    });
+    const ws = k => css("font-size:14px;font-weight:800;padding:1px 7px;white-space:nowrap;" + (k === "same" ? "border:1px solid var(--ok);color:var(--ok)" : k === "changed" ? "background:var(--yel);color:#111" : "border:2px dashed var(--danger);color:var(--danger)"));
+    const wire = [
+      { name: "City Council agendas", state: "Changed", note: "2 new items since yesterday", style: ws("changed") },
+      { name: "Housing & Human Services board", state: "Changed", note: "Cancellation notice posted", style: ws("changed") },
+      { name: "St. Vrain Valley Schools", state: "✓ Checked · no change", note: "Checked 6:02 a.m.", style: ws("same") },
+      { name: "Longmont Leader", state: "Could not check", note: "Site returned 403 (blocked). Try again or open it yourself.", style: ws("fail") },
+      { name: "HOPE for Longmont feed", state: "Could not check", note: "Feed is serving defaced pages", style: ws("fail") }
+    ];
+    const follows = [
+      { who: "Which Oct. 8 meeting is cancelled?", what: "Found: the HHS board page now lists the Oct. 8 hearing as moved to Oct. 15.", due: "Found an answer", k: "found", a: "Review finding", b: "Add to story" },
+      { who: "Size of the 2027 funding pool", what: "Searching the budget book · page 214 of 612", due: "Running now", k: "run", a: "Open", b: "Pause" },
+      { who: "Has HOPE for Longmont fixed its feed?", what: "Site timed out 3 times. Next try 2:00 p.m.", due: "Could not check", k: "fail", a: "Retry now", b: "Edit" }
+    ].map(f => Object.assign(f, { dueStyle: css("align-self:flex-start;font-size:14px;font-weight:800;padding:1px 8px;" + ({ found: "background:var(--yel);color:#111", run: "border:2px solid var(--ink);color:var(--ink)", fail: "border:2px dashed var(--danger);color:var(--danger)" })[f.k]) }));
+    return {
+      root: Object.assign({ display: "grid", gridTemplateColumns: phone ? "minmax(0,1fr)" : this.props.bare ? "minmax(0,1fr) 340px" : "230px minmax(0,1fr) 340px", gridTemplateAreas: phone ? "\"nav\" \"main\" \"rail\"" : this.props.bare ? "\"main rail\"" : "\"nav main rail\"", minHeight: phone ? "auto" : "1500px", background: "var(--bg)", color: "var(--ink)", fontFamily: "'Bricolage Grotesque',sans-serif", width: "100%" }, t, l),
+      theme: dark ? "dark" : "light", phone, desktop: !phone, showNav: !this.props.bare,
+      jobs: this.props.jobs || [], hasJobs: (this.props.jobs || []).length > 0,
+      aLead: this.act("add-lead"), aNew: this.act("new-story"), aOp: this.act("new-story"), aStory: this.act("story"), aScan: this.act("scan"),
+      keyDark: key("#111"), keyInk: key("var(--ink)"), keyDanger: key("var(--danger)"),
+      steps, edition, drafts, leads, wire, follows,
+      openCount: String(leads.filter(x => x.live).length), heldCount: String(3 + Object.values(st).filter(v => v === "held").length),
+      dark: [
+        { pile: "Open files", note: "Reading records", n: "2" },
+        { pile: "Signals to review", note: "From r/longmont and watched pages", n: "5" },
+        { pile: "Waiting on an AI follow-up", note: "AI watching for a statement or record", n: "1" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

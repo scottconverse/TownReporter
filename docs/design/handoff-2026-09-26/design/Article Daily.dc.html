@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&display=swap">
+</helmet>
+<div style="{{ root }}">
+  <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 20px;padding:10px var(--px);background:var(--yel);color:#111;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700">
+    <span>Today in Longmont · Sat, Sept. 26</span>
+    <div style="display:flex;gap:20px"><a href="#" style="display:flex;align-items:center;min-height:44px;color:#111">Search</a><a href="#" style="display:flex;align-items:center;min-height:44px;color:#111">Saved</a><a href="#" style="display:flex;align-items:center;min-height:44px;color:#111">{{ themeLabel }}</a><a href="#" style="display:flex;align-items:center;min-height:44px;color:#111">Editor’s desk</a></div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px 16px;padding:18px var(--px);border-bottom:3px solid var(--ink)">
+    <a href="#" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;color:var(--ink)">
+      <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:var(--wm);letter-spacing:-.035em;line-height:1">TownReporter</span>
+      <span style="font-family:'Bricolage Grotesque',sans-serif;font-size:16px;font-weight:700;background:var(--ink);color:var(--tagInk);padding:3px 9px">Longmont</span>
+    </a>
+    <nav style="display:flex;flex-wrap:wrap;gap:8px 22px;font-family:'Bricolage Grotesque',sans-serif;font-size:16px;font-weight:700">
+      <a href="#" style="color:var(--ink)">Council</a><a href="#" style="color:var(--ink)">Schools</a><a href="#" style="color:var(--ink);box-shadow:inset 0 -4px 0 var(--yel)">Housing</a><a href="#" style="color:var(--ink)">Growth &amp; planning</a><a href="#" style="color:var(--ink)">Utilities</a><a href="#" style="color:var(--ink)">Opinion</a>
+    </nav>
+  </div>
+
+  <header style="display:flex;flex-direction:column;gap:18px;padding:var(--headPad) var(--px) 28px;max-width:1000px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700">
+      <a href="#" style="color:var(--ink2)">Front page</a><span style="color:var(--ink2)">/</span>
+      <a href="#" style="background:var(--yel);color:#111;padding:3px 10px">Housing</a>
+    </div>
+    <h1 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:var(--h1);line-height:1.02;letter-spacing:-.028em;text-wrap:balance">Longmont Board Posts Two Oct. 8, 2026 Records: A Funding Hearing Packet and a Cancellation Notice</h1>
+    <p style="margin:0;font-size:var(--dek);line-height:1.45;color:var(--ink2);text-wrap:pretty;max-width:820px">The Housing and Human Services Advisory Board has a posted Oct. 1 funding hearing packet and an Oct. 8 funding hearing packet — and a separate posted notice cancelling its Oct. 8, 2026 meeting.</p>
+  </header>
+
+  <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px 24px;margin:0 var(--px);padding:14px 0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink)">
+    <div style="display:flex;align-items:center;gap:12px;font-family:'Bricolage Grotesque',sans-serif;font-size:15px">
+      <span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--yel);color:#111;font-weight:800;font-size:16px">TR</span>
+      <div style="display:flex;flex-direction:column;gap:2px"><span style="font-weight:700">TownReporter</span><span style="color:var(--ink2)">Saturday, September 26, 2026 · 2 min read</span></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700">
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 16px;border:2px solid var(--ink);color:var(--ink)">Save</a>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 16px;border:2px solid var(--ink);color:var(--ink)">Share</a>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 16px;border:2px solid var(--ink);color:var(--ink)">Aa Text size</a>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:var(--cols);grid-template-areas:var(--areas);gap:0 48px;padding:36px var(--px) 48px">
+    <nav style="grid-area:toc;display:flex;flex-direction:var(--tocDir);flex-wrap:wrap;gap:var(--tocGap);align-self:start;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700;margin-bottom:var(--tocMb)">
+      <span style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink2);width:100%">In this article</span>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border-left:4px solid var(--yel);color:var(--ink)">The story</a>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border-left:4px solid var(--soft);color:var(--ink)">Sources &amp; records</a>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border-left:4px solid var(--soft);color:var(--ink)">Corrections</a>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border-left:4px solid var(--soft);color:var(--ink)">Read next</a>
+    </nav>
+
+    <article style="grid-area:body;display:flex;flex-direction:column;gap:1.1em;font-size:var(--body);line-height:1.65;max-width:680px;min-width:0">
+      <p style="margin:0">Longmont's Housing and Human Services Advisory Board has posted a packet for Human Services Funding Hearings on Oct. 1, 2026, at 6 p.m., and a second packet for the same hearings on Oct. 8, 2026, at 6 p.m. Both are labeled "Agency Hearings" and both agendas list a call to order, a "Public invited to be heard" item, and the funding hearings.</p>
+      <p style="margin:0">A separate posted notice states that "the OCTOBER 8, 2026 meeting of the Housing and Human Services Advisory Board has been cancelled." That notice's agenda lists only a call to order, "Public invited to be heard," and adjournment.</p>
+      <p style="margin:0">So the board's public record carries two distinct Oct. 8, 2026 items — a funding-hearing packet and a cancellation notice. The posted pages do not say whether the cancellation applies to the funding hearing or to a separate regular board meeting.</p>
+      <p style="margin:0"><strong style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800">Why it matters locally:</strong> these hearings are the dated public window in which agencies seeking 2027 human services funding present to the advisory board. Residents who want to follow how city human services dollars are allocated have specific evenings to track.</p>
+      <p style="margin:0">The Oct. 1 hearing is designated for Education agencies and the Oct. 8 hearing for Self-Sufficiency agencies, per the packets. The packets do not state whether public comment is taken during the agency presentations themselves.</p>
+      <p style="margin:0">The size of the 2027 funding pool, the criteria the advisory board uses to score agencies, and the decision timeline after the hearings are not stated in the pages reviewed.</p>
+      <p style="margin:0">For context, the city's Human Services Grant Program receives 3% of General Fund revenue; in 2024 that totaled roughly $2.6 million, split between safety-net services and funding to address housing insecurity and adult homelessness, according to Longmont Leader reporting on the council's approval of that year's allocation.</p>
+      <p style="margin:.4em 0 0;padding:16px 0 0;border-top:3px solid var(--ink);font-size:.85em;line-height:1.55;color:var(--ink2)">A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.</p>
+    </article>
+
+    <aside style="grid-area:side;display:flex;flex-direction:column;gap:24px;align-self:start;margin-top:var(--sideMt)">
+      <div style="display:flex;flex-direction:column;padding:24px;background:var(--block);color:var(--blockInk)">
+        <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:24px;letter-spacing:-.02em;color:var(--yel);margin-bottom:6px">Dates in this story</span>
+        <sc-for list="{{ dates }}" as="d" hint-placeholder-count="3">
+          <div style="display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:12px 0;border-bottom:1px solid var(--blockRule)">
+            <div style="display:flex;flex-direction:column;font-family:'Bricolage Grotesque',sans-serif;line-height:1">
+              <span style="font-size:14px;font-weight:700;color:var(--yel)">{{ d.dow }}</span>
+              <span style="font-size:22px;font-weight:800;white-space:nowrap">{{ d.day }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:16px;line-height:1.35">{{ d.what }}</span>
+              <span style="font-family:'Bricolage Grotesque',sans-serif;font-size:14px;color:var(--blockInk2)">{{ d.note }}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </aside>
+  </div>
+
+  <section style="display:flex;flex-direction:column;gap:18px;padding:36px var(--px) 40px;border-top:3px solid var(--ink)">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px">
+      <span style="font-family:'Bricolage Grotesque',sans-serif;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;background:var(--yel);color:#111;padding:2px 8px">Follow the evidence</span>
+      <h2 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:32px;letter-spacing:-.02em">How we reported this</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:var(--srcCols);gap:1px;background:var(--grid);border:1px solid var(--grid)">
+      <sc-for list="{{ sources }}" as="s" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:8px;padding:20px 22px;background:var(--bg)">
+          <span style="font-family:'Bricolage Grotesque',sans-serif;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ s.role }}</span>
+          <span style="font-family:'Bricolage Grotesque',sans-serif;font-size:19px;font-weight:700;line-height:1.25">{{ s.title }}</span>
+          <span style="font-size:15px;color:var(--ink2)">{{ s.host }}{{ s.captured }}</span>
+          <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:auto;padding-top:6px;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700">
+            <a href="#" style="display:flex;align-items:center;min-height:44px;color:var(--ink);text-decoration:underline;text-decoration-color:var(--yel);text-decoration-thickness:3px;text-underline-offset:4px">Current source</a>
+            <a href="#" style="display:flex;align-items:center;min-height:44px;color:var(--ink);text-decoration:underline;text-decoration-color:var(--yel);text-decoration-thickness:3px;text-underline-offset:4px">View captured version</a>
+            <sc-if value="{{ s.compare }}" hint-placeholder-val="{{ true }}"><a href="#" style="display:flex;align-items:center;min-height:44px;color:var(--ink);text-decoration:underline;text-decoration-color:var(--yel);text-decoration-thickness:3px;text-underline-offset:4px">Compare versions</a></sc-if>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <p style="margin:0;font-size:16px;color:var(--ink2)">Trust is verifiable. Check the official record before you act on a figure or a vote.</p>
+  </section>
+
+  <section style="display:grid;grid-template-columns:var(--twoCols);border-top:3px solid var(--ink)">
+    <div style="display:flex;flex-direction:column;gap:12px;align-items:flex-start;padding:32px var(--px)">
+      <h2 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-.02em">Corrections &amp; accountability</h2>
+      <p style="margin:0;font-size:17px">No corrections have been posted for this story.</p>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 18px;background:var(--ink);color:var(--bg);font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700">File a correction →</a>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;align-items:flex-start;padding:32px var(--px);background:var(--yel);color:#111">
+      <h2 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-.02em">Share the reporting.</h2>
+      <p style="margin:0;font-size:17px;line-height:1.5">Free to reprint with credit to TownReporter and a link to the original. Reprinting does not imply endorsement.</p>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 18px;border:2px solid #111;color:#111;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700">Copy credit &amp; original link</a>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;border-top:3px solid var(--ink)">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px 16px;padding:28px var(--px) 16px">
+      <h2 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-.02em">Keep reading</h2>
+      <a href="#" style="font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700;color:var(--ink)">More in Housing →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:var(--sixCols);gap:1px;background:var(--grid);border-top:1px solid var(--grid)">
+      <sc-for list="{{ next }}" as="s" hint-placeholder-count="3">
+        <article style="display:flex;flex-direction:column;gap:10px;padding:24px var(--cellPx) 28px;background:var(--bg)">
+          <span style="font-family:'Bricolage Grotesque',sans-serif;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.05em">{{ s.sec }}</span>
+          <h3 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:21px;line-height:1.18;letter-spacing:-.01em">{{ s.title }}</h3>
+          <span style="font-size:15px;color:var(--ink2)">{{ s.date }} · {{ s.read }} read</span>
+        </article>
+      </sc-for>
+    </div>
+  </section>
+
+  <footer style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px 22px;padding:28px var(--px);background:var(--block);color:var(--blockInk);font-family:'Bricolage Grotesque',sans-serif;font-size:15px;border-top:3px solid var(--ink)">
+    <span style="font-weight:800;font-size:22px">TownReporter <span style="color:var(--yel)">· Longmont</span></span>
+    <div style="display:flex;flex-wrap:wrap;gap:12px 22px;font-weight:500"><a href="#" style="color:var(--blockInk)">About</a><a href="#" style="color:var(--blockInk)">How we report</a><a href="#" style="color:var(--blockInk)">Corrections</a><a href="#" style="color:var(--blockInk)">RSS</a><a href="#" style="color:var(--blockInk)">Editor’s desk</a></div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;'light'|'dark'&quot;},&quot;phone&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;textSize&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;large&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;'normal'|'large'&quot;}}">class Component extends DCLogic {
+  renderVals() {
+    const dark = (this.props.theme ?? "light") === "dark";
+    const phone = !!this.props.phone;
+    const scale = { normal: 1, large: 1.2 }[this.props.textSize ?? "normal"] || 1;
+    const t = dark
+      ? { "--bg": "#1b1916", "--ink": "#e8e6e1", "--ink2": "#bdbab3", "--grid": "#3b3631", "--soft": "#3b3631", "--block": "#27231f", "--blockInk": "#e8e6e1", "--blockInk2": "#bdbab3", "--blockRule": "#3b3631", "--yel": "#e6c35c", "--tagInk": "#1b1916" }
+      : { "--bg": "#fffdf7", "--ink": "#111", "--ink2": "#3a3a3a", "--grid": "#111", "--soft": "#d8d3c4", "--block": "#111", "--blockInk": "#fff", "--blockInk2": "#cfcfcf", "--blockRule": "#444", "--yel": "#ffd23f", "--tagInk": "#ffd23f" };
+    const l = phone
+      ? { "--px": "20px", "--wm": "30px", "--headPad": "24px", "--h1": (34 * scale) + "px", "--dek": (19 * scale) + "px", "--cols": "minmax(0,1fr)", "--areas": "\"toc\" \"body\" \"side\"", "--tocDir": "row", "--tocGap": "4px 6px", "--tocMb": "24px", "--sideMt": "32px", "--srcCols": "minmax(0,1fr)", "--twoCols": "minmax(0,1fr)", "--sixCols": "minmax(0,1fr)", "--cellPx": "20px" }
+      : { "--px": "40px", "--wm": "40px", "--headPad": "36px", "--h1": (56 * scale) + "px", "--dek": (22 * scale) + "px", "--cols": "200px minmax(0,680px) minmax(0,1fr)", "--areas": "\"toc body side\"", "--tocDir": "column", "--tocGap": "6px", "--tocMb": "0", "--sideMt": "0", "--srcCols": "repeat(2,minmax(0,1fr))", "--twoCols": "repeat(2,minmax(0,1fr))", "--sixCols": "repeat(3,minmax(0,1fr))", "--cellPx": "32px" };
+    return {
+      root: Object.assign({ background: "var(--bg)", color: "var(--ink)", fontFamily: "'Literata',serif", width: "100%", "--body": (phone ? 18 : 20) * scale + "px" }, t, l),
+      themeLabel: dark ? "Light mode" : "Dark mode",
+      dates: [
+        { dow: "Thu", day: "Oct 1", what: "Funding hearing: Education agencies", note: "6 p.m. · per posted packet" },
+        { dow: "Thu", day: "Oct 8", what: "Funding hearing: Self-Sufficiency agencies", note: "6 p.m. · per posted packet" },
+        { dow: "Thu", day: "Oct 8", what: "Board meeting cancelled", note: "Separate posted notice" }
+      ],
+      sources: [
+        { role: "Followed", title: "Human services funding allocation get council approval", host: "longmontleader.com", captured: "", compare: false },
+        { role: "Announcing source", title: "CompiledDocument (template 17292)", host: "longmont.primegov.com", captured: " · Captured Sep 25, 2026, 7:00 PM", compare: true },
+        { role: "Announcing source", title: "CompiledDocument (template 17302)", host: "longmont.primegov.com", captured: " · Captured Sep 25, 2026, 7:00 PM", compare: true },
+        { role: "Announcing source", title: "CompiledDocument (template 17299)", host: "longmont.primegov.com", captured: " · Captured Sep 25, 2026, 7:00 PM", compare: true }
+      ],
+      next: [
+        { sec: "Housing", title: "HomeAhead needs small dressers and flat-screen TVs at its Longmont donation site", date: "Sep 24", read: "2 min" },
+        { sec: "Community", title: "OUR Center Marks 40 Years in Longmont With Sept. 26 Celebration at 220 Collyer St.", date: "Sep 25", read: "4 min" },
+        { sec: "Seniors", title: "Longmont Senior Center to begin free meal pickups Oct. 2", date: "Sep 25", read: "2 min" }
+      ]
+    };
+  }
+}</script>
+</body>
+</html>

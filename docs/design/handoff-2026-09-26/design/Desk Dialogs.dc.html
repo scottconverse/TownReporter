@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="position:absolute;inset:0;z-index:50;display:flex;justify-content:center;align-items:flex-start;padding:0 24px;background:rgba(10,9,8,.62);font-family:'Bricolage Grotesque',sans-serif;color:var(--ink)" onClick="{{ close }}">
+  <div style="box-sizing:border-box;width:820px;max-width:100%;margin-top:{{ topPx }};display:flex;flex-direction:column;gap:18px;padding:26px 28px 24px;background:var(--bg);border:2px solid var(--ink);box-shadow:0 20px 50px rgba(0,0,0,.45)" onClick="{{ stop }}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:4px"><span style="font-weight:800;font-size:28px;letter-spacing:-.02em;line-height:1.1">{{ title }}</span><span style="font-size:15px;color:var(--ink2);line-height:1.4">{{ sub }}</span></div>
+      <a href="#" onClick="{{ close }}" style="display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border:1px solid var(--line);color:var(--ink);font-weight:800;font-size:18px">✕</a>
+    </div>
+    <sc-if value="{{ hasTabs }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-wrap:wrap;border:1px solid var(--line);align-self:flex-start"><sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3"><a href="#" onClick="{{ t.pick }}" style="{{ t.style }}">{{ t.label }}</a></sc-for></div>
+    </sc-if>
+
+    <sc-if value="{{ showDrop }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:22px;border:2px dashed var(--ink2);background:var(--panel)">
+        <span style="font-weight:800;font-size:18px">{{ dropTitle }}</span>
+        <span style="font-size:15px;color:var(--ink2)">{{ dropNote }}</span>
+        <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Choose files</a>
+      </div>
+    </sc-if>
+
+    <sc-for list="{{ fields }}" as="f" hint-placeholder-count="3">
+      <label style="display:flex;flex-direction:column;gap:6px;font-weight:800;font-size:15px">
+        <span>{{ f.label }} <span style="font-weight:500;color:var(--ink2)">{{ f.hint }}</span></span>
+        <sc-if value="{{ f.area }}" hint-placeholder-val="{{ false }}"><textarea placeholder="{{ f.ph }}" style="{{ f.style }}"></textarea></sc-if>
+        <sc-if value="{{ f.line }}" hint-placeholder-val="{{ true }}"><input placeholder="{{ f.ph }}" style="{{ f.style }}"></input></sc-if>
+      </label>
+    </sc-for>
+
+    <sc-if value="{{ hasChoices }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <span style="font-weight:800;font-size:15px">{{ choiceLabel }}</span>
+        <sc-for list="{{ choices }}" as="c" hint-placeholder-count="3">
+          <a href="#" onClick="{{ c.pick }}" style="{{ c.style }}"><span style="{{ c.dot }}"></span><span style="display:flex;flex-direction:column;gap:2px"><span style="font-weight:800;font-size:16px">{{ c.label }}</span><span style="font-size:14px;color:var(--ink2);font-weight:500">{{ c.note }}</span></span></a>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-for list="{{ fields2 }}" as="f" hint-placeholder-count="3">
+      <label style="display:flex;flex-direction:column;gap:6px;font-weight:800;font-size:15px">
+        <span>{{ f.label }} <span style="font-weight:500;color:var(--ink2)">{{ f.hint }}</span></span>
+        <sc-if value="{{ f.area }}" hint-placeholder-val="{{ false }}"><textarea placeholder="{{ f.ph }}" style="{{ f.style }}"></textarea></sc-if>
+        <sc-if value="{{ f.line }}" hint-placeholder-val="{{ true }}"><input placeholder="{{ f.ph }}" style="{{ f.style }}"></input></sc-if>
+      </label>
+    </sc-for>
+
+    <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:1px solid var(--line);border-left:4px solid var(--ink);background:var(--panel)">
+        <span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">Preview · the note as readers will see it</span>
+        <span style="font-family:'Literata',serif;font-size:16px;line-height:1.5">{{ notePreview }}</span>
+        <span style="font-size:14px;color:var(--ink2)">Shown at the bottom of the story and in the public corrections log. Nothing posts until you press Post.</span>
+      </div>
+    </sc-if>
+    <sc-if value="{{ hasPreview }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;border:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;padding:10px 12px;background:var(--panel);font-weight:800;font-size:15px"><span>Preview · 6 found</span><span style="color:var(--ink2);font-weight:600">5 new · 1 already watched</span></div>
+        <sc-for list="{{ preview }}" as="p" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid var(--line);font-size:15px"><span style="{{ p.box }}">{{ p.mark }}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.url }}</span><span style="{{ p.st }}">{{ p.kind }}</span></div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ hasItems }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ items }}" as="it" hint-placeholder-count="4">
+          <a href="#" onClick="{{ it.go }}" style="{{ it.style }}"><span style="display:flex;flex-direction:column;gap:3px"><span style="{{ it.labelStyle }}">{{ it.label }}</span><span style="font-size:14px;color:var(--ink2);font-weight:500;line-height:1.4">{{ it.note }}</span></span><span style="font-weight:800;font-size:15px;white-space:nowrap">{{ it.cta }}</span></a>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ hasCompare }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
+        <sc-for list="{{ cmp }}" as="c" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:10px;padding:14px 16px;background:var(--bg)">
+            <span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ c.h }}</span>
+            <sc-for list="{{ c.paras }}" as="p" hint-placeholder-count="3"><span style="{{ p.style }}">{{ p.t }}</span></sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <span style="font-size:14px;color:var(--ink2)">Yellow: added or changed by the check · struck through: removed. Findings stay listed under Checks either way.</span>
+    </sc-if>
+
+    <sc-if value="{{ hasModel }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 14px;border:1px solid var(--line);font-size:15px">
+        <span style="font-weight:800">Model</span>
+        <select style="min-height:44px;padding:0 8px;background:var(--bg);color:var(--ink);border:1px solid var(--ink);border-radius:0;font-family:inherit;font-weight:700;font-size:15px"><option>{{ modelDefault }}</option><option>Automatic (ladder)</option><option>Codex Sol · sign-in</option><option>Claude Sonnet · sign-in</option><option>Claude Opus · sign-in</option><option>Gemini Pro · API</option><option>gpt-oss 20B · Ollama</option></select>
+        <span style="font-weight:800">Effort</span>
+        <select style="min-height:44px;padding:0 8px;background:var(--bg);color:var(--ink);border:1px solid var(--ink);border-radius:0;font-family:inherit;font-weight:700;font-size:15px"><option>high</option><option>low</option><option>medium</option><option>xhigh</option><option>max</option></select>
+        <span style="color:var(--ink2)">Set per job in Server → Models</span>
+      </div>
+    </sc-if>
+
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+      <span style="font-size:14px;color:var(--ink2);flex:1 1 280px;min-width:0">{{ foot }}</span>
+      <div style="display:grid;grid-auto-flow:column;gap:8px;white-space:nowrap;flex:none">
+        <a href="#" onClick="{{ close }}" style="display:flex;align-items:center;min-height:48px;padding:0 16px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:15px">Cancel</a>
+        <a href="#" onClick="{{ goAlt }}" style="{{ altStyle }}">{{ alt }}</a>
+        <a href="#" onClick="{{ go }}" style="{{ primaryStyle }}">{{ primary }}</a>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:900},&quot;dialog&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;new-story&quot;,&quot;add-lead&quot;,&quot;add-source&quot;,&quot;redraft&quot;,&quot;add-to&quot;,&quot;dark-file&quot;,&quot;follow-up&quot;],&quot;default&quot;:&quot;new-story&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;onClose&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onStart&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(kind: string) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  state = { tab: 0, choice: 0 };
+  componentDidUpdate(p) { if (p.dialog !== this.props.dialog) this.setState({ tab: 0, choice: 0 }); }
+  renderVals() {
+    const d = this.props.dialog || "new-story";
+    const tab = this.state.tab, ch = this.state.choice;
+    const inp = { width: "100%", boxSizing: "border-box", minHeight: "44px", padding: "10px 12px", background: "var(--bg)", color: "var(--ink)", border: "1px solid var(--ink)", borderRadius: 0, fontFamily: "'Literata',serif", fontSize: "16px", lineHeight: 1.5 };
+    const F = (label, ph, area, hint, h) => ({ label, ph, hint: hint || "", area: !!area, line: !area, style: area ? Object.assign({}, inp, { minHeight: (h || 110) + "px", resize: "vertical" }) : inp });
+    const C = (label, note) => ({ label, note });
+    const D = {
+      "new-story": { title: "New story", sub: "Start from material for the AI, write it yourself, or bring in a story written elsewhere. Nothing prints until you press Publish.",
+        tabs: ["AI drafts from material", "Write it myself", "Paste a finished story"],
+        views: [
+          { drop: ["Drop documents here", "PDF, Word, text, images (OCR), subtitles · up to 20 files, 100 MB each"], fields: [F("Links", "https://… one per line (web pages, PDFs, YouTube)", true, "optional", 70), F("Source text", "Paste long material here", true, "optional", 90), F("Assignment", "What’s the story? Angle, what to find out, what to ignore", true, "", 80)], model: "Codex Sol · sign-in", primary: "Start drafting", kind: "draft", foot: "The AI reads everything, drafts, and files it to Drafts. You’ll see its progress the whole time." },
+          { fields: [F("Headline", "Your headline"), F("Summary", "One or two sentences", true, "", 60), F("Story", "Write here…", true, "", 180), F("Sources", "Links to the records you used, one per line", true, "optional", 60)], primary: "Save draft", alt: "Save & check against evidence", kind: "save", altKind: "check", foot: "Saved as your draft. The evidence check is optional but runs the same checks as an AI draft." },
+          { fields: [F("Original link", "Where it was first published"), F("Credit line", "e.g. Reprinted with permission from…"), F("Story text", "Paste the full story", true, "", 180)], choiceLabel: "What should the AI do?", choices: [C("Nothing: keep it exactly as pasted", "Formatting only"), C("Clean up formatting and suggest a headline", "Your text is unchanged"), C("Check it against its sources", "Runs the evidence check")], primary: "Save as draft", kind: "save", foot: "Reprints keep the credit line and link on the published page." }
+        ] },
+      "add-lead": { title: "Add a lead", sub: "Give the desk a link or a tip. The AI does the reading; you decide what happens next.",
+        views: [{ fields: [F("Link or tip", "Paste a URL, or describe what you heard", true, "", 90), F("Why it might matter", "Optional note for the AI", false, "optional")], choiceLabel: "Then", choices: [C("Research and score it", "Files it in the Queue with evidence and a score"), C("Research and draft a story now", "Goes straight to Drafts"), C("Just file it as-is", "No AI; you’ll work it yourself")], primary: "Add lead", kind: "lead", foot: "A Dark Desk file is for questions that need an investigation. This is for ordinary leads." }] },
+      "add-source": { title: "Add sources to watch", sub: "Add one page, paste a list, upload a file, or ask the AI to find sources.",
+        tabs: ["One link", "Paste a list", "Upload a file", "Ask AI to find sources"],
+        views: [
+          { fields: [F("Link", "https://…"), F("Name", "What to call it"), F("What to watch for", "e.g. new agendas, budget items", false, "optional")], choiceLabel: "Check it", choices: [C("Every daily scan", "The desk checks sources once a day at scan time")], primary: "Add & run first check", kind: "sources", foot: "The first check runs now so you can see whether the page can be read." },
+          { fields: [F("Links", "Paste URLs, one per line. Names optional after a comma.", true, "", 120)], preview: true, primary: "Add 5 sources", kind: "sources", foot: "Duplicates are skipped. Each new source gets a first check now." },
+          { drop: ["Drop a CSV, OPML or sitemap", "CSV columns: url, name, frequency (optional) · OPML from any RSS reader"], preview: true, primary: "Add 5 sources", kind: "sources", foot: "You’ll see every row before anything is added." },
+          { fields: [F("What should the paper cover?", "e.g. Longmont water, St. Vrain schools, Boulder County commissioners", true, "", 80)], choiceLabel: "Search", choices: [C("Government and public-record sites", ""), C("Local organizations and nonprofits", ""), C("Everything, including local news and forums", "")], model: "Claude Sonnet · sign-in", primary: "Find sources", kind: "find-sources", foot: "The AI proposes sources. They land in Suggested sources, with why and who found each, for you to accept or reject." }
+        ] },
+      "redraft": { title: "Redraft", sub: "Ask for a new version. Your headline and any text you marked as yours are kept.",
+        views: [{ fields: [F("What should change?", "e.g. lead with the cancellation, cut the context paragraph, shorter", true, "", 100)], choiceLabel: "Keep", choices: [C("My headline and my edits", "The AI works around them"), C("My headline only", ""), C("Start fresh from the records", "Your headline is kept")], model: "Codex Sol · sign-in", primary: "Start redraft", kind: "redraft", foot: "The current draft is kept. You’ll compare the two before choosing." }] },
+      "add-to": { title: "Add to this story", sub: "New material, a new record, or your own paragraph.",
+        views: [{ drop: ["Drop new documents", "They’re added to this story’s records"], fields: [F("New material", "Paste text, a link, or your own paragraph", true, "", 100)], choiceLabel: "How", choices: [C("AI weaves it in", "Rewrites around it; you review the change"), C("Add as an update at the top", "Marked Updated with the time"), C("Paste in as-is at the end", "No AI")], primary: "Add", kind: "add-to", foot: "You’ll see exactly what changed before saving." }] },
+      "dark-file": { title: "Start a Dark Desk file", sub: "For a question that needs an investigation. Nothing here prints on its own.",
+        views: [{ fields: [F("The question", "What are you trying to find out?", true, "", 60), F("The tip or starting point", "Link, document, post or what you heard", true, "", 60), F("The ordinary explanation", "What would make this a non-story?", false, "rule it out first")], choiceLabel: "Limits", choices: [C("Quick look · up to 10 records, 20 minutes", ""), C("Standard · up to 30 records, 2 hours or $3", ""), C("Deep · up to 100 records, 8 hours or $15", "")], model: "Claude Opus · sign-in", primary: "Open the file", kind: "dark", foot: "You’ll watch its activity log live and can stop it any time." }] },
+      "follow-up": { title: "New AI follow-up", sub: "An AI agent keeps looking for an answer and tells you what it finds.",
+        views: [{ fields: [F("What to find out", "e.g. Which Oct. 8 meeting was cancelled?", true, "", 60), F("Where to look", "Links, one per line (optional; the AI can search)", true, "optional", 60)], choiceLabel: "How", choices: [C("Re-check these pages on a schedule", "Tells you when they change"), C("Search the web and public records", "Daily until found"), C("Watch for the next agenda or minutes", "Checks when the body usually posts")], primary: "Start follow-up", kind: "follow", foot: "When it finds something it adds it to the story’s reporting notes and tells you. It never publishes." }] }
+      ,
+      "hold": { title: "Hold this lead", sub: "It leaves the open list and waits in Held. Tell the desk why so the AI learns what to hold.",
+        views: [{ choiceLabel: "Why (optional)", choices: [C("Waiting on a record or date", "You release it when the record arrives"), C("Waiting on an AI follow-up", "Creates a follow-up"), C("Not now, maybe later", "")], fields: [F("Note", "Optional", false, "optional")], alt: "Hold, no reason", altKind: "held", primary: "Hold with this reason", kind: "held", foot: "Released leads return to the open list with their score. Undo stays on the row." }] },
+      "kill": { title: "Kill this lead", sub: "Moves to Killed. The reason stays with it, with the time and any link.",
+        views: [{ choiceLabel: "Quick fill (optional)", choices: [C("Not news", "Routine notice, no public interest"), C("Already printed", "Matches a story we ran"), C("Outside our area", ""), C("Bad source or unreadable", "")], fields2: [F("Reason in your words", "A quick fill goes here; edit it or write your own", true, "optional", 60), F("Link", "https://… (optional)", false, "optional")], alt: "Kill, no reason", altKind: "killed", primary: "Kill with this reason", kind: "killed", foot: "The Kill button and the X key both open this. Cancel keeps the lead. The lead stays under Killed, and Undo stays on the row." }] },
+      "more-lead": { title: "More for this lead", sub: "Dry Creek annexation returns Oct. 6 for public hearing and second reading",
+        items: [["Edit the lead", "Change the title, notes or section before drafting", "Edit", "go:add-lead"], ["Hold with a reason", "", "Hold", "go:hold"], ["Merge with a printed story", "Adds this as an update to “Longmont Council Advances…”", "Merge", "add-to"], ["Send to Dark Desk", "Opens an investigation file from this lead", "Open file", "go:dark-file"], ["Start an AI follow-up", "Keep watching for the second reading", "Start", "go:follow-up"], ["Kill with a reason", "", "Kill", "go:kill", 1]], primary: "Done", kind: "none" },
+      "headlines": { title: "Headline", sub: "Pick a suggestion, keep yours, or type a new one. You can also type over the headline directly on the story.",
+        views: [{ choiceLabel: "Choose one", choices: [C("Keep mine: Longmont Board Posts Two Oct. 8, 2026 Records: A Funding Hearing Packet and a Cancellation Notice", "Your current headline"), C("Longmont Housing Board Posts Oct. 8 Hearing Packet — and a Notice Cancelling Its Oct. 8 Meeting", "Suggested · leads with the conflict"), C("Two Posted Records Disagree About the Housing Board’s Oct. 8 Meeting", "Suggested · shorter, reader-first"), C("Human Services Funding Hearings Set for Oct. 1 and Oct. 8; One Date Also Marked Cancelled", "Suggested · leads with the service info")], fields2: [F("Or write a new one", "Type a headline here; it replaces the choice above")], model: "Claude Haiku · API", alt: "Suggest 3 more", altKind: "headlines-more", primary: "Use this headline", kind: "use-headline", foot: "Suggestions came from Claude Haiku · high in 6 seconds. Nothing changes until you press Use this headline." }] },
+      "compare": { title: "Compare versions", sub: "Your saved version (left) and the version after the evidence check (right).", compare: true, alt: "Restore previous", altKind: "restore-prev", primary: "Keep checked version", kind: "keep-checked" },
+      "more-published": { title: "More for this story", sub: "Longmont police: juvenile stabbed at Loomiller Park; suspect in custody · printed Sep 25",
+        items: [["Edit the story", "Opens it in the workbench. Saving republishes with an “Updated” time.", "Edit", "story"], ["Add a correction", "Posted on the story and in the public corrections log", "Correct", "go:correction"], ["Add an update", "New information at the top, marked with the time", "Update", "add-to"], ["Unpublish", "Back to Drafts; recoverable. The URL shows a short notice.", "Unpublish", "unpublish"], ["Legal removal…", "Skips the trash. Requires a reason and shows the remaining cleanup.", "Start", "go:legal", 1]], primary: "Done", kind: "none" },
+      "correction": { title: "Add a correction", sub: "Appears at the bottom of the story and in the public corrections log.",
+        views: [{ fields: [F("What was wrong", "e.g. The story said Sept. 22; the incident was Sept. 21.", true, "", 70), F("What is right", "What the story should have said", true, "", 70)], choiceLabel: "The story text", choices: [C("Leave the story text as is", "Default. Only the correction note is posted."), C("Also fix the story text", "Changes the published text to match")], fields2: [F("Reader request", "Linked: 1 open request on this story", false, "optional")], notePreview: "Correction, Sept. 26, 2026: An earlier version of this story said the incident happened Sept. 22. It happened Sept. 21.", alt: "Suggest wording (AI)", altKind: "suggest-wording", primary: "Post as a plain note", kind: "corrected", foot: "Posted on the story and in the public corrections log. The correction note stays permanently." }] },
+      "legal": { title: "Legal removal", sub: "This bypasses the recoverable trash. Removing a page does not prove every copy is gone.",
+        items: [["Public story page", "Removed now; the URL returns 410 Gone", "Will remove", "none"], ["Captured records for this story", "3 captures · kept unless you also remove them", "Keep ▾", "none"], ["Search index and RSS", "Removed now", "Will remove", "none"], ["Nightly backups", "Up to 30 days of backups still hold the story. Needs operator review.", "Review", "none", 1]],
+        views: [{ choiceLabel: "What happens to the removed text", choices: [C("Keep a sealed copy for 12 months (default)", "Owner-only, never public. Deleted automatically after 12 months."), C("Keep nothing: a court order requires destruction", "No copy of the text is kept anywhere the desk controls.")], fields2: [F("Reason (required)", "e.g. Court order, case no. …", true, "", 70), F("Type REMOVE to confirm", "REMOVE")], primary: "Remove permanently", danger: true, kind: "legal-done", foot: "The restricted record keeps who, when, why and what. The rule chosen above decides whether a sealed copy of the text is kept." }] },
+      "add-connection": { title: "Add a model connection", sub: "Pick a kind. Nothing is used until you assign it in Who does what.",
+        items: [["Frontier model · API key", "Anthropic, OpenAI, Google. Pay per use.", "Add key", "connected"], ["Subscription sign-in", "Claude, Codex (ChatGPT), Gemini. Uses your plan.", "Sign in", "connected"], ["LM Studio", "This machine or another on your network (address:port)", "Connect", "connected"], ["Ollama", "Local (localhost:11434), a remote machine, or Ollama Cloud with a key", "Connect", "connected"], ["Any OpenAI-compatible server", "vLLM, llama.cpp server, others", "Connect", "connected"]], primary: "Done", kind: "none" }
+    }[d];
+    if (!D.views) D.views = [{ primary: D.primary, kind: D.kind, alt: D.alt, altKind: D.altKind }];
+    const v = D.views[Math.min(tab, D.views.length - 1)];
+    const items = (D.items || []).map(([label, note, cta, k, danger]) => ({ label, note, cta, go: e => { e.preventDefault(); if (k !== "none") this.props.onStart && this.props.onStart(k); }, labelStyle: { fontWeight: 800, fontSize: "16px", color: danger ? "var(--danger)" : "var(--ink)" }, style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", minHeight: "56px", padding: "10px 14px", color: "var(--ink)", border: danger ? "2px solid var(--danger)" : "1px solid var(--line)" } }));
+    const P = (tt, k) => ({ t: tt, style: { fontFamily: "'Literata',serif", fontSize: "15px", lineHeight: 1.55, ...(k === "add" ? { background: "color-mix(in srgb, var(--yel) 35%, transparent)" } : k === "del" ? { textDecoration: "line-through", color: "var(--ink2)" } : {}) } });
+    const cmp = [
+      { h: "Your saved version · 8:20 a.m.", paras: [P("Longmont's Housing and Human Services Advisory Board has posted a packet for Human Services Funding Hearings on Oct. 1, 2026, at 6 p.m. …"), P("For context, the city's Human Services Grant Program receives 3% of General Fund revenue; in 2024 that totaled $2.6 million.", "del")] },
+      { h: "After evidence check · 8:31 a.m.", paras: [P("Longmont's Housing and Human Services Advisory Board has posted a packet for Human Services Funding Hearings on Oct. 1, 2026, at 6 p.m. …"), P("For context, the city's Human Services Grant Program receives 3% of General Fund revenue; in 2024 that totaled roughly $2.6 million, according to Longmont Leader reporting.", "add")] }
+    ];
+    const btnS = on => ({ display: "flex", alignItems: "center", minHeight: "44px", padding: "0 14px", fontWeight: 800, fontSize: "15px", ...(on ? { background: "var(--ink)", color: "var(--bg)" } : { color: "var(--ink)" }) });
+    const start = (k) => e => { e.preventDefault(); this.props.onStart && this.props.onStart(k); };
+    return {
+      title: D.title, sub: D.sub,
+      hasTabs: !!D.tabs, tabs: (D.tabs || []).map((label, i) => ({ label, style: btnS(i === tab), pick: e => { e.preventDefault(); this.setState({ tab: i, choice: 0 }); } })),
+      showDrop: !!v.drop, dropTitle: v.drop ? v.drop[0] : "", dropNote: v.drop ? v.drop[1] : "",
+      fields: v.fields || [], fields2: v.fields2 || [],
+      hasChoices: !!v.choices, choiceLabel: v.choiceLabel || "",
+      choices: (v.choices || []).map((c, i) => Object.assign({}, c, { pick: e => { e.preventDefault(); this.setState({ choice: i }); }, style: { display: "flex", alignItems: "flex-start", gap: "12px", padding: "12px 14px", color: "var(--ink)", border: i === ch ? "2px solid var(--ink)" : "1px solid var(--line)", background: i === ch ? "var(--panel)" : "transparent" }, dot: { width: "18px", height: "18px", flex: "none", marginTop: "2px", boxSizing: "border-box", border: "2px solid var(--ink)", background: i === ch ? "var(--yel)" : "transparent" } })),
+      hasNote: !!v.notePreview, notePreview: v.notePreview || "",
+      hasPreview: !!v.preview,
+      preview: [["https://longmont.primegov.com/public/portal", "Meeting portal", 1], ["https://www.longmontcolorado.gov/news", "News page", 1], ["https://www.svvsd.org/feed/", "RSS", 1], ["https://bouldercounty.gov/government/meetings", "Already watched", 0], ["https://www.longmontleader.com/rss", "RSS", 1], ["https://ourcenter.org/news", "News page", 1]].map(([url, kind, on]) => ({ url, kind, mark: on ? "✓" : "", box: { width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, boxSizing: "border-box", ...(on ? { background: "var(--ink)", color: "var(--bg)" } : { border: "2px solid var(--line)" }) }, st: { fontSize: "14px", fontWeight: 700, color: on ? "var(--ink2)" : "var(--warn)" } })),
+      hasItems: items.length > 0, items, hasCompare: !!D.compare, cmp,
+      hasModel: !!v.model, modelDefault: v.model || "",
+      primary: v.primary, go: start(v.kind), primaryStyle: v.danger ? { display: "flex", alignItems: "center", minHeight: "48px", padding: "0 20px", border: "2px solid var(--danger)", color: "var(--danger)", fontWeight: 800, fontSize: "16px" } : { display: "flex", alignItems: "center", minHeight: "48px", padding: "0 20px", background: "var(--yel)", color: "#111", fontWeight: 800, fontSize: "16px" }, hasAlt: !!v.alt, alt: v.alt || "", altStyle: { display: v.alt ? "flex" : "none", alignItems: "center", minHeight: "48px", padding: "0 16px", border: "2px solid var(--ink)", color: "var(--ink)", fontWeight: 700, fontSize: "15px" }, goAlt: start(v.altKind || v.kind),
+      foot: v.foot || D.foot || "",
+      close: e => { e.preventDefault(); this.props.onClose && this.props.onClose(); },
+      topPx: (this.props.top ?? 60) + "px",
+      stop: e => e.stopPropagation()
+    };
+  }
+}
+</script>
+</body>
+</html>
