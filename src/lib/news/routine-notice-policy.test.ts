@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { beforeEach, test } from "node:test";
-import { getSql } from "../db.ts";
+import { getPglite, getSql } from "../db.ts";
 import {
   ensureRoutineNoticePolicySchema,
   readRoutineNoticePolicyFor,
@@ -20,7 +21,17 @@ beforeEach(async () => {
     "create table if not exists newsroom_members(user_id text primary key,newsroom_id integer not null,role text not null)",
   );
   await sql.query(
-    "create table if not exists sources(id serial primary key,user_id text not null,newsroom_id integer not null,url text not null,title text not null,status text not null default 'accepted')",
+    "create table if not exists sources(id serial primary key,user_id text not null,newsroom_id integer not null,url text not null,title text not null,status text not null default 'accepted',tier text,kind text)",
+  );
+  /*
+    The fixture above is a copy of the production `sources` table, so it carries
+    the migrations too -- a copy that omits one is a fixture that lies about the
+    schema (AK3). 0097 is the suggested-source origin columns; `exec` rather
+    than `query` because the file is several statements.
+  */
+  const pg = await getPglite();
+  await pg.exec(
+    await readFile(new URL("../../../migrations/0097_suggested_source_origin.sql", import.meta.url), "utf8"),
   );
   await sql.query(
     "create table if not exists audit_events(id serial primary key,user_id text not null,action text not null,detail text not null default '',created_at timestamptz not null default now(),newsroom_id integer not null default 1,subject_kind text,subject_id integer)",

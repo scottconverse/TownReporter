@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { beforeEach, describe, it } from "node:test";
-import { getSql } from "../db.ts";
+import { getPglite, getSql } from "../db.ts";
 import {
   commitDailyScanResults,
   finalizeDailyScanFailure,
@@ -45,6 +46,17 @@ async function reset() {
     "create table if not exists sources(id integer primary key,newsroom_id integer,url text,title text,kind text,tier integer,status text,last_hash text,last_fetched_at timestamptz,last_error text)",
   ])
     await sql.query(q);
+  /*
+    The `sources` fixture above is a copy of the production table, so it has to
+    carry the migrations too -- a copy that omits one is a fixture that lies
+    about the schema (AK3). 0097 is the suggested-source origin columns
+    (`proposed_reason`, `proposed_by`, `reviewed_at`, ...). It needs `exec`,
+    not `query`: one file, several statements.
+  */
+  const pg = await getPglite();
+  await pg.exec(
+    await readFile(new URL("../../../migrations/0097_suggested_source_origin.sql", import.meta.url), "utf8"),
+  );
   await sql.query("alter table desk_jobs add column if not exists failover_note text not null default ''");
   await sql.query("alter table desk_jobs add column if not exists result_json text not null default '{}'");
   for (const t of [

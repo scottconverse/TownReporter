@@ -60,6 +60,7 @@ import {
   sectionConfigInput,
   slugInput,
   sourceStatusInput,
+  suggestedSourceReviewInput,
   storyDocumentDownloadInput,
   storyDocumentListInput,
   trashId,
@@ -202,6 +203,23 @@ const rows: Row[] = [
       { why: "negative id", value: { id: -1, status: "accepted" } },
       { why: "unknown status", value: { id: 42, status: "maybe" } },
       { why: "id as text", value: { id: "42", status: "accepted" } },
+    ],
+  },
+  {
+    fn: "desk.ts:331 reviewSuggestedSources",
+    run: suggestedSourceReviewInput.parse.bind(suggestedSourceReviewInput),
+    valid: { ids: [3009, 3010], decision: "accepted", sectionKey: "council", note: "duplicate of the county page" },
+    bad: [
+      { why: "no ids at all", value: { ids: [], decision: "accepted" } },
+      // A bulk press has to be one real press, not an unbounded one.
+      {
+        why: "more ids than the batch cap",
+        value: { ids: Array.from({ length: LIMITS.suggestedBatch + 1 }, (_, i) => i + 1), decision: "rejected" },
+      },
+      // `proposed` is a state, never a decision: a press cannot un-review a batch.
+      { why: "unknown decision", value: { ids: [1], decision: "proposed" } },
+      { why: "oversize note", value: { ids: [1], decision: "rejected", note: x(LIMITS.reviewNote + 1) } },
+      { why: "oversize section key", value: { ids: [1], decision: "accepted", sectionKey: x(LIMITS.sectionKey + 1) } },
     ],
   },
   {
@@ -975,9 +993,16 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * missing from this list at 13b04db0 -- `git show 13b04db0:src/lib/news/desk.ts`
    * has the call at line 2441 and this regex had never heard of it -- so the
    * sweep was red on the news lane before either unit touched anything.
+   *
+   * Unit AO brings `suggestedSourceReviewInput`, the Suggested sources review
+   * press in `desk.ts:346`: the row ids in the batch, the decision, the section
+   * to file under and the reviewer's note. A strict `z.object` with real
+   * ceilings on all four (`LIMITS.suggestedBatch`, `LIMITS.sectionKey`,
+   * `LIMITS.reviewNote`), called the way every name beside it is. Added as a
+   * name, not as a relaxation -- the call was always the right shape.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to

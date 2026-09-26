@@ -208,9 +208,18 @@ The watch list chosen during Paper setup. The Longmont edition ships with city, 
 
 **Add one:** paste a URL, optional title, add. YouTube URLs are tagged as YouTube; everything else starts as official / tier A. The add form also carries an optional **Assign to sections** list: tick the newspaper sections this source should feed and it is filed under them as it is saved, in the same step. Opinion and About are not on that list — they are reserved pages.
 
-**Accept one:** accepting a proposed source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A proposed source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
+**Accept one:** accepting a suggested source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A suggested source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
 
-Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list; adding and accepting are still yours to do.
+**Suggested sources.** The third group — **Suggested sources: N** — is everything the desk found while it worked and has not decided yet. It is built for volume: 175 waiting suggestions was normal before this screen existed, and clicking each one to read its page was the only way to decide. Each row now carries the material a decision needs, and several rows can be decided at once.
+
+- **The reason** the pass recorded — what the page offers the paper, in the model's one sentence. A row suggested before this was recorded says *No reason was recorded when this was suggested* rather than showing a blank.
+- **Suggested by** — the scan, the research pass, or the Dark Desk — and, when the pass was working on a lead, a link to it. **Anyone / The scan / The research pass / The Dark Desk / Not recorded** filter the list by suggester.
+- **Section** — the model's guess, shown as the section picker's starting value. A guess for a section this paper no longer files under starts the picker empty instead, because accepting into it would be refused.
+- Per row: **Accept to <section>** (or **Accept** when no section is set), **Reject**, and an optional **Note** saved with either one.
+- For several: tick **Select <title>** on each row, or **Select all N**, then **Accept selected** or **Reject selected**. The batch section picker files the whole selection under one section; leave it at **No section** to accept without filing.
+- Every press says **Saving…**, then what it did — *Accepted 3 suggestions and filed them under Council* — or **Nothing was changed:** and why. A batch is one transaction: either every row in it is decided, or none is, and the message says which.
+
+Only the owner can file a source under a section — that is newspaper configuration, and **Server → Sections** is the owner's panel. If you are not the owner, the add form simply does not offer the list and the accept path does not offer the picker; adding, accepting and rejecting are still yours to do.
 
 
 **Add many:** bulk paste. Formats the toolkit already taught people:
@@ -228,7 +237,7 @@ Neighborhood group: https://www.facebook.com/groups/…
 - **Tier B** — news. Attributed, not gospel.
 - **Tier C** — community. Scanned as a discovery clue, **never treated as fact.**
 
-Proposed sources from a scan wait here until you accept or reject them. Accepting puts them on the next scan. Rejecting drops them.
+Suggested sources wait here until you accept or reject them. All three passes file what they find: the **scan** (from `proposed_sources` in its reply), the **research pass** (the public pages it actually read under a lead), and the **Dark Desk** (the pages it read while developing a file). Each one records why it suggested the page, which pass it was, and, when there was one, the lead it was working on. A page this paper already has — same host and path, however it is spelled — is never proposed again, and a search-results page is never proposed at all. A social profile is proposed only to a paper that already watches a social source: this edition ships with the city's and public media's accounts on watch, so a scan finding one is proposing what you asked for, while a paper watching no social sources will not have a Facebook group arrive on its list because a pass opened one on the way to a story. Accepting puts it on the next scan. Rejecting drops it.
 
 Newly discovered public records are fair game even if they were not on this list. Dark Desk does not have to ask the watch list for permission to fetch a public URL.
 
@@ -1203,7 +1212,7 @@ The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Sta
 
 **Edit and review:** the story workspace keeps headline, summary and body on the writing surface. Its toolbar has Save, Preview, Redraft, Check draft against evidence and Publish. Checks contains the existing name results and evidence entry points; Sources contains documents and download links; Reporting contains the model/research choices, reporting notes and claim-of-absence controls. The full finding/evidence review remains below the editor. Preview shows the current text without publishing it. Existing evidence and publication checks still apply.
 
-**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Proposed and Dropped groups. Server has nine panels: Writing models, Custom connections, Daily scan, Routine notices, Paper identity, Sections, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
+**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Suggested sources and Dropped groups. Server has nine panels: Writing models, Custom connections, Daily scan, Routine notices, Paper identity, Sections, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
 
 
 ### Recheck a draft against uploaded documents

@@ -61,6 +61,7 @@ import {
   scanCountsLine,
   scanZeroWhy,
   sourceErrorKind,
+  suggestedByLabel,
   workingQueueEmptyCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
@@ -396,7 +397,7 @@ function DeskHome() {
   }
   if (proposed.length) {
     needs.push({
-      t: `${proposed.length} proposed source${proposed.length === 1 ? "" : "s"} await${proposed.length === 1 ? "s" : ""} review`,
+      t: `${proposed.length} suggested source${proposed.length === 1 ? "" : "s"} await${proposed.length === 1 ? "s" : ""} review`,
       to: "/desk/sources",
     });
   }
@@ -1224,11 +1225,14 @@ function DeskHome() {
               {proposed.length ? (
                 <div className="wire-block">
                   <p className="wire-line">
-                    <b>Proposed sources</b> · {proposed.length}
+                    <b>Suggested sources</b> · {proposed.length}
                   </p>
                   {proposed.slice(0, 5).map((s) => (
                     <div key={s.id} className="wire-row wire-proposed">
                       <span title={s.title}>{s.title}</span>
+                      {/* Who found it. The rail is a triage shortcut and has no
+                          room for the reason; the list on Sources carries it. */}
+                      <span className="meta-inline">{suggestedByLabel(s.proposed_by)}</span>
                       <span className="wire-proposed-acts">
                         <InkButton
                           tone="quiet"
@@ -1249,9 +1253,9 @@ function DeskHome() {
                   ))}
                   {proposed.length > 5 ? (
                     <p className="wire-sum">
-                      {proposed.length - 5} more proposed ·{" "}
-                      <Link to="/desk/sources" className="inline-link">
-                        Review them in Sources
+                      {proposed.length - 5} more suggested ·{" "}
+                      <Link to="/desk/sources" search={{ tab: "proposed" }} className="inline-link">
+                        Review them in Suggested sources
                       </Link>
                     </p>
                   ) : null}

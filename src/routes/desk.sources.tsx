@@ -1,18 +1,48 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
-import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
-import { editorActionError, editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
+import {
+  addSource,
+  addSourcesBulk,
+  listSources,
+  reviewSuggestedSources,
+  setSourceStatus,
+} from "@/lib/news/desk";
+import {
+  editorActionError,
+  editorFetchError,
+  kindFromSourceUrl,
+  suggestedOriginLine,
+  tierFromKind,
+} from "@/lib/news/desk-copy";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { SourceRow } from "@/lib/news/types";
 
-export const Route = createFileRoute("/desk/sources")({ component: SourcesPage });
+export const Route = createFileRoute("/desk/sources")({
+  /*
+    `?tab=` is here for the Command Center's "N more suggested" link, which has
+    to land the editor on the list it is counting. Everywhere else links to
+    this page without one and lands on the watch list, which is the default.
+    An unknown value is dropped rather than trusted, so a hand-typed URL cannot
+    open a group this screen does not have.
+  */
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { tab?: "accepted" | "proposed" | "rejected" } => ({
+    tab:
+      search.tab === "accepted" || search.tab === "proposed" || search.tab === "rejected"
+        ? search.tab
+        : undefined,
+  }),
+  component: SourcesPage,
+});
 
 function SourcesPage() {
-  const [sourceTab, setSourceTab] = useState("accepted");
+  const search = Route.useSearch();
+  const [sourceTab, setSourceTab] = useState<string>(search.tab ?? "accepted");
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const {
@@ -221,8 +251,8 @@ function SourcesPage() {
     },
     {
       k: "proposed",
-      title: "Proposed",
-      sub: "Turned up by scans and Dark Desk. Nothing is fetched until you accept it.",
+      title: "Suggested sources",
+      sub: "Pages the scan, the research pass and the Dark Desk found while they worked. Nothing is fetched until you accept it, and nothing here is a source until you say so.",
       acts: ["accepted", "rejected"],
     },
     {
@@ -363,7 +393,11 @@ function SourcesPage() {
             aria-pressed={sourceTab === g.k}
             onClick={() => setSourceTab(g.k)}
           >
-            {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Proposed" : "Dropped"}{" "}
+            {g.k === "accepted"
+              ? "On watch"
+              : g.k === "proposed"
+                ? "Suggested sources:"
+                : "Dropped"}{" "}
             {sources.filter((s) => s.status === g.k).length}
           </button>
         ))}
@@ -381,10 +415,15 @@ function SourcesPage() {
           const rows = sources.filter((s) => s.status === g.k);
           if (sourceTab !== g.k) return null;
           return (
-            <section key={g.k} id={g.k === "accepted" ? "on-watch" : undefined} className="src-sec">
+            <section key={g.k} id={g.k === "accepted" ? "on-watch" : "suggested"} className="src-sec">
               <SecHead title={g.title} count={rows.length} sub={g.sub ?? undefined} />
               {g.k === "accepted" && !rows.length ? (
                 <p className="wire-sum">Nothing on watch yet — add a URL above.</p>
+              ) : g.k === "proposed" ? (
+                /* The one list built for volume: 175 rows were waiting when
+                   this was written, so it carries a select-all, a per-press
+                   Saving/Saved/Failed line, and one transaction per press. */
+                <SuggestedSources rows={rows} canAssign={canAssignSections} options={reportingSections} />
               ) : (
                 <SourceTable
                   rows={rows}
@@ -456,6 +495,341 @@ function SectionPicker({
         ))}
       </div>
     </fieldset>
+  );
+}
+
+/** Which filter bucket a suggestion falls in; anything unknown is "unrecorded". */
+function suggesterKey(by: string | null | undefined): "scan" | "research" | "dark" | "editor" | "unrecorded" {
+  return by === "scan" || by === "research" || by === "dark" || by === "editor" ? by : "unrecorded";
+}
+
+const SUGGESTER_FILTERS: { k: "all" | ReturnType<typeof suggesterKey>; label: string; none: string }[] = [
+  { k: "all", label: "Anyone", none: "Nothing is waiting for review." },
+  { k: "scan", label: "The scan", none: "No suggestions from the scan are waiting." },
+  { k: "research", label: "The research pass", none: "No suggestions from the research pass are waiting." },
+  { k: "dark", label: "The Dark Desk", none: "No suggestions from the Dark Desk are waiting." },
+  {
+    k: "unrecorded",
+    label: "Not recorded",
+    none: "No suggestions are waiting without a recorded suggester.",
+  },
+];
+
+/**
+ * The Suggested sources list: a pile of suggestions an editor can actually
+ * clear, not a list to click through one at a time.
+ *
+ * WHAT IT IS FOR. Production held 175 waiting suggestions, all of them from
+ * the scan, none of them reviewed, and the screen showed a title and a URL --
+ * so the only way to decide was to open each page. This shows the reason the
+ * pass recorded, who suggested it, which lead it came from and the section it
+ * guessed, which is the material a decision needs. Several rows can be decided
+ * at once.
+ *
+ * ONE PRESS, ONE TRANSACTION. Every button here calls `reviewSuggestedSources`
+ * with the whole selection: status and section link are written together, so a
+ * failure changes nothing and this screen can say "Nothing was changed" and be
+ * telling the truth. The old path -- accept, then assign -- could leave a batch
+ * half-filed with no way to see which rows landed.
+ *
+ * The section picker is owner-only, the same rule as everywhere else that
+ * writes `section_sources`. An editor without it still accepts and rejects;
+ * the guess is shown to them as a note rather than as a control they cannot
+ * use.
+ */
+function SuggestedSources({
+  rows,
+  canAssign,
+  options,
+}: {
+  rows: SourceRow[];
+  canAssign: boolean;
+  options: { key: string; name: string }[];
+}) {
+  const qc = useQueryClient();
+  const [selected, setSelected] = useState<number[]>([]);
+  const [who, setWho] = useState<"all" | ReturnType<typeof suggesterKey>>("all");
+  const [rowSection, setRowSection] = useState<Record<number, string>>({});
+  const [rowNote, setRowNote] = useState<Record<number, string>>({});
+  const [batchSection, setBatchSection] = useState("");
+  const [press, setPress] = useState<{ phase: "saving" | "ok" | "err"; text: string } | null>(null);
+
+  const nameOf = (key: string) => options.find((o) => o.key === key)?.name ?? key;
+  /*
+    The model's section guess, used as the picker's starting value -- but only
+    when this newsroom still files under that key. A guess for a section that
+    has since been renamed or merged away is a value this select cannot show
+    and the accept would refuse, so it is dropped here and the picker starts
+    empty rather than preselected with something that cannot be saved.
+  */
+  const guessFor = (row: SourceRow) =>
+    row.proposed_section && options.some((o) => o.key === row.proposed_section)
+      ? row.proposed_section
+      : "";
+  const sectionFor = (row: SourceRow) => rowSection[row.id] ?? guessFor(row);
+
+  const review = useMutation({
+    mutationFn: (input: {
+      ids: number[];
+      decision: "accepted" | "rejected";
+      sectionKey?: string;
+      note?: string;
+    }) => reviewSuggestedSources({ data: input }),
+    onMutate: (input) =>
+      setPress({
+        phase: "saving",
+        text:
+          input.ids.length === 1
+            ? `Saving "${rows.find((r) => r.id === input.ids[0])?.title ?? "that suggestion"}"…`
+            : `Saving ${input.ids.length} suggestions…`,
+      }),
+    onSuccess: (res, input) => {
+      if (!res.ok) {
+        // The server says nothing was written; repeat it here rather than
+        // letting the editor work out which half landed.
+        setPress({ phase: "err", text: `Nothing was changed: ${res.error}` });
+        return;
+      }
+      const n = input.ids.length;
+      const one = n === 1 ? (rows.find((r) => r.id === input.ids[0])?.title ?? "That suggestion") : null;
+      const noteSaved = input.note ? " The note was saved with it." : "";
+      const verb = input.decision === "accepted" ? "Accepted" : "Rejected";
+      const what = one ? `"${one}"` : `${n} suggestions`;
+      const where =
+        input.decision === "accepted"
+          ? res.sectionName
+            ? ` and filed ${one ? "it" : "them"} under ${res.sectionName}`
+            : " onto the watch list"
+          : "";
+      setPress({ phase: "ok", text: `${verb} ${what}${where}.${noteSaved}` });
+      setSelected([]);
+      setRowNote({});
+      setRowSection({});
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+    onError: (err) => {
+      // A thrown error is the boundary, not the server's own refusal: an
+      // expired session, or a payload the validator refused (the batch cap).
+      const raw = err instanceof Error ? err.message : "";
+      setPress({
+        phase: "err",
+        text:
+          raw === "Unauthorized"
+            ? "Nothing was changed: the session expired. Sign in again, then retry."
+            : `Nothing was changed: ${
+                editorActionError(raw, "review those suggestions") ?? "could not reach the desk."
+              }`,
+      });
+    },
+  });
+
+  const visible = who === "all" ? rows : rows.filter((r) => suggesterKey(r.proposed_by) === who);
+  const allPicked = visible.length > 0 && visible.every((r) => selected.includes(r.id));
+  const togglePicked = (id: number) =>
+    setSelected((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+  const noteFor = (row: SourceRow) => rowNote[row.id]?.trim() || undefined;
+  const decide = (
+    ids: number[],
+    decision: "accepted" | "rejected",
+    sectionKey?: string,
+    note?: string,
+  ) => {
+    if (!ids.length) return;
+    review.mutate({ ids, decision, sectionKey, note });
+  };
+
+  return (
+    <>
+      <div className="row-acts static" aria-label="Decide several suggestions at once">
+        <InkButton
+          small
+          disabled={!selected.length || review.isPending}
+          onClick={() =>
+            decide(selected, "accepted", canAssign ? batchSection || undefined : undefined)
+          }
+        >
+          Accept selected{canAssign && batchSection ? ` to ${nameOf(batchSection)}` : ""}
+        </InkButton>
+        <InkButton
+          tone="ghost"
+          small
+          disabled={!selected.length || review.isPending}
+          onClick={() => decide(selected, "rejected")}
+        >
+          Reject selected
+        </InkButton>
+        <InkButton
+          tone="ghost"
+          small
+          disabled={!visible.length || review.isPending}
+          onClick={() => setSelected(allPicked ? [] : visible.map((r) => r.id))}
+        >
+          {allPicked ? "Clear selection" : `Select all ${visible.length}`}
+        </InkButton>
+        {canAssign && options.length ? (
+          <label className="meta-inline">
+            Section for the batch
+            <select
+              className="ml-2"
+              value={batchSection}
+              disabled={review.isPending}
+              onChange={(e) => setBatchSection(e.target.value)}
+            >
+              <option value="">No section</option>
+              {options.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+      <div className="filters" aria-label="Who suggested these sources">
+        {SUGGESTER_FILTERS.map((f) => {
+          const count =
+            f.k === "all" ? rows.length : rows.filter((r) => suggesterKey(r.proposed_by) === f.k).length;
+          return (
+            <button
+              key={f.k}
+              className={"filter" + (who === f.k ? " on" : "")}
+              aria-pressed={who === f.k}
+              onClick={() => setWho(f.k)}
+            >
+              {f.label} {count}
+            </button>
+          );
+        })}
+      </div>
+      {press ? (
+        <p className={"note" + (press.phase === "err" ? " err" : "")} role="status">
+          {press.text}
+        </p>
+      ) : null}
+      {!rows.length ? (
+        <p className="wire-sum">
+          Nothing is waiting for review. The scan, the research pass and the Dark Desk file what
+          they find here as they work.
+        </p>
+      ) : !visible.length ? (
+        <p className="wire-sum">{SUGGESTER_FILTERS.find((f) => f.k === who)?.none}</p>
+      ) : (
+        <table className="ltable">
+          <thead>
+            <tr>
+              <th>
+                <span className="sr-only">Select</span>
+              </th>
+              <th>Suggested source</th>
+              <th>Why it was suggested</th>
+              <th>Suggested by</th>
+              <th>Section</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((s) => {
+              const picked = sectionFor(s);
+              return (
+                <tr key={s.id} className="lead-tr">
+                  <td className="td-meta" data-label="Select">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(s.id)}
+                      disabled={review.isPending}
+                      aria-label={`Select ${s.title}`}
+                      onChange={() => togglePicked(s.id)}
+                    />
+                  </td>
+                  <td className="td-hl" data-label="Suggested source">
+                    <span className="src-t">{s.title}</span>
+                    <span className="meta-inline block">
+                      <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
+                        {s.url}
+                      </a>
+                    </span>
+                  </td>
+                  <td className="td-meta" data-label="Why">
+                    {/*
+                      A row suggested before 0.6.70 has no reason on it. Saying
+                      so is the point -- 175 of them were waiting, and a blank
+                      cell would read as "the reason is nothing".
+                    */}
+                    {s.proposed_reason ?? "No reason was recorded when this was suggested."}
+                  </td>
+                  <td className="td-meta" data-label="Suggested by">
+                    {suggestedOriginLine(s)}
+                    {s.proposed_lead_id != null ? (
+                      <>
+                        {" "}
+                        <Link
+                          to="/desk/story/$leadId"
+                          params={{ leadId: String(s.proposed_lead_id) }}
+                          className="inline-link"
+                        >
+                          Open the lead
+                        </Link>
+                      </>
+                    ) : null}
+                  </td>
+                  <td className="td-meta" data-label="Section">
+                    {canAssign ? (
+                      <select
+                        aria-label={`Section for ${s.title}`}
+                        value={picked}
+                        disabled={review.isPending}
+                        onChange={(e) =>
+                          setRowSection((map) => ({ ...map, [s.id]: e.target.value }))
+                        }
+                      >
+                        <option value="">No section</option>
+                        {options.map((o) => (
+                          <option key={o.key} value={o.key}>
+                            {o.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : s.proposed_section ? (
+                      `Guessed ${s.proposed_section}`
+                    ) : (
+                      "No section guessed"
+                    )}
+                  </td>
+                  <td className="td-acts" data-label="Actions">
+                    <input
+                      className="mb-1 w-full"
+                      value={rowNote[s.id] ?? ""}
+                      disabled={review.isPending}
+                      aria-label={`Review note for ${s.title}`}
+                      placeholder="Note (optional)"
+                      onChange={(e) => setRowNote((map) => ({ ...map, [s.id]: e.target.value }))}
+                    />
+                    <span className="row-acts">
+                      <InkButton
+                        tone="quiet"
+                        small
+                        disabled={review.isPending}
+                        onClick={() => decide([s.id], "accepted", canAssign ? picked || undefined : undefined, noteFor(s))}
+                      >
+                        {canAssign && picked ? `Accept to ${nameOf(picked)}` : "Accept"}
+                      </InkButton>
+                      <InkButton
+                        tone="quiet"
+                        small
+                        disabled={review.isPending}
+                        onClick={() => decide([s.id], "rejected", undefined, noteFor(s))}
+                      >
+                        Reject
+                      </InkButton>
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 

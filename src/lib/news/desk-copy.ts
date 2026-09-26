@@ -1497,6 +1497,51 @@ export function tierFromKind(kind: string): "A" | "B" | "C" {
   return "C";
 }
 
+/**
+ * Who suggested a source, in words (migration 0097's `proposed_by`).
+ *
+ * "Not recorded" is a real answer and not a fallback to hide: 175 rows were
+ * already waiting when this column arrived, and a reviewer who reads "the
+ * scan" on every one of them would be reading a guess. The vocabulary is a
+ * closed set written by this codebase, so anything else -- including a value
+ * from a future pass this version does not know -- reads as unrecorded rather
+ * than being passed through raw.
+ */
+export function suggestedByLabel(by: string | null | undefined): string {
+  switch (by) {
+    case "scan":
+      return "the scan";
+    case "research":
+      return "the research pass";
+    case "dark":
+      return "the Dark Desk";
+    case "editor":
+      return "an editor";
+    default:
+      return "not recorded";
+  }
+}
+
+/**
+ * The one-line origin under a suggested source: who suggested it, and from
+ * what. The lead is named, not linked, here -- the caller renders the link so
+ * this stays a pure string a test can pin.
+ *
+ * A suggestion with a lead always has one; a scan suggestion carries the run
+ * instead, which is the only handle on where it came from. Neither is invented
+ * when it is missing.
+ */
+export function suggestedOriginLine(row: {
+  proposed_by?: string | null;
+  proposed_scan_run_id?: number | null;
+  proposed_lead_id?: number | null;
+}): string {
+  const who = `Suggested by ${suggestedByLabel(row.proposed_by)}`;
+  if (row.proposed_lead_id != null) return `${who} — from lead ${row.proposed_lead_id}`;
+  if (row.proposed_scan_run_id != null) return `${who} — scan ${row.proposed_scan_run_id}`;
+  return who;
+}
+
 /*
   The chooser for the two paths with no model reply to read a section out of:
   the Write a story box (write-story.ts) and the Dark Desk handoff (dark.ts).
@@ -1873,11 +1918,16 @@ Return JSON:
     }
   ],
   "proposed_sources": [
-    { "url": "https://...", "title": "", "why": "page worth investigating further" }
+    {
+      "url": "https://...",
+      "title": "",
+      "why": "one sentence: what this page offers the paper",
+      "section": "council"
+    }
   ]
 }
 ${scanTopicBlock(opts.topics ?? DEFAULT_TOPIC_OPTIONS)}
-${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler or manufacture a lead to earn a score. proposed_sources may be any public URL discovered in the text. Max 12 leads.`;
+${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler or manufacture a lead to earn a score. proposed_sources may be any public http(s) page URL cited in the text above -- a document, agenda, roster, feed or site the text actually points at. Give each one a "why": ONE sentence, in plain words, saying what that page offers this paper and why it is worth putting on the watch list. Set "section" to the exact key of the section it would be filed under, from the section list above. Never return a search-results page, a redirector, or a URL you did not see in the text. Max 12 leads, max 12 proposed_sources.`;
 }
 
 /**

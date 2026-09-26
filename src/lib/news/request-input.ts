@@ -241,6 +241,17 @@ export const LIMITS = {
    * to-do. `headline-control.ts` reads this as `HEADLINE_MAX`.
    */
   headlineEdit: 2_400,
+  /**
+   * How many suggested sources one review press may decide at once.
+   *
+   * 0.6.70. The list this acts on held 175 rows on production when it was
+   * measured, and its whole point is that 175 is too many to click through one
+   * at a time -- so "Select all" has to be a real press and this has to clear
+   * the number of rows a newsroom has actually accumulated. 500 is under three
+   * times that and still one small JSON body; the press is a handful of column
+   * writes either way.
+   */
+  suggestedBatch: 500,
 } as const;
 
 /*
@@ -667,6 +678,29 @@ export const bulkSourceInput = z.object({ text: z.string().max(LIMITS.bulkSource
 /** `desk.ts:220` setSourceStatus. */
 export const sourceStatusValue = z.enum(["accepted", "rejected", "proposed"]);
 export const sourceStatusInput = z.object({ id: rowId, status: sourceStatusValue });
+
+/**
+ * `desk.ts` reviewSuggestedSources: one press over one or more suggestions.
+ *
+ * The decision is a separate field from the status enum above on purpose. A
+ * reviewer decides "accept" or "reject" and nothing else -- `proposed` is a
+ * state a row is in, never a decision anyone takes here, and admitting it would
+ * let a bulk press quietly un-review a batch. The section travels with an
+ * accept, because the reviewer picks it on the row they are accepting
+ * (preselected with the model's guess); it is clipped rather than refused, and
+ * a key no section has is refused by the write with a plain sentence.
+ *
+ * The note is the reviewer's optional line -- "duplicate of the county page",
+ * "paywalled" -- and is bounded at the same 2000 as every other review note in
+ * the desk, never a paragraph. An empty note is "no note", the same as the
+ * column's null.
+ */
+export const suggestedSourceReviewInput = z.object({
+  ids: z.array(rowId).min(1).max(LIMITS.suggestedBatch),
+  decision: z.enum(["accepted", "rejected"]),
+  sectionKey: z.string().max(LIMITS.sectionKey).optional(),
+  note: z.string().max(LIMITS.reviewNote).optional(),
+});
 
 /** `desk.ts:338` fileLead (`desk.ts:340-348` slice the same three fields). */
 export const fileLeadInput = z.object({

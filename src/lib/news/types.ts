@@ -8,6 +8,19 @@ export type SourceRow = {
   last_hash: string | null;
   last_fetched_at: string | null;
   last_error: string | null;
+  /*
+    Why this source was suggested, who suggested it, and where it came from
+    (migration 0097). Optional because most readers of this type select only
+    the watch-list columns, and because every row proposed before 0.6.70 has
+    null for all of them -- which is "not recorded", not "no reason".
+  */
+  proposed_reason?: string | null;
+  proposed_by?: string | null;
+  proposed_scan_run_id?: number | null;
+  proposed_lead_id?: number | null;
+  proposed_section?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
 };
 
 export type LeadRow = {

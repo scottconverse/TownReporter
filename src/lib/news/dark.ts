@@ -65,6 +65,7 @@ import {
 import { storableText } from "./storable-text.ts";
 import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
+import { proposePassSources } from "./source-seeds.server.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
@@ -2958,8 +2959,8 @@ export async function queueInvestigationFor(
     await audit(userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, newsroomId);
     return { ok: true as const, leadId: already[0].id, alreadyQueued: true as const };
   }
-  const arts = await sql<{ url: string }>`
-    select url from artifacts
+  const arts = await sql<{ url: string; title: string }>`
+    select url, title from artifacts
     where newsroom_id = ${newsroomId} and investigation_id = ${id}
     order by id desc limit 12
   `;
@@ -3049,6 +3050,39 @@ export async function queueInvestigationFor(
     returning id
   `;
   await audit(userId, "dark-handoff", `inv ${id} lead ${created[0]!.id}`, newsroomId);
+  /*
+    The pass ends here -- the captured file becomes a story lead and the editor
+    is looking at it -- and the pages it read come with it.
+
+    `arts` above is exactly "the pages the pass actually fetched": the loop
+    writes an artifact row only for a document it retrieved, so the suggestion
+    is evidence the page exists in the form the desk would fetch tomorrow. They
+    are offered as candidates, never as sources; nothing is fetched until
+    someone accepts one, and the editor can still add a source by hand.
+
+    The section guess is the one `topicFromText` just made for the lead, kept
+    only when the file's own words named a section this newsroom files under.
+    `topicUnchosen` is precisely that answer, so a guess that came from the
+    fallback is not offered -- the review screen starts its picker at its own
+    default rather than at a decision nobody made.
+
+    The single-signal handoff (`sendDarkSignalToQueueFor`) deliberately does not
+    propose as well: it reads the same investigation's artifacts, so every page
+    it could offer the file handoff has already offered, and the duplicate guard
+    would return nothing.
+  */
+  await proposePassSources(sql, {
+    userId,
+    newsroomId,
+    proposedBy: "dark",
+    leadId: created[0]!.id,
+    section: topicUnchosen ? null : topic,
+    pages: arts.map((art) => ({
+      url: art.url,
+      title: art.title,
+      reason: `Read while developing "${inv[0].title.slice(0, 120)}" on the Dark Desk.`,
+    })),
+  });
   return { ok: true as const, leadId: created[0]!.id, alreadyQueued: false as const };
 }
 

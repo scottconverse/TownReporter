@@ -1,11 +1,13 @@
 import {
   ensureNewsroomSources as ensureSeeds,
   insertProposedNewsroomSource,
+  proposePassSources,
   saveAcceptedNewsroomSource,
 } from "./source-seeds.server.ts";
 import { selectCustomScanSources, selectedScanSources } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 import { buildScanBatches, mergeScanBatchResults } from "./scan-batches.ts";
+import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
@@ -66,6 +68,7 @@ import {
   runScanInput,
   slugInput,
   sourceStatusInput,
+  suggestedSourceReviewInput,
   writeStoryInput,
   cleanPublishRequest,
   suggestHeadlinesInput,
@@ -193,11 +196,20 @@ export const listSources = createServerFn({ method: "GET" })
     await ensureSeeds(context.userId, owned(context));
     const sql = await getSql();
     return sql<SourceRow>`
-      select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
+      select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             -- 0097: why it was suggested, who suggested it, and where it came
+             -- from. Null on every row that predates 0.6.70 = "not recorded".
+             proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
+             proposed_section, reviewed_at, review_note
       from sources
       where newsroom_id = ${owned(context)}
       order by
         case status when 'proposed' then 0 when 'accepted' then 1 else 2 end,
+        -- Within the suggested rows, newest first: the list is a review queue,
+        -- and the run that just finished is the one the editor is looking for.
+        -- Every other status keeps the oldest-first order the watch list has
+        -- always had.
+        case when status = 'proposed' then id end desc,
         id asc
     `;
   });
@@ -286,12 +298,39 @@ export const setSourceStatus = createServerFn({ method: "POST" })
   .validator((input: unknown) => sourceStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    /*
+      0.6.70: the reviewer's decision and its note are recorded here too.
+      This is the one-at-a-time path still used from the watch list; the
+      Suggested list uses `reviewSuggestedSources` below, which does the same
+      two writes for a whole batch. A row that goes BACK to 'proposed' -- the
+      desk's own un-decision -- clears the record, because "reviewed at" on a
+      row that is waiting to be reviewed is a lie the next reader would read
+      off a null check.
+    */
+    const decided = data.status === "accepted" || data.status === "rejected";
     await sql`
-      update sources set status = ${data.status}
+      update sources set
+        status = ${data.status},
+        reviewed_at = case when ${decided} then now() else null end,
+        review_note = case when ${decided} then review_note else null end
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
   });
+
+/**
+ * The review press for the Suggested sources list: one decision, many rows.
+ *
+ * The transaction itself -- what it checks, why the section link is owner-only
+ * and why it bumps `section_config.revision` -- lives in
+ * `suggested-sources.server.ts`, where a test can call it with a context.
+ * `desk.ts` cannot be imported under plain `node --test` (it reaches
+ * `@/lib/...`), and "a failure changes nothing" is a claim about the database.
+ */
+export const reviewSuggestedSources = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => suggestedSourceReviewInput.parse(input))
+  .handler(async ({ context, data }) => performReviewSuggestedSources(context, data));
 
 export const listLeads = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
@@ -1290,6 +1329,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           newsroomId: owned(context),
           url: url.toString(),
           title: p.title || url.hostname,
+          // 0.6.70: the scan already wrote a sentence about each suggested
+          // page and threw it away here. The editor reading 175 rows needs
+          // that sentence and the run it came from, not just a bare URL.
+          reason: p.why,
+          proposedBy: "scan",
+          scanRunId: runId,
+          section: p.section || null,
         })
       )
         proposed += 1;
@@ -2052,6 +2098,59 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     insert into audit_events (user_id, action, detail, newsroom_id)
     values (${context.userId}, 'draft', ${String(leadId)}, ${owned(context)})
   `;
+    /*
+      0.6.70: a research pass proposes sources too (owner, 2026-09-24: "Research/
+      Dark agents can propose newly found sources into the source database (as
+      candidates; a person accepts), so the source list grows over time").
+
+      What it proposes is what it READ: the documents it opened for text
+      (`research_memo.captured`) and the pages it cited in the draft
+      (`source_urls`). Not every URL it saw, and not the search pages it saw
+      them on -- `proposePassSources` refuses those, and `isIndexUrl` is the
+      different, citation-side question, so it is deliberately not applied here:
+      a council's agenda index is a page the owner may well want on the watch
+      list even though it is a poor thing to cite as the originating story.
+
+      The section guess travels with the suggestion. It is the section this
+      draft is filed under, which is what the pass already decided about this
+      material -- kept only when this newsroom still has that section, so the
+      review screen never preselects a key the accept would then refuse.
+
+      This runs inside the pass's own transaction, the way the scan's proposals
+      do (`:1328`): a pass's proposals are part of what the pass produced. The
+      writes below are a handful of column inserts with no model call, no
+      fetch and no new constraint to violate.
+    */
+    const [guessSection] = await sql<{ key: string }>`
+      select key from newsroom_sections
+      where newsroom_id = ${owned(context)} and key = ${reported.topic}
+    `;
+    await proposePassSources(sql, {
+      userId: context.userId,
+      newsroomId: owned(context),
+      proposedBy: "research",
+      leadId,
+      section: guessSection ? reported.topic : null,
+      pages: [
+        ...opened.map((doc) => {
+          // `opened` carries the question a document answered only when the
+          // memo recorded one, so the reason says which of the two it was
+          // rather than inventing an answer.
+          const answered = "for" in doc ? doc.for : "";
+          return {
+            url: doc.url,
+            title: doc.title,
+            reason: answered
+              ? `Opened while reporting "${reported.headline}" -- it answered: ${answered}`
+              : `Opened while reporting "${reported.headline}".`,
+          };
+        }),
+        ...sanitizePublicUrls(reported.source_urls).map((url) => ({
+          url,
+          reason: `Cited in the draft "${reported.headline}".`,
+        })),
+      ],
+    });
   });
 });
 

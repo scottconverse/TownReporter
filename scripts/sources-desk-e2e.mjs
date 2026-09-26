@@ -71,7 +71,11 @@ async function ownTheDesk() {
   step("first account owns the desk");
 }
 
-/** The row for a given source URL, wherever it currently sits (On watch/Proposed/Rejected). */
+/**
+ * The row for a given source URL, wherever it currently sits (On watch/
+ * Suggested sources/Dropped). The middle tab was renamed in 0.6.70; this walk
+ * only ever opens On watch and Dropped, so the row lookup is unchanged.
+ */
 function rowFor(url) {
   return page.locator("tr.lead-tr", { hasText: url });
 }

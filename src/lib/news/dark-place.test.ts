@@ -64,13 +64,23 @@ it("runtime planner and synthesis use configured place; Reddit endpoint is newsr
 });
 
 it("actual research loop reads this newsroom setup; accepted Reddit sources stay isolated", async () => {
-  const { getSql } = await import("../db.ts");
+  const { getPglite, getSql } = await import("../db.ts");
   const { ensureDarkSchema, readDarkPlace, readTipSubreddit } = await import("./dark.ts");
   const { researchLoop, emptyPlan } = await import("./investigate.ts");
   await ensureDarkSchema();
   const sql = await getSql();
   await sql.query(
-    `create table if not exists sources(id serial primary key,user_id text,newsroom_id integer,url text,title text,status text,tier text)`,
+    `create table if not exists sources(id serial primary key,user_id text,newsroom_id integer,url text,title text,status text,tier text,kind text)`,
+  );
+  /*
+    The fixture above is a copy of the production `sources` table, so it carries
+    the migrations too -- a copy that omits one is a fixture that lies about the
+    schema (AK3). 0097 is the suggested-source origin columns; this test drives
+    the research loop, which is one of the passes that writes them.
+  */
+  const pg = await getPglite();
+  await pg.exec(
+    await readFileSync(new URL("../../../migrations/0097_suggested_source_origin.sql", import.meta.url), "utf8"),
   );
   await readDarkPlace(771);
   await sql`insert into paper_settings(newsroom_id,city,state,onboarded) values(771,'Testerville','Oregon',true)`;
