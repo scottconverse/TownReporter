@@ -532,6 +532,36 @@
   border-bottom-color: var(--a);
   font-weight: 650;
 }
+/*
+ * Unit AK item 7 (2026-09-26): the Held tab's count, as a badge. A lead in
+ * Held is waiting on the editor, so its number is not one more number in a
+ * row of numbers. The badge is inside the tab's own words, so the visible
+ * text is still "held 3".
+ */
+.desk-ltr.astra .filter .filter-badge {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 2px 6px;
+  border-radius: 99px;
+  background: var(--accent-soft);
+  color: var(--a);
+  font: 600 calc(14px * var(--ts))/1.4 var(--fb);
+  letter-spacing: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* --a flips light-to-dark with the theme, so --bg is the readable ink on it
+   in both (white on #155b60, near-black on #8bcac3) -- white would fail AA
+   in the night desk, the same way it does for .score.hot. */
+.desk-ltr.astra .filter.on .filter-badge {
+  background: var(--a);
+  color: var(--bg);
+}
+.desk-ltr.astra .filter .filter-badge.waiting {
+  background: var(--a);
+  color: var(--bg);
+  font-weight: 700;
+}
 .desk-ltr.astra .chip {
   display: inline-flex;
   align-items: center;

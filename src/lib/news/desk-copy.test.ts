@@ -4,7 +4,21 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   blockedDigBannerText,
+  cameBackLabel,
+  COMPARE_CURRENT_LABEL,
+  COMPARE_HEADING,
+  COMPARE_PRIOR_LABEL,
   composeZeroLeadSummary,
+  duplicateKillReason,
+  killedAsDuplicateNote,
+  killRecordLine,
+  KILL_THIS_ONE_LABEL,
+  MOVE_TO_NEW_LABEL,
+  movedToNewNote,
+  printedDuplicateLine,
+  REOPEN_PRIOR_LABEL,
+  reopenedPriorNote,
+  DEVELOPING_LABEL,
   editorError,
   editorActionError,
   editorDraftError,
@@ -148,6 +162,96 @@ describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
       assert.equal(
         sentence,
         "2 leads matched stories you already killed and were stamped, not refiled; 1 matched an open lead.",
+      );
+    });
+  });
+
+  // Unit AK item 1: a same-run merge is a change to how many leads exist, so
+  // the summary has to say it rather than leave the editor to notice that two
+  // AI-returned leads produced one row.
+  describe("Unit AK item 1: mergedSameScan", () => {
+    it("speaks even when nothing resurfaced -- a merge is never invisible", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        mergedSameScan: 1,
+      });
+      assert.equal(
+        sentence,
+        "one story was found twice in this scan and kept as one lead, with both sources.",
+      );
+    });
+
+    it("counts more than one merge", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        mergedSameScan: 2,
+      });
+      assert.match(sentence, /^2 stories were each found twice in this scan/);
+    });
+
+    it("combines with the resurfaced and possible bits", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        possibleMatched: 1,
+        mergedSameScan: 1,
+      });
+      assert.match(sentence, /^1 lead matched a story you already killed/);
+      assert.match(sentence, /; 1 filed and marked maybe-same-as an existing lead; /);
+      assert.match(sentence, /one story was found twice in this scan/);
+    });
+
+    it("omitting mergedSameScan reproduces the pre-AK output (back-compat)", () => {
+      assert.equal(
+        resurfacedSummarySentence({ resurfacedKilled: 2, resurfacedOpen: 1 }),
+        "2 leads matched stories you already killed and were stamped, not refiled; 1 matched an open lead.",
+      );
+    });
+  });
+
+  // Unit AK item 2: a finding filed against a killed lead is a filing, not a
+  // stamp, so the summary must not read as "nothing to see" -- and it must not
+  // be counted as an ordinary new lead either (desk.ts subtracts it from
+  // filedNew, and that subtraction is only honest if the bit below is printed).
+  describe("Unit AK item 2: developingFiled", () => {
+    it("says a killed story came back with new facts, in plain words", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        developingFiled: 1,
+      });
+      assert.equal(
+        sentence,
+        "1 story you killed came back with new facts — filed held for review, linked to what you killed.",
+      );
+    });
+
+    it("counts more than one, and never calls them 'new'", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        developingFiled: 2,
+      });
+      assert.match(sentence, /^2 stories you killed came back with new facts/);
+      assert.doesNotMatch(sentence, /filed as new/);
+    });
+
+    it("sits alongside the stamp bit -- a repeat and a development in one run", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        developingFiled: 1,
+      });
+      assert.match(sentence, /^1 lead matched a story you already killed and was stamped, not refiled; /);
+      assert.match(sentence, /1 story you killed came back with new facts/);
+    });
+
+    it("omitting developingFiled reproduces the pre-AK output (back-compat)", () => {
+      assert.equal(
+        resurfacedSummarySentence({ resurfacedKilled: 0, resurfacedOpen: 0, mergedSameScan: 1 }),
+        "one story was found twice in this scan and kept as one lead, with both sources.",
       );
     });
   });
@@ -1551,5 +1655,135 @@ describe("a validation dump never reaches the editor", () => {
       /returned nothing this pass/,
     );
     assert.equal(editorDraftError(""), null);
+  });
+});
+
+/*
+ * Unit AK items 2, 4, 6, 7 (2026-09-26): the words an editor reads about a
+ * lead the desk thinks is already printed, and about a lead that was killed.
+ *
+ * Every one of these strings replaces something the owner could not act on:
+ * "≈ PRINTED" (a badge with no story name and no button), "Possible duplicate
+ * · compare" (a link into a dead end), "Nothing to draft." (a killed lead's
+ * page saying nothing else) and "seen again ×3" (a count in shorthand).
+ */
+describe("Unit AK: duplicate and kill wording", () => {
+  it("names the story the badge thinks is already printed", () => {
+    assert.equal(
+      printedDuplicateLine("Longmont Senior Center to begin free evening meal program Oct. 2"),
+      "Looks already printed: Longmont Senior Center to begin free evening meal program Oct. 2",
+    );
+    // The scan's headlines carry stray whitespace; the line must not show it.
+    assert.equal(printedDuplicateLine("  Housing plan advances  "), "Looks already printed: Housing plan advances");
+  });
+
+  it("records a kill as a duplicate in a sentence that carries the other headline", () => {
+    assert.equal(
+      duplicateKillReason("Longmont Senior Center to begin free evening meal program Oct. 2"),
+      "Duplicate of Longmont Senior Center to begin free evening meal program Oct. 2",
+    );
+    assert.equal(duplicateKillReason(" Council OKs the budget "), "Duplicate of Council OKs the budget");
+  });
+
+  it("says the developing label in words an editor can act on", () => {
+    // Item 2's wording is the brief's, verbatim -- pinned so a later copy edit
+    // has to be deliberate.
+    assert.equal(DEVELOPING_LABEL, "Developing: new facts on a story you killed");
+  });
+
+  it("counts a lead's returns in words, and stays silent at zero", () => {
+    assert.equal(cameBackLabel(1), "Came back 1 time");
+    assert.equal(cameBackLabel(3), "Came back 3 times");
+    assert.equal(cameBackLabel(0), "", "a lead that never came back says nothing");
+    assert.equal(cameBackLabel(null), "");
+    assert.equal(cameBackLabel(undefined), "");
+    // A defensive floor: the count is a counter, and a broken one must not
+    // render "Came back -2 times" on a Queue row.
+    assert.equal(cameBackLabel(-2), "");
+  });
+
+  it("shows when and why a lead was killed", () => {
+    // A local Date so the rendered calendar day is the same in every timezone
+    // the suite runs in.
+    const killedAt = new Date(2026, 8, 25, 12, 0);
+    assert.equal(
+      killRecordLine({ killedAt, reason: "Duplicate of Council OKs the budget" }),
+      "Killed Sep 25, 2026 — Duplicate of Council OKs the budget",
+    );
+    // Killed with a record of when but no reason.
+    assert.equal(killRecordLine({ killedAt }), "Killed Sep 25, 2026 — no reason was recorded");
+    assert.equal(killRecordLine({ killedAt, reason: "   " }), "Killed Sep 25, 2026 — no reason was recorded");
+    // Killed with a reason but no timestamp cannot happen after migration
+    // 0094, but the two columns are independent and the sentence must still
+    // read.
+    assert.equal(killRecordLine({ reason: "Duplicate of X" }), "Killed — Duplicate of X");
+  });
+
+  it("tells the truth about a kill the desk kept no record of", () => {
+    // Every lead killed before migration 0094 has neither column. The page
+    // must not render an empty line an editor would read as a bug.
+    assert.equal(
+      killRecordLine({}),
+      "Killed before the desk started recording why — no reason was kept",
+    );
+    assert.equal(killRecordLine({ killedAt: null, reason: null }), killRecordLine({}));
+    // A killed_at the desk cannot parse is the same as no killed_at.
+    assert.equal(killRecordLine({ killedAt: "not a date" }), killRecordLine({}));
+  });
+
+  it("says a kill was undone rather than letting the record vanish", () => {
+    const killedAt = new Date(2026, 8, 25, 12, 0);
+    assert.equal(
+      killRecordLine({ killedAt, reason: "Duplicate of Council OKs the budget", reopened: true }),
+      "Reopened — it was killed Sep 25, 2026 — Duplicate of Council OKs the budget",
+    );
+    assert.equal(
+      killRecordLine({ reopened: true }),
+      "Reopened — no record of when or why it was killed",
+    );
+  });
+
+  it("names the Compare view's three presses in plain words", () => {
+    // Item 5's labels are the brief's, verbatim -- pinned so a later copy edit
+    // has to be deliberate, and so the side-by-side view cannot grow a press
+    // an editor cannot read.
+    assert.equal(MOVE_TO_NEW_LABEL, "Not a duplicate — move to New");
+    assert.equal(KILL_THIS_ONE_LABEL, "Same story — kill this one");
+    assert.equal(REOPEN_PRIOR_LABEL, "Newer facts — reopen the old one");
+    // Both sides are named in words, not as "lead A" and "lead B".
+    assert.equal(COMPARE_CURRENT_LABEL, "This lead");
+    assert.equal(COMPARE_PRIOR_LABEL, "The lead it matched");
+    assert.equal(COMPARE_HEADING, "Compare these two leads");
+  });
+
+  it("reports what each Compare press did, in the row and on the page", () => {
+    assert.equal(
+      killedAsDuplicateNote("Bohn Farm rezoning heads to planning board with staff blessing"),
+      "Killed as a duplicate of Bohn Farm rezoning heads to planning board with staff blessing.",
+    );
+    // Whitespace off the scanned headline must not reach the sentence.
+    assert.equal(killedAsDuplicateNote("  Council OKs the budget "), "Killed as a duplicate of Council OKs the budget.");
+    assert.equal(
+      movedToNewNote("Loomiller stabbing"),
+      "Moved to New: Loomiller stabbing no longer claims a twin.",
+    );
+    assert.equal(
+      reopenedPriorNote("  Juvenile altercation  "),
+      "Reopened Juvenile altercation — it is back on the desk as New.",
+    );
+  });
+
+  it("keeps the two presses that settle a duplicate saying the same thing", () => {
+    // The reason recorded by the kill and the note shown after it name the same
+    // piece, with the same trimming of the scanned headline; if they ever
+    // disagree the page and the Queue would tell the editor two different
+    // stories about one press.
+    const scanned = "  Longmont Senior Center to begin free evening meal program Oct. 2 ";
+    const named = duplicateKillReason(scanned).slice("Duplicate of ".length);
+    assert.equal(named, "Longmont Senior Center to begin free evening meal program Oct. 2");
+    assert.ok(
+      killedAsDuplicateNote(scanned).includes(named),
+      "the note after the kill names the same piece, trimmed the same way",
+    );
   });
 });

@@ -289,13 +289,264 @@ export function normalizeSourceUrl(raw: string): string {
   return s;
 }
 
-function sharesUrl(a: string[], b: string[]): boolean {
-  if (a.length === 0 || b.length === 0) return false;
-  const setA = new Set(a.map(normalizeSourceUrl).filter(Boolean));
-  for (const u of b) {
+/**
+ * Unit AK item 3 (2026-09-26): the words a URL can END at and still be a
+ * section front rather than a story. `/news`, `/local-news`, `/sports` and
+ * the Daily Camera and Times-Call crime fronts are all one such word.
+ */
+const SECTION_FRONT_WORDS = new Set([
+  "news",
+  "newsroom",
+  "local-news",
+  "stories",
+  "latest",
+  "section",
+  "sections",
+  "category",
+  "categories",
+  "topic",
+  "topics",
+  "tag",
+  "tags",
+  "author",
+  "authors",
+  "search",
+  "archive",
+  "archives",
+  "index",
+  "feed",
+  "feeds",
+  "rss",
+  "sitemap",
+  "crime",
+  "crime-public-safety",
+  "public-safety",
+  "sports",
+  "obituaries",
+  "classifieds",
+  "meetings",
+  "events",
+  "calendar",
+]);
+
+/**
+ * A word that can be followed by exactly one short section slug and still be
+ * the section rather than a story: `/category/longmont`,
+ * `/news/crime-public-safety`, `/sports/high-school-sports`,
+ * `/author/jane-doe`.
+ */
+const SECTION_CONTAINER_WORDS = new Set([
+  "news",
+  "newsroom",
+  "local-news",
+  "stories",
+  "section",
+  "sections",
+  "category",
+  "categories",
+  "topic",
+  "topics",
+  "tag",
+  "tags",
+  "author",
+  "authors",
+  "sports",
+  "crime",
+  "crime-public-safety",
+  "public-safety",
+  "archive",
+  "archives",
+  "search",
+  "meetings",
+  "events",
+  "calendar",
+]);
+
+/** Feeds: an .rss/.atom/.xml document is a list of everything, never one
+ * story. */
+const FEED_EXTENSION = /\.(rss|atom|xml)$/;
+
+/** A section slug carries no date and reads as a place or a beat. Digits (a
+ * year in `/news/2026-...`), a file extension, or a long slug all mean the
+ * URL addresses one document. */
+const SECTION_SLUG = /^[a-z][a-z-]*$/;
+const SECTION_SLUG_MAX = 24;
+
+/**
+ * Is this URL a section, listing or index page rather than one story?
+ *
+ * Unit AK item 3, from the real queue: leads 218 (held, a Loomiller Park
+ * stabbing) and 209 (killed, a "juvenile altercation") both cited the Daily
+ * Camera's crime front -- `/news/crime-public-safety/` -- and the matcher
+ * read that shared URL as "same source". An index page carries every crime
+ * in the county, so sharing one says nothing about whether two leads are the
+ * same story; it is the weakest possible evidence, and it was linking
+ * unrelated leads as duplicates of each other.
+ *
+ * The rule is a closed, enumerated list of shapes rather than a general
+ * "looks short" heuristic, deliberately: the matcher must never demote a URL
+ * it cannot classify, because a false "not the same source" verdict re-files
+ * a lead an editor already killed or held. So only these count as index
+ * pages --
+ *
+ *   - a site root (`https://www.dailycamera.com/`, `https://bouldercounty.gov`);
+ *   - a feed (`https://www.reddit.com/r/longmont/.rss`, `.../feed.xml`);
+ *   - a path ENDING at a section word (`/news`, `/local-news`, `/sports`,
+ *     `/news/crime-public-safety`, `/meetings`, `/events`);
+ *   - a section container followed by one short dateless slug
+ *     (`/category/longmont`, `/tag/carbon-valley`, `/author/jane-doe`).
+ *
+ * Everything else keeps its full weight as a shared source, including every
+ * document-shaped URL the local sources publish:
+ * `timescall.com/2026/08/12/longmont-council-ranked-choice-voting/`,
+ * `longmontleader.com/agenda/sept-council`,
+ * `longmont.primegov.com/portal/meeting/12345`,
+ * `longmontcitycouncil.org/meetings/2026-09-15/`,
+ * `longmontcolorado.gov/agendas/2026-08-25-packet.pdf`. "agenda", "portal",
+ * "meeting" and "council" are therefore NOT section words, and neither is
+ * "notices" or "election-information" -- those name records, not lists,
+ * in this newsroom's sources table (see src/lib/paper.ts and
+ * src/lib/news/extract.ts's dropListingUrls, which keeps them for the same
+ * reason).
+ *
+ * This is intentionally NOT report.ts's isIndexUrl (that one asks whether a
+ * source is a bare front worth skipping during extraction) and NOT
+ * extract.ts's looksLikeSectionFront (that one is gated on a watched host --
+ * `isWatchedSectionFront` -- and without the gate it flags
+ * `longmontleader.com/agenda/sept-council`, a real story page the matcher's
+ * own tests share; see src/lib/news/lead-match.test.ts).
+ */
+export function isIndexPageUrl(raw: string): boolean {
+  const normalized = normalizeSourceUrl(raw);
+  if (!normalized) return false;
+  const slash = normalized.indexOf("/");
+  const path = slash < 0 ? "" : normalized.slice(slash).replace(/\/+$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0) return true;
+  const last = segments[segments.length - 1]!;
+  if (FEED_EXTENSION.test(last)) return true;
+  if (SECTION_FRONT_WORDS.has(last)) return true;
+  if (segments.length === 2 && SECTION_CONTAINER_WORDS.has(segments[0]!)) {
+    return SECTION_SLUG.test(last) && last.length <= SECTION_SLUG_MAX;
+  }
+  return false;
+}
+
+/** The URLs of this lead that address one story. Index, section and feed
+ * URLs are dropped: two leads citing the Daily Camera's crime front are not
+ * citing the same source (see isIndexPageUrl). */
+function storyUrls(urls: string[]): string[] {
+  return urls.filter((u) => !isIndexPageUrl(u));
+}
+
+/** Hosts that publish meeting records -- agendas, packets, minutes -- and
+ * nothing that is a single story. A PrimeGov `/portal/meeting/12345` or a
+ * Legistar `/Calendar.aspx` is a container of items, not one item, so two
+ * leads citing it are not citing the same story. The list is the
+ * meeting-record vendor family from src/lib/news/render-detect.ts's JS_HOST
+ * (which exists for the opposite question: does this host need rendering
+ * before extraction), restricted to the vendors that serve AGENDAS -- the
+ * municipal-code hosts on that list are left out, no source in this
+ * newsroom's sources table uses one. The leading `(^|\.)` and the trailing
+ * `.` are both deliberate: they match `longmont.primegov.com` and the repo's
+ * own `primegov.example.com` test fixture, but not a host that merely ends
+ * in the vendor's domain without being it. */
+const CIVIC_MEETING_HOST = /(^|\.)(primegov|legistar|civicclerk|granicus|granicusondemand|granicusideas|boarddocs|civicplus)\./i;
+
+/** Path segments that name a document holding many items rather than one
+ * story -- `/agendas/`, `/packets/`, `/minutes/`, `/meetings/`,
+ * `/DocumentCenter/`. Compared as a WHOLE segment, never as a substring:
+ * `/2026/09/25/longmont-council-minutes-released/` is a headline slug about
+ * minutes, not a minutes document. */
+const MULTI_ITEM_PATH_SEGMENTS = new Set([
+  "agenda", "agendas", "packet", "packets", "minutes", "minute",
+  "meeting", "meetings", "compileddocument", "documentcenter", "calendar",
+]);
+
+/**
+ * Unit AK2 item 2 (2026-09-26): is this URL a document that holds MANY items
+ * rather than one story?
+ *
+ * This is the exception to AK2's same-run merge rule. The real 207/212 pair
+ * shares an ARTICLE page -- one city news release -- and a shared article
+ * page is as good as it gets for "these two sightings are one story". An
+ * agenda, packet or minutes document is the opposite: it carries every item
+ * on a meeting, so two leads citing it tell you nothing about whether they
+ * are about the same item. QA-1's negatives are exactly that shape: NEG-4
+ * (jail expansion vs staff pay raises) and NEG-7 (rural east vs west county
+ * schools) both cite `longmont.primegov.com/portal/meeting/12345` --
+ * different items at one meeting -- and both are "possible", so without this
+ * exception a same-run merge would swallow the second story.
+ *
+ * Recognised (real shapes, all from this repo's code and tests):
+ *   - any `.pdf` -- `assets.bouldercounty.gov/.../2022-048-...-o.100pct.pdf`,
+ *     `civicclerk.example/agenda.pdf`, `example.gov/packet.pdf`;
+ *   - a meeting-record host -- `longmont.primegov.com/portal/meeting/12345`,
+ *     `longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=16823`,
+ *     `longmont.legistar.com/Calendar.aspx`;
+ *   - a path segment naming the container --
+ *     `longmontcolorado.gov/agendas/ordinance-o-2026-63/`,
+ *     `longmontcitycouncil.org/meetings/2026-09-15/`,
+ *     `longmontleader.com/agenda/sept-council`,
+ *     `civic.example/DocumentCenter/View/1234/agenda`.
+ *
+ * NOT a multi-item document, and therefore still full evidence of one story:
+ * `longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/` (the
+ * real 207/212 page), `timescall.com/2026/08/12/longmont-council-ranked-choice-voting/`.
+ *
+ * The bias is one-directional on purpose. Calling a URL a multi-item document
+ * that turns out to be a story page leaves two linked leads for an editor to
+ * resolve in one press -- today's behaviour. Missing one that really is a
+ * document merges two different stories with no way back, which is the
+ * failure QA-1 spent three rounds closing. So a shape this function cannot
+ * classify stays a story page.
+ */
+export function isMultiItemDocumentUrl(raw: string): boolean {
+  const normalized = normalizeSourceUrl(raw);
+  if (!normalized) return false;
+  const slash = normalized.indexOf("/");
+  const host = slash < 0 ? normalized : normalized.slice(0, slash);
+  const path = slash < 0 ? "" : normalized.slice(slash);
+  // A bare host is isIndexPageUrl's business, not this function's.
+  if (!path) return false;
+  if (/\.pdf(\/|$)/i.test(path)) return true;
+  const segments = path
+    .replace(/\/+$/, "")
+    .split("/")
+    .filter(Boolean)
+    // "minutes.html" and "calendar.aspx" name the same container as
+    // "minutes" and "calendar" -- the extension is a format, not a subject.
+    .map((s) => s.replace(/\.(html?|aspx|asp|php|jsp)$/i, ""));
+  if (segments.some((s) => MULTI_ITEM_PATH_SEGMENTS.has(s))) return true;
+  return CIVIC_MEETING_HOST.test(host);
+}
+
+/** A URL that addresses ONE story: not a list (isIndexPageUrl) and not a
+ * document holding many items (isMultiItemDocumentUrl). */
+function isStoryPageUrl(url: string): boolean {
+  return !isIndexPageUrl(url) && !isMultiItemDocumentUrl(url);
+}
+
+function sharesUrlWith(a: string[], b: string[], keep: (url: string) => boolean): boolean {
+  const realA = a.filter(keep);
+  const realB = b.filter(keep);
+  if (realA.length === 0 || realB.length === 0) return false;
+  const setA = new Set(realA.map(normalizeSourceUrl).filter(Boolean));
+  for (const u of realB) {
     if (setA.has(normalizeSourceUrl(u))) return true;
   }
   return false;
+}
+
+function sharesUrl(a: string[], b: string[]): boolean {
+  return sharesUrlWith(a, b, (u) => !isIndexPageUrl(u));
+}
+
+/** Unit AK2 item 2: do both leads cite the same page that addresses ONE
+ * story? This is the extra evidence that promotes a same-run "possible" pair
+ * to a merge -- see sameStoryForMerge. */
+export function sharesStoryPageUrl(a: string[], b: string[]): boolean {
+  return sharesUrlWith(a, b, isStoryPageUrl);
 }
 
 /**
@@ -371,6 +622,20 @@ export type MatchCandidateLead = {
    * callers that already filtered to the last 60 days by SQL can pass rows
    * without this field. */
   created_at?: string;
+  /** Unit AK item 2: the lead's own words, used by newFactsIn to decide
+   * whether a strong match against a KILLED lead carries facts that lead did
+   * not have. Optional: callers that only match (and never compare facts) can
+   * leave them out. An absent value means "this side recorded no facts", so a
+   * lead with nothing recorded is never treated as already knowing something a
+   * candidate says -- the candidate has to bring facts of its own before the
+   * comparison can fire at all (see newFactsIn). */
+  why?: string | null;
+  evidence?: string | null;
+  /** Unit AK item 2: when the lead was killed, and why, in the editor's
+   * words (migration 0094). Read only so a new finding filed against a killed
+   * lead can show the old reason; never used in matching. */
+  killed_at?: string | null;
+  kill_reason?: string | null;
 };
 
 /**
@@ -433,6 +698,140 @@ function pairMatches(
   }
   if (!shareUrl && headlinesAloneMatch(candidateHeadline, leadHeadline)) {
     return true;
+  }
+  return false;
+}
+
+/**
+ * Unit AK items 1 and AK2 item 2 (2026-09-26): is this candidate the same
+ * story as a lead THIS SAME SCAN RUN just filed? If so the two become one
+ * lead (their source URLs merged) rather than two rows for one story.
+ *
+ * The real case: leads 207 and 212, same city page, same second, one of them
+ * later published while the other sat on the Queue with a "≈ PRINTED" badge.
+ * The scan batches de-duplicate leads by byte-identical headline only
+ * (scan-batches.ts:109), and fileScanLeads discarded a repeat only at the
+ * "strong" tier (lead-filing.ts:111), so a pair the matcher flagged as
+ * "possible" -- and it does flag them, findMatchingLead has already returned
+ * the match id -- fell through to the insert and both were filed.
+ *
+ * Two ways to be the same story, in order of how much they prove:
+ *
+ *  1. matchStrength says "strong". That tier is already trusted to DISCARD a
+ *     finding outright (lead-filing.ts:111, `continue`, only a counter moves),
+ *     so saying "these two are one lead, keep both source URLs" is strictly
+ *     less destructive than what that tier already does. Nothing here changes
+ *     that.
+ *
+ *  2. matchStrength says "possible" AND the two share a page that addresses
+ *     ONE story (`sharesStoryPageUrl` -- not a section front, not a
+ *     multi-item document; see isMultiItemDocumentUrl). Unit AK2 item 2: the
+ *     real 207/212 pair is exactly this. Their content-token Jaccard is 0.43
+ *     ("begin free evening meal program" vs "offer free evening meals
+ *     beginning"), far below the 0.85 strong bar, so AK item 1 left them as
+ *     two rows -- but both cite
+ *     longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/,
+ *     one news release about one story, and that shared article page is
+ *     decisive in a way prose overlap is not.
+ *
+ * Why the "possible" tier could not simply be merged on prose, and why the URL
+ * gate is the whole point: every lexical bar below "strong" merges pairs QA-1
+ * (2026-09-02) proved are different stories, and those pairs are locked in by
+ * tests in ./lead-match.test.ts. Two real ones, both flagged "possible" and
+ * both clearing content-token overlap: NEG-7 ("...broadband expansion for
+ * rural EAST county schools" vs "WEST county schools") scores 0.71 Jaccard,
+ * and NEG-4 (closed-door session on "jail expansion" vs "staff pay raises")
+ * clears it too. Both cite the SAME meeting page --
+ * longmont.primegov.com/portal/meeting/12345 -- which is precisely the
+ * multi-item document isMultiItemDocumentUrl excludes, so both still file two
+ * leads, linked, exactly as before. A shared ARTICLE page does not have that
+ * problem: one article URL addresses one story, so two sightings of it are
+ * two sightings of that story. What is left for the excluded pairs is to keep
+ * both rows and make the link unmissable and one-press resolvable, which is
+ * what the Queue's "Looks already printed" chip, "Kill as duplicate" and the
+ * Compare view do (unit AK items 4, 5 and 7).
+ *
+ * CONSEQUENCE, stated plainly so it is not mistaken for a complete fix: a
+ * same-run "possible" pair with NO shared story page -- prose-only overlap
+ * (path 3 of findMatchingLead), or a shared section front or shared meeting
+ * document -- still files two rows. That is the deliberate trade: a false
+ * "same story" here silently swallows the second story, which is the failure
+ * the owner asked about ("Do I miss the real 2nd story?").
+ */
+export function sameStoryForMerge(
+  candidate: { headline: string; source_urls?: string[] },
+  existing: { headline: string; source_urls?: string[] },
+): boolean {
+  const candidateHeadline = candidate.headline ?? "";
+  const existingHeadline = existing.headline ?? "";
+  if (!candidateHeadline.trim() || !existingHeadline.trim()) return false;
+  const candidateUrls = candidate.source_urls ?? [];
+  const existingUrls = existing.source_urls ?? [];
+  const strength = matchStrength(
+    { headline: candidateHeadline, source_urls: candidateUrls },
+    { headline: existingHeadline, source_urls: existingUrls },
+  );
+  if (strength === "strong") return true;
+  if (strength !== "possible") return false;
+  return sharesStoryPageUrl(candidateUrls, existingUrls);
+}
+
+/**
+ * Unit AK item 2 (2026-09-26): does this finding carry facts the OTHER lead
+ * does not have?
+ *
+ * The real case: a strong match against a KILLED lead is discarded today --
+ * only `resurfaced_count` moves (lead-filing.ts:173). That is right when the
+ * finding is the same story with nothing new ("same headline and no new
+ * facts"). It is wrong when the new finding says something the killed lead
+ * never said: the owner's question is exactly "Do I miss the real 2nd story?",
+ * and a killed lead plus a new fact is the case where dropping it loses one.
+ *
+ * What counts as a fact: a concrete ANCHOR -- a date, a dollar amount, or a
+ * number -- in the two leads' own words (`why` and `evidence`; deliberately
+ * NOT the headline, which the caller has already established is the same story
+ * at >= 0.85 Jaccard, so letting headline wording count would make every
+ * paraphrase look like a new fact). See NEW_FACT_ANCHOR_KINDS.
+ *
+ * The bar was once "one new anchor OR two new content tokens" (0.6.69 unit AK
+ * as first written). The token half was wrong, and the Postgres end-to-end
+ * test caught it: the scan model REWORDS `why` on every sighting -- the live
+ * pair read "Testing a resurfaced kill" against "Same closed-session story,
+ * reworded by the scan." -- so a plain reword of a killed lead's own words
+ * cleared two new content tokens and was refiled as a development. That is the
+ * exact opposite of what this bar is for: counting new WORDS refiles almost
+ * every killed repeat, which is the noise the "possible" tier already exists to
+ * avoid. Only a new concrete anchor is a fact somebody added.
+ *
+ * A new name does not clear it either, and that is deliberate: extractAnchors()
+ * reads any capitalised word as a proper noun, so `noun:` cannot tell a name
+ * from a sentence-initial capital -- "Officials said ..." against "Police said
+ * ..." would refile every reworded duplicate. NEW_FACT_ANCHOR_KINDS lists the
+ * kinds that do count.
+ */
+/** The anchor kinds that count as a new fact. `noun:` and `month:` are
+ * deliberately absent -- see newFactsIn's doc comment (`month:` is a bare
+ * month mention with no day, so "in September" vs "in October" is not the kind
+ * of concrete new fact this bar is for). */
+const NEW_FACT_ANCHOR_KINDS = ["date:", "amount:", "num:"] as const;
+
+/** The concrete anchors in a lead's own words, and nothing else. */
+function factAnchors(why?: string | null, evidence?: string | null): Set<string> {
+  const text = `${why ?? ""} ${evidence ?? ""}`;
+  const anchors = new Set<string>();
+  for (const anchor of extractAnchors(text)) {
+    if (NEW_FACT_ANCHOR_KINDS.some((kind) => anchor.startsWith(kind))) anchors.add(anchor);
+  }
+  return anchors;
+}
+
+export function newFactsIn(
+  candidate: { why?: string | null; evidence?: string | null },
+  existing: { why?: string | null; evidence?: string | null },
+): boolean {
+  const old = factAnchors(existing.why, existing.evidence);
+  for (const anchor of factAnchors(candidate.why, candidate.evidence)) {
+    if (!old.has(anchor)) return true;
   }
   return false;
 }
@@ -519,7 +918,14 @@ export function matchStrength(
   const symmetricOk = symmetricDiffAllVariants(ca, cb);
 
   const shareUrl = sharesUrl(candidateUrls, existingUrls);
-  const bothSidesHaveUrls = candidateUrls.length > 0 && existingUrls.length > 0;
+  // Unit AK item 3: a lead whose only URLs are index pages has not really
+  // cited a source for this story, so it falls into the no-URL branch here
+  // exactly as a lead that was filed with no URLs at all -- two leads with an
+  // identical headline and only the crime front between them can still be
+  // "strong" at score >= 0.95, but a shared section front can no longer make
+  // two different stories "strong" by itself.
+  const bothSidesHaveUrls =
+    storyUrls(candidateUrls).length > 0 && storyUrls(existingUrls).length > 0;
   const urlOk = shareUrl || (!bothSidesHaveUrls && score >= 0.95);
 
   if (score >= 0.85 && symmetricOk && urlOk) return "strong";

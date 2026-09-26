@@ -42,8 +42,36 @@ export type LeadRow = {
    * plain new lead or a strong match (which never gets its own new row). */
   possible_duplicate_of?: number | null;
   /** The prior lead is returned only when it still belongs to this newsroom.
-   * A removed target is deliberately null rather than leaking historical text. */
-  possible_duplicate?: { id: number; headline: string; status: string } | null;
+   * A removed target is deliberately null rather than leaking historical text.
+   *
+   * Unit AK item 5: it now carries everything the Compare view shows side by
+   * side -- the prior lead's why, sources and dates, and (when it is killed)
+   * the record of that kill. Two leads, both readable without a second fetch. */
+  possible_duplicate?: {
+    id: number;
+    headline: string;
+    status: string;
+    why?: string | null;
+    source_urls?: string | null;
+    created_at?: string | null;
+    kill_reason?: string | null;
+    kill_reason_url?: string | null;
+    killed_at?: string | null;
+  } | null;
+  /** Migration 0094. Which of the two duplicate paths filed this lead.
+   * `"developing"` (Unit AK item 2) means it was filed
+   * against a KILLED lead because it carries facts that lead did not have --
+   * see newFactsIn in lib/news/lead-match.ts. `"possible"` is the QA-1
+   * "possible" match tier, filed and linked rather than stamped. */
+  dup_kind?: string | null;
+  /** Migration 0094. The reason recorded when this lead was killed, shown on
+   * its page and beside any finding filed against it (Unit AK items 4 and 6).
+   * Null for a kill with no stated reason, and for every lead killed before
+   * the column existed -- killRecordLine (desk-copy.ts) says so in words. */
+  kill_reason?: string | null;
+  /** The article or lead the kill reason points at, when it names one. */
+  kill_reason_url?: string | null;
+  killed_at?: string | null;
   meeting_video_id?: string | null;
   meeting_artifact_id?: number | null;
   meeting_lead_purpose?: string | null;

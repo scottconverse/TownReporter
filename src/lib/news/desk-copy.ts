@@ -1149,6 +1149,19 @@ export function resurfacedSummarySentence(input: {
    * nothing to flag stays silent, same as before this tier existed. */
   filedNew?: number;
   firstDiscardedHeadline?: string;
+  /** Unit AK item 1: same-run candidates merged into a lead this same run
+   * had already filed (one story found twice inside one scan). Counted
+   * separately from the resurfaced bits because nothing was stamped and the
+   * old lead is not "existing" in the editor's sense -- it was created
+   * seconds ago. Optional so this function's pre-AK tests still pass
+   * unchanged. */
+  mergedSameScan?: number;
+  /** Unit AK item 2: candidates filed HELD against a KILLED lead because they
+   * carry facts that lead did not have (`newFactsIn`, ./lead-match.ts). They
+   * are a filing, not a discard, so they are named here; the editor can see
+   * the full picture of one run without opening the Queue. Optional for the
+   * same reason as `mergedSameScan`. */
+  developingFiled?: number;
 }): string {
   const bits: string[] = [];
   if (input.resurfacedKilled > 0) {
@@ -1167,6 +1180,22 @@ export function resurfacedSummarySentence(input: {
       possibleMatched === 1
         ? `1 filed and marked maybe-same-as an existing lead`
         : `${possibleMatched} filed and marked maybe-same-as existing leads`,
+    );
+  }
+  const mergedSameScan = input.mergedSameScan ?? 0;
+  if (mergedSameScan > 0) {
+    bits.push(
+      mergedSameScan === 1
+        ? "one story was found twice in this scan and kept as one lead, with both sources"
+        : `${mergedSameScan} stories were each found twice in this scan and kept as one lead, with both sources`,
+    );
+  }
+  const developingFiled = input.developingFiled ?? 0;
+  if (developingFiled > 0) {
+    bits.push(
+      developingFiled === 1
+        ? "1 story you killed came back with new facts — filed held for review, linked to what you killed"
+        : `${developingFiled} stories you killed came back with new facts — filed held for review, linked to what you killed`,
     );
   }
   if (!bits.length) return "";
@@ -1289,6 +1318,154 @@ export function nearDuplicate(
     }
   }
   return null;
+}
+
+/*
+ * Unit AK items 2, 4, 6 and 7 (2026-09-26): the words the desk uses about a
+ * lead that may already be printed, and about a lead that was killed.
+ *
+ * The owner's complaint that started this unit: a lead stayed NEW with a badge
+ * reading "≈ PRINTED" and no way to act on it, and a "POSSIBLE DUPLICATE ·
+ * COMPARE" link opened a killed lead whose page said only "This lead was
+ * killed. Nothing to draft." Every string below exists to replace a badge or a
+ * dead end with a sentence that names the story and offers the next press.
+ */
+
+/** Unit AK item 4: what the row says instead of "≈ PRINTED". It names the
+ * headline it thinks the lead matches, so an editor can judge it without
+ * opening anything. */
+export function printedDuplicateLine(headline: string): string {
+  return `Looks already printed: ${headline.trim()}`;
+}
+
+/** Unit AK item 4: the reason recorded when an editor kills a lead as a
+ * duplicate. Kept as a sentence because it is shown verbatim on the Queue, in
+ * the Compare view and on the story page -- one string, three places. */
+export function duplicateKillReason(headline: string): string {
+  return `Duplicate of ${headline.trim()}`;
+}
+
+/** Unit AK item 4: what the row says after "Kill as duplicate" saves. The
+ * same sentence the Compare view shows after its "Same story" press, so the
+ * two places an editor can settle a duplicate cannot drift apart. */
+export function killedAsDuplicateNote(headline: string): string {
+  return `Killed as a duplicate of ${headline.trim()}.`;
+}
+
+/**
+ * Unit AK item 5: the Compare view. Three presses, one per thing an editor
+ * can decide after reading both leads side by side, and one sentence each for
+ * what the press did -- a press that reports nothing is what this unit was
+ * opened about, so each of the three has its own words and its own state.
+ */
+export const COMPARE_HEADING = "Compare these two leads";
+/** The two sides of the pair, in plain words rather than "lead A/lead B". */
+export const COMPARE_CURRENT_LABEL = "This lead";
+export const COMPARE_PRIOR_LABEL = "The lead it matched";
+export const MOVE_TO_NEW_LABEL = "Not a duplicate — move to New";
+export const KILL_THIS_ONE_LABEL = "Same story — kill this one";
+export const REOPEN_PRIOR_LABEL = "Newer facts — reopen the old one";
+
+/** Unit AK item 5: after "Not a duplicate — move to New". */
+export function movedToNewNote(headline: string): string {
+  return `Moved to New: ${headline.trim()} no longer claims a twin.`;
+}
+
+/** Unit AK item 5: after "Newer facts — reopen the old one". */
+export function reopenedPriorNote(headline: string): string {
+  return `Reopened ${headline.trim()} — it is back on the desk as New.`;
+}
+
+/** Unit AK item 5: what a Compare press says when the desk never answered --
+ * the request did not come back at all, which is not the same thing as the
+ * desk refusing it, and must not read as success. */
+export const COMPARE_NO_ANSWER =
+  "The desk did not answer that press. It may have been restarting — try again.";
+
+export type ComparePress = "not-a-duplicate" | "kill" | "reopen";
+
+/**
+ * Unit AK item 5: what each Compare press says after it comes back.
+ *
+ * It lives here, beside the sentences themselves, rather than in the panel:
+ * the component module must export only components (react-refresh), and more
+ * to the point this is copy, not markup. The panel renders this and nothing
+ * else, so what an editor reads after a press is decided by a tested function
+ * instead of by a branch inside JSX.
+ *
+ * The three outcome shapes are: landed (`ok`), refused (`ok: false` with the
+ * desk's own sentence), and never answered (no result at all).
+ */
+export function comparePressNote(
+  press: ComparePress,
+  res: { ok: boolean; error?: string | null } | undefined | null,
+  sides: { current: { headline: string }; prior: { headline: string } },
+): { kind: "ok" | "err"; text: string } {
+  if (res?.ok) {
+    const text =
+      press === "not-a-duplicate"
+        ? movedToNewNote(sides.current.headline)
+        : press === "kill"
+          ? killedAsDuplicateNote(sides.prior.headline)
+          : reopenedPriorNote(sides.prior.headline);
+    return { kind: "ok", text };
+  }
+  return { kind: "err", text: res?.error?.trim() || COMPARE_NO_ANSWER };
+}
+
+/**
+ * Unit AK item 6: the story page of a killed lead. "This lead was killed.
+ * Nothing to draft." told an editor the state and nothing else -- not what the
+ * story was, not when or why it was killed, and no way back. The heading below
+ * opens the record that replaces it.
+ */
+export const KILLED_LEAD_HEADING = "This lead was killed";
+export const REOPEN_LABEL = "Reopen";
+
+/** Unit AK item 2: the plain-words label on a finding filed HELD against a
+ * killed lead because it carries facts the killed lead did not have. */
+export const DEVELOPING_LABEL = "Developing: new facts on a story you killed";
+
+/** Unit AK item 7: how many times a lead came back after the desk had already
+ * dealt with it. "Seen again ×3" was the old chip; the count is the same fact,
+ * said in words. Empty for a lead that never came back, so callers can render
+ * unconditionally. */
+export function cameBackLabel(count: number | null | undefined): string {
+  const n = Math.max(0, Math.trunc(count ?? 0));
+  if (n === 0) return "";
+  return n === 1 ? "Came back 1 time" : `Came back ${n} times`;
+}
+
+/**
+ * Unit AK item 6: the record of a kill, in one sentence -- when, and why.
+ *
+ * Before migration 0094 the desk stored neither, so a lead killed earlier has
+ * no record at all; that case says so in as many words rather than showing an
+ * empty line an editor would read as "the desk forgot".
+ *
+ * `reopened` is for the story page of a lead whose kill was undone by the
+ * Compare view's "Newer facts — reopen the old one": the record stays, and it
+ * says it was undone, because a kill that silently disappears is exactly the
+ * kind of hidden state this unit exists to remove.
+ */
+export function killRecordLine(input: {
+  killedAt?: string | Date | null;
+  reason?: string | null;
+  reopened?: boolean;
+}): string {
+  const at = input.killedAt ? new Date(input.killedAt) : null;
+  const when = at && !Number.isNaN(at.getTime())
+    ? at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+  const reason = input.reason?.trim();
+  const why = reason ? reason : "no reason was recorded";
+  const lead = input.reopened ? "Reopened — it was killed" : "Killed";
+  if (when && reason) return `${lead} ${when} — ${reason}`;
+  if (when) return `${lead} ${when} — ${why}`;
+  if (reason) return `${lead} — ${reason}`;
+  return input.reopened
+    ? "Reopened — no record of when or why it was killed"
+    : "Killed before the desk started recording why — no reason was kept";
 }
 
 function properNounOverlap(a: string, b: string): boolean {
