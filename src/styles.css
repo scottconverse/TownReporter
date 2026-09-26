@@ -1165,6 +1165,15 @@
 .desk-ltr .pub-acts {display:flex;flex-direction:column;align-items:start;gap:4px}
 .desk-ltr .corr-form {margin-top:10px;max-width:520px}
 .desk-ltr .corr-form .row-acts {margin-top:8px}
+/* 0.6.70: the correction note's two source lines and the story-text editor.
+   They are not inside a `.f` field wrapper, so they need the same box the
+   correction textarea already has. */
+.desk-ltr .corr-form input[type="text"] {width:100%;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:7px 10px;min-height:40px}
+.desk-ltr .corr-form input[type="text"]:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .corr-form label {display:block;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin:10px 0 4px}
+/* The "also fix the story text" switch is a sentence, not a field caption. */
+.desk-ltr .corr-form label.check-line {display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:var(--fg);margin-top:10px}
+.desk-ltr .corr-form label.check-line input {width:auto;min-height:0}
 .desk-ltr .crumb {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin-bottom:14px}
 .desk-ltr .crumb:hover {color:var(--fg)}
 /*

@@ -70,6 +70,7 @@ import {
   cleanPublishRequest,
   suggestHeadlinesInput,
   updateArticleHeadlineInput,
+  correctionWordingInput,
 } from "./request-input.ts";
 import {
   evidenceNeedsReview,
@@ -99,6 +100,12 @@ import {
   sectionOverrideDetail,
   sectionOverridden,
 } from "./headline-control.ts";
+import {
+  cleanCorrectionLine,
+  correctionTemplate,
+  correctionWordingPrompt,
+  parseCorrectionWording,
+} from "./correction-wording.ts";
 import { provenanceFromUrls } from "./findings";
 import {
   namedOutlet,
@@ -3270,6 +3277,132 @@ export const suggestHeadlines = createServerFn({ method: "POST" })
   .validator((raw: unknown) => suggestHeadlinesInput.parse(raw))
   .handler(async ({ context, data }) => performSuggestHeadlines(context, data.leadId, data.headline));
 
+/**
+ * A correction note the story model would write, from the editor's two lines.
+ *
+ * The owner's first real correction (2026-09-25) was that the box starts empty.
+ * The editor knows what was wrong and what is right -- they are looking at both
+ * -- and what they need is the house form. This asks the story model, on the
+ * same provider ladder as every other story call (Automatic, resolved once by
+ * `grokChat`), for one note built from those two lines plus the story text, and
+ * changes nothing: the answer goes into the box, and the existing post button
+ * is still the only thing that publishes.
+ *
+ * TWO WAYS TO GET A NOTE, AND THEY ARE DIFFERENT ON PURPOSE. This is the model
+ * one. `correctionTemplate` is the other: the same note, written on the desk
+ * from the same two lines with no model involved, and the desk offers it as its
+ * own button. That is what keeps the basic case working on a machine with no
+ * model configured at all -- a fallback hidden inside a failed call would make
+ * "the model is down" and "here is your note" the same event, and they are not.
+ *
+ * A model that cannot be reached says so in a sentence and leaves the box
+ * exactly as the editor left it. A suggestion that silently did nothing would
+ * be indistinguishable from a suggestion that failed.
+ */
+export async function performSuggestCorrectionWording(
+  context: { userId: string; newsroomId?: number },
+  input: { articleSlug: string; wasWrong: string; isRight: string },
+): Promise<
+  | { ok: true; wording: string; source: "model" | "template" }
+  | { ok: false; error: string }
+> {
+  const wasWrong = cleanCorrectionLine(input.wasWrong);
+  const isRight = cleanCorrectionLine(input.isRight);
+  /*
+    Both lines are required for either path: the desk cannot write a correction
+    from half the fact, and asking a model to would produce a sentence that
+    reads finished and is not. A missing line is the editor's to fix, so it is
+    refused in a sentence naming which one, before any model is called.
+  */
+  if (!wasWrong || !isRight) {
+    return {
+      ok: false as const,
+      error: !wasWrong && !isRight
+        ? "Say what was wrong and what is right, then the desk can suggest the wording."
+        : !wasWrong
+          ? "Say what the story got wrong, then the desk can suggest the wording."
+          : "Say what is right, then the desk can suggest the wording.",
+    };
+  }
+  /*
+    A template the desk can write on its own. It is returned as the suggestion
+    when there is no story to ask about -- the editor is correcting a printed
+    story, so this should not happen, but answering with a usable note is better
+    than a model call about a story that is not there or a dead button.
+  */
+  const fallback = correctionTemplate(wasWrong, isRight);
+  const sql = await getSql();
+  const rows = await sql<{ id: number; headline: string | null; body: string | null }>`
+    select id, headline, body from articles
+    where slug = ${input.articleSlug}
+      and newsroom_id = ${owned(context)}
+      and status = 'published'
+    limit 1
+  `;
+  const article = rows[0];
+  if (!article) {
+    if (!fallback) return { ok: false as const, error: "That published story is not available in this newsroom." };
+    return { ok: true as const, wording: fallback, source: "template" as const };
+  }
+  const prompt = correctionWordingPrompt({
+    wasWrong,
+    isRight,
+    headline: String(article.headline ?? "").trim(),
+    body: String(article.body ?? ""),
+  });
+  const got = await grokChat(prompt.system, prompt.user, 700, {
+    choice: "auto",
+    newsroomId: owned(context),
+  });
+  if (!got.ok) {
+    return {
+      ok: false as const,
+      error:
+        "The story model could not be reached just now, so no wording was suggested. Your box is exactly as you left it.",
+    };
+  }
+  const wording = parseCorrectionWording(got.text);
+  if (!wording) {
+    return {
+      ok: false as const,
+      error:
+        "The story model did not come back with something that would post as a correction. Your box is exactly as you left it.",
+    };
+  }
+  return { ok: true as const, wording, source: "model" as const };
+}
+
+/**
+ * The plain correction note, written on the desk from the editor's two lines.
+ *
+ * No model, no network, nothing that can be down. This is the path the owner's
+ * complaint really asks for -- a filled box -- and it is deliberately separate
+ * from the model call so that "the model is unreachable" never turns into an
+ * empty box.
+ */
+export const suggestCorrectionTemplate = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => correctionWordingInput.parse(input))
+  .handler(async ({ data }) => {
+    const wording = correctionTemplate(data.wasWrong, data.isRight);
+    return wording
+      ? { ok: true as const, wording, source: "template" as const }
+      : {
+          ok: false as const,
+          error: "Say what was wrong and what is right, then the desk can write the note.",
+        };
+  });
+
+export const suggestCorrectionWording = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => correctionWordingInput.parse(input))
+  .handler(async ({ context, data }) =>
+    performSuggestCorrectionWording(context, {
+      articleSlug: data.articleSlug,
+      wasWrong: data.wasWrong,
+      isRight: data.isRight,
+    }));
+
 export const addCorrection = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => correctionInput.parse(input))
@@ -3287,6 +3420,15 @@ export type DeskPublishedRow = {
   published_at: string;
   lead_id: number | null;
   lead_score: number | null;
+  /**
+   * The story text as it is on the paper right now.
+   *
+   * 0.6.70: the desk needs it to open a correction's "also fix the story text"
+   * editor seeded with the words it is about to replace, so the editor never
+   * starts from an empty box holding a story they cannot see. It is what the
+   * public page prints, no more and no less.
+   */
+  body: string;
   corrections: { date: string; body: string }[];
   transcriptReviews: PublishedMeetingReview[];
 };
@@ -3480,9 +3622,10 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
       published_at: string;
       lead_id: number | null;
       lead_score: number | null;
+      body: string | null;
     }>`
       select a.id, a.slug, a.headline, a.dek, a.topic, a.published_at, a.lead_id,
-        l.newsworthiness as lead_score
+        a.body, l.newsworthiness as lead_score
       from articles a
       left join leads l on l.id = a.lead_id
       where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
@@ -3512,6 +3655,13 @@ export const listPublishedDesk = createServerFn({ method: "GET" })
     return arts.map((a) => ({
       ...a,
       lead_score: a.lead_score == null ? null : Number(a.lead_score),
+      /*
+        `articles.body` is nullable in the schema and every path that publishes
+        writes it, but the desk must not hand a component a null where it
+        expects the story's words: an editor-opening box seeded from null would
+        read as "this story has no text".
+      */
+      body: String(a.body ?? ""),
       corrections: byArt.get(a.id) ?? [],
       transcriptReviews: reviewsByArticle.get(a.id) ?? [],
     }));
