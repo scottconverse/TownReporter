@@ -11,7 +11,7 @@ import {
 } from "./sections-setup-copy";
 import { editorSections, applySections } from "@/lib/news/sections";
 import { addSource } from "@/lib/news/desk";
-import { kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
+import { editorActionError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
 import {
   sectionPreviewChanges,
   type Section,
@@ -149,11 +149,20 @@ export function SectionsSetup() {
       });
       void cache.invalidateQueries({ queryKey: ["editor-sections"] });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Could not add that source.";
+      /*
+        `addSource` caps the URL at 500 and this box has no `maxLength`, and
+        the validator runs in the browser -- so a pasted URL past the cap
+        arrives here as an issues array. Same guard as /desk/sources, which
+        calls the same server function.
+      */
+      const raw = err instanceof Error ? err.message : "";
       setAddNotice({
         key: s.key,
         kind: "err",
-        text: msg === "Unauthorized" ? "Session expired. Sign in again, then retry." : msg,
+        text:
+          raw === "Unauthorized"
+            ? "Session expired. Sign in again, then retry."
+            : editorActionError(raw, "add that source") ?? "Could not add that source.",
       });
     } finally {
       setAddingKey(null);

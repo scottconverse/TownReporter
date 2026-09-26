@@ -68,6 +68,22 @@ export function MeetingCaptureSettings() {
   });
 
   if (settings.isPending) return <Busy label="Loading meeting capture settings" />;
+  /*
+    A failed load used to fall through to the form: every field keeps its
+    initial state, `enabled ?? false` reads as off, `channels ?? []` as none,
+    and the Save button was live -- so one click after a transient load
+    failure wrote the paper's defaults over its real meeting settings. There
+    is nothing to edit until the real settings arrive, so the form is not
+    rendered (0.6.67).
+  */
+  if (settings.isError) {
+    return (
+      <p role="alert" className="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+        The desk could not read the meeting capture settings. Reload the page to try again — nothing
+        was changed.
+      </p>
+    );
+  }
 
   const list = channels ?? [];
 
