@@ -1030,7 +1030,14 @@ test("lib-migrate.ps1 hands the redirect to cmd.exe, retries migrate three times
   // The whole repair: cmd /c owns the redirection and Start-Process points it
   // at two FILES, so no PowerShell stream ever carries the child's stderr,
   // whatever the caller's preference is.
-  assert.match(code, /ArgumentList\s*=\s*@\("\/c", \$CommandLine\)/, "cmd /c must take the command line as ONE argument");
+  // `/s` plus one outer pair of quotes: plain `/c` strips the first and last
+  // quote of a line that starts with one, which broke the quoted psql probe on
+  // the live paper (2026-09-25 9:25 PM). scripts/ci-boot-recovery.ps1 2b runs it.
+  assert.match(
+    code,
+    /ArgumentList\s*=\s*@\("\/s", "\/c", \("`"" \+ \$CommandLine \+ "`""\)\)/,
+    "cmd /s /c must take the command line as ONE quoted argument",
+  );
   assert.match(code, /RedirectStandardOutput\s+= \$StdOutFile/, "stdout must go to a file, not a pipe");
   assert.match(code, /RedirectStandardError\s+= \$StdErrFile/, "and so must stderr -- this is the line that matters");
   assert.match(code, /ErrorActionPreference = "Continue"/, "and the preference is flipped for the duration as well");

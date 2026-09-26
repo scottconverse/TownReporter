@@ -95,7 +95,10 @@ function Invoke-TownReporterCommand {
     # command line is ever re-parsed or re-quoted on the way through.
     $startArgs = @{
       FilePath               = (Get-TownReporterShell)
-      ArgumentList           = @("/c", $CommandLine)
+      # /s + one outer pair of quotes: cmd strips exactly that pair and keeps every
+      # inner quote. Plain /c strips the FIRST and LAST quote of a line that starts
+      # with one, which broke "C:\...\psql.exe" -d "..." -tAc "select 1" at boot.
+      ArgumentList           = @("/s", "/c", ("`"" + $CommandLine + "`""))
       NoNewWindow            = $true
       RedirectStandardOutput = $StdOutFile
       RedirectStandardError  = $StdErrFile
