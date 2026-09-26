@@ -77,7 +77,9 @@ const DESK_MORE = [
  */
 function navItemIsActive(item: DeskNavItem, pathname: string, hash: string) {
   const path = item.to;
-  const onPath = item.exact ? pathname === path : pathname === path || pathname.startsWith(`${path}/`);
+  const onPath = item.exact
+    ? pathname === path
+    : pathname === path || pathname.startsWith(`${path}/`);
   if (!onPath) return false;
   if (path !== "/desk/ops") return true;
   const wantHash = `#${item.hash ?? ""}`;
@@ -135,6 +137,7 @@ export function DeskShell({
   kicker,
   night = false,
   lede,
+  actions,
   hideTitle = false,
 }: {
   children: React.ReactNode;
@@ -142,6 +145,14 @@ export function DeskShell({
   kicker?: string;
   night?: boolean;
   lede?: React.ReactNode;
+  /**
+   * The page's own buttons, on the drawn header's right-hand end (README
+   * "2. Today" / "3. Queue"): Today's "+ New story", the Queue's "Run scan
+   * now". `lede` is the sentence that goes under the title; this is the row
+   * that sits beside it, and the two are separate slots because the drawing
+   * puts them in different places.
+   */
+  actions?: React.ReactNode;
   hideTitle?: boolean;
 }) {
   const { user, isPending } = useCurrentUserState();
@@ -210,9 +221,7 @@ export function DeskShell({
   const allLeads = leads.data ?? [];
   const counts: Record<string, number | undefined> = {
     Queue: allLeads.length ? openLeads(allLeads).length : undefined,
-    Drafts: allLeads.length
-      ? allLeads.filter((l) => l.status === "drafted").length
-      : undefined,
+    Drafts: allLeads.length ? allLeads.filter((l) => l.status === "drafted").length : undefined,
     Published: allLeads.length
       ? allLeads.filter((l) => l.status === "published").length
       : undefined,
@@ -306,37 +315,36 @@ export function DeskShell({
           <Link to="/" className="astra-foot-paper" title="Public news page">
             View the paper ↗
           </Link>
-          {!night && (
+          <div className="astra-foot-row">
+            {!night && (
+              <button
+                type="button"
+                className="astra-foot-btn"
+                aria-label={
+                  mode === "dark" ? "Switch to light appearance" : "Switch to dark appearance"
+                }
+                onClick={() => choose(mode === "dark" ? "light" : "dark")}
+              >
+                {mode === "dark" ? "Light" : "Dark"}
+              </button>
+            )}
+            {/*
+              Drawn as "Aa Large", not a text-size select: one button in the
+              footer row that steps the desk between the two sizes. Like the
+              Dark/Light control beside it, the label names what pressing it
+              gets you, and `aria-pressed` carries the state the label cannot.
+            */}
             <button
               type="button"
               className="astra-foot-btn"
-              aria-label={
-                mode === "dark" ? "Switch to light appearance" : "Switch to dark appearance"
-              }
-              onClick={() => choose(mode === "dark" ? "light" : "dark")}
+              aria-pressed={size === "large"}
+              aria-label={size === "large" ? "Switch to normal text" : "Switch to large text"}
+              onClick={() => chooseSize(size === "large" ? "normal" : "large")}
             >
-              {mode === "dark" ? "Light" : "Dark"}
+              {size === "large" ? "Aa Normal" : "Aa Large"}
             </button>
-          )}
-          {/*
-            The design draws this as "Aa Large" — one control that cycles the
-            two steps. screen-reader-wise and test-wise the desk has always had
-            a labelled <select> here (scripts/desk-text-size-render.test.mjs
-            pins `aria-label="Text size"` and both options), so the select
-            stays and is drawn at the footer control height instead.
-          */}
-          <label className="astra-size">
-            Text size
-            <select
-              aria-label="Text size"
-              value={size}
-              onChange={(e) => chooseSize(e.target.value as "normal" | "large")}
-            >
-              <option value="normal">Normal</option>
-              <option value="large">Large</option>
-            </select>
-          </label>
-          <button type="button" className="astra-foot-btn" onClick={() => setKeysOpen(true)}>
+          </div>
+          <button type="button" className="astra-foot-keys" onClick={() => setKeysOpen(true)}>
             Press ? for keyboard shortcuts
           </button>
           <div className="astra-foot-more">
@@ -394,6 +402,7 @@ export function DeskShell({
                 <h1 className="h1">{title}</h1>
               </div>
               {lede && <div className="dark-lede">{lede}</div>}
+              {actions && <div className="head-acts">{actions}</div>}
             </div>
           )}
           {children}
@@ -554,12 +563,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
         </label>
         <nav aria-label="Search results">
           {pages.map((l) => (
-            <Link
-              key={l.label}
-              to={l.to}
-              className="astra-search-result"
-              onClick={onClose}
-            >
+            <Link key={l.label} to={l.to} className="astra-search-result" onClick={onClose}>
               {l.label}
               <ArrowUpRight size={16} />
             </Link>
@@ -1019,7 +1023,7 @@ export function Busy({ label }: { label: string }) {
 
 /*
   ===========================================================================
-  LANE-2 PLACEHOLDER — REPLACE THIS WITH THE REAL JOB CARD.
+  LANE-2 PLACEHOLDER — DRAFTS STILL DRAWS THIS; THE REAL CARD HAS LANDED.
   ===========================================================================
 
   The redesign draws a Job card (README "Job card anatomy"): title, model ·
@@ -1029,23 +1033,32 @@ export function Busy({ label }: { label: string }) {
   its own actions. The compact variant (no stage list, 12px padding) is what
   Drafts draws inline on a running row.
 
-  Lane 2 owns that card, and is building it against the same `desk_jobs` rows
-  this reads. Until it lands, this stands in: a `RunningJob`'s title, elapsed
-  time and current `stage` text inside a dashed outline, so a stand-in can
-  never be mistaken at a glance for the drawn card, in a screenshot or in the
-  code.
+  Lane 2 built that card and it has landed (`JobCard`, phase 3). Today's
+  "Running now" draws it now, and "In progress" draws its own `.today-card`
+  drafts (unit BF2, defects 3 and 5). What is left here is Drafts' running
+  rows, which still come through this stand-in: they hand it a `RunningJob`
+  and a clock (`nowMs`), while the card wants the `JobProgressView` that
+  `useDeskJobs()` returns, so swapping them is a change to how `/desk/drafts`
+  picks its jobs rather than a substituted body. Until someone does that,
+  Drafts keeps the stand-in -- a `RunningJob`'s title, elapsed time and
+  current `stage` text inside a dashed outline, so it can never be mistaken at
+  a glance for the drawn card, in a screenshot or in the code.
 
-  ONE SWAP POINT. Today's "Running now" and "In progress", and Drafts' running
-  rows, all render `<JobSlot>` and nothing else; when lane 2's `JobCard` exists,
-  this function's body becomes `<JobCard job={job} compact={compact} />` and
-  those three screens need no change at all. `data-job-slot` marks each one in
-  the DOM so the stand-ins are countable.
+  `data-job-slot` marks each one in the DOM so the stand-ins are countable.
 
   It shows only what the desk already polls: no fake progress bar, no invented
   stage list, no model name it was not given. A placeholder that fakes the
   missing half would hide the fact that it is missing.
 */
-export function JobSlot({ job, nowMs, compact = false }: { job: RunningJob; nowMs: number; compact?: boolean }) {
+export function JobSlot({
+  job,
+  nowMs,
+  compact = false,
+}: {
+  job: RunningJob;
+  nowMs: number;
+  compact?: boolean;
+}) {
   return (
     <div className={"job-slot" + (compact ? " job-slot-compact" : "")} data-job-slot="">
       <b className="job-slot-title">{job.headline}</b>

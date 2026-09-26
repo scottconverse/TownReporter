@@ -1,19 +1,15 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
-import { ActiveStoryJobs } from "@/components/JobCard";
+import { DeskJobCard } from "@/components/JobCard";
+import { useDeskJobs } from "@/components/job-card-state";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, Chip, DeskMoreMenu, InkButton, JobSlot, Score, SecHead } from "@/components/desk-chrome";
-import { useNowMs, type RunningJob } from "@/components/desk-jobs";
-import {
-  areaClass,
-  announceToDesk,
-  inputClass,
-  leadOrigin,
-} from "@/components/desk-chrome-utils";
+import { Busy, Chip, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
+import { useNowMs } from "@/components/desk-jobs";
+import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
 import { LeadFlags } from "@/components/desk-leads";
 import { formatAge } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
@@ -38,14 +34,8 @@ import {
   writeStoryFromInput,
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
+import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
-  IMPORT_DISCLOSURES,
-  IMPORT_LIMITS,
-  htmlToText,
-  type DisclosureKey,
-} from "@/lib/news/import-stories";
-import {
-  IMPORT_PASTE_KEY,
   NO_SECTION,
   SECTION_REQUIRED,
   cardProblems,
@@ -67,6 +57,7 @@ import {
   investigationStopKind,
   nearDuplicate,
   openLeads,
+  parseFailedSources,
   pileForStatus,
   scanCountsLine,
   scanZeroWhy,
@@ -83,7 +74,8 @@ import {
 } from "@/lib/news/desk-drafts";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
-import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { Dialog } from "@/components/dialog";
+import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -140,6 +132,13 @@ const TRIAGE_KEYS: [string, string][] = [
   ["U", "undo"],
   ["Enter", "open lead"],
 ];
+
+/**
+ * The three ways into the desk that used to be panels stacked on Today and are
+ * now dialogs, each reached by its own hash (defect 2). The name is the hash,
+ * so `PanelKey` and the ids the e2e walk looks for cannot drift apart.
+ */
+type PanelKey = "story-composer" | "import-story" | "paste-one-story" | null;
 
 function DeskHome() {
   const sectionQuery = useEditorSections();
@@ -302,12 +301,6 @@ function DeskHome() {
     leadId?: number;
   } | null>(null);
   /*
-    A finished story or a whole report, on its way to the import screen. Kept
-    here rather than typed straight into that screen because this is the box the
-    editor is already looking at; see IMPORT_PASTE_KEY for the handoff.
-  */
-  const [importText, setImportText] = useState("");
-  /*
     "Paste a story I already have": one story, straight into the Queue, no
     review screen and no model. See paste-one-story.ts for why it is the import
     path and not a second one.
@@ -318,9 +311,11 @@ function DeskHome() {
   const [pasteDisclosure, setPasteDisclosure] = useState<DisclosureKey>(PASTE_ONE_DISCLOSURE);
   const [pasteOther, setPasteOther] = useState("");
   const [pasteNotice, setPasteNotice] = useState<string>("");
-  const [pasted, setPasted] = useState<
-    { headline: string; leadId: number; duplicate?: DuplicateWarning } | null
-  >(null);
+  const [pasted, setPasted] = useState<{
+    headline: string;
+    leadId: number;
+    duplicate?: DuplicateWarning;
+  } | null>(null);
   const pasteStory = useMutation({
     mutationFn: () => {
       const card = pasteOneStoryCard({
@@ -382,13 +377,6 @@ function DeskHome() {
       announceToDesk(line);
     },
   });
-  async function readImportFile(file: File | undefined) {
-    if (!file) return;
-    const raw = await file.text();
-    const isHtml = /\.html?$/i.test(file.name) || /^\s*<(!doctype|html)/i.test(raw);
-    setImportText(isHtml ? htmlToText(raw) : raw);
-    announceToDesk(`${file.name} is ready. Read the stories when you are.`);
-  }
   const writeStory = useMutation({
     mutationFn: () =>
       writeStoryFromInput({
@@ -459,6 +447,89 @@ function DeskHome() {
     (last?.started_at && Date.now() - new Date(last.started_at).getTime() > 24 * 3600_000);
   const printed = published.data ?? [];
 
+  /*
+    THE WIRE'S PER-SOURCE ROWS. The drawing gives every watched source one line
+    with a state chip and the reason behind it. All three states come from what
+    the desk already stored -- never from a second guess about a fetch:
+
+      Could not check  the source is named in the last run's failed_sources,
+                       or it carries a last_error from an earlier attempt.
+      Changed          the last run filed at least one lead citing this
+                       source's URL.
+      Checked · no
+      change           it was fetched in the last run and filed nothing.
+
+    A source the last run never reached says so instead of claiming a check --
+    the same rule the edition's chips follow, and the reason there are four
+    states here and three in the drawing.
+  */
+  const scanFails = parseFailedSources(last?.failed_sources);
+  const failReasonFor = (s: (typeof accepted)[number]) => {
+    const named = scanFails.find((f) => f.id === s.id || (f.url && f.url === s.url));
+    const raw = named?.error ?? s.last_error;
+    if (!raw) return null;
+    return editorFetchError(raw, s.url) ?? raw;
+  };
+  const lastRunId = last?.id;
+  /*
+    Which watched source a lead came from: the run's leads carry the URLs they
+    cite, so a source is "changed" exactly when one of the last run's leads
+    names its URL. Built as a map so the counting is one pass over the leads
+    however many sources are watched.
+  */
+  const sourceByUrl = new Map(accepted.map((s) => [s.url, s]));
+  const citedCount = new Map<number, number>();
+  for (const l of allLeads) {
+    if (lastRunId == null || l.scan_run_id !== lastRunId) continue;
+    const seen = new Set<number>();
+    for (const url of (l.source_urls ?? "").split(/[\s,]+/)) {
+      const hit = sourceByUrl.get(url);
+      if (hit && !seen.has(hit.id)) {
+        seen.add(hit.id);
+        citedCount.set(hit.id, (citedCount.get(hit.id) ?? 0) + 1);
+      }
+    }
+  }
+  const lastStartedAt = last?.started_at ? new Date(last.started_at).getTime() : 0;
+  const wireRows = accepted
+    .map((s) => {
+      const failure = failReasonFor(s);
+      if (failure) {
+        return { s, tone: "fail", label: "Could not check", note: failure, rank: 0 };
+      }
+      if (citedCount.has(s.id)) {
+        const n = citedCount.get(s.id) ?? 0;
+        return {
+          s,
+          tone: "changed",
+          label: "Changed",
+          note: n > 0 ? `${n} new item${n === 1 ? "" : "s"} filed` : "New items filed",
+          rank: 1,
+        };
+      }
+      const fetched = s.last_fetched_at ? new Date(s.last_fetched_at).getTime() : 0;
+      if (fetched && fetched >= lastStartedAt) {
+        return {
+          s,
+          tone: "same",
+          label: "✓ Checked · no change",
+          note: `Checked ${formatDateTime(s.last_fetched_at)}`,
+          rank: 2,
+        };
+      }
+      return {
+        s,
+        tone: "quiet",
+        label: "Not checked yet",
+        note: s.last_fetched_at
+          ? `Last checked ${formatShortDate(s.last_fetched_at)}; the last scan did not reach it.`
+          : "No scan has reached this source yet.",
+        rank: 3,
+      };
+    })
+    .sort((a, b) => a.rank - b.rank || a.s.title.localeCompare(b.s.title))
+    .slice(0, 6);
+
   const needs: { t: string; to: string; openDark?: number; quiet?: boolean }[] = [];
   if (drafted)
     needs.push({
@@ -521,13 +592,19 @@ function DeskHome() {
   const writingNow = draftStates.filter((s) => s.running).length;
   const readyToCheck = draftStates.filter((s) => s.needsYou).length;
   const readyToPrint = draftStates.filter((s) => s.key === "ready").length;
-  const runningJobs = (recentStories.data ?? []).filter(
-    (story) => story.status === "running" || story.status === "queued",
-  );
+  /*
+    Running now, off the phase 3 desk-jobs query: one poll for the whole
+    screen, so three cards cost one request per tick rather than three. Open
+    jobs only -- a job that has stopped is not running, and the drafts grid
+    below is where a stopped job's story is looked at.
+  */
+  const deskJobs = useDeskJobs();
+  const liveJobs = (deskJobs.data ?? [])
+    .filter((row) => row.status === "queued" || row.status === "running")
+    .slice(0, 3);
   const today = formatDate(new Date(nowMs));
   const newToday = allLeads.filter((l) => formatDate(l.created_at) === today).length;
   const heldCount = allLeads.filter((l) => l.status === "held").length;
-  const newLeads = queue.slice(0, 8);
   const sectionName = (topic: string | null) =>
     (topic && sectionQuery.sections.find((s) => s.key === topic)?.name) || topic || "";
 
@@ -546,10 +623,39 @@ function DeskHome() {
     to: "/desk/queue" | "/desk/drafts" | "/desk";
     hash?: "tonight";
   }[] = [
-    { n: 1, name: "Pick leads", count: newToday, unit: "new today", act: "Review leads", to: "/desk/queue" },
-    { n: 2, name: "Draft", count: writingNow, unit: "writing now", act: "Watch progress", to: "/desk/drafts" },
-    { n: 3, name: "Check", count: readyToCheck, unit: "ready to check", act: "Check draft", to: "/desk/drafts" },
-    { n: 4, name: "Publish", count: readyToPrint, unit: "ready to print", act: "Tonight’s edition", to: "/desk", hash: "tonight" },
+    {
+      n: 1,
+      name: "Pick leads",
+      count: newToday,
+      unit: "new today",
+      act: "Review leads",
+      to: "/desk/queue",
+    },
+    {
+      n: 2,
+      name: "Draft",
+      count: writingNow,
+      unit: "writing now",
+      act: "Watch progress",
+      to: "/desk/drafts",
+    },
+    {
+      n: 3,
+      name: "Check",
+      count: readyToCheck,
+      unit: "ready to check",
+      act: "Check draft",
+      to: "/desk/drafts",
+    },
+    {
+      n: 4,
+      name: "Publish",
+      count: readyToPrint,
+      unit: "ready to print",
+      act: "Tonight’s edition",
+      to: "/desk",
+      hash: "tonight",
+    },
   ];
 
   /*
@@ -612,6 +718,19 @@ function DeskHome() {
     down for any modified key, so the shell's Ctrl-K and the browser's own
     shortcuts keep working.
   */
+  /*
+    WHICH LEADS THE LIST IS SHOWING (defect 6): the drawn header's segmented
+    control. "Open" is every lead the desk is still working, "Held" the ones an
+    editor set aside. Both are slices of the same `queue`, so the keyboard's
+    index, the cursor and the row actions all keep meaning the same thing.
+  */
+  const [leadSeg, setLeadSeg] = useState<"open" | "held">("open");
+  const newLeads = (
+    leadSeg === "held"
+      ? queue.filter((l) => l.status === "held")
+      : queue.filter((l) => l.status !== "held")
+  ).slice(0, 8);
+
   const [cursor, setCursor] = useState(0);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -648,10 +767,12 @@ function DeskHome() {
           if (lead) setStatus.mutate({ id: lead.id, status: "new" });
           break;
         case "enter":
-          if (lead) void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
+          if (lead)
+            void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
           break;
         case "n":
-          void navigate({ to: "/desk/queue", hash: "file-lead" });
+          setPanel("story-composer");
+          void navigate({ to: "/desk", hash: "story-composer" });
           break;
         default:
           return;
@@ -661,6 +782,42 @@ function DeskHome() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  /*
+    WHICH PANEL IS OPEN (defect 2).
+
+    The composer and the two paste paths are dialogs now instead of panels
+    stacked on the page: the drawing of Today has none of them, and each one is
+    something an editor does once rather than something to read at a glance.
+    "+ New story" and the N key link to /desk#story-composer, and
+    #import-story and #paste-one-story reach the other two the same way, so any
+    of the three can be bookmarked.
+
+    The router's own location is what this reads, not a `hashchange` listener:
+    the header link goes from /desk to /desk#story-composer, and a same-path
+    hash change is a `pushState` the router owns -- no `hashchange` fires, so a
+    listener would leave the press looking like it did nothing.
+  */
+  const [panel, setPanel] = useState<PanelKey>(null);
+  const { hash } = useLocation();
+  useEffect(() => {
+    setPanel(
+      hash === "story-composer" || hash === "import-story" || hash === "paste-one-story"
+        ? hash
+        : null,
+    );
+  }, [hash]);
+  const closePanel = () => {
+    /*
+      Leave the address tidy: the hash is what opened this, and a stale
+      #story-composer in the bar would re-open the dialog on a reload the
+      editor did not ask for. Going back through the router (rather than
+      `history.replaceState`) keeps the router's location in step, so opening
+      the same panel again is still a change the effect above can see.
+    */
+    if (window.location.hash) void navigate({ to: "/desk", replace: true });
+    else setPanel(null);
+  };
 
   const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
   // The two queries the front page cannot render anything useful without.
@@ -673,8 +830,8 @@ function DeskHome() {
     <DeskShell
       title="Good morning. Here’s today’s paper."
       kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
-      lede={
-        <div className="today-head-acts">
+      actions={
+        <>
           <Link to="/desk/queue" hash="file-lead" className="btn">
             + Add a lead
           </Link>
@@ -684,7 +841,7 @@ function DeskHome() {
           <Link to="/desk/opinion" className="btn">
             + Opinion
           </Link>
-        </div>
+        </>
       }
     >
       {/*
@@ -723,17 +880,18 @@ function DeskHome() {
       </nav>
 
       {/*
-        RUNNING NOW. Every long job the desk is running, read from the same
-        ["recent-story-work"] query the shell's Running box and the Drafts
-        screen poll -- so the elapsed time in the shell's footer and the time on
-        these cards come from one clock (`useNowMs`) and one formatter.
+        RUNNING NOW, as drawn: a three-up of compact job cards, and no section
+        at all when nothing is running. Each card comes from the phase 3
+        `useDeskJobs()` query (one poll for the screen) and carries its own
+        clock, its own stage line and its own press -- `onNavigate` is the
+        "Open your story" the old stand-in slot offered, so replacing the slot
+        with the real card takes nothing away.
       */}
-      {runningJobs.length > 0 ? (
+      {liveJobs.length > 0 ? (
         <section aria-label="Running now">
           <SecHead
             title="Running now"
-            count={runningJobs.length}
-            sub="Every long job the desk is running, with the stage it is on."
+            sub="Live. Each shows what it is doing and when it last did something."
             aside={
               <Link to="/desk/drafts" className="np-link">
                 All drafts
@@ -741,35 +899,20 @@ function DeskHome() {
             }
           />
           <div className="today-running">
-            {runningJobs.map((story) => {
-              const job: RunningJob = {
-                id: story.id,
-                headline: story.headline,
-                status: story.status,
-                stage: story.stage,
-                started_at: story.started_at,
-                updated_at: story.updated_at,
-              };
-              return (
-                <div key={story.id}>
-                  {/* LANE-2 SLOT: lane 2's Job card replaces this JobSlot. The
-                      screen hands it the job row and the clock and renders
-                      nothing else, so the swap is one line. The Open press
-                      stays outside the slot and goes when the card lands --
-                      the drawn card owns its own Open in the Done state, and
-                      until then a running job on Today must not be a dead
-                      end. */}
-                  <JobSlot job={job} nowMs={nowMs} compact />
-                  <Link
-                    className="btn"
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(story.lead_id) }}
-                  >
-                    Open
-                  </Link>
-                </div>
-              );
-            })}
+            {liveJobs.map((job) => (
+              <DeskJobCard
+                key={job.id}
+                job={job}
+                compact
+                viewLabel="Open your story"
+                onNavigate={(row) =>
+                  void navigate({
+                    to: "/desk/story/$leadId",
+                    params: { leadId: String(row.leadId) },
+                  })
+                }
+              />
+            ))}
           </div>
         </section>
       ) : null}
@@ -783,29 +926,36 @@ function DeskHome() {
         claiming a pass. "Preview viewed" is in the drawing and has no backend;
         it is deliberately absent (see the unit report).
       */}
-      <section id="tonight" aria-label="Tonight’s edition">
-        <SecHead
-          title="Tonight’s edition"
-          count={readyToPrint + readyToCheck}
-          sub="What still has to be true before the paper goes out."
-          aside={
-            <Link to="/desk/drafts" className="np-link">
-              All drafts
-            </Link>
-          }
-        />
+      {/*
+        TONIGHT'S EDITION, as drawn: the heading is INSIDE the panel with the
+        2px yellow rule (the panel is the edition, not a section that happens
+        to hold a list), the sub-line sits on the heading's own line, and each
+        story is one row of `1.1fr | 1.5fr | auto` -- section and headline,
+        then the checks, then the single press.
+      */}
+      <section id="tonight" className="today-edition" aria-label="Tonight’s edition">
+        <div className="today-edition-head">
+          <div className="today-edition-headline">
+            <h2 className="today-edition-title">Tonight’s edition</h2>
+            <span className="sec-count">{readyToPrint + readyToCheck}</span>
+          </div>
+          <p className="today-edition-sub">Each story needs every check before it can print.</p>
+          <Link to="/desk/drafts" className="np-link">
+            All drafts
+          </Link>
+        </div>
         {tonightRows.length === 0 ? (
           <p className="wire-sum">
-            No story is through its checks yet. A draft arrives here once it is written and you
-            have checked its evidence and its names.
+            No story is through its checks yet. A draft arrives here once it is written and you have
+            checked its evidence and its names.
           </p>
         ) : (
-          <div className="today-edition">
+          <div className="today-edition-rows">
             {tonightRows.map(({ row, state }) => {
               const chips = tonightChips(row);
               return (
                 <div className="today-edition-row" key={row.id}>
-                  <div>
+                  <div className="today-edition-what">
                     <span className="today-edition-sec">
                       {sectionName(row.topic) || "No section"}
                     </span>
@@ -816,13 +966,18 @@ function DeskHome() {
                     >
                       {row.headline}
                     </Link>
-                    <span className="today-edition-chips">
-                      <span className={"chip " + stateTone(state)}>{state.label}</span>
-                      <span className={"chip " + chips.evidence.tone}>{chips.evidence.text}</span>
-                      <span className={"chip " + chips.names.tone}>{chips.names.text}</span>
-                      <span className={"chip " + chips.section.tone}>{chips.section.text}</span>
-                    </span>
                   </div>
+                  {/*
+                    The checks are their own column, not a tail on the
+                    headline: the drawing lines them up down the middle of the
+                    panel so two drafts' chips can be compared at a glance.
+                  */}
+                  <span className="today-edition-chips">
+                    <span className={"chip " + stateTone(state)}>{state.label}</span>
+                    <span className={"chip " + chips.evidence.tone}>{chips.evidence.text}</span>
+                    <span className={"chip " + chips.names.tone}>{chips.names.text}</span>
+                    <span className={"chip " + chips.section.tone}>{chips.section.text}</span>
+                  </span>
                   {/*
                     The one next-action button on the row, in the draft's own
                     vocabulary (lib/news/desk-drafts.ts) -- the same word the
@@ -850,344 +1005,274 @@ function DeskHome() {
           too), and each one is pinned by its own class -- see the grid rules
           in desk-astra.css. */}
       <div className="desk-home">
-        <section className="recent-story-work in-progress" aria-label="In progress">
-          <SecHead
-            title="In progress"
-            count={(recentStories.data ?? []).length}
-            sub="Nothing here prints until you press Publish."
-            aside={
-              <Link to="/desk/drafts" className="np-link">
-                All drafts
-              </Link>
-            }
-          />
-          {recentStories.isError ? (
-            <p role="alert">
-              Recent drafts could not load.{" "}
-              <button type="button" className="btn" onClick={() => void recentStories.refetch()}>
-                Try again
-              </button>
-            </p>
-          ) : recentStories.isPending ? (
-            <p role="status">Loading your drafts…</p>
-          ) : !recentStories.data?.length ? (
-            <p>No drafts started yet. Add your sources below to begin.</p>
-          ) : (
-            <div className="today-cards">
-              {recentStories.data.map((story) => (
-                /*
+        <div className="desk-work">
+          <section className="recent-story-work in-progress" aria-label="In progress">
+            <SecHead
+              title="In progress"
+              count={(recentStories.data ?? []).length}
+              sub="Nothing here prints until you press Publish."
+              aside={
+                <Link to="/desk/drafts" className="np-link">
+                  All drafts
+                </Link>
+              }
+            />
+            {recentStories.isError ? (
+              <p role="alert">
+                Recent drafts could not load.{" "}
+                <button type="button" className="btn" onClick={() => void recentStories.refetch()}>
+                  Try again
+                </button>
+              </p>
+            ) : recentStories.isPending ? (
+              <p role="status">Loading your drafts…</p>
+            ) : !recentStories.data?.length ? (
+              <p>No drafts started yet. Add your sources below to begin.</p>
+            ) : (
+              <div className="today-cards">
+                {recentStories.data.map((story) => (
+                  /*
                   The drawn card carries the stage in its 4px top rule: yellow
                   while the desk is writing, ink once the draft is ready to
                   edit, line for everything else (queued, or stopped with a
                   reason). The stage is also in words, because the rule alone
                   is a colour and the desk never says a state in colour only.
                 */
-                <article
-                  className={
-                    "today-card " +
-                    (story.status === "running"
-                      ? "live"
-                      : story.status === "completed"
-                        ? "mine"
-                        : "idle")
-                  }
-                  key={story.id}
-                >
-                  <span className="today-card-stage">
-                    {story.status === "completed"
-                      ? "Ready to edit"
-                      : story.status === "failed"
-                        ? "Needs attention"
-                        : story.status === "queued"
-                          ? "Queued"
-                          : "Writing in progress"}
-                  </span>
-                  <h3 className="today-card-hl">
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(story.lead_id) }}
-                      className="hl-link"
-                    >
-                      {story.headline}
-                    </Link>
-                  </h3>
-                  <p className="meta">
-                    {story.status === "completed"
-                      ? "Draft saved. Review it before publishing."
-                      : story.status === "failed"
-                        ? "Open the story to see what stopped and resume."
-                        : story.stage || "Waiting to start"}
-                  </p>
-                  {/*
+                  <article
+                    className={
+                      "today-card " +
+                      (story.status === "running"
+                        ? "live"
+                        : story.status === "completed"
+                          ? "mine"
+                          : "idle")
+                    }
+                    key={story.id}
+                  >
+                    <span className="today-card-stage">
+                      {story.status === "completed"
+                        ? "Ready to edit"
+                        : story.status === "failed"
+                          ? "Needs attention"
+                          : story.status === "queued"
+                            ? "Queued"
+                            : "Writing in progress"}
+                    </span>
+                    <h3 className="today-card-hl">
+                      <Link
+                        to="/desk/story/$leadId"
+                        params={{ leadId: String(story.lead_id) }}
+                        className="hl-link"
+                      >
+                        {story.headline}
+                      </Link>
+                    </h3>
+                    <p className="meta">
+                      {story.status === "completed"
+                        ? "Draft saved. Review it before publishing."
+                        : story.status === "failed"
+                          ? "Open the story to see what stopped and resume."
+                          : story.stage || "Waiting to start"}
+                    </p>
+                    {/*
                     One press, not two: the drawn card's "next action and
                     Open" both land on the story page, and two buttons that go
                     to the same place make the editor choose for nothing.
                   */}
-                  <Link
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(story.lead_id) }}
-                    className="btn"
-                  >
-                    {story.status === "running" || story.status === "queued"
-                      ? "View progress"
-                      : "Open draft"}
-                  </Link>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(story.lead_id) }}
+                      className="btn"
+                    >
+                      {story.status === "running" || story.status === "queued"
+                        ? "View progress"
+                        : "Open draft"}
+                    </Link>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
-        <section
-          id="story-composer"
-          className="composer story-composer"
-          aria-labelledby="story-composer-title"
-        >
-          <header className="story-composer-heading">
-            <div>
-              <p className="composer-eyebrow">Start a draft</p>
-              <h2 id="story-composer-title">Write a story</h2>
-            </div>
-            <p>
-              Bring your sources. Tell us the angle.
-              <br />
-              You review the draft before anything is published.
-            </p>
-          </header>
-          <div className="composer-sources">
-            <StoryDocumentUpload
-              documents={storyDocuments}
-              onChange={setStoryDocuments}
-              onBusy={setUploadingDocuments}
-              disabled={writeStory.isPending}
-            />
-            <div className="composer-pasted">
-              <label htmlFor="story-source-text">Links or source text</label>
-              <p>
-                Paste website, PDF or YouTube links, or a full transcript. You can combine these
-                with attached files.
-              </p>
-              <textarea
-                id="story-source-text"
-                className={areaClass}
-                rows={6}
-                value={storyText}
-                disabled={writeStory.isPending}
-                onChange={(e) => setStoryText(e.target.value)}
-                placeholder="Paste source links or text here…"
-              />
-              <span className="composer-source-note">
-                Original documents are saved in full. Scanned pages and images are read with OCR.
-              </span>
-            </div>
-          </div>
-          <div className="composer-instructions">
-            <label htmlFor="story-instructions">What story do you want?</label>
-            <span>Give an angle, a question to answer, or points to emphasize.</span>
-            <textarea
-              id="story-instructions"
-              className={areaClass}
-              rows={3}
-              value={storyInstructions}
-              disabled={writeStory.isPending}
-              onChange={(e) => setStoryInstructions(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  if (
-                    !writeStory.isPending &&
-                    !uploadingDocuments &&
-                    (storyInput.length >= 8 || storyDocuments.length)
-                  )
-                    writeStory.mutate();
-                }
-              }}
-              placeholder="For example: Explain what the council decided, what it will cost, and what happens next."
-            />
-          </div>
-          <details className="composer-options">
-            <summary>
-              Research & section{" "}
-              <span>
-                {storyScope === "public" ? "Public research enabled" : "Supplied material only"} ·{" "}
-                {storySection || "Section suggested automatically"}
-              </span>
-            </summary>
-            <div className="composer-options-grid">
-              <DraftScopePicker
-                value={storyScope}
-                onChange={setStoryScope}
-                disabled={writeStory.isPending}
-              />
-              <label>
-                <span>Section (optional)</span>
-                <select
-                  value={storySection}
-                  onChange={(e) => setStorySection(e.target.value)}
-                  disabled={writeStory.isPending || sectionQuery.isPending}
-                >
-                  <option value="">Suggest from text — current default</option>
-                  {sectionQuery.sections
-                    .filter((s) => s.key !== "about" && s.key !== "opinion")
-                    .map((s) => (
-                      <option key={s.key} value={s.key}>
-                        {s.name}
-                      </option>
-                    ))}
-                  {storySection && !sectionQuery.sections.some((s) => s.key === storySection) ? (
-                    <option value={storySection}>
-                      Previous selection unavailable — choose again
-                    </option>
-                  ) : null}
-                </select>
-                <p>
-                  {sectionQuery.isPending
-                    ? "Loading sections…"
-                    : sectionQuery.isError
-                      ? "Sections could not load. Automatic selection is still available."
-                      : "You can change the section after drafting."}
-                </p>
-              </label>
-            </div>
-          </details>
-          <footer className="composer-footer">
-            <ModelPicker
-              scope="story"
-              value={storyModel}
-              onChange={(choice) => {
-                setStoryModel(choice);
-                setStoryModelEffort(defaultModelEffort(choice));
-              }}
-              effort={storyModelEffort}
-              onEffortChange={setStoryModelEffort}
-              disabled={writeStory.isPending}
-            />
-            <div className="composer-submit">
-              <InkButton
-                tone="solid"
-                onClick={() => writeStory.mutate()}
-                disabled={
-                  writeStory.isPending ||
-                  uploadingDocuments ||
-                  (storyInput.length < 8 && !storyDocuments.length)
-                }
-              >
-                {writeStory.isPending ? "Starting draft…" : "Write draft"}
-              </InkButton>
-              <p>
-                {uploadingDocuments
-                  ? "Waiting for your documents to finish uploading."
-                  : "Creates a draft for your review."}
-              </p>
-            </div>
-          </footer>
-          <div role="alert" aria-live="assertive" aria-atomic="true" className="composer-error">
-            {storyNotice?.kind === "error" ? storyNotice.text : ""}
-            {storyNotice?.leadId ? (
-              <p>
-                Your material is saved.{" "}
-                <Link
-                  to="/desk/story/$leadId"
-                  params={{ leadId: String(storyNotice.leadId) }}
-                  className="inline-link"
-                >
-                  Open the saved story to choose a model and continue
-                </Link>
-                .
-              </p>
-            ) : null}
-            {storyNotice?.kind === "error" &&
-            looksLikeProviderAuthFailure(storyNotice.authDetail) ? (
-              <ProviderSignInButton detail={storyNotice.authDetail} />
-            ) : null}
-          </div>
-        </section>
+          {/*
+          THE COMPOSER, IN A DIALOG (defect 2).
 
-        {/*
-          The second choice, right where the first one is.
-
-          Before this, a finished story could not be brought to the desk at all
-          unless it was an Opinion column. Pasting a report into "Write a story"
-          made the model rewrite it, which is the opposite of importing one: the
-          owner asked for the words to be kept exactly as written and for no
-          model to be run to find the stories. So this panel takes the paste and
-          hands it to a screen whose only job is to read it and let an editor
-          check every card.
+          The drawing of Today has no composer on it, and the brief moves this
+          one off the page: "+ New story" and the N key reach it at
+          /desk#story-composer. Same fields, same model picker, same disabled
+          rule, same mutation as the panel it replaces -- only its home and its
+          h2 (now the dialog's own title) changed.
         */}
-        <section
-          id="import-story"
-          className="composer story-composer"
-          aria-labelledby="import-story-title"
-        >
-          <header className="story-composer-heading">
-            <div>
-              <p className="composer-eyebrow">Or bring one already written</p>
-              <h2 id="import-story-title">Import finished stories</h2>
+          <Dialog
+            open={panel === "story-composer"}
+            onClose={closePanel}
+            title="Write a story"
+            subtitle="Bring your sources. Tell us the angle. You review the draft before anything is published."
+            primaryLabel={writeStory.isPending ? "Starting draft…" : "Write draft"}
+            onPrimary={() => writeStory.mutate()}
+            primaryDisabled={
+              writeStory.isPending ||
+              uploadingDocuments ||
+              (storyInput.length < 8 && !storyDocuments.length)
+            }
+            cancelLabel="Close"
+            closeLabel="Close the composer"
+            footNote={
+              uploadingDocuments
+                ? "Waiting for your documents to finish uploading."
+                : "Creates a draft for your review."
+            }
+          >
+            {/* `composer-fields` is the class the composer's field styling hangs
+              off now that the panel that carried `.story-composer` is gone
+              (styles.css, the textarea rule). */}
+            <div className="composer-fields">
+              <div className="composer-sources">
+                <StoryDocumentUpload
+                  documents={storyDocuments}
+                  onChange={setStoryDocuments}
+                  onBusy={setUploadingDocuments}
+                  disabled={writeStory.isPending}
+                />
+                <div className="composer-pasted">
+                  <label htmlFor="story-source-text">Links or source text</label>
+                  <p>
+                    Paste website, PDF or YouTube links, or a full transcript. You can combine these
+                    with attached files.
+                  </p>
+                  <textarea
+                    id="story-source-text"
+                    className={areaClass}
+                    rows={6}
+                    value={storyText}
+                    disabled={writeStory.isPending}
+                    onChange={(e) => setStoryText(e.target.value)}
+                    placeholder="Paste source links or text here…"
+                  />
+                  <span className="composer-source-note">
+                    Original documents are saved in full. Scanned pages and images are read with
+                    OCR.
+                  </span>
+                </div>
+              </div>
+              <div className="composer-instructions">
+                <label htmlFor="story-instructions">What story do you want?</label>
+                <span>Give an angle, a question to answer, or points to emphasize.</span>
+                <textarea
+                  id="story-instructions"
+                  className={areaClass}
+                  rows={3}
+                  value={storyInstructions}
+                  disabled={writeStory.isPending}
+                  onChange={(e) => setStoryInstructions(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      if (
+                        !writeStory.isPending &&
+                        !uploadingDocuments &&
+                        (storyInput.length >= 8 || storyDocuments.length)
+                      )
+                        writeStory.mutate();
+                    }
+                  }}
+                  placeholder="For example: Explain what the council decided, what it will cost, and what happens next."
+                />
+              </div>
+              <details className="composer-options">
+                <summary>
+                  Research & section{" "}
+                  <span>
+                    {storyScope === "public" ? "Public research enabled" : "Supplied material only"}{" "}
+                    · {storySection || "Section suggested automatically"}
+                  </span>
+                </summary>
+                <div className="composer-options-grid">
+                  <DraftScopePicker
+                    value={storyScope}
+                    onChange={setStoryScope}
+                    disabled={writeStory.isPending}
+                  />
+                  <label>
+                    <span>Section (optional)</span>
+                    <select
+                      value={storySection}
+                      onChange={(e) => setStorySection(e.target.value)}
+                      disabled={writeStory.isPending || sectionQuery.isPending}
+                    >
+                      <option value="">Suggest from text — current default</option>
+                      {sectionQuery.sections
+                        .filter((s) => s.key !== "about" && s.key !== "opinion")
+                        .map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.name}
+                          </option>
+                        ))}
+                      {storySection &&
+                      !sectionQuery.sections.some((s) => s.key === storySection) ? (
+                        <option value={storySection}>
+                          Previous selection unavailable — choose again
+                        </option>
+                      ) : null}
+                    </select>
+                    <p>
+                      {sectionQuery.isPending
+                        ? "Loading sections…"
+                        : sectionQuery.isError
+                          ? "Sections could not load. Automatic selection is still available."
+                          : "You can change the section after drafting."}
+                    </p>
+                  </label>
+                </div>
+              </details>
+              <footer className="composer-footer">
+                <ModelPicker
+                  scope="story"
+                  value={storyModel}
+                  onChange={(choice) => {
+                    setStoryModel(choice);
+                    setStoryModelEffort(defaultModelEffort(choice));
+                  }}
+                  effort={storyModelEffort}
+                  onEffortChange={setStoryModelEffort}
+                  disabled={writeStory.isPending}
+                />
+                {/*
+              The composer's own submit button is the dialog's primary press
+              now, so nothing here duplicates it -- one control named "Write
+              draft" on the screen, not two. What is left in the footer is the
+              other way in, which used to be the panel below this one.
+            */}
+                <div className="composer-submit">
+                  <Link to="/desk/import" className="inline-link">
+                    Already written somewhere else? Import finished stories
+                  </Link>
+                </div>
+              </footer>
+              <div role="alert" aria-live="assertive" aria-atomic="true" className="composer-error">
+                {storyNotice?.kind === "error" ? storyNotice.text : ""}
+                {storyNotice?.leadId ? (
+                  <p>
+                    Your material is saved.{" "}
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(storyNotice.leadId) }}
+                      className="inline-link"
+                    >
+                      Open the saved story to choose a model and continue
+                    </Link>
+                    .
+                  </p>
+                ) : null}
+                {storyNotice?.kind === "error" &&
+                looksLikeProviderAuthFailure(storyNotice.authDetail) ? (
+                  <ProviderSignInButton detail={storyNotice.authDetail} />
+                ) : null}
+              </div>
             </div>
-            <p>
-              Paste one story or a whole report. The text is kept exactly as written.
-            </p>
-          </header>
-          <div className="composer-sources">
-            <div className="composer-pasted">
-              <label htmlFor="import-source-text">The story, or the whole report</label>
-              <p>
-                A story on its own, or a report with headings — one story per heading. Its source
-                links come across with it. A saved page (.md, .txt, .html) can be chosen instead.
-              </p>
-              <textarea
-                id="import-source-text"
-                className={areaClass}
-                rows={6}
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                maxLength={IMPORT_LIMITS.text}
-                placeholder={"# A report title, if it has one\n\n### 1. The headline of the first story\nThe body of the story, exactly as it was written. [A source](https://example.test/record)"}
-              />
-              <label htmlFor="import-source-file" className="composer-source-note">
-                Or choose a file (.md, .txt, .html)
-              </label>
-              <input
-                id="import-source-file"
-                type="file"
-                accept=".md,.markdown,.txt,.html,.htm,text/plain,text/markdown,text/html"
-                className={inputClass}
-                onChange={(e) => void readImportFile(e.target.files?.[0])}
-              />
-              <span className="composer-source-note">
-                Nothing is saved or published yet. Next you check each story — its headline, its
-                section, its text and its sources — and only the ones you tick are imported.
-              </span>
-            </div>
-          </div>
-          <footer className="composer-footer">
-            <div className="composer-submit">
-              <InkButton
-                tone="solid"
-                onClick={() => {
-                  try {
-                    sessionStorage.setItem(IMPORT_PASTE_KEY, importText);
-                  } catch {
-                    /* ignore */
-                  }
-                  void navigate({ to: "/desk/import" });
-                }}
-                disabled={importText.trim().length < 20}
-              >
-                Read the stories
-              </InkButton>
-              <p>
-                Opens the import screen with this text in the box.{" "}
-                <Link to="/desk/import" className="inline-link">
-                  Go there on its own
-                </Link>
-                .
-              </p>
-            </div>
-          </footer>
-        </section>
+          </Dialog>
 
-        {/*
+          {/*
           The third choice: one story, already written, straight to the Queue.
 
           The owner asked for the Opinion desk's "Paste a piece I wrote" on the
@@ -1196,264 +1281,297 @@ function DeskHome() {
           screen, no model, no second save path -- it files the same card the
           import screen files, through the same server function.
         */}
-        <section
-          id="paste-one-story"
-          className="composer story-composer"
-          aria-labelledby="paste-one-story-title"
-        >
-          <header className="story-composer-heading">
-            <div>
-              <p className="composer-eyebrow">Or one you already wrote</p>
-              <h2 id="paste-one-story-title">Paste a story I already have</h2>
-            </div>
-            <p>One finished story. It goes to the Queue as a draft for you to work on there.</p>
-          </header>
-          <div className="composer-sources">
-            <div className="composer-pasted">
-              <label htmlFor="paste-one-text">The story</label>
-              <p>
-                Paste it as it is. Nothing is rewritten and no AI reads it — the paste becomes the
-                draft, with its first line as the headline if you leave that empty. Its links come
-                across as the story&rsquo;s sources.
-              </p>
-              <textarea
-                id="paste-one-text"
-                className={areaClass}
-                rows={14}
-                value={pasteText}
-                onChange={(e) => setPasteText(e.target.value)}
-                maxLength={IMPORT_LIMITS.text}
-                placeholder={
-                  "Council votes to bring the rules back for consideration\n\nThe council voted 5-2 on Tuesday. [The packet](https://example.test/packet)"
-                }
-              />
-              <label htmlFor="paste-one-headline" className="composer-source-note">
-                Headline — leave it empty and the first line becomes the headline
-              </label>
-              <input
-                id="paste-one-headline"
-                className={inputClass}
-                value={pasteHeadline}
-                onChange={(e) => setPasteHeadline(e.target.value)}
-                maxLength={IMPORT_LIMITS.headline}
-                placeholder="Taken from the first line if you leave this empty"
-              />
-              <label htmlFor="paste-one-section" className="composer-source-note">
-                Section
-              </label>
-              <select
-                id="paste-one-section"
-                className={inputClass}
-                value={pasteSection}
-                disabled={sectionQuery.sections.length === 0}
-                onChange={(e) => setPasteSection(e.target.value)}
-              >
-                <option value={NO_SECTION}>{SECTION_REQUIRED}</option>
-                {sectionQuery.sections.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <span className="composer-source-note">
-                {sectionQuery.sections.length === 0
-                  ? "Your sections could not load, and there is nothing to file this under without one. Try again in a moment."
-                  : "Pick one to add it — and you still confirm it in the story editor before it can publish."}
-              </span>
-              <label htmlFor="paste-one-disclosure" className="composer-source-note">
-                Who wrote this — the line readers see
-              </label>
-              <select
-                id="paste-one-disclosure"
-                className={inputClass}
-                value={pasteDisclosure}
-                onChange={(e) => setPasteDisclosure(e.target.value as DisclosureKey)}
-              >
-                {IMPORT_DISCLOSURES.map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-              {pasteDisclosure === "other" ? (
-                <input
-                  className={inputClass}
-                  value={pasteOther}
-                  onChange={(e) => setPasteOther(e.target.value)}
-                  placeholder="The line to print under the story"
-                  aria-label="The disclosure line to print"
-                />
-              ) : (
-                <span className="composer-source-note">
-                  {IMPORT_DISCLOSURES.find((d) => d.key === pasteDisclosure)?.line}
-                </span>
-              )}
-              <span className="composer-source-note">
-                Nothing is published. The story lands in the Queue as a news draft, editable like
-                any other — you can publish it whenever it is ready.
-              </span>
-            </div>
-          </div>
-          <footer className="composer-footer">
-            <div className="composer-submit">
-              <InkButton
-                tone="solid"
-                onClick={() => void pasteStory.mutate()}
-                disabled={pasteText.trim().length < 40 || pasteStory.isPending}
-              >
-                {pasteStory.isPending ? "Adding…" : "Add to Queue"}
-              </InkButton>
-              <p>No screen to check first. One story in, one draft in the Queue.</p>
-            </div>
-          </footer>
-          {pasteNotice ? (
-            <p className="composer-source-note" role="status">
-              {pasteNotice}
-            </p>
-          ) : null}
-          {pasted ? (
-            <p className="composer-source-note" role="status">
-              Added to the Queue as a draft. Nothing is published.{" "}
-              <Link to="/desk/story/$leadId" params={{ leadId: String(pasted.leadId) }} className="inline-link">
-                Open it
-              </Link>
-              .
-              {pasted.duplicate ? (
-                <>
-                  {" "}
-                  {duplicateNote(pasted.duplicate)}{" "}
-                  {pasted.duplicate.slug ? (
-                    <Link to="/articles/$slug" params={{ slug: pasted.duplicate.slug }} className="inline-link">
-                      Read the printed one
-                    </Link>
-                  ) : pasted.duplicate.leadId ? (
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(pasted.duplicate.leadId) }}
-                      className="inline-link"
-                    >
-                      Open the one on the desk
-                    </Link>
-                  ) : null}
-                </>
-              ) : null}
-            </p>
-          ) : null}
-        </section>
-
-        {needs.length > 0 ? (
-          <div className="needs">
-            <span className="needs-label">Needs you</span>
-            {needs.map((n) => (
-              <Link
-                key={n.t}
-                to={n.to}
-                className={"needs-item" + (n.quiet ? " quiet" : "")}
-                onClick={() => {
-                  if (n.openDark == null) return;
-                  try {
-                    sessionStorage.setItem(OPEN_KEY, String(n.openDark));
-                  } catch {
-                    /* ignore */
-                  }
-                }}
-              >
-                {n.t}
-              </Link>
-            ))}
-          </div>
-        ) : null}
-        {bootFailed ? (
-          <ScreenError
-            message={
-              (leads.error instanceof Error && leads.error.message) ||
-              (sources.error instanceof Error && sources.error.message) ||
-              "Could not load the desk."
-            }
-            onRetry={() => {
-              void leads.refetch();
-              void sources.refetch();
-            }}
-            retrying={leads.isRefetching || sources.isRefetching}
-          />
-        ) : booting ? (
-          <ListSkeleton rows={6} />
-        ) : (
-          <div className="desk-cc-grid">
-            <section className="gc-queue" aria-label="New leads">
-              <div className="today-leads-head">
-                <SecHead
-                  title="New leads"
-                  sub={last ? `${formatDateTime(last.started_at)} scan · best first` : "Best first"}
-                  aside={
-                    <span className="today-filters">
-                      <span>Open · {queue.length - heldCount}</span>
-                      <span>Held · {heldCount}</span>
-                      <Link to="/desk/queue" className="np-link">
-                        All leads in the Queue
-                      </Link>
+          <Dialog
+            open={panel === "paste-one-story"}
+            onClose={closePanel}
+            title="Paste a story I already have"
+            subtitle="One finished story. It goes to the Queue as a draft for you to work on there."
+            primaryLabel={pasteStory.isPending ? "Adding…" : "Add to Queue"}
+            onPrimary={() => void pasteStory.mutate()}
+            primaryDisabled={pasteText.trim().length < 40 || pasteStory.isPending}
+            cancelLabel="Close"
+            footNote="No screen to check first. One story in, one draft in the Queue."
+          >
+            <div className="composer-fields">
+              <div className="composer-sources">
+                <div className="composer-pasted">
+                  <label htmlFor="paste-one-text">The story</label>
+                  <p>
+                    Paste it as it is. Nothing is rewritten and no AI reads it — the paste becomes
+                    the draft, with its first line as the headline if you leave that empty. Its
+                    links come across as the story&rsquo;s sources.
+                  </p>
+                  <textarea
+                    id="paste-one-text"
+                    className={areaClass}
+                    rows={14}
+                    value={pasteText}
+                    onChange={(e) => setPasteText(e.target.value)}
+                    maxLength={IMPORT_LIMITS.text}
+                    placeholder={
+                      "Council votes to bring the rules back for consideration\n\nThe council voted 5-2 on Tuesday. [The packet](https://example.test/packet)"
+                    }
+                  />
+                  <label htmlFor="paste-one-headline" className="composer-source-note">
+                    Headline — leave it empty and the first line becomes the headline
+                  </label>
+                  <input
+                    id="paste-one-headline"
+                    className={inputClass}
+                    value={pasteHeadline}
+                    onChange={(e) => setPasteHeadline(e.target.value)}
+                    maxLength={IMPORT_LIMITS.headline}
+                    placeholder="Taken from the first line if you leave this empty"
+                  />
+                  <label htmlFor="paste-one-section" className="composer-source-note">
+                    Section
+                  </label>
+                  <select
+                    id="paste-one-section"
+                    className={inputClass}
+                    value={pasteSection}
+                    disabled={sectionQuery.sections.length === 0}
+                    onChange={(e) => setPasteSection(e.target.value)}
+                  >
+                    <option value={NO_SECTION}>{SECTION_REQUIRED}</option>
+                    {sectionQuery.sections.map((s) => (
+                      <option key={s.key} value={s.key}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="composer-source-note">
+                    {sectionQuery.sections.length === 0
+                      ? "Your sections could not load, and there is nothing to file this under without one. Try again in a moment."
+                      : "Pick one to add it — and you still confirm it in the story editor before it can publish."}
+                  </span>
+                  <label htmlFor="paste-one-disclosure" className="composer-source-note">
+                    Who wrote this — the line readers see
+                  </label>
+                  <select
+                    id="paste-one-disclosure"
+                    className={inputClass}
+                    value={pasteDisclosure}
+                    onChange={(e) => setPasteDisclosure(e.target.value as DisclosureKey)}
+                  >
+                    {IMPORT_DISCLOSURES.map((d) => (
+                      <option key={d.key} value={d.key}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                  {pasteDisclosure === "other" ? (
+                    <input
+                      className={inputClass}
+                      value={pasteOther}
+                      onChange={(e) => setPasteOther(e.target.value)}
+                      placeholder="The line to print under the story"
+                      aria-label="The disclosure line to print"
+                    />
+                  ) : (
+                    <span className="composer-source-note">
+                      {IMPORT_DISCLOSURES.find((d) => d.key === pasteDisclosure)?.line}
                     </span>
-                  }
-                />
+                  )}
+                  <span className="composer-source-note">
+                    Nothing is published. The story lands in the Queue as a news draft, editable
+                    like any other — you can publish it whenever it is ready.
+                  </span>
+                </div>
               </div>
-              {queue.length === 0 ? (
-                !last && publishedCount === 0 ? (
-                  <p className="wire-sum">
-                    Queue is empty —{" "}
-                    <Link to="/desk/scan" className="inline-link">
-                      run the first scan
-                    </Link>{" "}
-                    or{" "}
-                    <Link to="/desk/queue" className="inline-link">
-                      file a lead
-                    </Link>
-                    .
-                  </p>
-                ) : (
-                  <p className="wire-sum">
-                    {workingQueueEmptyCopy({
-                      publishedCount,
-                      lastScan: last
-                        ? {
-                            leads_created: last.leads_created,
-                            sources_fetched: last.sources_fetched,
-                            error: last.error,
-                          }
-                        : null,
-                    })}{" "}
-                    <Link to="/desk/scan" className="inline-link">
-                      Run the scan again
-                    </Link>
-                    {publishedCount > 0 ? (
-                      <>
-                        {" · "}
-                        <Link to="/desk/published" className="inline-link">
-                          Published
+              {pasteNotice ? (
+                <p className="composer-source-note" role="status">
+                  {pasteNotice}
+                </p>
+              ) : null}
+              {pasted ? (
+                <p className="composer-source-note" role="status">
+                  Added to the Queue as a draft. Nothing is published.{" "}
+                  <Link
+                    to="/desk/story/$leadId"
+                    params={{ leadId: String(pasted.leadId) }}
+                    className="inline-link"
+                  >
+                    Open it
+                  </Link>
+                  .
+                  {pasted.duplicate ? (
+                    <>
+                      {" "}
+                      {duplicateNote(pasted.duplicate)}{" "}
+                      {pasted.duplicate.slug ? (
+                        <Link
+                          to="/articles/$slug"
+                          params={{ slug: pasted.duplicate.slug }}
+                          className="inline-link"
+                        >
+                          Read the printed one
                         </Link>
-                      </>
-                    ) : null}
-                    .
-                  </p>
-                )
-              ) : (
-                <>
-                  {/*
+                      ) : pasted.duplicate.leadId ? (
+                        <Link
+                          to="/desk/story/$leadId"
+                          params={{ leadId: String(pasted.duplicate.leadId) }}
+                          className="inline-link"
+                        >
+                          Open the one on the desk
+                        </Link>
+                      ) : null}
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+          </Dialog>
+
+          {needs.length > 0 ? (
+            <div className="needs">
+              <span className="needs-label">Needs you</span>
+              {needs.map((n) => (
+                <Link
+                  key={n.t}
+                  to={n.to}
+                  className={"needs-item" + (n.quiet ? " quiet" : "")}
+                  onClick={() => {
+                    if (n.openDark == null) return;
+                    try {
+                      sessionStorage.setItem(OPEN_KEY, String(n.openDark));
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
+                >
+                  {n.t}
+                </Link>
+              ))}
+            </div>
+          ) : null}
+          {bootFailed ? (
+            <ScreenError
+              message={
+                (leads.error instanceof Error && leads.error.message) ||
+                (sources.error instanceof Error && sources.error.message) ||
+                "Could not load the desk."
+              }
+              onRetry={() => {
+                void leads.refetch();
+                void sources.refetch();
+              }}
+              retrying={leads.isRefetching || sources.isRefetching}
+            />
+          ) : booting ? (
+            <ListSkeleton rows={6} />
+          ) : (
+            <div className="desk-cc-grid">
+              <section className="gc-queue" aria-label="New leads">
+                {/*
+                The drawn head: a 3px rule under the title, and the two counts
+                as a segmented control an editor can press -- not two labels.
+              */}
+                <div className="today-leads-head">
+                  <div className="today-leads-title">
+                    <h2>New leads</h2>
+                    <span>
+                      {last ? `${formatDateTime(last.started_at)} scan · best first` : "Best first"}
+                    </span>
+                  </div>
+                  <div className="today-segs" role="group" aria-label="Which leads to show">
+                    <button
+                      type="button"
+                      className={"today-seg" + (leadSeg === "open" ? " on" : "")}
+                      aria-pressed={leadSeg === "open"}
+                      onClick={() => {
+                        setLeadSeg("open");
+                        setCursor(0);
+                      }}
+                    >
+                      Open · {queue.length - heldCount}
+                    </button>
+                    <button
+                      type="button"
+                      className={"today-seg" + (leadSeg === "held" ? " on" : "")}
+                      aria-pressed={leadSeg === "held"}
+                      onClick={() => {
+                        setLeadSeg("held");
+                        setCursor(0);
+                      }}
+                    >
+                      Held · {heldCount}
+                    </button>
+                  </div>
+                </div>
+                {queue.length === 0 ? (
+                  !last && publishedCount === 0 ? (
+                    <p className="wire-sum">
+                      Queue is empty —{" "}
+                      <Link to="/desk/scan" className="inline-link">
+                        run the first scan
+                      </Link>{" "}
+                      or{" "}
+                      <Link to="/desk/queue" className="inline-link">
+                        file a lead
+                      </Link>
+                      .
+                    </p>
+                  ) : (
+                    <p className="wire-sum">
+                      {workingQueueEmptyCopy({
+                        publishedCount,
+                        lastScan: last
+                          ? {
+                              leads_created: last.leads_created,
+                              sources_fetched: last.sources_fetched,
+                              error: last.error,
+                            }
+                          : null,
+                      })}{" "}
+                      <Link to="/desk/scan" className="inline-link">
+                        Run the scan again
+                      </Link>
+                      {publishedCount > 0 ? (
+                        <>
+                          {" · "}
+                          <Link to="/desk/published" className="inline-link">
+                            Published
+                          </Link>
+                        </>
+                      ) : null}
+                      .
+                    </p>
+                  )
+                ) : (
+                  <>
+                    {/*
                     README "Interactions & behavior": the keys are on the screen,
                     not only in the "?" sheet -- an editor triaging a list should
                     not have to open a dialog to learn what J does.
                   */}
-                  <p className="today-legend" aria-label="Keys for this list">
-                    {TRIAGE_KEYS.map(([key, what]) => (
-                      <span key={key}>
-                        <kbd>{key}</kbd> {what}
-                      </span>
-                    ))}
-                  </p>
-                  {newLeads.map((l, index) => {
-                    const dup = nearDuplicate(l, printed);
-                    const held = l.status === "held";
-                    return (
-                      /*
+                    <p className="today-legend" aria-label="Keys for this list">
+                      <span className="today-legend-label">Keyboard</span>
+                      {TRIAGE_KEYS.map(([key, what]) => (
+                        <span key={key}>
+                          <kbd>{key}</kbd> {what}
+                        </span>
+                      ))}
+                    </p>
+                    {newLeads.length === 0 ? (
+                      <p className="wire-sum">
+                        Nothing held right now.{" "}
+                        <button
+                          type="button"
+                          className="inline-link"
+                          onClick={() => setLeadSeg("open")}
+                        >
+                          Back to the open leads
+                        </button>
+                        .
+                      </p>
+                    ) : null}
+                    {newLeads.map((l, index) => {
+                      const dup = nearDuplicate(l, printed);
+                      const held = l.status === "held";
+                      const done = held || l.status === "killed";
+                      return (
+                        /*
                         The drawn compact row: `52px | 1fr | auto` -- score
                         badge, the title with its why line and its badges, and
                         the three presses an editor makes on a lead. The
@@ -1461,230 +1579,317 @@ function DeskHome() {
                         picker) stay on the Queue's full row, which is where
                         the desk draws them.
                       */
-                      <div
-                        className={
-                          "today-lead" +
-                          (index === cursor ? " sel" : "") +
-                          (held ? " acted" : "")
-                        }
-                        key={l.id}
-                      >
-                        <Score v={l.newsworthiness ?? 0} />
-                        <div>
-                          <Link
-                            to="/desk/story/$leadId"
-                            params={{ leadId: String(l.id) }}
-                            className="today-lead-hl hl-link"
-                          >
-                            {l.headline}
-                          </Link>
-                          <p className="today-lead-why">{l.why}</p>
-                          <div className="today-lead-row2">
-                            <span className="meta">
-                              {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
-                            </span>
-                            <Chip s={l.status} />
-                            {l.possible_duplicate ? (
-                              <Link
-                                to="/desk/story/$leadId"
-                                params={{ leadId: String(l.id) }}
-                                className="chip maybe-same"
-                                title={
-                                  l.dup_kind === "developing"
-                                    ? `This story came back with facts the killed lead "${l.possible_duplicate.headline}" did not have. Open it to compare.`
-                                    : `Possible duplicate of ${l.possible_duplicate.headline} (${l.possible_duplicate.status}). Open it to compare.`
-                                }
-                              >
-                                {l.dup_kind === "developing"
-                                  ? "New facts · compare"
-                                  : "Possible duplicate · compare"}
-                              </Link>
-                            ) : null}
-                          </div>
-                          {/*
+                        <div
+                          className={
+                            "today-lead" + (index === cursor ? " sel" : "") + (done ? " acted" : "")
+                          }
+                          key={l.id}
+                        >
+                          <Score v={l.newsworthiness ?? 0} />
+                          <div>
+                            <Link
+                              to="/desk/story/$leadId"
+                              params={{ leadId: String(l.id) }}
+                              className={
+                                "today-lead-hl hl-link" +
+                                (l.status === "killed" ? " today-lead-struck" : "")
+                              }
+                            >
+                              {l.headline}
+                            </Link>
+                            <p className="today-lead-why">{l.why}</p>
+                            <div className="today-lead-row2">
+                              <span className="meta">
+                                {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
+                              </span>
+                              <Chip s={l.status} />
+                              {l.possible_duplicate ? (
+                                <Link
+                                  to="/desk/story/$leadId"
+                                  params={{ leadId: String(l.id) }}
+                                  className="chip maybe-same"
+                                  title={
+                                    l.dup_kind === "developing"
+                                      ? `This story came back with facts the killed lead "${l.possible_duplicate.headline}" did not have. Open it to compare.`
+                                      : `Possible duplicate of ${l.possible_duplicate.headline} (${l.possible_duplicate.status}). Open it to compare.`
+                                  }
+                                >
+                                  {l.dup_kind === "developing"
+                                    ? "New facts · compare"
+                                    : "Possible duplicate · compare"}
+                                </Link>
+                              ) : null}
+                            </div>
+                            {/*
                             Same component the Queue's row renders, so the two
                             screens cannot drift on what the desk has found.
                           */}
-                          <LeadFlags lead={l} dup={dup} />
+                            <LeadFlags lead={l} dup={dup} />
+                          </div>
+                          <span className="today-lead-side">
+                            {done ? (
+                              /*
+                              A lead already acted on dims to 60% and offers
+                              only the way back -- the drawing's doneLabel plus
+                              Undo, in place of the three presses.
+                            */
+                              <>
+                                <span className="today-lead-done">
+                                  {l.status === "held" ? "Held" : "Killed"}
+                                </span>
+                                <InkButton
+                                  tone="quiet"
+                                  onClick={() => setStatus.mutate({ id: l.id, status: "new" })}
+                                >
+                                  Undo <kbd>U</kbd>
+                                </InkButton>
+                              </>
+                            ) : (
+                              <>
+                                <InkButton onClick={() => startDraft.mutate(l.id)}>
+                                  Start story <kbd>S</kbd>
+                                </InkButton>
+                                <InkButton
+                                  tone="quiet"
+                                  onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
+                                >
+                                  Hold <kbd>H</kbd>
+                                </InkButton>
+                                <InkButton
+                                  tone="quiet-danger"
+                                  onClick={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                                >
+                                  Kill <kbd>X</kbd>
+                                </InkButton>
+                              </>
+                            )}
+                            <DeskMoreMenu
+                              ariaLabel={`More actions for ${l.headline}`}
+                              items={[
+                                {
+                                  label: "Open the lead",
+                                  onSelect: () =>
+                                    void navigate({
+                                      to: "/desk/story/$leadId",
+                                      params: { leadId: String(l.id) },
+                                    }),
+                                },
+                                ...(dup
+                                  ? [
+                                      {
+                                        label: "The piece it matches",
+                                        onSelect: () =>
+                                          void navigate({
+                                            to: "/articles/$slug",
+                                            params: { slug: dup.slug },
+                                          }),
+                                      },
+                                    ]
+                                  : []),
+                              ]}
+                            />
+                          </span>
                         </div>
-                        <span className="today-lead-side">
-                          <InkButton onClick={() => startDraft.mutate(l.id)}>
-                            Start story <kbd>S</kbd>
-                          </InkButton>
-                          {held ? (
-                            <InkButton
-                              tone="quiet"
-                              onClick={() => setStatus.mutate({ id: l.id, status: "new" })}
-                            >
-                              Back <kbd>U</kbd>
-                            </InkButton>
-                          ) : (
-                            <InkButton
-                              tone="quiet"
-                              onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
-                            >
-                              Hold <kbd>H</kbd>
-                            </InkButton>
-                          )}
-                          <InkButton
-                            tone="quiet-danger"
-                            onClick={() => setStatus.mutate({ id: l.id, status: "killed" })}
-                          >
-                            Kill <kbd>X</kbd>
-                          </InkButton>
-                          <DeskMoreMenu
-                            ariaLabel={`More actions for ${l.headline}`}
-                            items={[
-                              {
-                                label: "Open the lead",
-                                onSelect: () =>
-                                  void navigate({
-                                    to: "/desk/story/$leadId",
-                                    params: { leadId: String(l.id) },
-                                  }),
-                              },
-                              ...(dup
-                                ? [
-                                    {
-                                      label: "The piece it matches",
-                                      onSelect: () =>
-                                        void navigate({
-                                          to: "/articles/$slug",
-                                          params: { slug: dup.slug },
-                                        }),
-                                    },
-                                  ]
-                                : []),
-                            ]}
-                          />
-                        </span>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </section>
-
-            <section className="nightpanel gc-darkdesk">
-              <SecHead
-                title="Dark Desk"
-                aside={
-                  <Link to="/desk/dark" className="np-link">
-                    Open the desk
-                  </Link>
-                }
-              />
-              <p className="np-note">Investigates. Never prints.</p>
-              {darkErr ? <p className="note err">{darkErr}</p> : null}
-              {inbox.length === 0 && onDesk.length === 0 ? (
-                <p className="wire-sum">
-                  Nothing new tonight.{" "}
-                  <Link to="/desk/dark" className="inline-link">
-                    Start from a tip
-                  </Link>
-                  .
-                </p>
-              ) : (
-                <>
-                  <p className="np-pile">To look at · {inbox.length}</p>
-                  {inbox.slice(0, 3).map((item) => (
-                    <div key={item.id} className="np-item">
-                      <p className="np-kind">{editorKindLabel(item.kind)}</p>
-                      <p className="np-title">{item.title}</p>
-                      {item.source_line ? <p className="np-meta">{item.source_line}</p> : null}
-                      <div className="np-acts">
-                        <InkButton
-                          tone="invert"
-                          small
-                          disabled={startDark.isPending}
-                          onClick={() => startDark.mutate({ seed: item.seed, title: item.title })}
-                        >
-                          Start digging
-                        </InkButton>
-                      </div>
-                    </div>
-                  ))}
-                  <p className="np-pile">On the desk · {onDesk.length}</p>
-                  {onDesk.slice(0, 3).map((row) => (
-                    <div key={row.id} className="np-item">
-                      <p className="np-kind">{editorStatus(row.status)}</p>
-                      <p className="np-title">{row.title}</p>
-                      <p className="np-meta">
-                        {Number(row.records ?? 0)} records · {Number(row.still_open ?? 0)} still to
-                        open
-                      </p>
-                      <div className="np-acts">
-                        <Link
-                          to="/desk/dark"
-                          className="btn solid small"
-                          onClick={() => {
-                            try {
-                              sessionStorage.setItem(OPEN_KEY, String(row.id));
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        >
-                          Open file
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                  <p className="np-pile">
-                    Set aside · {aside.length}{" "}
-                    <Link to="/desk/dark" className="np-link">
-                      see the pile
+                      );
+                    })}
+                    <Link to="/desk/queue" className="today-leads-all">
+                      All leads in the Queue →
                     </Link>
-                  </p>
-                </>
-              )}
-            </section>
+                  </>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
 
-            <section id="desk-followups" className="gc-followups">
-              <SecHead
-                title={`Follow-ups · ${followUps.data?.length ?? 0}`}
-                aside={
-                  <Link to="/desk/follow-ups" className="np-link">
-                    All follow-ups
-                  </Link>
-                }
-                sub={
-                  followUpsRailCopy(followUps.isError) ??
-                  ((followUps.data ?? []).length === 0
-                    ? "No one owes you an answer right now."
-                    : undefined)
-                }
-              />
-              {followUps.isError || (followUps.data ?? []).length === 0
-                ? null
-                : (followUps.data ?? [])
-                    .slice(0, 3)
-                    .map((f) => (
-                      <FollowUpItem
-                        key={f.id}
-                        item={f}
-                        onReply={(replyText, repliedOn) =>
-                          replyFollowUp.mutate({ id: f.id, replyText, repliedOn })
-                        }
-                        onNudge={() => nudgeFollow.mutate(f.id)}
-                        onDrop={() => dropFollow.mutate(f.id)}
-                        nudging={nudgeFollow.isPending}
-                        dropping={dropFollow.isPending}
-                        replying={replyFollowUp.isPending}
-                      />
-                    ))}
-            </section>
+        {/*
+          THE RAIL (README "1. Today", Desk Command.dc.html): the three panels
+          the drawing puts beside the work -- Follow-ups, Dark Desk, The wire.
+          They are outside the boot gate on purpose: each one carries its own
+          error and empty state, and a rail that disappears while the queue
+          loads reads as a broken page rather than a loading one.
+        */}
+        <aside className="desk-rail">
+          <section id="desk-followups" className="gc-followups">
+            <SecHead
+              title="AI follow-ups"
+              count={
+                followUps.isError || (followUps.data ?? []).length === 0
+                  ? undefined
+                  : `${followUps.data?.length ?? 0} active`
+              }
+              aside={
+                <Link to="/desk/follow-ups" className="np-link">
+                  All follow-ups
+                </Link>
+              }
+            />
+            {/*
+                Phase 6 is where the AI does this work; today the panel shows
+                the follow-ups that exist -- the ones the desk has already
+                asked about -- and says so rather than showing an empty
+                promise. `followUpsRailCopy` carries that sentence.
+              */}
+            <p className="rail-note">{followUpsRailCopy(false)}</p>
+            {followUps.isError || (followUps.data ?? []).length === 0
+              ? null
+              : (followUps.data ?? [])
+                  .slice(0, 3)
+                  .map((f) => (
+                    <FollowUpItem
+                      key={f.id}
+                      item={f}
+                      onReply={(replyText, repliedOn) =>
+                        replyFollowUp.mutate({ id: f.id, replyText, repliedOn })
+                      }
+                      onNudge={() => nudgeFollow.mutate(f.id)}
+                      onDrop={() => dropFollow.mutate(f.id)}
+                      nudging={nudgeFollow.isPending}
+                      dropping={dropFollow.isPending}
+                      replying={replyFollowUp.isPending}
+                    />
+                  ))}
+          </section>
 
-            <section className="wirecol gc-wire">
-              <SecHead
-                title="The wire"
-                aside={
-                  <InkButton small disabled={scanning} onClick={() => scan.mutate()}>
-                    {scanning ? "Scanning…" : "Run scan"}
-                  </InkButton>
-                }
-              />
-              {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
+          <section className="nightpanel gc-darkdesk">
+            <SecHead
+              title="Dark Desk"
+              sub="Never prints on its own"
+              aside={
+                <Link to="/desk/dark" className="np-link">
+                  Open Dark Desk →
+                </Link>
+              }
+            />
+            {darkErr ? <p className="note err">{darkErr}</p> : null}
+            {/*
+                As drawn: the three piles with their counts, then one way in.
+                The items themselves (start digging, open a file) sit behind the
+                disclosure below -- nothing the panel could do is gone, it is
+                just not three cards deep in a rail panel.
+              */}
+            <div className="dd-piles">
+              <Link to="/desk/dark" className="dd-pile">
+                <span className="dd-pile-label">To look at</span>
+                <span className="dd-pile-count">{inbox.length}</span>
+              </Link>
+              <Link to="/desk/dark" className="dd-pile">
+                <span className="dd-pile-label">On the desk</span>
+                <span className="dd-pile-count">{onDesk.length}</span>
+              </Link>
+              <Link to="/desk/dark" className="dd-pile">
+                <span className="dd-pile-label">Set aside</span>
+                <span className="dd-pile-count">{aside.length}</span>
+              </Link>
+            </div>
+            {inbox.length === 0 && onDesk.length === 0 ? (
+              <p className="wire-sum">
+                Nothing new tonight.{" "}
+                <Link to="/desk/dark" className="inline-link">
+                  Start from a tip
+                </Link>
+                .
+              </p>
+            ) : (
+              <details className="dd-more">
+                <summary>What is in the piles</summary>
+                {inbox.length ? <p className="np-pile">To look at · {inbox.length}</p> : null}
+                {inbox.slice(0, 3).map((item) => (
+                  <div key={item.id} className="np-item">
+                    <p className="np-kind">{editorKindLabel(item.kind)}</p>
+                    <p className="np-title">{item.title}</p>
+                    {item.source_line ? <p className="np-meta">{item.source_line}</p> : null}
+                    <div className="np-acts">
+                      <InkButton
+                        tone="invert"
+                        small
+                        disabled={startDark.isPending}
+                        onClick={() => startDark.mutate({ seed: item.seed, title: item.title })}
+                      >
+                        Start digging
+                      </InkButton>
+                    </div>
+                  </div>
+                ))}
+                {onDesk.length ? <p className="np-pile">On the desk · {onDesk.length}</p> : null}
+                {onDesk.slice(0, 3).map((row) => (
+                  <div key={row.id} className="np-item">
+                    <p className="np-kind">{editorStatus(row.status)}</p>
+                    <p className="np-title">{row.title}</p>
+                    <p className="np-meta">
+                      {Number(row.records ?? 0)} records · {Number(row.still_open ?? 0)} still to
+                      open
+                    </p>
+                    <div className="np-acts">
+                      <Link
+                        to="/desk/dark"
+                        className="btn solid small"
+                        onClick={() => {
+                          try {
+                            sessionStorage.setItem(OPEN_KEY, String(row.id));
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
+                      >
+                        Open file
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </details>
+            )}
+          </section>
+
+          <section className="wirecol gc-wire">
+            <SecHead
+              title="The wire"
+              sub={last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet"}
+            />
+            {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
+            {/*
+                THE WIRE, as drawn: one line per watched source with the state
+                the last run left it in and the reason why, then the writing
+                model, then the two presses. The longer material the rail used
+                to carry (the scan note, source health, suggested sources, the
+                paper, beat memory) is below behind one disclosure -- the
+                drawn panel is a status board, and none of it is lost.
+              */}
+            {wireRows.length === 0 ? (
+              <p className="wire-sum">
+                No source is on watch yet —{" "}
+                <Link to="/desk/sources" className="inline-link">
+                  add one
+                </Link>
+                .
+              </p>
+            ) : (
+              <div className="wire-sources">
+                {wireRows.map(({ s, tone, label, note }) => (
+                  <div className="wire-source" key={s.id}>
+                    <span className="wire-source-name" title={s.title}>
+                      {s.title}
+                    </span>
+                    <span className={"wire-chip " + tone}>{label}</span>
+                    <p className="wire-source-note">{note}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="wire-model">
+              <b>Writing model</b> · {modelChoiceLabel(storyModel)} ·{" "}
+              {writeStory.isPending ? "writing now" : "ready"}
+            </p>
+            <div className="wire-acts">
+              <InkButton onClick={() => scan.mutate()} disabled={scanning}>
+                {scanning ? "Scanning…" : "Run scan now"}
+              </InkButton>
+              <Link to="/desk/sources" className="btn quiet">
+                All sources
+              </Link>
+            </div>
+            <details className="wire-more">
+              <summary>More from the wire</summary>
               {last ? (
                 <>
                   <p className="wire-line">
@@ -1819,9 +2024,9 @@ function DeskHome() {
                   <p className="meta">No beat memory yet — it builds as you publish.</p>
                 ) : null}
               </div>
-            </section>
-          </div>
-        )}
+            </details>
+          </section>
+        </aside>
       </div>
     </DeskShell>
   );

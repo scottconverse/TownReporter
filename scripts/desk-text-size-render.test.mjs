@@ -6,10 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 
 // Renders the real DeskShell header (src/components/desk-chrome.tsx) to
-// prove the "Text: Normal / Large" control the readability pass added is
-// actually in the header, next to Light/Dark, with real button semantics
-// (aria-pressed, not decoration). Follows the same stub-everything-but-React
-// pattern lead-badge-render.test.mjs uses for desk-leads.tsx.
+// prove the Large/Normal control the readability pass added is actually in the
+// header, next to Light/Dark, with real button semantics (aria-pressed, not
+// decoration). Since unit BF2 it is drawn as the design's "Aa Large" button
+// rather than a <select>; the behaviour it toggles is unchanged. Follows the
+// same stub-everything-but-React pattern lead-badge-render.test.mjs uses for
+// desk-leads.tsx.
 //
 // DeskShell reads its Large/Normal choice from localStorage inside a
 // useEffect, which renderToStaticMarkup (server rendering, no hydration)
@@ -200,9 +202,17 @@ test("the desk exposes accessible appearance and text size controls alongside ev
     createElement(DeskShell, { title: "Queue" }, createElement("p", null, "body")),
   );
   assert.match(html, /aria-label="Switch to dark appearance"/);
-  assert.match(html, /<select aria-label="Text size"/);
-  assert.match(html, /<option value="normal" selected="">Normal/);
-  assert.match(html, /<option value="large">Large/);
+  /*
+    Unit BF2, defect 9: the footer is drawn as buttons -- "Dark" and "Aa Large"
+    side by side -- not a text-size <select>. The Large/Normal behaviour is the
+    same one the select had; only the control changed.
+  */
+  assert.match(html, /class="astra-foot-row"/);
+  assert.match(html, />Dark</);
+  assert.match(html, /aria-label="Switch to large text"/);
+  assert.match(html, /aria-pressed="false"[^>]*>Aa Large</);
+  assert.match(html, /Press \? for keyboard shortcuts/);
+  assert.doesNotMatch(html, /<select aria-label="Text size"/);
   for (const route of [
     "/desk",
     "/desk/sources",
@@ -219,12 +229,13 @@ test("the desk exposes accessible appearance and text size controls alongside ev
   assert.match(html, /id="desk-announcer"[^>]*aria-live="polite"/);
 });
 
-test("the Text size control still renders on a forced-night page (Dark Desk), which hides Light/Dark", () => {
+test("the Aa control still renders on a forced-night page (Dark Desk), which hides Light/Dark", () => {
   const html = renderToStaticMarkup(
     createElement(DeskShell, { title: "Dark Desk", night: true }, createElement("p", null, "body")),
   );
   assert.doesNotMatch(html, /aria-label="Light or dark"/);
-  assert.match(html, /aria-label="Text size"/);
+  assert.doesNotMatch(html, /aria-label="Switch to dark appearance"/);
+  assert.match(html, /aria-label="Switch to large text"/);
 });
 
 test("deskShellClassName adds .large only when size is large, independent of theme", () => {
