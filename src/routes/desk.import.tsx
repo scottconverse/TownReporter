@@ -37,6 +37,7 @@ import {
   type ReviewCard,
 } from "@/lib/news/import-review";
 import { DARK_SEED_KEY, darkSeedFromCard } from "@/lib/news/dark-seed";
+import { editorActionError } from "@/lib/news/desk-copy";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
@@ -204,7 +205,16 @@ function ImportPage() {
     },
     onError: (err) =>
       setNotice({
-        text: err instanceof Error ? err.message : "The desk could not read that text.",
+        /*
+          A paste over `LIMITS.importText` is refused by `importStructureInput`
+          before this call leaves the browser, and a zod refusal arrives here as
+          its own pretty-printed JSON. `editorActionError` turns that into the
+          one sentence it is worth -- which field, and that the paste is still
+          in the box -- and passes a real failure through unchanged.
+        */
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "read that text") ??
+          "The desk could not read that text.",
         kind: "error",
       }),
   });
@@ -249,7 +259,11 @@ function ImportPage() {
     },
     onError: (err) =>
       setNotice({
-        text: err instanceof Error ? err.message : "Those stories were not imported. Nothing was changed.",
+        // Same boundary, second call: `importStoriesInput` caps the paste and
+        // the ticked cards, and both refusals are dumps until they get here.
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "import those stories") ??
+          "Those stories were not imported. Nothing was changed.",
         kind: "error",
       }),
   });

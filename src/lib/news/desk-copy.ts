@@ -661,6 +661,14 @@ function fieldLabelFromPath(path: string): string {
     headline: "the headline",
     dek: "the summary line",
     body: "the story text",
+    /*
+      `text` is the pasted box on three screens (0.6.67): the sources paste,
+      "write a story" (`writeStoryInput`), and both halves of Import finished
+      stories. Each has exactly one field the editor typed, so naming it beats
+      the anonymous "one of the fields on this page" -- an editor who pasted
+      400,001 characters wants to be told it was the paste.
+    */
+    text: "the text you pasted",
     topic: "the section",
     scratch: "the working notes",
     storyDirection: "the direction you wrote",

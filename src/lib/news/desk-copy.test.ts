@@ -66,7 +66,7 @@ import {
   suggestFocusLeads,
   validationFieldLabel,
 } from "./desk-copy.ts";
-import { reportingNotesInput } from "./request-input.ts";
+import { importStoriesInput, reportingNotesInput } from "./request-input.ts";
 import { STALE_RUNNING_SECONDS } from "./jobs.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -1409,6 +1409,17 @@ const listDump = reportingNotesInput.safeParse({
   todos: Array.from({ length: 600 }, () => ({ t: "x", done: false, src: "machine" })),
 }).error!.message;
 
+/*
+  The Import screen's own boundary, from the wire an editor presses: a paste
+  past the 400,000-character cap on "Import finished stories". Both import
+  calls validate client-side before the request leaves the browser, so this is
+  the text the review screen's `onError` had to print (0.6.67).
+*/
+const importDump = importStoriesInput.safeParse({
+  text: "x".repeat(400_001),
+  stories: [],
+}).error!.message;
+
 describe("a validation dump never reaches the editor", () => {
   it("knows a real zod message for what it is, and a sentence for what it is", () => {
     assert.equal(looksLikeValidationDump(elementDump), true);
@@ -1423,6 +1434,8 @@ describe("a validation dump never reaches the editor", () => {
     // The live dump named the first to-do's text -- the field that was too long.
     assert.equal(validationFieldLabel(elementDump), "a to-do line");
     assert.equal(validationFieldLabel(listDump), "the to-do list");
+    // The Import paste is one field the editor typed, so it is named.
+    assert.equal(validationFieldLabel(importDump), "the text you pasted");
     // A field this file does not know is named as nothing rather than guessed.
     assert.equal(validationFieldLabel('{"code":"too_big","path":["somethingElse"]}'), "");
     assert.equal(validationFieldLabel("no path here"), "");
@@ -1444,6 +1457,23 @@ describe("a validation dump never reaches the editor", () => {
     // A dump naming nothing this file knows still reads as a sentence.
     const unknown = z.object({ whatever: z.array(z.string()).max(1) }).safeParse({ whatever: ["a", "b"] }).error!.message;
     assert.match(editorActionError(unknown, "save the notes") ?? "", /one of the fields on this page is longer than the desk can store/);
+  });
+
+  it("gives the Import screen a sentence for its own paste cap, not the schema", () => {
+    /*
+      The last two raw renders in the desk were on Import finished stories:
+      both its calls cap the paste at 400,000 characters and both validated in
+      the browser, so a long paste put the pretty-printed issues array in the
+      notice bar. Asserted through the real schema rather than a hand-typed
+      dump, so the copy stays matched to what zod actually emits.
+    */
+    for (const what of ["read that text", "import those stories"]) {
+      const said = editorActionError(importDump, what);
+      assert.ok(said, "a dump must produce a sentence, not null");
+      assert.match(said, /the text you pasted is longer than the desk can store/);
+      assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
+    }
+    assert.match(editorActionError("The desk could not read that text.", "read that text") ?? "", /could not read that text/);
   });
 
   it("turns a bare server failure into something the editor can act on", () => {
