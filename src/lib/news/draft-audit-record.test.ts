@@ -6,8 +6,10 @@ import {
   STYLE_AUDIT_KEY,
   fixFindings,
   parseStyleRecord,
+  researchJsonWithStyleAudit,
   reviewFindings,
   styleAuditSummary,
+  styleRecordForSavedText,
   styleRecordFromAudit,
   styleRecordFromRepair,
 } from "./draft-audit-record.ts";
@@ -41,6 +43,74 @@ describe("a record of an audit that ran with no model", () => {
 
   it("never claims a timestamp it was not given", () => {
     assert.equal("checkedAt" in styleRecordFromAudit(audit(CLEAN)), false);
+  });
+});
+
+describe("measuring text the editor saved, with no model", () => {
+  /*
+    143 words in one paragraph: over the cap for a brief (95) and a reported
+    piece (135), under it for an explainer and an investigation (155). The form
+    is the only thing that differs between these calls.
+  */
+  const LONG = Array.from({ length: 11 }, (_, index) => `Witness number ${index} described the flooding on the road that night in detail`).join(" ") + ".";
+  const saved = (form: unknown) =>
+    styleRecordForSavedText({ headline: "Flooding closes the road", dek: "", body: LONG, form });
+  const hasParagraphFinding = (form: unknown) =>
+    saved(form).findings.some((finding) => finding.code === "paragraph-length");
+
+  it("lets the form decide the paragraph cap", () => {
+    assert.equal(hasParagraphFinding("brief"), true);
+    assert.equal(hasParagraphFinding("reported"), true);
+    assert.equal(hasParagraphFinding("investigation"), false);
+    assert.equal(saved("brief").measurementsBefore.paragraphCap, 95);
+    assert.equal(saved("investigation").measurementsBefore.paragraphCap, 155);
+  });
+
+  it("falls back to the default cap when the form is empty or is one it does not know", () => {
+    assert.equal(saved("").measurementsBefore.paragraphCap, saved("reported").measurementsBefore.paragraphCap);
+    assert.equal(saved("newsletter").measurementsBefore.paragraphCap, saved("reported").measurementsBefore.paragraphCap);
+    assert.equal(saved(undefined).measurementsBefore.paragraphCap, saved("reported").measurementsBefore.paragraphCap);
+  });
+
+  it("claims no timestamp, so the same words saved twice write the same bytes", () => {
+    const first = saved("reported");
+    assert.equal("checkedAt" in first, false);
+    assert.deepEqual(first, saved("reported"));
+  });
+
+  it("counts a long paragraph as something to read, and names the form it broke", () => {
+    const finding = saved("brief").findings.find((row) => row.code === "paragraph-length");
+    assert.equal(finding?.severity, "review");
+    assert.match(finding?.message ?? "", /143 words/);
+    assert.match(finding?.message ?? "", /brief/);
+  });
+});
+
+describe("putting the audit into a row's research_json", () => {
+  const record = () => styleRecordFromAudit(audit(MESSY), "2026-09-26T12:00:00.000Z");
+  const read = (raw: string) => JSON.parse(raw) as Record<string, unknown>;
+
+  it("adds the audit and leaves the keys it does not own alone", () => {
+    const raw = JSON.stringify({ nameCheck: { version: 1, rows: [] }, manualClaims: [{ fact: "the fee" }] });
+    const merged = read(researchJsonWithStyleAudit(raw, record()));
+    assert.deepEqual(merged.nameCheck, { version: 1, rows: [] });
+    assert.deepEqual(merged.manualClaims, [{ fact: "the fee" }]);
+    assert.equal(parseStyleRecord(merged.styleAudit)?.status, "open");
+  });
+
+  it("replaces an earlier audit rather than stacking them up", () => {
+    const once = researchJsonWithStyleAudit("{}", styleRecordFromAudit(audit(MESSY)));
+    const twice = researchJsonWithStyleAudit(once, styleRecordFromAudit(audit(CLEAN)));
+    assert.equal(Object.keys(read(twice)).length, 1);
+    assert.equal(parseStyleRecord(read(twice).styleAudit)?.status, "clean");
+  });
+
+  it("starts a fresh memo when there is nothing stored, or nothing readable", () => {
+    for (const raw of [null, undefined, "", "   ", "{oops", "null", "[]", "7"]) {
+      const merged = read(researchJsonWithStyleAudit(raw, record()));
+      assert.deepEqual(Object.keys(merged), [STYLE_AUDIT_KEY]);
+      assert.equal(parseStyleRecord(merged[STYLE_AUDIT_KEY])?.fixCount, 1);
+    }
   });
 });
 
