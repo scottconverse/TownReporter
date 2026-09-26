@@ -835,6 +835,19 @@ export const idOnlyInput = z.object({ id: rowId });
 export const leadStatusInput = z.object({
   id: rowId,
   status: z.enum(["held", "killed", "new"]),
+  /** Unit AK item 4 (migration 0094): the reason a kill states, when the
+   * editor's press stated one. Optional, so the Queue's plain Hold / Kill /
+   * Back calls -- written before the column existed -- are unchanged and
+   * still record a killed_at with no reason. */
+  killReason: z.string().trim().max(500).optional(),
+  /** The article or lead the reason points at, when it names one. */
+  killReasonUrl: z.string().trim().max(2000).optional(),
+});
+
+/** Unit AK item 5: the two Compare-view presses that are not a kill. */
+export const leadDuplicateResolutionInput = z.object({
+  id: rowId,
+  action: z.enum(["not-a-duplicate", "reopen-prior"]),
 });
 
 /** `desk.ts:2236` listFollowUps (`input ?? {}`). */
@@ -1044,6 +1057,18 @@ export const draftEditInput = z.object({
   evidenceDecision: z.enum(EVIDENCE_DECISIONS).optional(),
   evidenceToken: z.string().max(LIMITS.draftEvidenceToken).optional(),
 });
+
+/**
+ * "Fix these with the model": the text on screen, plus the dials for the one
+ * call it may make. The effort is the loose one -- the registry is allowed to
+ * reinterpret it, and a value it will not take must not refuse the press.
+ */
+export const draftStyleFixInput = draftEditInput
+  .omit({ evidenceDecision: true, evidenceToken: true })
+  .extend({
+    modelChoice: modelChoiceText.optional(),
+    modelEffort: modelEffortLoose.optional(),
+  });
 
 /** `opinion.ts:370` fileWrittenEditorial (`opinion.ts:376` refuses over 400,000). */
 export const editorialText = z.string().max(LIMITS.editorialBody);

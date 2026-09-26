@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current software version: [0.6.68](releases/0.6.68.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.69](releases/0.6.69.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -480,6 +480,16 @@ Choose an editor judgment of **Supports**, **Does not support**, **Contradicts**
 After **Save edits**, the review refreshes for the saved draft without reloading the page. Judgment controls remain unavailable while a replacement draft is queued or running, or while a draft-wide evidence decision is saving. When the replacement job completes, the workbench loads its draft and review together.
 
 If an older record contains incomplete or unreadable structured findings, the panel says so and offers no judgment controls. Review the original material or generate a replacement draft; retrying does not repair the saved record.
+
+### Style check
+
+Everything else the desk checks about a draft is about whether it is true. **Style check** is the one panel about whether it reads. It is measured by code, not by a model, and it looks for shapes rather than facts: a claim attributed to nobody (**Experts say…**), a sentence that asserts importance and reports nothing, a participle tail on the end of a sentence, a dressed-up verb where **said** would do, filler, the same phrase cycling through different synonyms, a paste artifact, a tracking parameter or redirect in a link, a paragraph past the length the story form reads best under, a draft whose sentences are all the same length, a draft with no short sentence next to a long one, and the same six words repeated.
+
+The list is at the bottom of the draft. It says how many things to fix, and for each one where it is — paragraph and sentence — what it is, and the sentence it came from. **Review** findings sit under a fold beneath them: those are for you to read, not to fix. The list measures the text on the page, so it stays current as you type. Every line is a suggestion. Nothing there blocks a save or a publish, and nothing there publishes anything.
+
+**Fix these with the model** runs one repair pass, on demand, using the model the picker is set to. The model is given the list and the draft, and returns the draft with those problems fixed. It may not change a quotation, a number, a name or a link: a rewrite that does is refused, your text is kept, and the desk says why. The result is saved as an ordinary draft revision — the same as **Save** — so it is never a publication. The list then shows whatever is left, which may be nothing.
+
+A model never decides what counts as a fault here. The code names the problems, the model repairs only those, and the code checks the repair.
 
 ### Reporting notes (do not print)
 

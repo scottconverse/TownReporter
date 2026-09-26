@@ -12,7 +12,7 @@ test("filing stamps the exact killed repeat instead of inserting behind a possib
       newsworthiness integer, status text, possible_duplicate_of integer,
       topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer
+      last_resurfaced_scan_run_id integer, dup_kind text
     )`);
     const source_urls = ["https://example.org/road-work"];
     const existing = [
@@ -86,7 +86,7 @@ test("a possible repeat of a killed lead is held, while a possible open match st
       newsworthiness integer, status text, possible_duplicate_of integer,
       topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer
+      last_resurfaced_scan_run_id integer, dup_kind text
     )`);
     for (const status of ["killed", "new"]) {
       await db.exec("truncate leads restart identity");

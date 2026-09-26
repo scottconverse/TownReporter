@@ -1,4 +1,5 @@
 import { StoryBody } from "@/components/story-body";
+import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
@@ -9,9 +10,11 @@ import {
   mayInheritLeadSources,
   type EvidenceDecision,
 } from "@/lib/news/draft-evidence";
+import { auditDraft } from "@/lib/news/draft-audit";
+import { parseStyleRecord } from "@/lib/news/draft-audit-record";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
@@ -19,6 +22,7 @@ import {
   createFollowUp,
   dropFollowUp,
   draftLead,
+  fixDraftStyle,
   getLead,
   getDraftHistoryItem,
   listDraftHistory,
@@ -31,8 +35,10 @@ import {
   continuePullJob,
   overrideNamedOutlet,
   recordFollowUpReply,
+  resolveLeadDuplicate,
   saveDraft,
   saveReportingNotes,
+  setLeadStatus,
   stopPullJob,
   suggestHeadlines,
   updateArticleHeadline,
@@ -52,6 +58,7 @@ import {
   type ReportingNotes,
 } from "@/lib/news/notes";
 import {
+  duplicateKillReason,
   editorActionError,
   editorDraftError,
   expectedDraftJobHasLanded,
@@ -111,6 +118,18 @@ const NO_ANSWER = "The desk did not answer that click. It may have been restarti
 
 function answered<T>(res: T | undefined | null): res is T {
   return res !== undefined && res !== null && typeof res === "object";
+}
+
+/**
+ * Where a style finding is, in words the editor can find on the page.
+ *
+ * Paragraph 0 is the headline and the dek, which print together above the
+ * body (`draft-audit.ts`), so it is named rather than numbered.
+ */
+function styleLocation(finding: { paragraph: number; sentence: number }): string {
+  return finding.paragraph === 0
+    ? "Headline and dek"
+    : `Paragraph ${finding.paragraph}, sentence ${finding.sentence}`;
 }
 
 function StoryPage() {
@@ -192,6 +211,13 @@ function StoryPage() {
   const [headlineNote, setHeadlineNote] = useState("");
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
   const [slowWait, setSlowWait] = useState(false);
+  /*
+   * Unit AK item 5: whether the side-by-side view is open. `null` means the
+   * editor has not said, and the panel follows the data: a lead the scanner
+   * filed against another one opens with the comparison showing, because that
+   * is the question the lead is asking. The press can close it.
+   */
+  const [compareOpen, setCompareOpen] = useState<boolean | null>(null);
   const hadBodyAtStart = useRef(false);
   const bodyAtStart = useRef("");
   const expectedDraftJobId = useRef<number | null>(null);
@@ -588,6 +614,60 @@ function StoryPage() {
       ),
   });
 
+  /*
+    "Fix these with the model": ONE round, on the text on this page, with the
+    model the picker is set to. The server saves what comes back as an ordinary
+    draft revision -- nothing publishes -- and a rewrite that would have
+    changed a quotation, a number, a name or a link is refused there, so the
+    text the editor gets back is either the repair or exactly what was sent.
+
+    No findings, no call: the button is only offered when the check above found
+    something to fix.
+  */
+  const fixStyle = useMutation({
+    mutationFn: () =>
+      fixDraftStyle({ data: { leadId: id, headline, dek, body, topic, modelChoice, modelEffort } }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setBody(res.body);
+      setMsg(res.note);
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "fix the style findings") ??
+          "The style repair did not run. Your draft is unchanged.",
+      );
+    },
+  });
+
+  /*
+    The style check, measured on the text on screen rather than read back from
+    the stored record: the editor's unsaved edits are exactly what they are
+    looking at, and this measurement is pure, so keeping it current costs
+    nothing and cannot go stale. The same measurement runs when the desk writes
+    a draft and when the editor saves; the stored copy is what the completion
+    receipt and the evidence record read.
+
+    Nothing here is a verdict and nothing here blocks: every finding is
+    advisory, and the editor may ignore all of it.
+  */
+  const styleCheck = useMemo(
+    () => auditDraft({ headline, dek, body, form: data?.draft?.form ?? "" }),
+    [headline, dek, body, data?.draft?.form],
+  );
+  const styleFixes = styleCheck.findings.filter((finding) => finding.severity === "fix");
+  const styleReviews = styleCheck.findings.filter((finding) => finding.severity === "review");
+  /* What the desk said last time it measured this draft, from the record saved
+     with it -- the plain sentence the repair or the save wrote. */
+  const styleNote = useMemo(() => {
+    try {
+      const research = JSON.parse(data?.draft?.research_json ?? "{}") as Record<string, unknown>;
+      return parseStyleRecord(research?.styleAudit)?.note ?? "";
+    } catch {
+      return "";
+    }
+  }, [data?.draft?.research_json]);
+
   const applyCheckedDraft = useCallback(async (
     draftId: number,
     originalDraftId: number,
@@ -909,6 +989,57 @@ function StoryPage() {
     },
   });
 
+  /*
+   * Unit AK items 5 and 6: the Compare view's three presses and the Reopen on
+   * a killed lead's page.
+   *
+   * These are plain callbacks rather than useMutation()s because each one has
+   * to hand a result back to the panel that pressed it -- "did that land?" is
+   * the whole point of the press, and a fire-and-forget mutation cannot answer.
+   * Every branch below returns `{ ok: false, error }` with a sentence, so a
+   * refusal from the desk is shown, not swallowed.
+   */
+  const afterLeadChange = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: ["lead", id] });
+    await qc.invalidateQueries({ queryKey: ["leads"] });
+  }, [qc, id]);
+
+  const moveToNew = useCallback(async () => {
+    const res = await resolveLeadDuplicate({ data: { id, action: "not-a-duplicate" } });
+    if (!answered(res)) return { ok: false, error: NO_ANSWER };
+    if (!res.ok) return { ok: false, error: res.error };
+    await afterLeadChange();
+    return { ok: true };
+  }, [id, afterLeadChange]);
+
+  const killAsDuplicateOfPrior = useCallback(async () => {
+    const prior = data?.lead.possible_duplicate;
+    if (!prior) return { ok: false, error: "The earlier lead is no longer available to name." };
+    const res = await setLeadStatus({
+      data: { id, status: "killed", killReason: duplicateKillReason(prior.headline) },
+    });
+    if (!answered(res)) return { ok: false, error: NO_ANSWER };
+    if (!res.ok) return { ok: false, error: "The desk refused that kill." };
+    await afterLeadChange();
+    return { ok: true };
+  }, [data, id, afterLeadChange]);
+
+  const reopenPrior = useCallback(async () => {
+    const res = await resolveLeadDuplicate({ data: { id, action: "reopen-prior" } });
+    if (!answered(res)) return { ok: false, error: NO_ANSWER };
+    if (!res.ok) return { ok: false, error: res.error };
+    await afterLeadChange();
+    return { ok: true };
+  }, [id, afterLeadChange]);
+
+  const reopenThisLead = useCallback(async () => {
+    const res = await setLeadStatus({ data: { id, status: "new" } });
+    if (!answered(res)) return { ok: false, error: NO_ANSWER };
+    if (!res.ok) return { ok: false, error: "The desk refused that reopen." };
+    await afterLeadChange();
+    return { ok: true };
+  }, [id, afterLeadChange]);
+
   if (isPending) {
     return (
       <DeskShell title="Story" kicker="Workbench">
@@ -967,6 +1098,31 @@ function StoryPage() {
     data.lead.headline.startsWith("[Dark]");
   const locked = data.lead.status === "killed";
   const onPaper = data.lead.status === "published" || Boolean(publishedSlug);
+  /*
+   * Unit AK item 5: the two leads the scanner thinks are the same story. Both
+   * sides come down with the lead (see getLead), so the comparison is on this
+   * page instead of a link to a page that knew nothing about the pair.
+   */
+  const priorLead = data.lead.possible_duplicate ?? null;
+  const comparePair = data.lead.possible_duplicate_of && priorLead ? { prior: priorLead } : null;
+  const compareShown = comparePair ? (compareOpen ?? true) : false;
+  /*
+   * Unit AK item 6: a kill leaves a record, and the record outlives the kill --
+   * once the Compare view reopens a lead, its status is "new" again and the
+   * kill columns are all that is left to say what happened to it.
+   */
+  const killRecord = Boolean(data.lead.killed_at || data.lead.kill_reason);
+  const leadForRecord = {
+    id: data.lead.id,
+    headline: data.lead.headline,
+    why: data.lead.why,
+    status: data.lead.status,
+    source_urls: data.lead.source_urls,
+    created_at: data.lead.created_at,
+    kill_reason: data.lead.kill_reason ?? null,
+    kill_reason_url: data.lead.kill_reason_url ?? null,
+    killed_at: data.lead.killed_at ?? null,
+  };
   const canChooseAnotherModel =
     !onPaper &&
     /readiness check|did not answer in time|provider slow|timed?\s*out|choose another model/i.test(
@@ -1131,6 +1287,22 @@ function StoryPage() {
         <a className="btn astra-checks-jump" href="#story-inspector">
           Checks & sources
         </a>
+        {/*
+          Unit AK item 5: the press that opens the side-by-side view. It used
+          to be a link on the Queue that opened the other lead's page, which
+          had no comparison on it at all.
+        */}
+        {comparePair ? (
+          <button
+            className="btn"
+            type="button"
+            aria-expanded={compareShown}
+            aria-controls="lead-compare"
+            onClick={() => setCompareOpen(!compareShown)}
+          >
+            Compare
+          </button>
+        ) : null}
         {!locked && !onPaper ? (
           <>
             <InkButton
@@ -1354,6 +1526,18 @@ function StoryPage() {
           </p>
         ) : null}
       </div>
+      {comparePair && compareShown ? (
+        <div id="lead-compare">
+          <LeadComparePanel
+            current={leadForRecord}
+            prior={comparePair.prior}
+            onNotADuplicate={moveToNew}
+            onKillThis={killAsDuplicateOfPrior}
+            onReopenPrior={reopenPrior}
+            formatDate={formatShortDate}
+          />
+        </div>
+      ) : null}
       {!locked && !onPaper ? (
         <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
           <textarea
@@ -1992,13 +2176,93 @@ function StoryPage() {
                 <p className="meta">Model note: {data.job.failover_note}</p>
               ) : null}
             </form>
-          ) : waiting ? null : (
+          ) : waiting ? null : locked || killRecord ? (
+            /*
+              Unit AK item 6: "This lead was killed. Nothing to draft." named
+              the state and nothing else. The record below shows what the lead
+              was -- headline, why, sources -- and when and why it was killed,
+              with the way back. After a reopen it stays, saying the kill was
+              undone, because a record that vanishes hides what happened.
+            */
+            <KilledLeadRecord
+              lead={leadForRecord}
+              reopened={!locked}
+              onReopen={locked ? reopenThisLead : undefined}
+              formatDate={formatShortDate}
+            />
+          ) : (
             <p className="meta" style={{ marginTop: 14 }}>
-              {locked
-                ? "This lead was killed. Nothing to draft."
-                : "No draft yet. Draft with AI writes a first pass from the lead and its sources; you edit, then publish."}
+              No draft yet. Draft with AI writes a first pass from the lead and its sources; you
+              edit, then publish.
             </p>
           )}
+          {data.draft ? (
+            <section className="note-sec" aria-label="Style check">
+              <p className="side-label">Style check</p>
+              {styleFixes.length ? (
+                <>
+                  <p className="note-one">
+                    {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix:
+                  </p>
+                  <ul className="meeting-citations">
+                    {styleFixes.map((finding, index) => (
+                      <li key={`${finding.code}-${finding.paragraph}-${finding.sentence}-${index}`}>
+                        <p>
+                          <b>{styleLocation(finding)}</b> · {finding.message}
+                        </p>
+                        {finding.snippet ? <p className="note-one">{finding.snippet}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="note-one">Nothing to fix.</p>
+              )}
+              {styleReviews.length ? (
+                <details>
+                  <summary>
+                    {styleReviews.length} thing{styleReviews.length === 1 ? "" : "s"} to read, not
+                    to fix
+                  </summary>
+                  <ul className="meeting-citations">
+                    {styleReviews.map((finding, index) => (
+                      <li key={`${finding.code}-${finding.paragraph}-${finding.sentence}-${index}`}>
+                        <p>
+                          <b>{styleLocation(finding)}</b> · {finding.message}
+                        </p>
+                        {finding.snippet ? <p className="note-one">{finding.snippet}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              <p className="note-one">
+                You do not have to act on any of this. Nothing here publishes anything.
+              </p>
+              <InkButton
+                disabled={
+                  !styleFixes.length ||
+                  locked ||
+                  onPaper ||
+                  waiting ||
+                  fixStyle.isPending ||
+                  save.isPending ||
+                  reviewEvidence.isPending ||
+                  reconcileActive
+                }
+                onClick={() => fixStyle.mutate()}
+              >
+                {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
+              </InkButton>
+              <p className="note-one">
+                One pass with the model the picker is set to. It is given the list above and the
+                draft, and returns the draft with those problems fixed. It may not change a
+                quotation, a number, a name or a link — a rewrite that does is refused and your text
+                is kept. The result is saved as a draft revision, never published.
+              </p>
+              {styleNote ? <p className="note-one">{styleNote}</p> : null}
+            </section>
+          ) : null}
           {data.draft ? (
             <FindingEvidenceReviewPanel
               leadId={id}

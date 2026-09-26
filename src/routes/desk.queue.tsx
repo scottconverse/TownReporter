@@ -9,6 +9,7 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
 import {
+  duplicateKillReason,
   editorActionError,
   mergeFocusSelection,
   nearDuplicate,
@@ -45,8 +46,22 @@ function QueuePage() {
   const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const setStatus = useMutation({
-    mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
-      setLeadStatus({ data: input }),
+    mutationFn: (input: {
+      id: number;
+      status: "held" | "killed" | "new";
+      killReason?: string;
+      killReasonUrl?: string;
+    }) => setLeadStatus({ data: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+  });
+  /*
+   * Unit AK item 4: "Kill as duplicate" is the same kill with a reason
+   * recorded (migration 0094). It rejects on failure so the row can say
+   * "That did not save." instead of looking like it worked.
+   */
+  const killAsDuplicate = useMutation({
+    mutationFn: (input: { id: number; killReason: string }) =>
+      setLeadStatus({ data: { id: input.id, status: "killed", killReason: input.killReason } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
   });
   const remove = useMutation({
@@ -473,7 +488,24 @@ function QueuePage() {
               setBulkDeleteNotice("");
             }}
           >
-            {k} {counts[k]}
+            {k}{" "}
+            {/*
+              Unit AK item 7: the Held tab's count is a badge, not one more
+              number in a row of numbers -- a lead sitting in Held is waiting
+              on the editor, which is the state the owner could not see. The
+              visible text is still "held <n>", so anything that finds the tab
+              by its words is unchanged.
+            */}
+            <span
+              className={"filter-badge" + (k === "held" && counts.held > 0 ? " waiting" : "")}
+              title={
+                k === "held" && counts.held > 0
+                  ? `${counts.held} lead${counts.held === 1 ? "" : "s"} waiting on you under Held`
+                  : undefined
+              }
+            >
+              {counts[k]}
+            </span>
           </button>
         ))}
       </div>
@@ -580,15 +612,30 @@ function QueuePage() {
         </p>
       ) : (
         <div className="lead-list roomy">
-          {shown.map((l) => (
+          {shown.map((l) => {
+            const dupMatch = nearDuplicate(l, printed);
+            return (
             <LeadRowView
               key={l.id}
               lead={l}
-              dup={nearDuplicate(l, printed)}
+              dup={dupMatch}
               roomy
               onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
               onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
               onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
+              onKillAsDuplicate={
+                /* Unit AK item 4: the reason names the piece the desk matched,
+                   so the kill record on the story page means something to
+                   whoever reads it next. */
+                dupMatch
+                  ? async () => {
+                      await killAsDuplicate.mutateAsync({
+                        id: l.id,
+                        killReason: duplicateKillReason(dupMatch.headline),
+                      });
+                    }
+                  : undefined
+              }
               onDelete={() => remove.mutate(l.id)}
               deleteSelected={selectedDeleteLeads.includes(l.id)}
               onDeleteSelect={(selected) => {
@@ -626,7 +673,8 @@ function QueuePage() {
                   : undefined
               }
             />
-          ))}
+            );
+          })}
         </div>
       )}
     </DeskShell>

@@ -1004,6 +1004,31 @@
 
 /* A delete says what it costs, in the row, before it happens. */
 .desk-ltr .del-warn {display:block;font-size:calc(0.875rem * var(--ts));color:var(--adeep);margin-top:6px;max-width:60ch}
+/* Unit AK item 4: "Kill as duplicate" reports itself in the row -- saving,
+   saved, failed -- because the press that used to have no equivalent here is
+   exactly the one an editor needs to know landed. */
+.desk-ltr .dup-kill-note {display:inline-block;color:var(--adeep);align-self:center;white-space:normal;max-width:46ch}
+/* Unit AK items 5 and 6: the side-by-side comparison of two leads the scanner
+   thinks are one story, and the record a killed lead keeps. Both are the same
+   six facts in the same order, so "is this the same story?" is answered by
+   reading, not by remembering. */
+.desk-ltr .lead-compare {border:1px solid var(--line);background:var(--paper-2);padding:16px 18px;margin:18px 0}
+.desk-ltr .lead-compare-head {display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.desk-ltr .lead-compare-sides {display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:12px}
+.desk-ltr .lead-compare-side {border-left:1px solid var(--line);padding-left:14px;min-width:0}
+.desk-ltr .lead-compare-side:first-child {border-left:0;padding-left:0}
+.desk-ltr .lead-compare-headline {font-size:calc(1.0625rem * var(--ts));line-height:1.35;margin:4px 0 6px;overflow-wrap:anywhere}
+.desk-ltr .lead-compare-why {font-size:calc(0.9375rem * var(--ts));color:var(--fg2);margin:6px 0;overflow-wrap:anywhere}
+.desk-ltr .lead-compare-sources {list-style:none;margin:6px 0 0;padding:0}
+.desk-ltr .lead-compare-sources li {font-size:calc(0.875rem * var(--ts));margin-bottom:4px;overflow-wrap:anywhere}
+.desk-ltr .lead-compare-kill {color:var(--warn);font-weight:600;font-size:calc(0.9375rem * var(--ts));margin:10px 0 0;overflow-wrap:anywhere}
+.desk-ltr .lead-compare-actions {display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.desk-ltr .lead-killed-record {border:1px solid var(--warn);padding:16px 18px;margin:14px 0}
+@media (max-width:720px) {
+.desk-ltr .lead-compare-sides {grid-template-columns:1fr}
+.desk-ltr .lead-compare-side {border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:12px}
+.desk-ltr .lead-compare-side:first-child {border-top:0;padding-top:0}
+}
 @media (max-width:640px) {
 .desk-ltr .needs {flex-direction:column;align-items:flex-start;gap:8px}
 .desk-ltr .needs-item {white-space:normal;text-align:left}
@@ -1095,6 +1120,16 @@
 .desk-ltr .queue-delete-select {display:block}
 .desk-ltr .filter {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.1em;border:1px solid var(--line);padding:4px 12px;color:var(--mut);white-space:nowrap}
 .desk-ltr .filter.on {background:var(--fg);color:var(--bg);border-color:var(--fg)}
+/* Unit AK item 7: a count of leads waiting on the editor, not one more
+   number in a row of numbers. It sits inside the tab's own words, so the
+   visible text of the button is still "held 3" and anything that finds the
+   tab by its label keeps working. */
+.desk-ltr .filter .filter-badge {display:inline-block;min-width:1.6em;padding:0 5px;border-radius:99px;background:var(--paper-2);color:var(--mut);font-size:calc(0.875rem * var(--ts));letter-spacing:0;text-align:center;font-variant-numeric:tabular-nums}
+.desk-ltr .filter.on .filter-badge {background:transparent;color:var(--bg)}
+/* --a is dark rust by day (#9b2915) and light rust at night (#d2764f), so
+   --bg is the readable ink on it in both; white would fail AA at night, the
+   same reason .score.hot swaps. */
+.desk-ltr .filter .filter-badge.waiting {background:var(--a);color:var(--bg);font-weight:700}
 .desk-ltr .file-form {margin-top:16px;border:1px solid var(--line);padding:0 16px}
 .desk-ltr .file-form summary {font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));padding:10px 0;cursor:pointer;list-style-position:inside}
 .desk-ltr .file-form>*:last-child {margin-bottom:14px}

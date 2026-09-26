@@ -44,6 +44,7 @@ import {
   draftHistoryInput,
   draftLeadInput,
   draftMeetingReviewInput,
+  draftStyleFixInput,
   fileLeadInput,
   followUpCreateInput,
   followUpReplyInput,
@@ -52,6 +53,7 @@ import {
   jobIdInput,
   leadIdInput,
   leadStatusInput,
+  leadDuplicateResolutionInput,
   meetingArticleReviewInput,
   outletInput,
   packDeleteInput,
@@ -133,6 +135,9 @@ import {
   type PerformDraftWorkDeps,
 } from "./desk-model-run.ts";
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
+import { repairDraftStyle } from "./draft-audit-repair.ts";
+import { styleRepairCall } from "./draft-audit.server.ts";
+import { styleAuditSummary, styleRecordFromRepair } from "./draft-audit-record.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
@@ -305,9 +310,16 @@ export const listLeads = createServerFn({ method: "GET" })
                where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
                order by d.updated_at desc,d.id desc limit 1)) as story_headline,
              l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
-             l.possible_duplicate_of,
+             l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+             -- Unit AK item 5: the Compare view shows both leads side by side
+             -- without a second round trip, so the prior lead's why, sources,
+             -- dates and kill record travel with the row.
              case when prior.id is null then null else jsonb_build_object(
-               'id', prior.id, 'headline', prior.headline, 'status', prior.status
+               'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+               'why', prior.why, 'source_urls', prior.source_urls,
+               'created_at', prior.created_at,
+               'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
+               'killed_at', prior.killed_at
              ) end as possible_duplicate
       from leads l
       left join articles a on a.lead_id = l.id and a.status = 'published'
@@ -434,9 +446,16 @@ export const getLead = createServerFn({ method: "GET" })
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.origin,
-             l.possible_duplicate_of,
+             l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+             -- Unit AK item 5: the Compare view shows both leads side by side
+             -- without a second round trip, so the prior lead's why, sources,
+             -- dates and kill record travel with the row.
              case when prior.id is null then null else jsonb_build_object(
-               'id', prior.id, 'headline', prior.headline, 'status', prior.status
+               'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+               'why', prior.why, 'source_urls', prior.source_urls,
+               'created_at', prior.created_at,
+               'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
+               'killed_at', prior.killed_at
              ) end as possible_duplicate
       from leads l
       left join leads prior on prior.id = l.possible_duplicate_of
@@ -1222,8 +1241,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       headline: string;
       source_urls: string;
       created_at: string;
+      why: string | null;
+      evidence: string | null;
     }>`
-      select id, status, headline, source_urls, created_at
+      select id, status, headline, source_urls, created_at, why, evidence
       from leads
       where newsroom_id = ${owned(context)}
         and status <> 'published'
@@ -1235,6 +1256,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       headline: l.headline,
       source_urls: parseLeadSourceUrls(l.source_urls),
       created_at: l.created_at,
+      // Unit AK item 2: the killed lead's own words, so a strong match that
+      // brings new facts can be filed against it instead of discarded.
+      why: l.why,
+      evidence: l.evidence,
     }));
 
     const {
@@ -1242,7 +1267,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       resurfacedKilled,
       resurfacedOpen,
       possibleMatched,
+      developingFiled,
       firstDiscardedHeadline,
+      mergedSameScan,
     } = await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
 
     let proposed = 0;
@@ -1275,8 +1302,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       resurfacedKilled,
       resurfacedOpen,
       possibleMatched,
-      filedNew: leadsCreated - possibleMatched,
+      // Unit AK item 2: a developing finding is filed too, but it is not a
+      // brand-new story for the desk -- it is an old one that came back -- so
+      // it is named by its own bit rather than counted as "filed as new".
+      filedNew: leadsCreated - possibleMatched - developingFiled,
+      developingFiled,
       firstDiscardedHeadline,
+      mergedSameScan,
     });
     if (resurfacedSentence)
       summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
@@ -1803,6 +1835,42 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   });
   if ("error" in reported) throw new Error(reported.error);
 
+  /*
+    THE STYLE AUDIT, BEFORE ANYTHING IS WRITTEN.
+
+    The model's draft is measured in code, and a finding the code calls a fix
+    gets one bounded repair pass through the same chat the draft itself came
+    through -- the newsroom's picker, the preflight probe, the fail-over ladder.
+    The repair may rewrite wording and nothing else: a rewrite that changes a
+    quoted word, a number, a name or a link is refused and the model's own text
+    is kept. That refusal is what makes the rest of this function safe, because
+    every check that ran against the draft -- the name check, the document
+    claims, the citation derivation -- still describes the text being stored:
+    the body below is the repaired one, and the guard has already proved the
+    facts in it are the facts that were checked.
+
+    Nothing here publishes and nothing here is a verdict. What is left over
+    becomes a review reason and a list the editor can read and ignore.
+  */
+  const style = await repairDraftStyle({
+    headline: reported.headline,
+    dek: reported.dek,
+    body: reported.body,
+    form: String(reported.form ?? ""),
+    repair: styleRepairCall({
+      /*
+        Both paths above wire this. The fallback keeps the type honest and turns
+        an unwired chat into a plain refusal -- the audit still runs, the draft
+        is untouched, and the note says so -- rather than a crash mid-draft.
+      */
+      chat:
+        reportDeps.chat ??
+        (async () => ({ ok: false, error: "The writing provider is not available." })),
+    }),
+  });
+  const draftBody = style.body;
+  const styleRecord = styleRecordFromRepair(style, { checkedAt: new Date().toISOString() });
+
   // Discovery exclusions are not citation rules: a watched page or a root
   // dashboard can be the substantive primary record. Preserve the reporter's
   // explicit citations, including an empty list, without adding lead seeds.
@@ -1821,9 +1889,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     reportedClaims: { version: 1, rows: reported.claims },
     reportedDocumentClaims: {
       version: 1,
-      checkedText: [reported.headline, reported.dek, reported.body].join("\n\n"),
+      checkedText: [reported.headline, reported.dek, draftBody].join("\n\n"),
       rows: reported.documentClaims ?? [],
     },
+    // The findings and the before/after measurements, stored with the draft they
+    // describe rather than recomputed into the page on every render.
+    styleAudit: styleRecord,
   });
   const yours = keepHumanTodos(prevNotes);
   /*
@@ -1922,7 +1993,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       model_headline, model_topic, headline_source
     )
     values (
-      ${context.userId}, ${owned(context)}, ${leadId}, ${headline.headline}, ${reported.dek}, ${reported.body},
+      ${context.userId}, ${owned(context)}, ${leadId}, ${headline.headline}, ${reported.dek}, ${draftBody},
       ${reported.topic}, ${sourceUrls}, ${notes},
       ${provenanceJson}, ${reported.form}, ${reported.found_note}, ${unansweredJson},
       ${researchJson},
@@ -1955,7 +2026,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         const draftText = {
           headline: reported.headline,
           dek: reported.dek,
-          body: reported.body,
+          // The text this draft actually stores: the citation derivation has to
+          // describe the story on the page, not the one the model first wrote.
+          body: draftBody,
         };
         // A new meeting draft can only cite transcript segments the reporter
         // actually saw. Older drafts with saved transcript notes retain their
@@ -2000,6 +2073,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             "Evidence reconciliation not completed within the available edit pass.",
           ),
           nameCheck: reported.research_memo.nameCheck,
+          styleAudit: styleAuditSummary(styleRecord),
         }),
       );
       await sql`
@@ -2362,16 +2436,96 @@ export const saveDraft = createServerFn({ method: "POST" })
     return saveDraftForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
+/**
+ * The editor's "Fix these with the model" press.
+ *
+ * One round, on demand, on the text the page is showing. It saves as a draft
+ * revision like any other save -- nothing publishes -- and the row is left
+ * exactly as it was when the call fails or the guard refuses the rewrite.
+ */
+export const fixDraftStyle = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => draftStyleFixInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { fixDraftStyleForEditor } = await import("./draft-audit.server.ts");
+    return fixDraftStyleForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
+  });
+
 export const setLeadStatus = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => leadStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
+    const reason = data.killReason?.trim();
+    if (data.status === "killed") {
+      // Unit AK items 4 and 6 (migration 0094): a kill keeps a record. The
+      // timestamp is always written -- "when was this killed" has an answer
+      // the moment the kill happens -- and the reason is written when the
+      // editor's press stated one ("Kill as duplicate" and the Compare view's
+      // "Same story" both do). A plain Kill from the Queue states none, and
+      // the page says so in words rather than showing an empty line
+      // (killRecordLine, lib/news/desk-copy.ts).
+      await sql`
+        update leads set status = 'killed', killed_at = now(),
+                kill_reason = ${reason || null},
+                kill_reason_url = ${data.killReasonUrl?.trim() || null}
+        where id = ${data.id} and newsroom_id = ${owned(context)}
+      `;
+      return { ok: true as const };
+    }
     await sql`
       update leads set status = ${data.status}
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
+  });
+
+/**
+ * Unit AK item 5: the two Compare-view presses that are not a kill.
+ *
+ * "Not a duplicate — move to New" clears the link the scanner filed the lead
+ * with, so the lead stops claiming a twin and stops sitting in Held for a
+ * question the editor has just answered. "Newer facts — reopen the old one"
+ * puts the KILLED lead it was linked to back on the desk as New, because the
+ * finding carried facts the killed lead did not have and the story is live
+ * again. Neither press deletes anything: the kill record on the old lead
+ * stays, and `killRecordLine` says on its page that the kill was undone
+ * rather than letting it disappear.
+ *
+ * Both are scoped to the newsroom twice over -- the lead being resolved, and
+ * the prior lead it points at -- so a link that crosses newsrooms (which the
+ * schema does not allow, but which a stale row could still carry) can only
+ * ever touch this newsroom's rows.
+ */
+export const resolveLeadDuplicate = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => leadDuplicateResolutionInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const room = owned(context);
+    if (data.action === "not-a-duplicate") {
+      const rows = await sql<{ id: number }>`
+        update leads
+        set possible_duplicate_of = null, dup_kind = null,
+            status = case when status = 'held' then 'new' else status end
+        where id = ${data.id} and newsroom_id = ${room}
+        returning id
+      `;
+      if (!rows.length) return { ok: false as const, error: "That lead is no longer on the desk." };
+      return { ok: true as const, action: data.action };
+    }
+    const reopened = await sql<{ id: number }>`
+      update leads
+      set status = 'new'
+      where newsroom_id = ${room}
+        and id = (select possible_duplicate_of from leads
+                  where id = ${data.id} and newsroom_id = ${room})
+      returning id
+    `;
+    if (!reopened.length) {
+      return { ok: false as const, error: "There is no earlier lead to reopen for this one." };
+    }
+    return { ok: true as const, action: data.action, priorId: reopened[0]!.id };
   });
 
 export {
