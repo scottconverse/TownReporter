@@ -25,6 +25,18 @@
  *      Measured on the element's own box (getBoundingClientRect), which is not
  *      clipped by an ancestor's `overflow: hidden` -- the property that let the
  *      article defect survive `scrollWidth` measurement.
+ *   3. WORD SPLITS. No word in the panel's event text may be broken across two
+ *      lines. Unit BD3 found a panel that fit its box exactly and was still
+ *      wrong to read: `overflow-wrap: anywhere` broke "attachments" into
+ *      "attachmen / ts" and the host into "gmont- / .gov", which is inside the
+ *      panel, inside the contrast floor, and unreadable. Instrument 2 measures
+ *      boxes; a box cannot see this. So for every word in a text node the panel
+ *      prints, a Range is set over the word's own character offsets and its
+ *      client rects counted: one rect is a word on one line, more than one is a
+ *      word split across a break. The event text is `.datewhat` and its items;
+ *      the domain line (`.datenote`) is exempt by owner ruling -- a host longer
+ *      than the line has nowhere else to go and `anywhere` is allowed to break
+ *      it -- and the exempt words are counted, not hidden.
  *
  * A third, coarser assertion keeps the first from being satisfied by accident:
  * the panel's own computed background must be the reader's `--block` token, in
@@ -54,6 +66,13 @@ const MIN_CONTRAST = 4.5;
 const EDGE_TOLERANCE_PX = 1;
 /** The reader's own storage key shape; the paper name is part of it. */
 const READER_KEY_PREFIX = "townreporter:reader:";
+/**
+ * Where a word is allowed to be broken across lines: the domain line under an
+ * event. A host longer than the panel's line has no space to break at, so it
+ * breaks inside the word rather than running past the edge, and the event text
+ * above it is what must stay whole.
+ */
+const WORD_SPLIT_ALLOWED = ".datenote";
 
 const TARGETS = [
   {
@@ -189,6 +208,10 @@ function auditPanels(cfg) {
       panelBgComputed: panelStyle.backgroundColor,
       blockToken: (panelStyle.getPropertyValue("--block") || "").trim(),
       textElements: 0,
+      wordsMeasured: 0,
+      domainWords: 0,
+      splitWords: [],
+      domainSplitWords: [],
       contrastViolations: [],
       edgeViolations: [],
       minRatio: null,
@@ -286,6 +309,65 @@ function auditPanels(cfg) {
       }
     }
     entry.minRatio = minRatio === Infinity ? null : Math.round(minRatio * 100) / 100;
+
+    /*
+      The word-split pass. A Range over a word's own character offsets has one
+      client rect per line the word occupies, so `rects.length > 1` is a word
+      broken at a line break. Done per text node, and the node's word count is
+      checked against the number of ranges measured, so a node that quietly
+      measured nothing is a violation rather than a pass.
+    */
+    const invisible = (el) => {
+      const style = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        Number(style.opacity) === 0 ||
+        rect.width === 0 ||
+        rect.height === 0 ||
+        el.closest(".vh")
+      );
+    };
+    const wordWalker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+    let wordNode = wordWalker.nextNode();
+    while (wordNode) {
+      const textNode = wordNode;
+      const nodeText = textNode.textContent || "";
+      const el = textNode.parentElement;
+      wordNode = wordWalker.nextNode();
+      if (!nodeText.trim() || !el || invisible(el)) continue;
+      const words = [...nodeText.matchAll(/\S+/g)];
+      if (!words.length) continue;
+      const exempt = Boolean(el.closest(cfg.wordSplitAllowed));
+      const range = document.createRange();
+      let measured = 0;
+      words.forEach((match) => {
+        const word = match[0];
+        const at = match.index;
+        range.setStart(textNode, at);
+        range.setEnd(textNode, at + word.length);
+        const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+        measured += 1;
+        if (exempt) entry.domainWords += 1;
+        if (rects.length > 1) {
+          entry[exempt ? "domainSplitWords" : "splitWords"].push({
+            tag: el.tagName.toLowerCase(),
+            cls: typeof el.className === "string" ? el.className.slice(0, 60) : "",
+            word: word.slice(0, 40),
+            wordOf: words.length,
+            rects: rects.length,
+            lines: [...new Set(rects.map((r) => Math.round(r.top)))],
+            text: nodeText.trim().slice(0, 80),
+          });
+        }
+      });
+      entry.wordsMeasured += measured;
+      if (measured !== words.length) {
+        entry.wordCountMismatch = `${measured} ranges measured against ${words.length} words in "${nodeText.trim().slice(0, 40)}"`;
+      }
+    }
+
     panels.push(entry);
   }
 
@@ -368,6 +450,7 @@ try {
         targets: [{ name: target.name, selectors: target.selectors, head: target.head.source }],
         minContrast: MIN_CONTRAST,
         tolerance: EDGE_TOLERANCE_PX,
+        wordSplitAllowed: WORD_SPLIT_ALLOWED,
       });
       const panel = measured.panels[0];
       panel.theme = theme.name;
@@ -423,6 +506,20 @@ try {
       for (const v of panel.edgeViolations.slice(0, 40)) {
         report.violations.push({ where, kind: "past-panel-edge", detail: v });
       }
+      // A word-split check that measured no words must not pass.
+      if (panel.wordsMeasured === 0) {
+        report.violations.push({
+          where,
+          kind: "no-words-measured",
+          detail: "the panel's text was not measured for word splits",
+        });
+      }
+      if (panel.wordCountMismatch) {
+        report.violations.push({ where, kind: "word-count-mismatch", detail: panel.wordCountMismatch });
+      }
+      for (const v of (panel.splitWords || []).slice(0, 40)) {
+        report.violations.push({ where, kind: "split-word", detail: v });
+      }
     }
     await context.close();
   }
@@ -443,6 +540,10 @@ report.summary = report.panels.map((p) => ({
   blockToken: p.blockToken,
   contrastViolations: (p.contrastViolations || []).length,
   edgeViolations: (p.edgeViolations || []).length,
+  wordsMeasured: p.wordsMeasured,
+  splitWords: (p.splitWords || []).length,
+  domainWordsMeasured: p.domainWords,
+  domainWordsSplit: (p.domainSplitWords || []).length,
 }));
 
 console.log(JSON.stringify(report, null, 2));

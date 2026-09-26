@@ -101,6 +101,29 @@ export function addDays(iso: string, days: number): string {
 }
 
 /**
+ * The domain line under an event: the host alone, when the note is a URL.
+ *
+ * A record's `organization` is usually already a host -- `report.ts`'s
+ * `describeSourceUrl` returns `URL.hostname` with `www.` dropped, and
+ * `isWeakOrg` treats that host as weak so an authored name wins over it. But an
+ * authored provenance item can carry a whole URL, and what belongs under a date
+ * is the domain a reader recognises rather than a path, a query and a GUID. So
+ * a URL-shaped note is reduced to its host; a name ("Longmont City Council") is
+ * printed exactly as it came. A host still longer than the panel's line breaks
+ * inside the word -- `.datenote` keeps `overflow-wrap: anywhere` for it -- and
+ * the event text above it never does.
+ */
+export function hostOnly(organization: string): string {
+  const value = organization.trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;
+  try {
+    return new URL(value).hostname.replace(/^www\./i, "") || value;
+  } catch {
+    return value;
+  }
+}
+
+/**
  * Every dated record in `sources` inside the window, oldest first, each once.
  *
  * `from` is the first day printed and `days` how many days the window covers --
@@ -127,7 +150,7 @@ export function collectStoryDates(
       if (from && date < from) continue;
       if (to && date >= to) continue;
       const what = record.title.trim() || "A record we kept";
-      const note = record.organization.trim();
+      const note = hostOnly(record.organization);
       const key = `${date}|${what}|${note}`;
       if (seen.has(key)) continue;
       seen.add(key);

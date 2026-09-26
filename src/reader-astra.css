@@ -1970,12 +1970,24 @@
   }
 }
 /* The front page is a full-bleed paper, not a column: its wrap runs to `--px`
-   from the edge (1600px ceiling, so a very wide screen still has gutters),
-   while the article page keeps the 1240px reading measure. `:has` picks the
-   front page out by the band only it prints; without `:has` support the wrap
-   stays 1240px and the bands simply stop short of the edge, which is a
-   narrower paper rather than a broken one. */
+   from the edge (1600px ceiling, so a very wide screen still has gutters).
+   `:has` picks the front page out by the band only it prints; without `:has`
+   support the wrap stays 1240px and the bands simply stop short of the edge,
+   which is a narrower paper rather than a broken one. */
 .reader .wrap:has(> .ledgerow) {
+  width: min(1600px, calc(100% - 2 * var(--px)));
+}
+/* The article page too: header and story, not the footer. The rail in
+   `Article Daily.dc.html` is the grid's `1fr`, so it is exactly what the
+   reading measure leaves over -- at 1440 the 1240px measure left the "Dates in
+   this story" panel 264px against the design's 384, narrow enough that a
+   three-word event breaks mid-word. `:has` picks the article out by the layout
+   only it prints (`articles.$slug.tsx`). Above 1320 this is the only rule that
+   changes anything: `min(1240px, 100% - 80px)` and `100% - 2 * 40px` are the
+   same number at 1280 and below, so the 1280 and 1024 measurements are the
+   same before and after, as the design's own are. */
+.reader:has(.articlelayout) > header .wrap,
+.reader:has(.articlelayout) > main.wrap {
   width: min(1600px, calc(100% - 2 * var(--px)));
 }
 /* The bands that reach the viewport edge. Only ever written on an element that
@@ -2300,6 +2312,17 @@
   color: var(--blockInk);
   padding: 32px var(--px);
 }
+/* The article rail's panel is the prototype's own block, and the prototype pads
+   it 24px on every side (`Article Daily.dc.html`, the aside's `padding:24px`),
+   where the front page's panel keeps the row's 32px. Only the INLINE padding
+   decides the event text's column, and at the rail's 224px at 1280 the page
+   gutter's 40px cost the text 16px a side: 86px for a word ("attachments" in
+   Literata 400 at 16px) that needs 94.6 to sit on one line, so `break-word`
+   had nowhere to put it but the middle of the word. 24px leaves 118px. The
+   vertical padding is left at 32px -- it changes nothing about the wrap. */
+.reader:has(.articlelayout) .datespanel {
+  padding: 32px 24px;
+}
 /* (The front page's panel keeps the row's 32px inline padding, set above.) */.reader .datespanel h2 {
   font-family: var(--fd);
   font-size: 28px;
@@ -2351,11 +2374,16 @@
   font-size: 16px;
   line-height: 1.5;
   color: var(--blockInk);
-  /* The item text and its host wrap inside the panel rather than running out of
-     it. `anywhere` rather than `break-word` because only `anywhere` changes the
-     element's min-content width, which is what the flex item is measured by. */
+  /* The item text wraps inside the panel rather than running out of it: that is
+     `min-width: 0` below, which the flex item needs so it may shrink below the
+     width of its longest word -- BD2's 35px overhang. What the TEXT does at the
+     line break is a separate question: `anywhere` (what BD2 shipped) also
+     breaks ordinary words, so "attachments" printed as "attachmen / ts" in a
+     panel the design has room for. `break-word` breaks only a word longer than
+     the line, which is the event title's rule; the domain below it keeps
+     `anywhere` because a host has nowhere else to break. */
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .reader .datewhat a {
   color: var(--blockInk);
@@ -2371,6 +2399,10 @@
   line-height: 1.5;
   color: var(--blockInk2);
   margin-top: 4px;
+  /* The one line in the panel allowed to break inside a word: it is a host
+     (`story-dates.ts` prints the host alone when the record's organization is a
+     whole URL), and a host longer than the line has no space to break at. */
+  overflow-wrap: anywhere;
 }
 /* A date that will not happen is struck through: a panel of dates that prints
    a cancellation as if it were an event is worse than no panel. */
