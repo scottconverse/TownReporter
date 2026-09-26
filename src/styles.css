@@ -1112,8 +1112,8 @@
 .desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--fg2);color:var(--fg2);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .chip.maybe-same:hover {color:var(--adeep)}
 .desk-ltr .lead-flags .chip.maybe-same {margin:0}
-.desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
-.desk-ltr .score.warm {border-color:var(--fg);color:var(--fg)}
+.desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:calc(44px * var(--ts));min-height:calc(44px * var(--ts));padding:0 4px;border:1px solid var(--line);font-family:var(--fd);font-weight:800;font-size:calc(1.25rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--fg2)}
+.desk-ltr .score.warm {border:2px solid var(--fg);color:var(--fg)}
 .desk-ltr .score.hot {background:var(--a);border-color:var(--a);color:#111}
 /* The hot score is a yellow fill in both themes, and text on yellow is #111 in
    both -- the old rule put white on it in light mode and the dark cream on it

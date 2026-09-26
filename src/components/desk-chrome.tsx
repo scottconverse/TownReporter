@@ -1,58 +1,95 @@
-import { Link, useMatchRoute, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePaper } from "@/lib/paper-context-state";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { leaveEditor } from "@/lib/news/claim";
-import { createEditorCopy } from "@/lib/news/desk-copy";
+import { createEditorCopy, openLeads } from "@/lib/news/desk-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { useAppearance } from "@/lib/appearance-context";
+import { Dialog } from "@/components/dialog";
 
-import {
-  LayoutDashboard,
-  Library,
-  Radar,
-  Inbox,
-  Newspaper,
-  PenLine,
-  Settings,
-  ChartNoAxesCombined,
-  Search,
-  Plus,
-  Moon,
-  Sun,
-  Menu,
-  X,
-  ArrowUpRight,
-  Telescope,
-  MessagesSquare,
-  ClipboardPaste,
-} from "lucide-react";
-import { listLeads } from "@/lib/news/desk";
+import { Search, Plus, Moon, Sun, Menu, X, ArrowUpRight } from "lucide-react";
+import { listLeads, listRecentStoryWork } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 
-const NAV_ICONS = [
-  LayoutDashboard,
-  Library,
-  Radar,
-  Inbox,
-  Newspaper,
-  PenLine,
-  Settings,
-  ChartNoAxesCombined,
-];
-const LINKS = [
-  { to: "/desk", label: "Desk", exact: true },
-  { to: "/desk/sources", label: "Sources" },
-  { to: "/desk/scan", label: "Scan" },
+/*
+  THE NAV, IN THE REDESIGN'S ORDER AND THE REDESIGN'S WORDS.
+
+  docs/design/handoff-2026-09-26/README.md, "Shell for all desk screens":
+  Today, Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk,
+  Sources & scan, Models, Server, Stats. It replaced an eight-item list that
+  had no Drafts (the new list screen), called Today "Desk", and merged
+  models into "Server".
+
+  No icons. design-system/README.md §9 ("Icons: avoid them. Words are
+  clearer… always next to a text label") and the DeskNav reference component
+  both draw the nav as a word with a count at the right, so the lucide glyphs
+  the old nav carried are gone rather than kept as decoration.
+
+  Two items share one route: "Models" is the existing model-assignment panel
+  on the Server page (`#writing-models` in desk.ops.tsx), and "Server" is that
+  page itself. The phase-1 unit reports this honestly instead of inventing a
+  /desk/models screen the app does not have; the hash is what tells the two
+  apart for the active item, below.
+
+  `count` is only ever set from data a desk page already polls (leads, jobs).
+  A designed count with no query behind it shows nothing rather than a zero
+  that looks like an answer.
+*/
+type DeskNavItem = {
+  to: string;
+  label: string;
+  /** Active only on an exact path match — the page the item names. */
+  exact?: boolean;
+  /** A hash the link carries, when two items share one route. */
+  hash?: string;
+};
+
+const DESK_NAV: readonly DeskNavItem[] = [
+  { to: "/desk", label: "Today", exact: true },
   { to: "/desk/queue", label: "Queue" },
+  { to: "/desk/drafts", label: "Drafts" },
   { to: "/desk/published", label: "Published" },
   { to: "/desk/opinion", label: "Opinion" },
+  { to: "/desk/follow-ups", label: "Follow-ups" },
+  { to: "/desk/dark", label: "Dark Desk" },
+  { to: "/desk/sources", label: "Sources & scan" },
+  { to: "/desk/ops", label: "Models", hash: "writing-models" },
   { to: "/desk/ops", label: "Server" },
   { to: "/desk/stats", label: "Stats" },
 ] as const;
+
+/** Routes the shell no longer draws as nav items, kept reachable in the footer. */
+const DESK_MORE = [
+  { to: "/desk/scan", label: "Scan the wire" },
+  { to: "/desk/import", label: "Import" },
+  { to: "/desk/memory", label: "Beat memory" },
+  { to: "/desk/legal-removals", label: "Legal removals" },
+] as const;
+
+/**
+ * Which nav item is current. `pathname` alone cannot answer it any more,
+ * because Models and Server are the same route; the hash decides between them
+ * when there is one, and Server — the page — wins when there is not.
+ */
+function navItemIsActive(item: DeskNavItem, pathname: string, hash: string) {
+  const path = item.to;
+  const onPath = item.exact ? pathname === path : pathname === path || pathname.startsWith(`${path}/`);
+  if (!onPath) return false;
+  if (path !== "/desk/ops") return true;
+  const wantHash = `#${item.hash ?? ""}`;
+  return item.hash ? hash === wantHash : hash !== "#writing-models";
+}
+
+/**
+ * Search pages list. The old one read `LINKS`, so a rebuilt nav with new
+ * routes and new words silently changed what "Find a story or screen" could
+ * find; this is the same list the nav draws, plus the screens that are now
+ * only in the footer.
+ */
+const SEARCH_PAGES = [...DESK_NAV, ...DESK_MORE].map((l) => ({ to: l.to, label: l.label }));
 
 /*
   Light/Dark and Normal/Large both come from AppearanceProvider now.
@@ -106,7 +143,6 @@ export function DeskShell({
   lede?: React.ReactNode;
   hideTitle?: boolean;
 }) {
-  const paper = usePaper();
   const { user, isPending } = useCurrentUserState();
   const { mode, choose } = useDeskMode();
   const { size, choose: chooseSize } = useDeskTextSize();
@@ -149,11 +185,38 @@ export function DeskShell({
     return () => document.removeEventListener("keydown", trap);
   }, [mobile, menuOpen]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const hash = useRouterState({ select: (s) => s.location.hash });
-  const current =
-    LINKS.find((l) => l.to === pathname)?.label ??
-    (pathname.includes("story/") ? "Story workspace" : night ? "Dark Desk" : title);
+  /*
+    THE RUNNING BOX'S DATA, and the nav's counts.
+
+    `["recent-story-work"]` is the key `/desk` already polls, so the shell and
+    the page share one in-flight request and one cache entry. `["leads"]` is
+    the key every desk page already uses for `listLeads()`. Nothing new is
+    fetched that a desk screen was not already fetching; the shell only reads
+    it.
+  */
+  const jobs = useQuery({
+    queryKey: ["recent-story-work"],
+    queryFn: () => listRecentStoryWork(),
+    refetchInterval: 5000,
+  });
+  const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
+  const running = (jobs.data ?? []).filter(
+    (j) => j.status === "running" || j.status === "queued",
+  ) as RunningJob[];
+  const allLeads = leads.data ?? [];
+  const counts: Record<string, number | undefined> = {
+    Queue: allLeads.length ? openLeads(allLeads).length : undefined,
+    Drafts: allLeads.length
+      ? allLeads.filter((l) => l.status === "drafted").length
+      : undefined,
+    Published: allLeads.length
+      ? allLeads.filter((l) => l.status === "published").length
+      : undefined,
+  };
+  const nowMs = useNowMs(running.length > 0);
   useEffect(() => {
     setMenuOpen(false);
     if (!hash) window.scrollTo(0, 0);
@@ -165,6 +228,19 @@ export function DeskShell({
         setSearchOpen(true);
       }
       if (e.key === "Escape") setMenuOpen(false);
+      /*
+        "?" opens the shortcut list from any desk screen, which is what the
+        nav footer promises. Ignored while the editor is typing, so a question
+        mark in a headline or a note stays a question mark.
+      */
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target?.isContentEditable === true ||
+        (target ? /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) : false);
+      if (e.key === "?" && !typing) {
+        e.preventDefault();
+        setKeysOpen(true);
+      }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
@@ -204,21 +280,52 @@ export function DeskShell({
         </button>
         <Link to="/" className="astra-brand" title="Public news page">
           <strong>TownReporter</strong>
-          <span>EDITOR'S DESK · {paper.city}</span>
+          <span>Editor’s desk</span>
         </Link>
-        <Link
-          to="/desk"
-          hash="story-composer"
-          activeOptions={{ exact: true, includeHash: true }}
-          className="btn solid astra-new"
-          onClick={() => setMenuOpen(false)}
+        <RunningBox jobs={running} nowMs={nowMs} onNavigate={() => setMenuOpen(false)} />
+        <button
+          type="button"
+          className="astra-nav astra-find"
+          onClick={() => {
+            setMenuOpen(false);
+            setSearchOpen(true);
+          }}
         >
-          <Plus size={18} aria-hidden /> New story
-        </Link>
-        <DeskNav onNavigate={() => setMenuOpen(false)} />
-        <div className="astra-account">
+          <Search size={18} aria-hidden />
+          <span>Find anything</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <DeskNav
+          onNavigate={() => setMenuOpen(false)}
+          counts={counts}
+          pathname={pathname}
+          hash={hash}
+        />
+        <div className="astra-nav-foot">
+          <Link to="/" className="astra-foot-paper" title="Public news page">
+            View the paper ↗
+          </Link>
+          {!night && (
+            <button
+              type="button"
+              className="astra-foot-btn"
+              aria-label={
+                mode === "dark" ? "Switch to light appearance" : "Switch to dark appearance"
+              }
+              onClick={() => choose(mode === "dark" ? "light" : "dark")}
+            >
+              {mode === "dark" ? "Light" : "Dark"}
+            </button>
+          )}
+          {/*
+            The design draws this as "Aa Large" — one control that cycles the
+            two steps. screen-reader-wise and test-wise the desk has always had
+            a labelled <select> here (scripts/desk-text-size-render.test.mjs
+            pins `aria-label="Text size"` and both options), so the select
+            stays and is drawn at the footer control height instead.
+          */}
           <label className="astra-size">
-            Text size{" "}
+            Text size
             <select
               aria-label="Text size"
               value={size}
@@ -228,10 +335,30 @@ export function DeskShell({
               <option value="large">Large</option>
             </select>
           </label>
-          {isPending ? <span aria-hidden /> : user ? <UserButton /> : null}
+          <button type="button" className="astra-foot-btn" onClick={() => setKeysOpen(true)}>
+            Press ? for keyboard shortcuts
+          </button>
+          <div className="astra-foot-more">
+            {DESK_MORE.map((l) => (
+              <Link key={l.to} to={l.to} onClick={() => setMenuOpen(false)}>
+                {l.label}
+              </Link>
+            ))}
+          </div>
+          <div className="astra-account">
+            {isPending ? <span aria-hidden /> : user ? <UserButton /> : null}
+          </div>
         </div>
       </aside>
       <div className="astra-workspace">
+        {/*
+          PHONE ONLY. The design puts the whole navigation in the drawer and
+          gives the top bar four things: "Menu", the wordmark, a "Desk" tag and
+          "+ New" ("Shell for all desk screens" → "Phone: the nav collapses to
+          a top bar…"). On the desktop grid the nav column is always on screen,
+          so a second strip above the page carried a breadcrumb nobody needed
+          and a theme toggle that now lives in the nav footer.
+        */}
         <header className="astra-topbar">
           <button
             ref={menuButton}
@@ -243,38 +370,13 @@ export function DeskShell({
           >
             <Menu size={20} />
           </button>
-          <div className="astra-breadcrumb">
-            <Link to="/" title="Public news page">
-              {paper.name}
-            </Link>
-            <span aria-hidden>/</span>
-            <b>{current}</b>
-          </div>
-          <div className="astra-top-actions">
-            <button
-              className="astra-search-trigger"
-              aria-label="Find anything"
-              onClick={() => setSearchOpen(true)}
-            >
-              <Search size={17} />
-              <span>Find anything</span>
-              <kbd>Ctrl K</kbd>
-            </button>
-            {!night && (
-              <button
-                className="astra-icon"
-                aria-label={
-                  mode === "dark" ? "Switch to light appearance" : "Switch to dark appearance"
-                }
-                onClick={() => choose(mode === "dark" ? "light" : "dark")}
-              >
-                {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-              </button>
-            )}
-            <Link to="/" className="astra-paper-link">
-              Public news page <ArrowUpRight size={15} aria-hidden />
-            </Link>
-          </div>
+          <Link to="/" className="astra-brand astra-brand-bar" title="Public news page">
+            <strong>TownReporter</strong>
+            <span>Desk</span>
+          </Link>
+          <Link to="/desk" hash="story-composer" className="btn solid astra-bar-new">
+            <Plus size={18} aria-hidden /> New
+          </Link>
         </header>
         <div
           id="desk-announcer"
@@ -297,7 +399,126 @@ export function DeskShell({
         </main>
       </div>
       <DeskSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <ShortcutSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
     </div>
+  );
+}
+
+/**
+ * THE RUNNING BOX. "A Running box, shown only while jobs are running. It has a
+ * 2px yellow border, a pulsing 10px yellow square, 'Running · N', and each
+ * job's title with elapsed time and current stage. Clicking it goes to Today."
+ *
+ * It reads the same `listRecentStoryWork` query the desk already polls
+ * (5s, the interval README "Interactions & behavior" sets for Today lists),
+ * through the same query key as `/desk` — one request, two readers, no new
+ * endpoint and nothing written.
+ *
+ * Elapsed is measured from `started_at` (set when a worker claims the job) and
+ * falls back to `updated_at` while the job is still queued, so a queued row
+ * counts from when it was filed rather than from 0:00 forever. The one-second
+ * ticker only runs while something is running.
+ */
+function RunningBox({
+  jobs,
+  nowMs,
+  onNavigate,
+}: {
+  jobs: RunningJob[];
+  nowMs: number;
+  onNavigate: () => void;
+}) {
+  if (!jobs.length) return null;
+  return (
+    <Link to="/desk" className="astra-running" onClick={onNavigate}>
+      <b className="astra-running-head">
+        <span className="astra-running-dot" aria-hidden /> Running · {jobs.length}
+      </b>
+      {jobs.slice(0, 3).map((job) => (
+        <span className="astra-running-job" key={job.id}>
+          <b>{job.headline}</b>
+          <span>
+            {elapsedLabel(job, nowMs)} · {job.stage || "Waiting to start"}
+          </span>
+        </span>
+      ))}
+    </Link>
+  );
+}
+
+/**
+ * A one-second clock, but only while something is running — an idle desk pays
+ * nothing for the elapsed times it is not showing. Returns the epoch in ms, so
+ * every row measures against the same instant.
+ */
+function useNowMs(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+type RunningJob = {
+  id: number;
+  headline: string;
+  status: string;
+  stage: string;
+  started_at: string | null;
+  updated_at: string;
+};
+
+/** m:ss, the desk's elapsed format (README "Job card anatomy"). */
+function elapsedLabel(job: RunningJob, nowMs: number): string {
+  const from = Date.parse(job.started_at ?? job.updated_at);
+  if (!Number.isFinite(from)) return "0:00";
+  const secs = Math.max(0, Math.floor((nowMs - from) / 1000));
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The shortcut sheet behind "?" . Every line is a key the desk actually binds
+ * somewhere: the triage keys on Today, ⌘S in the story workbench, Ctrl-K for
+ * search here. ⌘S is listed because README "Interactions & behavior" lists it
+ * and it is bound on the workbench, not because the shell intercepts it.
+ */
+const SHORTCUTS: { keys: string; what: string }[] = [
+  { keys: "J / K", what: "Next / previous lead" },
+  { keys: "S", what: "Start a story from the selected lead" },
+  { keys: "H", what: "Hold the selected lead — asks why" },
+  { keys: "X", what: "Kill the selected lead — asks why" },
+  { keys: "U", what: "Undo the last hold or kill" },
+  { keys: "Enter", what: "Open the selected lead" },
+  { keys: "N", what: "Start a new story" },
+  { keys: "⌘S", what: "Save in the story workbench" },
+  { keys: "?", what: "This list" },
+  { keys: "Esc", what: "Close this list or the phone menu" },
+];
+
+function ShortcutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Keyboard shortcuts"
+      subtitle="Keys are ignored while you are typing in a box."
+      primaryLabel="Got it"
+      onPrimary={onClose}
+      cancelLabel="Close"
+    >
+      <dl className="astra-keys">
+        {SHORTCUTS.map((s) => (
+          <div key={s.keys}>
+            <dt>
+              <kbd>{s.keys}</kbd>
+            </dt>
+            <dd>{s.what}</dd>
+          </div>
+        ))}
+      </dl>
+    </Dialog>
   );
 }
 function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -317,12 +538,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
     } else dialog.current?.close();
   }, [open]);
   const query = term.trim().toLocaleLowerCase();
-  const pages = [
-    ...LINKS,
-    { to: "/desk/dark", label: "Dark Desk" },
-    { to: "/desk/follow-ups", label: "Follow-ups" },
-    { to: "/desk/memory", label: "Beat memory" },
-  ].filter((l) => l.label.toLocaleLowerCase().includes(query));
+  const pages = SEARCH_PAGES.filter((l) => l.label.toLocaleLowerCase().includes(query));
   const matches = (leads.data ?? [])
     .filter((l) =>
       `${l.story_headline ?? ""} ${l.headline} ${l.why} ${l.topic}`
@@ -364,7 +580,12 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
         </label>
         <nav aria-label="Search results">
           {pages.map((l) => (
-            <Link key={l.to} to={l.to} className="astra-search-result" onClick={onClose}>
+            <Link
+              key={l.label}
+              to={l.to}
+              className="astra-search-result"
+              onClick={onClose}
+            >
               {l.label}
               <ArrowUpRight size={16} />
             </Link>
@@ -520,51 +741,37 @@ export function LeaveEditorControl({ email }: { email: string }) {
   );
 }
 
-function DeskNav({ onNavigate }: { onNavigate: () => void }) {
-  const matchRoute = useMatchRoute();
-  function item(l: (typeof LINKS)[number], index: number) {
-    const Icon = NAV_ICONS[index];
-    const active = Boolean(matchRoute({ to: l.to, fuzzy: !("exact" in l && l.exact) }));
-    return (
-      <Link
-        key={l.to}
-        to={l.to}
-        activeOptions={{ exact: true }}
-        onClick={onNavigate}
-        aria-current={active ? "page" : undefined}
-        className={"astra-nav" + (active ? " active" : "")}
-      >
-        <Icon size={18} aria-hidden />
-        <span>{l.label}</span>
-      </Link>
-    );
-  }
+function DeskNav({
+  onNavigate,
+  counts,
+  pathname,
+  hash,
+}: {
+  onNavigate: () => void;
+  counts: Record<string, number | undefined>;
+  pathname: string;
+  hash: string;
+}) {
   return (
-    <nav className="astra-navigation" aria-label="Editor's desk">
-      <p className="astra-nav-label">Newsroom</p>
-      {LINKS.slice(0, 6).map(item)}
-      <p className="astra-nav-label">Reporting</p>
-      <Link
-        to="/desk/dark"
-        onClick={onNavigate}
-        className={"astra-nav" + (matchRoute({ to: "/desk/dark" }) ? " active" : "")}
-      >
-        <Telescope size={18} aria-hidden />
-        <span>Dark Desk</span>
-      </Link>
-      <Link to="/desk/follow-ups" onClick={onNavigate} className="astra-nav">
-        <MessagesSquare size={18} aria-hidden />
-        <span>Follow-ups</span>
-      </Link>
-      <Link
-        to="/desk/import"
-        onClick={onNavigate}
-        className={"astra-nav" + (matchRoute({ to: "/desk/import" }) ? " active" : "")}
-      >
-        <ClipboardPaste size={18} aria-hidden />
-        <span>Import</span>
-      </Link>
-      <div className="astra-nav-bottom">{LINKS.slice(6).map((l, i) => item(l, i + 6))}</div>
+    <nav className="astra-navigation" aria-label="Editor’s desk">
+      {DESK_NAV.map((l) => {
+        const count = counts[l.label];
+        const active = navItemIsActive(l, pathname, hash);
+        return (
+          <Link
+            key={l.label}
+            to={l.to}
+            hash={l.hash}
+            activeOptions={{ exact: true, includeHash: Boolean(l.hash) }}
+            onClick={onNavigate}
+            aria-current={active ? "page" : undefined}
+            className={"astra-nav" + (active ? " active" : "")}
+          >
+            <span>{l.label}</span>
+            {count != null ? <span className="astra-nav-count">{count}</span> : null}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

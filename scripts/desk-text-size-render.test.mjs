@@ -95,7 +95,31 @@ const claimStub = inlineModule(`
   }
 `);
 
+const dialogStub = inlineModule(`
+  import { createElement } from "react";
+  export function Dialog({ open, title, children, primaryLabel, cancelLabel, onPrimary, onClose }) {
+    if (!open) return null;
+    return createElement(
+      "div",
+      { className: "dialog-stub", "data-title": String(title ?? "") },
+      createElement("div", null, children),
+      createElement("button", { type: "button", onClick: onPrimary }, primaryLabel ?? "OK"),
+      createElement("button", { type: "button", onClick: onClose }, cancelLabel ?? "Cancel"),
+    );
+  }
+  export function ChoiceCard({ label, note }) {
+    return createElement("span", { className: "choice-stub" }, label ?? note ?? "");
+  }
+`);
+
 const deskCopyStub = inlineModule(`
+  /*
+    openLeads is what the shell counts Queue from. The render test does not care
+    about the arithmetic, only that the import resolves.
+  */
+  export function openLeads(leads) {
+    return (leads ?? []).filter((l) => l.status !== "killed" && l.status !== "published");
+  }
   export function createEditorCopy() {
     return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
   }
@@ -141,10 +165,13 @@ const { DeskShell } = await import(
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
       "lucide-react": import.meta.resolve("lucide-react"),
-      "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
+      "@/lib/news/desk": inlineModule(
+        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; }",
+      ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
       "@/lib/appearance-context": appearanceContextStub,
+      "@/components/dialog": dialogStub,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

@@ -58,13 +58,13 @@
   --font-display: var(--fd);
   --font-serif: var(--fb);
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 230px minmax(0, 1fr);
   /* The first track above, as a length the fixed chrome can read. A fixed
      element's `left` is measured from the viewport, so anything pinned at the
      bottom of the desk has to be told where the content column starts; the
      three values here and in the two breakpoints below are the only ones that
      know. See `.astra-unsaved-bar`. */
-  --desk-nav-w: 232px;
+  --desk-nav-w: 230px;
   align-items: start;
   min-height: 100dvh;
   font-family: var(--fd);
@@ -181,29 +181,36 @@
   top: 0;
   background: var(--bg2);
   border-right: 1px solid var(--line);
-  padding: 30px 16px 18px;
+  padding: 20px 14px 18px;
   display: flex;
   flex-direction: column;
   z-index: 40;
   overflow: auto;
 }
 .desk-ltr.astra .astra-brand {
-  display: block;
-  padding: 0 12px 25px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 10px 18px;
   text-decoration: none;
   color: var(--fg);
 }
 .desk-ltr.astra .astra-brand strong {
-  font: 800 25px var(--fd);
-  letter-spacing: -1.1px;
+  font: 800 calc(24px * var(--ts)) var(--fd);
+  letter-spacing: -0.03em;
 }
+/* The tag is yellow with ink text in both themes (design-system README §3). */
 .desk-ltr.astra .astra-brand span {
   display: block;
   font-size: calc(14px * var(--ts));
-  letter-spacing: 1.6px;
-  color: var(--mut);
-  margin-top: 8px;
-  line-height: 1.8;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--yel, var(--a));
+  color: #111;
+  padding: 2px 8px;
+  line-height: 1.6;
 }
 .desk-ltr.astra .astra-new {
   margin: 0 8px 10px;
@@ -225,26 +232,46 @@
 }
 .desk-ltr.astra .astra-nav {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 12px;
   text-decoration: none;
-  padding: 10px 13px;
+  padding: 0 12px;
+  border: 0;
   border-radius: 0;
-  margin: 2px 0;
+  margin: 0;
   min-height: 44px;
-  font-weight: 500;
-  color: var(--mut);
-  font-size: calc(14px * var(--ts));
+  width: 100%;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  font-weight: 700;
+  color: var(--fg);
+  font-size: calc(16px * var(--ts));
   transition: background 0.15s;
 }
 .desk-ltr.astra .astra-nav:hover {
   background: var(--hover);
   color: var(--fg);
 }
+/*
+  THE CURRENT ITEM is a `--bg` fill plus a 4px `--sel` inset -- ink in light
+  mode, gold in dark. `--sel` and not yellow: the handoff README draws this
+  inset yellow, but design-system/README.md §6 and DECISIONS.md ("Selection
+  marker") settle it, and yellow on cream is 1.42:1. Authority order runs
+  DECISIONS.md > design-system/README.md > prototypes.
+*/
 .desk-ltr.astra .astra-nav.active {
-  color: var(--adeep);
-  background: var(--accent-soft);
+  color: var(--fg);
+  background: var(--bg);
+  box-shadow: inset 4px 0 0 var(--sel);
   font-weight: 700;
+}
+.desk-ltr.astra .astra-nav-count {
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  color: var(--fg2);
+  font-variant-numeric: tabular-nums;
 }
 .desk-ltr.astra .astra-nav-bottom {
   margin-top: auto;
@@ -267,30 +294,26 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--mut);
-  margin-bottom: 14px;
-  font-size: calc(14px * var(--ts));
+  gap: 8px;
+  color: var(--fg);
+  font-weight: 700;
+  font-size: calc(15px * var(--ts));
 }
 .desk-ltr.astra .astra-size select {
-  padding: 5px 8px;
-  min-height: 32px;
+  padding: 0 8px;
+  min-height: 44px;
   width: auto;
-  font-size: calc(14px * var(--ts));
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  font-size: calc(15px * var(--ts));
+  font-weight: 700;
 }
 .desk-ltr.astra .astra-workspace {
   min-width: 0;
 }
 .desk-ltr.astra .astra-topbar {
-  height: 68px;
-  padding: 0 40px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  position: sticky;
-  top: 0;
-  z-index: 30;
+  display: none;
 }
 .desk-ltr.astra .astra-breadcrumb {
   display: flex;
@@ -677,16 +700,33 @@
   letter-spacing: 0.3px;
 }
 .desk-ltr.astra .score {
-  border: 1px solid var(--line);
-  background: var(--accent-soft);
-  color: var(--fg);
-  border-radius: 0;
-  min-width: 36px;
-  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font: 700 calc(14px * var(--ts)) var(--fd);
+  /*
+    The design's ScoreBadge: a 44px square, 20/800, tabular. It is a square
+    rather than a fixed 44px box so the Large text step grows the badge
+    instead of clipping the number.
+  */
+  min-width: calc(44px * var(--ts));
+  min-height: calc(44px * var(--ts));
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg2);
+  font: 800 calc(20px * var(--ts))/1 var(--fd);
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .score.warm {
+  border: 2px solid var(--fg);
+  color: var(--fg);
+}
+/* Text on yellow is #111 in both themes; see the note on .desk-ltr .score.hot. */
+.desk-ltr.astra .score.hot {
+  background: var(--a);
+  border-color: var(--a);
+  color: #111;
 }
 .desk-ltr.astra .astra-metrics {
   display: flex;
@@ -2139,5 +2179,182 @@
   }
   .desk-ltr.astra .recent-story-row .btn {
     align-self: flex-start;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Redesign phase 2a — the shell pieces the handoff README draws and the
+   old chrome did not have: the Running box, the find row, the nav footer
+   with the paper/theme/size controls, the phone top bar and the shortcut
+   sheet's key list. Geometry comes from
+   docs/design/handoff-2026-09-26/design-system/components/desk/DeskNav.jsx.
+   --------------------------------------------------------------------- */
+
+/* Running box: "shown only while jobs run" — the component renders nothing
+   when the list is empty, so this rule never has to hide anything. */
+.desk-ltr.astra .astra-running {
+  display: block;
+  border: 2px solid var(--a);
+  border-radius: 0;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  background: var(--bg);
+  color: var(--fg);
+  text-decoration: none;
+}
+.desk-ltr.astra .astra-running-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+}
+/* The "this is working" pulse. trPulse lives in src/styles.css and the
+   prefers-reduced-motion block above already switches animations off. */
+.desk-ltr.astra .astra-running-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background: var(--a);
+  animation: trPulse 1.2s ease-in-out infinite;
+}
+.desk-ltr.astra .astra-running-job {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-running-job b {
+  display: block;
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* "Find anything" sits with the nav items but is a button, not a link. */
+.desk-ltr.astra .astra-nav.astra-find {
+  border: 1px solid var(--line);
+  color: var(--fg2);
+  font-size: calc(14px * var(--ts));
+  margin-bottom: 10px;
+}
+.desk-ltr.astra .astra-nav.astra-find:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+/* Nav footer: paper link, appearance, text size, shortcuts, the routes the
+   eleven design items do not cover, and the account button. */
+.desk-ltr.astra .astra-nav-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-foot-paper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--fg);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: calc(15px * var(--ts));
+  font-weight: 700;
+  text-decoration: none;
+}
+.desk-ltr.astra .astra-foot-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: calc(15px * var(--ts));
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-foot-btn:hover {
+  background: var(--hover);
+  border-color: var(--a);
+}
+.desk-ltr.astra .astra-foot-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+.desk-ltr.astra .astra-foot-more a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+  text-decoration: none;
+}
+.desk-ltr.astra .astra-foot-more a:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* Phone top bar (the whole `.astra-topbar` rule is inside the ≤700 block,
+   so nothing here needs to hide it on desktop). */
+.desk-ltr.astra .astra-brand-bar {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+.desk-ltr.astra .astra-brand-bar strong {
+  font-size: calc(20px * var(--ts));
+}
+.desk-ltr.astra .astra-bar-new {
+  margin-left: auto;
+  min-height: 44px;
+  gap: 6px;
+  font-size: calc(15px * var(--ts));
+  font-weight: 800;
+}
+.desk-ltr.astra .astra-icon {
+  width: 44px;
+  height: 44px;
+}
+
+/* The "?" shortcut sheet. */
+.desk-ltr.astra .astra-keys {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px 18px;
+  margin: 0;
+}
+.desk-ltr.astra .astra-keys dt {
+  font: 800 calc(15px * var(--ts)) var(--fd);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-keys dd {
+  margin: 0;
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+
+@media (max-width: 700px) {
+  .desk-ltr.astra .astra-topbar {
+    display: flex;
+    align-items: center;
   }
 }
