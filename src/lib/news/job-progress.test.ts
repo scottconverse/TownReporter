@@ -84,6 +84,7 @@ describe("structured job progress", () => {
     const spoke = (await stored(id))!;
     assert.equal(jobProgressStalled(spoke), false, "beat_at is the sign of life the card reads");
     assert.equal(spoke.step_text, "Reading packet 2 of 3");
+    assert.equal(spoke.stage, "Reading packet 2 of 3", "the older stage column still carries the step (banner, job API, redraft-scan-e2e)");
     assert.equal(spoke.pct, 0, "clamped where it is written, not where it is drawn");
     assert.equal(spoke.stage_index, 3, "an absent stageIndex leaves the chip where it was");
 
@@ -95,6 +96,7 @@ describe("structured job progress", () => {
     assert.equal(cleared.pct, null);
     assert.equal(cleared.stage_index, null);
     assert.equal(cleared.step_text, "Reading packet 2 of 3", "an absent step keeps the last one");
+    assert.equal(cleared.stage, "Reading packet 2 of 3", "an absent step leaves stage alone too");
 
     /*
       An `undefined` VALUE counts as absent, not as a clear. This is the defect

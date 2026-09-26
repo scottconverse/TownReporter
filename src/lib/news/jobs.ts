@@ -1031,6 +1031,11 @@ export async function reportProgress(
     set stage_index = case when ${hasIndex} then ${progress.stageIndex ?? null}::integer else stage_index end,
         pct = case when ${hasPct} then ${clampPct(progress.pct)}::integer else pct end,
         step_text = case when ${hasStep} then ${progress.step ?? null}::text else step_text end,
+        -- The older stage column still carries the step: the story page's
+        -- running banner, the job API and redraft-scan-e2e read it, and before
+        -- phase 3 every stage boundary wrote it (with updated_at) via setStage.
+        stage = case when ${hasStep && progress.step != null} then ${progress.step ?? null}::text else stage end,
+        updated_at = case when ${hasStep && progress.step != null} then now() else updated_at end,
         beat_at = now()
     where id = ${jobId}
   `;
