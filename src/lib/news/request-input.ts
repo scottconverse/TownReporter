@@ -197,6 +197,17 @@ export const LIMITS = {
   /** A Reddit post's title and body. */
   redditTitle: 300,
   redditExcerpt: 4000,
+
+  /*
+    Unit BK, the editor's new dialogs. Two ceilings with no existing twin: the
+    Hold dialog's note (a sentence or two for a person reading it back under
+    Held) and the "new material" box on Add to story, which is a paste of its
+    own and so is bounded like one rather than like the story it joins.
+  */
+  /** `kill-reasons.ts` HOLD_CHOICES; a hold note is a line, not a memo. */
+  holdNote: 1000,
+  /** The Add to story material box. A pasted record, not a whole story. */
+  addToMaterial: 20_000,
   /** `story-documents.server.ts:123` refuses more than 22 ids. */
   documentIds: 22,
   /** `sections.server.ts:154/170/173/175` and the key regex at :162 (40). */
@@ -1354,3 +1365,63 @@ export const modelAssignmentRowsInput = z
     }),
   )
   .max(LIMITS.modelAssignments);
+
+/* --- editor-dialog-actions.ts (Unit BK, the editor's new dialogs) --------- */
+
+/*
+  Five schemas for the dialogs the redesign adds. Four of them reach a model
+  (`findSources`, `weaveIntoStory`, `researchLead`) or an existing desk action;
+  the fifth is the Hold dialog, which stores a reason and nothing else.
+
+  The `choice` on Hold is an enum of the keys `kill-reasons.ts` defines, not the
+  labels the design draws. A label is copy and copy changes; the stored value
+  has to survive that. `"none"` is "Hold, no reason" -- a real press that stores
+  that the editor chose not to say why, so a later reader can tell it from a
+  dialog that was never opened.
+*/
+
+/** `editor-dialog-actions.ts` holdLead. */
+export const holdLeadInput = z.object({
+  id: publishId,
+  choice: z.enum(["record-or-date", "follow-up", "not-now", "none"]),
+  note: z.string().max(LIMITS.holdNote).optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` sourceKillPattern and findSources.
+ *
+ * The pattern's input is one source row id: it reads leads, it never writes.
+ * The find-sources scope is an enum because it selects one of three prompts,
+ * and a free-text scope would reach a template that has no branch for it.
+ */
+export const sourceKillPatternInput = z.object({ sourceId: publishId });
+
+export const findSourcesInput = z.object({
+  topic: z.string().max(LIMITS.leadWhy),
+  scope: z.enum(["records", "organizations", "everything"]),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/** `editor-dialog-actions.ts` weaveIntoStory (`story-documents.server.ts:123` caps 22). */
+export const weaveIntoStoryInput = z.object({
+  leadId: publishId,
+  material: z.string().max(LIMITS.addToMaterial),
+  documentIds: z.array(idText).max(22).optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` researchLead: the two model modes of "Then".
+ *
+ * "Just file it as-is" is deliberately absent -- it is `fileLead`, which already
+ * exists, and giving it a second name here would be a second path to the same
+ * insert. The mode is an enum for the same reason the scope above is.
+ */
+export const researchLeadInput = z.object({
+  id: publishId,
+  mode: z.enum(["score", "draft"]),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
