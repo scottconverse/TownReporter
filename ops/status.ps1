@@ -37,6 +37,16 @@
   supported state and is shown with a plain marker rather than a fault marker.
   Crying wolf about an optional reader is how a real fault gets ignored.
 
+  Every row therefore carries a real STATE -- one of "ok", "note" or "down" --
+  and the marker is derived from that state rather than from whether the row is
+  optional. That distinction was a bug the coordinator caught on the Control
+  page (2026-09-25): an optional row printed "[ NOTE ]" even when it was up, so
+  a working Reddit reader read as a note, and the Control page -- which keys on
+  the row's own fields -- showed a "Fix this" button on a healthy card. "ok" is
+  a row that answered the question it was asked; "note" is one that could not be
+  read, or a supported degraded state; "down" is a row the paper cannot serve
+  without. Only "down" rows count toward the attention figure.
+
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 script as ANSI, so
   anything fancier comes out as mojibake in a console window.
 #>
@@ -68,19 +78,31 @@ $envFile = Join-Path $app ".env"
 # moved, so this stays a change to what a row CARRIES rather than to what a row
 # SAYS. (scripts/ops-scripts.test.mjs matches on `Show "The paper"` and on
 # `Show "DeepSeek (via Ollama)"` ... $true, and those must keep matching.)
+#
+# $State is the row's real answer: "ok" / "note" / "down". $Ok is kept alongside
+# it because it is the older name and callers read it; $Ok is derived here so
+# the two can never disagree.
 $checks = New-Object System.Collections.ArrayList
 
-function Show($label, $ok, $detail, $optional, $fix, $id) {
+function Show($label, $state, $detail, $optional, $fix, $id) {
+  # Anything that is not one of the three words is a bug in this file, and a row
+  # whose state nothing recognises must not be able to count as healthy.
+  if ($state -notin @("ok", "note", "down")) { $state = "down" }
   [void]$checks.Add([pscustomobject]@{
     id       = $id
     label    = $label
-    ok       = [bool]$ok
+    state    = $state
+    ok       = [bool]($state -eq "ok")
     optional = [bool]$optional
     detail   = $detail
     fix      = $fix
   })
   if ($Json) { return }
-  $mark = if ($optional) { " NOTE " } elseif ($ok) { "  OK  " } else { " DOWN " }
+  # The marker follows the STATE, not whether the row is optional. An optional
+  # service that is up prints OK; the plain NOTE is for the supported degraded
+  # states (Redlib down, Ollama not running) and for a row that could not be
+  # read at all.
+  $mark = if ($state -eq "ok") { "  OK  " } elseif ($state -eq "note") { " NOTE " } else { " DOWN " }
   Write-Host ("  [" + $mark + "] " + $label.PadRight(24) + $detail)
 }
 
@@ -99,7 +121,7 @@ if (-not $Json) {
 
 # Database
 $pg = @(Get-NetTCPConnection -LocalPort 5433 -State Listen)
-Show "Database" ($pg.Count -gt 0) $(if ($pg.Count) { "answering on 5433" } else { "nothing on port 5433" }) $false "start-all" "database"
+Show "Database" $(if ($pg.Count -gt 0) { "ok" } else { "down" }) $(if ($pg.Count) { "answering on 5433" } else { "nothing on port 5433" }) $false "start-all" "database"
 
 # The app
 $appOk = $false
@@ -109,11 +131,11 @@ try {
   $appOk = ($r.StatusCode -eq 200)
   $appDetail = "answered $($r.StatusCode) on port $port"
 } catch { }
-Show "The paper" $appOk $appDetail $false "start-all" "paper"
+Show "The paper" $(if ($appOk) { "ok" } else { "down" }) $appDetail $false "start-all" "paper"
 
 # The tunnel process
 $cf = @(Get-Process -Name cloudflared -ErrorAction SilentlyContinue)
-Show "Tunnel" ($cf.Count -gt 0) $(if ($cf.Count) { "$($cf.Count) process(es) running" } else { "cloudflared is not running" }) $false "restart-tunnel" "tunnel"
+Show "Tunnel" $(if ($cf.Count -gt 0) { "ok" } else { "down" }) $(if ($cf.Count) { "$($cf.Count) process(es) running" } else { "cloudflared is not running" }) $false "restart-tunnel" "tunnel"
 
 # The public address
 $pubOk = $false
@@ -125,15 +147,15 @@ try {
 } catch {
   $pubDetail = "$site did not answer"
 }
-Show "Public site" $pubOk $pubDetail $false "restart-tunnel" "public-site"
+Show "Public site" $(if ($pubOk) { "ok" } else { "down" }) $pubDetail $false "restart-tunnel" "public-site"
 
 # The watchdog
 $wd = Get-ScheduledTaskInfo -TaskName "TownReporter Watchdog" -ErrorAction SilentlyContinue
 if ($wd -and $wd.LastRunTime) {
   $mins = [int]((Get-Date) - $wd.LastRunTime).TotalMinutes
-  Show "Watchdog" ($mins -le 15) "last ran $mins minute(s) ago" $false "" "watchdog"
+  Show "Watchdog" $(if ($mins -le 15) { "ok" } else { "down" }) "last ran $mins minute(s) ago" $false "" "watchdog"
 } else {
-  Show "Watchdog" $false "never run, or the task is missing" $false "" "watchdog"
+  Show "Watchdog" "down" "never run, or the task is missing" $false "" "watchdog"
 }
 
 # The Reddit reader, if this machine has one.
@@ -144,18 +166,22 @@ if ($wd -and $wd.LastRunTime) {
 # line and the watchdog and the Control menu cannot disagree about it.
 . (Join-Path $PSScriptRoot "lib-redlib.ps1")
 $redlibDetail = ""
+$redlibState = "note"
 $redlibOptional = $true
+# A fix offered only where a fix exists: a restart repairs a stopped reader, not
+# an uninstalled one and not a reader the operator switched off on purpose.
+$redlibFix = ""
 switch (Get-RedlibOffSwitch -EnvFile $envFile) {
   '0' { $redlibDetail = "switched off (TOWNREPORTER_REDLIB=0)" }
   default {
     switch (Get-RedlibState) {
-      'up'     { $redlibDetail = "up" }
-      'down'   { $redlibDetail = "down - the paper reads Reddit through RSS alone" }
+      'up'     { $redlibState = "ok"; $redlibDetail = "up" }
+      'down'   { $redlibDetail = "down - the paper reads Reddit through RSS alone"; $redlibFix = "restart-reddit" }
       'absent' { $redlibDetail = "not installed - the paper reads Reddit through RSS alone" }
     }
   }
 }
-Show "Reddit reader (Redlib)" $false $redlibDetail $redlibOptional "restart-reddit" "reddit-reader"
+Show "Reddit reader (Redlib)" $redlibState $redlibDetail $redlibOptional $redlibFix "reddit-reader"
 
 # The model the paper drafts with, first rung of the Automatic ladder.
 #
@@ -165,12 +191,12 @@ Show "Reddit reader (Redlib)" $false $redlibDetail $redlibOptional "restart-redd
 . (Join-Path $PSScriptRoot "lib-ollama.ps1")
 $ollamaSwitch = Read-OpsEnvValue -EnvFile $envFile -Name "TOWNREPORTER_OLLAMA" -Fallback '1'
 $ollamaDetail = ""
-$ollamaOk = $false
+$ollamaState = "note"
 switch ($ollamaSwitch) {
   '0' { $ollamaDetail = "switched off - the paper will use the next model" }
   default {
     switch (Get-OllamaState -EnvFile $envFile) {
-      'up'       { $ollamaOk = $true; $ollamaDetail = "ready" }
+      'up'       { $ollamaState = "ok"; $ollamaDetail = "ready" }
       'starting' { $ollamaDetail = "starting up - the paper will use the next model for now" }
       'down'     { $ollamaDetail = "Ollama not running - the paper will use the next model" }
       'absent'   { $ollamaDetail = "Ollama not installed - the paper will use the next model" }
@@ -178,15 +204,16 @@ switch ($ollamaSwitch) {
     }
   }
 }
-Show "DeepSeek (via Ollama)" $ollamaOk $ollamaDetail $true "" "model-server"
+Show "DeepSeek (via Ollama)" $ollamaState $ollamaDetail $true "" "model-server"
 
 # The headline, and the advice under it. Both are computed from the rows above
 # rather than restated, so the console and the JSON cannot disagree.
 #
 # An OPTIONAL row that is down is never counted as something needing attention:
 # the reader falls back to .rss and Automatic walks past a missing model. Only
-# the rows the paper cannot serve without are faults.
-$faults = @($checks | Where-Object { -not $_.ok -and -not $_.optional })
+# the rows the paper cannot serve without are faults -- which is exactly the
+# rows whose state is "down".
+$faults = @($checks | Where-Object { $_.state -eq "down" })
 $attention = $faults.Count
 
 if ($attention -eq 0) {

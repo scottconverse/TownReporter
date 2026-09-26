@@ -748,6 +748,31 @@ test("status.ps1 answers for the reader and the model server in plain words, rea
   assert.match(readerLine.slice(0, 80), /\$redlibOptional/, "the reader must not be marked as a fault");
   assert.match(text, /Show "DeepSeek \(via Ollama\)"[^\n]*\$true/, "the model line must not be marked as a fault");
 
+  // Fix 2, from the coordinator's review (2026-09-25): the printed marker was
+  // derived from whether the row was OPTIONAL, so a reader that was up printed
+  // "[ NOTE ] Reddit reader (Redlib)  up" -- and the Control page, which keys on
+  // the row's own fields, then offered a "Fix this" button on a healthy card.
+  // The state is the verdict; the marker follows it. The repair each row carries
+  // must be empty exactly when there is nothing to repair.
+  assert.match(text, /if \(\$state -eq "ok"\) \{ " {2}OK {2}" \}/, "the console marker must follow the row's state");
+  assert.doesNotMatch(
+    text,
+    /optional[^\n]{0,40}" NOTE "/,
+    "an optional row must not print NOTE for being optional; only its state may",
+  );
+  assert.match(text, /'up'\s+\{\s*\$redlibState = "ok"; \$redlibDetail = "up" \}/, "a reader that answers is OK");
+  assert.match(text, /'up'\s+\{\s*\$ollamaState = "ok"; \$ollamaDetail = "ready" \}/, "a model server that answers is OK");
+  assert.match(
+    text,
+    /Show "Reddit reader \(Redlib\)" \$redlibState \$redlibDetail \$redlibOptional \$redlibFix "reddit-reader"/,
+    "the reader's fix must come from the row's own state, not from the row existing",
+  );
+  assert.match(
+    text,
+    /Show "DeepSeek \(via Ollama\)" \$ollamaState \$ollamaDetail \$true "" "model-server"/,
+    "the model row must offer no repair (there is no action that would help it)",
+  );
+
   // Read-only, in both modes, and -DryRun must SAY so rather than imply it.
   assert.match(text, /\[switch\]\$DryRun/, "status.ps1 must take -DryRun");
   assert.match(text, /\[string\]\$Root/, "status.ps1 must take -Root so it can describe the live install");
@@ -824,9 +849,18 @@ test(
         assert.ok(ids.includes(id), `status.ps1 -Json is missing the "${id}" row`);
       }
       for (const check of status.checks) {
-        for (const key of ["id", "label", "ok", "optional", "detail", "fix"]) {
+        for (const key of ["id", "label", "state", "ok", "optional", "detail", "fix"]) {
           assert.ok(key in check, `the "${check.id}" row is missing ${key}`);
         }
+        // Fix 2: every row carries a real state, one of three words, and `ok` is
+        // derived from it here exactly as it is in the console. The page keys on
+        // the state, so a row whose two fields could disagree would put a "Fix
+        // this" button on a healthy card -- which is the bug that was reported.
+        assert.ok(
+          ["ok", "note", "down"].includes(check.state),
+          `the "${check.id}" row's state is "${check.state}", which is not one of ok/note/down`,
+        );
+        assert.equal(check.ok, check.state === "ok", `"${check.id}" says state ${check.state} and ok ${check.ok}`);
         assert.equal(typeof check.ok, "boolean", `"${check.id}".ok must be a boolean, not a truthy string`);
         assert.equal(typeof check.optional, "boolean", `"${check.id}".optional must be a boolean`);
         if (check.fix) {
@@ -835,11 +869,21 @@ test(
             `the "${check.id}" row names the fix "${check.fix}", which the Control page has no action for`,
           );
         }
+        // Fix 1: a soft failure is never OK. "Could not" on a green row is the
+        // lie the review found; a row that could not be read is a Note.
+        if (check.detail && /^could not|could not be read/i.test(check.detail)) {
+          assert.notEqual(check.state, "ok", `the "${check.id}" row is green over "${check.detail}"`);
+        }
       }
 
       // The count, and the rule about the optional rows. This is the property
       // that would turn "the Reddit reader is down" into a red headline.
       const faults = status.checks.filter((c) => !c.ok && !c.optional);
+      assert.equal(
+        status.attention,
+        status.checks.filter((c) => c.state === "down").length,
+        "attention must be the rows whose state is down",
+      );
       assert.equal(status.attention, faults.length, "attention must be the non-optional faults");
       assert.ok(
         status.checks.some((c) => c.optional),
@@ -847,6 +891,44 @@ test(
       );
       assert.equal(typeof status.advice, "string");
       assert.ok(status.checkedAt, "the object must say when it was read");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "the console never prints NOTE or DOWN in front of a row that answered",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The console half of Fix 2. The marker used to follow whether a row was
+      OPTIONAL, so a working Reddit reader printed "[ NOTE ] ... up" -- and the
+      page, which renders the row's own fields, put a Fix button under it. The
+      same throwaway install as the -Json test: two ports nothing listens on, so
+      every probe is refused locally and no live service is touched.
+
+      The assertion is about any row that answered, not about the reader on this
+      machine: whatever this box's Redlib and Ollama happen to be doing, a line
+      that ends in "up" or "ready" may not carry a NOTE or DOWN marker.
+    */
+    const dir = mkdtempSync(join(tmpdir(), "control-console-"));
+    try {
+      writeFileSync(join(dir, ".env"), "PORT=65531\nPUBLIC_SITE_URL=http://127.0.0.1:65532\n", "utf8");
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(OPS, "status.ps1"), "-Root", dir],
+        { encoding: "utf8", timeout: 120_000 },
+      );
+      assert.match(out, /TownReporter, as seen from this machine/, "console mode must still print its headings");
+      assert.match(out, /\[ {2}OK {2}\]|\[ NOTE \]|\[ DOWN \]/, "console mode must still print a marker per row");
+      for (const line of out.split(/\r?\n/)) {
+        assert.doesNotMatch(
+          line,
+          /\[ (NOTE|DOWN) \][^\n]*\b(up|ready)\s*$/,
+          `a row that answered is printed as a note or a fault: ${line.trim()}`,
+        );
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

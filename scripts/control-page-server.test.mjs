@@ -1,7 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { createControlServer, ACTIONS, CONFIRM_WORD, renderPage } from "../ops/control/control-server.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  createControlServer,
+  collectStatus,
+  describeLastScan,
+  formatLocalRange,
+  formatLocalTime,
+  ACTIONS,
+  CONFIRM_WORD,
+  renderPage,
+} from "../ops/control/control-server.mjs";
 
 /**
  * The Control page (ops/control/control-server.mjs) puts action buttons on a
@@ -15,11 +27,18 @@ import { createControlServer, ACTIONS, CONFIRM_WORD, renderPage } from "../ops/c
  * cross-origin page cannot read, and the Origin header. None of the three is
  * load-bearing on its own, so each has a test here that fails if it is dropped.
  *
- * Nothing in this file spawns anything. `runner` is injected, so a bug in the
+ * Nothing in this file spawns an ACTION. `runner` is injected, so a bug in the
  * action table cannot take the live paper down from a test run -- which is the
  * only way these tests are safe to run on the machine that serves the paper.
  * (Two of them do press stop-all, with the fake runner, on purpose: that is the
  * action whose guard is worth proving.)
+ *
+ * One test does spawn the real last-scan chain -- node, the app's own env
+ * wrapper, and `pg` -- against a throwaway app root whose .env names a port
+ * nothing listens on. That is deliberate and it is the only spawn here: the
+ * claim under test is that a database URL found in the install's .env reaches
+ * the child at all, and a faked probe could not fail if that path broke. No
+ * powershell, no port 5433, no running paper is involved.
  *
  * Port 0 throughout: an ephemeral port per server, so a test run cannot collide
  * with a real Control page or with a sibling test binding a fixed port.
@@ -402,6 +421,265 @@ test("it exits by itself after the idle window, and a request pushes that window
   } finally {
     await server.close();
   }
+});
+
+/* ─────────────────── the six fixes the review asked for ─────────────────── */
+
+/** 2026-09-25, 8:00 PM in Denver: the "now" every fixed-clock test uses. */
+const NOW = () => Date.parse("2026-09-26T02:00:00.000Z");
+const DENVER = "America/Denver";
+const cardFor = (data, id) => data.extras.find((row) => row.id === id);
+
+/**
+ * Every probe, faked, so nothing here reaches the network, LM Studio or a
+ * database. `lastScan` soft-fails by default: an unreadable scan is the state
+ * the page has to survive, and the test that is ABOUT reading it replaces this.
+ */
+function probeSet(overrides = {}) {
+  return {
+    status: async () => ({ ok: true, status: FAKE_STATUS }),
+    version: () => ({ version: "0.6.65", head: "abcdef12", label: "0.6.65 (abcdef12)" }),
+    publicVersion: async () => ({ ok: true, version: "0.6.65" }),
+    testCopy: async () => ({ ok: true, up: false, version: null }),
+    qwen: async () => ({ ok: true, qwen: [], detail: "LM Studio is not running" }),
+    lastScan: async () => ({ ok: false, reason: "unreachable", detail: "Could not read the last scan" }),
+    backup: () => ({ ok: false, found: false, dir: "nowhere" }),
+    ...overrides,
+  };
+}
+
+test("no card is green when its probe did not answer", async () => {
+  /*
+    Fix 1: "OK: Could not read the last scan" was the report. A green verdict is
+    a claim that the question was answered, so every card below is a Note --
+    including the version card, whose public site could not be read.
+  */
+  const data = await collectStatus({
+    appRoot: "C:\\no\\such\\install",
+    now: NOW,
+    probes: probeSet({ publicVersion: async () => ({ ok: false, version: null, error: "no answer" }) }),
+  });
+  assert.equal(data.extras.length, 5, "the fixture is expected to be the whole card set");
+  for (const row of data.extras) {
+    assert.equal(row.state, "note", `${row.id} reads green over a soft failure: "${row.detail}"`);
+    assert.equal(row.ok, false, `${row.id} still says ok: true`);
+  }
+  assert.equal(data.attention, FAKE_STATUS.attention, "the script's own count is the count");
+});
+
+test("a database URL from the install's .env reaches the probe, and an unreachable one is a Note", async () => {
+  /*
+    Fix 4: the live page said "no database URL is configured" while a URL was
+    configured in the install the page was describing -- the server ran from a
+    worktree with no .env of its own. The row has to tell those two apart.
+
+    This is the one test in this file that spawns: the real chain (node ->
+    scripts/with-app-env.mjs -> ops/control/last-scan.cjs -> pg) against a
+    throwaway app root whose .env names port 1, where nothing listens. The A/B
+    is the point: the same call with no .env in the app root must produce the
+    OTHER sentence, or the first result proves nothing about the .env.
+  */
+  const withEnv = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-ag2-env-"));
+  const withoutEnv = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-ag2-bare-"));
+  const saved = process.env.DATABASE_URL;
+  // Every probe faked EXCEPT the last scan: this test is about the real chain,
+  // and a faked probe cannot fail when that chain is what broke.
+  const probes = probeSet();
+  delete probes.lastScan;
+  try {
+    fs.writeFileSync(
+      path.join(withEnv, ".env"),
+      "# the fixture install's own environment\nDATABASE_URL=postgres://postgres:postgres@127.0.0.1:1/townreporter\n",
+      "utf8",
+    );
+    // process.env wins over any .env in probeLastScan, so it has to be out of
+    // the way for this to be a test of the file.
+    delete process.env.DATABASE_URL;
+
+    const configured = await collectStatus({ appRoot: withEnv, now: NOW, probes });
+    const row = cardFor(configured, "last-scan");
+    assert.equal(row.state, "note", "a scan that could not be read is never OK");
+    assert.equal(row.ok, false);
+    assert.match(row.detail, /could not reach the database/, `the row said: "${row.detail}"`);
+    assert.doesNotMatch(row.detail, /no database URL/i, "the URL was configured; saying otherwise is the lie that was reported");
+
+    const bare = await collectStatus({ appRoot: withoutEnv, now: NOW, probes });
+    const other = cardFor(bare, "last-scan");
+    assert.match(other.detail, /no database URL is configured for the paper/, `the control row said: "${other.detail}"`);
+    assert.notEqual(other.detail, row.detail, "two different faults must not read as one sentence");
+  } finally {
+    if (saved === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = saved;
+    fs.rmSync(withEnv, { recursive: true, force: true });
+    fs.rmSync(withoutEnv, { recursive: true, force: true });
+  }
+});
+
+test("every time on the page is a 12-hour clock in this machine's own zone", () => {
+  /*
+    Fix 3: the last-backup card printed "2026-09-25 22:31" for a file written at
+    4:31 PM Mountain. UTC and 24-hour, on a page for one person at that machine.
+  */
+  const options = { timeZone: DENVER, now: NOW };
+  assert.equal(formatLocalTime("2026-09-25T22:31:00.000Z", options), "today at 4:31 PM");
+  assert.equal(formatLocalTime("2026-09-25T03:05:00.000Z", options), "yesterday at 9:05 PM");
+  assert.equal(formatLocalTime("2026-09-23T12:00:00.000Z", options), "Sep 23 at 6:00 AM");
+  assert.equal(formatLocalTime("2026-09-26T13:00:00.000Z", options), "tomorrow at 7:00 AM");
+  // Another year is named, or "Sep 23" in a January page reads as this January.
+  assert.equal(formatLocalTime("2025-12-01T13:00:00.000Z", options), "Dec 1, 2025 at 6:00 AM");
+  assert.equal(formatLocalTime(null, options), "");
+  assert.equal(formatLocalTime("not a time", options), "");
+
+  for (const iso of ["2026-09-25T22:31:00.000Z", "2026-09-25T03:05:00.000Z", "2026-09-23T12:00:00.000Z"]) {
+    const text = formatLocalTime(iso, options);
+    const clock = text.match(/(\d{1,2}):(\d{2}) (AM|PM)$/);
+    assert.ok(clock, `${text} is not a 12-hour clock`);
+    const hour = Number(clock[1]);
+    assert.ok(hour >= 1 && hour <= 12, `${text} has an hour a 12-hour clock cannot have`);
+  }
+
+  // The day is a civil date in the zone, not a 24-hour subtraction: on the
+  // night the clocks go back these two are 15 hours apart and still "yesterday".
+  const acrossDst = { timeZone: DENVER, now: () => Date.parse("2026-11-01T20:00:00.000Z") };
+  assert.equal(formatLocalTime("2026-11-01T05:00:00.000Z", acrossDst), "yesterday at 11:00 PM");
+
+  assert.equal(
+    formatLocalRange("2026-09-25T22:26:00.000Z", "2026-09-25T22:31:00.000Z", options),
+    "today at 4:26 PM to 4:31 PM",
+    "two times on one day say the day once",
+  );
+  assert.equal(
+    formatLocalRange("2026-09-25T03:05:00.000Z", "2026-09-25T22:31:00.000Z", options),
+    "yesterday at 9:05 PM to today at 4:31 PM",
+  );
+});
+
+test("the last-scan row says which fault it hit, and a run that did not finish is a Note", () => {
+  const note = (scan) => describeLastScan(scan, { timeZone: DENVER, now: NOW }).state;
+  assert.deepEqual(describeLastScan({ ok: false, reason: "unreachable" }), {
+    state: "note",
+    detail: "could not reach the database",
+    reason: "unreachable",
+  });
+  const sentences = {
+    "no-database-url": "no database URL is configured for the paper",
+    "driver-missing": "the paper's database driver is not installed",
+    unreachable: "could not reach the database",
+    "no-scans": "no scan has run yet",
+    "query-failed": "the scan table could not be read",
+  };
+  for (const [reason, detail] of Object.entries(sentences)) {
+    assert.equal(describeLastScan({ ok: false, reason }).detail, detail, reason);
+  }
+  // A reason this file has never heard of still may not read as OK, and falls
+  // back to what the probe itself said rather than inventing a sentence.
+  assert.deepEqual(describeLastScan({ ok: false, reason: "something-new", detail: "fell over" }), {
+    state: "note",
+    detail: "fell over",
+    reason: "something-new",
+  });
+  assert.equal(note({ ok: false }), "note");
+
+  assert.deepEqual(
+    describeLastScan(
+      {
+        ok: true,
+        status: "finished",
+        startedAt: "2026-09-25T22:26:00.000Z",
+        finishedAt: "2026-09-25T22:31:00.000Z",
+        leads: 4,
+        model: "deepseek",
+      },
+      { timeZone: DENVER, now: NOW },
+    ),
+    { state: "ok", detail: "today at 4:26 PM to 4:31 PM - finished, 4 lead(s), model deepseek", reason: null },
+  );
+  // "OK: failed" is the same lie as "OK: could not read it", one line down.
+  const unfinished = { ok: true, startedAt: "2026-09-25T22:26:00.000Z", finishedAt: "2026-09-25T22:31:00.000Z" };
+  assert.equal(note({ ...unfinished, status: "failed" }), "note");
+  assert.equal(note({ ...unfinished, status: "failed (never finished)" }), "note");
+  assert.equal(note({ ok: true, status: "running", startedAt: "2026-09-25T22:26:00.000Z" }), "note");
+  assert.equal(note({ ok: true, startedAt: "2026-09-25T22:26:00.000Z" }), "note");
+});
+
+test("a version skew is a Note that names both versions", async () => {
+  /*
+    Fix 6: while the public site still shows the previous release, the card said
+    OK. It is not a fault -- it is what every update looks like for a minute --
+    and it is not OK either, because the two are not the same build.
+  */
+  const differing = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    probes: probeSet({ publicVersion: async () => ({ ok: true, version: "0.6.64" }) }),
+  });
+  const row = cardFor(differing, "version");
+  assert.equal(row.state, "note", "a skew is not a green light");
+  assert.equal(row.ok, false);
+  assert.equal(
+    row.detail,
+    "This install is 0.6.65; the public site shows 0.6.64. Normal right after an update, until the site refreshes.",
+  );
+  assert.equal(row.optional, true, "a version skew may never inflate the attention count");
+  assert.equal(differing.attention, FAKE_STATUS.attention);
+
+  const agreeing = await collectStatus({ appRoot: ".", now: NOW, probes: probeSet() });
+  assert.equal(cardFor(agreeing, "version").state, "ok");
+});
+
+test("the one destructive action is painted differently, and the Fix button is gated on state", async () => {
+  /*
+    Fix 5: all six buttons looked the same, including the one that takes the
+    paper offline. Fix 2: a healthy row offered a "Fix this" button.
+  */
+  assert.equal(ACTIONS["stop-all"].danger, true, "stop everything must carry the danger flag");
+  for (const [id, spec] of Object.entries(ACTIONS)) {
+    if (id === "stop-all") continue;
+    assert.notEqual(spec.danger, true, `${id} must not be painted as destructive`);
+  }
+  // The paint is a real rule in both themes, and it is not the accent colour the
+  // other five use: AA against its own ink in each theme.
+  const page = renderPage("0123456789abcdef0123456789abcdef");
+  assert.match(page, /button\.danger \{ background: var\(--bad\); color: var\(--danger-ink\);/);
+  assert.match(page, /--danger-ink: #1b0d0a;/);
+  assert.match(page, /--danger-ink: #ffffff;/);
+  // A Note is amber. It was the dim grey, which is how "Note: up" looked like a
+  // green light with a button under it.
+  assert.match(page, /\.verdict\.note \{ color: var\(--warn\); \}/);
+  assert.match(page, /if \(withFix && card\.fix && stateOf\(card\) !== "ok"\)/);
+  assert.match(page, /box\.dataset\.state = stateOf\(card\)/);
+
+  const { server, port } = await boot();
+  try {
+    const res = await raw(port, { path: "/api/actions", headers: hostFor(port) });
+    const actions = JSON.parse(res.text).actions;
+    const flagged = actions.filter((a) => a.danger === true).map((a) => a.id);
+    assert.deepEqual(flagged, ["stop-all"], "exactly one action may be painted as destructive");
+  } finally {
+    await server.close();
+  }
+});
+
+test("a row written before `state` existed still renders by its old fields", () => {
+  /*
+    The page must survive an /api/status the row model predates -- the walk's
+    fixture is exactly that. `ok` without `state` is the whole of what an older
+    row says, so the page derives the state the same way the server does.
+
+    The page script cannot be run whole here (its last lines touch the DOM), so
+    the one function is lifted out of it by name and called.
+  */
+  const page = renderPage("0123456789abcdef0123456789abcdef");
+  const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const source = scripts[scripts.length - 1];
+  const start = source.indexOf("function stateOf(card)");
+  const end = source.indexOf("function renderCards(", start);
+  assert.ok(start > 0 && end > start, "the page no longer defines stateOf(card) where this test expects");
+  const stateOf = new Function(`${source.slice(start, end)}; return stateOf;`)();
+  assert.equal(stateOf({ ok: true, optional: true }), "ok");
+  assert.equal(stateOf({ ok: false, optional: true }), "note");
+  assert.equal(stateOf({ ok: false, optional: false }), "down");
+  for (const word of ["ok", "note", "down"]) assert.equal(stateOf({ ok: false, state: word }), word);
 });
 
 test("the status endpoint is read-only: asking for it starts nothing and stops nothing", async () => {

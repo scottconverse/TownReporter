@@ -18,6 +18,12 @@
  * document, and "Working..." is timed inside the page, because the handler runs
  * synchronously and a round trip to the driver cannot time a same-frame update.
  *
+ * Two checks come straight from the coordinator's review of the first version
+ * (2026-09-25), and both are claims about pixels rather than about code: no card
+ * may wear the healthy green over an answer it could not read, and the one
+ * button that takes the paper offline may not be painted like the five that do
+ * not -- in either theme.
+ *
  * THE ACTION IS FAKE, DELIBERATELY. The server's `runner` seam is injected with
  * a stub, so the restart this walk presses emits two lines and flips a flag in
  * this process. Nothing is spawned, no scheduled task is touched, and the live
@@ -75,14 +81,15 @@ const REDLIB = "redlib.ps1";
  */
 function fakeStatus() {
   const checks = [
-    { id: "database", label: "Database", ok: true, optional: false, detail: "answering on 5433", fix: null },
-    { id: "paper", label: "The paper", ok: true, optional: false, detail: "answered on port 3000", fix: "restart-paper" },
-    { id: "tunnel", label: "Tunnel", ok: true, optional: false, detail: "connected", fix: "restart-tunnel" },
-    { id: "public-site", label: "Public site", ok: true, optional: false, detail: "answered 200", fix: "restart-tunnel" },
-    { id: "watchdog", label: "Watchdog", ok: true, optional: false, detail: "last looked 2 minutes ago", fix: null },
+    { id: "database", label: "Database", state: "ok", ok: true, optional: false, detail: "answering on 5433", fix: null },
+    { id: "paper", label: "The paper", state: "ok", ok: true, optional: false, detail: "answered on port 3000", fix: "restart-paper" },
+    { id: "tunnel", label: "Tunnel", state: "ok", ok: true, optional: false, detail: "connected", fix: "restart-tunnel" },
+    { id: "public-site", label: "Public site", state: "ok", ok: true, optional: false, detail: "answered 200", fix: "restart-tunnel" },
+    { id: "watchdog", label: "Watchdog", state: "ok", ok: true, optional: false, detail: "last looked 2 minutes ago", fix: null },
     {
       id: "reddit-reader",
       label: "Reddit reader (Redlib)",
+      state: world.redditDown ? "down" : "ok",
       ok: !world.redditDown,
       optional: false, // required in this fixture -- see the comment above
       detail: world.redditDown
@@ -91,7 +98,7 @@ function fakeStatus() {
       fix: "restart-reddit",
     },
   ];
-  const faults = checks.filter((c) => !c.ok && !c.optional);
+  const faults = checks.filter((c) => c.state === "down");
   return {
     checkedAt: new Date().toISOString(),
     attention: faults.length,
@@ -102,9 +109,21 @@ function fakeStatus() {
     root: "C:\\Users\\scott\\Desktop\\Code\\townreporter-web",
     checks,
     extras: [
-      { id: "version", label: "Version", ok: true, optional: true, detail: "0.6.65", fix: null },
-      { id: "backup", label: "Last backup", ok: true, optional: true, detail: "townreporter.sql, 3 hours ago", fix: null },
-      { id: "qwen", label: "Model server (Qwen)", ok: true, optional: true, detail: "1 model loaded", fix: null },
+      { id: "version", label: "Version", state: "ok", ok: true, optional: true, detail: "0.6.65", fix: null },
+      { id: "backup", label: "Last backup", state: "ok", ok: true, optional: true, detail: "townreporter.sql, 3 hours ago", fix: null },
+      { id: "qwen", label: "Model server (Qwen)", state: "ok", ok: true, optional: true, detail: "1 model loaded", fix: null },
+      // The card this walk's first new check is about: a probe that could not
+      // read its answer. It is a Note, and it must never be painted green --
+      // "OK: Could not read the last scan" was the bug the coordinator found.
+      {
+        id: "last-scan",
+        label: "Last scan",
+        state: "note",
+        ok: false,
+        optional: true,
+        detail: "could not reach the database",
+        fix: null,
+      },
     ],
   };
 }
@@ -310,6 +329,146 @@ async function theHeadline() {
   step("one line says what needs attention, and the row that is down carries its own fix");
 }
 
+/**
+ * No card may be green over an answer it could not read.
+ *
+ * Fix 1 of the coordinator's review was "OK: Could not read the last scan" -- a
+ * soft failure wearing the healthy colour. This is measured, not inspected: the
+ * green is read off the stylesheet (`--good` as the browser computes it, sampled
+ * through a throwaway .verdict.ok element), and every `.card` in the document is
+ * compared against it. The fixture's Last scan card is the one that says
+ * "could not", and the check refuses to pass if nothing in the document does.
+ */
+async function noGreenOverCouldNot() {
+  const measured = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.className = "verdict ok";
+    probe.textContent = "OK: ";
+    document.body.appendChild(probe);
+    const green = getComputedStyle(probe).color;
+    probe.remove();
+    const cards = [];
+    document.querySelectorAll(".card").forEach((card) => {
+      const verdict = card.querySelector(".verdict");
+      if (!verdict) return;
+      cards.push({
+        state: card.dataset.state || null,
+        text: (card.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+        className: verdict.className,
+        painted: getComputedStyle(verdict).color,
+        could: /could not/i.test(card.textContent || ""),
+      });
+    });
+    return { green, cards };
+  });
+  const soft = measured.cards.filter((c) => c.could);
+  must(
+    soft.length > 0,
+    "the fixture has no card saying 'Could not', so this check proves nothing about the colour of one",
+  );
+  for (const card of soft) {
+    must(card.state === "note", `"${card.text}" carries state ${card.state}; a soft failure is a Note`);
+    must(card.className === "verdict note", `"${card.text}" is painted as ${card.className}`);
+    must(
+      card.painted !== measured.green,
+      `"${card.text}" is painted the healthy green (${card.painted})`,
+    );
+  }
+  facts.push({ softFailureCards: soft.length, healthyGreen: measured.green, cards: measured.cards.length });
+  step(
+    `no card that could not read its answer is green (${soft.length} of ${measured.cards.length} cards say so; ` +
+      `the healthy green is ${measured.green})`,
+  );
+}
+
+/** Contrast of two computed colours, the WCAG way. */
+function contrast(first, second) {
+  const luminance = (text) => {
+    const [r, g, b] = (text.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number).map((value) => {
+      const c = value / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  return (high + 0.05) / (low + 0.05);
+}
+
+/** Every action button's fill and ink, as the browser paints it right now. */
+function actionPaint() {
+  return page.evaluate(() => {
+    const rows = [];
+    for (const button of document.querySelectorAll("#actions button[data-action]")) {
+      const style = getComputedStyle(button);
+      rows.push({
+        id: button.dataset.action,
+        label: (button.textContent || "").trim(),
+        bg: style.backgroundColor,
+        ink: style.color,
+      });
+    }
+    return rows;
+  });
+}
+
+/**
+ * Stop everything must look like the one that takes the paper offline.
+ *
+ * Fix 5: all six buttons were one flat accent colour. This compares the painted
+ * fill against every other action button in BOTH themes -- the toggle is real,
+ * so this is the operator's own view, not a stylesheet read -- and checks the
+ * label's contrast against its own fill, since a red nobody can read is not an
+ * improvement.
+ */
+async function theStopButtonLooksDangerous() {
+  const dark = await actionPaint();
+  const stop = dark.find((row) => row.id === "stop-all");
+  must(stop, `the page renders no button for stop-all; it rendered ${JSON.stringify(dark.map((r) => r.id))}`);
+  const others = dark.filter((row) => row.id !== "stop-all");
+  must(others.length === 5, `expected the other five action buttons, found ${others.length}`);
+  for (const other of others) {
+    must(
+      stop.bg !== other.bg,
+      `Stop everything is painted the same ${stop.bg} as ${other.id} in the dark theme`,
+    );
+  }
+  const darkContrast = contrast(stop.bg, stop.ink);
+  must(darkContrast >= 4.5, `the stop button's label is ${darkContrast.toFixed(2)}:1 on its fill in dark, under AA`);
+
+  await page.getByRole("button", { name: /appearance$/ }).click();
+  await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "light", undefined, {
+    timeout: 10_000,
+  });
+  const light = await actionPaint();
+  const stopLight = light.find((row) => row.id === "stop-all");
+  must(stopLight.bg !== stop.bg, "the stop button's fill is the same in both themes, so it was never themed");
+  for (const other of light.filter((row) => row.id !== "stop-all")) {
+    must(
+      stopLight.bg !== other.bg,
+      `Stop everything is painted the same ${stopLight.bg} as ${other.id} in the light theme`,
+    );
+  }
+  const lightContrast = contrast(stopLight.bg, stopLight.ink);
+  must(lightContrast >= 4.5, `the stop button's label is ${lightContrast.toFixed(2)}:1 on its fill in light, under AA`);
+
+  await page.getByRole("button", { name: /appearance$/ }).click();
+  await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "dark", undefined, {
+    timeout: 10_000,
+  });
+  facts.push({
+    stopButton: {
+      dark: stop.bg,
+      light: stopLight.bg,
+      contrastDark: Math.round(darkContrast * 100) / 100,
+      contrastLight: Math.round(lightContrast * 100) / 100,
+    },
+  });
+  step(
+    `Stop everything is ${stop.bg} on ${stop.ink} (${darkContrast.toFixed(1)}:1) in dark and ${stopLight.bg} on ` +
+      `${stopLight.ink} (${lightContrast.toFixed(1)}:1) in light, unlike all ${others.length} other buttons in either theme`,
+  );
+}
+
 /** Every button is the menu's own wording, and the links go where the brief says. */
 async function theWording(server) {
   const actions = await (await fetch(`${base}/api/actions`)).json();
@@ -482,6 +641,8 @@ try {
   await theLightToggle();
   await theWording(server);
   await theHeadline();
+  await noGreenOverCouldNot();
+  await theStopButtonLooksDangerous();
   await measureEveryElement();
   await cancelChangesNothing(server);
   await pressRestartReddit(server);

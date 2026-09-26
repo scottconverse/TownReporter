@@ -23,21 +23,49 @@
  * is reported in the object (`ok: false`), never in the exit code, so a caller
  * that only checks the exit code still cannot see it as a scan verdict.
  *
+ * Every soft failure also carries a `reason`, one of a small fixed set, because
+ * the caller has to say WHICH thing went wrong in one plain sentence and a
+ * caller that only sees a prose `detail` has to pattern-match a sentence it
+ * wrote itself. The coordinator's review, 2026-09-25: the row must read
+ * "could not reach the database", not "no database URL is configured" -- two
+ * different faults with two different remedies, and only the reason can tell
+ * them apart.
+ *
+ * Times are ISO 8601 UTC (`toISOString`), never a pre-formatted string: this
+ * process does not know the reader's clock, and the page renders every time on
+ * it in the machine's own local 12-hour form ("today at 4:31 PM"). A formatted
+ * "2026-09-25 22:31" here was the bug -- UTC and 24-hour, for a file the
+ * operator wrote at 4:31 PM.
+ *
  * CommonJS (`require`), because the repository is ESM and this file is run
  * directly by `node` with no loader; `.cjs` makes that unambiguous.
  */
 
 const OUT = (value) => process.stdout.write(JSON.stringify(value) + "\n");
 
+/** The reason words the caller knows how to say in plain words. */
+const REASONS = {
+  NO_URL: "no-database-url",
+  NO_DRIVER: "driver-missing",
+  UNREACHABLE: "unreachable",
+  NO_SCANS: "no-scans",
+  QUERY_FAILED: "query-failed",
+};
+
 /** The object the page renders, for the case where nothing could be read. */
-function soft(detail) {
-  OUT({ ok: false, detail: detail || "Could not read the last scan" });
+function soft(reason, detail) {
+  OUT({ ok: false, reason, detail: detail || "Could not read the last scan" });
   process.exit(0);
 }
 
+/** `Date` -> ISO 8601 UTC, or null. The page does the local-time formatting. */
+const iso = (value) => (value ? new Date(value).toISOString() : null);
+
 async function main() {
   const url = process.env.DATABASE_URL;
-  if (!url) soft("Could not read the last scan (no database URL is configured)");
+  if (!url) {
+    soft(REASONS.NO_URL, "Could not read the last scan (no database URL is configured)");
+  }
 
   let pg;
   try {
@@ -47,14 +75,17 @@ async function main() {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     pg = require("pg");
   } catch {
-    soft("Could not read the last scan (the app's database driver is not installed)");
+    soft(REASONS.NO_DRIVER, "Could not read the last scan (the app's database driver is not installed)");
   }
 
   const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 5000 });
   try {
     await client.connect();
   } catch {
-    soft("Could not read the last scan (the database did not answer)");
+    // Reachable URL, nothing listening (or refusing): the row says the database
+    // could not be reached, which is a different sentence and a different
+    // remedy from "no database URL is configured".
+    soft(REASONS.UNREACHABLE, "Could not read the last scan (the database did not answer)");
   }
 
   try {
@@ -69,7 +100,7 @@ async function main() {
         order by id desc
         limit 1`,
     );
-    if (!scan.rows.length) soft("No scan has run yet");
+    if (!scan.rows.length) soft(REASONS.NO_SCANS, "No scan has run yet");
 
     const row = scan.rows[0];
 
@@ -116,8 +147,8 @@ async function main() {
     OUT({
       ok: true,
       id: row.id,
-      startedAt: row.started_at ? new Date(row.started_at).toISOString().replace("T", " ").slice(0, 16) : null,
-      finishedAt: row.finished_at ? new Date(row.finished_at).toISOString().replace("T", " ").slice(0, 16) : null,
+      startedAt: iso(row.started_at),
+      finishedAt: iso(row.finished_at),
       status,
       leads: row.leads_created,
       sourcesFetched: row.sources_fetched,
@@ -129,7 +160,10 @@ async function main() {
     });
     process.exit(0);
   } catch (error) {
-    soft("Could not read the last scan (" + String((error && error.message) || error).slice(0, 120) + ")");
+    soft(
+      REASONS.QUERY_FAILED,
+      "Could not read the last scan (" + String((error && error.message) || error).slice(0, 120) + ")",
+    );
   } finally {
     try {
       await client.end();
@@ -139,4 +173,4 @@ async function main() {
   }
 }
 
-main().catch(() => soft());
+main().catch(() => soft(REASONS.QUERY_FAILED));

@@ -139,9 +139,11 @@ export const ACTIONS = {
   "stop-all": {
     label: "Stop everything",
     explain: "Takes the paper offline until you start it again.",
-    // The one action that takes the paper OFFLINE. The page asks first; this is
-    // the server-side half of that, so a POST forged past the page still cannot
-    // do it. See CONFIRM_WORD.
+    // The one action that takes the paper OFFLINE, and the only button on the
+    // page that is drawn as one: red fill, so it does not read as the fifth of
+    // five identical "do something" buttons. See CONFIRM_WORD for the other
+    // half of that -- the page asks first, and the server refuses without it.
+    danger: true,
     confirm: "offline",
     spawns: [
       {
@@ -451,13 +453,120 @@ const bytes = (n) => {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const when = (ms) => {
+/** This machine's own zone, resolved once. `TZ` in the environment wins. */
+const LOCAL_TZ = (() => {
   try {
-    return new Date(ms).toISOString().replace("T", " ").slice(0, 16);
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+})();
+
+/** The civil date (year, month, day) `ms` falls on in `timeZone`. */
+function civilDay(ms, timeZone) {
+  const found = {};
+  for (const part of new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms))) {
+    found[part.type] = part.value;
+  }
+  return { year: Number(found.year), month: Number(found.month), day: Number(found.day) };
+}
+
+/** Days since the epoch, so two civil dates can be subtracted without DST lies. */
+const dayIndex = ({ year, month, day }) => Math.round(Date.UTC(year, month - 1, day) / 86_400_000);
+
+/**
+ * A time the way the person reading this page says it: 12-hour clock, in this
+ * machine's own zone, with the day named when it is near.
+ *
+ * The bug this replaces printed a backup written at 4:31 PM Mountain as
+ * "2026-09-25 22:31" -- UTC, 24-hour, on a page whose whole job is to be read
+ * by one person sitting at that machine. `Intl` in the resolved zone is the
+ * only way to be right about the offset AND the DST boundary, and the zone is
+ * injectable so a test can pin it instead of inheriting whatever CI's TZ is.
+ *
+ * "today" / "yesterday" / "Sep 23" is a comparison of civil dates in the zone,
+ * never a 24-hour subtraction: 9:05 PM yesterday and 6:00 AM today are seven
+ * hours apart and two different days.
+ */
+export function formatLocalTime(value, { timeZone = LOCAL_TZ, now = Date.now } = {}) {
+  const ms = typeof value === "number" ? value : Date.parse(String(value ?? ""));
+  if (!Number.isFinite(ms)) return "";
+  try {
+    const clock = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date(ms));
+    const nowMs = typeof now === "function" ? now() : now;
+    const day = civilDay(ms, timeZone);
+    const delta = dayIndex(day) - dayIndex(civilDay(nowMs, timeZone));
+    if (delta === 0) return `today at ${clock}`;
+    if (delta === -1) return `yesterday at ${clock}`;
+    if (delta === 1) return `tomorrow at ${clock}`;
+    const label = new Intl.DateTimeFormat("en-US", { timeZone, month: "short", day: "numeric" }).format(new Date(ms));
+    // Outside this year, name the year: "Sep 23 at 6:00 AM" in a January page
+    // would otherwise read as this January.
+    return `${label}${day.year === civilDay(nowMs, timeZone).year ? "" : `, ${day.year}`} at ${clock}`;
   } catch {
     return "";
   }
-};
+}
+
+/** Two times as one span, with the day said once: "today at 4:26 PM to 4:31 PM". */
+export function formatLocalRange(from, to, options = {}) {
+  const start = formatLocalTime(from, options);
+  const end = formatLocalTime(to, options);
+  if (!start) return end;
+  if (!end) return start;
+  const cut = (text) => text.indexOf(" at ");
+  if (cut(start) > 0 && cut(end) > 0 && start.slice(0, cut(start)) === end.slice(0, cut(end))) {
+    return `${start} to ${end.slice(cut(end) + 4)}`;
+  }
+  return `${start} to ${end}`;
+}
+
+/**
+ * The last scan as one honest row.
+ *
+ * Every soft failure gets its own sentence, keyed on the reason the script
+ * reported rather than on prose this file wrote: "no database URL is
+ * configured" and "the database did not answer" are different faults with
+ * different remedies, and the coordinator's review caught the row saying the
+ * first when the second was true.
+ *
+ * A readable scan is OK only when the run actually finished. A run that failed,
+ * or is still going, is a Note with the same words -- "OK: failed" is the same
+ * lie as "OK: could not read it", one line down.
+ */
+export function describeLastScan(scan, options = {}) {
+  if (!scan || !scan.ok) {
+    const reason = scan?.reason || "";
+    const details = {
+      "no-database-url": "no database URL is configured for the paper",
+      "driver-missing": "the paper's database driver is not installed",
+      unreachable: "could not reach the database",
+      "no-scans": "no scan has run yet",
+      "query-failed": "the scan table could not be read",
+    };
+    return {
+      state: "note",
+      detail: details[reason] || scan?.detail || "Could not read the last scan",
+      reason: reason || null,
+    };
+  }
+  const status = String(scan.status || "");
+  const when = formatLocalRange(scan.startedAt, scan.finishedAt, options);
+  const extras = [
+    scan.leads === null || scan.leads === undefined ? "" : `${scan.leads} lead(s)`,
+    scan.model ? `model ${scan.model}` : "",
+  ].filter(Boolean);
+  return {
+    state: !status || status.startsWith("failed") || status === "running" ? "note" : "ok",
+    detail: `${when || "started at an unknown time"} - ${status || "unknown"}${extras.length ? `, ${extras.join(", ")}` : ""}`,
+    reason: null,
+  };
+}
 
 /**
  * The whole page's answer, in one object.
@@ -468,8 +577,29 @@ const when = (ms) => {
  * cards below are marked informational, so a version skew or a missing backup
  * cannot inflate "N things need attention" into crying wolf.
  */
-export async function collectStatus({ appRoot, repoRoot = REPO_ROOT, backupDir = DEFAULT_BACKUP_DIR, now = Date.now, onOutput } = {}) {
-  const probed = await probeStatus({ appRoot, repoRoot, onOutput });
+export async function collectStatus({
+  appRoot,
+  repoRoot = REPO_ROOT,
+  backupDir = DEFAULT_BACKUP_DIR,
+  now = Date.now,
+  onOutput,
+  timeZone = LOCAL_TZ,
+  /** Every read-only probe, injectable. Tests replace the ones they are about
+   *  rather than reaching for the network, the machine's PowerShell or a
+   *  database; nothing here changes a probe's defaults. */
+  probes = {},
+} = {}) {
+  const read = {
+    status: probeStatus,
+    version: probeVersion,
+    publicVersion: probePublicVersion,
+    testCopy: probeTestCopy,
+    qwen: probeQwen,
+    lastScan: probeLastScan,
+    backup: probeBackup,
+    ...probes,
+  };
+  const probed = await read.status({ appRoot, repoRoot, onOutput });
 
   if (!probed.ok) {
     return {
@@ -482,6 +612,7 @@ export async function collectStatus({ appRoot, repoRoot = REPO_ROOT, backupDir =
         {
           id: "status-script",
           label: "The check",
+          state: "down",
           ok: false,
           optional: false,
           detail: probed.error,
@@ -494,72 +625,76 @@ export async function collectStatus({ appRoot, repoRoot = REPO_ROOT, backupDir =
 
   const status = probed.status;
   const [version, publicVersion, testCopy, qwen, lastScan] = await Promise.all([
-    Promise.resolve(probeVersion({ repoRoot })),
-    probePublicVersion({ site: status.site || "https://townreporter.org" }),
-    probeTestCopy({}),
-    probeQwen({}),
-    probeLastScan({ repoRoot, appRoot, onOutput }),
+    Promise.resolve(read.version({ repoRoot })),
+    read.publicVersion({ site: status.site || "https://townreporter.org" }),
+    read.testCopy({}),
+    read.qwen({}),
+    read.lastScan({ repoRoot, appRoot, onOutput }),
   ]);
 
-  const backup = probeBackup({ dir: backupDir, now });
+  const backup = read.backup({ dir: backupDir, now });
 
-  const versionDetail = publicVersion.ok
-    ? publicVersion.version
-      ? `this install ${version.label}, the public site ${publicVersion.version}${
-          publicVersion.version === version.version ? "" : " (they differ; a promote in progress looks like this)"
-        }`
-      : `this install ${version.label}; the public site answered but name no version`
-    : `this install ${version.label}; the public site could not be read (${publicVersion.error})`;
+  // Every card below carries a real `state` -- "ok" / "note" / "down" -- and
+  // `ok` derived from it, so the page cannot print OK over a probe that did not
+  // answer. NOTHING on a catch or fallback path may be OK: that was the whole
+  // of the coordinator's first finding, where a soft failure rendered as a
+  // green "OK: Could not read the last scan".
+  const card = (id, label, state, detail) => ({
+    id,
+    label,
+    state,
+    ok: state === "ok",
+    optional: true,
+    detail,
+    fix: null,
+  });
+
+  // Fix 6: versions that differ are a Note with the reason in the sentence.
+  const sameVersion = Boolean(
+    publicVersion.ok && publicVersion.version && version.version && publicVersion.version === version.version,
+  );
+  const versionDetail = !publicVersion.ok
+    ? `This install is ${version.label}; the public site could not be read (${publicVersion.error})`
+    : sameVersion
+      ? `This install is ${version.label}; the public site shows the same version`
+      : publicVersion.version
+        ? `This install is ${version.version}; the public site shows ${publicVersion.version}. Normal right after an update, until the site refreshes.`
+        : `This install is ${version.label}; the public site answered but named no version`;
+
+  const scan = describeLastScan(lastScan, { now, timeZone });
 
   const extras = [
-    {
-      id: "version",
-      label: "Version",
-      ok: true,
-      optional: true,
-      detail: versionDetail,
-      fix: null,
-    },
-    {
-      id: "backup",
-      label: "Last backup",
-      ok: backup.found,
-      optional: true,
-      detail: backup.found
-        ? `${backup.name} - ${bytes(backup.size)}, written ${when(backup.mtimeMs)} (${backup.ageMinutes} minutes ago)`
+    card("version", "Version", sameVersion ? "ok" : "note", versionDetail),
+    // A backup that is not there is not a fault -- this page never starts one --
+    // but it is not "OK" either, and it never was: read it as a Note.
+    card(
+      "backup",
+      "Last backup",
+      backup.found ? "ok" : "note",
+      backup.found
+        ? `${backup.name} - ${bytes(backup.size)}, written ${formatLocalTime(backup.mtimeMs, { now, timeZone })} (${backup.ageMinutes} minutes ago)`
         : `No backup found in ${backup.dir}`,
-      fix: null,
-    },
-    {
-      id: "test-copy",
-      label: "Test copy on 3100",
-      ok: true,
-      optional: true,
-      detail: testCopy.up
+    ),
+    // A test copy that is not running is normal, and normal is not the same
+    // word as healthy: Note, so the card is never a green light nobody checked.
+    card(
+      "test-copy",
+      "Test copy on 3100",
+      testCopy.up ? "ok" : "note",
+      testCopy.up
         ? `answering${testCopy.version ? `, version ${testCopy.version}` : ""}`
         : "nothing is answering on 3100 (that is normal; it is not always running)",
-      fix: null,
-    },
-    {
-      id: "qwen",
-      label: "Qwen on this computer",
-      ok: true,
-      optional: true,
-      detail: qwen.detail,
-      fix: null,
-    },
-    {
-      id: "last-scan",
-      label: "Last scan",
-      ok: true,
-      optional: true,
-      detail: lastScan.ok
-        ? `${lastScan.startedAt || "unknown start"} to ${lastScan.finishedAt || "not finished"} - ${lastScan.status}${
-            lastScan.leads === null || lastScan.leads === undefined ? "" : `, ${lastScan.leads} lead(s)`
-          }${lastScan.model ? `, model ${lastScan.model}` : ""}`
-        : lastScan.detail || "Could not read the last scan",
-      fix: null,
-    },
+    ),
+    // The probe reports `ok` for "not installed" / "not answering" because
+    // those are answers, not failures -- but a card is a verdict, and the only
+    // verdict Qwen loaded earns is OK.
+    card(
+      "qwen",
+      "Qwen on this computer",
+      Array.isArray(qwen.qwen) && qwen.qwen.length ? "ok" : "note",
+      qwen.detail,
+    ),
+    card("last-scan", "Last scan", scan.state, scan.detail),
   ];
 
   return {
@@ -742,6 +877,7 @@ export function createControlServer(options = {}) {
             id,
             label: spec.label,
             explain: spec.explain,
+            danger: spec.danger === true,
             confirm: spec.confirm || null,
           })),
           links: LINKS,
@@ -959,10 +1095,12 @@ try { if (localStorage.getItem("townreporter.control.theme") === "light") docume
 :root[data-theme="dark"] {
   --bg: #10161a; --card: #182024; --line: #2c3a42; --ink: #eef4f7; --dim: #a9bcc6;
   --good: #6fd08c; --warn: #f0c05a; --bad: #ff9a8a; --accent: #7fc4e8; --accent-ink: #08131a;
+  --danger-ink: #1b0d0a;
 }
 :root[data-theme="light"] {
   --bg: #f6f1e7; --card: #fffdf8; --line: #cbbfa8; --ink: #1b2328; --dim: #4d5a62;
   --good: #1d6b38; --warn: #8a5a00; --bad: #a3231a; --accent: #14526e; --accent-ink: #ffffff;
+  --danger-ink: #ffffff;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -980,14 +1118,23 @@ h2 { font-size: 20px; margin: 0 0 12px; color: var(--dim); font-weight: 600; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
 .card h3 { margin: 0 0 6px; font-size: 18px; }
 .card p { margin: 0; font-size: 17px; color: var(--dim); }
+/* Three colours, three meanings. "note" is AMBER, not the dim grey it used to
+   be: a soft failure has to look like something to look at, or "OK: could not
+   read the last scan" comes back wearing a different shade. */
 .verdict { font-weight: 600; }
 .verdict.ok { color: var(--good); }
-.verdict.note { color: var(--dim); }
+.verdict.note { color: var(--warn); }
 .verdict.bad { color: var(--bad); }
 .card button, .actions button, .links a { min-height: 48px; }
 .card button { margin-top: 12px; }
 button { font: inherit; font-size: 17px; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--accent); color: var(--accent-ink); cursor: pointer; }
 button.secondary { background: transparent; color: var(--ink); }
+/* Stop everything, and only it. The six buttons used to be one flat colour,
+   which made the one that takes the paper offline look like the five that do
+   not. Red fill, with the ink chosen per theme so the label stays legible in
+   both: #1b0d0a on the dark theme's pale red (9.2:1) and white on the light
+   theme's deep red (7.5:1). */
+button.danger { background: var(--bad); color: var(--danger-ink); border-color: var(--bad); font-weight: 600; }
 button[disabled] { opacity: 0.65; cursor: default; }
 button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
@@ -1002,7 +1149,9 @@ header { display: flex; justify-content: space-between; align-items: flex-start;
 #dialog .box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; max-width: 620px; }
 #dialog h2 { color: var(--ink); font-size: 22px; }
 #dialog .row { display: flex; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
-#dialog button.danger { background: var(--bad); color: #1b0d0a; }
+/* The dialog's confirm is the same button class, so it inherits the same
+   per-theme ink -- the hardcoded near-black it used to carry was 1.9:1 on the
+   light theme's red, which is the contrast bug this fixes. */
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
@@ -1072,13 +1221,26 @@ el("theme").addEventListener("click", function () {
 });
 applyThemeButton();
 
+/**
+ * The card's real state, from the row the server sent.
+ *
+ * The row's own "state" is the truth and is what this keys on. The fallback is
+ * for a status object written before the field existed (the fixtures in
+ * scripts/control-page-server.test.mjs and scripts/control-page-walk.mjs, and
+ * any cached page still holding an older /api/status): derive it from "ok" and
+ * "optional", which is exactly how the server derives it.
+ */
+function stateOf(card) {
+  if (card.state === "ok" || card.state === "note" || card.state === "down") return card.state;
+  return card.ok ? "ok" : card.optional ? "note" : "down";
+}
 function verdictClass(card) {
-  if (card.optional) return card.ok ? "ok" : "note";
-  return card.ok ? "ok" : "bad";
+  var s = stateOf(card);
+  return s === "ok" ? "ok" : s === "note" ? "note" : "bad";
 }
 function verdictWord(card) {
-  if (card.optional) return card.ok ? "OK" : "Note";
-  return card.ok ? "OK" : "Down";
+  var s = stateOf(card);
+  return s === "ok" ? "OK" : s === "note" ? "Note" : "Down";
 }
 
 function renderCards(target, cards, withFix) {
@@ -1086,6 +1248,7 @@ function renderCards(target, cards, withFix) {
   (cards || []).forEach(function (card) {
     var box = document.createElement("div");
     box.className = "card";
+    box.dataset.state = stateOf(card);
     var h = document.createElement("h3");
     h.textContent = card.label;
     var v = document.createElement("span");
@@ -1097,8 +1260,10 @@ function renderCards(target, cards, withFix) {
     box.appendChild(h);
     box.appendChild(p);
     // The one button that fixes it -- only when there is one and only when the
-    // row is not OK. A button on a healthy row is an invitation to press it.
-    if (withFix && card.fix && !card.ok) {
+    // row is not OK. A button on a healthy row is an invitation to press it,
+    // which is what "Note: up" plus a Fix button was: a healthy Reddit reader
+    // offering to restart itself.
+    if (withFix && card.fix && stateOf(card) !== "ok") {
       var b = document.createElement("button");
       b.type = "button";
       b.textContent = "Fix this";
@@ -1124,6 +1289,7 @@ function renderActions(actions) {
     b.type = "button";
     b.textContent = action.label;
     b.dataset.action = action.id;
+    if (action.danger) b.className = "danger";
     b.addEventListener("click", function () { runAction(action.id, b); });
     box.appendChild(h);
     box.appendChild(p);
@@ -1218,7 +1384,7 @@ function loadStatus(force) {
       h.className = "headline " + (data.attention > 0 ? (data.attention > 2 ? "bad" : "warn") : "ok");
       el("advice").textContent = data.advice || "";
       var paperCards = (data.checks || []).map(function (c) {
-        return { id: c.id, label: c.label, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix };
+        return { id: c.id, label: c.label, state: c.state, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix };
       });
       renderCards(el("cards"), paperCards.concat(data.extras || []).filter(function (c) { return !c.optional || !c.ok; }).concat((data.extras || []).filter(function (c) { return c.optional && c.ok; })), true);
     })
