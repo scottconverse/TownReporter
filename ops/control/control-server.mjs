@@ -1386,7 +1386,9 @@ function loadStatus(force) {
       var paperCards = (data.checks || []).map(function (c) {
         return { id: c.id, label: c.label, state: c.state, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix };
       });
-      renderCards(el("cards"), paperCards.concat(data.extras || []).filter(function (c) { return !c.optional || !c.ok; }).concat((data.extras || []).filter(function (c) { return c.optional && c.ok; })), true);
+      // Every row is shown, healthy or not: the owner looks here to see that the
+      // Reddit reader and DeepSeek are up, not only to learn when they are down.
+      renderCards(el("cards"), paperCards.concat(data.extras || []), true);
     })
     .catch(function (err) {
       el("headline").textContent = "Could not read the status";
