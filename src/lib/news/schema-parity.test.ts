@@ -142,6 +142,7 @@ if (dbProbe.ok) {
     const paperSettings = await import("./paper-settings.ts");
     const providerLoginServer = await import("./provider-login.server.ts");
     const providerSettings = await import("./provider-settings.ts");
+    const modelAssignments = await import("./model-assignments-store.ts");
     const editorialServer = await import("./editorial.server.ts");
     const followUps = await import("./follow-ups.ts");
     const ops = await import("./ops.ts");
@@ -159,6 +160,8 @@ if (dbProbe.ok) {
     await paperSettings.ensurePaperSettingsSchema();
     await providerLoginServer.ensureProviderLoginsSchema();
     await providerSettings.ensureProviderSettingsSchema();
+    // Unit BG: model_assignments, mirrored by migrations/0100_model_assignments.sql.
+    await modelAssignments.ensureModelAssignmentsSchema();
     await jobs.ensureJobsSchema();
     await editorialServer.ensureEditorialSchema();
     await editorialServer.ensureEditorialRequestSchema();
