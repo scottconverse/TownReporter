@@ -1,4 +1,5 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { StoryBody } from "@/components/story-body";
@@ -6,14 +7,29 @@ import { AiDisclosure } from "@/components/ai-disclosure";
 import { EmptyState, StorySkeleton } from "@/components/states";
 import { inkGhost } from "@/components/desk-chrome-utils";
 import { getPublishedArticle, listPublishedArticles } from "@/lib/news/public";
+import { articleDates } from "@/lib/news/story-dates-public";
+import { storyDateRows } from "@/lib/story-dates";
 import { parseUrlList, siteUrl } from "@/lib/paper";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import { usePublicSections } from "@/lib/use-sections";
 import { ProvenanceBlock } from "@/components/provenance";
+import { DatesPanel } from "@/components/paper/dates-panel";
+import { SectionTag } from "@/components/paper/section-tag";
 import { ReaderRow, SaveStory, ShareStory, ReadingButton, CopyButton } from "@/components/reader-controls";
 import { readMinutes } from "@/lib/reader";
 import { ViewBeacon } from "@/components/view-beacon";
+
+/**
+ * How much of a story a heading has to have gone past before the jump list
+ * calls it current.
+ *
+ * The observer reports a section as current while its top is inside the band
+ * between the sticky masthead's height and 60% of the viewport. Without the
+ * negative bottom margin every section on the page is "intersecting" at once
+ * and the mark lands wherever the browser happens to order them.
+ */
+const TOC_MARGIN = "-120px 0px -60% 0px";
 
 export const Route = createFileRoute("/articles/$slug")({
   loader: async ({ params }) => {
@@ -31,7 +47,15 @@ export const Route = createFileRoute("/articles/$slug")({
       that has already gone out.
     */
     if (!article) throw notFound();
-    return article;
+    /*
+      "Dates in this story" is read here, not in a client query, so the panel
+      is in the first HTML a reader (or a crawler) receives. It reads dated
+      records out of *published stories* only -- this story's own provenance
+      rows -- which is the owner's ruling of 2026-09-26; nothing here can print
+      a meeting nobody has written about.
+    */
+    const dates = await articleDates({ data: { slug: params.slug } });
+    return { article, dates };
   },
   notFoundComponent: () => (
     <PaperShell compact>
@@ -58,7 +82,7 @@ export const Route = createFileRoute("/articles/$slug")({
    * sharing links, that is the difference between a story travelling and not.
    */
   head: ({ loaderData, params, match }) => {
-    const article = loaderData;
+    const article = loaderData?.article;
     if (!article) return {};
     const paper = match.context.paper ?? DEFAULT_PAPER_IDENTITY;
     const url = siteUrl(`/articles/${params.slug}`);
@@ -99,6 +123,40 @@ export const Route = createFileRoute("/articles/$slug")({
   component: ArticlePage,
 });
 
+type Jump = { id: string; label: string };
+
+/**
+ * Which jump link is where the reader is.
+ *
+ * The handoff draws the current one with a 4px yellow inset ("In this article"
+ * -- Article page, item 4). Marking the first link and leaving it would be a
+ * claim about the page that is false three paragraphs later, so this follows
+ * the scroll; with no `IntersectionObserver` (or no sections to watch) the
+ * list simply carries no current mark.
+ */
+function useCurrentJump(jumps: Jump[]): string {
+  const [active, setActive] = useState("");
+  useEffect(() => {
+    const nodes = jumps
+      .map((j) => document.getElementById(j.id))
+      .filter((n): n is HTMLElement => n !== null);
+    if (!nodes.length || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        const first = visible[0];
+        if (first) setActive(first.target.id);
+      },
+      { rootMargin: TOC_MARGIN, threshold: 0 },
+    );
+    for (const node of nodes) observer.observe(node);
+    return () => observer.disconnect();
+  }, [jumps]);
+  return active;
+}
+
 function ArticlePage() {
   const paper = usePaper();
   const { sections } = usePublicSections();
@@ -108,12 +166,32 @@ function ArticlePage() {
   const { data: article, isPending } = useQuery({
     queryKey: ["article", slug],
     queryFn: () => getPublishedArticle({ data: slug }),
-    initialData: loaded ?? undefined,
+    initialData: loaded?.article ?? undefined,
   });
   const { data: related = [] } = useQuery({
     queryKey: ["paper"],
     queryFn: () => listPublishedArticles(),
   });
+  /*
+    The dates panel is server-rendered from the loader and kept fresh by the
+    same read, so a story printed after this page was cached still shows the
+    dates it carries.
+  */
+  const { data: dateItems = [] } = useQuery({
+    queryKey: ["article-dates", slug],
+    queryFn: () => articleDates({ data: { slug } }),
+    initialData: loaded?.dates ?? undefined,
+  });
+  const body = article?.body ?? "";
+  const jumps = useMemo<Jump[]>(() => {
+    const list: Jump[] = [{ id: "story-body", label: "The story" }];
+    if (/claims and sources/i.test(body)) list.push({ id: "claims", label: "Claims and sources" });
+    list.push({ id: "sources", label: "Sources & records" });
+    list.push({ id: "story-corrections", label: "Corrections" });
+    list.push({ id: "related", label: "Read next" });
+    return list;
+  }, [body]);
+  const current = useCurrentJump(jumps);
 
   if (isPending) {
     return (
@@ -154,91 +232,98 @@ function ArticlePage() {
         disappeared: false,
         role: "source",
       }));
-  const more = related.filter((a) => a.slug !== slug).slice(0, 4);
+  const more = related.filter((a) => a.slug !== slug).slice(0, 3);
+  const sectionName = sections.find((s) => s.key === article.topic)?.name ?? article.topic;
+  const isOpinion = article.topic === "opinion";
+  const storyDates = storyDateRows(dateItems);
 
   return (
     <PaperShell compact>
       <ViewBeacon targets={[`story:${slug}`, "site"]} />
 
-      <div className="breadcrumbs">
-        <Link to="/" search={{}}>
-          Front page
-        </Link>
-        <span>/</span>
-        <Link to="/" search={{ topic: article.topic }}>
-          {sections.find((s) => s.key === article.topic)?.name ?? article.topic}
-        </Link>
-      </div>
+      {/* The story proper. "Keep reading" below it is about other stories, so it sits outside. */}
       <article>
-        <div className="articlehead">
-          <Link className={`tag ${article.topic}`} to="/" search={{ topic: article.topic }}>
-            {sections.find((s) => s.key === article.topic)?.name ?? article.topic}
-            {article.topic === "opinion" ? " · Perspective" : ""}
-          </Link>
+        <header className="articlehead">
+          <div className="breadcrumbs">
+            <Link to="/" search={{}}>
+              Front page
+            </Link>
+            <span>/</span>
+            <SectionTag topic={article.topic}>
+              {sectionName}
+              {isOpinion ? " · Perspective" : ""}
+            </SectionTag>
+          </div>
           <h1>{article.headline}</h1>
-          <p className="dek">{article.dek}</p>
-          <div className="byline">
-            <div className="avatar">
-              <span>TR</span>
-              <div>
-                <strong>
-                  {paper.name}
-                  {article.topic === "opinion" ? " · Opinion" : ""}
-                </strong>
-                <span>
-                  {formatDate(article.published_at)} · {readMinutes(article.body)} min read
-                </span>
-              </div>
-            </div>
-            <div className="readingtools">
-              <SaveStory story={article} label />
-              <ShareStory slug={slug} headline={article.headline} />
-              <ReadingButton label />
-            </div>
+          {article.dek ? <p className="dek">{article.dek}</p> : null}
+        </header>
+        <div className="bylinebar">
+          <div className="bylinewho">
+            <span className="trbadge" aria-hidden>
+              TR
+            </span>
+            <span className="bylinenames">
+              <strong>
+                {paper.name}
+                {isOpinion ? " · Opinion" : ""}
+              </strong>
+              <span>
+                {formatDate(article.published_at)} · {readMinutes(article.body)} min read
+              </span>
+            </span>
+          </div>
+          <div className="readingtools">
+            <SaveStory story={article} label />
+            <ShareStory slug={slug} headline={article.headline} />
+            <ReadingButton label />
           </div>
         </div>
         <div className="articlelayout">
-          <nav className="contents" aria-label="In this article">
-            <strong>In this article</strong>
-            <a href="#story-body">The story</a>
-            {/claims and sources/i.test(article.body) && <a href="#claims">Claims and sources</a>}
-            <a href="#sources">Sources &amp; records</a>
-            <a href="#story-corrections">Corrections</a>
-            <a href="#related">Read next</a>
-          </nav>
-          <div className="articlebody" id="story-body">
-            <StoryBody body={article.body} publicReading />
-            <section className="sources" id="sources">
-              <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
-              {/*
-                FOLLOW THE EVIDENCE used to print above this section whatever was
-                in it, so a story with no separate source records showed a
-                heading with nothing under it (coordinator review of the Unit X
-                screenshots, 2026-09-24: a published imported story read
-                "FOLLOW THE EVIDENCE" and then stopped). It is a heading for the
-                evidence that follows, so it is rendered only when there is
-                evidence to follow -- for every story, not only imported ones.
-                The branch below already says in words that there is none.
-              */}
-              {provenance.length ? (
-                <>
-                  <span className="eyebrow">FOLLOW THE EVIDENCE</span>
-                  <ProvenanceBlock
-                    items={provenance}
-                    findings={article.findings}
-                    form={article.form}
-                  />
-                </>
-              ) : (
-                <>
-                  <h2>Sources &amp; public records</h2>
-                  <p>
-                    No separate public source records are attached to this story. See any source
-                    references in the article above.
-                  </p>
-                </>
-              )}
-            </section>
+        <nav className="contents" aria-label="In this article">
+          <span className="contentslabel">In this article</span>
+          {jumps.map((jump) => (
+            <a
+              key={jump.id}
+              href={`#${jump.id}`}
+              className={current === jump.id ? "on" : ""}
+              aria-current={current === jump.id ? "location" : undefined}
+            >
+              {jump.label}
+            </a>
+          ))}
+        </nav>
+        <div className="articlebody" id="story-body">
+          <StoryBody body={article.body} publicReading />
+          <section className="sources" id="sources">
+            <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
+            {/*
+              FOLLOW THE EVIDENCE used to print above this section whatever was
+              in it, so a story with no separate source records showed a
+              heading with nothing under it (coordinator review of the Unit X
+              screenshots, 2026-09-24: a published imported story read
+              "FOLLOW THE EVIDENCE" and then stopped). The kicker now lives
+              inside ProvenanceBlock, above the records it introduces, so it is
+              printed only when there are records to follow -- for every story,
+              not only imported ones. The branch below already says in words
+              that there are none.
+            */}
+            {provenance.length ? (
+              <ProvenanceBlock
+                items={provenance}
+                findings={article.findings}
+                form={article.form}
+              />
+            ) : (
+              <>
+                <h2>Sources &amp; public records</h2>
+                <p>
+                  No separate public source records are attached to this story. See any source
+                  references in the article above.
+                </p>
+              </>
+            )}
+          </section>
+          <div className="articlefoot">
             <section className="sources" id="story-corrections">
               <h2>Corrections &amp; accountability</h2>
               {article.corrections?.length ? (
@@ -251,11 +336,11 @@ function ArticlePage() {
               ) : (
                 <p>No corrections have been posted for this story.</p>
               )}
-              <Link className="textlink" to="/corrections" search={{ article: article.headline }}>
+              <Link className="btn primary" to="/corrections" search={{ article: article.headline }}>
                 File a correction →
               </Link>
             </section>
-            <section className="sources">
+            <section className="sources sharepanel">
               <h2>Share the reporting.</h2>
               <p>
                 Free to reprint with credit to {paper.name} and a link to the original. Reprinting
@@ -270,25 +355,35 @@ function ArticlePage() {
               </CopyButton>
             </section>
           </div>
+        </div>
           <aside className="articleaside">
-            <span className="tag">OPEN RECORD</span>
-            <p>Good reporting should let you look over its shoulder.</p>
-            <Link className="textlink" to="/how-we-report">
-              How we report →
-            </Link>
+            <DatesPanel
+              title="Dates in this story"
+              items={storyDates}
+              empty="No published record attached to this story carries a date of its own."
+            />
+            <div className="asidecard">
+              <span className="tag">OPEN RECORD</span>
+              <p>Good reporting should let you look over its shoulder.</p>
+              <Link className="textlink" to="/how-we-report">
+                How we report →
+              </Link>
+            </div>
           </aside>
         </div>
       </article>
-      <section id="related" className="opinionband">
+      <section id="related" className="opinionband keepreading">
         <div className="sectionhead">
           <h2>Keep reading</h2>
           <Link className="textlink" to="/" search={{ topic: article.topic }}>
             More in this section →
           </Link>
         </div>
-        {more.map((a) => (
-          <ReaderRow key={a.id} story={a} description={false} />
-        ))}
+        <div className="keepreadinggrid">
+          {more.map((a) => (
+            <ReaderRow key={a.id} story={a} description={false} />
+          ))}
+        </div>
       </section>
     </PaperShell>
   );

@@ -4,9 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, FileText, Search } from "lucide-react";
 import { PaperShell, ReaderResources } from "@/components/paper-chrome";
 import { ReaderRow, SaveStory, ReadingButton } from "@/components/reader-controls";
+import { DatesPanel } from "@/components/paper/dates-panel";
+import { GeoPills } from "@/components/paper/geo-pills";
+import { SectionTag } from "@/components/paper/section-tag";
+import { StoryCell, StoryGrid } from "@/components/paper/story-grid";
 import { useReader } from "@/components/reader-context";
 import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
+import { thisWeekDates } from "@/lib/news/story-dates-public";
+import { storyDateRows } from "@/lib/story-dates";
+import { AREA_LABELS, HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
 import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -14,17 +21,21 @@ import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 /** How many stories one "Latest stories" batch carries. */
 const RIVER_BATCH = 12;
 /**
- * Where "The latest" ends: the lead, then the five under it. The box beside the
- * lead picks up here -- it used to print stories 2, 3 and 4, which "The latest"
- * already prints, so three of the front page's first six appeared twice.
+ * How many cells the front page's ruled story grid prints: three across, two
+ * down (design-system/README.md, "Story grid"). On a phone the stylesheet
+ * collapses it to one column and the last two cells are hidden, which is the
+ * handoff's "four story cells instead of six" -- done in CSS so the server
+ * prints one list rather than two.
  */
-const LATEST_END = 6;
+const GRID_CELLS = 6;
 /**
- * How many stories the top of the front page prints in all: the lead, the five
- * under "The latest", and the three in the box beside the lead. The opinion
- * band and the river start below them, so no story is printed twice.
+ * How many stories the top of the front page prints in all: the lead and the
+ * six cells. The region band and the river start below them, so no story is
+ * printed twice.
  */
-const TOP_STORIES = 9;
+const TOP_STORIES = 1 + GRID_CELLS;
+/** How many place rows the region band prints at most -- one per ground. */
+const REGION_ROWS = 3;
 
 export const Route = createFileRoute("/")({
   validateSearch: readerSearch,
@@ -37,12 +48,12 @@ export const Route = createFileRoute("/")({
         topic: deps.topic,
         page: deps.page ?? 1,
         oldest: deps.sort === "oldest",
+        ...(deps.area ? { area: deps.area } : {}),
         ...(deps.view === "saved" ? { saved: [] } : {}),
       },
     });
-    if (listing) return { listing: page, river: null, opinion: null };
-    // The lead, "The latest" and the box beside the lead: what is printed above
-    // the band and the river.
+    if (listing) return { listing: page, river: null, opinion: null, week: [] };
+    // The lead and the six cells: what is printed above the band and the river.
     const above = page.stories.slice(0, TOP_STORIES).map((s) => s.id);
     /*
       The opinion band is above the river, so its story is read here -- once --
@@ -54,6 +65,12 @@ export const Route = createFileRoute("/")({
     const opinion = await readerArticles({
       data: { topic: "opinion", page: 1, oldest: false, limit: 1, exclude: above },
     });
+    /*
+      "This week". The dated items printed stories carry for the next seven
+      days; see `story-dates.ts`. It is read here rather than in the opinion
+      query because it sweeps the whole paper, not one section.
+    */
+    const week = await thisWeekDates();
     const river = await readerArticles({
       data: {
         limit: RIVER_BATCH,
@@ -62,19 +79,35 @@ export const Route = createFileRoute("/")({
         exclude: [...above, ...opinion.stories.map((s) => s.id)],
       },
     });
-    return { listing: page, river, opinion };
+    return { listing: page, river, opinion, week };
   },
-  component: () => (
-    <PaperShell>
+  component: FrontPage,
+});
+/**
+ * The masthead's geography row, and the page under it.
+ *
+ * The pills belong to the front page and to its search object -- they set
+ * `?area=`, which is the archive query's own predicate -- so they are built
+ * here, where the route's search is in reach, and handed to the shell as a
+ * slot. The archive and the listing screens print no pills: a reader who has
+ * gone looking for something has already chosen what they are looking at.
+ */
+function FrontPage() {
+  const search = Route.useSearch();
+  const listing = Boolean(search.topic || search.q || search.view);
+  return (
+    <PaperShell
+      geography={listing ? undefined : <GeoPills active={search.area} search={search} />}
+    >
       <Home />
     </PaperShell>
-  ),
-});
+  );
+}
 function Home() {
   const paper = usePaper();
   const { sections } = usePublicSections();
   const visible = sections.filter((s) => s.visible);
-  const { formatShortDate, formatDate } = usePaperDateFormatters();
+  const { formatShortDate } = usePaperDateFormatters();
   const search = Route.useSearch();
   const initial = Route.useLoaderData();
   const navigate = useNavigate();
@@ -88,6 +121,7 @@ function Home() {
     topic: search.topic,
     page: search.page ?? 1,
     oldest: search.sort === "oldest",
+    ...(search.area ? { area: search.area } : {}),
     ...(search.view === "saved" ? { saved: reader.saved } : {}),
   };
   const query = useQuery({
@@ -116,14 +150,36 @@ function Home() {
     initialData: initial.opinion ?? undefined,
   });
   const featuredOpinion = opinion.data?.stories[0];
+  /* The section name for a stored key; sections are configurable (0045). */
+  const sectionName = (topic: string) => sections.find((s) => s.key === topic)?.name ?? topic;
+  /**
+   * The six cells of the ruled grid. The lead is the seventh story, so the
+   * grid starts at index 1; a paper with fewer than seven printed stories
+   * simply prints fewer cells and the grid rules close on the last one.
+   */
+  const gridStories = stories.slice(1, TOP_STORIES);
+  const printed = new Set(stories.slice(0, TOP_STORIES).map((s) => s.id));
+  /**
+   * "Around the region": one row per ground the paper covers beyond the home
+   * town, carrying that ground's newest story that is not already printed
+   * above. Stories whose area was never recorded read as the home town
+   * (`readStoryArea`), so they are not here, and a ground with nothing left to
+   * print is left out rather than filled with a story the reader has already
+   * read.
+   */
+  const regionRows = STORY_AREAS.filter((area) => area !== HOME_AREA)
+    .map((area) => ({
+      area,
+      story: stories.find((s) => s.area === area && !printed.has(s.id)),
+    }))
+    .filter((row): row is { area: StoryArea; story: ReaderStory } => Boolean(row.story))
+    .slice(0, REGION_ROWS);
   /*
-    The box beside the lead. It picks up where "The latest" stops rather than
-    repeating it: the hero deepens the front page instead of printing three of
-    its stories a second time. On a paper with nothing left at story 7 there is
-    nothing for the box to add, and it is left out -- the "Explore the archive"
-    button under "The latest" is the way down the page either way.
+    "This week". The loader server-renders it and the panel takes the rows
+    already split into the weekday and day columns; see `story-dates.ts` for
+    where a dated item comes from and why a short panel is the honest read.
   */
-  const moreStories = stories.slice(LATEST_END, TOP_STORIES);
+  const week = storyDateRows(initial.week);
   /*
     The "Latest stories" river. The loader server-renders its first batch, so
     the list is there without JavaScript and for a crawler; the rest arrives
@@ -322,71 +378,71 @@ function Home() {
         </div>
       ) : (
         <>
-          <div className="intro">
-            <div>
-              <h1>A clearer view of {paper.city}.</h1>
-              <p>The decisions, the details and what they mean for our community.</p>
-            </div>
-            <span className="date" suppressHydrationWarning>
-              {formatDate(new Date())}
-            </span>
-          </div>
+          {/*
+            The front page's one heading. The edition's title is the dateline
+            in the top bar, so this is for a screen reader and a crawler only
+            -- the page's first *visible* type is the lead headline, which is
+            what a front page is.
+          */}
+          <h1 className="vh">
+            {paper.name} — {paper.location}
+          </h1>
           {lead ? (
-            <section
-              className={moreStories.length > 0 ? "hero" : "hero single"}
-              aria-label="Featured story"
-            >
-              <article className="lead">
-                <Link to="/" search={{ topic: lead.topic }} className={`tag ${lead.topic}`}>
-                  {sections.find((s) => s.key === lead.topic)?.name ?? lead.topic} · THE LEAD
-                </Link>
-                <Link to="/articles/$slug" params={{ slug: lead.slug }}>
-                  <h2>{lead.headline}</h2>
-                </Link>
-                <p className="dek">{lead.dek}</p>
-                <div className="meta">
-                  <span>{formatShortDate(lead.published_at)}</span>
-                  <span className="dot" />
-                  <span>{readMinutes(lead.body)} min read</span>
-                </div>
-                <div className="leadbottom">
-                  <Link className="btn primary" to="/articles/$slug" params={{ slug: lead.slug }}>
-                    Read the story <ArrowRight aria-hidden />
-                  </Link>
-                  <SaveStory story={lead} />
-                </div>
-              </article>
-              {moreStories.length > 0 ? (
-                <aside className="record">
-                  <div>
-                    <div className="topline">
-                      <FileText aria-hidden /> Around the publication
-                    </div>
-                    <h3>
-                      More of the story.
-                      <br />
-                      More of your community.
-                    </h3>
-                    <ol className="record-list">
-                      {moreStories.map((s, i) => (
-                        <li key={s.id}>
-                          <span className="num">0{LATEST_END + i + 1}</span>
-                          <div>
-                            <Link to="/articles/$slug" params={{ slug: s.slug }}>
-                              <strong>{s.headline}</strong>
-                            </Link>
-                            <p>{sections.find((t) => t.key === s.topic)?.name ?? s.topic}</p>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
+            <>
+              {/*
+                The lead and "This week", side by side in the 1.7fr / 1fr grid.
+                The 1px rules between the two columns and the 3px rule under
+                them come from the container's own background showing through a
+                1px gap, so no cell carries a border that doubles where two
+                meet.
+              */}
+              <section className="ledgerow" aria-label="Featured story">
+                <article className="lead">
+                  <SectionTag topic={lead.topic}>{sectionName(lead.topic)}</SectionTag>
+                  <h2 className="leadhead">
+                    <Link to="/articles/$slug" params={{ slug: lead.slug }}>
+                      {lead.headline}
+                    </Link>
+                  </h2>
+                  <p className="dek">{lead.dek}</p>
+                  <div className="meta">
+                    <span>{formatShortDate(lead.published_at)}</span>
+                    <span className="dot" />
+                    <span>{readMinutes(lead.body)} min read</span>
                   </div>
-                  <Link className="textlink" to="/" search={{ view: "archive" }}>
-                    Explore the archive <ArrowRight aria-hidden />
-                  </Link>
-                </aside>
-              ) : null}
-            </section>
+                  <div className="leadbottom">
+                    <Link className="btn primary" to="/articles/$slug" params={{ slug: lead.slug }}>
+                      Read the story <ArrowRight aria-hidden />
+                    </Link>
+                    <SaveStory story={lead} />
+                  </div>
+                </article>
+                <DatesPanel
+                  title="This week"
+                  items={week}
+                  empty={`No published story carries a date in the next seven days, and this panel
+                    never prints a meeting that no story has reported.`}
+                />
+              </section>
+              {/*
+                The ruled story grid: three across on a desktop, two on a
+                tablet, one on a phone, with the last two cells dropped on a
+                phone so the front page reaches "Around the region" sooner.
+              */}
+              <StoryGrid columns={3}>
+                {gridStories.map((s) => (
+                  <StoryCell
+                    key={s.id}
+                    section={sectionName(s.topic)}
+                    title={s.headline}
+                    date={formatShortDate(s.published_at)}
+                    read={String(readMinutes(s.body))}
+                    slug={s.slug}
+                    topic={s.topic}
+                  />
+                ))}
+              </StoryGrid>
+            </>
           ) : !query.isError ? (
             <div className="empty">
               <h2>The edition is still being set.</h2>
@@ -409,70 +465,51 @@ function Home() {
               How we report <ArrowRight aria-hidden />
             </Link>
           </div>
-          <div className="content-grid">
-            <section>
+          {/*
+            "Around the region" beside "Opinion": the places this paper
+            covers beyond the home town, and the paper's own voice. Both are
+            printed from stories already loaded, and neither repeats a story
+            from above.
+          */}
+          <section className="regionband">
+            <div className="regioncol">
               <div className="sectionhead">
-                <h2>The latest</h2>
-                <Link className="textlink" to="/" search={{ view: "archive" }}>
-                  All stories <ArrowRight aria-hidden />
-                </Link>
+                <h2>Around the region</h2>
               </div>
-              {stories.slice(1, 6).map((s) => (
-                <ReaderRow key={s.id} story={s} />
-              ))}
-              <Link className="btn more" to="/" search={{ view: "archive" }}>
-                Explore the archive <ArrowRight aria-hidden />
-              </Link>
-            </section>
-            <aside>
-              <section className="sidebarcard">
-                <h2>Find your way around.</h2>
-                <p>Start with what matters to you.</p>
-                <div className="topiclist">
-                  {visible.map((s) => (
-                    <Link key={s.key} to="/" search={{ topic: s.key }}>
-                      {s.name}
-                      <span>
-                        <ArrowRight aria-hidden />
-                      </span>
-                    </Link>
+              {regionRows.length ? (
+                <ul className="regionlist">
+                  {regionRows.map(({ area, story }) => (
+                    <li key={area}>
+                      <span className="regionplace">{AREA_LABELS[area]}</span>
+                      <Link to="/articles/$slug" params={{ slug: story.slug }}>
+                        {story.headline}
+                      </Link>
+                    </li>
                   ))}
-                </div>
-              </section>
-              <ReaderResources />
-              <section className="sidebarcard">
-                <span className="eyebrow">YOUR READING, YOUR WAY</span>
-                <h2>A little easier on the eyes.</h2>
-                <p>Adjust the type size or switch to a darker page.</p>
-                <ReadingButton label />
-              </section>
-            </aside>
-          </div>
-          {featuredOpinion && (
-            <section className="opinionband">
-              <div className="sectionhead">
+                </ul>
+              ) : (
+                <p className="regionempty">
+                  Every story in this edition is a {paper.city} story. The towns around us appear
+                  here when we report from them.
+                </p>
+              )}
+              <Link className="textlink" to="/" search={{ view: "archive" }}>
+                All stories <ArrowRight aria-hidden />
+              </Link>
+            </div>
+            {featuredOpinion ? (
+              <aside className="opinionpanel">
                 <h2>Opinion</h2>
+                <Link to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
+                  <h3>{featuredOpinion.headline}</h3>
+                </Link>
+                <p>{featuredOpinion.dek}</p>
                 <Link className="textlink" to="/" search={{ topic: "opinion" }}>
                   All opinion <ArrowRight aria-hidden />
                 </Link>
-              </div>
-              <article className="opinionfeature">
-                <div className="opinionmark" aria-hidden>
-                  “
-                </div>
-                <div>
-                  <span className="tag opinion">Perspective · Opinion</span>
-                  <Link to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
-                    <h3>{featuredOpinion.headline}</h3>
-                  </Link>
-                  <p>{featuredOpinion.dek}</p>
-                </div>
-                <Link className="btn" to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
-                  Read opinion <ArrowRight aria-hidden />
-                </Link>
-              </article>
-            </section>
-          )}
+              </aside>
+            ) : null}
+          </section>
           {listed.length > 0 && (
             <section className="river" aria-labelledby="latest-stories">
               <div className="sectionhead">
@@ -509,6 +546,37 @@ function Home() {
               <div className="riversentinel" ref={sentinel} aria-hidden="true" />
             </section>
           )}
+          {/*
+            The back of the book: the sections, the places to go deeper and
+            the reading controls. These used to sit in a sidebar beside "The
+            latest"; the ruled grid took that space, so they close the page
+            instead. Every one of them is the same data source as before --
+            `newsroom_sections`, the paper's configured tool links, and the
+            reader's own text size.
+          */}
+          <section className="backmatter" aria-label="Ways through the paper">
+            <div className="sidebarcard">
+              <h2>Find your way around.</h2>
+              <p>Start with what matters to you.</p>
+              <div className="topiclist">
+                {visible.map((s) => (
+                  <Link key={s.key} to="/" search={{ topic: s.key }}>
+                    {s.name}
+                    <span>
+                      <ArrowRight aria-hidden />
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <ReaderResources />
+            <div className="sidebarcard">
+              <span className="eyebrow">YOUR READING, YOUR WAY</span>
+              <h2>A little easier on the eyes.</h2>
+              <p>Adjust the type size or switch to a darker page.</p>
+              <ReadingButton label />
+            </div>
+          </section>
           <section className="aboutstrip">
             <div>
               <h2>Your community. An open record.</h2>

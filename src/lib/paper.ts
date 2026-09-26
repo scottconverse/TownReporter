@@ -248,6 +248,24 @@ export function formatShortDate(iso: string | Date | null | undefined, timeZone:
   });
 }
 
+/*
+  The paper's dateline: "Sat, Sept. 26" (design-system/README.md, front page
+  top bar). Separate from `formatShortDate` because it carries the weekday --
+  a reader checking whether today's edition has been set reads the weekday
+  before the number -- and separate from `formatDate` because that one spells
+  everything out and is used inside story text.
+*/
+export function formatDayStamp(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone,
+  });
+}
+
 export function formatDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
   if (!d) return "";

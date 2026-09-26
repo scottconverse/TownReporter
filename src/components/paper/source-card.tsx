@@ -23,23 +23,29 @@ export function SourceCard({
   role,
   title,
   host,
+  documentDate,
   captured,
   actions,
 }: {
   role: string;
   title: string;
   host: string;
+  /** The record's own date, printed verbatim beside the host when it has one. */
+  documentDate?: string;
   captured?: string;
   actions: ReactNode;
 }) {
+  const line = [host, documentDate].filter(Boolean).join(" · ");
   return (
     <div className="sourcecard-new">
       <span className="sourcerole">{role}</span>
       <b>{title}</b>
-      <span className="sourcehost">
-        {host}
-        {captured ? ` · Captured ${captured}` : ""}
-      </span>
+      {line || captured ? (
+        <span className="sourcehost">
+          {line}
+          {captured ? `${line ? " · " : ""}Captured ${captured}` : ""}
+        </span>
+      ) : null}
       <div className="sourceactionrow">{actions}</div>
     </div>
   );

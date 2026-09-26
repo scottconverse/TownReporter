@@ -16,6 +16,12 @@ export type DateItem = {
   what: string;
   note?: string;
   cancelled?: boolean;
+  /**
+   * The printed story this date came out of. A panel of dates with no way back
+   * to the record is a list of claims, so when the caller knows the story the
+   * item's text becomes the link to it; a row with no story stays plain text.
+   */
+  slug?: string;
 };
 
 /**
@@ -59,7 +65,13 @@ export function DatesPanel({
                 <b className="datenum">{item.day}</b>
               </span>
               <span className="datewhat">
-                <span>{item.what}</span>
+                {item.slug ? (
+                  <Link to="/articles/$slug" params={{ slug: item.slug }}>
+                    {item.what}
+                  </Link>
+                ) : (
+                  <span>{item.what}</span>
+                )}
                 {item.note ? <span className="datenote">{item.note}</span> : null}
               </span>
             </li>
