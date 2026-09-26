@@ -57,6 +57,17 @@
   added to `repaired` -- their starts are detached and a run cannot yet say
   they worked. Both are described in ops\lib-redlib.ps1 and ops\lib-ollama.ps1.
 
+  The staged copy (the test copy on 3100) is the third thing it keeps alive,
+  and the newest. ops\stage.ps1 restores a backup into townreporter_dev,
+  builds, and starts the built server on 3100 for a walkthrough; the database
+  and the build survive a reboot and the server does not, so before this the
+  only way back after a reboot was to run the whole restore again. It is
+  start-only -- ops\start-stage.ps1 -- and it starts nothing unless the paper
+  is healthy, the staged port is free, and thirty minutes have passed since
+  the last attempt. Same shape as the other two optional services: its own
+  try/catch, never added to `repaired`, and nothing staged says nothing at
+  all. The decision lives in ops\lib-stage.ps1; the section below says why.
+
   It is also the clock for the nightly backup and the alert check, and for one
   reason: the owner is shrinking programs, not adding them. This file already
   runs every five minutes, so "is a backup due" and "has anything been wrong
@@ -89,7 +100,7 @@
   wrote "app DOWN" and nothing else, which was indistinguishable from a broken
   probe -- and that is exactly what it turned out to be.
 
-  TEST-003: three seams, each an env var that defaults to the exact value the
+  TEST-003: seams, each an env var that defaults to the exact value the
   live paper already used, so an unset environment produces byte-identical
   behavior to before this change. They exist so a CI runner can point the
   watchdog at a disposable app/Postgres pair instead of this machine's real
@@ -101,6 +112,13 @@
     WATCHDOG_PG_PORT     - port Postgres is checked/repaired on (default: 5433)
     WATCHDOG_START_SCRIPT - script used to (re)start the app (default:
                             start-townreporter.ps1, same as always)
+    WATCHDOG_STAGE_APP   - checkout whose staged copy this run may start
+                            (default: this checkout, same as always). Honored
+                            ONLY when WATCHDOG_TEST_MODE=1, so a stray value
+                            on the live machine cannot point this at another
+                            directory; lib-ownership.ps1 validates it and
+                            refuses the run rather than starting anything from
+                            a path it has not checked.
 #>
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
@@ -466,6 +484,101 @@ if ($env:WATCHDOG_TEST_MODE -ne '1') {
     }
   } catch {
     Write-Log "ollama: check failed: $($_.Exception.Message) -- the paper is unaffected"
+  }
+}
+
+# --- The staged copy (the test copy on 3100) ------------------------------
+<#
+  Bring back the copy ops\stage.ps1 staged, after a reboot.
+
+  ops\stage.ps1 restores a production backup into townreporter_dev, builds
+  this checkout and starts the built server on 3100 for a manual walkthrough.
+  The database and the build survive a reboot; the running server does not.
+  Before this section existed, a reboot during a walkthrough took the staged
+  copy away and the only way back was the whole stage again -- drop the
+  database, restore the backup, rebuild.
+
+  Start-only, and ops\start-stage.ps1 is the whole of it: no restore, no
+  build, no kill, nothing that touches the live paper. Three conditions, all
+  required:
+
+    * the paper is healthy ($appHealthy, measured above -- and set true by a
+      repair this very run made). A paper that is down is the run's real
+      problem; starting a second node against the same database while the
+      paper is being repaired is not a repair.
+    * the staged port has no listener at all. If something IS listening --
+      a half-dead copy of the staged server, or another program -- nothing is
+      started: the port is taken, this run will not kill for it, and
+      ops\stage.ps1 -Stop is the operator's stop. lib-stage.ps1 logs which of
+      the two it found.
+    * at least thirty minutes since the last attempt (logs\stage-start.json,
+      written below before the spawn and by ops\start-stage.ps1 after it). A
+      staged copy that cannot come up -- a database that is not restored, a
+      build from before the port was moved -- must not be retried every five
+      minutes forever. The same back-off shape as the nightly backup's.
+
+  Nothing staged is the ordinary state on a machine that has never staged, so
+  that case says nothing at all -- the same reason the backup section is quiet
+  when a backup is not due. The answer to "what is staged here?" lives in
+  ops\stage.ps1 -Status, in ops\start-stage.ps1's own words, and on the
+  Control page's 3100 card.
+
+  WATCHDOG_STAGE_APP points the whole stage world (ops\.stage.json, the build,
+  the log) somewhere other than this checkout, and is honored ONLY in test
+  mode, so production cannot be redirected at another directory. Unset, it is
+  this checkout -- which is where this machine's staged copy lives.
+
+  Detached, like the other starts here: this run does not wait for it. Never
+  added to $repaired for that reason -- this run cannot yet say it worked, and
+  the next run's log line is the receipt. That is also why a failed start is
+  not retried for thirty minutes: the next run is what would find out.
+#>
+if ($appHealthy) {
+  try {
+    . (Join-Path $PSScriptRoot "lib-stage.ps1")
+    $stageApp = $app
+    if ($env:WATCHDOG_TEST_MODE -eq '1' -and $env:WATCHDOG_STAGE_APP) { $stageApp = $env:WATCHDOG_STAGE_APP }
+    $stage = Get-TownReporterStageInfo -App $stageApp -AppPort ([int]$port) -PgPort ([int]$pgPort)
+    switch ($stage.Verdict) {
+      'up'       { Write-Log "stage: the staged copy is up on $($stage.Port) (version $($stage.Version))" }
+      'wedged'   { Write-Log "stage: $($stage.Reason)" }
+      'starting' { Write-Log "stage: $($stage.Reason)" }
+      'down' {
+        $due = Test-TownReporterStageStartDue -App $stageApp -Minutes 30
+        if (-not $due.Due) {
+          Write-Log "stage: staged on $($stage.Port) and not answering, but $($due.Reason); leaving it for a later run"
+        } else {
+          # The attempt is recorded BEFORE the spawn, so the thirty-minute
+          # floor holds even if this spawn dies on the next line, and so a
+          # Control page press in between cannot start a second copy. -Watchdog
+          # tells ops\start-stage.ps1 that the record it is about to read is
+          # this write: without it the child reads its own caller's attempt as
+          # an attempt in flight and declines -- which is exactly what happened
+          # the first time this section ran against the harness.
+          Save-TownReporterStageStartRecord -App $stageApp -Record ([pscustomobject]@{
+            LastAttemptAt = (Get-TownReporterIsoTime)
+            LastOutcome   = 'starting'
+            LastReason    = 'the watchdog started it'
+            LastPid       = ''
+          })
+          Write-Log "stage: staged on $($stage.Port) (version $($stage.Version)) and not answering ($($due.Reason)); starting it -- ops\start-stage.ps1 writes its own log to logs\stage-start.log"
+          $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
+          $stageShell = if ($shell) { $shell.Source } else { "powershell.exe" }
+          Start-Process -FilePath $stageShell `
+            -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
+                          "-File", (Join-Path $stageApp "ops\start-stage.ps1"), "-Quiet", "-Watchdog" `
+            -WindowStyle Hidden
+        }
+      }
+      default {
+        # 'none' with a state file present is the only thing left here: a
+        # state file that names the paper's port, or one that cannot be read.
+        # Worth a line. The ordinary "nothing staged here" is not.
+        if ($stage.StateExists) { Write-Log "stage: $($stage.Reason)" }
+      }
+    }
+  } catch {
+    Write-Log "stage: check failed: $($_.Exception.Message) -- the paper is unaffected"
   }
 }
 

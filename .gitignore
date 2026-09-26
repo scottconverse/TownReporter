@@ -12,6 +12,10 @@ ops/.stage.pid
 ops/.stage.json
 ops/stage.out.log
 ops/stage.err.log
+# ops/start-stage.ps1 moves the two logs above aside before starting, so the
+# run that failed is still readable after the one that replaced it.
+ops/stage.out.prev.log
+ops/stage.err.prev.log
 .vercel/
 .tanstack/
 .node_modules.lock

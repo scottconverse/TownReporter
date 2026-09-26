@@ -124,6 +124,20 @@ function fakeStatus() {
         detail: "3 copies on D:\\TownReporter-backups; checked today at 2:04 AM; 4.3 TB free",
         fix: null,
       },
+      // The staged copy after a reboot: everything on disk, nothing answering,
+      // no start tried yet. This is the one row on the page that offers to
+      // start something, and behind its button is ops\start-stage.ps1 -- so the
+      // words are asserted and the button is never pressed. See theTestCopyRow.
+      {
+        id: "test-copy",
+        label: "Test copy on 3100",
+        state: "note",
+        ok: false,
+        optional: true,
+        detail: "staged (version 0.6.66) and nothing is answering on 127.0.0.1:3100; no start has been tried yet",
+        fix: "start-test-copy",
+        fixLabel: "Start the test copy",
+      },
       { id: "qwen", label: "Model server (Qwen)", state: "ok", ok: true, optional: true, detail: "1 model loaded", fix: null },
       // The card this walk's first new check is about: a probe that could not
       // read its answer. It is a Note, and it must never be painted green --
@@ -451,6 +465,43 @@ async function theNewCards() {
   step(`the "Copy on D:" and "Attention" cards are on the page: "${attention.text.slice(0, 60)}..."`);
 }
 
+/**
+ * The row that brings the staged copy back after a reboot -- and the one button
+ * this walk must not press.
+ *
+ * After a reboot the staged copy is gone and everything else about staging is
+ * not: the database is restored, the build is on disk, and the only way back
+ * used to be running the whole restore again. So the page has to say what
+ * happened, in a sentence an operator can act on, and offer the button the
+ * brief names. Reading the words is the check; the button is checked to be
+ * there and checked to have done nothing, because behind it is
+ * ops\start-stage.ps1, which on this machine would start a server on the port
+ * somebody is walking. `world.spawns` is every argv the action table ran this
+ * run, and this is the one id that must never appear in it.
+ */
+async function theTestCopyRow() {
+  const card = page.locator(".card", { hasText: "Test copy on" }).first();
+  must((await card.count()) === 1, "the page draws no card for the test copy");
+  const text = ((await card.textContent()) ?? "").trim().replace(/\s+/g, " ");
+  must(/staged/.test(text), `the test-copy row does not say the copy is staged: ${text}`);
+  must(
+    /nothing is answering on 127\.0\.0\.1:\d+/.test(text),
+    `the test-copy row does not say, in plain words, that nothing is answering: ${text}`,
+  );
+  const button = card.getByRole("button", { name: "Start the test copy" });
+  must(
+    (await button.count()) === 1,
+    `the staged-and-down row offers no "Start the test copy" button; the row reads: ${text}`,
+  );
+  const started = world.spawns.filter((argv) => /start-stage\.ps1/.test(argv));
+  must(
+    started.length === 0,
+    `this walk started the staged copy: ${JSON.stringify(started)}. Nothing on this machine may be started.`,
+  );
+  facts.push({ testCopy: text });
+  step(`the test copy row reads "${text.slice(0, 70)}..." and its button was not pressed`);
+}
+
 /** Contrast of two computed colours, the WCAG way. */
 function contrast(first, second) {
   const luminance = (text) => {
@@ -495,7 +546,7 @@ async function theStopButtonLooksDangerous() {
   const stop = dark.find((row) => row.id === "stop-all");
   must(stop, `the page renders no button for stop-all; it rendered ${JSON.stringify(dark.map((r) => r.id))}`);
   const others = dark.filter((row) => row.id !== "stop-all");
-  must(others.length === 6, `expected the other six action buttons, found ${others.length}`);
+  must(others.length === 7, `expected the other seven action buttons, found ${others.length}`);
   for (const other of others) {
     must(
       stop.bg !== other.bg,
@@ -551,6 +602,7 @@ async function theWording(server) {
     "Stop everything",
     "Restart the Reddit reader",
     "Back up now",
+    "Start the test copy",
   ]) {
     must(labels.includes(want), `the page offers no button labelled "${want}"`);
   }
@@ -712,6 +764,7 @@ try {
   await theLightToggle();
   await theWording(server);
   await theNewCards();
+  await theTestCopyRow();
   await theHeadline();
   await noGreenOverCouldNot();
   await theStopButtonLooksDangerous();

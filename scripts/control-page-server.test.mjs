@@ -12,6 +12,9 @@ import {
   formatLocalTime,
   probeAlerts,
   probeOffsiteCopy,
+  probeTestCopy,
+  describeTestCopy,
+  STAGE_START_WINDOW_MS,
   ACTIONS,
   CONFIRM_WORD,
   OPS_DIR,
@@ -443,7 +446,10 @@ function probeSet(overrides = {}) {
     status: async () => ({ ok: true, status: FAKE_STATUS }),
     version: () => ({ version: "0.6.66", head: "abcdef12", label: "0.6.66 (abcdef12)" }),
     publicVersion: async () => ({ ok: true, version: "0.6.66" }),
-    testCopy: async () => ({ ok: true, up: false, version: null }),
+    // The shape probeTestCopy really returns -- a verdict, not a bare "up" --
+    // so the card is built from the field the real page reads. "none" is a
+    // machine that has never staged anything: a Note, and no button.
+    testCopy: async () => ({ ok: true, port: 3100, up: false, version: null, verdict: "none" }),
     qwen: async () => ({ ok: true, qwen: [], detail: "LM Studio is not running" }),
     lastScan: async () => ({ ok: false, reason: "unreachable", detail: "Could not read the last scan" }),
     backup: () => ({ ok: false, found: false, dir: "nowhere" }),
@@ -947,10 +953,335 @@ test("Back up now runs the one backup script, with a fixed argv and no confirm",
     const res = await raw(port, { path: "/api/actions", headers: hostFor(port) });
     const actions = JSON.parse(res.text).actions;
     const ids = actions.map((a) => a.id);
-    assert.deepEqual(ids, ["check", "restart-paper", "restart-tunnel", "start-all", "stop-all", "restart-reddit", "back-up-now"]);
+    assert.deepEqual(ids, [
+      "check",
+      "restart-paper",
+      "restart-tunnel",
+      "start-all",
+      "stop-all",
+      "restart-reddit",
+      "back-up-now",
+      "start-test-copy",
+    ]);
     const button = actions.find((a) => a.id === "back-up-now");
     assert.equal(button.label, "Back up now");
     assert.match(button.explain, /copies it to the other drive/);
+  } finally {
+    await server.close();
+  }
+});
+
+/* ─────────────── the staged copy, and the one button that starts it ─────────────── */
+
+/**
+ * A port nothing is listening on. Bound and released rather than guessed, and
+ * never 3100: these tests probe a socket, and 3100 is where the owner's own
+ * staged copy may be walking.
+ */
+async function freePort() {
+  const probe = http.createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const { port } = probe.address();
+  // Connections first, then close: a server with a live keep-alive socket on it
+  // does not finish closing, and a test that never finishes is not a test.
+  probe.closeAllConnections();
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+}
+
+/** A loopback listener on an ephemeral port, standing in for the staged copy. */
+async function stubListener(reply) {
+  const server = http.createServer((q, r) => {
+    // null is the half-dead listener: the socket accepts and nothing comes back.
+    if (reply === null) { r.destroy(); return; }
+    r.writeHead(reply, { "content-type": "text/plain" });
+    r.end(reply === 200 ? "staged copy 0.6.66\n" : "not it\n");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    port: server.address().port,
+    // `fetch` keeps its socket alive in a pooled agent, so closing without
+    // tearing those down waits on a connection nobody is going to end.
+    close: async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+/**
+ * ops\.stage.json and logs\stage-start.json in a temp directory.
+ *
+ * `state: null` -- the default -- writes NO state file at all, which is the
+ * machine that has never staged anything. An empty `{}` would be a different
+ * machine: a file that exists and names no port, which ops\stage.ps1 can leave
+ * behind half-written and which is a refusal rather than an absence.
+ */
+function stageFiles({ state = null, record = null } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-stage-"));
+  const stateFile = path.join(root, "ops.stage.json");
+  const recordFile = path.join(root, "stage-start.json");
+  if (state !== null) fs.writeFileSync(stateFile, JSON.stringify(state), "utf8");
+  if (record) fs.writeFileSync(recordFile, JSON.stringify(record), "utf8");
+  return { root, stateFile, recordFile, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+test("the staged copy is described in plain words, and only one state gets a button", async () => {
+  /*
+    The reboot case, and the only row on the page that offers to start
+    something. The decision to start belongs to ops\start-stage.ps1 -- it
+    re-reads all of this itself and declines in its own words, so a button
+    pressed on a stale page starts nothing. What this page owes the operator is
+    the sentence and the button in the one state a press can repair.
+  */
+  // Nothing was ever staged: no port to be wrong about, no button.
+  const never = stageFiles();
+  try {
+    const free = await freePort();
+    const info = await probeTestCopy({ port: free, stateFile: never.stateFile, recordFile: never.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "none");
+    assert.equal(info.stagedRaw, false, "a state file that is not there is not a staged copy");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.state, "note", "a test copy that is not running is normal, not healthy");
+    assert.equal(row.fix, null, "there is nothing to start on a machine that never staged anything");
+    assert.match(row.detail, new RegExp("nothing is answering on 127\\.0\\.0\\.1:" + free));
+  } finally {
+    never.cleanup();
+  }
+
+  // Staged, nothing listening: the reboot case. One button, and it is named.
+  const down = stageFiles({ state: { port: await freePort(), version: "0.6.66", started: "2026-09-26T02:00:00Z" } });
+  try {
+    const info = await probeTestCopy({ stateFile: down.stateFile, recordFile: down.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "down");
+    assert.equal(info.up, false);
+    assert.equal(info.staged, true);
+    assert.equal(info.stagedVersion, "0.6.66");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.state, "note");
+    assert.match(row.detail, /staged \(version 0\.6\.66\)/);
+    assert.match(row.detail, /no start has been tried yet/);
+    assert.equal(row.fix, "start-test-copy");
+    assert.equal(row.fixLabel, "Start the test copy");
+  } finally {
+    down.cleanup();
+  }
+
+  // A start recorded seconds ago and nothing answering yet: an attempt is in
+  // flight, and a second copy would fight the first for the port.
+  const starting = stageFiles({
+    state: { port: await freePort(), version: "0.6.66" },
+    record: {
+      lastAttemptAt: new Date(Date.now() - 30_000).toISOString(),
+      lastOutcome: "starting",
+      lastReason: "the watchdog started it",
+      lastPid: "",
+    },
+  });
+  try {
+    const info = await probeTestCopy({ stateFile: starting.stateFile, recordFile: starting.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "starting");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.fix, null, "a start already in flight must not be offered a second one");
+    assert.match(row.detail, /a start was recorded .* minute\(s\) ago/);
+  } finally {
+    starting.cleanup();
+  }
+
+  // An attempt older than the window is the same as no attempt: down, button.
+  const stale = stageFiles({
+    state: { port: await freePort() },
+    record: {
+      lastAttemptAt: new Date(Date.now() - STAGE_START_WINDOW_MS - 60_000).toISOString(),
+      lastOutcome: "failed",
+      lastReason: "nothing was listening",
+      lastPid: "",
+    },
+  });
+  try {
+    const info = await probeTestCopy({ stateFile: stale.stateFile, recordFile: stale.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "down");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.fix, "start-test-copy", "an attempt that failed minutes ago is a press worth offering");
+    assert.match(row.detail, /the last start, .*failed: nothing was listening/, `the failed attempt's own reason is missing: ${row.detail}`);
+  } finally {
+    stale.cleanup();
+  }
+
+  // A state file naming the paper's port: refused by name, and nothing offered.
+  const fallback = await freePort();
+  const unsafe = stageFiles({ state: { port: 3000 } });
+  try {
+    const info = await probeTestCopy({ port: fallback, stateFile: unsafe.stateFile, recordFile: unsafe.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "unsafe");
+    assert.match(info.stagedReason, /port 3000, which belongs to the live paper/);
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.fix, null, "the page must never offer to start something on the paper's port");
+    assert.match(row.detail, /will not offer to start anything from it/);
+  } finally {
+    unsafe.cleanup();
+  }
+
+  // 5433 is the database, and a hand-edited file is exactly how that gets here.
+  const database = stageFiles({ state: { port: 5433 } });
+  try {
+    const info = await probeTestCopy({ port: fallback, stateFile: database.stateFile, recordFile: database.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "unsafe");
+    assert.match(info.stagedReason, /port 5433, which belongs to the database/);
+  } finally {
+    database.cleanup();
+  }
+
+  // A file that is there and names no port -- what a half-written or hand-edited
+  // ops\.stage.json looks like. "There is a file here" is not "there is a copy
+  // here", and neither is a thing to put a start button under.
+  const portless = stageFiles({ state: {} });
+  try {
+    const info = await probeTestCopy({ port: fallback, stateFile: portless.stateFile, recordFile: portless.recordFile, timeoutMs: 250 });
+    assert.equal(info.verdict, "unsafe");
+    assert.equal(info.stagedRaw, true, "the state file is there");
+    assert.equal(info.staged, false, "and it names no port, so nothing is staged by it");
+    assert.match(info.stagedReason, /does not name a port/);
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.fix, null, "a file that names no port gets no button");
+  } finally {
+    portless.cleanup();
+  }
+});
+
+test("an answered port is up, a half-dead one is wedged, and neither offers a button", async () => {
+  /*
+    "A socket is not a paper" is the rule the watchdog and ops\stage.ps1 both
+    use, and the page has to agree with them: a 503 means something is there,
+    which means the port is taken and nothing may be started on it. Treating any
+    answer as up -- which this probe did before -- would have painted a green OK
+    over a server refusing every request.
+  */
+  const up = await stubListener(200);
+  const files = stageFiles({ state: { port: up.port, version: "0.6.66" } });
+  try {
+    const info = await probeTestCopy({ stateFile: files.stateFile, recordFile: files.recordFile, timeoutMs: 2000 });
+    assert.equal(info.verdict, "up");
+    assert.equal(info.up, true);
+    assert.equal(info.version, "0.6.66", "the version comes off the page the copy served");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.state, "ok");
+    assert.equal(row.fix, null, "a copy that is already answering must not be offered a start");
+  } finally {
+    files.cleanup();
+    await up.close();
+  }
+
+  const wedged = await stubListener(503);
+  const wedgedFiles = stageFiles({ state: { port: wedged.port, version: "0.6.66" } });
+  try {
+    const info = await probeTestCopy({ stateFile: wedgedFiles.stateFile, recordFile: wedgedFiles.recordFile, timeoutMs: 2000 });
+    assert.equal(info.verdict, "wedged");
+    assert.equal(info.status, 503, "the status it answered with is the fact the page prints");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.state, "note");
+    assert.equal(row.fix, null, "nothing is started while the port is taken");
+    assert.match(row.detail, /answered 503/);
+  } finally {
+    wedgedFiles.cleanup();
+    await wedged.close();
+  }
+
+  // The socket accepts and nothing comes back: the case ECONNREFUSED cannot
+  // describe, and the reason the probe tells the two apart at all.
+  const dead = await stubListener(null);
+  const deadFiles = stageFiles({ state: { port: dead.port } });
+  try {
+    const info = await probeTestCopy({ stateFile: deadFiles.stateFile, recordFile: deadFiles.recordFile, timeoutMs: 2000 });
+    assert.equal(info.verdict, "wedged");
+    assert.notEqual(info.errorCode, "ECONNREFUSED");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.match(row.detail, /did not answer/);
+    assert.equal(row.fix, null);
+  } finally {
+    deadFiles.cleanup();
+    await dead.close();
+  }
+});
+
+test("the card follows the port the state file names, not the number 3100", async () => {
+  // A staged copy can be on any safe port; a card titled 3100 over a sentence
+  // about 3199 is two facts that disagree, and this page's whole job is to be
+  // the one place that agrees.
+  const port = await freePort();
+  const data = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    timeZone: DENVER,
+    probes: probeSet({
+      testCopy: async () => ({
+        ok: true,
+        port,
+        up: false,
+        version: null,
+        verdict: "down",
+        staged: true,
+        stagedVersion: "0.6.65",
+        lastAttempt: null,
+      }),
+    }),
+  });
+  const card = cardFor(data, "test-copy");
+  assert.equal(card.label, "Test copy on " + port, "the label must name the port the sentence is about");
+  assert.equal(card.fix, "start-test-copy");
+  assert.equal(card.fixLabel, "Start the test copy");
+  assert.equal(card.state, "note");
+});
+
+test("Start the test copy runs the start-only script, and only that", async () => {
+  /*
+    The button, and the argv behind it. ops\start-stage.ps1 restores nothing,
+    builds nothing and kills nothing -- it starts the build already on disk and
+    declines in its own words if anything else holds the port. It is also the
+    file the watchdog spawns, so a press and a reboot take the same path and
+    this page cannot become a second way to start a server.
+  */
+  const spec = ACTIONS["start-test-copy"];
+  assert.ok(spec, "there is no start-test-copy action");
+  assert.equal(spec.label, "Start the test copy");
+  assert.equal(spec.danger, undefined, "it starts one server; it takes nothing offline");
+  assert.equal(spec.confirm, undefined, "a start that declines in its own words needs no confirm word");
+  assert.equal(spec.spawns.length, 1);
+  const [step] = spec.spawns;
+  assert.match(step.exe, /System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/i);
+  assert.deepEqual(step.args, [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    path.join(OPS_DIR, "start-stage.ps1"),
+  ]);
+  assert.equal(step.settleMs, 0, "the script reports its own outcome; the page must not hold the button for it");
+
+  // The file it runs is on disk here and is the start-only one: no restore, no
+  // build, no stop.
+  const script = fs.readFileSync(path.join(OPS_DIR, "start-stage.ps1"), "utf8");
+  assert.match(script, /Get-TownReporterStageInfo/, "the button must run the one shared stage decision");
+  // Comments stripped first: the file's own header promises "there is no
+  // Stop-Process, no taskkill", and a bare doesNotMatch would fail on the
+  // sentence that makes the promise instead of on a line that breaks it.
+  const code = script
+    .replace(/<#[\s\S]*?#>/g, "") // block comments
+    .replace(/^\s*#.*$/gm, ""); // whole-line comments
+  assert.doesNotMatch(code, /Stop-Process|taskkill/, "the start path must never stop anything");
+  assert.doesNotMatch(code, /\bpsql\b|Invoke-Sqlcmd|npm run build/, "the start path must never restore or build");
+  assert.match(code, /Get-TownReporterStageInfo -App \$app/, "the shared decision must still be reached in code, not only in prose");
+
+  // And it is on the page, with the menu's own wording, like every other button.
+  const { server, port } = await boot();
+  try {
+    const res = await raw(port, { path: "/api/actions", headers: hostFor(port) });
+    const actions = JSON.parse(res.text).actions;
+    const button = actions.find((a) => a.id === "start-test-copy");
+    assert.ok(button, "the page offers no start-test-copy button");
+    assert.equal(button.label, "Start the test copy");
+    assert.match(button.explain, /Nothing is restored or rebuilt/);
   } finally {
     await server.close();
   }

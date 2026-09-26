@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { assertStagingDatabase } from "./stage-editor.mjs";
-import { ACTIONS } from "../ops/control/control-server.mjs";
+import { ACTIONS, STAGE_START_WINDOW_MS } from "../ops/control/control-server.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -68,6 +68,14 @@ const REQUIRED = [
   "lib-backup.ps1",
   "lib-alert.ps1",
   "backup.ps1",
+  // What brings the staged copy on 3100 back after a reboot, without a second
+  // stage. lib-stage.ps1 decides and starts nothing; start-stage.ps1 is the
+  // only thing that starts, and it declines unless what ops\stage.ps1 left on
+  // disk is there and the port is free. Both are called by ops\watchdog.ps1 and
+  // by the Control page's one start button, so a missing file fails at 3 AM on
+  // the machine whose walkthrough is waiting, not in CI.
+  "lib-stage.ps1",
+  "start-stage.ps1",
   // The Control page, and the launcher the Desktop icon runs. The page is the
   // operator's non-terminal way in now, so the same argument that put
   // status.ps1 in this list applies twice over: a missing file fails on the
@@ -690,9 +698,13 @@ test("the watchdog repairs the reader and the model server without ever aiming a
   assert.match(wd, /Start-RedlibIfDown/, "the watchdog must start the reader if it is down");
   assert.match(wd, /Start-OllamaIfDown/, "the watchdog must start Ollama if it is down");
 
-  // The two optional sections sit between the app and the tunnel sections and
-  // are each skipped in test mode. Sliced, then read for what must not appear.
-  const optionalRaw = wd.slice(wd.indexOf("--- Reddit reader (Redlib)"), wd.indexOf("--- Tunnel ---"));
+  // The two optional sections sit between the app and the staged copy's own
+  // section (the fourth thing the watchdog keeps alive, and the one with its
+  // own test) and are each skipped in test mode. Sliced to that next section
+  // so this is about the two sections it names and nothing else -- the count
+  // below is one catch per section, and a slice that ran to the tunnel would
+  // count a section this test does not describe.
+  const optionalRaw = wd.slice(wd.indexOf("--- Reddit reader (Redlib)"), wd.indexOf("--- The staged copy"));
   assert.ok(optionalRaw.length > 0, "could not find the optional-service sections");
   const optional = stripComments(optionalRaw);
   assert.match(optional, /WATCHDOG_TEST_MODE -ne '1'/, "both sections must be skipped in test mode");
@@ -1835,6 +1847,270 @@ test(
     }
     assert.doesNotMatch(out, /FAIL/, `a hash check failed:\n${out}`);
     assert.match(out, /file hashing without a module: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
+
+/* ─────────── the staged copy on 3100 comes back after a reboot ─────────── */
+
+/**
+ * The two files that bring back what ops\stage.ps1 already staged.
+ *
+ * The reboot is the case: the restored townreporter_dev, the build and the
+ * files it wrote all survive it, the running server does not, and the only way
+ * back used to be the whole stage again -- drop the database, restore the
+ * backup, rebuild. ops\lib-stage.ps1 decides and starts nothing; the watchdog
+ * calls ops\start-stage.ps1, which starts and still decides for itself.
+ *
+ * Every assertion below is one of the three rules those files are built on:
+ * it starts and never stops; it starts only what was already staged; and it
+ * never puts a second copy on a port something already holds.
+ */
+const STAGE_LIB = read("lib-stage.ps1");
+const STAGE_START = read("start-stage.ps1");
+// Comments stripped for the negative assertions: both files say in prose that
+// they never kill anything, and a bare doesNotMatch would fail on the sentence
+// that makes the promise rather than on a line that breaks it.
+const STAGE_LIB_CODE = stripComments(STAGE_LIB);
+const STAGE_CODE = stripComments(STAGE_START);
+
+test("the staged copy's start path is start-only, and stays ASCII for 5.1", () => {
+  for (const [name, text] of [
+    ["lib-stage.ps1", STAGE_LIB],
+    ["start-stage.ps1", STAGE_START],
+  ]) {
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `ops\\${name} has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+  }
+
+  for (const [name, code] of [
+    ["lib-stage.ps1", STAGE_LIB_CODE],
+    ["start-stage.ps1", STAGE_CODE],
+  ]) {
+    assert.doesNotMatch(
+      code,
+      /Stop-Process|taskkill|Remove-Item[^\n]*\.stage\.pid/,
+      `ops\\${name} must never stop anything: a copy on that port belongs to the operator, and ops\\stage.ps1 -Stop is the only stop`,
+    );
+  }
+  assert.doesNotMatch(
+    STAGE_CODE,
+    /\bpsql\b|Invoke-Sqlcmd|drop database|createdb|\brestore\b/i,
+    "the start path restores nothing -- it is the half of staging a reboot did not take away",
+  );
+  assert.doesNotMatch(STAGE_CODE, /npm (run )?build|vite build/i, "and it builds nothing: the build is already on disk");
+
+  // The port comes from ops\.stage.json through the shared decision, never from
+  // a literal typed into this file. 3100 is only the default; a state file may
+  // name any safe port, and a number written here would be a second, silently
+  // disagreeing answer to a question the file already answers.
+  assert.doesNotMatch(STAGE_CODE, /\b3100\b|\b3000\b/, "ops\\start-stage.ps1 must not name a port of its own");
+  assert.match(STAGE_CODE, /\$stagePort = \$info\.Port/, "the port must come from Get-TownReporterStageInfo");
+  // It does read 5433 -- as the input that lets the library refuse a state file
+  // naming the database's port. Nothing is ever started on it.
+  assert.match(STAGE_CODE, /-PgPort 5433/, "the database's port is passed to the verifier so it can be refused by name");
+  assert.match(
+    STAGE_CODE,
+    /\. \(Join-Path \$PSScriptRoot "lib-ownership\.ps1"\)[\s\S]{0,400}Assert-TownReporterLegacyOwnership -Watchdog/,
+    "a script that starts a server on this checkout must ask the same opt-in question the watchdog asked",
+  );
+
+  // Nothing is started while the port is taken: every verdict but 'down' and a
+  // watchdog-owned 'starting' declines, in the decision's own words.
+  assert.match(STAGE_CODE, /switch \(\$info\.Verdict\)/, "the decision to start must be the library's verdict, not a second opinion");
+  const declines = [...STAGE_CODE.matchAll(/'(none|up|wedged)'\s+\{ Decline/g)].map((m) => m[1]);
+  assert.deepEqual(declines.sort(), ["none", "up", "wedged"], "none, up and wedged must all decline");
+  assert.match(
+    STAGE_CODE,
+    /'starting' \{\s*\n\s*if \(-not \$Watchdog\) \{ Decline/,
+    "a start already in flight is declined unless the watchdog says the record is its own handwriting",
+  );
+  assert.match(STAGE_CODE, /\[switch\]\$Watchdog/, "the -Watchdog switch the watchdog passes must exist");
+
+  // The order that makes a failed start survivable: the attempt is written
+  // before the process is spawned, and the pid file before the wait, so a
+  // process that dies on its first line is still on record and still visible.
+  const recordedAt = STAGE_CODE.indexOf("Save-TownReporterStageStartRecord");
+  const spawnedAt = STAGE_CODE.indexOf("Start-Process -FilePath $nodeExe");
+  assert.ok(recordedAt >= 0 && spawnedAt > recordedAt, "the attempt must be recorded BEFORE the spawn, or the floor is not a floor");
+  const pidAt = STAGE_CODE.indexOf("Set-Content -Path $paths.Pid");
+  const waitedAt = STAGE_CODE.indexOf("for ($i = 0; $i -lt 100; $i++)");
+  assert.ok(pidAt >= 0 && waitedAt > pidAt, "the pid file must be written before the wait, so the page can see what is starting");
+
+  // The build goes on the command line as an absolute path in quotes, exactly
+  // as ops\start-townreporter.ps1 writes it: Windows reports a command line as
+  // it was typed, and Test-TownReporterServerProcess matches that path, which is
+  // how a copy started from here is recognised as ours. ops\stage.ps1 passes
+  // the same file relative, and lib-stage.ps1 has a weaker wording for that.
+  assert.match(
+    STAGE_CODE,
+    /-ArgumentList @\("scripts\/with-app-env\.mjs", "node", "`"\$outputServer`""\)/,
+    "the built server must go on the command line as a quoted absolute path, or the copy is not recognised as ours",
+  );
+});
+
+test("start-stage.ps1 starts the staged copy in stage.ps1's own environment, to the letter", () => {
+  /*
+    Two files now start "the staged copy", and if they disagree about the
+    database or the host then a reboot quietly hands the operator a different
+    server than the one they were walking: the same port, pointing at the live
+    townreporter database. So the environment block is compared line for line,
+    with each file's own variables resolved to what they actually are today --
+    which is also why the two resolutions below are asserted separately: a
+    `$dbName` that drifted off townreporter_dev would otherwise be normalised
+    away and this test would pass while agreeing about nothing.
+  */
+  const stageText = read("stage.ps1");
+  const dbName = stageText.match(/\$dbName = "([^"]+)"/);
+  const pgPort = stageText.match(/\$pgPort = (\d+)/);
+  assert.ok(dbName && pgPort, "could not find $dbName or $pgPort in ops\\stage.ps1");
+  assert.equal(dbName[1], "townreporter_dev", "staging targets townreporter_dev and nothing else");
+  assert.equal(pgPort[1], "5433", "staging's Postgres port is 5433");
+
+  const resolve = (value) =>
+    value
+      .replace(/\$(Port|stagePort)\b/g, "<port>")
+      .replace(/\$pgPort\b/g, pgPort[1])
+      .replace(/\$dbName\b/g, dbName[1]);
+  const envBlock = (ps) =>
+    new Map([...ps.matchAll(/^\$env:([A-Z_]+)\s*=\s*"([^"]*)"/gm)].map((m) => [m[1], resolve(m[2])]));
+
+  const staged = envBlock(STAGE_START);
+  const stage = envBlock(stageText);
+  assert.deepEqual([...staged.keys()].sort(), [...stage.keys()].sort(), "the two start paths must set the same variables");
+  for (const [name, value] of stage) {
+    assert.equal(staged.get(name), value, `$env:${name} disagrees: ops\\start-stage.ps1 says "${staged.get(name)}", ops\\stage.ps1 says "${value}"`);
+  }
+  assert.equal(
+    staged.get("DATABASE_URL"),
+    `postgres://postgres@127.0.0.1:5433/${dbName[1]}`,
+    "the staged copy must come back on the restored database, not on whatever .env says",
+  );
+  assert.equal(staged.get("PORT"), "<port>", "the port must be the staged one, from ops\\.stage.json");
+  assert.equal(staged.get("TOWNREPORTER_TUNNEL"), "0", "a staged copy must never take the paper's public hostname over");
+});
+
+test("the page's start window and the library's are the same 150 seconds", () => {
+  /*
+    The one number the Control page and ops\lib-stage.ps1 share. A drift makes
+    the page's WORDS wrong and nothing else -- the library decides, and the page
+    never starts anything -- which is exactly why it would go unnoticed. The
+    page's own comment promises this test exists.
+  */
+  const window = STAGE_LIB.match(/\$StartWindowSeconds = (\d+)/);
+  assert.ok(window, "could not find StartWindowSeconds in ops\\lib-stage.ps1");
+  assert.equal(
+    Number(window[1]) * 1000,
+    STAGE_START_WINDOW_MS,
+    `ops\\lib-stage.ps1's StartWindowSeconds is ${window[1]}s but the Control page's STAGE_START_WINDOW_MS is ${STAGE_START_WINDOW_MS}ms`,
+  );
+});
+
+test("the watchdog brings the staged copy back, start-only, behind the paper's health", () => {
+  /*
+    The caller, and the reason the reboot case is fixed at all: the watchdog
+    already runs every five minutes, so nothing new has to be scheduled for
+    this. Four rules, each one a way it could have gone wrong instead --
+    starting something while the paper is down, stopping what holds the port,
+    retrying a start that cannot work every five minutes forever, and reading
+    its own attempt record back as somebody else's.
+  */
+  const wd = readFileSync(join(OPS, "watchdog.ps1"), "utf8");
+  // The section's doc comment sits ABOVE the gate; the code it describes sits
+  // inside it. So the slice to judge is the gate to the next section.
+  const gate = wd.indexOf("if ($appHealthy) {");
+  const section = wd.indexOf("# --- The staged copy");
+  const tunnel = wd.indexOf("# --- Tunnel");
+  assert.ok(gate >= 0 && section >= 0 && tunnel > gate, "could not find the stage section or the paper's health gate");
+  const gated = wd.slice(gate, tunnel);
+  assert.match(gated, /Get-TownReporterStageInfo/, "the stage section must be inside the paper's health gate");
+  assert.doesNotMatch(
+    gated.slice(0, gated.indexOf("Get-TownReporterStageInfo")),
+    /^\}$/m,
+    "the stage section must sit inside the paper's health gate: nothing is started while the paper is down",
+  );
+  const code = stripComments(gated);
+  assert.match(code, /Get-TownReporterStageInfo -App \$stageApp -AppPort \(\[int\]\$port\) -PgPort \(\[int\]\$pgPort\)/, "the watchdog must ask the shared decision, with its own ports");
+  assert.doesNotMatch(
+    code,
+    /Stop-Process|taskkill/,
+    "the watchdog is start-only here: what holds that port is the operator's copy, and stopping it is ops\\stage.ps1 -Stop's job",
+  );
+  assert.match(code, /Test-TownReporterStageStartDue -App \$stageApp -Minutes 30/, "the thirty-minute floor must be asked of the shared record");
+  assert.match(code, /-Minutes 30/, "the floor is 30 minutes");
+
+  const recordedAt = code.indexOf("Save-TownReporterStageStartRecord");
+  const spawnedAt = code.indexOf("Start-Process -FilePath $stageShell");
+  assert.ok(recordedAt >= 0 && spawnedAt > recordedAt, "the watchdog must record the attempt before it spawns the start");
+  assert.match(
+    code,
+    /"-File", \(Join-Path \$stageApp "ops\\start-stage\.ps1"\), "-Quiet", "-Watchdog"/,
+    "the spawn must pass -Watchdog, or the child reads the watchdog's own record as an attempt in flight and declines itself",
+  );
+  // Only 'down' starts anything, and 'nothing staged' says nothing at all: an
+  // ordinary log line every five minutes on a machine that has never staged is
+  // how an operator learns to stop reading the log.
+  assert.match(code, /'down' \{/, "only the down verdict may start anything");
+  assert.match(code, /if \(\$stage\.StateExists\) \{ Write-Log "stage: \$\(\$stage\.Reason\)" \}/, "nothing staged says nothing; a state file that names an unusable port is worth a line");
+  assert.match(
+    wd,
+    /if \(\$env:WATCHDOG_TEST_MODE -eq '1' -and \$env:WATCHDOG_STAGE_APP\) \{ \$stageApp = \$env:WATCHDOG_STAGE_APP \}/,
+    "the stage world must be redirectable for CI, and only in test mode",
+  );
+  assert.match(wd, /^\s*WATCHDOG_STAGE_APP\s+-/m, "and the seam must be documented with the others");
+});
+
+test(
+  "the staged copy comes back after a reboot, and the floors hold, without touching 3000 or 3100",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The reboot, executed. scripts\ci-stage-start.ps1 builds a disposable
+      world in the temp directory -- a checkout holding copies of the real
+      ops\ files, a stub build that answers 200, a stub Postgres listener, a
+      stub app -- and runs the REAL ops\watchdog.ps1 against it through the
+      TEST-003 seams plus WATCHDOG_STAGE_APP.
+
+      It proves the five scenarios in its own header, and the assertions below
+      are as load-bearing as the ones above: this file must never become a way
+      to touch the machine's own copy on 3100, the paper on 3000 or Postgres.
+    */
+    const fixture = join(ROOT, "scripts", "ci-stage-start.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-stage-start.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-stage-start.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.match(text, /WATCHDOG_STAGE_APP/, "the harness must run the real watchdog against its disposable stage world");
+    assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
+    assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+    assert.match(
+      text,
+      /foreach \(\$processId in \$script:spawned\) \{\s*\n\s*Stop-Process -Id \$processId/,
+      "cleanup stops the pids THIS run started, one by one -- never by image name",
+    );
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a stage-start check failed:\n${out}`);
+    assert.match(out, /ci-stage-start\.ps1 : every check passed/, `the fixture did not reach its end:\n${out}`);
     assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
   },
 );

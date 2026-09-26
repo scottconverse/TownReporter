@@ -26,11 +26,19 @@
  *           https://townreporter.org  the published version, 10s timeout
  *           <backup folder>/*.sql     the newest backup
  *           127.0.0.1:3100            the test copy, if one is up
+ *           ops\.stage.json +         what is STAGED there -- the build and the
+ *           logs\stage-start.json     database that survive a reboot -- and what
+ *                                     the last attempt to start it came to. Two
+ *                                     small files, read-only; the page never
+ *                                     starts anything itself.
  *           lms ps --json             Qwen on this computer, read-only
  *           scan_runs (SELECT)        the last scan
  *   runs    exactly the six menu actions, each a fixed executable with a fixed
  *           argument ARRAY and shell:false. No user-supplied argument ever
- *           reaches a command line. See ACTIONS below.
+ *           reaches a command line. See ACTIONS below -- plus "start the test
+ *           copy", which is not on the menu and is start-only: it runs
+ *           ops\start-stage.ps1, which restores nothing, builds nothing and
+ *           kills nothing.
  *
  * SECURITY SHAPE (copied from stock-dsh/mission-control/mission-control.mjs)
  *
@@ -182,6 +190,25 @@ export const ACTIONS = {
       {
         exe: POWERSHELL,
         args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path.join(OPS_DIR, "backup.ps1"), "-Force"],
+        settleMs: 0,
+      },
+    ],
+  },
+  // The staged copy is the one service on this machine that does NOT come back
+  // by itself after a full stop: it is not a scheduled task, and its whole
+  // point is to be started for a walkthrough and stopped again. So the button
+  // is here, and ops\start-stage.ps1 behind it is start-only -- no restore, no
+  // build, no kill. It declines in its own words when there is nothing staged,
+  // when something already holds the port, or when a start is already in
+  // flight, so pressing this on a stale page cannot start a second copy.
+  "start-test-copy": {
+    label: "Start the test copy",
+    explain:
+      "Brings back the test copy already staged on this machine, after a reboot. Nothing is restored or rebuilt, and the paper is not touched. Does nothing if it is already running.",
+    spawns: [
+      {
+        exe: POWERSHELL,
+        args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path.join(OPS_DIR, "start-stage.ps1")],
         settleMs: 0,
       },
     ],
@@ -506,21 +533,146 @@ export function probeAlerts({ appRoot = null, stateFile = null } = {}) {
   };
 }
 
-/** Whether a test copy is answering on 3100, and what version it says. */
-export async function probeTestCopy({ port = 3100, timeoutMs = 3000 } = {}) {
+/**
+ * The test copy: is one answering, and is one staged?
+ *
+ * The old probe asked one question -- an HTTP GET of 3100, three seconds, "did
+ * it answer". That is still here, and it is still a read that changes nothing.
+ * What is new is the second question, because after a reboot the copy is GONE
+ * and "nothing is answering" no longer means "nothing is here": the build and
+ * the database are on disk, and ops\start-stage.ps1 can put a server back in
+ * front of them. So this also reads the two small files the watchdog and that
+ * script write -- `ops\.stage.json` and `logs\stage-start.json` -- and says
+ * what they say.
+ *
+ * This is a VIEW, not the decision. Whether anything may be started lives in
+ * ops\lib-stage.ps1 and only there; this page starts nothing itself, it posts
+ * the `start-test-copy` action and that script applies its own gate. The one
+ * rule repeated here is the port: a state file naming 3000 or 5433 is not a
+ * test copy, it is the paper or the database, and the page will not describe
+ * it as something to start.
+ *
+ * `up` means answered 200. A 503 comes back as a STATUS, not as an exception,
+ * and the old probe called that "up" -- the same lie ops\lib-stage.ps1 was
+ * fixed not to tell. "Another program answered 503" is a different fact from
+ * "nothing is there", and the page prints both.
+ */
+export async function probeTestCopy({
+  port = 3100,
+  timeoutMs = 3000,
+  appRoot = null,
+  stateFile = null,
+  recordFile = null,
+} = {}) {
+  const statePath = stateFile || (appRoot ? path.join(appRoot, "ops", ".stage.json") : null);
+  const staged = statePath ? readStagedPort(statePath) : { found: false, usable: false, reason: null, port: null, version: null, started: null };
+  const probePort = staged.usable ? staged.port : port;
+
+  const recordPath = recordFile || (appRoot ? path.join(appRoot, "logs", "stage-start.json") : null);
+  const recordState = recordPath ? readJsonState(recordPath) : { ok: false, exists: false, value: null };
+  const record = recordState.ok ? recordState.value || {} : null;
+  const lastAttempt = record
+    ? {
+        at: record.lastAttemptAt || null,
+        outcome: record.lastOutcome || null,
+        reason: record.lastReason || null,
+        pid: record.lastPid || null,
+      }
+    : null;
+  const sinceMs = lastAttempt ? Date.now() - Date.parse(String(lastAttempt.at ?? "")) : NaN;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let answered = null;
+  let body = "";
+  let errorCode = null;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/`, { signal: controller.signal });
-    const body = await res.text();
-    const m = body.match(/0\.6\.\d+/);
-    return { ok: true, up: true, version: m ? m[0] : null, status: res.status };
-  } catch {
-    return { ok: true, up: false, version: null };
+    const res = await fetch(`http://127.0.0.1:${probePort}/`, { signal: controller.signal });
+    answered = res.status;
+    body = await res.text();
+  } catch (error) {
+    // ECONNREFUSED is "nothing is listening"; everything else -- a reset, a
+    // timeout on a socket that accepted -- is something being there and not
+    // answering, which is the half-dead listener ops\lib-stage.ps1 calls
+    // wedged. The page says which of the two it found.
+    errorCode = error?.cause?.code || error?.code || null;
   } finally {
     clearTimeout(timer);
   }
+
+  const up = answered === 200;
+  const version = body.match(/0\.6\.\d+/)?.[0] ?? null;
+  const listening = answered !== null ? true : errorCode !== null && errorCode !== "ECONNREFUSED";
+
+  let verdict;
+  if (up) verdict = "up";
+  else if (listening) verdict = "wedged";
+  else if (!staged.found) verdict = "none";
+  else if (!staged.usable) verdict = "unsafe";
+  else if (Number.isFinite(sinceMs) && sinceMs >= 0 && sinceMs < STAGE_START_WINDOW_MS) verdict = "starting";
+  else verdict = "down";
+
+  return {
+    ok: true,
+    port: probePort,
+    up,
+    version,
+    status: answered,
+    errorCode,
+    verdict,
+    staged: staged.usable,
+    stagedRaw: staged.found,
+    stagedVersion: staged.version,
+    stagedStarted: staged.started,
+    stagedReason: staged.reason,
+    lastAttempt,
+    minutesSinceAttempt: Number.isFinite(sinceMs) ? Math.floor(sinceMs / 60_000) : null,
+  };
 }
+
+/**
+ * The port `ops\.stage.json` names, when it names one this page may describe.
+ *
+ * A file anyone can hand-edit, so the number is a claim and not a fact: out of
+ * range, or 3000, or 5433, and there is nothing here a person should be offered
+ * a start button for. The refusal is the same one ops\lib-stage.ps1's
+ * Test-TownReporterStagePortSafe makes, in this page's words.
+ */
+function readStagedPort(file) {
+  const read = readJsonState(file);
+  if (!read.exists) return { found: false, usable: false, reason: null, port: null, version: null, started: null };
+  if (!read.ok) {
+    return { found: true, usable: false, reason: "ops\\.stage.json could not be read", port: null, version: null, started: null };
+  }
+  const state = read.value || {};
+  const raw = String(state.port ?? "").trim();
+  const base = { found: true, version: state.version || null, started: state.started || null };
+  if (!/^\d+$/.test(raw)) {
+    return { ...base, usable: false, reason: `ops\\.stage.json does not name a port ('${raw}')`, port: null };
+  }
+  const stagedPort = Number(raw);
+  if (stagedPort < 1024 || stagedPort > 65535) {
+    return { ...base, usable: false, reason: `ops\\.stage.json names port ${stagedPort}, which is not a usable port`, port: stagedPort };
+  }
+  if (stagedPort === 3000) {
+    return { ...base, usable: false, reason: "ops\\.stage.json names port 3000, which belongs to the live paper", port: stagedPort };
+  }
+  if (stagedPort === 5433) {
+    return { ...base, usable: false, reason: "ops\\.stage.json names port 5433, which belongs to the database", port: stagedPort };
+  }
+  return { ...base, usable: true, reason: null, port: stagedPort };
+}
+
+/**
+ * How long after a recorded start an unanswered port still counts as "a start
+ * is in flight" rather than "it did not come back". The same 150 seconds
+ * `Get-TownReporterStageInfo` uses (its StartWindowSeconds), and the only
+ * number this page shares with it. A drift between the two makes the page's
+ * WORDS wrong and nothing else: the decision to start anything is that
+ * library's, and this page never starts anything. scripts/ops-scripts.test.mjs
+ * asserts the two numbers are still the same one.
+ */
+export const STAGE_START_WINDOW_MS = 150_000;
 
 /**
  * Qwen on this computer, through LM Studio's own read-only process listing.
@@ -598,6 +750,83 @@ export async function probeLastScan({ repoRoot = REPO_ROOT, appRoot = null, time
     return JSON.parse(text.slice(start));
   } catch {
     return { ok: false, detail: "Could not read the last scan" };
+  }
+}
+
+/**
+ * The test copy as one honest row: what is answering, what is staged, and what
+ * the last attempt to bring it back came to.
+ *
+ * "Nothing is running" is not a fault -- this page never starts a copy by
+ * itself -- so the row is a Note, and the only thing that earns a button is
+ * the one state a press can repair: staged on disk, nothing answering, no
+ * start in flight, and a port this page is allowed to describe. Everything
+ * else says why not, in the same words ops\lib-stage.ps1 would use, because a
+ * second phrasing for the same fact is a second thing to get wrong.
+ *
+ * The press is a POST of `start-test-copy`, which runs ops\start-stage.ps1.
+ * That script is the gate -- it re-reads all of this itself and declines in
+ * its own words, so a button pressed on a stale page cannot start anything
+ * this row would not have offered.
+ */
+export function describeTestCopy(testCopy, { now = Date.now, timeZone = LOCAL_TZ } = {}) {
+  const where = `127.0.0.1:${testCopy?.port ?? 3100}`;
+  const attempt = testCopy?.lastAttempt;
+  const when = attempt?.at ? formatLocalTime(attempt.at, { now, timeZone }) : "";
+  // What the last attempt came to, appended to whatever else the row says. The
+  // distinction that matters is 'failed' versus 'started': one says this has
+  // never worked, the other says it worked and stopped since.
+  const lastLine = !attempt || !attempt.outcome
+    ? "; no start has been tried yet"
+    : attempt.outcome === "failed"
+      ? `; the last start${when ? `, ${when},` : ""} failed: ${attempt.reason || "no reason was given"}`
+      : attempt.outcome === "started"
+        ? `; the last start${when ? `, ${when},` : ""} reported it answering, so it has stopped since`
+        : "";
+
+  switch (testCopy?.verdict) {
+    case "up":
+      return {
+        state: "ok",
+        detail: `answering${testCopy.version ? `, version ${testCopy.version}` : ""}`,
+        fix: null,
+      };
+    case "unsafe":
+      return {
+        state: "note",
+        detail: `${testCopy.stagedReason}; this page will not offer to start anything from it`,
+        fix: null,
+      };
+    case "wedged":
+      return {
+        state: "note",
+        detail:
+          `something is listening on ${where} but ${testCopy.status ? `answered ${testCopy.status}` : "did not answer"}` +
+          "; nothing is started while the port is taken" +
+          (testCopy.staged ? lastLine : ""),
+        fix: null,
+      };
+    case "starting":
+      return {
+        state: "note",
+        detail: `a start was recorded ${testCopy.minutesSinceAttempt} minute(s) ago and nothing is answering yet; giving it a moment`,
+        fix: null,
+      };
+    case "down":
+      return {
+        state: "note",
+        detail:
+          `staged${testCopy.stagedVersion ? ` (version ${testCopy.stagedVersion})` : ""} and nothing is answering on ${where}` +
+          lastLine,
+        fix: "start-test-copy",
+        fixLabel: "Start the test copy",
+      };
+    default:
+      return {
+        state: "note",
+        detail: `nothing is answering on ${where} (that is normal; it is not always running)`,
+        fix: null,
+      };
   }
 }
 
@@ -786,7 +1015,7 @@ export async function collectStatus({
   const [version, publicVersion, testCopy, qwen, lastScan] = await Promise.all([
     Promise.resolve(read.version({ repoRoot })),
     read.publicVersion({ site: status.site || "https://townreporter.org" }),
-    read.testCopy({}),
+    read.testCopy({ appRoot }),
     read.qwen({}),
     read.lastScan({ repoRoot, appRoot, onOutput }),
   ]);
@@ -826,6 +1055,7 @@ export async function collectStatus({
         : `This install is ${version.label}; the public site answered but named no version`;
 
   const scan = describeLastScan(lastScan, { now, timeZone });
+  const copy = describeTestCopy(testCopy, { now, timeZone });
 
   const extras = [
     card("version", "Version", sameVersion ? "ok" : "note", versionDetail),
@@ -839,8 +1069,6 @@ export async function collectStatus({
         ? `${backup.name} - ${bytes(backup.size)}, written ${formatLocalTime(backup.mtimeMs, { now, timeZone })} (${backup.ageMinutes} minutes ago)`
         : `No backup found in ${backup.dir}`,
     ),
-    // A test copy that is not running is normal, and normal is not the same
-    // word as healthy: Note, so the card is never a green light nobody checked.
     // The copy on the other drive, in the owner's own terms: how many are
     // there, when the last one was checked, and how much room is left. Down
     // only when the run said the copying failed -- an unreadable report is a
@@ -861,14 +1089,18 @@ export async function collectStatus({
               .filter(Boolean)
               .join("; "),
     ),
-    card(
-      "test-copy",
-      "Test copy on 3100",
-      testCopy.up ? "ok" : "note",
-      testCopy.up
-        ? `answering${testCopy.version ? `, version ${testCopy.version}` : ""}`
-        : "nothing is answering on 3100 (that is normal; it is not always running)",
-    ),
+    // The staged copy. Not answering is normal -- it is not a scheduled task
+    // and it does not come back by itself -- so the row is a Note and never a
+    // green light nobody checked; the only thing that earns a button is the one
+    // state a press can repair, which is what describeTestCopy decides.
+    // The port in the label is the port the row is about, not always 3100: a
+    // staged copy can be on any safe port, and a card titled 3100 over a
+    // sentence about 3199 is two facts that disagree.
+    {
+      ...card("test-copy", `Test copy on ${testCopy.port ?? 3100}`, copy.state, copy.detail),
+      fix: copy.fix ?? null,
+      ...(copy.fixLabel ? { fixLabel: copy.fixLabel } : {}),
+    },
     // The probe reports `ok` for "not installed" / "not answering" because
     // those are answers, not failures -- but a card is a verdict, and the only
     // verdict Qwen loaded earns is OK.
@@ -1472,7 +1704,10 @@ function renderCards(target, cards, withFix) {
     if (withFix && card.fix && stateOf(card) !== "ok") {
       var b = document.createElement("button");
       b.type = "button";
-      b.textContent = "Fix this";
+      // The label, when there is one, IS the button: "Start the test copy" is
+      // the words the operator was given for that action, and "Fix this" over
+      // it is a different thing to press. Rows without one keep the old word.
+      b.textContent = card.fixLabel || "Fix this";
       b.setAttribute("aria-label", "Fix this: " + (card.fixLabel || card.fix));
       b.addEventListener("click", function () { runAction(card.fix, b); });
       box.appendChild(b);
@@ -1590,7 +1825,9 @@ function loadStatus(force) {
       h.className = "headline " + (data.attention > 0 ? (data.attention > 2 ? "bad" : "warn") : "ok");
       el("advice").textContent = data.advice || "";
       var paperCards = (data.checks || []).map(function (c) {
-        return { id: c.id, label: c.label, state: c.state, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix };
+        // fixLabel travels with fix: dropping it here was why every fix button
+        // read "Fix this", including the one the server had already named.
+        return { id: c.id, label: c.label, state: c.state, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix, fixLabel: c.fixLabel };
       });
       // Every row is shown, healthy or not: the owner looks here to see that the
       // Reddit reader and DeepSeek are up, not only to learn when they are down.
