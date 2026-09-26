@@ -1013,6 +1013,18 @@ export const draftEditInput = z.object({
   evidenceToken: z.string().max(LIMITS.draftEvidenceToken).optional(),
 });
 
+/**
+ * "Fix these with the model": the text on screen, plus the dials for the one
+ * call it may make. The effort is the loose one -- the registry is allowed to
+ * reinterpret it, and a value it will not take must not refuse the press.
+ */
+export const draftStyleFixInput = draftEditInput
+  .omit({ evidenceDecision: true, evidenceToken: true })
+  .extend({
+    modelChoice: modelChoiceText.optional(),
+    modelEffort: modelEffortLoose.optional(),
+  });
+
 /** `opinion.ts:370` fileWrittenEditorial (`opinion.ts:376` refuses over 400,000). */
 export const editorialText = z.string().max(LIMITS.editorialBody);
 

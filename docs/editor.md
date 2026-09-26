@@ -481,6 +481,16 @@ After **Save edits**, the review refreshes for the saved draft without reloading
 
 If an older record contains incomplete or unreadable structured findings, the panel says so and offers no judgment controls. Review the original material or generate a replacement draft; retrying does not repair the saved record.
 
+### Style check
+
+Everything else the desk checks about a draft is about whether it is true. **Style check** is the one panel about whether it reads. It is measured by code, not by a model, and it looks for shapes rather than facts: a claim attributed to nobody (**Experts say…**), a sentence that asserts importance and reports nothing, a participle tail on the end of a sentence, a dressed-up verb where **said** would do, filler, the same phrase cycling through different synonyms, a paste artifact, a tracking parameter or redirect in a link, a paragraph past the length the story form reads best under, a draft whose sentences are all the same length, a draft with no short sentence next to a long one, and the same six words repeated.
+
+The list is at the bottom of the draft. It says how many things to fix, and for each one where it is — paragraph and sentence — what it is, and the sentence it came from. **Review** findings sit under a fold beneath them: those are for you to read, not to fix. The list measures the text on the page, so it stays current as you type. Every line is a suggestion. Nothing there blocks a save or a publish, and nothing there publishes anything.
+
+**Fix these with the model** runs one repair pass, on demand, using the model the picker is set to. The model is given the list and the draft, and returns the draft with those problems fixed. It may not change a quotation, a number, a name or a link: a rewrite that does is refused, your text is kept, and the desk says why. The result is saved as an ordinary draft revision — the same as **Save** — so it is never a publication. The list then shows whatever is left, which may be nothing.
+
+A model never decides what counts as a fault here. The code names the problems, the model repairs only those, and the code checks the repair.
+
 ### Reporting notes (do not print)
 
 The notes pane is the notebook:
