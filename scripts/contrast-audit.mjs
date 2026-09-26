@@ -143,7 +143,7 @@ const PAIRS = [
   // Notice (states.tsx) carries the README's three shapes: ok is a solid 1px
   // `--ok`, err is 2px dashed `--danger`, warn is solid 2px `--warn` (amber).
   // All three sit on the notice's own `--bg2` panel, which is what these rows
-  // check -- the shape is not contrast, but the colour still has to be legible.
+  // check -- the shape is not contrast, but the color still has to be legible.
   { fg: "danger", bg: "bg2", label: ".notice-err text on the notice's bg2 panel", kind: "text", size: "normal" },
   { fg: "warn", bg: "bg2", label: ".notice-warn text on the notice's bg2 panel", kind: "text", size: "normal" },
   { fg: "ok", bg: "bg2", label: ".notice-ok text on the notice's bg2 panel", kind: "text", size: "normal" },

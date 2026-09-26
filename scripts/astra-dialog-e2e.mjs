@@ -6,7 +6,7 @@
  * whole reason it is built on Radix rather than copied from the design
  * package's `desk/Dialog.jsx` is the three things the reference component
  * cannot do: trap focus, lock the page behind it, and hand focus back to the
- * control that opened it. Those are behaviour, not markup, so nothing that
+ * control that opened it. Those are behavior, not markup, so nothing that
  * reads the source can prove them -- and this repository has no DOM test
  * environment (no jsdom, no happy-dom, no @testing-library), so there is no
  * unit-test route to them either.
@@ -146,7 +146,7 @@ const opened = await page.evaluate(() => {
     role: el.getAttribute("role"),
     labelled: el.getAttribute("aria-labelledby") === title?.id,
     title: title?.textContent?.trim(),
-    // Radix's modal behaviour is `aria-hidden` on everything else in the body
+    // Radix's modal behavior is `aria-hidden` on everything else in the body
     // (plus a FocusScope), not an `aria-modal` attribute -- so this is what
     // "modal" looks like here. The trigger stands in for the rest of the page.
     pageHidden: trigger.getAttribute("aria-hidden"),
@@ -154,7 +154,7 @@ const opened = await page.evaluate(() => {
     border: style.borderTopWidth,
     radius: style.borderTopLeftRadius,
     background: style.backgroundColor,
-    colour: style.color,
+    color: style.color,
     buttons: [...el.querySelectorAll("button")].map((b) => b.textContent.trim()),
   };
 });
@@ -190,7 +190,7 @@ const dark = await page.evaluate(() => {
   const out = {
     matched: backdrop.matches(':root[data-appearance="desk-dark"] .desk-ltr.astra-modal-layer'),
     background: style.backgroundColor,
-    colour: style.color,
+    color: style.color,
     layerBackground: getComputedStyle(backdrop).backgroundColor,
     scrim: scrim.backgroundColor,
   };
@@ -202,8 +202,8 @@ if (!dark.matched) fail("the dark palette rule does not reach the portaled layer
 if (dark.background !== "rgb(27, 25, 22)") {
   fail(`the dialog panel is ${dark.background} in dark mode, not the desk's warm black #1b1916`);
 }
-if (dark.colour !== "rgb(232, 230, 225)") {
-  fail(`the dialog text is ${dark.colour} in dark mode, not #e8e6e1`);
+if (dark.color !== "rgb(232, 230, 225)") {
+  fail(`the dialog text is ${dark.color} in dark mode, not #e8e6e1`);
 }
 if (dark.layerBackground !== "rgba(0, 0, 0, 0)") {
   fail(`the portal layer paints ${dark.layerBackground} -- it should be transparent, the scrim paints the dimming`);

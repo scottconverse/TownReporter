@@ -4,7 +4,7 @@
   (docs/design/handoff-2026-09-26/design-system/tokens/).
 
   `--teal` survives as a NAME because forty-odd rules in this file read it, but
-  it is no longer a colour: it is the accent TEXT tone, so it is ink on cream
+  it is no longer a color: it is the accent TEXT tone, so it is ink on cream
   and bone on warm black. The accent FILL is `--a`, the yellow, and nothing
   informational is ever set in it -- `--sel` exists for the marks that need to
   be legible as a position (the current section, the selected segment) because
@@ -1169,7 +1169,7 @@
   paper and the desk are the same newspaper at night -- and it is what
   `READER_DARK_BG` in src/lib/appearance.ts reports to the
   `<meta name="theme-color">` update; src/lib/appearance.test.ts fails if either
-  colour moves without the other.
+  color moves without the other.
 
   Every value that has to change with the theme lives in this one block: the
   seven `.prototype` / `.btn.primary` / `.opinionmark` / `.tag.opinion`

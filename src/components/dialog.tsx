@@ -12,7 +12,7 @@ import { InkButton } from "./desk-chrome";
  * lock the page behind it, and cannot give focus back to the control that
  * opened it -- and `Dialog.prompt.md` says exactly that ("In production, build
  * on Radix Dialog (focus trap, scroll lock, focus return) with this styling").
- * So the look below is the reference's, to the pixel; the behaviour is Radix's.
+ * So the look below is the reference's, to the pixel; the behavior is Radix's.
  *
  * **Nothing uses this yet.** Phase 0 puts it here so that phase 2 has one
  * target when the desk's existing dialogs (the native `<dialog class="astra-

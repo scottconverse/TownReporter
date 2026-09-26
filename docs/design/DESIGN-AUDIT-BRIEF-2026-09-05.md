@@ -19,10 +19,10 @@ The desk works. The owner's verdict is that it "feels clunky and disjointed" aft
 
 ## 3. Rules that are not negotiable (rule)
 
-1. WCAG AA contrast in both themes. Every colour pair is measured by a script in the repo; the audit should assume 4.5:1 body, 3:1 large.
+1. WCAG AA contrast in both themes. Every color pair is measured by a script in the repo; the audit should assume 4.5:1 body, 3:1 large.
 2. **Nothing informational under 14px.** Labels, chips, meta lines included. A Normal / Large text control exists and must scale everything a reader needs, including headlines and document text (today it does not — see §7).
 3. **Dark mode is one warm near-black ground with a warm off-white for text** — `#1b1916` behind `#e8e6e1`, the same pair for the desk and the paper. Not the old brown, not a neutral grey, and since the 2026-09-26 redesign not `#000000`/`#ffffff` either: pure black behind pure white was the rule here in 0.6.19 and the handoff package replaced it. Panels sit a step up from the ground (`#27231f`) to separate from the page.
-4. Quiet styling never carries meaning alone. If something is disabled, failed, or important, the words say so, not only the colour or the opacity.
+4. Quiet styling never carries meaning alone. If something is disabled, failed, or important, the words say so, not only the color or the opacity.
 5. Every AI surface reads one provider registry: the same model picker appears wherever the desk writes, with the same options and the same states.
 6. The desk never claims something exists or does not exist without evidence; the story page shows what was opened and what was not. Design must make "checked, nothing changed" look different from "could not check."
 7. UI/UX is co-equal with code. A feature that works but cannot be understood is not done.
@@ -43,13 +43,13 @@ Lifted from `src/styles.css` and the component source. Values are exact; do not 
 | Dark Desk document reading pane | 15px fixed | does not scale |
 | Article body | 15px fixed | does not scale |
 
-**Colour, light.** Paper #f6f1e7 · paper-2 #efe6d6 · ink #1c1410 · ink-2 #3a3129 · muted #6b5e52 · rule #cfc2ac · accent (rust) #9b2915 · deep accent #7a1f10 · danger #8b1e12.
+**Color, light.** Paper #f6f1e7 · paper-2 #efe6d6 · ink #1c1410 · ink-2 #3a3129 · muted #6b5e52 · rule #cfc2ac · accent (rust) #9b2915 · deep accent #7a1f10 · danger #8b1e12.
 
-**Colour, dark (as of 0.6.19, per rule 3 — superseded by the 2026-09-26 handoff, which is the current authority).** bg #1b1916 · panel #27231f · text #e8e6e1 · secondary #bdbab3 · line #3b3631 · accent #e6c35c · attention #f0b27a · failure #f0998c. Attention and failure are two colours, not one. Before 0.6.19 the dark desk was brown (#211812 / #2c221a / #f6f1e7 / #c8b9a6), and from 0.6.19 until the redesign it was `#000000`/`#ffffff`; the "before" screenshots in this package show the brown version if they were taken from the live site before the change — the file names say which.
+**Color, dark (as of 0.6.19, per rule 3 — superseded by the 2026-09-26 handoff, which is the current authority).** bg #1b1916 · panel #27231f · text #e8e6e1 · secondary #bdbab3 · line #3b3631 · accent #e6c35c · attention #f0b27a · failure #f0998c. Attention and failure are two colors, not one. Before 0.6.19 the dark desk was brown (#211812 / #2c221a / #f6f1e7 / #c8b9a6), and from 0.6.19 until the redesign it was `#000000`/`#ffffff`; the "before" screenshots in this package show the brown version if they were taken from the live site before the change — the file names say which.
 
 **Shape.** Square corners everywhere (radius tokens exist but are unused on the desk). No drop shadows; hierarchy comes from rules and type. Avatar is the only circle.
 
-**Controls.** Button: 1px solid ink border, padding 8px 14px, Fraunces 600 14px; *solid* = ink fill, paper text; *quiet* = no border, deep-accent text; *danger* = same shape, warn-coloured text only. Small button: padding 4px 10px, same font size. Inputs: 1px line border, padding 7px 10px, min-height 34px; a second Tailwind-based input family uses min-height 44px. Chip: 13px uppercase, 1px border, padding 2px 7px. Score badge: 26×26, 1px border, tabular numerals; ≥10 gets an ink border, ≥14 fills with accent. Focus: 2px outline in the text colour, offset 2px.
+**Controls.** Button: 1px solid ink border, padding 8px 14px, Fraunces 600 14px; *solid* = ink fill, paper text; *quiet* = no border, deep-accent text; *danger* = same shape, warn-colored text only. Small button: padding 4px 10px, same font size. Inputs: 1px line border, padding 7px 10px, min-height 34px; a second Tailwind-based input family uses min-height 44px. Chip: 13px uppercase, 1px border, padding 2px 7px. Score badge: 26×26, 1px border, tabular numerals; ≥10 gets an ink border, ≥14 fills with accent. Focus: 2px outline in the text color, offset 2px.
 
 **Layout.** Content max width around 1440 with 60px gutters on the desk; Command Center is a three-column front (queue · Dark Desk · wire); story page is a two-column grid (lead + reporting notes 0.8fr · draft 1.6fr) collapsing at 720px.
 
@@ -87,7 +87,7 @@ Masthead: brand, "Editor's desk — Longmont", date, View paper, Light/Dark, Tex
 7. **Status chips are incomplete.** *Held* has no style and looks like an undefined state.
 8. **Large text does not reach the text that matters.** Headlines, the document reading pane, and article bodies are fixed px; only labels grow.
 9. **Three toggle-group patterns** (segmented control, underlined tabs, bordered pills) for one interaction.
-10. **Destructive actions look like Cancel.** Kill and "Yes, delete" differ from neutral buttons only by text colour.
+10. **Destructive actions look like Cancel.** Kill and "Yes, delete" differ from neutral buttons only by text color.
 11. **Kickers, chips and labels are 13px** at Normal size, under the 14px floor. (Fixed in the prototypes; not yet in the product.)
 
 ## 8. The prototype canvas

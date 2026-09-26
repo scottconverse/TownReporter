@@ -1,5 +1,5 @@
 /*
-  Appearance: the preferences that decide what colour a page paints, and the
+  Appearance: the preferences that decide what color a page paints, and the
   one piece of code that applies them BEFORE the first paint.
 
   The bug this module exists to kill (owner report, 2026-09-25): "when I
@@ -70,7 +70,7 @@ export const DESK_SIZE_ATTR = "data-desk-size";
 
 export const DEFAULT_APPEARANCE: Appearance = { desk: "light", size: "normal", reader: "light" };
 
-/** The dark page colour, for both surfaces: the desk's `.desk-ltr.astra.night`
+/** The dark page color, for both surfaces: the desk's `.desk-ltr.astra.night`
     `--bg` / `:root[data-appearance="desk-dark"]` and the paper's
     `.reader.mode-dark` `--bg` (desk-astra.css, reader-astra.css, styles.css).
     Used by the head script to keep the browser's own `theme-color` in step, so
@@ -85,12 +85,12 @@ export const DEFAULT_APPEARANCE: Appearance = { desk: "light", size: "normal", r
     editor switching the desk to Dark and then opening the paper should not be
     looking at two different newspapers. */
 export const DESK_NIGHT_BG = "#1b1916";
-/** The paper's dark page colour. The same warm black as the desk's, and the
+/** The paper's dark page color. The same warm black as the desk's, and the
     same value on `:root[data-appearance="reader-dark"] .reader`
     (reader-astra.css). Kept as its own name because `surfaceBackground` and
     the head script still have to answer per surface. */
 export const READER_DARK_BG = "#1b1916";
-/** The shipped light page colour, matching `--color-paper` (styles.css). */
+/** The shipped light page color, matching `--color-paper` (styles.css). */
 export const LIGHT_BG = "#fffdf7";
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {

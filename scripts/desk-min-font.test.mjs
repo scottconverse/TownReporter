@@ -276,12 +276,12 @@ test("desk-rendered files do not hardcode a sub-14px font-size or use a banned s
 // quietly reintroducing the invisible-border bug.
 //
 // The token it asserts on was `--warn` when this was written, because the old
-// palette pointed both names at one colour (`--warn: var(--color-danger)`), so
+// palette pointed both names at one color (`--warn: var(--color-danger)`), so
 // `--warn` was how a rule spelled "red". The redesign separates them -- amber
 // `--warn` for attention, red `--danger` for failure -- and
-// `design-system/README.md` names the colour for this exact button: "Danger |
+// `design-system/README.md` names the color for this exact button: "Danger |
 // 2px danger border and text | Kill, Stop, Cancel a job, Legal removal." So the
-// assertion follows the name to `--danger`; the rendered colour is unchanged,
+// assertion follows the name to `--danger`; the rendered color is unchanged,
 // and the guard still fails on `transparent` or on a dropped selector.
 test(".btn.quiet.danger (Kill) resolves a real, non-transparent danger border regardless of declaration order", () => {
   const css = readFileSync(CSS_PATHS[0], "utf8");

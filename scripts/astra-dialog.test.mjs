@@ -14,7 +14,7 @@ import ts from "typescript";
  * still matches the reference's, and that the CSS under it still carries the
  * design's panel and the desk's warm-black dark palette.
  *
- * What it deliberately does NOT hold is the behaviour: focus trap, Escape,
+ * What it deliberately does NOT hold is the behavior: focus trap, Escape,
  * scroll lock and focus return are assertions about a live document, and this
  * repository has no DOM test environment. That is `scripts/astra-dialog-e2e.mjs`,
  * which mounts the component into a real page -- and the last test here fails
@@ -99,7 +99,7 @@ test("every prop of the design reference is kept", () => {
 test("the closed dialog renders nothing, and the open one cannot render without a document", () => {
   // Radix's Portal mounts into `document.body`, so on the server there is
   // nothing to render into and both states come back empty. Asserting it keeps
-  // the honest reading of this file in place: the markup and the behaviour are
+  // the honest reading of this file in place: the markup and the behavior are
   // only real in a browser, which is what the e2e walk is for.
   const props = { title: "Kill this lead", primaryLabel: "Kill with this reason" };
   assert.equal(renderToStaticMarkup(createElement(module.Dialog, { ...props, open: false, onClose() {} })), "");
@@ -148,7 +148,7 @@ test("the modal CSS carries the design's panel and the desk's warm-black dark pa
   assert.match(styles, /:root\[data-desk-size="large"\] \.desk-ltr\.astra-modal-layer \{\s*--ts: 1\.2;/);
 });
 
-test("the browser walk that proves the behaviour is run by CI", async () => {
+test("the browser walk that proves the behavior is run by CI", async () => {
   await read("scripts/astra-dialog-e2e.mjs");
   const ci = await read(".github/workflows/ci.yml");
   assert.ok(

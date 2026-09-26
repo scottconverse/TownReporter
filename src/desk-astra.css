@@ -31,7 +31,7 @@
   --sel: #111111;
   --ok: #1e6b34;
   --accent-soft: #f6f2e7;
-  /* Attention (amber) and danger (red) are two colours in the design tokens,
+  /* Attention (amber) and danger (red) are two colors in the design tokens,
      not one -- see the `.desk-ltr` block in styles.css for the full note. */
   --warn: #8a4b00;
   --danger: #b3261e;
@@ -48,7 +48,7 @@
      `rust` is the one old-brand name the redesign kept in the markup: ~40 desk
      sites read `text-rust` and almost all of them are failures ("Could not read
      the server", "Could not read the stats"), so it has to keep following the
-     failure colour. It used to be `var(--warn)`, which was the danger red back
+     failure color. It used to be `var(--warn)`, which was the danger red back
      when the desk had a single alert token; now that `--warn` is the design's
      amber, rust follows `--danger` instead. That also settles the theme
      automatically -- the night block above redefines `--danger`, and a var()
@@ -83,7 +83,7 @@
   by the inline <head> script before the first paint, from the same
   localStorage, so the first frame is already this palette. #1b1916 is the
   desk's dark, and it is also what `DESK_NIGHT_BG` in src/lib/appearance.ts
-  reports to the `<meta name="theme-color">` update -- if either colour moves,
+  reports to the `<meta name="theme-color">` update -- if either color moves,
   the test in src/lib/appearance.test.ts fails rather than the address bar
   going quietly out of step.
 */
@@ -468,9 +468,9 @@
 
   Three things the old shell did are gone because the redesign forbids them: the
   8px radius on every control, the drop shadow that appeared on hover, and the
-  teal-filled primary whose on-colour had to be re-specified per theme. The
+  teal-filled primary whose on-color had to be re-specified per theme. The
   primary is now the same yellow in both themes and its text is always #111 --
-  one rule, no theme branch, and it is the only colour that clears AA on
+  one rule, no theme branch, and it is the only color that clears AA on
   #ffd23f (12.1:1) and on #e6c35c (9.9:1).
 */
 .desk-ltr.astra :is(.btn, .document-add-button) {
@@ -551,7 +551,7 @@
   opacity: 0.85;
 }
 .desk-ltr.astra :is(input[type="checkbox"], input[type="radio"]) {
-  /* --sel, not --a: a native control paints this colour itself, and a
+  /* --sel, not --a: a native control paints this color itself, and a
      yellow tick on the cream ground is 1.42:1 (WCAG 1.4.11 wants 3:1 for a
      non-text indicator). --sel is ink in light and gold in dark. */
   accent-color: var(--sel);
@@ -656,9 +656,9 @@
   font-weight: 700;
 }
 /*
-  Chips and scores, on the redesign's state colours (README section 6).
+  Chips and scores, on the redesign's state colors (README section 6).
 
-  The state colours themselves are set once, in `.desk-ltr .chip.*` in
+  The state colors themselves are set once, in `.desk-ltr .chip.*` in
   styles.css; this shell only has to stop overriding them with a filled teal
   pill. A chip here is now the same chip as on every other desk surface: a 1px
   outline, dashed when the state is not settled, yellow fill only for `new`.

@@ -16,7 +16,7 @@
  *
  * This walk is the proof, and it is a measurement rather than an inspection:
  * a probe installed before any page script runs samples, on every animation
- * frame, the colour that frame is about to paint (the body's computed
+ * frame, the color that frame is about to paint (the body's computed
  * background over the html's -- `getComputedStyle` at a rAF callback is
  * resolved before the paint for that very frame). It records a sample whenever
  * anything about the surface changes, so the log is the sequence of surfaces
@@ -44,7 +44,7 @@
  * stuck on one value, one of them would fail. On top of that each pass ends
  * with a deliberate break -- the attribute is removed in the dark pass and
  * forced to `desk-dark` in the light one -- and the walk asserts the probe
- * RECORDS the other colour. That is the direct check that this instrument can
+ * RECORDS the other color. That is the direct check that this instrument can
  * see the bug it is claiming is absent.
  *
  * Walked in one browser, twice, on a real reload for every screen and on a
@@ -198,7 +198,7 @@ function expectEveryFrame(label, entries, expected, attr) {
   facts.push({
     label,
     frames: entries.length,
-    colour: expected.hex,
+    color: expected.hex,
     attr,
     first: describe(entries[0]),
   });
@@ -457,7 +457,7 @@ async function theWalk(pass) {
     );
   }
 
-  // 2. Out to the public paper -- the reader's own dark, a different colour --
+  // 2. Out to the public paper -- the reader's own dark, a different color --
   //    and back with the browser's Back button, which is a client-side
   //    navigation too.
   await clickThrough(

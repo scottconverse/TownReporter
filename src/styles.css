@@ -4,14 +4,14 @@
 @import "tw-animate-css";
 
 /*
-  The redesign's colour set (docs/design/handoff-2026-09-26/design-system/
+  The redesign's color set (docs/design/handoff-2026-09-26/design-system/
   tokens/colors.css) on the repo's existing Tailwind names.
 
   Two rules from the handoff decide this block, and both are the opposite of
   what the names used to mean here:
 
   1. Ground is cream and the accent is YELLOW -- `#ffd23f`. Yellow is a FILL
-     colour and nothing else: as text on cream it is 1.42:1, which is why
+     color and nothing else: as text on cream it is 1.42:1, which is why
      `--color-rust` below is ink and not yellow. Every place that painted a
      yellow fill says so with its own rule (buttons, chips, .score.hot); every
      place that painted accent TEXT reads ink. Yellow text on cream is the one
@@ -39,7 +39,7 @@
   --color-danger: #b3261e;
   --color-blush: #8a4b00;
   /* The accent, as a fill and only as a fill: buttons, chips, progress bars,
-     the top bar. Text never sits on it in any colour but #111. */
+     the top bar. Text never sits on it in any color but #111. */
   --color-yel: #ffd23f;
   /* "Checked, and it is fine" -- and it must never be mistakable for "could
      not check", which is `--danger` and dashed. See README §6. */
@@ -551,14 +551,14 @@
     a current-step mark has to be SEEABLE rather than filled (accent-color,
     the active nav row, the current filter), that is `--sel` instead.
     `scripts/contrast-audit.mjs` keeps the three apart: `adeep/bg` as text,
-    `sel/bg` as a UI colour, and `#111` on `a` for the yellow fills.
+    `sel/bg` as a UI color, and `#111` on `a` for the yellow fills.
   */
   --a: var(--color-yel);
   --adeep: var(--color-ink);
   --sel: var(--color-sel);
   --ok: var(--color-ok);
   /*
-    Two state colours, not one (design-system/tokens/colors.css: `--warn` and
+    Two state colors, not one (design-system/tokens/colors.css: `--warn` and
     `--danger` are separate values in both themes).
 
     The desk used to have a single alert token, and it held the DANGER value:
@@ -567,7 +567,7 @@
     "could not check" could only be told apart by the words. The reader's own
     sheet has had the split all along (`--warn: #8a4b00; --danger: #b3261e`);
     this is the desk catching up. `--warn` is now the design's amber attention
-    colour, `--danger` the failure red, and the rules that mean failure read
+    color, `--danger` the failure red, and the rules that mean failure read
     `--danger` (see `.notice-err`, `.btn.danger`, `.screen-error`,
     `.chip.st-killed`).
   */
@@ -860,7 +860,7 @@
   tokens are light-only by construction -- `--color-ink` is #111111, which is
   1.08:1 against this canvas -- so on a dark screen they are pointed at the
   screen's own palette. Since the redesign `--color-rust` is ink too, so the
-  kicker's colour comes from `--adeep` (bone, 14.06:1 here) like every other
+  kicker's color comes from `--adeep` (bone, 14.06:1 here) like every other
   accent-text site; there is no dark-mode rust any more.
 
   The palette below is the desk's dark, spelled out, and it is the fix for a
@@ -912,7 +912,7 @@
   It used to be a third palette -- #142428, a blue-black, against the desk's
   #182024. The redesign has one dark: warm black. Both blocks below are now the
   same values as the desk's, so a screen that says "Opening the edition" and
-  the edition it opens are the same colour. The reader keeps its appearance in
+  the edition it opens are the same color. The reader keeps its appearance in
   a per-paper blob rather than in the desk keys, which is why it still needs
   its own copy of the palette here.
 */
@@ -1078,7 +1078,7 @@
   The uppercase + letter-spacing treatment is kept: it is this desk's chip
   typography and the words are the label, so changing case would re-wrap every
   list row (a layout change, which this pass is not allowed to make). What
-  changed here is the colour, the weight (800, as the reference component) and
+  changed here is the color, the weight (800, as the reference component) and
   the padding the reference uses.
 */
 .desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg2);padding:1px 8px;white-space:nowrap;align-self:start;color:var(--fg2);font-weight:800}
@@ -1295,7 +1295,7 @@
   The Follow-ups object (Direction A stage 1). One item: who · what · due ·
   the story link, matching the anatomy in build-notes' "Follow-ups" section.
   `.text-warn` is the one place overdue is ALSO stated in words ("Overdue N
-  days") -- colour never carries the meaning alone.
+  days") -- color never carries the meaning alone.
 */
 .desk-ltr .followup-item {padding:14px 0;border-bottom:1px solid var(--line)}
 .desk-ltr .followup-item:last-child {border-bottom:none}
@@ -1363,7 +1363,7 @@
 .desk-ltr .filter .filter-badge {display:inline-block;min-width:1.6em;padding:0 5px;border-radius: 0;background:var(--paper-2);color:var(--mut);font-size:calc(0.875rem * var(--ts));letter-spacing:0;text-align:center;font-variant-numeric:tabular-nums}
 .desk-ltr .filter.on .filter-badge {background:transparent;color:var(--fg)}
 /* The waiting count is a yellow FILL, and text on yellow is #111 in both
-   themes -- 12.1:1 on #ffd23f, 9.9:1 on #e6c35c. The theme's own ground colour
+   themes -- 12.1:1 on #ffd23f, 9.9:1 on #e6c35c. The theme's own ground color
    would be 1.42:1 here, which is the same reason `.score.hot` and the primary
    button say #111 rather than var(--bg). */
 .desk-ltr .filter .filter-badge.waiting {background:var(--a);color:#111;font-weight:700}
@@ -1472,9 +1472,9 @@
 /*
   Claims of absence (2026-09-05). A story saying a public document does not
   exist is the one thing this desk cannot let through on a model's word, so
-  the block is bordered in the warning colour, sits above the ordinary to-dos,
+  the block is bordered in the warning color, sits above the ordinary to-dos,
   and every line in it is body-sized -- nothing informational under 14px, and
-  no meaning carried by colour alone (the label says what it is).
+  no meaning carried by color alone (the label says what it is).
 */
 .desk-ltr .note-gate {border:2px solid var(--warn);padding:10px 12px 12px;margin-top:14px;background:var(--bg2)}
 .desk-ltr .note-gate .side-label {color:var(--warn)}
@@ -1862,7 +1862,7 @@
 /* The composer's primary action, on the same rule as every other primary:
    a yellow fill with #111 on it. It was an ink fill with the paper's own
    ground as its text, which worked but made "add documents" a different
-   colour from every other primary in the app. */
+   color from every other primary in the app. */
 .desk-ltr .document-add-button {display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:12px 24px;margin:20px 0;background:var(--a);color:#111;border:2px solid var(--a);border-radius: 0;font:inherit;font-weight:800;cursor:pointer;transition:background-color var(--motion-fast),color var(--motion-fast),border-color var(--motion-fast)}
 .desk-ltr .document-add-button:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 88%,#111);border-color:color-mix(in srgb,var(--a) 88%,#111);color:#111;text-decoration:underline;text-underline-offset:4px}
 .desk-ltr .document-add-button:focus-visible {outline:3px solid var(--fg);outline-offset:4px}
@@ -2101,7 +2101,7 @@
 /*
   ChoiceCard: the design system's desk/Dialog.jsx ChoiceCard. The mark is a
   square (the desk has no circles except the avatar) and the selected state is
-  carried by the 2px ink border and the yellow mark fill, not by colour alone
+  carried by the 2px ink border and the yellow mark fill, not by color alone
   -- the label is always there and `aria-checked` is always set.
 */
 .desk-ltr.astra-modal-layer .astra-choice-card {

@@ -25,7 +25,7 @@ import {
   The script in <head> (see `appearanceHeadScript`) cannot import anything --
   it has to run on a page where the app's bundle never loads at all, which is
   the same hard constraint the `data-stranded` fallback in __root.tsx is built
-  around -- so its copy of the path rule, the defaults and the colour choices
+  around -- so its copy of the path rule, the defaults and the color choices
   are duplicates. Duplicates drift. The first test below does not compare the
   script's text to itself: it RUNS the generated script against a stub
   document/localStorage/location and asserts the attribute it stamps is what
@@ -87,7 +87,7 @@ function runHeadScript(options: {
 const DESKS = ["/desk", "/desk/queue", "/desk/story/12", "/desk/sources"];
 const PAPERS = ["/", "/articles/council-approves", "/how-we-report"];
 
-test("the head script stamps the surface and theme colour appearanceSurface and surfaceBackground name", () => {
+test("the head script stamps the surface and theme color appearanceSurface and surfaceBackground name", () => {
   for (const deskMode of ["light", "dark"] as DeskMode[]) {
     for (const readerMode of ["light", "dark"] as ReaderMode[]) {
       for (const pathname of [...DESKS, ...PAPERS]) {
@@ -152,8 +152,8 @@ test("the head script survives blocked storage, junk values and an unreadable re
     size: "gigantic",
     readerBlob: "{not json",
   });
-  assert.equal(junk.attributes[APPEARANCE_ATTR], "light", "an unrecognised mode is not dark");
-  assert.equal(junk.attributes[DESK_SIZE_ATTR], "normal", "an unrecognised size is not large");
+  assert.equal(junk.attributes[APPEARANCE_ATTR], "light", "an unrecognized mode is not dark");
+  assert.equal(junk.attributes[DESK_SIZE_ATTR], "normal", "an unrecognized size is not large");
 
   const large = runHeadScript({ pathname: "/desk/queue", desk: "dark", size: "large" });
   assert.equal(large.attributes[APPEARANCE_ATTR], "desk-dark");
@@ -229,7 +229,7 @@ test("the surface backgrounds are the designed ones, and light is not dark", () 
   // was the old product decision. The redesign has one dark -- the warm black
   // the tokens call `--dd`'s ground -- for the desk and the paper alike, so
   // what has to hold now is that both dark surfaces resolve to it and that the
-  // light canvas is still a different colour (a mix-up between the constants
+  // light canvas is still a different color (a mix-up between the constants
   // and the stylesheets is what this guards, not the palette).
   const surfaces: AppearanceSurface[] = ["desk-dark", "reader-dark", "light"];
   assert.equal(surfaceBackground("desk-dark"), DESK_NIGHT_BG);

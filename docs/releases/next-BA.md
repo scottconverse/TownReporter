@@ -18,9 +18,9 @@ page. Light mode keeps its cream ground (`#fffdf7`) and its ink (`#111111`).
 
 ### "Checked, nothing changed" no longer looks like "could not check"
 
-The desk had collapsed the design's two state colours into one, so every
+The desk had collapsed the design's two state colors into one, so every
 attention state painted the same red as a failure. Amber and red are now two
-distinct colours in **both** themes:
+distinct colors in **both** themes:
 
 | | light | dark |
 |---|---|---|
@@ -58,7 +58,7 @@ Buttons, chips, notices, skeletons, empty states, pending and error screens were
 restyled in place to the design system's vocabulary — one button family, one chip
 family, one notice — without removing a single prop or export. Editors see:
 consistent button heights (nothing below 44px), square corners throughout, and
-chip colours that say what they mean (a failed chip is dashed red, a held chip is
+chip colors that say what they mean (a failed chip is dashed red, a held chip is
 solid amber, a `✓` chip is outlined green).
 
 ### A shared dialog, ready for phase 2
@@ -74,7 +74,7 @@ focus to where it opened from, and there is a test that proves all three.
 
 Phase 0 replaces values, not structure. No screen changed its layout, no screen
 was added, no navigation changed, and there are no backend or migration changes.
-If a page looks different, it is because a colour, a typeface, a border or a
+If a page looks different, it is because a color, a typeface, a border or a
 spacing token underneath it changed — not because the page was rearranged.
 
 **Limits.** The redesign is not complete: phase 2 has to move the existing

@@ -50,7 +50,7 @@ export const Route = createRootRoute({
     Fetched ONCE per page load, on the server: this `beforeLoad` runs a
     single time per navigation, and its returned object is merged into every
     descendant route's `context` (TanStack's normal context-inheritance
-    behaviour) -- not re-fetched per component or per route. Falls back to
+    behavior) -- not re-fetched per component or per route. Falls back to
     the shipped PAPER constant if the call ever throws, so a database hiccup
     degrades to today's fixed copy rather than a broken page.
   */
