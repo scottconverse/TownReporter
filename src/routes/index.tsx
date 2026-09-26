@@ -13,10 +13,10 @@ import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
 import { thisWeekDates } from "@/lib/news/story-dates-public";
 import { storyDateRows } from "@/lib/story-dates";
-import { AREA_LABELS, HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
+import { HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
 import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
-import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 
 /** How many stories one "Latest stories" batch carries. */
 const RIVER_BATCH = 12;
@@ -143,6 +143,9 @@ function FrontPage() {
 }
 function Home() {
   const paper = usePaper();
+  // "Around the region" names the ground each story stands on; the words are
+  // this paper's own (see `useAreaLabels`), not the shipped default's.
+  const labels = useAreaLabels();
   const { sections } = usePublicSections();
   const visible = sections.filter((s) => s.visible);
   const { formatShortDate } = usePaperDateFormatters();
@@ -229,6 +232,22 @@ function Home() {
   const riverBusy = useRef(false);
   const sentinel = useRef<HTMLDivElement | null>(null);
   const listed = [...(initial.river?.stories ?? []), ...loadedRiver];
+  /*
+    What every batch AFTER the first one must leave out, carried in a ref so the
+    callback below reads the current list rather than the one it closed over.
+
+    The loader's first batch already excludes what the page prints above the
+    river -- the seven at the top, and the opinion band's own piece
+    (`exclude: [...above, ...opinion.stories.map((s) => s.id)]` there). A cursor
+    is a position in the paper, not a filter, so it carries none of that with
+    it: the batches fetched here came back with the band's story in them, and a
+    reader who scrolled read the band's piece a second time, in the river, under
+    the band that already prints it. That is the repeat the loader's own comment
+    says the front page used to carry; it has to hold for every batch, not just
+    the server-rendered one.
+  */
+  const riverExclude = useRef<number[]>([]);
+  riverExclude.current = [...aboveIds, ...(featuredOpinion ? [featuredOpinion.id] : [])];
   useEffect(() => {
     // A new loader run is a new page: the batches it did not fetch are gone.
     setLoadedRiver([]);
@@ -241,7 +260,9 @@ function Home() {
     riverBusy.current = true;
     setLoadingRiver(true);
     try {
-      const batch = await readerArticles({ data: { limit: RIVER_BATCH, cursor: riverCursor } });
+      const batch = await readerArticles({
+        data: { limit: RIVER_BATCH, cursor: riverCursor, exclude: riverExclude.current },
+      });
       setLoadedRiver((prev) => [...prev, ...batch.stories]);
       setRiverCursor(batch.nextCursor);
       setRiverHasMore(batch.hasMore);
@@ -512,7 +533,7 @@ function Home() {
                 <ul className="regionlist">
                   {regionRows.map(({ area, story }) => (
                     <li key={area}>
-                      <span className="regionplace">{AREA_LABELS[area]}</span>
+                      <span className="regionplace">{labels[area]}</span>
                       <Link to="/articles/$slug" params={{ slug: story.slug }}>
                         {story.headline}
                       </Link>

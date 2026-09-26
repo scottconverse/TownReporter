@@ -12,7 +12,7 @@ import {
 } from "@/lib/news/draft-evidence";
 import { auditDraft } from "@/lib/news/draft-audit";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
-import { AREA_LABELS, AREA_PILLS, HOME_AREA } from "@/lib/story-area";
+import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,7 +49,7 @@ import { FollowUpItem } from "@/components/follow-up-item";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
-import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useAreaLabels, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
   mergeDraftEvidenceIntoNotes,
@@ -145,6 +145,9 @@ function StoryPage() {
      name it. Falls back to the key, which is what the desk stored. */
   const sectionName = (key: string) => sections.find((s) => s.key === key)?.name ?? key;
   const { formatShortDate } = usePaperDateFormatters();
+  // The same words the reader sees on the pill row: this paper's own
+  // geography, not the shipped default's (see `useAreaLabels`).
+  const labels = useAreaLabels();
   const { leadId } = Route.useParams();
   const id = Number(leadId);
   const qc = useQueryClient();
@@ -2121,7 +2124,7 @@ function StoryPage() {
                     onChange={(e) => setArea(e.target.value)}
                     disabled={onPaper}
                   >
-                    {AREA_PILLS.map((p) => (
+                    {areaPills(labels).map((p) => (
                       <option key={p.key} value={p.key}>
                         {p.label}
                       </option>
@@ -2129,7 +2132,7 @@ function StoryPage() {
                   </select>
                 </Field>
                 <p className="note">
-                  Which pill this story answers to on the front page — {AREA_LABELS[HOME_AREA]} is
+                  Which pill this story answers to on the front page — {labels[HOME_AREA]} is
                   the home town and the default.
                 </p>
               </div>

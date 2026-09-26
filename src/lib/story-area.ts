@@ -27,6 +27,15 @@ export const HOME_AREA: StoryArea = "longmont";
  * story stands on, and a nearby story's own town is in its headline ("Lyons
  * trustees post draft water rate study"). Naming a town here would be the paper
  * asserting one the row does not carry.
+ *
+ * These are the SHIPPED paper's words (Longmont, Colorado). They are the
+ * fallback for the default identity and the labels `story-area.test.ts` covers;
+ * anything a reader sees goes through `areaLabelsFor` below, because a paper
+ * configured for another town must not print this town's geography. That was a
+ * real leak: phase 1's pill row read this constant directly, so a Riverbend,
+ * Ohio paper printed `Longmont · Nearby · Boulder County · Colorado` on its
+ * masthead while its title, h1 and footer all said Riverbend
+ * (`src/lib/news/paper-identity.e2e.test.ts`).
  */
 export const AREA_LABELS: Record<StoryArea, string> = {
   longmont: "Longmont",
@@ -35,11 +44,55 @@ export const AREA_LABELS: Record<StoryArea, string> = {
   colorado: "Colorado",
 };
 
-/** The pill row's labels, in print order. */
-export const AREA_PILLS: readonly { key: StoryArea; label: string }[] = STORY_AREAS.map((key) => ({
-  key,
-  label: AREA_LABELS[key],
-}));
+/** The words for the four grounds on one particular paper. */
+export type AreaLabels = Record<StoryArea, string>;
+
+/**
+ * The four grounds in the CONFIGURED paper's own words.
+ *
+ * The home ground and the state ground are the paper's own `city`/`state`
+ * (its identity, fetched once per page load and threaded down as context), so a
+ * configured paper names itself and never the shipped default's town.
+ *
+ * The county ground is a `dark_settings.county` setting, which is server-side
+ * and not on the public identity, so this takes it as an argument and, with
+ * none configured, names the GROUND rather than a county: "County" beside
+ * "Nearby" is the same kind of word -- which part of the map a story stands on
+ * -- and asserting "Boulder County" on a paper that has never been told its
+ * county would be the leak again in a different costume.
+ */
+export function areaLabelsFor(
+  paper: { city: string; state: string },
+  county?: string | null,
+): AreaLabels {
+  const countyName = (county ?? "").trim();
+  return {
+    longmont: paper.city.trim(),
+    nearby: "Nearby",
+    county: countyName || "County",
+    colorado: paper.state.trim(),
+  };
+}
+
+/**
+ * Whether this paper has a geography to offer at all.
+ *
+ * An install that has not been through first-run setup has no city and no
+ * state (`UNCONFIGURED_PAPER_CONFIG`), so its pill row and its region labels
+ * would be empty or generic words for a paper that has not said where it is.
+ * The front page prints no geography row in that state -- the same honest
+ * "not set up" answer the rest of the page gives.
+ */
+export function hasGeography(paper: { city: string; state: string }): boolean {
+  return paper.city.trim().length > 0;
+}
+
+/** The pill row, in print order, from a paper's own labels. */
+export function areaPills(
+  labels: AreaLabels,
+): readonly { key: StoryArea; label: string }[] {
+  return STORY_AREAS.map((key) => ({ key, label: labels[key] }));
+}
 
 /**
  * The stored value for a row that has no area, or for a value this release does

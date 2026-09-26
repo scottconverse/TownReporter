@@ -323,9 +323,21 @@ describe("the configured paper identity, not Longmont's", () => {
   /*
     CITY-SETUP slice C2 proof: the masthead's "today" (Masthead in
     src/components/paper-chrome.tsx, via usePaperDateFormatters ->
-    formatDate) renders in the paper's CONFIGURED timezone -- not
+    formatDayStamp) renders in the paper's CONFIGURED timezone -- not
     PAPER.timezone (America/Denver), which is what every call site rendered
     before this slice regardless of what paper_settings said.
+
+    The FORMAT changed with the redesign, and this assertion follows the product
+    rather than the old markup: the dateline is the design's short stamp -- the
+    prototype's masthead reads "Today in Longmont · Sat, Sept. 26"
+    (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html:15`) -- so the
+    masthead now prints `formatDayStamp` ("Sun, Sep 27"), not the full
+    "Sunday, September 27, 2026" this test pinned when it was written. The
+    timezone claim is unchanged and still exact: the date parts must be the
+    configured zone's, and Denver's must be absent whenever the two disagree.
+    Every other date on the front page goes through `formatShortDate`
+    ("Sep 26, 2026", no weekday -- see src/components/reader-controls.tsx), so
+    a "Sat, Sep 26"-shaped string is the masthead's dateline and nothing else.
   */
   it(
     "the masthead date is computed in the configured timezone, not Denver's",
@@ -335,10 +347,9 @@ describe("the configured paper identity, not Longmont's", () => {
       await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 
       const dateOpts: Intl.DateTimeFormatOptions = {
-        weekday: "long",
-        month: "long",
+        weekday: "short",
+        month: "short",
         day: "numeric",
-        year: "numeric",
       };
       const now = new Date();
       const expectedAuckland = now.toLocaleDateString("en-US", {
