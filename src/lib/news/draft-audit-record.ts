@@ -12,7 +12,7 @@
  * by a later version, or by hand, must never make the page print a wrong line
  * or throw while rendering a story.
  */
-import type { DraftAuditFinding, DraftAuditMeasurements, DraftAuditResult, DraftAuditSeverity } from "./draft-audit.ts";
+import { auditDraft, type DraftAuditFinding, type DraftAuditMeasurements, type DraftAuditResult, type DraftAuditSeverity } from "./draft-audit.ts";
 import type { DraftRepairStatus, DraftStyleRepairOutcome } from "./draft-audit-repair.ts";
 import type { DraftStyleAuditSummary } from "./draft-completion.ts";
 
@@ -93,6 +93,50 @@ export function styleRecordFromRepair(
     ...(options.checkedAt ? { checkedAt: options.checkedAt } : {}),
     ...(options.requested ? { requested: true } : {}),
   };
+}
+
+/**
+ * A record of a draft that was measured and not rewritten: the editor saved,
+ * or the model wrote and nothing needed fixing. `form` decides the paragraph
+ * cap, so an empty or unknown form falls back to the default inside the audit.
+ */
+export function styleRecordForSavedText(
+  input: { headline: string; dek: string; body: string; form: unknown },
+  checkedAt?: string,
+): DraftStyleRecord {
+  return styleRecordFromAudit(
+    auditDraft({
+      headline: input.headline,
+      dek: input.dek,
+      body: input.body,
+      form: String(input.form ?? ""),
+    }),
+    checkedAt,
+  );
+}
+
+/**
+ * A row's `research_json`, with this audit in it and every other key left
+ * alone. Ten writers share that column -- evidence review, manual claims,
+ * transcript links, the name check -- so this adds one and rewrites nothing.
+ * A row that will not parse is replaced rather than trusted: this column holds
+ * machine findings, and a draft nobody can check is worse than a draft whose
+ * unreadable memo was dropped.
+ */
+export function researchJsonWithStyleAudit(
+  raw: string | null | undefined,
+  record: DraftStyleRecord,
+): string {
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      current = parsed as Record<string, unknown>;
+    }
+  } catch {
+    current = {};
+  }
+  return JSON.stringify({ ...current, [STYLE_AUDIT_KEY]: record });
 }
 
 const asCount = (value: unknown): number => {
