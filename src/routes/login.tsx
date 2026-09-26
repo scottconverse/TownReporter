@@ -258,7 +258,7 @@ function Login() {
   return (
     <main
       className="grid min-h-dvh place-items-center bg-paper px-6 py-10 text-ink"
-      style={{ background: "#F6F1E7", color: "#1C1410", minHeight: "100dvh" }}
+      style={{ background: "#fffdf7", color: "#111111", minHeight: "100dvh" }}
     >
       <div className="stagger-in w-full max-w-sm space-y-5">
         {stalled ? (

@@ -183,7 +183,7 @@ function StoryPage() {
     wrong way round.
 
     Same inline pattern the desk already uses for Delete, so it is a shape
-    the editor recognises rather than a new dialog to learn.
+    the editor recognizes rather than a new dialog to learn.
   */
   const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [msg, setMsg] = useState("");
@@ -1865,7 +1865,7 @@ function StoryPage() {
             saved but the reporting notes did not -- still reads as a success:
             the story was saved, and a red box would say otherwise. Both of
             those sentences begin with the thing that worked, which is what the
-            colour below reads. The sentence stays the first thing inside the
+            color below reads. The sentence stays the first thing inside the
             notice, where the editor reads it before the button under it.
           */}
           {draftProblem && !onPaper ? (

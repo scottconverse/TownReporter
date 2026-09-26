@@ -20,12 +20,6 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f6f1e7'/%3E%3Crect x='6' y='7' width='20' height='3' fill='%239b2915'/%3E%3Crect x='6' y='14' width='20' height='2' fill='%231c1410'/%3E%3Crect x='6' y='19' width='14' height='2' fill='%231c1410'/%3E%3Crect x='6' y='24' width='17' height='2' fill='%231c1410'/%3E%3C/svg%3E"
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap"
-      rel="stylesheet"
-    />
     <style>
       :root {
         --paper: #f6f1e7;
@@ -38,8 +32,13 @@
         --rust-2: #7a1f10;
         --blush: #e8b4a8;
         --panel: #fffdf8;
-        --display: "Fraunces", "Source Serif 4", Georgia, serif;
-        --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+        /* The app self-hosts its two faces (public/fonts, src/fonts.css); this
+           static page is published on its own and loads none of them, so both
+           stacks land on the system faces unless one is installed locally. The
+           names stay so the page follows the design system the moment it is
+           given the files; the Google Fonts link it used is gone. */
+        --display: "Bricolage Grotesque", system-ui, sans-serif;
+        --serif: "Literata", Georgia, "Times New Roman", serif;
         --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
 

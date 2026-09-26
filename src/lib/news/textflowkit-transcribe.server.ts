@@ -70,7 +70,7 @@ function sha256File(path: string): string {
  * scan costs one query per meeting and never doubles a pending job.
  *
  * When textflowkit is not installed this returns immediately with nothing
- * queued. That is the product's behaviour before unit R: a meeting without
+ * queued. That is the product's behavior before unit R: a meeting without
  * captions stays audio-only, and nothing is recorded as a failure.
  */
 export async function enqueueMissingTranscriptions(

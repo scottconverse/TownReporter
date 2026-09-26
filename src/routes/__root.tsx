@@ -50,7 +50,7 @@ export const Route = createRootRoute({
     Fetched ONCE per page load, on the server: this `beforeLoad` runs a
     single time per navigation, and its returned object is merged into every
     descendant route's `context` (TanStack's normal context-inheritance
-    behaviour) -- not re-fetched per component or per route. Falls back to
+    behavior) -- not re-fetched per component or per route. Falls back to
     the shipped PAPER constant if the call ever throws, so a database hiccup
     degrades to today's fixed copy rather than a broken page.
   */
@@ -80,7 +80,7 @@ export const Route = createRootRoute({
         // The deck IS this sentence, and it is configurable. Hard-coding it
         // here left a second city describing Longmont in its own <head>.
         { name: "description", content: `${paper.deck} ${paper.trust}` },
-        { name: "theme-color", content: "#F6F1E7" },
+        { name: "theme-color", content: "#fffdf7" },
         // Site-wide share card. Article routes override the title, description
         // and URL; the image is the same for all of them.
         { property: "og:type", content: "website" },

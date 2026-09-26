@@ -14,7 +14,7 @@ import { jobCardState, useDeskJobs } from "./job-card-state";
   JobCard.jsx -- same states, same copy, same motion, same geometry. Three
   deliberate departures, each because the reference's context is a prototype:
 
-  1. Colours come from the desk's own tokens (see the JobCard block in
+  1. Colors come from the desk's own tokens (see the JobCard block in
      desk-astra.css), not the prototype's --yel/--panel/--ink set, which the
      shipped desk never defines.
   2. `role="status" aria-live="polite"` is on the status LINE, not on the card.

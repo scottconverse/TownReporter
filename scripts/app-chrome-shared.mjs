@@ -153,8 +153,8 @@ export function renderWebManifest(hostHeader) {
       start_url: "/",
       scope: "/",
       display: "standalone",
-      background_color: "#F6F1E7",
-      theme_color: "#F6F1E7",
+      background_color: "#fffdf7",
+      theme_color: "#fffdf7",
       icons: [
         {
           src: "/__app/icon-180.png",

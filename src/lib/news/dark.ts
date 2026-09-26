@@ -2300,7 +2300,7 @@ export type DarkRoundFailoverDeps = {
  * point, which makes it unsuitable as the seam a unit test drives through.
  *
  * Returns null when Automatic did not move on (not on Automatic, not a
- * recognised failure, or no ready later rung) -- the caller keeps `loop`/
+ * recognized failure, or no ready later rung) -- the caller keeps `loop`/
  * `synth` from the attempt that just ran. Otherwise the model_choice and
  * stage writes have already happened, same as before this was extracted,
  * and the caller re-runs on the returned rung.

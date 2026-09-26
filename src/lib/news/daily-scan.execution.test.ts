@@ -102,7 +102,7 @@ describe("daily scan refuses loudly, never silently", () => {
       stopped producing, and nothing told the operator why.
 
       The timezone and runtime checks in the same function already paused the
-      policy with a sentence. This binds to that behaviour for the owner case.
+      policy with a sentence. This binds to that behavior for the owner case.
     */
     it("pauses the policy with a reason when the configuring account is not the owner", async () => {
       const sql = await getSql();

@@ -90,7 +90,7 @@ export function ScreenPending({
       aria-busy="true"
     >
       <div className="enter-fade max-w-sm text-center">
-        <p className="text-[11px] tracking-[0.16em] text-rust uppercase">
+        <p className="text-[11px] tracking-[0.16em] text-muted uppercase">
           {resolvedKicker}
         </p>
         <h1 className="mt-2 font-display text-3xl font-semibold">{title}</h1>
@@ -151,7 +151,7 @@ export function EmptyState({
     >
       <Ornament night={night} />
       {kicker ? (
-        <p className="mt-5 text-[11px] tracking-[0.16em] text-rust uppercase">
+        <p className="mt-5 text-[11px] tracking-[0.16em] text-muted uppercase">
           {kicker}
         </p>
       ) : (
@@ -428,12 +428,12 @@ export function ScreenError({
 }) {
   /*
     Used to pick fixed Tailwind colors for `night` (border-blush/40, bg-ink,
-    text-blush, ...) -- `bg-ink` (`--color-ink`, #1c1410) is a fixed dark
-    BROWN, not the desk's actual night background, so a full-screen error on
-    the dark desk showed a brown panel instead of matching the black desk
-    around it. `.screen-error*` (styles.css) reads the desk's own theme vars
-    instead, so `.desk-ltr.night` flips these automatically; `night` stays
-    accepted so call sites keep compiling.
+    text-blush, ...) -- `bg-ink` (`--color-ink`, #111111) is the fixed
+    light-theme ink, not the desk's actual night background, so a full-screen
+    error on the dark desk showed an ink panel instead of matching the warm
+    black desk around it. `.screen-error*` (styles.css) reads the desk's own
+    theme vars instead, so `.desk-ltr.night` flips these automatically;
+    `night` stays accepted so call sites keep compiling.
   */
   void night;
   return (

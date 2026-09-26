@@ -1,16 +1,44 @@
 /* Public reader 14px floor: no informational text below 14px (pre-Option-B accessibility gate). */
+/*
+  The reader, on the redesign's tokens
+  (docs/design/handoff-2026-09-26/design-system/tokens/).
+
+  `--teal` survives as a NAME because forty-odd rules in this file read it, but
+  it is no longer a color: it is the accent TEXT tone, so it is ink on cream
+  and bone on warm black. The accent FILL is `--a`, the yellow, and nothing
+  informational is ever set in it -- `--sel` exists for the marks that need to
+  be legible as a position (the current section, the selected segment) because
+  yellow on cream is 1.42:1.
+
+  `--serif` is Literata and the shell's UI face is Bricolage Grotesque, which is
+  the whole visible point of this pass: the reader used to run a display serif
+  over the system UI face. Both new faces are self-hosted (src/fonts.css), and
+  no stylesheet still asks for the ones they replaced -- scripts/font-licenses.test.mjs
+  fails on the family names, so they are deliberately not written here either.
+
+  `--reading` is deliberately still 21px. The token sheet's `--fs-body-article`
+  is 20px, but the whole archive is set at 21px and re-setting the measure would
+  rewrap every article -- a layout change, which this pass is not allowed to
+  make. 21px is above the 14px floor the gate asserts.
+*/
 .reader {
-  --bg: #f8faf9;
-  --surface: #fff;
-  --ink: #172e34;
-  --muted: #56696e;
-  --line: #dce5e3;
-  --teal: #14656a;
-  --soft: #eaf3ef;
-  --warm: #f4eee5;
+  --bg: #fffdf7;
+  --surface: #f6f2e7;
+  --ink: #111111;
+  --muted: #3a3a3a;
+  --line: #d8d3c4;
+  --teal: #111111;
+  --soft: #f6f2e7;
+  --warm: #f6f2e7;
+  --a: #ffd23f;
+  --sel: #111111;
+  --ok: #1e6b34;
+  --warn: #8a4b00;
+  --danger: #b3261e;
   --reading: 21px;
-  --serif: Fraunces, Georgia, serif;
-  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --serif: "Literata", Georgia, serif;
+  --fd: "Bricolage Grotesque", system-ui, sans-serif;
+  font-family: "Bricolage Grotesque", system-ui, sans-serif;
   color: var(--ink);
   background: var(--bg);
   font-synthesis: none;
@@ -57,8 +85,8 @@
 .reader input:focus-visible,
 .reader select:focus-visible,
 .reader summary:focus-visible {
-  outline: 3px solid #289fa4;
-  outline-offset: 4px;
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 .reader button {
   background: none;
@@ -103,7 +131,7 @@
   top: -60px;
   left: 20px;
   z-index: 100;
-  background: white;
+  background: var(--surface);
   padding: 12px;
 }
 .reader .skip:focus {
@@ -115,8 +143,8 @@
   justify-content: space-between;
   align-items: center;
   padding: 0 40px;
-  background: #eaf0ee;
-  color: #53696a;
+  background: var(--soft);
+  color: var(--muted);
   font-size: 14px;
   letter-spacing: 0.02em;
 }
@@ -149,7 +177,8 @@
   gap: 25px;
 }
 .reader .brand {
-  font-family: var(--serif);
+  font-family: var(--fd);
+  font-weight: 800;
   font-size: 33px;
   letter-spacing: -1.65px;
   white-space: nowrap;
@@ -165,7 +194,7 @@
   color: var(--muted);
 }
 .reader .locality strong {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ink);
   display: block;
 }
@@ -174,34 +203,50 @@
   align-items: center;
   gap: 9px;
 }
+/*
+  One button family (design-system/components/core/Button.jsx, README section 6).
+  Square corners, a 2px ink border, the 44px tap-target token, and a YELLOW
+  primary with #111 on it -- the same yellow in both themes, with one rule and
+  no per-theme override.
+
+  The primary used to be a teal fill with white text. White on the dark theme's
+  accent measured 3.3:1, so that one variant already carried a dark-mode
+  exception; the redesign removes the exception by making the fill the yellow
+  the design reserves for the primary action, which #111 clears at 12.1:1 on
+  #ffd23f and 9.9:1 on #e6c35c.
+
+  min-height moves 43px -> the 44px token. That is a one-pixel box change, and
+  it is the only one in this file: the tap target is a design rule, not a
+  preference, and scripts/desk-min-font.test.mjs asserts the floor.
+*/
 .reader .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 43px;
+  min-height: var(--tap, 44px);
   padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  border-radius: 0;
+  border: 2px solid var(--ink);
   font-size: 14px;
-  font-weight: 600;
-  background: var(--surface);
-  transition:
-    background 0.15s,
-    transform 0.15s;
+  font-weight: 700;
+  background: transparent;
+  color: var(--ink);
+  transition: background var(--motion-fast, 0.2s);
 }
 .reader .btn:hover {
   background: var(--soft);
-  border-color: #b5cfca;
-  color: var(--teal);
+  color: var(--ink);
 }
 .reader .btn.primary {
-  background: var(--teal);
-  border-color: var(--teal);
-  color: white;
+  background: var(--a);
+  border-color: var(--a);
+  color: #111;
+  font-weight: 800;
 }
 .reader .btn.primary:hover {
-  background: #0d5054;
+  background: color-mix(in srgb, var(--a) 88%, #111);
+  color: #111;
 }
 .reader .btn.subtle {
   border-color: transparent;
@@ -236,18 +281,18 @@
   font-weight: 500;
 }
 .reader .sections a.active {
-  color: var(--teal);
-  font-weight: 650;
+  color: var(--sel);
+  font-weight: 700;
 }
 .reader .sections a.active:after {
   content: "";
   position: absolute;
   bottom: -1px;
   height: 3px;
-  background: var(--teal);
+  background: var(--sel);
   left: 0;
   right: 0;
-  border-radius: 3px 3px 0 0;
+  border-radius: 0;
 }
 .reader .navrow > .textlink,
 .reader .navrow .about-newsroom {
@@ -269,7 +314,7 @@
   gap: 6px;
   color: var(--teal);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   min-height: 35px;
 }
 .reader .textlink:hover {
@@ -287,7 +332,7 @@
 }
 .reader .eyebrow {
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--teal);
@@ -311,7 +356,7 @@
   display: grid;
   grid-template-columns: 1.7fr 1fr;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 0;
   background: var(--surface);
   overflow: hidden;
 }
@@ -330,23 +375,28 @@
 .reader .tag {
   display: inline-block;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--teal);
   margin-bottom: 15px;
 }
+/* Opinion is one of the redesign's named yellow surfaces (README section 6,
+   "section tags"). The fill adds no box: this is an inline-block with no
+   padding, so the background paints exactly the text box and nothing reflows. */
 .reader .tag.opinion {
-  color: #87552f;
+  background: var(--a);
+  color: #111;
 }
 .reader .lead h2 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 42px;
   line-height: 1.16;
   letter-spacing: -1.1px;
   max-width: 650px;
 }
 .reader .lead .dek {
+  font-family: var(--serif);
   font-size: 16px;
   line-height: 1.65;
   color: var(--muted);
@@ -365,7 +415,7 @@
 .reader .meta .dot {
   width: 3px;
   height: 3px;
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--muted);
 }
 .reader .leadbottom {
@@ -382,7 +432,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line);
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--surface);
 }
 .reader .iconbtn:hover {
@@ -391,7 +441,7 @@
 }
 .reader .iconbtn.saved {
   background: var(--soft);
-  color: var(--teal);
+  color: var(--ok);
 }
 .reader .record {
   background: var(--soft);
@@ -408,12 +458,12 @@
   gap: 9px;
   color: var(--teal);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 .reader .record h3 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 29px;
   line-height: 1.2;
   letter-spacing: -0.6px;
@@ -431,19 +481,19 @@
 .reader .record-list li {
   display: flex;
   gap: 15px;
-  border-top: 1px solid #cbddd6;
+  border-top: 1px solid var(--line);
   padding: 16px 0;
 }
 .reader .record-list .num {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 24px;
-  color: #668c7e;
+  color: var(--muted);
   line-height: 1.2;
 }
 .reader .record-list strong {
   display: block;
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 700;
   margin-bottom: 4px;
 }
 .reader .record-list p {
@@ -479,7 +529,7 @@
 .reader .sectionhead h2 {
   font-size: 23px;
   letter-spacing: -0.6px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .reader .content-grid {
   display: grid;
@@ -506,7 +556,7 @@
   margin-bottom: 9px;
 }
 .reader .newsrow h3 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 23px;
   line-height: 1.3;
   letter-spacing: -0.35px;
@@ -528,13 +578,13 @@
 .reader .sidebarcard {
   padding: 25px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--surface);
   margin-bottom: 23px;
 }
 .reader .sidebarcard h2 {
   font-size: 17px;
-  font-weight: 650;
+  font-weight: 700;
   margin-bottom: 7px;
 }
 .reader .sidebarcard > p {
@@ -573,9 +623,9 @@
   align-items: center;
   gap: 13px;
   padding: 16px 0;
-  border-top: 1px solid #ded9d1;
+  border-top: 1px solid var(--line);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .reader .toolitem svg:last-child {
   margin-left: auto;
@@ -584,7 +634,7 @@
 .reader .aboutstrip {
   padding: 30px;
   background: var(--soft);
-  border-radius: 12px;
+  border-radius: 0;
   margin: 12px 0 50px;
   display: flex;
   align-items: center;
@@ -592,7 +642,7 @@
   gap: 30px;
 }
 .reader .aboutstrip h2 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 27px;
   letter-spacing: -0.5px;
 }
@@ -612,17 +662,17 @@
   align-items: center;
   padding: 30px;
   background: var(--warm);
-  border-radius: 12px;
+  border-radius: 0;
 }
 .reader .opinionmark {
   height: 76px;
   width: 76px;
-  background: #e8dcc8;
-  border-radius: 50%;
+  background: var(--a);
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #8b6341;
+  color: #111;
   font-family: var(--serif);
   font-size: 62px;
   padding-top: 22px;
@@ -686,7 +736,7 @@
   padding: 40px 0 27px;
 }
 .reader .pagehead h1 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 43px;
   letter-spacing: -1px;
 }
@@ -718,9 +768,9 @@
 }
 .reader .field {
   background: var(--surface);
-  border: 1px solid #bdcecb;
+  border: 1px solid var(--line);
   color: var(--ink);
-  border-radius: 8px;
+  border-radius: 0;
   min-height: 48px;
   padding: 12px 15px;
   font-size: 15px;
@@ -748,7 +798,7 @@
   font-size: 14px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--surface);
   color: var(--ink);
   max-width: 175px;
@@ -757,7 +807,7 @@
   padding: 65px 25px;
   text-align: center;
   border: 1px dashed var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   margin: 25px 0;
 }
 .reader .empty h2 {
@@ -774,12 +824,13 @@
   margin: 35px auto 28px;
 }
 .reader .articlehead h1 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 48px;
   line-height: 1.18;
   letter-spacing: -1.3px;
 }
 .reader .articlehead .dek {
+  font-family: var(--serif);
   font-size: 19px;
   color: var(--muted);
   line-height: 1.65;
@@ -799,7 +850,7 @@
 .reader .byline strong {
   display: block;
   margin-bottom: 5px;
-  font-weight: 650;
+  font-weight: 700;
 }
 .reader .avatar {
   display: flex;
@@ -813,8 +864,8 @@
   height: 36px;
   background: var(--soft);
   color: var(--teal);
-  border-radius: 50%;
-  font-family: var(--serif);
+  border-radius: 0;
+  font-family: var(--fd);
   font-size: 14px;
 }
 .reader .readingtools {
@@ -849,7 +900,7 @@
   text-decoration: underline;
 }
 .reader .articlebody {
-  font-family: "Source Serif 4", Georgia, serif;
+  font-family: var(--serif);
   font-size: var(--reading);
   line-height: 1.8;
 }
@@ -858,20 +909,20 @@
   margin-bottom: 24px;
 }
 .reader .articlebody h2 {
-  font-family: "Segoe UI", sans-serif;
+  font-family: var(--fd);
   font-size: 24px;
   line-height: 1.4;
-  font-weight: 600;
+  font-weight: 700;
   margin: 35px 0 18px;
 }
 .reader .articlebody .notice {
-  font-family: "Segoe UI", sans-serif;
+  font-family: var(--fd);
   font-size: 14px;
   line-height: 1.6;
   background: var(--warm);
   padding: 15px 19px;
-  border-radius: 8px;
-  color: #745f43;
+  border-radius: 0;
+  color: var(--ink);
   margin-bottom: 25px;
 }
 .reader .articlebody blockquote {
@@ -884,7 +935,7 @@
   margin: 30px 0;
 }
 .reader .sources {
-  font-family: "Segoe UI", sans-serif;
+  font-family: var(--fd);
   border-top: 1px solid var(--line);
   padding-top: 5px;
   margin-top: 35px;
@@ -898,7 +949,7 @@
 }
 .reader .sourcecard {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 20px;
   margin-bottom: 15px;
   background: var(--surface);
@@ -910,7 +961,7 @@
 }
 .reader .sourcecard h3 {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 700;
 }
 .reader .sourcecard p {
   font-size: 14px;
@@ -960,7 +1011,7 @@
 }
 .reader .step {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--surface);
   padding: 25px;
 }
@@ -984,7 +1035,7 @@
 .reader .comparison > div {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 0;
   padding: 20px;
   font-size: 14px;
   line-height: 1.8;
@@ -992,36 +1043,40 @@
 .reader .comparison h3 {
   font-size: 14px;
   margin-bottom: 15px;
-  font-weight: 650;
+  font-weight: 700;
 }
+/* "Changed" is yellow (README section 6); "removed" is the warn tone. Both are
+   fills under ink, so both themes get the same two rules. */
 .reader .comparison mark {
-  background: #d9eede;
+  background: var(--a);
+  color: #111;
   padding: 2px 4px;
 }
 .reader .comparison del {
-  background: #f6dddd;
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg));
+  color: var(--warn);
   padding: 2px 4px;
 }
 .reader .badge {
   font-size: 14px;
   background: var(--soft);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 5px 7px;
   color: var(--teal);
 }
 .reader dialog {
-  border: 1px solid var(--line);
-  border-radius: 17px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
   padding: 30px;
   width: min(620px, calc(100% - 32px));
   max-height: 85vh;
   overflow: auto;
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 25px 100px #142f3430;
+  box-shadow: var(--shadow-dialog);
 }
 .reader dialog::backdrop {
-  background: #142f3466;
+  background: var(--scrim);
   backdrop-filter: blur(5px);
 }
 .reader .dialoghead {
@@ -1058,16 +1113,16 @@
 }
 .reader .segmented .selected {
   background: var(--soft);
-  border-color: var(--teal);
-  color: var(--teal);
+  border-color: var(--sel);
+  color: var(--sel);
 }
 .reader .reading-sample {
-  font-family: "Source Serif 4";
+  font-family: var(--serif);
   font-size: var(--reading);
   line-height: 1.8;
   background: var(--bg);
   padding: 20px;
-  border-radius: 9px;
+  border-radius: 0;
 }
 .reader #toast {
   position: fixed;
@@ -1075,14 +1130,13 @@
   left: 50%;
   transform: translate(-50%, 20px);
   padding: 13px 22px;
-  border-radius: 9px;
-  background: #173e42;
-  color: white;
-  box-shadow: 0 5px 25px #0002;
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--bg);
   font-size: 14px;
   opacity: 0;
   pointer-events: none;
-  transition: 0.2s;
+  transition: var(--motion-fast, 0.2s);
   z-index: 100;
   max-width: calc(100% - 30px);
   text-align: center;
@@ -1106,57 +1160,38 @@
   `.mode-dark` is what React renders once it has read the reader's preference,
   and React cannot know it on the server: it lives in a per-paper localStorage
   blob, so a hard reload of an article was server-rendered light -- a full
-  page of #f8faf9 in a dark room -- and flipped dark a paint later.
+  page of #fffdf7 in a dark room -- and flipped dark a paint later.
   `:root[data-appearance="reader-dark"]` is stamped on <html> by the inline
   <head> script in __root.tsx BEFORE the first paint, out of the same blob, so
   the first frame is already this palette.
 
-  #142428 is the reader's dark, and it is also what `READER_DARK_BG` in
-  src/lib/appearance.ts reports to the `<meta name="theme-color">` update --
-  src/lib/appearance.test.ts fails if either colour moves without the other.
+  #1b1916 is the reader's dark -- the same warm black as the desk's, so the
+  paper and the desk are the same newspaper at night -- and it is what
+  `READER_DARK_BG` in src/lib/appearance.ts reports to the
+  `<meta name="theme-color">` update; src/lib/appearance.test.ts fails if either
+  color moves without the other.
 
-  Every `.reader.mode-dark …` override below carries the attribute form too.
-  They are not redundant: before hydration only the attribute is set, and a
-  `.prototype` banner or an opinion tag that kept its light colours over a dark
-  page would be a legibility bug of its own (--color-rust is #9b2915, 1.6:1
-  against this background).
+  Every value that has to change with the theme lives in this one block: the
+  seven `.prototype` / `.btn.primary` / `.opinionmark` / `.tag.opinion`
+  overrides that used to sit below it are gone, because those rules now read
+  `var(--soft)`, `var(--a)` and the other tokens, which flip here. Fewer rules,
+  and no way for a dark override to drift out of step with its light twin.
 */
 .reader.mode-dark,
 :root[data-appearance="reader-dark"] .reader {
-  --bg: #142428;
-  --surface: #1a2d32;
-  --ink: #e0ebe7;
-  --muted: #adbfbd;
-  --line: #354a4d;
-  --teal: #83c9c3;
-  --soft: #233e3e;
-  --warm: #39372f;
-}
-.reader.mode-dark .prototype,
-:root[data-appearance="reader-dark"] .reader .prototype {
-  background: #233638;
-  color: #bacac7;
-}
-.reader.mode-dark .btn.primary,
-:root[data-appearance="reader-dark"] .reader .btn.primary {
-  color: #152d31;
-}
-.reader.mode-dark .record-list li,
-:root[data-appearance="reader-dark"] .reader .record-list li {
-  border-color: var(--line);
-}
-.reader.mode-dark .articlebody .notice,
-:root[data-appearance="reader-dark"] .reader .articlebody .notice {
-  color: #d9c49d;
-}
-.reader.mode-dark .opinionmark,
-:root[data-appearance="reader-dark"] .reader .opinionmark {
-  background: #554a37;
-  color: #e7c698;
-}
-.reader.mode-dark .tag.opinion,
-:root[data-appearance="reader-dark"] .reader .tag.opinion {
-  color: #d7b58c;
+  --bg: #1b1916;
+  --surface: #27231f;
+  --ink: #e8e6e1;
+  --muted: #bdbab3;
+  --line: #3b3631;
+  --teal: #e8e6e1;
+  --soft: #27231f;
+  --warm: #27231f;
+  --a: #e6c35c;
+  --sel: #e6c35c;
+  --ok: #9fd4a8;
+  --warn: #f0b27a;
+  --danger: #f0998c;
 }
 @media (min-width: 1500px) {
   .reader .wrap {
@@ -1258,7 +1293,7 @@
     width: auto;
     padding: 13px 0;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     align-items: center;
     order: 1;
   }
@@ -1289,7 +1324,7 @@
   }
   .reader .sections a.active {
     background: var(--soft);
-    border-radius: 6px;
+    border-radius: 0;
   }
   .reader .sections a.active:after {
     display: none;
@@ -1536,9 +1571,9 @@
   text-underline-offset: 3px;
 }
 .reader .articlebody .textlink {
-  font-family: "Segoe UI", sans-serif;
+  font-family: var(--fd);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .reader .lead .dek {
   display: -webkit-box;
@@ -1565,24 +1600,15 @@
 :root[data-appearance="reader-dark"] .reader {
   color-scheme: dark;
 }
-.reader.mode-dark .btn.primary:hover,
-:root[data-appearance="reader-dark"] .reader .btn.primary:hover {
-  background: #a0ddd5;
-  color: #152d31;
-}
-.reader.mode-dark .record-list .num,
-:root[data-appearance="reader-dark"] .reader .record-list .num {
-  color: #a1c8b8;
-}
 .reader .skip {
   background: var(--surface);
   color: var(--ink);
 }
 .reader .comparison mark {
-  color: #173422;
+  color: #111;
 }
 .reader .comparison del {
-  color: #542222;
+  color: var(--warn);
 }
 .reader .field::placeholder {
   color: var(--muted);
@@ -1592,7 +1618,7 @@
   margin-top: 40px;
   padding: 28px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--surface);
 }
 .reader .correction-panel h2 {
@@ -1604,13 +1630,13 @@
 .reader #correctionform label {
   display: block;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 20px 0 9px;
   color: var(--ink);
 }
 .reader #correctionform label span {
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   color: var(--muted);
 }
 .reader #correctionform .field {
@@ -1658,17 +1684,17 @@
   --color-ink-2: var(--ink);
   --color-muted: var(--muted);
   --color-rule: var(--line);
-  --color-rust: var(--teal);
-  --color-rust-2: var(--teal);
-  --color-danger: #a32b22;
-  --font-serif: "Source Serif 4", Georgia, serif;
-  --font-display: Fraunces, Georgia, serif;
+  --color-rust: var(--ink);
+  --color-rust-2: var(--ink);
+  --color-danger: var(--danger);
+  --font-serif: "Literata", Georgia, serif;
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
   color: var(--ink);
   background: var(--bg);
 }
 .reader.mode-dark,
 :root[data-appearance="reader-dark"] .reader {
-  --color-danger: #ffb4a7;
+  --color-danger: var(--danger);
   color-scheme: dark;
 }
 .reader .reader-main {
@@ -1703,10 +1729,9 @@
   z-index: 100;
   padding: 14px 20px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 0;
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 5px 20px #0003;
   max-width: 90vw;
   font-size: 14px;
 }
@@ -1732,7 +1757,7 @@
   row-gap: 0;
 }
 .reader .articlebody > div {
-  font-family: "Source Serif 4", Georgia, serif;
+  font-family: var(--serif);
   font-size: var(--reading);
   line-height: 1.85;
 }
@@ -1740,7 +1765,7 @@
   font-size: inherit;
 }
 .reader .articlebody .sources {
-  font-family: "Segoe UI", sans-serif;
+  font-family: var(--fd);
   font-size: 14px;
 }
 .reader .articlebody .sources p {
@@ -1768,7 +1793,7 @@
   border: 1px solid var(--color-danger);
   padding: 18px;
   margin: 20px 0;
-  border-radius: 9px;
+  border-radius: 0;
   color: var(--color-danger);
 }
 .reader .pagination {

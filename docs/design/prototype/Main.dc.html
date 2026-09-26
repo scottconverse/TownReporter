@@ -7,7 +7,15 @@
 <body>
 <x-dc>
 <helmet>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+  <!--
+    This prototype loaded Fraunces and Source Serif 4 from fonts.googleapis.com.
+    That link is gone: the app self-hosts its two faces (public/fonts, src/fonts.css)
+    and no request to fonts.googleapis.com is made from anything it ships. The
+    stacks below still name the faces this prototype was drawn with, so it renders
+    as it did wherever those faces are installed and falls back to the system ones
+    where they are not. The 2026-09-26 redesign replaced them with Bricolage
+    Grotesque and Literata.
+  -->
   <style>
     body { margin: 0; }
     a { color: #7a1f10; } a:hover { color: #9b2915; }
@@ -43,7 +51,7 @@
         <div onClick="{{navtab.go}}" style="padding: 14px 0; font-size: {{ts.body}}; font-family: 'Fraunces', serif; font-weight: 600; cursor: pointer; box-sizing: border-box; border-bottom: 2px solid {{navtab.underline}}; color: {{navtab.color}}; display: flex; align-items: center;">{{navtab.label}}</div>
       </sc-for>
     </div>
-    <div onClick="{{goDarkDesk}}" style="display: flex; align-items: center; padding: 0 22px; background: #000000; color: #ffffff; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; border-bottom: 2px solid {{darkTabUnderline}};">Dark Desk</div>
+    <div onClick="{{goDarkDesk}}" style="display: flex; align-items: center; padding: 0 22px; background: #1b1916; color: #e8e6e1; font-family: 'Fraunces', serif; font-weight: 600; font-size: {{ts.body}}; cursor: pointer; box-sizing: border-box; border-bottom: 2px solid {{darkTabUnderline}};">Dark Desk</div>
   </div>
 
   <!-- needs-you ticker -->
@@ -305,7 +313,7 @@
       <div style="width: 420px; display: flex; flex-direction: column; gap: 28px;">
 
         <!-- dark desk -->
-        <div style="background: #000000; color: #ffffff; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
+        <div style="background: #1b1916; color: #e8e6e1; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
           <div>
             <div style="font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px;">Dark Desk</div>
             <div style="font-size: 14px; color: #e0e0e0; font-style: italic;">Investigates. Never prints.</div>
@@ -654,7 +662,10 @@ class Component extends DCLogic {
 
     const THEMES = {
       light: { bg: "#f6f1e7", bg2: "#efe6d6", fg: "#1c1410", fg2: "#3a3129", mut: "#6b5e52", line: "#cfc2ac", a: "#9b2915", adeep: "#7a1f10", warn: "#8b1e12" },
-      dark: { bg: "#000000", bg2: "#141414", fg: "#ffffff", fg2: "#e0e0e0", mut: "#e0e0e0", line: "#444444", a: "#d2764f", adeep: "#d2764f", warn: "#e8b4a8" }
+      // The dark ground was #000000/#ffffff from 0.6.19 until the 2026-09-26
+      // redesign, which names one warm near-black (#1b1916) for both the desk and
+      // the paper; the values here are that package's tokens/colors.css dark set.
+      dark: { bg: "#1b1916", bg2: "#27231f", fg: "#e8e6e1", fg2: "#bdbab3", mut: "#bdbab3", line: "#3b3631", a: "#e6c35c", adeep: "#e8e6e1", warn: "#f0b27a", danger: "#f0998c" }
     };
     const t = THEMES[theme];
 

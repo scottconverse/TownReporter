@@ -1,5 +1,5 @@
 /*
-  Appearance: the preferences that decide what colour a page paints, and the
+  Appearance: the preferences that decide what color a page paints, and the
   one piece of code that applies them BEFORE the first paint.
 
   The bug this module exists to kill (owner report, 2026-09-25): "when I
@@ -70,20 +70,28 @@ export const DESK_SIZE_ATTR = "data-desk-size";
 
 export const DEFAULT_APPEARANCE: Appearance = { desk: "light", size: "normal", reader: "light" };
 
-/** The desk's dark page colour: `.desk-ltr.astra.night`'s `--bg` /
-    `:root[data-appearance="desk-dark"]` (desk-astra.css, styles.css). Used by
-    the head script to keep the browser's own `theme-color` in step, so a
-    phone's address bar does not stay white over a dark page. There is no
+/** The dark page color, for both surfaces: the desk's `.desk-ltr.astra.night`
+    `--bg` / `:root[data-appearance="desk-dark"]` and the paper's
+    `.reader.mode-dark` `--bg` (desk-astra.css, reader-astra.css, styles.css).
+    Used by the head script to keep the browser's own `theme-color` in step, so
+    a phone's address bar does not stay white over a dark page. There is no
     custom property holding it -- the value is written out at each site, and
     src/lib/appearance.test.ts fails if one of them moves away from this
-    constant. */
-export const DESK_NIGHT_BG = "#182024";
-/** The public paper's dark page colour: `.reader.mode-dark`'s `--bg`, and the
+    constant.
+
+    Until the redesign this was two constants, #182024 for the desk and #142428
+    for the paper. The tokens have one dark -- `--dd: #0f0e0c` is the darkest
+    step and `#1b1916` is the ground every dark panel sits on -- because an
+    editor switching the desk to Dark and then opening the paper should not be
+    looking at two different newspapers. */
+export const DESK_NIGHT_BG = "#1b1916";
+/** The paper's dark page color. The same warm black as the desk's, and the
     same value on `:root[data-appearance="reader-dark"] .reader`
-    (reader-astra.css). */
-export const READER_DARK_BG = "#142428";
-/** The shipped light page colour, matching `--color-paper` (styles.css). */
-export const LIGHT_BG = "#f6f1e7";
+    (reader-astra.css). Kept as its own name because `surfaceBackground` and
+    the head script still have to answer per surface. */
+export const READER_DARK_BG = "#1b1916";
+/** The shipped light page color, matching `--color-paper` (styles.css). */
+export const LIGHT_BG = "#fffdf7";
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === "string" && (allowed as readonly string[]).includes(value)
@@ -98,10 +106,11 @@ export function isDeskPath(pathname: string): boolean {
 /**
  * Which surface the browser is on decides WHICH preference paints.
  *
- * The desk's dark and the paper's dark are different darks (#182024 against
- * #142428) and the two toggles are independent, so "dark" is not a property of
- * the document -- it is a property of the page you are looking at. `/desk` and
- * everything under it is the desk; everything else is the paper.
+ * The two toggles are independent, so "dark" is not a property of the
+ * document -- it is a property of the page you are looking at. `/desk` and
+ * everything under it is the desk; everything else is the paper. (Both darks
+ * are the same warm black now, but the toggles are still two preferences, so
+ * the answer still has to be computed per surface.)
  *
  * Kept as one pure function so the head script's own copy of this rule can be
  * checked against it (src/lib/appearance.test.ts).
