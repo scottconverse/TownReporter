@@ -139,7 +139,7 @@ This is the loop. Skip steps that have nothing in them.
 5. **Workbench** — draft, notes, check the documents, publish or don’t.
 6. **Dark Desk** — only when something doesn’t add up, disappeared, or was never posted.
 7. **Opinion** — when the paper should say what it thinks about something it has reported.
-8. **Published** — if you got it wrong, post a correction. It is public.
+8. **Published** — if you got it wrong, post a correction, and fix the story text too when the words themselves were wrong. Both are public.
 9. **Server** — a glance, when something feels slow or the site looks down.
 
 Scan does not publish. Draft does not publish. Dark Desk does not publish. **Publish** on the workbench remains the gate for ordinary reporting; approved routine notices use their separate fixed-template path.
@@ -1103,6 +1103,16 @@ What is live on the paper, with its corrections.
 **Edit headline** beside a story rewrites the words at the top of it without touching anything else. It opens a box under the headline that is on the paper now, so you are looking at what you are replacing. The URL does not change, no link breaks, and the desk keeps the old headline, your account and the time. This is the one part of a printed story the desk lets you change without a notice, because the words are the story's name rather than its content.
 
 If you got it wrong: open the story here, write the correction in the open, post it. It appears on `/corrections` and with the article. Do not silently rewrite a published piece and hope nobody notices. We would rather look careful than look first.
+
+The correction box no longer starts empty. Above it are two short lines — **What was wrong** and **What is right** — and you type the fact, not the sentence: *the fee was $4,200* / *the fee is $2,400*. Then either button fills the box below.
+
+**Suggest wording** asks the story model to write the note, in the paper's voice, from those two lines and the story it can see. It is asked not to add a fact, a number, a name or a date that is not in your two lines, and the note it writes is put in the box, not published. You read it, change any word of it, and post it yourself. The button says **Suggesting…** while it waits, then **Suggested below. Read it, change any of it, then post it.** If the model cannot be reached, the desk says so and leaves the box exactly as you left it — your typing is never replaced by a partial or guessed note.
+
+**Use a plain note** writes the same note on the desk, with no model and no network: *An earlier version of this story said the fee was $4,200. In fact, the fee is $2,400.* It works when nothing else does, and it is the button to press if you would rather not spend a model call. Both buttons need both lines, because a note built from half a fact reads finished and says nothing.
+
+Nothing posts until you press **Publish correction**, and you can always ignore both buttons and type the note yourself; that path is unchanged.
+
+**Also fix the story text** is the second choice, and it is off unless you turn it on. Left off, the correction is exactly what it has always been: a public note above a story whose words do not change. Turned on, it opens the printed body in a box that already holds the story as it printed, so you are editing the words on the paper rather than retyping them, and you press **Publish correction** once. The corrected text and the note go public together, in one act. The URL does not change and no link breaks. The desk keeps the text the story used to carry, with your account, the time and the correction that justified the change, so the paper can always answer what it printed and who changed it. Readers see the corrected story and the note; the replaced words are never printed again. If the box holds the same text the story already has, or is empty, the desk refuses rather than recording a change that did not happen.
 
 A correction can attach only to a published story in your newsroom. If the selected story is no longer available, the desk refuses the correction instead of saving an unattached note. Return to Published and select the current story before posting again.
 
