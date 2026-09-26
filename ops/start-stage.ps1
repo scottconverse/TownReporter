@@ -47,6 +47,30 @@
   starting anything or writing anything, which is how the test suite covers
   the branches of this file on a machine nothing may be started on.
 
+  WHICH CHECKOUT (Unit AL2). The staged copy is not always in the checkout
+  this script lives in: the owner's rule is that a build never happens in the
+  live checkout, so the copy on 3100 is staged from a worker or a dev
+  checkout. ops\stage.ps1 writes a machine-wide pointer naming that checkout,
+  and this script follows it. In order:
+
+    * -App <path> -- what ops\watchdog.ps1 passes, because it has already put
+      the pointer through Resolve-TownReporterStageApp and knows what it
+      decided. One resolution, one target, and the line the operator reads is
+      about the checkout that is actually being started.
+    * no -App -- ops\stage.ps1's own checkout is used; if nothing is staged
+      there, the pointer is read and every check in lib-stage.ps1 is applied
+      to it first. This is the path the Control page's button takes, and a
+      pointer that cannot be trusted is declined with the plain reason rather
+      than acted on.
+    * neither -- nothing staged here and no pointer anywhere: the 'none'
+      verdict below declines in the words this script always used.
+
+  Everything downstream -- the start record, the pid file, the state file, the
+  logs and the version note -- belongs to whichever checkout was chosen, so
+  the copy and its paperwork end up in the same place. The database is the one
+  thing not chosen: the staged copy is always townreporter_dev on 5433, here
+  and in ops\stage.ps1.
+
   ASCII only: PS 5.1 reads a BOM-less UTF-8 file as ANSI.
 #>
 [CmdletBinding()]
@@ -57,7 +81,10 @@ param(
   # Meaning: "the fresh attempt record you are about to read is mine, not
   # somebody else's." See the 'starting' branch below for why that has to be
   # said out loud.
-  [switch]$Watchdog
+  [switch]$Watchdog,
+  # The checkout to start the copy in. Empty means "work it out": this
+  # checkout if something is staged here, otherwise the machine-wide pointer.
+  [string]$App = ''
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,12 +103,16 @@ $app = Split-Path -Parent $ops
 # file naming the live paper's port is refused before anything is started.
 $appPort = [int]$port
 . (Join-Path $ops "lib-stage.ps1")
-$paths = Get-TownReporterStagePaths -App $app
+
+# The checkout this run is about. Set to $app first so every line Say/Fail
+# writes before the choice is made still lands in this checkout's own log.
+$target = $app
+$targetFrom = 'this checkout'
 
 function Say($msg) {
   if (-not $Quiet) { Write-Host "  $msg" }
   # A dry run writes nothing at all -- not even a log line.
-  if (-not $DryRun) { Write-TownReporterStageLog -App $app -Message $msg }
+  if (-not $DryRun) { Write-TownReporterStageLog -App $target -Message $msg }
 }
 
 # Exit 2: nothing to do, and nothing wrong. The reason is the message.
@@ -96,7 +127,35 @@ function Fail($msg) {
   exit 1
 }
 
-$info = Get-TownReporterStageInfo -App $app -AppPort $appPort -PgPort 5433
+# Which checkout? (see the header). -App is the watchdog's answer; otherwise
+# this checkout if it has staged something, and the machine-wide pointer if it
+# has not.
+if ($App) {
+  $target = [IO.Path]::GetFullPath($App)
+  $targetFrom = "-App"
+  if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+    Fail "the checkout $target is not there any more. Nothing was started."
+  }
+} else {
+  $resolve = Resolve-TownReporterStageApp -App $app -AppPort $appPort -PgPort 5433
+  if ($resolve.Ok) {
+    $target = $resolve.App
+    # $resolve.From is 'checkout' when it is this one, so the message only
+    # appears when the copy really is somewhere else.
+    if ($resolve.From -eq 'pointer') {
+      $targetFrom = 'the machine-wide pointer'
+      Say "the staged copy is in $target (from the machine-wide pointer $($resolve.PointerFile))"
+    }
+  } elseif (-not $resolve.Silent) {
+    Decline "the machine-wide staged-copy pointer cannot be trusted: $($resolve.Reason)"
+  }
+  # Silent means this machine has never staged anything: nothing was found, and
+  # nothing is said about it here. The 'none' verdict below declines in the
+  # words this script used before there was a pointer.
+}
+
+$paths = Get-TownReporterStagePaths -App $target
+$info = Get-TownReporterStageInfo -App $target -AppPort $appPort -PgPort 5433
 
 # The 'starting' verdict means "port free, nothing answering, but an attempt
 # was recorded in the last 150 seconds". For a person pressing the button that
@@ -118,7 +177,7 @@ switch ($info.Verdict) {
 }
 
 $stagePort = $info.Port
-$outputServer = Join-Path $app ".output\server\index.mjs"
+$outputServer = Join-Path $target ".output\server\index.mjs"
 if (-not (Test-Path -LiteralPath $outputServer)) {
   Fail "there is no build at $outputServer. Nothing was started. Run ops\stage.ps1 to stage one."
 }
@@ -129,12 +188,13 @@ try {
   Fail "node is not on PATH, so the staged copy cannot be started."
 }
 
-$checkoutVersion = (Get-Content (Join-Path $app "package.json") -Raw | ConvertFrom-Json).version
+$checkoutVersion = (Get-Content (Join-Path $target "package.json") -Raw | ConvertFrom-Json).version
 $stagedVersion = if ($info.Version) { $info.Version } else { [string]$checkoutVersion }
 
 if ($DryRun) {
   Say "[dry run] would start the staged copy on http://127.0.0.1:$stagePort (version $stagedVersion)"
-  Say "[dry run] working directory: $app"
+  Say "[dry run] checkout: $target (from $targetFrom)"
+  Say "[dry run] working directory: $target"
   Say "[dry run] command: $nodeExe scripts/with-app-env.mjs node `"$outputServer`""
   Say "[dry run] environment: DATABASE_URL=postgres://postgres@127.0.0.1:5433/townreporter_dev PORT=$stagePort HOST=127.0.0.1 TOWNREPORTER_TUNNEL=0"
   Say "[dry run] would write $($paths.Pid), $($paths.State) and $($paths.Record)"
@@ -149,7 +209,7 @@ if ($info.Version -and $info.Version -ne $checkoutVersion) {
 # Record the attempt BEFORE spawning. This is the write that makes "at most
 # once every thirty minutes" true even if this process dies on the next line:
 # ops\watchdog.ps1 reads it back on its next run either way.
-Save-TownReporterStageStartRecord -App $app -Record ([pscustomobject]@{
+Save-TownReporterStageStartRecord -App $target -Record ([pscustomobject]@{
   LastAttemptAt = (Get-TownReporterIsoTime)
   LastOutcome   = 'starting'
   LastReason    = "started by $($MyInvocation.MyCommand.Path)"
@@ -185,13 +245,13 @@ try {
   # started -- this script does not repeat that.
   $proc = Start-Process -FilePath $nodeExe `
     -ArgumentList @("scripts/with-app-env.mjs", "node", "`"$outputServer`"") `
-    -WorkingDirectory $app `
+    -WorkingDirectory $target `
     -WindowStyle Hidden `
     -RedirectStandardOutput $paths.OutLog `
     -RedirectStandardError $paths.ErrLog `
     -PassThru
 } catch {
-  Save-TownReporterStageStartRecord -App $app -Record ([pscustomobject]@{
+  Save-TownReporterStageStartRecord -App $target -Record ([pscustomobject]@{
     LastAttemptAt = (Get-TownReporterIsoTime)
     LastOutcome   = 'failed'
     LastReason    = "could not start: $($_.Exception.Message)"
@@ -244,7 +304,7 @@ for ($i = 0; $i -lt 12; $i++) {
 }
 
 if ($code -eq 200) {
-  Save-TownReporterStageStartRecord -App $app -Record ([pscustomobject]@{
+  Save-TownReporterStageStartRecord -App $target -Record ([pscustomobject]@{
     LastAttemptAt = (Get-TownReporterIsoTime)
     LastOutcome   = 'started'
     LastReason    = "answering 200 on 127.0.0.1:$stagePort"
@@ -255,7 +315,7 @@ if ($code -eq 200) {
 }
 
 $detail = if ($code -eq 0) { "nothing was listening on $stagePort" } else { "it answered $code" }
-Save-TownReporterStageStartRecord -App $app -Record ([pscustomobject]@{
+Save-TownReporterStageStartRecord -App $target -Record ([pscustomobject]@{
   LastAttemptAt = (Get-TownReporterIsoTime)
   LastOutcome   = 'failed'
   LastReason    = "$detail two minutes after starting PID $($proc.Id)"

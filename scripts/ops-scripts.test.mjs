@@ -2048,8 +2048,33 @@ test("the watchdog brings the staged copy back, start-only, behind the paper's h
   assert.ok(recordedAt >= 0 && spawnedAt > recordedAt, "the watchdog must record the attempt before it spawns the start");
   assert.match(
     code,
-    /"-File", \(Join-Path \$stageApp "ops\\start-stage\.ps1"\), "-Quiet", "-Watchdog"/,
-    "the spawn must pass -Watchdog, or the child reads the watchdog's own record as an attempt in flight and declines itself",
+    /"-File", \(Join-Path \$stageApp "ops\\start-stage\.ps1"\), "-App", "`"\$stageApp`"", "-Quiet", "-Watchdog"/,
+    "the spawn must run the staged checkout's own start script, name that checkout, and pass -Watchdog, or the child reads the watchdog's own record as an attempt in flight and declines itself",
+  );
+  // The resolution above is the whole of Unit AL2's watchdog half: when this
+  // checkout has nothing staged, the copy it starts is the one the pointer
+  // names. And the silent answer must leave $stageApp alone -- assigning the
+  // resolver's App unconditionally puts "" there, and the next line throws on
+  // the empty string every five minutes on a machine that never staged.
+  assert.match(
+    code,
+    /Resolve-TownReporterStageApp -App \$stageApp -AppPort \(\[int\]\$port\) -PgPort \(\[int\]\$pgPort\)/,
+    "the watchdog must put the pointer through the shared gate before it starts anything from it",
+  );
+  assert.match(
+    code,
+    /if \(\$resolve\.Ok\) \{ \$stageApp = \$resolve\.App \}/,
+    "only a resolver that answered Ok may replace the checkout: the silent answer carries no path",
+  );
+  assert.doesNotMatch(
+    code,
+    /^\s*\$stageApp = \$resolve\.App\s*$/m,
+    "an unconditional assignment blanks the checkout on the silent answer and the next line throws",
+  );
+  assert.match(
+    code,
+    /not answering, but \$\(\$due\.Reason\); leaving it for a later run/,
+    "the thirty-minute floor still declines in the library's own words",
   );
   // Only 'down' starts anything, and 'nothing staged' says nothing at all: an
   // ordinary log line every five minutes on a machine that has never staged is
@@ -2111,6 +2136,171 @@ test(
     }
     assert.doesNotMatch(out, /FAIL/, `a stage-start check failed:\n${out}`);
     assert.match(out, /ci-stage-start\.ps1 : every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
+
+/*
+  Unit AL2. The gap the staging work above left open, measured on this machine:
+  ops\watchdog.ps1 runs from the LIVE checkout and looked for ops\.stage.json
+  in that same checkout -- but a build is never made in the live checkout (the
+  owner's rule), so the copy on 3100 is staged from a worker or a dev checkout.
+  After a reboot the live watchdog found nothing and started nothing, and the
+  operator's copy stayed down until somebody started it by hand.
+
+  The fix is one small written-down fact: ops\stage.ps1 records which checkout
+  it just staged, machine-wide, and every reader -- the watchdog,
+  ops\start-stage.ps1 with no arguments, the Control page -- puts that record
+  through the same gate in ops\lib-stage.ps1 before starting anything from it.
+  The assertions below are the shape of that: one writer, one gate, three
+  readers, and a refusal that is silent the first time only.
+*/
+test("which checkout was staged last is written down machine-wide, and one gate guards it", () => {
+  const STAGE = read("stage.ps1");
+
+  // One place, outside every checkout. A pointer inside the live checkout is
+  // the bug it exists to fix; one inside the worker is invisible to the
+  // watchdog that has to read it.
+  assert.match(
+    STAGE_LIB,
+    /function Get-TownReporterStagedCopyPointerPath \{[\s\S]*?\$env:LOCALAPPDATA[\s\S]*?'TownReporter\\staged-copy\.json'/,
+    "ops\\lib-stage.ps1 must own the pointer's path: %LOCALAPPDATA%\\TownReporter\\staged-copy.json",
+  );
+  assert.match(
+    STAGE_LIB,
+    /function Get-TownReporterStagedCopyPointerPath \{[\s\S]*?\$PointerFile/,
+    "and honor an explicit -PointerFile, which is how a test points it at a temp folder",
+  );
+
+  // Atomic, like every other state file in this layer: a reader must never see
+  // half a document, and the watchdog is a reader that runs unattended.
+  const save = STAGE_LIB.slice(STAGE_LIB.indexOf("function Save-TownReporterStagedCopyPointer"));
+  assert.match(save, /\$tmp = "\$path\.tmp"/, "the pointer must be written beside its target first");
+  assert.match(save, /Move-Item -LiteralPath \$tmp -Destination \$path -Force/, "and moved over it, so no reader sees a partial file");
+  for (const field of ["app", "port", "commit", "version", "database", "time"]) {
+    assert.match(save, new RegExp(`^\\s{4}${field}\\s`, "m"), `the pointer must name the ${field} the brief asks a reader to have`);
+  }
+
+  // The writer is ops\stage.ps1, and it is the one place that knows a restore
+  // and a build just succeeded. Written AFTER the state file on purpose: every
+  // reader checks the two against each other, so a pointer that arrived first
+  // would be refused by all of them.
+  const pointerWrite = STAGE.indexOf("Save-TownReporterStagedCopyPointer -App $app");
+  const stateWrite = STAGE.indexOf("$state | ConvertTo-Json | Set-Content -Path $stateFile");
+  assert.ok(stateWrite >= 0, "ops\\stage.ps1 must still write the checkout's own ops\\.stage.json");
+  assert.ok(pointerWrite > stateWrite, "the machine-wide pointer must be written after the state file it is checked against");
+  assert.match(STAGE, /^ {2}commit {2}= \$commit$/m, "the state file must record the commit the pointer is compared against");
+  assert.match(
+    STAGE,
+    /if \(Remove-TownReporterStagedCopyPointer -App \$app\)/,
+    "-Stop must remove the pointer, and only for the checkout it just stopped: a pointer naming another checkout is a copy still running there",
+  );
+
+  // The gate. One function, one answer, and the reasons a reader may refuse.
+  const resolve = STAGE_LIB.slice(
+    STAGE_LIB.indexOf("function Resolve-TownReporterStageApp"),
+    STAGE_LIB.indexOf("function Get-TownReporterStageInfo"),
+  );
+  const ownStateAt = resolve.indexOf("ops\\.stage.json')");
+  const pointerAt = resolve.indexOf("Get-TownReporterStagedCopyPointer -PointerFile $PointerFile");
+  assert.ok(ownStateAt >= 0 && pointerAt > ownStateAt, "this checkout's own staging wins: the pointer is only read when nothing is staged here");
+  for (const [what, pattern] of [
+    ["a checkout with no build at .output\\server\\index.mjs", /\$outputServer/],
+    ["a folder that is not there any more", /is not there any more/],
+    ["a folder outside the one this checkout lives in", /is not under \$root/],
+    ["the live paper's own checkout", /the live paper's own/],
+    ["a folder whose package.json names something else", /packageName -ne 'townreporter'/],
+    ["a commit that no longer matches the checkout's own state file", /the checkout has been staged again since/],
+    ["a port the staged copy must not use", /Test-TownReporterStagePortSafe/],
+  ]) {
+    assert.match(resolve, pattern, `the gate must refuse ${what} by name`);
+  }
+  assert.match(
+    resolve,
+    /App = ''; Ok = \$false; From = 'none'; Silent = \$true; Reason = ''/,
+    "a machine with nothing staged here and no pointer anywhere must answer SILENTLY -- an ordinary log line every five minutes is how an operator stops reading the log",
+  );
+
+  // Said once. The watchdog runs every five minutes; the same broken pointer is
+  // not news the sixth time, and a different one is.
+  assert.match(
+    STAGE_LIB,
+    /function Test-TownReporterStageNoticeIsNew \{[\s\S]{0,900}\$last -ceq \$Reason/,
+    "the same refusal must not be repeated on every run, and a different one must still be said",
+  );
+
+  // The two readers that start something. Both go through the gate: neither
+  // reads the pointer file's fields for itself, or they would drift apart.
+  const start = STAGE_START;
+  assert.match(
+    start,
+    /Resolve-TownReporterStageApp -App \$app -AppPort \$appPort -PgPort 5433/,
+    "ops\\start-stage.ps1 with no -App must put the pointer through the shared gate",
+  );
+  assert.match(start, /Decline "the machine-wide staged-copy pointer cannot be trusted: \$\(\$resolve\.Reason\)"/, "and decline with the gate's own plain reason");
+  assert.match(start, /if \(\$resolve\.Ok\) \{/, "only an Ok answer may set the target");
+  assert.match(
+    STAGE_LIB,
+    /function Resolve-TownReporterStageApp \{[\s\S]{0,120}\[string\]\$PointerFile = ''/,
+    "the gate takes -PointerFile so a test can hand it a temp folder instead of this machine's own",
+  );
+});
+
+test(
+  "the machine-wide pointer is exercised end to end, in another checkout, off this machine",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      Unit AL2's own fixture, and the reason it can run at all: the pointer's
+      path is read from %LOCALAPPDATA% at the moment it is used, by both the
+      PowerShell and the JavaScript side, so a fake LOCALAPPDATA in a
+      disposable world is the seam -- no new WATCHDOG_* variable had to be
+      invented for it, and this machine's real pointer is never read or
+      written. The world is two checkouts side by side: 'live', which the
+      watchdog runs from and which has nothing staged, and 'worker', which the
+      pointer names and which holds the build.
+
+      The checks below are the ones that matter for a fixture nothing else
+      guards: it must not be able to touch this machine's own copy, and it must
+      really run the real watchdog.
+    */
+    const fixture = join(ROOT, "scripts", "ci-stage-pointer.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-stage-pointer.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-stage-pointer.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.match(text, /GetTempPath\(\)/, "its world must be built under the OS temp directory");
+    assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
+    assert.match(
+      text,
+      /\$env:LOCALAPPDATA = \$fakeLocal/,
+      "the pointer must be redirected into the disposable world, so the operator's real pointer is neither read nor written",
+    );
+    assert.match(
+      text,
+      /foreach \(\$processId in \$script:spawned\) \{\s*\n\s*Stop-Process -Id \$processId/,
+      "cleanup stops the pids THIS run started, one by one -- never by image name",
+    );
+    assert.match(text, /\$env:LOCALAPPDATA = \$previousLocalAppData|Remove-Item Env:\\LOCALAPPDATA/, "and puts the real LOCALAPPDATA back");
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a pointer check failed:\n${out}`);
+    assert.match(out, /ci-stage-pointer\.ps1 : every check passed/, `the fixture did not reach its end:\n${out}`);
     assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
   },
 );

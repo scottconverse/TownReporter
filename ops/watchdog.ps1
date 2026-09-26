@@ -523,10 +523,25 @@ if ($env:WATCHDOG_TEST_MODE -ne '1') {
   ops\stage.ps1 -Status, in ops\start-stage.ps1's own words, and on the
   Control page's 3100 card.
 
+  WHICH CHECKOUT (Unit AL2). This section's first version assumed the staged
+  copy was in the checkout this watchdog runs from. It is not: the owner's rule
+  is that a build never happens in the live checkout, so the copy on 3100 is
+  staged from a worker or a dev checkout -- and the live watchdog, looking for
+  ops\.stage.json in its own checkout, found nothing and started nothing after
+  a reboot. So the first thing this section does is ask
+  Resolve-TownReporterStageApp which checkout has the copy: this one if
+  something is staged here, otherwise the one the machine-wide pointer
+  (written by ops\stage.ps1) names, and only if that pointer passes every check
+  in lib-stage.ps1. A pointer that fails starts NOTHING and says the plain
+  reason -- once, not every five minutes, because a bad pointer is not news the
+  seventy-second time either. The pointer is a file in the user's profile, so
+  it is a claim and not a fact; that gate is the whole reason it is safe to
+  follow.
+
   WATCHDOG_STAGE_APP points the whole stage world (ops\.stage.json, the build,
   the log) somewhere other than this checkout, and is honored ONLY in test
   mode, so production cannot be redirected at another directory. Unset, it is
-  this checkout -- which is where this machine's staged copy lives.
+  this checkout -- the checkout whose pointer, if there is one, gets read.
 
   Detached, like the other starts here: this run does not wait for it. Never
   added to $repaired for that reason -- this run cannot yet say it worked, and
@@ -538,43 +553,74 @@ if ($appHealthy) {
     . (Join-Path $PSScriptRoot "lib-stage.ps1")
     $stageApp = $app
     if ($env:WATCHDOG_TEST_MODE -eq '1' -and $env:WATCHDOG_STAGE_APP) { $stageApp = $env:WATCHDOG_STAGE_APP }
-    $stage = Get-TownReporterStageInfo -App $stageApp -AppPort ([int]$port) -PgPort ([int]$pgPort)
-    switch ($stage.Verdict) {
-      'up'       { Write-Log "stage: the staged copy is up on $($stage.Port) (version $($stage.Version))" }
-      'wedged'   { Write-Log "stage: $($stage.Reason)" }
-      'starting' { Write-Log "stage: $($stage.Reason)" }
-      'down' {
-        $due = Test-TownReporterStageStartDue -App $stageApp -Minutes 30
-        if (-not $due.Due) {
-          Write-Log "stage: staged on $($stage.Port) and not answering, but $($due.Reason); leaving it for a later run"
-        } else {
-          # The attempt is recorded BEFORE the spawn, so the thirty-minute
-          # floor holds even if this spawn dies on the next line, and so a
-          # Control page press in between cannot start a second copy. -Watchdog
-          # tells ops\start-stage.ps1 that the record it is about to read is
-          # this write: without it the child reads its own caller's attempt as
-          # an attempt in flight and declines -- which is exactly what happened
-          # the first time this section ran against the harness.
-          Save-TownReporterStageStartRecord -App $stageApp -Record ([pscustomobject]@{
-            LastAttemptAt = (Get-TownReporterIsoTime)
-            LastOutcome   = 'starting'
-            LastReason    = 'the watchdog started it'
-            LastPid       = ''
-          })
-          Write-Log "stage: staged on $($stage.Port) (version $($stage.Version)) and not answering ($($due.Reason)); starting it -- ops\start-stage.ps1 writes its own log to logs\stage-start.log"
-          $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
-          $stageShell = if ($shell) { $shell.Source } else { "powershell.exe" }
-          Start-Process -FilePath $stageShell `
-            -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
-                          "-File", (Join-Path $stageApp "ops\start-stage.ps1"), "-Quiet", "-Watchdog" `
-            -WindowStyle Hidden
-        }
+    # ([int]$port) is the paper's own port -- 3000 -- which is how the resolver
+    # recognises a pointer that names the live checkout, the one place a build
+    # must never happen and a second server must never be put in front of.
+    $resolve = Resolve-TownReporterStageApp -App $stageApp -AppPort ([int]$port) -PgPort ([int]$pgPort)
+    if (-not $resolve.Ok -and -not $resolve.Silent) {
+      if (Test-TownReporterStageNoticeIsNew -App $stageApp -Reason $resolve.Reason) {
+        Write-Log "stage: nothing was started -- $($resolve.Reason)"
       }
-      default {
-        # 'none' with a state file present is the only thing left here: a
-        # state file that names the paper's port, or one that cannot be read.
-        # Worth a line. The ordinary "nothing staged here" is not.
-        if ($stage.StateExists) { Write-Log "stage: $($stage.Reason)" }
+    } else {
+      # $resolve.Ok: this checkout if something is staged here, otherwise the
+      # checkout the pointer names. Everything below -- the info, the record,
+      # the spawn -- belongs to that one checkout and to nothing else.
+      #
+      # The Silent answer (nothing staged here, no pointer anywhere) leaves
+      # $stageApp alone: it is this checkout, and asking about it above is what
+      # produced the silence. Assigning $resolve.App there would assign "" and
+      # the very next line would throw on the empty string -- a red watchdog
+      # line every five minutes on a machine that has simply never staged
+      # anything.
+      if ($resolve.Ok) { $stageApp = $resolve.App }
+      # Named in the log only when it is not this checkout: "the staged copy is
+      # in townreporter-deepseek-2" is news; "in this checkout" is not.
+      $where = if ($resolve.From -eq 'pointer') { " in $(Split-Path -Leaf $stageApp)" } else { '' }
+      $stage = Get-TownReporterStageInfo -App $stageApp -AppPort ([int]$port) -PgPort ([int]$pgPort)
+      switch ($stage.Verdict) {
+        'up'       { Write-Log "stage: the staged copy is up on $($stage.Port)$where (version $($stage.Version))" }
+        'wedged'   { Write-Log "stage: $($stage.Reason)" }
+        'starting' { Write-Log "stage: $($stage.Reason)" }
+        'down' {
+          $due = Test-TownReporterStageStartDue -App $stageApp -Minutes 30
+          if (-not $due.Due) {
+            Write-Log "stage: staged$where on $($stage.Port) and not answering, but $($due.Reason); leaving it for a later run"
+          } else {
+            # The attempt is recorded BEFORE the spawn, so the thirty-minute
+            # floor holds even if this spawn dies on the next line, and so a
+            # Control page press in between cannot start a second copy. -Watchdog
+            # tells ops\start-stage.ps1 that the record it is about to read is
+            # this write: without it the child reads its own caller's attempt as
+            # an attempt in flight and declines -- which is exactly what happened
+            # the first time this section ran against the harness.
+            Save-TownReporterStageStartRecord -App $stageApp -Record ([pscustomobject]@{
+              LastAttemptAt = (Get-TownReporterIsoTime)
+              LastOutcome   = 'starting'
+              LastReason    = 'the watchdog started it'
+              LastPid       = ''
+            })
+            Write-Log "stage: staged$where on $($stage.Port) (version $($stage.Version)) and not answering ($($due.Reason)); starting it -- ops\start-stage.ps1 writes its own log to $(Join-Path $stageApp 'logs\stage-start.log')"
+            # This run spawns its OWN ops\start-stage.ps1 and names the checkout
+            # with -App, rather than spawning the copy inside $stageApp.
+            # -Watchdog makes that script ask Assert-TownReporterLegacyOwnership,
+            # and the checkout that question is about is the one whose .env
+            # carries the legacy triple -- this one. A worker checkout has no
+            # such .env, so the copy inside $stageApp would refuse itself and
+            # decline into a log nobody is reading.
+            $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
+            $stageShell = if ($shell) { $shell.Source } else { "powershell.exe" }
+            Start-Process -FilePath $stageShell `
+              -ArgumentList "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", `
+                            "-File", (Join-Path $stageApp "ops\start-stage.ps1"), "-App", "`"$stageApp`"", "-Quiet", "-Watchdog" `
+              -WindowStyle Hidden
+          }
+        }
+        default {
+          # 'none' with a state file present is the only thing left here: a
+          # state file that names the paper's port, or one that cannot be read.
+          # Worth a line. The ordinary "nothing staged here" is not.
+          if ($stage.StateExists) { Write-Log "stage: $($stage.Reason)" }
+        }
       }
     }
   } catch {

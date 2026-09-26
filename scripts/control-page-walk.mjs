@@ -134,7 +134,7 @@ function fakeStatus() {
         state: "note",
         ok: false,
         optional: true,
-        detail: "staged (version 0.6.66) and nothing is answering on 127.0.0.1:3100; no start has been tried yet",
+        detail: "staged in townreporter-deepseek-2 (version 0.6.66) and nothing is answering on 127.0.0.1:3100; no start has been tried yet",
         fix: "start-test-copy",
         fixLabel: "Start the test copy",
       },
@@ -491,6 +491,15 @@ async function theTestCopyRow() {
   must(
     /nothing is answering on 127\.0\.0\.1:\d+/.test(text),
     `the test-copy row does not say, in plain words, that nothing is answering: ${text}`,
+  );
+  // Unit AL2: the copy is staged from a worker checkout, not from the live one
+  // this page runs in, so the row has to name the folder it would start --
+  // otherwise "Start the test copy" is a button whose effect the operator
+  // cannot see. The version comes with it, because that is what tells the
+  // operator whether the copy is the build they expect.
+  must(
+    /staged in [^\s(]+ \(version \d+\.\d+\.\d+\)/.test(text),
+    `the test-copy row names no checkout folder and version, so the button it offers is anonymous: ${text}`,
   );
   const button = card.getByRole("button", { name: "Start the test copy" });
   must(

@@ -18,7 +18,19 @@
   taskkill and no psql anywhere in this file, so no path through it can reach
   the staged copy, the live paper or the database. Deciding and doing are
   separate files on purpose -- the tests can then run every decision without
-  anything being started.
+  anything being started. What it does write is three small JSON files: the
+  start-attempt record, the machine-wide pointer below, and the note of which
+  pointer refusal was already logged. The only delete in the file is
+  Remove-TownReporterStagedCopyPointer, and it removes that one pointer file
+  and nothing else.
+
+  The staged copy is not always in THIS checkout (Unit AL2). The owner's rule
+  is that a build never happens in the live checkout, so the copy on 3100 is
+  staged from a worker or a dev checkout -- and the live watchdog, looking for
+  ops\.stage.json in its own checkout, found nothing and started nothing after
+  a reboot. The pointer section near the bottom is the fix: ops\stage.ps1
+  writes one machine-wide file naming the checkout it staged, and
+  Resolve-TownReporterStageApp decides whether that claim may be acted on.
 
   It does NOT dot-source lib-port.ps1, and must not start to: that file sets
   $port as a side effect (see the note in ops\stage.ps1), and the watchdog
@@ -230,6 +242,358 @@ function Get-TownReporterStageHolder {
     if ($p.Name -eq 'node.exe' -and ([string]$p.CommandLine -replace '/', '\') -like '*.output\server\index.mjs*') { $likely = $true }
   }
   return [pscustomobject]@{ Count = $owners.Count; Ours = $ours; Likely = $likely; Names = $names }
+}
+
+# ==========================================================================
+# The machine-wide pointer: which checkout was staged last (Unit AL2)
+# ==========================================================================
+
+<#
+  Where ops\stage.ps1 records the checkout it just staged.
+
+  Machine-wide and outside every checkout on purpose: one machine has one
+  staged copy, and the reader is often not the checkout that staged it. Under
+  %LOCALAPPDATA% because that is the one per-user location every process on
+  this machine can write and read without asking anyone, and it is not a path
+  either checkout can delete by cleaning up after itself.
+
+  An empty return means there is nowhere to write or read it (no LOCALAPPDATA),
+  which the callers say out loud rather than guessing a path.
+#>
+function Get-TownReporterStagedCopyPointerPath {
+  param([string]$PointerFile = '')
+  if ($PointerFile) { return [IO.Path]::GetFullPath($PointerFile) }
+  $base = [string]$env:LOCALAPPDATA
+  if (-not $base) { return '' }
+  return (Join-Path $base 'TownReporter\staged-copy.json')
+}
+
+<#
+  The pointer, read. Exists/Ok/Value/Reason, the same shape
+  Get-TownReporterStageStartRecord uses: a missing file is not an error, an
+  unreadable one is a refusal with a reason.
+#>
+function Get-TownReporterStagedCopyPointer {
+  param([string]$PointerFile = '')
+  $path = Get-TownReporterStagedCopyPointerPath -PointerFile $PointerFile
+  if (-not $path) {
+    return [pscustomobject]@{
+      Path = ''; Exists = $false; Ok = $false; Value = $null
+      Reason = 'there is no LOCALAPPDATA on this machine, so there is nowhere the staged-copy pointer could be'
+    }
+  }
+  if (-not (Test-Path -LiteralPath $path)) {
+    return [pscustomobject]@{ Path = $path; Exists = $false; Ok = $false; Value = $null; Reason = '' }
+  }
+  try {
+    $parsed = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+  } catch {
+    return [pscustomobject]@{
+      Path = $path; Exists = $true; Ok = $false; Value = $null
+      Reason = "the staged-copy pointer $path could not be read ($($_.Exception.Message))"
+    }
+  }
+  return [pscustomobject]@{ Path = $path; Exists = $true; Ok = $true; Value = $parsed; Reason = '' }
+}
+
+<#
+  Write it, atomically, the way every other state file in the ops layer is
+  written: beside the target, then moved over it, so a reader never sees half a
+  document. Returns $false when there is nowhere to write it -- a successful
+  staging is not failed by a pointer nobody could store, and the caller says so
+  in its own words.
+
+  Field names are the ones the readers use, and the readers are three: the
+  watchdog, ops\start-stage.ps1 and the Control page (which mirrors these
+  checks in JavaScript). The four the brief asks for -- checkout, port, commit,
+  version -- plus the database it was staged against and the time, which are
+  what makes "is this pointer still describing what I think it does" a question
+  anyone can answer without a PowerShell session.
+#>
+function Save-TownReporterStagedCopyPointer {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][int]$Port,
+    [string]$Commit = '',
+    [string]$Version = '',
+    [string]$Database = '',
+    [string]$Time = '',
+    [string]$PointerFile = ''
+  )
+  $path = Get-TownReporterStagedCopyPointerPath -PointerFile $PointerFile
+  if (-not $path) { return $false }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+  if (-not $Time) { $Time = Get-TownReporterIsoTime }
+  $doc = [ordered]@{
+    app      = [IO.Path]::GetFullPath($App)
+    port     = $Port
+    commit   = $Commit
+    version  = $Version
+    database = $Database
+    time     = $Time
+  }
+  $tmp = "$path.tmp"
+  [IO.File]::WriteAllText($tmp, ($doc | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+  Move-Item -LiteralPath $tmp -Destination $path -Force
+  return $true
+}
+
+<#
+  Remove it -- and only when it names the checkout being stopped.
+
+  ops\stage.ps1 -Stop removes the pointer of the copy it just stopped. It must
+  not remove a pointer naming ANOTHER checkout: that copy is still running
+  there, and deleting the record of it is exactly how "after a reboot the
+  watchdog brings it back" would stop being true for the one checkout that
+  needs it. $App is the checkout stopping; omit it to remove unconditionally
+  (tests and cleanup want that).
+#>
+function Remove-TownReporterStagedCopyPointer {
+  param([string]$App = '', [string]$PointerFile = '')
+  $path = Get-TownReporterStagedCopyPointerPath -PointerFile $PointerFile
+  if (-not $path -or -not (Test-Path -LiteralPath $path)) { return $false }
+  if ($App) {
+    $read = Get-TownReporterStagedCopyPointer -PointerFile $path
+    if (-not $read.Ok) { return $false }
+    $named = [string]$read.Value.app
+    if (-not $named) { return $false }
+    if ($named.TrimEnd('\') -ine ([IO.Path]::GetFullPath($App)).TrimEnd('\')) { return $false }
+  }
+  Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath "$path.tmp" -Force -ErrorAction SilentlyContinue
+  return $true
+}
+
+<#
+  Has this exact refusal already been said? The watchdog runs every five
+  minutes, and a pointer that cannot be trusted is not news the sixth time --
+  the operator reads one plain line, not seventy-two a day. Any different
+  reason (including a fixed pointer that then fails a different check) is new
+  and is said.
+
+  The memo is logs\stage-pointer.json in the checkout doing the asking, beside
+  the watchdog's own log, because that is where the operator reads it.
+#>
+function Test-TownReporterStageNoticeIsNew {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Reason
+  )
+  $paths = Get-TownReporterStagePaths -App $App
+  $dir = Split-Path -Parent $paths.Log
+  $file = Join-Path $dir 'stage-pointer.json'
+  $last = ''
+  if (Test-Path -LiteralPath $file) {
+    try { $last = [string](Get-Content -LiteralPath $file -Raw | ConvertFrom-Json).lastReason } catch { $last = '' }
+  }
+  if ($last -ceq $Reason) { return $false }
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $doc = [ordered]@{ lastReason = $Reason; lastAt = (Get-TownReporterIsoTime) }
+  $tmp = "$file.tmp"
+  [IO.File]::WriteAllText($tmp, ($doc | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+  Move-Item -LiteralPath $tmp -Destination $file -Force
+  return $true
+}
+
+# The refusal, in one shape, so every caller can print it and no caller has to
+# guess which fields a refusal has.
+function New-TownReporterStagePointerRefusal {
+  param(
+    [Parameter(Mandatory = $true)][string]$Reason,
+    [string]$PointerFile = '',
+    [string]$PointerApp = ''
+  )
+  $folder = ''
+  if ($PointerApp) { $folder = Split-Path -Leaf $PointerApp.TrimEnd('\') }
+  return [pscustomobject]@{
+    App = ''; Ok = $false; From = 'pointer'; Silent = $false; Reason = $Reason
+    Folder = $folder; Port = 0; Commit = ''; Version = ''; Database = ''
+    PointerFile = $PointerFile; PointerApp = $PointerApp
+  }
+}
+
+<#
+  WHICH CHECKOUT SHOULD BE STARTED, HERE?
+
+  Three answers, and the caller does the same thing with the first two (start
+  the checkout it is handed) and nothing at all with the third:
+
+    this checkout   ops\.stage.json is here. The pointer is then not even read:
+                    a checkout that staged its own copy is the answer to the
+                    question, and a stale pointer elsewhere must not override
+                    it.
+    the pointer     nothing is staged here, and the machine-wide pointer names
+                    a checkout this file is willing to vouch for.
+    nothing         and Reason says why, unless Silent is true -- silent is the
+                    ordinary "this machine has never staged anything" and the
+                    watchdog stays quiet about it, the same reason the backup
+                    section is quiet when no backup is due.
+
+  The checks, in the order they run. Every one of them exists because the
+  pointer is a file in the user's profile: anyone can write any path into it,
+  and this is the gate that path has to pass before a server is started from
+  it. A failure starts nothing and says the plain reason:
+
+    1. it can be read as JSON at all;
+    2. it names a directory that is there;
+    3. that directory is under the same folder as THIS checkout. On this
+       machine that folder is C:\Users\scott\Desktop\Code -- the brief's own
+       words -- and it is derived from the calling checkout rather than
+       hard-coded, for the reason the Control page gives about the backup
+       folder: a path to one operator's Desktop, written into an ops script,
+       is a claim about a machine the script cannot see. Every checkout of
+       this app is a sibling of the others;
+    4. it is NOT this checkout when this checkout is the live paper's. The
+       live paper answers on 3000 and its checkout is not a build target --
+       the owner's rule is that a build never happens there -- so a pointer
+       that names it would put a second server in front of the paper's own
+       build. $AppPort is how "the live one" is recognised: 3000 is the paper;
+    5. it is a TownReporter checkout: package.json names townreporter. A
+       folder that is not one of ours has no build to start;
+    6. its ops\.stage.json is there, names a safe port, and agrees with the
+       pointer on that port AND on the commit. This is the check that makes a
+       STALE pointer refuse itself: the pointer says checkout X was staged at
+       commit C, and if X has been staged again since -- a new backup, a new
+       build -- its own state file no longer says C, so the pointer is not
+       describing what is on disk and nothing is started from it;
+    7. the build is there (.output\server\index.mjs) and so is
+       ops\start-stage.ps1, which is what will be run.
+
+  Commit agreement needs both sides to record one. ops\stage.ps1 wrote no
+  commit into ops\.stage.json before this change, so a state file without one
+  cannot agree with anything and is refused with that as the reason -- the
+  self-consistent outcome, since only pairs written from now on can pass.
+#>
+function Resolve-TownReporterStageApp {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [int]$AppPort = 0,
+    [int]$PgPort = 0,
+    [string]$PointerFile = ''
+  )
+  $own = [IO.Path]::GetFullPath($App)
+  $ownFolder = Split-Path -Leaf $own.TrimEnd('\')
+
+  # 1 of the three answers: this checkout has its own staged copy.
+  if (Test-Path -LiteralPath (Join-Path $own 'ops\.stage.json')) {
+    return [pscustomobject]@{
+      App = $own; Ok = $true; From = 'checkout'; Silent = $false; Reason = ''
+      Folder = $ownFolder; Port = 0; Commit = ''; Version = ''; Database = ''
+      PointerFile = ''; PointerApp = ''
+    }
+  }
+
+  $read = Get-TownReporterStagedCopyPointer -PointerFile $PointerFile
+  if (-not $read.Exists -and -not $read.Reason) {
+    # Nothing staged here and no pointer anywhere: the ordinary state of a
+    # machine that has never staged. Silence, by construction.
+    return [pscustomobject]@{
+      App = ''; Ok = $false; From = 'none'; Silent = $true; Reason = ''
+      Folder = ''; Port = 0; Commit = ''; Version = ''; Database = ''
+      PointerFile = ''; PointerApp = ''
+    }
+  }
+  if (-not $read.Ok) {
+    return (New-TownReporterStagePointerRefusal -Reason $read.Reason -PointerFile $read.Path)
+  }
+  $pointer = $read.Value
+  $named = [string]$pointer.app
+  if (-not $named) {
+    return (New-TownReporterStagePointerRefusal -PointerFile $read.Path `
+      -Reason "the staged-copy pointer $($read.Path) does not name a checkout")
+  }
+  if (-not [IO.Path]::IsPathRooted($named)) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $named -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names '$named', which is not an absolute path")
+  }
+  $target = [IO.Path]::GetFullPath($named)
+  if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, which is not there any more")
+  }
+
+  # Under the same folder as this checkout (see the list above, item 3).
+  $root = [IO.Path]::GetFullPath((Split-Path -Parent $own)).TrimEnd('\')
+  if ($target.TrimEnd('\') -ieq $root -or -not $target.StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase)) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, which is not under $root -- the folder this checkout lives in")
+  }
+
+  # The live paper's own checkout (item 4).
+  if ($AppPort -eq 3000 -and $target.TrimEnd('\') -ieq $own.TrimEnd('\')) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names this checkout ($target), which is the live paper's own -- the test copy is built in another checkout, never here")
+  }
+
+  # Ours? (item 5)
+  $packageFile = Join-Path $target 'package.json'
+  $packageName = ''
+  if (Test-Path -LiteralPath $packageFile) {
+    try { $packageName = [string](Get-Content -LiteralPath $packageFile -Raw | ConvertFrom-Json).name } catch { $packageName = '' }
+  }
+  if ($packageName -ne 'townreporter') {
+    $what = if ($packageName) { "its package.json names '$packageName'" } else { 'it has no readable package.json' }
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, which is not a TownReporter checkout ($what)")
+  }
+
+  # Its own record of the staging, agreeing with the pointer (item 6).
+  $targetPaths = Get-TownReporterStagePaths -App $target
+  if (-not (Test-Path -LiteralPath $targetPaths.State)) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, but there is no ops\.stage.json there -- nothing is staged in it")
+  }
+  $state = $null
+  try {
+    $state = Get-Content -LiteralPath $targetPaths.State -Raw | ConvertFrom-Json
+  } catch {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, and its ops\.stage.json could not be read ($($_.Exception.Message))")
+  }
+  $rawPort = [string]$state.port
+  if ($rawPort -notmatch '^\d+$') {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, whose ops\.stage.json does not name a port ('$rawPort')")
+  }
+  $statePort = [int]$rawPort
+  $pointerPort = [string]$pointer.port
+  if ($pointerPort -notmatch '^\d+$' -or [int]$pointerPort -ne $statePort) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names port $pointerPort but $target's own ops\.stage.json names port $statePort; one of the two is out of date")
+  }
+  $unsafe = Test-TownReporterStagePortSafe -Port $statePort -AppPort $AppPort -PgPort $PgPort
+  if ($unsafe) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, whose ops\.stage.json names a port the staged copy must not use -- $unsafe")
+  }
+  $stateCommit = [string]$state.commit
+  $pointerCommit = [string]$pointer.commit
+  if (-not $stateCommit) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names commit '$pointerCommit' but $target's own ops\.stage.json records no commit, so the two cannot be shown to agree")
+  }
+  if ($stateCommit -ne $pointerCommit) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names commit $pointerCommit but $target's own ops\.stage.json records $stateCommit; the checkout has been staged again since, so the pointer is out of date")
+  }
+
+  # The two files that will actually be used (item 7).
+  $outputServer = Join-Path $target '.output\server\index.mjs'
+  if (-not (Test-Path -LiteralPath $outputServer)) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, which has no build at $outputServer")
+  }
+  if (-not (Test-Path -LiteralPath $targetPaths.Start)) {
+    return (New-TownReporterStagePointerRefusal -PointerApp $target -PointerFile $read.Path `
+      -Reason "the staged-copy pointer names $target, which has no $($targetPaths.Start) -- a copy staged there could not be started")
+  }
+
+  return [pscustomobject]@{
+    App = $target; Ok = $true; From = 'pointer'; Silent = $false; Reason = ''
+    Folder = (Split-Path -Leaf $target.TrimEnd('\')); Port = $statePort
+    Commit = $stateCommit; Version = [string]$state.version; Database = [string]$pointer.database
+    PointerFile = $read.Path; PointerApp = $target
+  }
 }
 
 <#

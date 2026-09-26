@@ -1237,6 +1237,179 @@ test("the card follows the port the state file names, not the number 3100", asyn
   assert.equal(card.state, "note");
 });
 
+/* ─────────── the copy is in ANOTHER checkout: the machine-wide pointer (0.6.70) ─────────── */
+
+/**
+ * Unit AL2's other half, on the page.
+ *
+ * ops\watchdog.ps1 and this page both run from the LIVE checkout, and the owner
+ * never builds there -- the copy on 3100 is staged from a worker or a dev
+ * checkout. Before the pointer, the card said "nothing is staged" on a machine
+ * with a perfectly good build in the next folder along, and the page could not
+ * tell the operator which folder a press of that button would start.
+ *
+ * The world below is two checkouts side by side, exactly as they are on this
+ * machine: a 'live' one that has staged nothing, and a 'worker' one the pointer
+ * names. The pointer is read from a fake LOCALAPPDATA in the temp directory --
+ * both sides of it read %LOCALAPPDATA% at the moment they use it, so no test
+ * here can see or touch the operator's real pointer.
+ */
+function fakeCheckout({ root, state = null, env = null }) {
+  fs.mkdirSync(path.join(root, "ops"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".output", "server"), { recursive: true });
+  fs.mkdirSync(path.join(root, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "townreporter", version: "0.6.70" }), "utf8");
+  fs.writeFileSync(path.join(root, ".output", "server", "index.mjs"), "// built\n", "utf8");
+  fs.writeFileSync(path.join(root, "ops", "start-stage.ps1"), "# the start-only script\n", "utf8");
+  if (state) fs.writeFileSync(path.join(root, "ops", ".stage.json"), JSON.stringify(state), "utf8");
+  if (env !== null) fs.writeFileSync(path.join(root, ".env"), env, "utf8");
+  return root;
+}
+
+function pointerWorld({ stage = null, liveEnv = "" } = {}) {
+  const world = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-pointer-"));
+  const live = path.join(world, "live");
+  const worker = path.join(world, "worker");
+  const idle = path.join(world, "idle");
+  const localAppData = path.join(world, "localappdata");
+  fs.mkdirSync(live, { recursive: true });
+  fakeCheckout({ root: live, env: liveEnv });
+  fakeCheckout({ root: worker, state: stage });
+  // A checkout that is a TownReporter checkout and could be built, but has
+  // never been staged: the pointer naming this one is the "the two disagree"
+  // case, as opposed to the folder that is not a checkout at all.
+  fakeCheckout({ root: idle });
+  const pointerFile = path.join(localAppData, "TownReporter", "staged-copy.json");
+  return {
+    world,
+    live,
+    worker,
+    idle,
+    localAppData,
+    pointerFile,
+    name(target, port, commit) {
+      fs.mkdirSync(path.dirname(pointerFile), { recursive: true });
+      fs.writeFileSync(
+        pointerFile,
+        JSON.stringify({ app: target, port, commit, version: "0.6.70", database: "townreporter_dev", time: "2026-09-26T04:00:00.000Z" }),
+        "utf8",
+      );
+    },
+    cleanup: () => fs.rmSync(world, { recursive: true, force: true }),
+  };
+}
+
+test("the test copy is found in the checkout the pointer names, and the card says which one", async () => {
+  const port = await freePort();
+  const commit = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+  const world = pointerWorld({ stage: { port, version: "0.6.70", commit, started: "2026-09-26T02:00:00Z" } });
+  try {
+    world.name(world.worker, port, commit);
+    const info = await probeTestCopy({
+      appRoot: world.live,
+      pointerFile: world.pointerFile,
+      localAppData: world.localAppData,
+      timeoutMs: 250,
+    });
+    assert.equal(info.verdict, "down", "a staged copy in the next folder along is the reboot case, not nothing");
+    assert.equal(info.staged, true);
+    assert.equal(info.stagedIn, "worker", "the probe must say which checkout the copy is in");
+    assert.equal(info.stagedVersion, "0.6.70");
+    assert.equal(info.port, port, "the port must come from the OTHER checkout's own state file");
+
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.match(row.detail, /staged in worker \(version 0\.6\.70\)/, "the sentence must name the checkout a press would start");
+    assert.match(row.detail, new RegExp("nothing is answering on 127\\.0\\.0\\.1:" + port));
+    assert.equal(row.fix, "start-test-copy", "and the button is offered, because ops\\start-stage.ps1 follows the same pointer");
+  } finally {
+    world.cleanup();
+  }
+});
+
+test("a pointer that cannot be trusted is refused on the page, with the same plain reason", async () => {
+  /*
+    The pointer is a file anyone with a text editor can write into, and the
+    button behind this card starts a real server from it. So the page applies
+    every check ops\lib-stage.ps1 applies, and says the same words -- an
+    operator reading two different stories about one file would trust neither.
+    The button is never offered on a refusal: what a press would do is unknown.
+  */
+  const port = await freePort();
+  const quiet = await freePort();
+  const commit = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+  const cases = [
+    {
+      why: "a folder that is not there any more",
+      pointer: (w) => w.name(path.join(w.world, "gone"), port, commit),
+      reason: /is not there any more/,
+    },
+    {
+      why: "a folder that is not a TownReporter checkout",
+      pointer: (w) => {
+        const other = path.join(w.world, "other");
+        fs.mkdirSync(other, { recursive: true });
+        fs.writeFileSync(path.join(other, "package.json"), JSON.stringify({ name: "something-else" }), "utf8");
+        w.name(other, port, commit);
+      },
+      reason: /is not a TownReporter checkout/,
+    },
+    {
+      why: "a checkout that has staged nothing",
+      pointer: (w) => w.name(w.idle, port, commit),
+      reason: /no ops\\\.stage\.json there/,
+    },
+    {
+      why: "a commit that no longer matches the checkout's own state file",
+      pointer: (w) => w.name(w.worker, port, "ffffffffffffffffffffffffffffffffffffffff"),
+      reason: /out of date/,
+    },
+    {
+      why: "this checkout, when this checkout is the live paper",
+      pointer: (w) => w.name(w.live, port, commit),
+      reason: /the live paper's own/,
+    },
+  ];
+  for (const c of cases) {
+    const world = pointerWorld({ stage: { port, version: "0.6.70", commit, started: "2026-09-26T02:00:00Z" }, liveEnv: "PORT=3000\n" });
+    try {
+      c.pointer(world);
+      const info = await probeTestCopy({
+        appRoot: world.live,
+        port: quiet,
+        pointerFile: world.pointerFile,
+        localAppData: world.localAppData,
+        timeoutMs: 250,
+      });
+      assert.equal(info.verdict, "unsafe", `a pointer naming ${c.why} must start nothing and must not be described as a copy`);
+      assert.equal(info.staged, false);
+      assert.match(String(info.stagedReason), c.reason, `the refusal for ${c.why} must say the plain reason`);
+      const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+      assert.equal(row.fix, null, `no button may be offered when the pointer names ${c.why}`);
+      assert.match(String(row.detail), c.reason, "the card must carry the reason, not a shrug");
+    } finally {
+      world.cleanup();
+    }
+  }
+});
+
+test("a machine that never staged anything says nothing about a test copy", async () => {
+  // The ordinary state of this machine before it was ever staged from here, and
+  // the one that matters most often: silence, not a refusal and not a shrug. No
+  // LOCALAPPDATA is the seam for it -- the probe reads the variable when it runs.
+  const world = pointerWorld({ stage: { port: await freePort(), version: "0.6.70", commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" } });
+  try {
+    const info = await probeTestCopy({ appRoot: world.live, port: await freePort(), localAppData: null, timeoutMs: 250 });
+    assert.equal(info.verdict, "none", "nothing staged here and no pointer anywhere is 'none', the quiet default");
+    assert.equal(info.stagedRaw, false);
+    assert.equal(info.stagedReason, null, "no pointer anywhere is not a refusal -- there is nothing to refuse");
+    const row = describeTestCopy(info, { now: NOW, timeZone: DENVER });
+    assert.equal(row.fix, null);
+    assert.doesNotMatch(String(row.detail), /staged\b/, `the card must not claim a copy is staged: ${row.detail}`);
+  } finally {
+    world.cleanup();
+  }
+});
+
 test("Start the test copy runs the start-only script, and only that", async () => {
   /*
     The button, and the argv behind it. ops\start-stage.ps1 restores nothing,
@@ -1275,7 +1448,16 @@ test("Start the test copy runs the start-only script, and only that", async () =
     .replace(/^\s*#.*$/gm, ""); // whole-line comments
   assert.doesNotMatch(code, /Stop-Process|taskkill/, "the start path must never stop anything");
   assert.doesNotMatch(code, /\bpsql\b|Invoke-Sqlcmd|npm run build/, "the start path must never restore or build");
-  assert.match(code, /Get-TownReporterStageInfo -App \$app/, "the shared decision must still be reached in code, not only in prose");
+  // $target, not $app (Unit AL2): with nothing staged in this checkout the
+  // script follows the machine-wide pointer to the checkout that IS staged,
+  // and the verdict has to be asked about that one -- asking about this
+  // checkout would answer 'none' for a copy that is sitting right there.
+  assert.match(code, /Get-TownReporterStageInfo -App \$target -AppPort \$appPort -PgPort 5433/, "the shared decision must still be reached in code, about the checkout that was chosen, not only in prose");
+  assert.match(
+    code,
+    /Resolve-TownReporterStageApp -App \$app -AppPort \$appPort -PgPort 5433/,
+    "the button's script is the reader that has to put the pointer through the shared gate",
+  );
 
   // And it is on the page, with the menu's own wording, like every other button.
   const { server, port } = await boot();

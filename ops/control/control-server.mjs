@@ -563,12 +563,38 @@ export async function probeTestCopy({
   appRoot = null,
   stateFile = null,
   recordFile = null,
+  pointerFile = null,
+  localAppData = undefined,
 } = {}) {
-  const statePath = stateFile || (appRoot ? path.join(appRoot, "ops", ".stage.json") : null);
-  const staged = statePath ? readStagedPort(statePath) : { found: false, usable: false, reason: null, port: null, version: null, started: null };
+  // WHICH CHECKOUT (Unit AL2). This one if something is staged here -- or if
+  // the caller named the files by hand -- otherwise the one the machine-wide
+  // pointer names, and only if it passes every check in readStagedCopyPointer.
+  // The record and the state file then come from that same checkout, because
+  // that is where ops\start-stage.ps1 writes them.
+  let root = appRoot;
+  let stagedIn = null;
+  let pointerRefusal = null;
+  const ownState = stateFile || (appRoot ? path.join(appRoot, "ops", ".stage.json") : null);
+  if (appRoot && !stateFile && !fs.existsSync(ownState)) {
+    const pointer = readStagedCopyPointer(appRoot, { pointerFile, localAppData });
+    if (pointer.usable) {
+      root = pointer.app;
+      stagedIn = pointer.folder;
+    } else if (pointer.found) {
+      pointerRefusal = pointer;
+      stagedIn = pointer.folder;
+    }
+  }
+  if (root && !stagedIn) stagedIn = path.basename(path.resolve(root));
+  const statePath = stateFile || (root ? path.join(root, "ops", ".stage.json") : null);
+  const staged = pointerRefusal
+    ? { found: true, usable: false, reason: pointerRefusal.reason, port: null, version: null, started: null }
+    : statePath
+      ? readStagedPort(statePath)
+      : { found: false, usable: false, reason: null, port: null, version: null, started: null };
   const probePort = staged.usable ? staged.port : port;
 
-  const recordPath = recordFile || (appRoot ? path.join(appRoot, "logs", "stage-start.json") : null);
+  const recordPath = recordFile || (root ? path.join(root, "logs", "stage-start.json") : null);
   const recordState = recordPath ? readJsonState(recordPath) : { ok: false, exists: false, value: null };
   const record = recordState.ok ? recordState.value || {} : null;
   const lastAttempt = record
@@ -625,6 +651,7 @@ export async function probeTestCopy({
     stagedVersion: staged.version,
     stagedStarted: staged.started,
     stagedReason: staged.reason,
+    stagedIn,
     lastAttempt,
     minutesSinceAttempt: Number.isFinite(sinceMs) ? Math.floor(sinceMs / 60_000) : null,
   };
@@ -661,6 +688,142 @@ function readStagedPort(file) {
     return { ...base, usable: false, reason: "ops\\.stage.json names port 5433, which belongs to the database", port: stagedPort };
   }
   return { ...base, usable: true, reason: null, port: stagedPort };
+}
+
+/**
+ * The machine-wide pointer `ops\stage.ps1` writes when it stages a checkout:
+ * one small JSON file naming the checkout, port, commit, version, database and
+ * time of the copy on 3100.
+ *
+ * It is machine-wide because the copy is not always in the checkout this page
+ * runs from. The owner's rule is that a build never happens in the live
+ * checkout, so the copy on 3100 is staged from a worker or a dev checkout --
+ * which is why the 3100 card used to say "nothing is staged" on a machine with
+ * a perfectly good build sitting in the next folder along.
+ */
+export function stagedCopyPointerFile({ localAppData = process.env.LOCALAPPDATA, pointerFile = null } = {}) {
+  if (pointerFile) return path.resolve(pointerFile);
+  if (!localAppData) return null;
+  return path.join(localAppData, "TownReporter", "staged-copy.json");
+}
+
+/** Windows paths, folded the way the filesystem folds them for comparison. */
+const foldCase = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
+const samePath = (a, b) => foldCase(path.resolve(a)) === foldCase(path.resolve(b));
+const underPath = (child, parent) => {
+  const c = foldCase(path.resolve(child));
+  const p = foldCase(path.resolve(parent)).replace(/[\\/]+$/, "");
+  return c === p || c.startsWith(p + path.sep);
+};
+
+/**
+ * The pointer, put through the same gate `Resolve-TownReporterStageApp` in
+ * ops\lib-stage.ps1 puts it through before anything is started from it.
+ *
+ * This is a VIEW and the gate in that library is the decision -- the button
+ * runs ops\start-stage.ps1, which applies the real one. But a page that
+ * described a pointer it had not checked would be offering a start from a path
+ * anyone with a text editor can write into, and the reasons have to be the
+ * same words or the operator has two stories about one fact.
+ *
+ * Refused: unreadable, a relative path, a folder that is not there, a folder
+ * outside this checkout's own parent, this checkout when it is the live
+ * paper's, a folder that is not a TownReporter checkout, no `ops\.stage.json`
+ * (or one that disagrees with the pointer on port or commit), no build, no
+ * ops\start-stage.ps1. Silence -- no LOCALAPPDATA, no file -- is `found:false`,
+ * which is the ordinary "this machine has never staged anything".
+ */
+export function readStagedCopyPointer(appRoot, { pointerFile = null, localAppData = undefined } = {}) {
+  const none = { found: false, usable: false, app: null, folder: null, port: null, commit: null, version: null, reason: null, file: null };
+  if (!appRoot) return none;
+  const file = stagedCopyPointerFile(localAppData === undefined ? { pointerFile } : { pointerFile, localAppData });
+  if (!file) return none;
+  if (!fs.existsSync(file)) return { ...none, file };
+  let pointer;
+  try {
+    pointer = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return { ...none, found: true, file, reason: `the staged-copy pointer ${file} could not be read` };
+  }
+  const named = String(pointer?.app ?? "").trim();
+  const folder = named ? path.basename(named.replace(/[\\/]+$/, "")) : null;
+  const rawPointerPort = String(pointer?.port ?? "").trim();
+  const base = {
+    found: true,
+    file,
+    app: named || null,
+    folder,
+    port: /^\d+$/.test(rawPointerPort) ? Number(rawPointerPort) : null,
+    commit: String(pointer?.commit ?? "").trim() || null,
+    version: String(pointer?.version ?? "").trim() || null,
+  };
+  const refuse = (reason) => ({ ...base, usable: false, reason });
+
+  if (!named) return refuse(`the staged-copy pointer ${file} does not name a checkout`);
+  if (!path.isAbsolute(named)) return refuse(`the staged-copy pointer names '${named}', which is not an absolute path`);
+  const target = path.resolve(named);
+  let isDir = false;
+  try {
+    isDir = fs.statSync(target).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) return refuse(`the staged-copy pointer names ${target}, which is not there any more`);
+
+  // The same folder as this checkout -- on this machine, the Code folder every
+  // checkout is a sibling in. Derived from the page's own root rather than
+  // hard-coded, for the reason the backup card gives about its own path.
+  const root = path.dirname(path.resolve(appRoot));
+  if (!underPath(target, root)) {
+    return refuse(`the staged-copy pointer names ${target}, which is not under ${root} -- the folder this checkout lives in`);
+  }
+
+  // The live paper's own checkout, recognised the way the library recognises
+  // it: this checkout, serving 3000. A build never happens there.
+  const paperPort = Number(readEnvFile(appRoot).PORT ?? 3000) || 3000;
+  if (paperPort === 3000 && samePath(target, appRoot)) {
+    return refuse(
+      `the staged-copy pointer names this checkout (${target}), which is the live paper's own -- the test copy is built in another checkout, never here`,
+    );
+  }
+
+  const pkg = readJsonState(path.join(target, "package.json"));
+  const pkgName = String(pkg.value?.name ?? "").trim();
+  if (pkgName !== "townreporter") {
+    const what = pkgName ? `its package.json names '${pkgName}'` : "it has no readable package.json";
+    return refuse(`the staged-copy pointer names ${target}, which is not a TownReporter checkout (${what})`);
+  }
+
+  const staged = readStagedPort(path.join(target, "ops", ".stage.json"));
+  if (!staged.found) {
+    return refuse(`the staged-copy pointer names ${target}, but there is no ops\\.stage.json there -- nothing is staged in it`);
+  }
+  if (!staged.usable) {
+    return refuse(`the staged-copy pointer names ${target}, whose ${staged.reason}`);
+  }
+  if (base.port !== staged.port) {
+    return refuse(
+      `the staged-copy pointer names port ${base.port} but ${target}'s own ops\\.stage.json names port ${staged.port}; one of the two is out of date`,
+    );
+  }
+  const stateCommit = String(readJsonState(path.join(target, "ops", ".stage.json")).value?.commit ?? "").trim();
+  if (!stateCommit) {
+    return refuse(
+      `the staged-copy pointer names commit '${base.commit}' but ${target}'s own ops\\.stage.json records no commit, so the two cannot be shown to agree`,
+    );
+  }
+  if (stateCommit !== base.commit) {
+    return refuse(
+      `the staged-copy pointer names commit ${base.commit} but ${target}'s own ops\\.stage.json records ${stateCommit}; the checkout has been staged again since, so the pointer is out of date`,
+    );
+  }
+  if (!fs.existsSync(path.join(target, ".output", "server", "index.mjs"))) {
+    return refuse(`the staged-copy pointer names ${target}, which has no build at .output\\server\\index.mjs`);
+  }
+  if (!fs.existsSync(path.join(target, "ops", "start-stage.ps1"))) {
+    return refuse(`the staged-copy pointer names ${target}, which has no ops\\start-stage.ps1 -- a copy staged there could not be started`);
+  }
+  return { ...base, usable: true, reason: null };
 }
 
 /**
@@ -844,10 +1007,13 @@ export function describeTestCopy(testCopy, { now = Date.now, timeZone = LOCAL_TZ
         fix: null,
       };
     case "down":
+      // The folder is named because the copy is not always in the checkout
+      // this page runs from: "staged in townreporter-deepseek-2 (version
+      // 0.6.67)" is the operator's answer to "what would that button start?".
       return {
         state: "note",
         detail:
-          `staged${testCopy.stagedVersion ? ` (version ${testCopy.stagedVersion})` : ""} and nothing is answering on ${where}` +
+          `staged${testCopy.stagedIn ? ` in ${testCopy.stagedIn}` : ""}${testCopy.stagedVersion ? ` (version ${testCopy.stagedVersion})` : ""} and nothing is answering on ${where}` +
           lastLine,
         fix: "start-test-copy",
         fixLabel: "Start the test copy",
@@ -1005,6 +1171,13 @@ export async function collectStatus({
    *  rather than reaching for the network, the machine's PowerShell or a
    *  database; nothing here changes a probe's defaults. */
   probes = {},
+  /** Where the machine-wide staged-copy pointer is looked for. Unset, the
+   *  probe reads %LOCALAPPDATA% -- the right answer for a page describing THIS
+   *  machine. A test hands it a temp folder (`localAppData: null` for "no
+   *  pointer at all") so its verdict does not depend on what the operator
+   *  happened to have staged the day it ran. */
+  pointerFile = null,
+  localAppData = undefined,
 } = {}) {
   const read = {
     status: probeStatus,
@@ -1046,7 +1219,7 @@ export async function collectStatus({
   const [version, publicVersion, testCopy, qwen, lastScan] = await Promise.all([
     Promise.resolve(read.version({ repoRoot })),
     read.publicVersion({ site: status.site || "https://townreporter.org" }),
-    read.testCopy({ appRoot }),
+    read.testCopy({ appRoot, pointerFile, localAppData }),
     read.qwen({}),
     read.lastScan({ repoRoot, appRoot, onOutput }),
   ]);
