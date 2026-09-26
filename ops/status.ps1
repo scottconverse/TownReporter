@@ -174,10 +174,18 @@ $redlibFix = ""
 switch (Get-RedlibOffSwitch -EnvFile $envFile) {
   '0' { $redlibDetail = "switched off (TOWNREPORTER_REDLIB=0)" }
   default {
-    switch (Get-RedlibState) {
+    # -EnvFile, not this script's own directory: the root the reader was
+    # installed into is a line in the SELECTED install's .env (lib-redlib.ps1
+    # Get-RedlibInstallRoot), so -Root describes the root of the install it was
+    # asked about rather than of the checkout this script happens to sit in.
+    switch (Get-RedlibState -EnvFile $envFile) {
       'up'     { $redlibState = "ok"; $redlibDetail = "up" }
       'down'   { $redlibDetail = "down - the paper reads Reddit through RSS alone"; $redlibFix = "restart-reddit" }
-      'absent' { $redlibDetail = "not installed - the paper reads Reddit through RSS alone" }
+      # "Absent" and "installed where only an app sandbox can see it" are the
+      # same state word and different problems, so the words come from
+      # lib-redlib.ps1 and the console cannot understate a working reader that
+      # Task Scheduler simply cannot start.
+      'absent' { $redlibDetail = (Get-RedlibAbsenceNote) }
     }
   }
 }
