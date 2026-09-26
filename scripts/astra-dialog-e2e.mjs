@@ -51,10 +51,22 @@ page.setDefaultTimeout(30_000);
 
 console.log(`astra dialog: ${base}`);
 
-await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
 // The first `body > *` is a `<script>`, which never becomes "visible" -- wait
 // for the page itself, so the stylesheet is in and the app's module graph is up.
-await page.waitForFunction(() => document.querySelector("main, #root, header, footer") !== null);
+const openFrontPage = async () => {
+  await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector("main, #root, header, footer") !== null);
+};
+
+// Warm-up. No screen imports dialog.tsx yet, so the first import makes Vite
+// discover @radix-ui/react-dialog, optimize it and reload the page -- which
+// destroyed the page mid-test in CI (PR #112). Import it once, give Vite time
+// to finish that reload, then start from a fresh page on the optimized graph.
+await openFrontPage();
+await page.evaluate(() => import("/src/components/dialog.tsx").then(() => null, () => null)).catch(() => null);
+await page.waitForTimeout(3_000);
+await page.waitForLoadState("load").catch(() => null);
+await openFrontPage();
 
 // ── Mount the component, using the dev server's own module graph ────────────
 const mountError = await page.evaluate(async () => {
