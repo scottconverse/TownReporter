@@ -1,6 +1,6 @@
 # Direction A — build notes (2026-09-06)
 
-> **Implementation history, reconciled 2026-09-07.** The Command Center and story stages below were implemented in 0.6.21–0.6.22. These notes preserve the approved direction; they do not restart that work or authorize another redesign. Dark Desk's color rule means **black background and white text**. Prototype-package paths below are historical references; the repository retains [Main.dc.html](prototype/Main.dc.html). The [current handoff](../../HANDOFF-NEXT-AGENT.md) governs remote development and the separate Halo-local promotion boundary.
+> **Implementation history, reconciled 2026-09-07.** The Command Center and story stages below were implemented in 0.6.21–0.6.22. These notes preserve the approved direction; they do not restart that work or authorize another redesign. Dark Desk's color rule means **one warm near-black ground (`#1b1916`) with warm off-white text (`#e8e6e1`)** — pure black and white from 0.6.19 until the 2026-09-26 redesign replaced them. Prototype-package paths below are historical references; the repository retains [Main.dc.html](prototype/Main.dc.html). The [current handoff](../../HANDOFF-NEXT-AGENT.md) governs remote development and the separate Halo-local promotion boundary.
 
 The design is the clickable prototype (`prototype/editors-desk-redesign.html` in the audit package; artboard `Main.dc.html`). Build that. This note covers only what the prototype does not show.
 
@@ -24,7 +24,7 @@ Auditor's verdict (2026-09-05): use this system; take from the Codex prototype o
 Purpose: the people the editor has asked and what they owe. Today this lives only inside a story's reporting notes ("People who still need to respond"); it needs one place.
 
 - Section title "Follow-ups · N" with a quiet link "All follow-ups" (a filterable list page at `/desk/follow-ups`, stage 1 may ship the rail block and a simple list page).
-- Each item: **who** (e.g. "City Manager's office") · **for what** (one line, e.g. "cause report on the 15th Avenue explosion") · **due** ("due Tue Sep 9" / "due today" / "**Overdue 3 days**" — overdue is stated in words and set in `--warn`; never colour alone) · the story it belongs to, as a link.
+- Each item: **who** (e.g. "City Manager's office") · **for what** (one line, e.g. "cause report on the 15th Avenue explosion") · **due** ("due Tue Sep 9" / "due today" / "**Overdue 3 days**" — overdue is stated in words and set in `--warn`; never color alone) · the story it belongs to, as a link.
 - Actions per item: **Record reply** (opens a small form: what they said, date; saves to the story's reporting notes and marks the follow-up answered) · **Nudge** (marks a reminder sent, stamps the date) · **Drop**.
 - Creation: from a story's reporting notes ("People who still need to respond" → "Add a follow-up": who, for what, due date), and from the Investigation "Seek a response" decision when that ships. Stage 1 seeds from existing notes where a due date can be inferred; otherwise items are created by the editor.
 - Data: a `follow_ups` table (newsroom-scoped: id, newsroom_id, lead_id/article_id, who, what, due_on, status open|answered|dropped, nudged_at, answered_at, reply_text, created_at). Forward migration only. Guarded by the newsroom-scoped-inserts test.
@@ -40,7 +40,7 @@ Purpose: the people the editor has asked and what they owe. Today this lives onl
 
 ## Rules that bind every stage
 
-- WCAG AA in both themes (`node scripts/contrast-audit.mjs` passes). Black on white in dark mode.
+- WCAG AA in both themes (`node scripts/contrast-audit.mjs` passes). Warm off-white on warm near-black in dark mode (`#e8e6e1` on `#1b1916`); it was black on white until the 2026-09-26 redesign.
 - Nothing informational under 14px at Normal (`scripts/desk-min-font.test.mjs` passes). Large scales everything the editor reads.
 - One button family, one chip family, one notice. Reuse `.btn`, `.chip`, `Notice`, `.f`.
 - Quiet styling never carries meaning alone.

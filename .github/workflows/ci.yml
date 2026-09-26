@@ -222,6 +222,16 @@ jobs:
             echo "dev server did not come up"; tail -n 80 /tmp/dev.log; exit 1;
           }
           node scripts/smoke-built-server.mjs
+      # The shared dialog's focus trap, Escape, scroll lock and focus return
+      # cannot be proved by reading the source, and this repository has no DOM
+      # test environment -- so the walk mounts the component into a page from
+      # the dev server already running above and drives it with real keys. It
+      # builds its own harness elements and claims no desk, so it can share this
+      # job's server with no risk of two walks signing up on one newsroom.
+      - name: The shared dialog opens, traps focus and closes on Escape
+        env:
+          DIALOG_BASE_URL: http://127.0.0.1:8080
+        run: node scripts/astra-dialog-e2e.mjs
 
   # The unit suite runs against PGLite, which has no pg_trgm and no admin
   # connection to create a scratch database from, so three files that need a
@@ -442,7 +452,7 @@ jobs:
 
   # The Writing models panel: the screen an operator reaches on the worst day,
   # when a writing-model login has lapsed and every draft is failing. All of it
-  # is screen behaviour -- the right words in the row, a link rendered as a real
+  # is screen behavior -- the right words in the row, a link rendered as a real
   # anchor, a row that flips to "Signed in" on its own -- so a unit test proves
   # none of it.
   #
@@ -541,7 +551,7 @@ jobs:
   # fake-deepseek-endpoint.mjs (an OpenAI-compatible rung 1 that can answer its
   # readiness probe and then fail a real call the way the test needs),
   # fake-lmstudio-endpoint.mjs (rung 2's server, on 1234 because that is how
-  # local discovery recognises an LM Studio one, whose one model reports itself
+  # local discovery recognizes an LM Studio one, whose one model reports itself
   # NOT loaded so the rung has nothing to run), and
   # fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1 as the last rung. Nothing
   # here spends allowance or touches a real credential. See the walk under
@@ -685,7 +695,7 @@ jobs:
 
   # Dark Desk was the one screen where an AI did something with no model
   # choice at all, and the Server page's per-provider time budgets are pure
-  # screen behaviour -- neither is provable from a unit test. Model-free,
+  # screen behavior -- neither is provable from a unit test. Model-free,
   # same trick as provider-signin and failover: the fake Claude CLI answers
   # signed in and no round is ever started, so nothing here spends money or
   # calls a real provider. See the walk under scripts/, named for what it
@@ -1328,11 +1338,11 @@ jobs:
   #
   # This is the regression test for it, and it is a MEASUREMENT: a probe
   # installed before any page script samples, at every animation frame, the
-  # colour that frame is about to paint, on a hard reload of every desk screen
+  # color that frame is about to paint, on a hard reload of every desk screen
   # and on a client-side click between them, in dark and in light. Every
   # sampled frame must be the right one; the light pass is the sensitivity
   # control for the dark one, and each pass ends by deliberately breaking the
-  # attribute and requiring the same probe to report the other colour. Removing
+  # attribute and requiring the same probe to report the other color. Removing
   # the <head> script in src/routes/__root.tsx makes this job fail on the first
   # hard reload with `at: null, #f6f1e7` -- the owner's flash, reproduced.
   #

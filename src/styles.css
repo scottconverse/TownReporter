@@ -3,39 +3,98 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/*
+  The redesign's color set (docs/design/handoff-2026-09-26/design-system/
+  tokens/colors.css) on the repo's existing Tailwind names.
+
+  Two rules from the handoff decide this block, and both are the opposite of
+  what the names used to mean here:
+
+  1. Ground is cream and the accent is YELLOW -- `#ffd23f`. Yellow is a FILL
+     color and nothing else: as text on cream it is 1.42:1, which is why
+     `--color-rust` below is ink and not yellow. Every place that painted a
+     yellow fill says so with its own rule (buttons, chips, .score.hot); every
+     place that painted accent TEXT reads ink. Yellow text on cream is the one
+     thing this palette exists to prevent.
+
+  2. The second text tone is `--ink2` `#3a3a3a`, and `--muted` is that same
+     tone. The redesign defines exactly two text levels (README §3); the third
+     "muted" brown this theme used to carry does not exist in it, and inventing
+     a third tone would put small text back under the contrast floor.
+
+  Dark is warm black, never pure black -- see `--n-*` in `.desk-ltr` and the
+  `:root[data-appearance]` rules further down.
+*/
 @theme {
-  --color-paper: #f6f1e7;
-  --color-paper-2: #efe6d6;
-  --color-ink: #1c1410;
-  --color-ink-2: #3a3129;
-  --color-muted: #6b5e52;
-  --color-rule: #cfc2ac;
-  --color-rust: #9b2915;
-  --color-rust-2: #7a1f10;
-  --color-desk: #f3eee6;
-  --color-desk-ink: #1c1410;
-  --color-danger: #8b1e12;
-  --color-blush: #e8b4a8;
-  --font-display: "Fraunces", "Source Serif 4", Georgia, serif;
-  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
-  --radius-sm: 0.125rem;
-  --radius-md: 0.25rem;
-  --radius-lg: 0.5rem;
+  --color-paper: #fffdf7;
+  --color-paper-2: #f6f2e7;
+  --color-ink: #111111;
+  --color-ink-2: #3a3a3a;
+  --color-muted: #3a3a3a;
+  --color-rule: #d8d3c4;
+  --color-rust: #111111;
+  --color-rust-2: #111111;
+  --color-desk: #f6f2e7;
+  --color-desk-ink: #111111;
+  --color-danger: #b3261e;
+  --color-blush: #8a4b00;
+  /* The accent, as a fill and only as a fill: buttons, chips, progress bars,
+     the top bar. Text never sits on it in any color but #111. */
+  --color-yel: #ffd23f;
+  /* "Checked, and it is fine" -- and it must never be mistakable for "could
+     not check", which is `--danger` and dashed. See README §6. */
+  --color-ok: #1e6b34;
+  /* The "where you are now" marker: the active nav item's rule, the current
+     step, a selected row's edge. Ink in light because yellow on cream is
+     1.42:1; gold in dark. DECISIONS.md (handoff) calls this `--sel`. */
+  --color-sel: #111111;
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-serif: "Literata", Georgia, serif;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  /* Shape and measure, from tokens/spacing.css. `--radius` is the entire
+     radius scale: square corners everywhere, including the controls that used
+     to be pills and the avatars that used to be circles. `--rule-*` are the
+     three line weights the redesign draws with -- 3px under a section, 2px
+     where a border carries emphasis, 1px inside a panel -- and `--state-bar`
+     is the 4px edge that marks "you are here". */
+  --radius: 0;
+  --rule-section: 3px;
+  --rule-inner: 1px;
+  --rule-emphasis: 2px;
+  --state-bar: 4px;
+  --tap: 44px;
+  --tap-primary: 48px;
+  --measure-article: 680px;
+  --gutter-paper: 40px;
+  --gutter-desk: 32px;
+  --panel-pad: 18px;
+  /* The one shadow the redesign allows -- on dialogs -- and the scrim behind
+     it. Everything else that used to cast a shadow now separates with a rule. */
+  --shadow-dialog: 0 20px 50px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(10, 9, 8, 0.62);
   --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-quart: cubic-bezier(0.55, 0.06, 0.68, 0.19);
   --motion-stagger: 40ms;
-  --motion-micro: 80ms;
-  --motion-quick: 150ms;
-  --motion-fast: 250ms;
-  --motion-medium: 350ms;
-  --motion-slow: 400ms;
-  --animate-ink-pulse: ink-pulse 1.4s ease-in-out infinite;
-  --animate-enter-fade: enter-fade 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  --animate-enter-rise: enter-rise 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  --animate-busy-rule: busy-rule 1.15s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-  --animate-fetching-bar: fetching-bar 1.15s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-  --animate-shimmer-text: shimmer-text 1.8s linear infinite;
-  --animate-ink-shimmer: ink-shimmer 1.55s ease-in-out infinite;
+  --motion-micro: 200ms;
+  --motion-quick: 200ms;
+  --motion-fast: 200ms;
+  --motion-medium: 200ms;
+  --motion-slow: 200ms;
+  --motion-bar: 0.6s;
+  --pulse: 1.2s;
+  --animate-ink-pulse: ink-pulse 1.2s ease-in-out infinite;
+  --animate-enter-fade: enter-fade 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-enter-rise: enter-rise 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-busy-rule: busy-rule 0.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  --animate-fetching-bar: fetching-bar 0.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  --animate-shimmer-text: shimmer-text 1.2s linear infinite;
+  --animate-ink-shimmer: ink-shimmer 1.2s ease-in-out infinite;
+  /* The redesign's own progress keyframes (tokens/motion.css), used by the
+     job cards and the desk nav's indeterminate bar. */
+  --animate-tr-pulse: trPulse 1.2s ease-in-out infinite;
+  --animate-tr-slide: trSlide 0.6s ease-in-out infinite;
 }
 
 @layer base {
@@ -162,6 +221,43 @@
   50% {
     transform: rotate(45deg) scale(1);
     opacity: 1;
+  }
+}
+
+/*
+  The redesign's two progress animations (docs/design/handoff-2026-09-26/
+  design-system/tokens/motion.css), copied verbatim.
+
+  `trPulse` is the "this is working" pulse on a job card; `trSlide` is the
+  indeterminate bar the desk nav and job cards run while they wait. Both are
+  referenced from inline `style` attributes and from `.tr-pulse`, which is why
+  the reduced-motion opt-out below has to match on `[style*=...]` as well as on
+  the class -- `animation: none !important` on a class alone would miss them.
+*/
+@keyframes trPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes trSlide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="trPulse"],
+  [style*="trSlide"],
+  .tr-pulse {
+    animation: none !important;
   }
 }
 
@@ -443,19 +539,78 @@
   --fg2: var(--color-ink-2);
   --mut: var(--color-muted);
   --line: var(--color-rule);
-  --a: var(--color-rust);
-  --adeep: var(--color-rust-2);
-  --warn: var(--color-danger);
+  /*
+    `--a` is the accent FILL and `--adeep` is accent TEXT.
+
+    They used to be the same red at two darknesses, and every `color: var(--a)`
+    in this file and in desk-astra.css was legible. The redesign's accent is
+    yellow, which is not: `#ffd23f` on the cream ground is 1.42:1. So no text
+    site reads `--a` any more -- they all read `--adeep` (ink, bone in dark) --
+    and `--a` was left to the FILLS: `.btn.solid`, `.chip.st-new`, `.score.hot`,
+    the filter badge, and the reader's Opinion marks. Where a native control or
+    a current-step mark has to be SEEABLE rather than filled (accent-color,
+    the active nav row, the current filter), that is `--sel` instead.
+    `scripts/contrast-audit.mjs` keeps the three apart: `adeep/bg` as text,
+    `sel/bg` as a UI color, and `#111` on `a` for the yellow fills.
+  */
+  --a: var(--color-yel);
+  --adeep: var(--color-ink);
+  --sel: var(--color-sel);
+  --ok: var(--color-ok);
+  /*
+    Two state colors, not one (design-system/tokens/colors.css: `--warn` and
+    `--danger` are separate values in both themes).
+
+    The desk used to have a single alert token, and it held the DANGER value:
+    `--warn: var(--color-danger)`. So every rule whose name says "warn" -- the
+    attention ones -- was painting failure red, and "needs attention" and
+    "could not check" could only be told apart by the words. The reader's own
+    sheet has had the split all along (`--warn: #8a4b00; --danger: #b3261e`);
+    this is the desk catching up. `--warn` is now the design's amber attention
+    color, `--danger` the failure red, and the rules that mean failure read
+    `--danger` (see `.notice-err`, `.btn.danger`, `.screen-error`,
+    `.chip.st-killed`).
+  */
+  --warn: var(--color-blush);
+  --danger: var(--color-danger);
   --fd: var(--font-display);
   --fb: var(--font-serif);
-  --n-bg: #000000;
-  --n-bg2: #141414;
-  --n-fg: #ffffff;
-  --n-fg2: #e0e0e0;
-  --n-line: #444444;
-  --n-a: #d2764f;
-  --n-adeep: #d2764f;
-  --n-warn: #e8b4a8;
+  /*
+    `--paper-2` is the panel ground -- the redesign's `--panel`. It is defined
+    here rather than left alone because it was NOT defined anywhere in the app:
+    three rules read `var(--paper-2)` (`.lead-compare`, `.queue-bulk-delete`,
+    `.filter .filter-badge`) and an undefined custom property makes the whole
+    declaration invalid, so those three had no background at all. Pointing it at
+    `--bg2` gives them the panel the rules were written for, and it resolves per
+    element, so astra's own `--bg2` is what those surfaces get on the desk.
+  */
+  --paper-2: var(--bg2);
+  /*
+    The letterpress dark, and it is WARM black, not black.
+
+    This block used to be `#000000` on `#ffffff` -- "black background, white
+    text", the repo's old desk rule. The owner replaced that rule on
+    2026-09-26 (handoff DECISIONS.md): dark ground `#1b1916`, panels `#27231f`,
+    rules `#3b3631`, text `#e8e6e1`, secondary `#bdbab3`. The reason is in the
+    handoff's RESEARCH.md (pure black halates against light type and reads as a
+    different product from the cream light theme), but the short version is
+    that a dark theme which is not the same newspaper as the light one is two
+    products. The desk and the reader now share it -- see
+    `:root[data-appearance]` below.
+  */
+  --n-bg: #1b1916;
+  --n-bg2: #27231f;
+  --n-fg: #e8e6e1;
+  --n-fg2: #bdbab3;
+  --n-line: #3b3631;
+  --n-a: #e6c35c;
+  --n-adeep: #e8e6e1;
+  --n-sel: #e6c35c;
+  --n-ok: #9fd4a8;
+  --n-warn: #f0b27a;
+  --n-danger: #f0998c;
+  /* The desk's own dark panel/rail ground, from the same table. */
+  --n-dd: #0f0e0c;
   /*
     Text-size control (Normal / Large), independent of the Light/Dark toggle.
 
@@ -464,6 +619,11 @@
     `.large` only changes this one number; every touched rule reads it via
     `calc(<floor>rem * var(--ts))`, so raising it re-scales the whole desk at
     once instead of requiring a second, parallel set of large-mode rules.
+
+    Large is 1.2, the redesign's number (design-system/tokens/typography.css:4,
+    `--text-scale`). It was 1.125 here, which was this file's own invention --
+    the tokens name exactly two sizes and their ratio, and the desk is
+    supposed to be the same product as the paper it prints.
   */
   --ts: 1;
   min-height: 100dvh;
@@ -473,7 +633,7 @@
   line-height: 1.5;
 }
 .desk-ltr.large {
-  --ts: 1.125;
+  --ts: 1.2;
 }
 /*
   Tailwind's `text-muted` / `text-ink-2` / `text-ink` / `bg-paper` /
@@ -590,9 +750,12 @@
   The two triggers always agree; the attribute merely gets there first.
 
   The `:not(.astra)` scoping keeps this from fighting the astra shell, which
-  carries its own dark palette in desk-astra.css. That file extends its
-  `.desk-ltr.astra.night` rule the same way -- the desk's dark is #182024, not
-  the letterpress `--n-bg` black, and only astra knows that.
+  carries its own dark palette in desk-astra.css. The two used to be different
+  darks (astra was a blue-black #182024, this one was #000000); after the
+  redesign they are the same warm black, because a desk that goes dark one way
+  and a paper that goes dark another is two products. They are still declared
+  separately: astra overrides the light palette too, and the two files are the
+  two shells.
 
   Which is why this rule NO LONGER keys on the attribute (2026-09-25). It used
   to, and `:root[data-appearance="desk-dark"] .desk-ltr:not(.astra)` is
@@ -600,8 +763,8 @@
   `.screen-page` the desk's dark palette further down this file. So the
   pending/loading/error screens, which are the only non-astra `.desk-ltr`
   surfaces in the tree (states.tsx, error-component.tsx, the two desk-gate
-  branches -- grep, 2026-09-25), kept THIS black: `--n-bg: #000000`. The
-  announce screen painted pure black where the desk is #182024, the
+  branches -- grep, 2026-09-25), kept THIS palette: `--n-bg`, which was pure
+  black then. The announce screen painted black where the desk was #182024, the
   `.screen-page` palette below was dead code, and the first version of that fix
   changed nothing at all -- the screenshot harness caught it, not a re-read.
   The two remaining selectors are legacy letterpress surfaces (`.night` is
@@ -619,7 +782,10 @@
   --line: var(--n-line);
   --a: var(--n-a);
   --adeep: var(--n-adeep);
+  --sel: var(--n-sel);
+  --ok: var(--n-ok);
   --warn: var(--n-warn);
+  --danger: var(--n-danger);
 }
 /*
   Normal / Large, before React.
@@ -630,7 +796,7 @@
   attribute lets the first paint be the right size.
 */
 :root[data-desk-size="large"] .desk-ltr {
-  --ts: 1.125;
+  --ts: 1.2;
 }
 /*
   The document canvas.
@@ -649,17 +815,17 @@
 */
 :root[data-appearance="desk-dark"] {
   color-scheme: dark;
-  background: #182024;
+  background: #1b1916;
 }
 :root[data-appearance="reader-dark"] {
   color-scheme: dark;
-  background: #142428;
+  background: #1b1916;
 }
 :root[data-appearance="desk-dark"] body {
-  background: #182024;
+  background: #1b1916;
 }
 :root[data-appearance="reader-dark"] body {
-  background: #142428;
+  background: #1b1916;
 }
 /*
   A full-page screen with no desk shell around it.
@@ -691,10 +857,11 @@
   rather than one of the remapped utilities: the ornament's rules and diamond
   (`--color-rule`, `--color-rust`), and the "Sign in"/"Back to the paper"
   buttons (`border-ink`, `bg-ink`, `text-paper`, `border-paper`). `@theme`
-  tokens are light-only by construction -- `--color-rust` is #9b2915, which is
-  ~1.6:1 against the dark canvas -- so on a dark screen they are pointed at the
-  screen's own palette. The kicker keeps the desk's dark-mode rust (#f3a19b,
-  8.2:1) rather than the light one.
+  tokens are light-only by construction -- `--color-ink` is #111111, which is
+  1.08:1 against this canvas -- so on a dark screen they are pointed at the
+  screen's own palette. Since the redesign `--color-rust` is ink too, so the
+  kicker's color comes from `--adeep` (bone, 14.06:1 here) like every other
+  accent-text site; there is no dark-mode rust any more.
 
   The palette below is the desk's dark, spelled out, and it is the fix for a
   second, quieter version of the owner's flash. `.screen-page` is the one
@@ -715,44 +882,57 @@
   states.tsx, error-component.tsx and the two desk-gate branches of desk.tsx --
   and all four are `desk-ltr screen-page`; the one builder of the other shape,
   deskShellClassName, always has `" astra"` appended by desk-chrome.tsx. So the
-  `.nightpanel` in desk.index.tsx is the only remaining `--n-*` surface, inside
-  the astra shell, and it keeps its black.
+  `.nightpanel` in desk.index.tsx is the only element left carrying `--n-*`, and
+  it is inside the astra shell -- which overrides every one of those tokens from
+  `.desk-ltr.astra .nightpanel.gc-darkdesk` in desk-astra.css, so the panel now
+  paints the same warm black (or the same cream) as the page it sits on rather
+  than the letterpress black this rule still calls dark.
 */
 :root[data-appearance="desk-dark"] .screen-page {
   color-scheme: dark;
-  --bg: #182024;
-  --bg2: #1c262b;
-  --fg: #edf2f3;
-  --fg2: #c1cdd1;
-  --mut: #a7b5ba;
-  --line: #39474d;
-  --a: #8bcac3;
-  --adeep: #a4dad4;
-  --warn: #f3a19b;
-  --color-rust: #f3a19b;
-  --color-rule: #39474d;
-  --color-danger: #f3a19b;
+  --bg: #1b1916;
+  --bg2: #27231f;
+  --fg: #e8e6e1;
+  --fg2: #bdbab3;
+  --mut: #bdbab3;
+  --line: #3b3631;
+  --a: #e6c35c;
+  --adeep: #e8e6e1;
+  --sel: #e6c35c;
+  --ok: #9fd4a8;
+  --warn: #f0b27a;
+  --danger: #f0998c;
+  --color-rust: #e8e6e1;
+  --color-rule: #3b3631;
+  --color-danger: #f0998c;
 }
 /*
-  The public paper's dark, which is not the desk's dark (#142428 against
-  #182024) and has its own palette in reader-astra.css. The reader keeps its
-  appearance in a per-paper blob rather than in the desk keys, so a screen on a
-  public route has to be given these directly.
+  The public paper's dark, given to a screen on a public route.
+
+  It used to be a third palette -- #142428, a blue-black, against the desk's
+  #182024. The redesign has one dark: warm black. Both blocks below are now the
+  same values as the desk's, so a screen that says "Opening the edition" and
+  the edition it opens are the same color. The reader keeps its appearance in
+  a per-paper blob rather than in the desk keys, which is why it still needs
+  its own copy of the palette here.
 */
 :root[data-appearance="reader-dark"] .screen-page {
   color-scheme: dark;
-  --bg: #142428;
-  --bg2: #1a2d32;
-  --fg: #e0ebe7;
-  --fg2: #adbfbd;
-  --mut: #adbfbd;
-  --line: #354a4d;
-  --a: #83c9c3;
-  --adeep: #83c9c3;
-  --warn: #ffb4a7;
-  --color-rust: #ffb4a7;
-  --color-rule: #354a4d;
-  --color-danger: #ffb4a7;
+  --bg: #1b1916;
+  --bg2: #27231f;
+  --fg: #e8e6e1;
+  --fg2: #bdbab3;
+  --mut: #bdbab3;
+  --line: #3b3631;
+  --a: #e6c35c;
+  --adeep: #e8e6e1;
+  --sel: #e6c35c;
+  --ok: #9fd4a8;
+  --warn: #f0b27a;
+  --danger: #f0998c;
+  --color-rust: #e8e6e1;
+  --color-rule: #3b3631;
+  --color-danger: #f0998c;
 }
 .screen-page .border-ink {
   border-color: var(--fg);
@@ -773,7 +953,7 @@
 .screen-page .hover\:bg-paper-2:hover {
   background-color: var(--bg2);
 }
-.desk-ltr a:hover {color:var(--a)}
+.desk-ltr a:hover {color:var(--adeep)}
 .desk-ltr .shell {min-height:100dvh;background:var(--bg);color:var(--fg)}
 .desk-ltr .nightpanel {background:var(--bg);color:var(--fg)}
 .desk-ltr .masthead {padding:14px 28px 0;max-width:1420px;margin:0 auto}
@@ -801,7 +981,7 @@
 .desk-ltr .mast-tools {display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-width:0;max-width:100%}
 .desk-ltr .mast-link {font-size:calc(0.875rem * var(--ts));color:var(--mut);cursor:pointer}
 .desk-ltr .mast-link:hover {color:var(--fg)}
-.desk-ltr .mast-user {display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--fg);border-radius:50%;font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));cursor:default}
+.desk-ltr .mast-user {display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--fg);border-radius: 0;font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));cursor:default}
 .desk-ltr .mast-account {display:inline-flex;align-items:center;gap:10px;min-width:0;max-width:100%}
 .desk-ltr .mast-account > div {flex-wrap:wrap;min-width:0}
 .desk-ltr .mast-account > div > span {overflow-wrap:anywhere}
@@ -813,90 +993,132 @@
 .desk-ltr .nav-toggle {display:none;min-height:40px;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);background:none;border:none;width:100%;text-align:center;cursor:pointer}
 .desk-ltr .nav-item {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;padding:8px 14px;color:var(--fg2);border-bottom:2px solid transparent}
 .desk-ltr .nav-item:hover {color:var(--fg)}
-.desk-ltr .nav-item.on {color:var(--adeep);border-bottom-color:var(--a)}
+.desk-ltr .nav-item.on {color:var(--adeep);border-bottom-color:var(--sel)}
 .desk-ltr .nav-sep {flex:1}
 .desk-ltr .nav-dark {background:var(--fg);color:var(--bg);margin:4px 0;padding:6px 14px;border-bottom:none;white-space:nowrap}
 .desk-ltr .nav-dark:hover {color:var(--bg);opacity:.88}
-.desk-ltr .nav-dark.on {color:var(--bg);box-shadow:inset 0 -3px 0 var(--a)}
+.desk-ltr .nav-dark.on {color:var(--bg);box-shadow:inset 0 -3px 0 var(--sel)}
 .desk-ltr .deskmain {max-width:1420px;margin:0 auto;padding:20px 28px 90px}
 .desk-ltr .seg {display:inline-flex;border:1px solid var(--line)}
 .desk-ltr .seg-opt {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.08em;padding:5px 12px;color:var(--mut);white-space:nowrap}
 .desk-ltr .seg-opt+.seg-opt {border-left:1px solid var(--line)}
 .desk-ltr .seg-opt.on {background:var(--fg);color:var(--bg)}
 .desk-ltr .kick {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.18em;color:var(--adeep);margin:0}
-.desk-ltr .h1 {font-family:var(--fd);font-weight:600;font-size:calc(1.875rem * var(--ts));line-height:1.05;letter-spacing:-0.015em;margin:4px 0 0}
+.desk-ltr .h1 {font-family:var(--fd);font-weight:700;font-size:calc(1.875rem * var(--ts));line-height:1.05;letter-spacing:-0.015em;margin:4px 0 0}
 .desk-ltr .lede {max-width:640px;color:var(--fg2);margin:10px 0 0;text-wrap:pretty}
 .desk-ltr .meta {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:2px 0 0}
 .desk-ltr .meta.evidence-weak {font-style:italic}
 .desk-ltr .meta-inline {font-size:calc(0.875rem * var(--ts));color:var(--mut);display:inline-block;margin-left:6px}
 .desk-ltr .meta-inline.block {display:block;margin-left:0}
 .desk-ltr .warn-inline {display:block;font-size:calc(0.875rem * var(--ts));color:var(--warn)}
-.desk-ltr .btn {display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--fg);padding:8px 14px;font-size:calc(0.875rem * var(--ts));font-weight:600;font-family:var(--fd);white-space:nowrap;min-height:44px;transition:background .15s,color .15s,opacity .15s}
+/*
+  The button family, restyled to the redesign's one family
+  (design-system/components/core/Button.jsx, README section 6).
+
+  Three things changed and one deliberately did not. The border is 2px on the
+  secondary and the danger variants -- the redesign draws emphasis at 2px, not
+  1px. Secondary is ink text on the ground with a 2px ink border, danger is
+  `--warn` text with a 2px `--warn` border, quiet is the 1px `--line` outline.
+  And `solid` -- the primary action -- is now YELLOW with #111 text, where it
+  used to be an ink fill: the redesign's primary button is the yellow, and the
+  yellow is only ever readable with ink on it (#111 on #ffd23f is 12.1:1; the
+  cream `--bg` this used to put on a dark fill would be 1.42:1 on yellow).
+
+  What did not change: every variant is still 44px minimum and the geometry
+  (padding, gaps) is untouched, so no row on any desk screen reflows -- the
+  44px tap target and the sizes here are asserted by
+  scripts/desk-min-font.test.mjs and by the layouts around them.
+
+  InkButton's tone names are unchanged (solid / ghost / danger / invert /
+  quiet / quiet-danger); this is a restyle of the classes it already emits, not
+  a second family.
+*/
+.desk-ltr .btn {display:inline-flex;align-items:center;justify-content:center;gap:6px;border:2px solid var(--fg);padding:8px 14px;font-size:calc(0.875rem * var(--ts));font-weight:700;font-family:var(--fd);white-space:nowrap;min-height:44px;transition:background var(--motion-fast),color var(--motion-fast),opacity var(--motion-fast)}
 .desk-ltr .btn:hover:not(:disabled) {background:color-mix(in srgb,var(--fg) 8%,transparent)}
 .desk-ltr .btn:active:not(:disabled) {background:color-mix(in srgb,var(--fg) 16%,transparent)}
-.desk-ltr .btn.solid {background:var(--fg);color:var(--bg)}
-.desk-ltr .btn.solid:hover:not(:disabled) {background:var(--fg2)}
+.desk-ltr .btn.solid {background:var(--a);border-color:var(--a);color:#111;font-weight:800}
+.desk-ltr .btn.solid:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 88%,#111)}
 .desk-ltr .btn.small {padding:6px 12px;font-size:calc(0.875rem * var(--ts));min-height:36px}
-.desk-ltr .btn.quiet {border-color:transparent;color:var(--adeep);font-weight:600;padding-inline:6px}
+.desk-ltr .btn.quiet {border:1px solid var(--line);color:var(--fg);padding:8px 14px}
 .desk-ltr .btn.quiet:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 12%,transparent)}
 /* Equal specificity between .btn.quiet (border-color: transparent) and
-   .btn.danger (border-color: var(--warn)) let source order decide the
+   .btn.danger (border-color: var(--danger)) let source order decide the
    winner in the built stylesheet -- Kill (tone="quiet-danger", used for a
    real but non-final action) rendered with a transparent border, so it
    read as a neutral secondary action with no warn signal at all. The
    combined selector has higher specificity and wins regardless of
    declaration order. */
-.desk-ltr .btn.danger, .desk-ltr .btn.quiet.danger {border-color:var(--warn);color:var(--warn)}
-.desk-ltr .btn.danger:hover:not(:disabled), .desk-ltr .btn.quiet.danger:hover:not(:disabled) {background:var(--warn);color:var(--bg)}
+.desk-ltr .btn.danger, .desk-ltr .btn.quiet.danger {border:2px solid var(--danger);color:var(--danger)}
+.desk-ltr .btn.danger:hover:not(:disabled), .desk-ltr .btn.quiet.danger:hover:not(:disabled) {background:var(--danger);color:var(--bg)}
 /* Kill/Delete confirm-step buttons render tone="danger", which InkButton
    also marks "solid" -- a destructive confirm reads as a real stop sign
-   (solid warn fill), not the same low-emphasis outline as every other
+   (solid danger fill), not the same low-emphasis outline as every other
    secondary action next to it. */
-.desk-ltr .btn.danger.solid {background:var(--warn);color:var(--bg);border-color:var(--warn)}
+.desk-ltr .btn.danger.solid {background:var(--danger);color:var(--bg);border-color:var(--danger)}
+/* The gated variant: a control that exists but cannot be used yet -- dashed,
+   so it never reads as a second kind of disabled button. */
+.desk-ltr .btn.gated {border:2px dashed var(--line);color:var(--fg2)}
 .desk-ltr .btn.danger.solid:hover:not(:disabled) {opacity:.85}
 .desk-ltr .btn:disabled {opacity:.45;cursor:not-allowed}
 .desk-ltr .btn.queue-done {text-decoration:none;border-color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}
 .desk-ltr .btn.queue-done:hover {background:color-mix(in srgb,var(--fg) 18%,transparent)}
 .desk-ltr .inline-link {color:var(--adeep);text-decoration:underline;text-underline-offset:3px;font-size:inherit}
-.desk-ltr .inline-link:hover {color:var(--a)}
-.desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--line);padding:2px 7px;white-space:nowrap;align-self:start;color:var(--mut)}
-.desk-ltr .chip.st-new {border-color:var(--fg);color:var(--fg)}
-.desk-ltr .chip.st-drafted {border-color:var(--adeep);color:var(--adeep)}
-.desk-ltr .chip.st-published {background:var(--fg);color:var(--bg);border-color:var(--fg)}
-.desk-ltr .chip.st-killed {color:var(--warn);border-color:var(--warn)}
+.desk-ltr .inline-link:hover {color:var(--adeep)}
+/*
+  Chips, restyled to the redesign's state table
+  (design-system/components/core/Chip.jsx, README section 6).
+
+  The rule the table encodes is the one this desk kept getting wrong: a state
+  that has been CHECKED and is fine must not look like one that COULD NOT BE
+  CHECKED. So the settled-good states are solid 1px outlines in `--ok`, the
+  unresolved or refused ones are dashed in `--danger` / `--warn`, and the
+  neutral "nothing to say" ones are the 1px `--fg2` outline. Only `new` is a
+  filled chip -- yellow, with #111 text.
+
+  The uppercase + letter-spacing treatment is kept: it is this desk's chip
+  typography and the words are the label, so changing case would re-wrap every
+  list row (a layout change, which this pass is not allowed to make). What
+  changed here is the color, the weight (800, as the reference component) and
+  the padding the reference uses.
+*/
+.desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg2);padding:1px 8px;white-space:nowrap;align-self:start;color:var(--fg2);font-weight:800}
+.desk-ltr .chip.st-new {background:var(--a);border-color:var(--a);color:#111}
+.desk-ltr .chip.st-drafted {border-color:var(--fg2);color:var(--fg2)}
+.desk-ltr .chip.st-published {border-color:var(--ok);color:var(--ok)}
+.desk-ltr .chip.st-killed {border-style:dashed;border-width:2px;color:var(--danger);border-color:var(--danger)}
 /* A held lead is coming back; aside/closed/exhausted are done. Each renders
    its own visible word (see Chip() in desk-chrome.tsx) and its own styled
    chip -- none of the four falls through to the unstyled default gray, which
    used to read as "the same status" for all of them. */
-.desk-ltr .chip.st-held {border-style:solid;border-color:var(--fg2);color:var(--fg2)}
-.desk-ltr .chip.st-aside {border-style:dashed;border-color:var(--mut);color:var(--mut)}
-.desk-ltr .chip.st-closed {border-style:solid;border-color:var(--mut);color:var(--mut)}
-.desk-ltr .chip.st-exhausted {border-style:dotted;border-color:var(--mut);color:var(--mut)}
-.desk-ltr .chip.dup {border-style:dashed;border-color:var(--adeep);color:var(--adeep)}
+.desk-ltr .chip.st-held {border:2px solid var(--warn);color:var(--warn)}
+.desk-ltr .chip.st-aside {border-style:dashed;border-color:var(--fg2);color:var(--fg2)}
+.desk-ltr .chip.st-closed {border-style:solid;border-color:var(--fg2);color:var(--fg2)}
+.desk-ltr .chip.st-exhausted {border-style:dotted;border-color:var(--fg2);color:var(--fg2)}
+.desk-ltr .chip.dup {border-style:dashed;border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .lead-flags .chip.dup {margin:0}
-.desk-ltr .chip.seen-again {border-color:var(--adeep);color:var(--adeep)}
+.desk-ltr .chip.seen-again {border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .lead-flags .chip.seen-again {margin:0}
 /* The scan filed this lead under a section the model never chose. Dashed
    because nothing is settled, accent because it is the editor's to settle --
    and wrapping, like the possible-duplicate chip, since the words are the
    point and the rail is not wide enough for them on one line. */
-.desk-ltr .chip.topic-unchosen {border-style:dashed;border-color:var(--a);color:var(--a);display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.desk-ltr .chip.topic-unchosen {border-style:dashed;border-color:var(--fg2);color:var(--fg2);display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .lead-flags .chip.topic-unchosen {margin:0}
 /* An imported story was not written by the desk and was not found by the
    scanner. It says so on the row, so "where did this come from?" is answered
    without opening the lead. */
 .desk-ltr .chip.imported {border-style:solid;border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .lead-flags .chip.imported {margin:0}
-.desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--adeep);color:var(--adeep);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
-.desk-ltr .chip.maybe-same:hover {color:var(--a)}
+.desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--fg2);color:var(--fg2);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.desk-ltr .chip.maybe-same:hover {color:var(--adeep)}
 .desk-ltr .lead-flags .chip.maybe-same {margin:0}
-.desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
+.desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
 .desk-ltr .score.warm {border-color:var(--fg);color:var(--fg)}
-.desk-ltr .score.hot {background:var(--a);border-color:var(--a);color:#fff}
-/* White-on-accent is 7.7:1 in light mode but only 3.3:1 against the
-   dark-mode accent (#d2764f) -- fails AA for 14px bold text. Black ink on the
-   same accent measures 6.44:1, so the dark desk swaps to that instead. */
-.desk-ltr.night .score.hot {color:var(--bg)}
+.desk-ltr .score.hot {background:var(--a);border-color:var(--a);color:#111}
+/* The hot score is a yellow fill in both themes, and text on yellow is #111 in
+   both -- the old rule put white on it in light mode and the dark cream on it
+   at night, which measured 3.3:1 and 1.4:1. `.score.hot` already sets #111. */
+.desk-ltr.night .score.hot {color:#111}
 /*
   Notice (src/components/states.tsx) used to take a manual `night` prop and
   render fixed Tailwind colors (border-danger/35, text-danger, ...) that
@@ -904,25 +1126,35 @@
   dark-red-on-dark-panel (owner screenshot, story page, 2026-09-05). These
   read the desk's own theme vars instead, so `.desk-ltr.night` above flips
   them automatically with no per-call prop needed.
+
+  Each kind now carries the shape the design system gives it, so the
+  headline rule of README section 6 -- "Checked, nothing changed" must
+  never look like "could not check" -- is actually expressed here:
+  ok is a solid 1px `--ok` outline in `--ok` (a settled result),
+  err is 2px DASHED `--danger` (a check that failed), and warn is a
+  solid 2px `--warn` (amber) outline for "needs attention", which is
+  neither of those. Before the token split all three of err and warn
+  shared one red, and ok shared the neutral `--line` with every
+  unremarkable rule on the page.
 */
-.desk-ltr .notice-err {border-color:var(--warn);color:var(--warn);background:var(--bg2)}
-.desk-ltr .notice-warn {border-color:var(--adeep);color:var(--fg);background:var(--bg2)}
-.desk-ltr .notice-ok {border-color:var(--line);color:var(--fg);background:var(--bg2)}
+.desk-ltr .notice-err {border:2px dashed var(--danger);color:var(--danger);background:var(--bg2)}
+.desk-ltr .notice-warn {border:2px solid var(--warn);color:var(--warn);background:var(--bg2)}
+.desk-ltr .notice-ok {border:1px solid var(--ok);color:var(--ok);background:var(--bg2)}
 /*
   ScreenError (src/components/states.tsx) used to pick `bg-ink` for its night
-  background -- `--color-ink` (#1c1410) is a fixed dark BROWN, not the desk's
-  actual night background, so a full-screen error panel on the dark desk
-  showed a brown box instead of matching the black/near-black desk around it.
+  background -- `--color-ink` (#111111) is the fixed light-theme INK, not the
+  desk's actual night background, so a full-screen error panel on the dark desk
+  showed an ink box instead of matching the warm-black desk around it.
   Reads the theme vars instead, so `.desk-ltr.night` flips it with everything
   else.
 */
-.desk-ltr .screen-error {border-color:var(--warn);background:var(--bg2);color:var(--fg)}
-.desk-ltr .screen-error-message {color:var(--warn)}
+.desk-ltr .screen-error {border-color:var(--danger);background:var(--bg2);color:var(--fg)}
+.desk-ltr .screen-error-message {color:var(--danger)}
 .desk-ltr .screen-error-retry {border-color:var(--fg);color:var(--fg)}
 .desk-ltr .screen-error-retry:hover {background:var(--bg)}
 .desk-ltr .sechead {margin-top:26px;border-bottom:1px solid var(--fg);padding-bottom:5px;display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
 .desk-ltr .sechead-l {display:flex;align-items:baseline;gap:8px;margin-right:auto}
-.desk-ltr .sec-title {font-family:var(--fd);font-weight:600;font-size:calc(1.0625rem * var(--ts));margin:0}
+.desk-ltr .sec-title {font-family:var(--fd);font-weight:700;font-size:calc(1.0625rem * var(--ts));margin:0}
 .desk-ltr .sec-count {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
 .desk-ltr .sec-sub {width:100%;font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:0 0 2px}
 .desk-ltr .busy {margin:12px 0}
@@ -930,9 +1162,9 @@
 @keyframes busyk{0%,100%{transform:scaleX(.15);opacity:.5}50%{transform:scaleX(1);opacity:1}}
 .desk-ltr .busy-label {font-size:calc(0.875rem * var(--ts));font-style:italic;color:var(--mut);margin:6px 0 0}
 .desk-ltr .note {font-size:calc(0.875rem * var(--ts));margin:12px 0 0;padding:8px 12px;border-left:2px solid var(--fg)}
-.desk-ltr .note.err {border-color:var(--warn);color:var(--warn)}
+.desk-ltr .note.err {border-color:var(--danger);color:var(--danger)}
 .desk-ltr .needs {display:flex;flex-wrap:wrap;align-items:center;gap:4px 18px;margin-top:16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:7px 0}
-.desk-ltr .needs-label {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.18em;color:var(--adeep);font-weight:600}
+.desk-ltr .needs-label {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.18em;color:var(--adeep);font-weight:700}
 .desk-ltr .needs-item {font-size:calc(0.875rem * var(--ts));color:var(--fg2);position:relative;padding-left:14px;white-space:nowrap}
 .desk-ltr .needs-item::before {content:"";position:absolute;left:0;top:50%;width:5px;height:5px;transform:translateY(-50%) rotate(45deg);background:var(--a)}
 .desk-ltr .needs-item:hover {color:var(--adeep);text-decoration:underline;text-underline-offset:3px}
@@ -969,7 +1201,7 @@
 .desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px;min-width:0;max-width:11rem}
 .desk-ltr .lead-row.dead {opacity:.5}
 .desk-ltr .lead-main {min-width:0}
-.desk-ltr .hl-link {font-family:var(--fd);font-weight:600;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em}
+.desk-ltr .hl-link {font-family:var(--fd);font-weight:700;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em}
 .desk-ltr .hl-link:hover {color:var(--adeep)}
 .desk-ltr .hl-link.sm {font-size:calc(0.875rem * var(--ts))}
 .desk-ltr .lead-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0;text-wrap:pretty}
@@ -1021,7 +1253,7 @@
 .desk-ltr .lead-compare-why {font-size:calc(0.9375rem * var(--ts));color:var(--fg2);margin:6px 0;overflow-wrap:anywhere}
 .desk-ltr .lead-compare-sources {list-style:none;margin:6px 0 0;padding:0}
 .desk-ltr .lead-compare-sources li {font-size:calc(0.875rem * var(--ts));margin-bottom:4px;overflow-wrap:anywhere}
-.desk-ltr .lead-compare-kill {color:var(--warn);font-weight:600;font-size:calc(0.9375rem * var(--ts));margin:10px 0 0;overflow-wrap:anywhere}
+.desk-ltr .lead-compare-kill {color:var(--warn);font-weight:500;font-size:calc(0.9375rem * var(--ts));margin:10px 0 0;overflow-wrap:anywhere}
 .desk-ltr .lead-compare-actions {display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .desk-ltr .lead-killed-record {border:1px solid var(--warn);padding:16px 18px;margin:14px 0}
 @media (max-width:720px) {
@@ -1045,10 +1277,10 @@
 .desk-ltr .nightpanel {padding:16px 18px 18px;margin-top:6px}
 .desk-ltr .nightpanel .sechead {margin-top:0;border-bottom-color:var(--line)}
 .desk-ltr .np-note {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin:6px 0 0}
-.desk-ltr .np-pile {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--fg);font-weight:600;margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px}
+.desk-ltr .np-pile {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--fg);font-weight:700;margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:3px}
 .desk-ltr .np-item {padding:8px 0;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
 .desk-ltr .np-kind {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--adeep);margin:0}
-.desk-ltr .np-title {font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));line-height:1.3;margin:2px 0 0}
+.desk-ltr .np-title {font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));line-height:1.3;margin:2px 0 0}
 .desk-ltr .np-meta {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:3px 0 0}
 .desk-ltr .np-acts {margin-top:7px;display:flex;gap:8px;flex-wrap:wrap}
 .desk-ltr .np-link {font-size:calc(0.875rem * var(--ts));color:var(--adeep);text-decoration:underline;text-underline-offset:3px;text-transform:none;letter-spacing:0;margin-left:6px}
@@ -1063,16 +1295,16 @@
   The Follow-ups object (Direction A stage 1). One item: who · what · due ·
   the story link, matching the anatomy in build-notes' "Follow-ups" section.
   `.text-warn` is the one place overdue is ALSO stated in words ("Overdue N
-  days") -- colour never carries the meaning alone.
+  days") -- color never carries the meaning alone.
 */
 .desk-ltr .followup-item {padding:14px 0;border-bottom:1px solid var(--line)}
 .desk-ltr .followup-item:last-child {border-bottom:none}
 .desk-ltr .followup-item.done {opacity:.7}
-.desk-ltr .followup-who {font-family:var(--fd);font-weight:600;font-size:calc(0.9375rem * var(--ts));margin:0}
+.desk-ltr .followup-who {font-family:var(--fd);font-weight:700;font-size:calc(0.9375rem * var(--ts));margin:0}
 .desk-ltr .followup-what {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:4px 0 0}
-.desk-ltr .text-warn {color:var(--warn);font-weight:600}
+.desk-ltr .text-warn {color:var(--warn);font-weight:700}
 .desk-ltr .followup-reply-form {margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.desk-ltr .mem-e {font-family:var(--fd);font-weight:600}
+.desk-ltr .mem-e {font-family:var(--fd);font-weight:700}
 /*
   Beat memory (Direction A stage 1): each entity is one line -- title only,
   the long last-angle description moves to a title= tooltip instead of
@@ -1096,11 +1328,11 @@
 .desk-ltr .pipe-cell {flex:1;min-width:150px;border:1px solid var(--line);padding:10px 14px;text-align:left;display:flex;flex-direction:column;gap:2px;transition:border-color .15s}
 .desk-ltr .pipe-cell:hover {border-color:var(--fg)}
 .desk-ltr .pipe-k {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.16em;color:var(--adeep)}
-.desk-ltr .pipe-v {font-family:var(--fd);font-weight:600;font-size:calc(1rem * var(--ts))}
+.desk-ltr .pipe-v {font-family:var(--fd);font-weight:700;font-size:calc(1rem * var(--ts))}
 .desk-ltr .pipe-w {font-size:calc(0.875rem * var(--ts));color:var(--mut)}
 .desk-ltr .pipe-arrow {align-self:center;color:var(--mut)}
 .desk-ltr .ltable {width:100%;border-collapse:collapse;margin-top:4px;font-size:calc(0.875rem * var(--ts))}
-.desk-ltr .ltable th {text-align:left;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;color:var(--mut);font-weight:600;padding:8px 10px 5px;border-bottom:1px solid var(--fg)}
+.desk-ltr .ltable th {text-align:left;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;color:var(--mut);font-weight:500;padding:8px 10px 5px;border-bottom:1px solid var(--fg)}
 .desk-ltr .ltable td {padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 .desk-ltr .lead-tr:hover td {background:color-mix(in srgb,var(--fg) 3%,transparent)}
 .desk-ltr .lead-tr.dead {opacity:.5}
@@ -1108,30 +1340,35 @@
 .desk-ltr .td-meta {font-size:calc(0.875rem * var(--ts));color:var(--mut);white-space:nowrap}
 .desk-ltr .td-meta.wide {white-space:normal}
 .desk-ltr .td-acts {white-space:nowrap}
-.desk-ltr .src-t {font-weight:600}
+.desk-ltr .src-t {font-weight:700}
 .desk-ltr .board-lower {display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:10px}
 .desk-ltr .board-lower>div {min-width:0;padding:0 22px}
 .desk-ltr .board-lower>div:first-child {padding-left:0}
 .desk-ltr .board-lower>div+div {border-left:1px solid var(--line)}
 .desk-ltr .narrowish {max-width:1000px}
 .desk-ltr .filters {display:flex;gap:6px;margin-top:18px;flex-wrap:wrap}
-.desk-ltr .queue-bulk-delete {display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}
+.desk-ltr .queue-bulk-delete {display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius: 0;background:var(--paper-2)}
 .desk-ltr .queue-bulk-delete-confirm {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .desk-ltr .queue-delete-select {display:block}
 .desk-ltr .filter {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.1em;border:1px solid var(--line);padding:4px 12px;color:var(--mut);white-space:nowrap}
-.desk-ltr .filter.on {background:var(--fg);color:var(--bg);border-color:var(--fg)}
+/* The current filter is a `--sel` rule on the panel ground, not an ink fill:
+   `--sel` is the token that means "you are here" -- ink in light, gold in dark
+   -- and it is the same marker the astra shell draws under its current step.
+   The ink fill this used to be put bone text on a bone slab in the dark desk. */
+.desk-ltr .filter.on {background:var(--bg2);color:var(--fg);border-color:var(--sel)}
 /* Unit AK item 7: a count of leads waiting on the editor, not one more
    number in a row of numbers. It sits inside the tab's own words, so the
    visible text of the button is still "held 3" and anything that finds the
    tab by its label keeps working. */
-.desk-ltr .filter .filter-badge {display:inline-block;min-width:1.6em;padding:0 5px;border-radius:99px;background:var(--paper-2);color:var(--mut);font-size:calc(0.875rem * var(--ts));letter-spacing:0;text-align:center;font-variant-numeric:tabular-nums}
-.desk-ltr .filter.on .filter-badge {background:transparent;color:var(--bg)}
-/* --a is dark rust by day (#9b2915) and light rust at night (#d2764f), so
-   --bg is the readable ink on it in both; white would fail AA at night, the
-   same reason .score.hot swaps. */
-.desk-ltr .filter .filter-badge.waiting {background:var(--a);color:var(--bg);font-weight:700}
+.desk-ltr .filter .filter-badge {display:inline-block;min-width:1.6em;padding:0 5px;border-radius: 0;background:var(--paper-2);color:var(--mut);font-size:calc(0.875rem * var(--ts));letter-spacing:0;text-align:center;font-variant-numeric:tabular-nums}
+.desk-ltr .filter.on .filter-badge {background:transparent;color:var(--fg)}
+/* The waiting count is a yellow FILL, and text on yellow is #111 in both
+   themes -- 12.1:1 on #ffd23f, 9.9:1 on #e6c35c. The theme's own ground color
+   would be 1.42:1 here, which is the same reason `.score.hot` and the primary
+   button say #111 rather than var(--bg). */
+.desk-ltr .filter .filter-badge.waiting {background:var(--a);color:#111;font-weight:700}
 .desk-ltr .file-form {margin-top:16px;border:1px solid var(--line);padding:0 16px}
-.desk-ltr .file-form summary {font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));padding:10px 0;cursor:pointer;list-style-position:inside}
+.desk-ltr .file-form summary {font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));padding:10px 0;cursor:pointer;list-style-position:inside}
 .desk-ltr .file-form>*:last-child {margin-bottom:14px}
 .desk-ltr .form-grid {display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
 .desk-ltr .f {display:block}
@@ -1156,10 +1393,10 @@
 .desk-ltr .just-added td, .desk-ltr tr.just-added td {background:color-mix(in srgb,var(--a) 12%,transparent)}
 .desk-ltr .scan-hist {margin-top:4px}
 .desk-ltr .scan-row {padding:11px 0;border-bottom:1px solid var(--line)}
-.desk-ltr .scan-line {font-size:calc(0.875rem * var(--ts));font-weight:600;margin:2px 0 0}
+.desk-ltr .scan-line {font-size:calc(0.875rem * var(--ts));font-weight:500;margin:2px 0 0}
 .desk-ltr .pub-list {margin-top:8px}
 .desk-ltr .pub-row {display:grid;grid-template-columns:1fr auto;gap:16px;padding:14px 0;border-bottom:1px solid var(--line)}
-.desk-ltr .pub-h {font-family:var(--fd);font-weight:600;font-size:19px;line-height:1.2;margin:3px 0 0;letter-spacing:-.01em}
+.desk-ltr .pub-h {font-family:var(--fd);font-weight:700;font-size:19px;line-height:1.2;margin:3px 0 0;letter-spacing:-.01em}
 .desk-ltr .pub-dek {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:4px 0 0;font-style:italic}
 .desk-ltr .pub-corr {font-size:calc(0.875rem * var(--ts));margin:8px 0 0;padding-left:12px;border-left:2px solid var(--warn)}
 .desk-ltr .pub-acts {display:flex;flex-direction:column;align-items:start;gap:4px}
@@ -1192,11 +1429,11 @@
 .desk-ltr .story-side {min-width:0}
 .desk-ltr .story-side > .chip:first-child {display:inline-block;margin-bottom:10px}
 .desk-ltr .story-work {min-width:0;display:flex;flex-direction:column;gap:16px}
-.desk-ltr .side-h {font-family:var(--fd);font-weight:600;font-size:calc(1.375rem * var(--ts));line-height:1.2;margin:4px 0 0;letter-spacing:-.01em}
+.desk-ltr .side-h {font-family:var(--fd);font-weight:700;font-size:calc(1.375rem * var(--ts));line-height:1.2;margin:4px 0 0;letter-spacing:-.01em}
 .desk-ltr .side-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:8px 0 0}
 .desk-ltr .side-note {font-size:calc(0.875rem * var(--ts));margin:12px 0 0;padding:10px 12px;background:var(--bg2)}
 .desk-ltr .side-block {margin-top:16px;border-top:1px solid var(--line);padding-top:8px}
-.desk-ltr .side-label {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.16em;color:var(--adeep);font-weight:600;margin:0 0 4px}
+.desk-ltr .side-label {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.16em;color:var(--adeep);font-weight:700;margin:0 0 4px}
 .desk-ltr .side-item {font-size:calc(0.875rem * var(--ts));margin:5px 0 0;color:var(--fg2)}
 /* Sources on the lead: long agenda/council URLs wrap instead of forcing the 380px aside track wider (no horizontal scroll at 390/762 -- build-notes "Narrow layout" #5). */
 .desk-ltr .side-url {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:3px 0 0;word-break:break-all;overflow-wrap:anywhere}
@@ -1221,11 +1458,11 @@
 .desk-ltr .pull-progress {margin:8px 0 12px 19px;padding:10px 12px;border:1px solid var(--line);background:var(--bg2);font-size:calc(0.875rem * var(--ts));color:var(--fg2)}
 .desk-ltr .pull-progress.active {border-left:4px solid var(--adeep)}
 .desk-ltr .pull-progress-head {display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--fg)}
-.desk-ltr .pull-progress-head strong {font-weight:650;text-wrap:pretty}
+.desk-ltr .pull-progress-head strong {font-weight:700;text-wrap:pretty}
 .desk-ltr .pull-progress p {margin:5px 0 0;text-wrap:pretty}
 .desk-ltr .pull-counts {font-variant-numeric:tabular-nums;color:var(--fg)}
 .desk-ltr .pull-progress-actions {display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:8px}
-.desk-ltr .pull-progress .text-action {border:1px solid var(--fg);background:var(--bg);color:var(--fg);font:inherit;font-weight:600;padding:5px 9px;cursor:pointer}
+.desk-ltr .pull-progress .text-action {border:1px solid var(--fg);background:var(--bg);color:var(--fg);font:inherit;font-weight:700;padding:5px 9px;cursor:pointer}
 .desk-ltr .pull-progress .text-action:hover {background:var(--fg);color:var(--bg)}
 .desk-ltr .pull-progress .text-action:disabled {opacity:.55;cursor:wait}
 .desk-ltr .pull-progress details {min-width:min(100%,280px)}
@@ -1235,9 +1472,9 @@
 /*
   Claims of absence (2026-09-05). A story saying a public document does not
   exist is the one thing this desk cannot let through on a model's word, so
-  the block is bordered in the warning colour, sits above the ordinary to-dos,
+  the block is bordered in the warning color, sits above the ordinary to-dos,
   and every line in it is body-sized -- nothing informational under 14px, and
-  no meaning carried by colour alone (the label says what it is).
+  no meaning carried by color alone (the label says what it is).
 */
 .desk-ltr .note-gate {border:2px solid var(--warn);padding:10px 12px 12px;margin-top:14px;background:var(--bg2)}
 .desk-ltr .note-gate .side-label {color:var(--warn)}
@@ -1265,14 +1502,14 @@
 .desk-ltr .gate-claim-queries code {font-size:calc(0.875rem * var(--ts));color:var(--fg)}
 .desk-ltr .gate-claim-query-outcome {color:var(--fg2)}
 /* The reason a disabled Publish is disabled, in words rather than opacity. */
-.desk-ltr .publish-blocked {color:var(--warn);font-weight:600}
+.desk-ltr .publish-blocked {color:var(--warn);font-weight:700}
 .desk-ltr .opened-for {display:block;color:var(--fg2);font-size:calc(0.875rem * var(--ts));margin-top:2px}
 .desk-ltr .note-hint {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:8px 0 0;font-style:italic}
 .desk-ltr .note-add {display:flex;gap:8px;margin-top:14px}
 .desk-ltr .note-add input {flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 9px}
 .desk-ltr .note-add input:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
 .desk-ltr .notes-disc {margin-top:18px;border:1px solid var(--fg)}
-.desk-ltr .notes-disc summary {font-family:var(--fd);font-weight:600;font-size:calc(0.875rem * var(--ts));padding:10px 14px;cursor:pointer;list-style-position:inside}
+.desk-ltr .notes-disc summary {font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));padding:10px 14px;cursor:pointer;list-style-position:inside}
 .desk-ltr .notes-disc .notes {margin:0;border:none;border-top:1px solid var(--line)}
 /*
   Below 1024px: single column, aside first then the work area (source
@@ -1342,9 +1579,9 @@
 .desk-ltr .piles>section:first-child {padding-left:0}
 .desk-ltr .piles>section+section {border-left:1px solid var(--line)}
 .desk-ltr .worth, .desk-ltr .deskfile {padding:12px 0;border-bottom:1px solid var(--line)}
-.desk-ltr .worth-t {font-family:var(--fd);font-weight:600;font-size:calc(0.96875rem * var(--ts));line-height:1.25;margin:3px 0 0}
+.desk-ltr .worth-t {font-family:var(--fd);font-weight:700;font-size:calc(0.96875rem * var(--ts));line-height:1.25;margin:3px 0 0}
 .desk-ltr .worth-line {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0}
-.desk-ltr .worth-line b {color:var(--fg);font-weight:600}
+.desk-ltr .worth-line b {color:var(--fg);font-weight:700}
 .desk-ltr .worth-q {font-size:calc(0.875rem * var(--ts));font-style:italic;margin:7px 0 0}
 .desk-ltr .deskfile.sel {background:var(--bg2);margin:0 -12px;padding:12px;border-bottom-color:transparent}
 .desk-ltr .deskfile.dim {opacity:.75}
@@ -1354,11 +1591,11 @@
 .desk-ltr .openfile {border:1px solid var(--fg);background:var(--bg2);padding:18px 22px 22px;margin-top:20px}
 .desk-ltr .of-head {display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:start}
 .desk-ltr .of-head > div {min-width:0;max-width:100%;overflow-wrap:anywhere}
-.desk-ltr .of-title {font-family:var(--fd);font-weight:600;font-size:calc(1.625rem * var(--ts));line-height:1.1;margin:4px 0 2px;letter-spacing:-.015em}
+.desk-ltr .of-title {font-family:var(--fd);font-weight:700;font-size:calc(1.625rem * var(--ts));line-height:1.1;margin:4px 0 2px;letter-spacing:-.015em}
 .desk-ltr .of-started {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:10px 0 0;font-style:italic}
 .desk-ltr .of-stop {font-size:calc(0.875rem * var(--ts));margin:8px 0 0;max-width:720px}
 .desk-ltr .of-stop b {font-family:var(--fd)}
-.desk-ltr .of-stop.err {color:var(--warn);border-left:3px solid var(--warn);padding-left:10px}
+.desk-ltr .of-stop.err {color:var(--danger);border-left:3px solid var(--danger);padding-left:10px}
 .desk-ltr .of-grid {display:grid;grid-template-columns:1.4fr 1fr;gap:32px}
 .desk-ltr .of-grid > * {min-width:0;overflow-wrap:anywhere}
 .desk-ltr .of-grid .sechead {margin-top:20px}
@@ -1372,10 +1609,10 @@
 .desk-ltr .reader-row:hover .read-title {color:var(--adeep)}
 .desk-ltr .reader-row .read-title {font-size:calc(0.875rem * var(--ts))}
 .desk-ltr .reader-doc {margin-top:16px}
-.desk-ltr .read-doc-title {font-family:var(--fd);font-weight:600;font-size:calc(1.375rem * var(--ts));line-height:1.2;margin:6px 0 8px;letter-spacing:-.01em}
+.desk-ltr .read-doc-title {font-family:var(--fd);font-weight:700;font-size:calc(1.375rem * var(--ts));line-height:1.2;margin:6px 0 8px;letter-spacing:-.01em}
 .desk-ltr .read-item {padding:10px 0;border-bottom:1px solid var(--line)}
 .desk-ltr .read-kind {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;color:var(--adeep);margin:0}
-.desk-ltr .read-title {display:block;font-family:var(--fd);font-weight:600;font-size:14.5px;margin:3px 0 0;line-height:1.3}
+.desk-ltr .read-title {display:block;font-family:var(--fd);font-weight:700;font-size:14.5px;margin:3px 0 0;line-height:1.3}
 .desk-ltr .read-ex {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0;text-wrap:pretty}
 .desk-ltr .read-acts {font-size:calc(0.875rem * var(--ts));margin:6px 0 0;display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
 .desk-ltr .read-url {font-size:calc(0.875rem * var(--ts));color:var(--mut);word-break:break-all;margin:6px 0 0}
@@ -1383,11 +1620,11 @@
 .desk-ltr .of-reads .btn {margin-top:10px}
 .desk-ltr .of-frontier {margin-top:2px}
 .desk-ltr .fr-item {padding:9px 0;border-bottom:1px solid var(--line)}
-.desk-ltr .fr-label {font-weight:600;font-size:calc(0.875rem * var(--ts));margin:0}
+.desk-ltr .fr-label {font-weight:700;font-size:calc(0.875rem * var(--ts));margin:0}
 .desk-ltr .fr-why {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:2px 0 5px}
 .desk-ltr .of-block {margin-top:18px;border-top:1px solid var(--line);padding-top:8px}
 .desk-ltr .of-trail {margin-top:16px}
-.desk-ltr .of-trail summary {font-size:calc(0.875rem * var(--ts));font-weight:600;cursor:pointer;color:var(--fg2)}
+.desk-ltr .of-trail summary {font-size:calc(0.875rem * var(--ts));font-weight:700;cursor:pointer;color:var(--fg2)}
 .desk-ltr .of-trail.runs {margin-top:20px}
 .desk-ltr .run-row {margin-top:8px}
 /* The two Dark Desk stages, on the open file. Nothing here carries meaning by
@@ -1403,7 +1640,7 @@
 .desk-ltr .reddit-result .worth-t {margin-top:0}
 .desk-ltr .reddit-sub {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:4px 0 0}
 .desk-ltr .reddit-elapsed {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut);margin:9px 0 0}
-.desk-ltr .reddit-headline {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--fg);font-weight:600;margin:0}
+.desk-ltr .reddit-headline {font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--fg);font-weight:700;margin:0}
 .desk-ltr .reddit-empty {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0}
 .desk-ltr .reddit-searched {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:4px 0 0}
 .desk-ltr .reddit-near-misses {margin-top:16px;padding-top:12px;border-top:1px dashed var(--line)}
@@ -1427,16 +1664,16 @@
 .desk-ltr .ptop-mid {flex:1;text-align:center}
 .desk-ltr .pmast {text-align:center;padding:34px 0 26px}
 .desk-ltr .pmast.compact {padding:18px 0 14px}
-.desk-ltr .pname {font-family:var(--fd);font-weight:600;font-size:52px;letter-spacing:-.02em;line-height:1}
+.desk-ltr .pname {font-family:var(--fd);font-weight:800;font-size:52px;letter-spacing:-.02em;line-height:1}
 .desk-ltr .pmast.compact .pname {font-size:32px}
 .desk-ltr .pname:hover {color:var(--adeep)}
 .desk-ltr .ploc {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.2em;color:var(--mut);margin:8px 0 0}
-.desk-ltr .ptagline {font-family:var(--fd);font-style:italic;font-size:14px;color:var(--fg2);margin:10px 0 0}
+.desk-ltr .ptagline {font-family:var(--fb);font-style:italic;font-size:14px;color:var(--fg2);margin:10px 0 0}
 .desk-ltr .pnav-band {display:flex;align-items:stretch;border-top:2px solid var(--fg);border-bottom:2px solid var(--fg)}
 .desk-ltr .pnav {flex:1;display:flex;justify-content:center;gap:22px;flex-wrap:wrap}
 .desk-ltr .pnav-item {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;padding:9px 2px;color:var(--fg);border-bottom:2px solid transparent}
 .desk-ltr .pnav-item:hover {color:var(--adeep)}
-.desk-ltr .pnav-item.on {color:var(--adeep);border-bottom-color:var(--a)}
+.desk-ltr .pnav-item.on {color:var(--adeep);border-bottom-color:var(--sel)}
 .desk-ltr .pnav-desk {background:var(--fg);color:var(--bg);font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.14em;padding:0 14px}
 .desk-ltr .pnav-desk:hover {opacity:.88}
 .desk-ltr .pbody {padding-top:22px}
@@ -1447,11 +1684,11 @@
 .desk-ltr .pdeck {max-width:620px;color:var(--fg2);margin:18px 0 0;text-wrap:pretty}
 .desk-ltr .feat {margin-top:22px;border-bottom:1px solid var(--fg);padding-bottom:30px}
 .desk-ltr .feat-h {margin:8px 0 0}
-.desk-ltr .p-hl {font-family:var(--fd);font-weight:600;text-align:left;letter-spacing:-.015em;line-height:1.12}
+.desk-ltr .p-hl {font-family:var(--fd);font-weight:700;text-align:left;letter-spacing:-.015em;line-height:1.12}
 .desk-ltr .feat-h .p-hl {font-size:40px}
 .desk-ltr .p-hl:hover {color:var(--adeep)}
 .desk-ltr .p-hl.md {font-size:19px}
-.desk-ltr .feat-dek {font-family:var(--fd);font-style:italic;font-size:17px;color:var(--fg2);margin:12px 0 0;max-width:640px}
+.desk-ltr .feat-dek {font-family:var(--fb);font-style:italic;font-size:17px;color:var(--fg2);margin:12px 0 0;max-width:640px}
 .desk-ltr .feat-body {max-width:600px;margin-top:14px;font-size:calc(0.90625rem * var(--ts));line-height:1.65}
 .desk-ltr .feat-body p {margin:0 0 12px}
 .desk-ltr .pgrid {display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:26px}
@@ -1461,12 +1698,12 @@
 .desk-ltr .pcell-dek {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:7px 0 0;text-wrap:pretty}
 .desk-ltr .pcell-corr {font-size:calc(0.875rem * var(--ts));color:var(--warn);margin:7px 0 0;text-transform:uppercase;letter-spacing:.1em}
 .desk-ltr .pnews {margin-top:46px;border-top:2px solid var(--fg);padding-top:20px}
-.desk-ltr .pnews-h {font-family:var(--fd);font-weight:600;font-size:21px;margin:0}
+.desk-ltr .pnews-h {font-family:var(--fd);font-weight:700;font-size:21px;margin:0}
 .desk-ltr .pnews-form {display:flex;gap:8px;max-width:380px;margin-top:12px}
 .desk-ltr .pnews-form input {flex:1;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:7px 10px}
 .desk-ltr .pfoot {margin-top:40px;border-top:1px solid var(--fg);padding-top:12px;font-size:calc(0.875rem * var(--ts));color:var(--mut)}
-.desk-ltr .art-h {font-family:var(--fd);font-weight:600;font-size:38px;line-height:1.1;letter-spacing:-.02em;margin:8px 0 0;max-width:760px}
-.desk-ltr .art-dek {font-family:var(--fd);font-style:italic;font-size:18px;color:var(--fg2);margin:14px 0 0;max-width:640px}
+.desk-ltr .art-h {font-family:var(--fd);font-weight:700;font-size:38px;line-height:1.1;letter-spacing:-.02em;margin:8px 0 0;max-width:760px}
+.desk-ltr .art-dek {font-family:var(--fb);font-style:italic;font-size:18px;color:var(--fg2);margin:14px 0 0;max-width:640px}
 .desk-ltr .art-body {max-width:620px;margin-top:22px;font-size:calc(0.9375rem * var(--ts));line-height:1.7}
 .desk-ltr .art-body p {margin:0 0 14px}
 .desk-ltr .art-corrs {max-width:620px;margin-top:8px}
@@ -1571,7 +1808,7 @@
   display: inline-block;
   width: 0.5rem;
   height: 0.5rem;
-  border-radius: 9999px;
+  border-radius: 0;
   background: currentColor;
   animation: var(--animate-ink-pulse);
 }
@@ -1618,49 +1855,53 @@
 .desk-ltr .composer-sources {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
 .desk-ltr .document-upload {min-width:0}
 .desk-ltr .document-dropzone {border:2px dashed var(--line);background:var(--bg);color:var(--fg);padding:24px;text-align:center;transition:border-color .15s,background-color .15s}
-.desk-ltr .document-dropzone.is-dragging {border-color:var(--a);background:var(--bg2)}
+.desk-ltr .document-dropzone.is-dragging {border-color:var(--sel);background:var(--bg2)}
 .desk-ltr .document-upload-icon {display:block;margin:0 auto 12px;color:var(--adeep)}
 .desk-ltr .document-dropzone h3 {font-size:20px;margin:0 0 8px}
 .desk-ltr .document-dropzone p {font-size:15px;line-height:1.5;margin:0;color:var(--fg2)}
-.desk-ltr .document-add-button {display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:12px 24px;margin:20px 0;background:var(--fg);color:var(--bg);border:2px solid var(--fg);border-radius:4px;font:inherit;font-weight:700;cursor:pointer;transition:background-color .15s,color .15s,border-color .15s}
-.desk-ltr .document-add-button:hover:not(:disabled) {background:var(--adeep);border-color:var(--adeep);color:var(--bg);text-decoration:underline;text-underline-offset:4px}
-.desk-ltr .document-add-button:focus-visible {outline:3px solid var(--a);outline-offset:4px}
+/* The composer's primary action, on the same rule as every other primary:
+   a yellow fill with #111 on it. It was an ink fill with the paper's own
+   ground as its text, which worked but made "add documents" a different
+   color from every other primary in the app. */
+.desk-ltr .document-add-button {display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:12px 24px;margin:20px 0;background:var(--a);color:#111;border:2px solid var(--a);border-radius: 0;font:inherit;font-weight:800;cursor:pointer;transition:background-color var(--motion-fast),color var(--motion-fast),border-color var(--motion-fast)}
+.desk-ltr .document-add-button:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 88%,#111);border-color:color-mix(in srgb,var(--a) 88%,#111);color:#111;text-decoration:underline;text-underline-offset:4px}
+.desk-ltr .document-add-button:focus-visible {outline:3px solid var(--fg);outline-offset:4px}
 .desk-ltr .document-add-button:disabled {opacity:.6;cursor:wait}
 .desk-ltr input.document-file-input {display:none}
 .desk-ltr .document-dropzone .document-formats {font-size:calc(0.875rem * var(--ts))}
 .desk-ltr .document-dropzone .document-limits {font-size:calc(0.875rem * var(--ts));margin-top:6px}
 .desk-ltr .document-status {font-size:14px;margin:12px 0;overflow-wrap:anywhere}
-.desk-ltr .document-status.is-error,.desk-ltr .composer-error {color:var(--warn)}
-.desk-ltr .document-progress {display:block;width:100%;height:8px;margin-top:12px;accent-color:var(--a)}
-.desk-ltr .document-count {font-size:14px;font-weight:600;margin:16px 0 8px}
+.desk-ltr .document-status.is-error,.desk-ltr .composer-error {color:var(--danger)}
+.desk-ltr .document-progress {display:block;width:100%;height:8px;margin-top:12px;accent-color:var(--sel)}
+.desk-ltr .document-count {font-size:14px;font-weight:500;margin:16px 0 8px}
 .desk-ltr .document-file-row {display:flex;align-items:center;gap:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:12px;margin-top:8px}
 .desk-ltr .document-file-detail {flex:1;min-width:0}
 .desk-ltr .document-file-detail strong {display:block;overflow-wrap:anywhere;font-size:14px}
 .desk-ltr .document-file-detail span {display:flex;align-items:center;gap:4px;color:var(--fg2);font-size:calc(0.875rem * var(--ts));margin-top:4px}
-.desk-ltr .document-remove {display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:8px;background:transparent;color:var(--fg2);border:1px solid var(--line);font:inherit;font-size:calc(0.875rem * var(--ts));border-radius:4px}
-.desk-ltr .document-remove:hover:not(:disabled) {color:var(--warn);border-color:var(--warn);text-decoration:underline}
+.desk-ltr .document-remove {display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:8px;background:transparent;color:var(--fg2);border:1px solid var(--line);font:inherit;font-size:calc(0.875rem * var(--ts));border-radius: 0}
+.desk-ltr .document-remove:hover:not(:disabled) {color:var(--danger);border-color:var(--danger);text-decoration:underline}
 .desk-ltr .composer-pasted {display:flex;flex-direction:column;min-width:0}
-.desk-ltr .composer-pasted label,.desk-ltr .composer-instructions label {display:block;font-size:18px;font-weight:600;margin-bottom:8px}
+.desk-ltr .composer-pasted label,.desk-ltr .composer-instructions label {display:block;font-size:18px;font-weight:700;margin-bottom:8px}
 .desk-ltr .composer-pasted p,.desk-ltr .composer-instructions>span {display:block;font-size:15px;line-height:1.5;color:var(--fg2);margin:0 0 12px}
-.desk-ltr .story-composer textarea {width:100%;min-width:0;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:14px;font:inherit;line-height:1.5;resize:vertical;border-radius:4px}
+.desk-ltr .story-composer textarea {width:100%;min-width:0;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:14px;font:inherit;line-height:1.5;resize:vertical;border-radius: 0}
 .desk-ltr .composer-pasted textarea {flex:1;min-height:160px}
 .desk-ltr .composer-source-note {font-size:calc(0.875rem * var(--ts));line-height:1.5;margin-top:12px;color:var(--fg2)}
 .desk-ltr .composer-instructions {margin-top:24px}
 .desk-ltr .composer-instructions textarea {min-height:96px}
 .desk-ltr .composer-options {border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:20px}
-.desk-ltr .composer-options summary {cursor:pointer;min-height:48px;padding:14px 0;font-size:15px;font-weight:600}
+.desk-ltr .composer-options summary {cursor:pointer;min-height:48px;padding:14px 0;font-size:15px;font-weight:700}
 .desk-ltr .composer-options summary:hover {text-decoration:underline;text-underline-offset:4px}
-.desk-ltr .composer-options summary>span {font-weight:400;font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin-left:16px}
+.desk-ltr .composer-options summary>span {font-weight:500;font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin-left:16px}
 .desk-ltr .composer-options-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;padding:8px 0 20px}
 .desk-ltr .composer-options-grid select {display:block;max-width:100%;width:100%;min-height:44px;margin:8px 0}
 .desk-ltr .composer-options-grid p,.desk-ltr .composer-options-grid label>span:last-child {font-size:calc(0.875rem * var(--ts));line-height:1.5;color:var(--fg2)}
 .desk-ltr .composer-footer {display:flex;align-items:flex-start;justify-content:space-between;gap:28px;margin-top:24px}
 .desk-ltr .composer-footer .model-picker {margin:0;flex:1;max-width:660px}
 .desk-ltr .composer-submit {text-align:right;flex-shrink:0}
-.desk-ltr .composer-submit .btn {min-height:48px;min-width:180px;font-size:17px;border-radius:4px}
+.desk-ltr .composer-submit .btn {min-height:48px;min-width:180px;font-size:17px;border-radius: 0}
 .desk-ltr .composer-submit p {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:8px 0 0}
 .desk-ltr .composer-error:empty {display:none}
-.desk-ltr .composer-error:not(:empty) {padding:16px;border:1px solid var(--warn);margin-top:16px}
+.desk-ltr .composer-error:not(:empty) {padding:16px;border:1px solid var(--danger);margin-top:16px}
 @media (max-width:800px) {
   .desk-ltr .desk-home .story-composer {padding:20px}
   .desk-ltr .story-composer-heading {display:block}
@@ -1684,8 +1925,8 @@
 .desk-ltr .recent-story-work p {color:var(--fg2);font-size:14px;line-height:1.5;margin:8px 0}
 .desk-ltr .recent-story-row {display:flex;justify-content:space-between;align-items:center;gap:20px;border-top:1px solid var(--line);padding:16px 0;margin-top:12px}
 .desk-ltr .recent-story-row>div {min-width:0}
-.desk-ltr .recent-story-status {display:block;font-size:calc(0.875rem * var(--ts));font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--adeep);margin-bottom:6px}
-.desk-ltr .recent-story-title {display:block;font-size:18px;font-weight:600;overflow-wrap:anywhere;text-decoration:underline;text-underline-offset:4px}
+.desk-ltr .recent-story-status {display:block;font-size:calc(0.875rem * var(--ts));font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--adeep);margin-bottom:6px}
+.desk-ltr .recent-story-title {display:block;font-size:18px;font-weight:700;overflow-wrap:anywhere;text-decoration:underline;text-underline-offset:4px}
 .desk-ltr .recent-story-row .btn {flex-shrink:0;min-height:44px}
 @media(max-width:600px) {.desk-ltr .recent-story-row {align-items:flex-start;flex-direction:column}.desk-ltr .recent-story-work {padding:20px}}
 .desk-ltr .story-running-banner {padding:20px 24px;margin-bottom:24px;background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-left:4px solid var(--a)}
@@ -1693,7 +1934,7 @@
 .desk-ltr .story-running-banner p {font-size:16px;margin:8px 0;overflow-wrap:anywhere}
 .desk-ltr .story-running-banner span {font-size:14px;color:var(--fg2)}
 .desk-ltr .story-running-banner a {text-decoration:underline;text-underline-offset:3px}
-.desk-ltr .desk-active-story {order:-1;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 24px;border:1px solid var(--a);background:var(--bg2);color:var(--fg)}
+.desk-ltr .desk-active-story {order:-1;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 24px;border:1px solid var(--sel);background:var(--bg2);color:var(--fg)}
 .desk-ltr .desk-active-story strong {font-size:20px}
 .desk-ltr .desk-active-story p {font-size:15px;margin:6px 0 0;overflow-wrap:anywhere}
 .desk-ltr .desk-active-story .btn {min-height:48px;flex-shrink:0}
@@ -1718,4 +1959,200 @@
 .desk-ltr .meeting-citation-head {margin:0;font-size:calc(0.875rem * var(--ts));color:var(--fg)}
 .desk-ltr .meeting-citation-time {font-variant-numeric:tabular-nums;color:var(--fg2)}
 .desk-ltr .meeting-citation-excerpt {margin:2px 0 0;font-size:calc(0.875rem * var(--ts));color:var(--fg2);text-wrap:pretty;border-left:2px solid var(--rule);padding-left:8px}
+
+/*
+  The one shared dialog (src/components/dialog.tsx), styled as the redesign's
+  design-system/components/desk/Dialog.jsx: an 820px panel, a 2px ink border,
+  square corners, one scrim and the one drop shadow the design system allows
+  (`--shadow-dialog` -- "no shadows except dialogs").
+
+  The portal lands in `document.body`, outside the desk shell, so this block
+  re-establishes the desk scope on the wrapper itself rather than relying on
+  inheritance: `.desk-ltr` brings the whole token block, the 14px×`--ts` body
+  size, and the unlayered `.desk-ltr .btn` / `.desk-ltr .chip` families the
+  footer is made of.
+
+  The dark palette is re-declared here, on the same values as the desk's own
+  dark and as the `.screen-page` precedent above, because an element outside
+  the shell cannot inherit `.desk-ltr.night`. The trigger is the same root
+  attribute the pre-paint script stamps, which is the one signal that is
+  always current by the time a dialog can be open (a dialog is opened by a
+  click, i.e. after hydration, and after hydration
+  src/lib/appearance-context.ts is the only writer of that attribute).
+*/
+.desk-ltr.astra-modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 60px 24px;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--fg);
+}
+:root[data-appearance="desk-dark"] .desk-ltr.astra-modal-layer {
+  color-scheme: dark;
+  --bg: #1b1916;
+  --bg2: #27231f;
+  --fg: #e8e6e1;
+  --fg2: #bdbab3;
+  --mut: #bdbab3;
+  --line: #3b3631;
+  --a: #e6c35c;
+  --adeep: #e8e6e1;
+  --sel: #e6c35c;
+  --ok: #9fd4a8;
+  --warn: #f0b27a;
+  --danger: #f0998c;
+  --color-rust: #e8e6e1;
+  --color-rule: #3b3631;
+  --color-danger: #f0998c;
+}
+:root[data-desk-size="large"] .desk-ltr.astra-modal-layer {
+  --ts: 1.2;
+}
+/* The scrim, once. It is also the click-outside target Radix uses to dismiss;
+   the wrapper above is only the scroll container, so a tall dialog scrolls
+   instead of overflowing the viewport. */
+.desk-ltr.astra-modal-layer .astra-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--scrim);
+}
+.desk-ltr.astra-modal-layer .astra-modal {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 820px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 26px 28px 24px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 2px solid var(--fg);
+  border-radius: 0;
+  box-shadow: var(--shadow-dialog);
+  font-family: var(--fd);
+}
+.desk-ltr.astra-modal-layer .astra-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.desk-ltr.astra-modal-layer .astra-modal-title {
+  margin: 0;
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(1.75rem * var(--ts));
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.desk-ltr.astra-modal-layer .astra-modal-sub {
+  margin: 6px 0 0;
+  font-family: var(--fd);
+  font-size: calc(0.9375rem * var(--ts));
+  color: var(--fg2);
+}
+/* The close control is a quiet InkButton -- a 1px `--line` outline -- but it
+   is a square glyph button, not a labelled one, so it is width-constrained
+   here rather than given a second button style. */
+.desk-ltr.astra-modal-layer .astra-modal-head .btn {
+  min-width: 44px;
+  padding: 8px;
+  font-size: 18px;
+  flex: none;
+}
+.desk-ltr.astra-modal-layer .astra-modal-body {
+  font-family: var(--fd);
+  font-size: calc(0.875rem * var(--ts));
+  line-height: 1.6;
+}
+.desk-ltr.astra-modal-layer .astra-modal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-modal-note {
+  flex: 1 1 280px;
+  font-family: var(--fd);
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-modal-actions {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 8px;
+}
+/* The reference draws the dialog's actions 48px tall, one step up from the
+   desk's 44px floor -- the same step `.composer-submit .btn` takes. */
+.desk-ltr.astra-modal-layer .astra-modal-actions .btn {
+  min-height: 48px;
+}
+/*
+  ChoiceCard: the design system's desk/Dialog.jsx ChoiceCard. The mark is a
+  square (the desk has no circles except the avatar) and the selected state is
+  carried by the 2px ink border and the yellow mark fill, not by color alone
+  -- the label is always there and `aria-checked` is always set.
+*/
+.desk-ltr.astra-modal-layer .astra-choice-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  font-family: var(--fd);
+  font-size: calc(0.875rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-choice-card.on {
+  background: var(--bg2);
+  border: 2px solid var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-choice-mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  box-sizing: border-box;
+  border: 2px solid var(--fg);
+  background: transparent;
+}
+.desk-ltr.astra-modal-layer .astra-choice-card.on .astra-choice-mark {
+  background: var(--a);
+}
+.desk-ltr.astra-modal-layer .astra-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.desk-ltr.astra-modal-layer .astra-choice-text b {
+  font-weight: 700;
+  font-size: calc(1rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-choice-note {
+  font-family: var(--fd);
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+@media (max-width: 700px) {
+  .desk-ltr.astra-modal-layer {
+    padding: 24px 12px;
+  }
+}
 

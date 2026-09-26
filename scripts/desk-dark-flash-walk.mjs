@@ -16,7 +16,7 @@
  *
  * This walk is the proof, and it is a measurement rather than an inspection:
  * a probe installed before any page script runs samples, on every animation
- * frame, the colour that frame is about to paint (the body's computed
+ * frame, the color that frame is about to paint (the body's computed
  * background over the html's -- `getComputedStyle` at a rAF callback is
  * resolved before the paint for that very frame). It records a sample whenever
  * anything about the surface changes, so the log is the sequence of surfaces
@@ -34,15 +34,17 @@
  * measured and the check fails rather than passing quietly.
  *
  *   dark pass   every sampled frame on a desk route must be the desk's dark
- *               (#182024) and on the public paper the reader's dark (#142428)
- *   light pass  every sampled frame must be the light canvas (#f6f1e7)
+ *               and on the public paper the reader's dark -- since the redesign
+ *               both are the same warm black (#1b1916), the one dark ground the
+ *               design system names (tokens/README)
+ *   light pass  every sampled frame must be the light canvas (#fffdf7)
  *
  * The light pass is not decoration: it is the sensitivity control for the
  * dark one. Both passes run the SAME probe, so if the probe were blind or
  * stuck on one value, one of them would fail. On top of that each pass ends
  * with a deliberate break -- the attribute is removed in the dark pass and
  * forced to `desk-dark` in the light one -- and the walk asserts the probe
- * RECORDS the other colour. That is the direct check that this instrument can
+ * RECORDS the other color. That is the direct check that this instrument can
  * see the bug it is claiming is absent.
  *
  * Walked in one browser, twice, on a real reload for every screen and on a
@@ -73,10 +75,12 @@ const PORT_DESK_DARK_FLASH = 3474;
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const base = checkedUrl(`http://127.0.0.1:${PORT_DESK_DARK_FLASH}`).replace(/\/$/, "");
 
-/** The three surfaces, as the stylesheets paint them (src/styles.css). */
-const DESK_DARK = { hex: "#182024", ...rgb(24, 32, 36) };
-const READER_DARK = { hex: "#142428", ...rgb(20, 36, 40) };
-const LIGHT = { hex: "#f6f1e7", ...rgb(246, 241, 231) };
+/** The three surfaces, as the stylesheets paint them (src/styles.css).
+    The desk's night and the reader's night are the same warm black now; the
+    light canvas is the warm off-white (tokens/README, `--bg` in both themes). */
+const DESK_DARK = { hex: "#1b1916", ...rgb(27, 25, 22) };
+const READER_DARK = { hex: "#1b1916", ...rgb(27, 25, 22) };
+const LIGHT = { hex: "#fffdf7", ...rgb(255, 253, 247) };
 
 /**
  * The reader's own store is per paper (`readerStorageKey`): the first-run
@@ -194,7 +198,7 @@ function expectEveryFrame(label, entries, expected, attr) {
   facts.push({
     label,
     frames: entries.length,
-    colour: expected.hex,
+    color: expected.hex,
     attr,
     first: describe(entries[0]),
   });
@@ -453,7 +457,7 @@ async function theWalk(pass) {
     );
   }
 
-  // 2. Out to the public paper -- the reader's own dark, a different colour --
+  // 2. Out to the public paper -- the reader's own dark, a different color --
   //    and back with the browser's Back button, which is a client-side
   //    navigation too.
   await clickThrough(
