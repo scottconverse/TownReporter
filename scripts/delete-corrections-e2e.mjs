@@ -44,6 +44,35 @@ const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:80
   "",
 );
 
+/**
+ * Press "Post correction" and wait for the box it opens.
+ *
+ * NOT `click({ force: true })`, and the difference is not stylistic. The desk's
+ * top bar is `position: sticky` (`.astra-topbar`, src/desk-astra.css), and
+ * posting a correction closes the confirm form and swaps a notice in above the
+ * list, so the row moves up by the form's own height and the button can come to
+ * rest *under* the bar. `force: true` skips the "receives events" check, so the
+ * click is delivered to whatever is on top -- the bar -- and the button is never
+ * pressed; the next locator then fails after its timeout naming that locator,
+ * which reads like a missing element rather than a click that went nowhere.
+ * A plain click waits for the browser to give the button a point nothing covers,
+ * which is what an editor's own click implies, and the wait below turns a press
+ * that did nothing into a sentence about the press.
+ *
+ * Measured before the fix, in Chromium against the real page, with the button's
+ * centre scrolled onto the bar on purpose (centre 1134,59; scrollY 453; the bar
+ * ends at y=68; `document.elementFromPoint` on that centre answered
+ * `HEADER.astra-topbar`, not the button): the forced click left every
+ * correction box closed and the next fill timed out -- the same line CI failed
+ * on. The same press with force removed opened the box. Do not put it back.
+ */
+async function openCorrectionForm(row) {
+  const button = row.getByRole("button", { name: "Post correction" });
+  await button.scrollIntoViewIfNeeded();
+  await button.click();
+  await row.getByLabel("The correction").waitFor({ timeout: 15_000 });
+}
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   console.error(
@@ -464,7 +493,7 @@ async function main() {
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
   const pubRow = page.locator(".pub-row", { hasText: leadHeadline }).first();
   await pubRow.waitFor({ timeout: 20_000 });
-  await pubRow.getByRole("button", { name: "Post correction" }).click({ force: true });
+  await openCorrectionForm(pubRow);
 
   // 0.6.70, the owner's first real correction: the box used to start empty.
   // The two lines go in, the desk writes the note from them, and the note
@@ -525,7 +554,7 @@ async function main() {
   // takes the other path deliberately.
   // Posting closed the form; the same button reopens it, with the two lines
   // cleared, which is what the owner's empty-box complaint is about.
-  await pubRow.getByRole("button", { name: "Post correction" }).click({ force: true });
+  await openCorrectionForm(pubRow);
   await page.getByLabel("The correction").fill(fixNote);
   await pubRow.getByLabel("Also fix the story text").check();
   const fixBodyBox = pubRow.getByLabel(/The story text as it should read/);
