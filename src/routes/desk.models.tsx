@@ -37,15 +37,14 @@
  * it is never the protection.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton } from "@/components/desk-chrome";
-import { inputClass } from "@/components/desk-chrome-utils";
+import { Dialog } from "@/components/dialog";
 import { ListSkeleton } from "@/components/states";
 import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
 import { ProviderStatusCard } from "@/components/provider-status-card";
-import { XaiOauthConnection } from "@/components/xai-oauth-connection";
 import { myDesk } from "@/lib/news/claim";
 import { getProviderStatuses } from "@/lib/news/provider-login";
 import { getLocalModelChoice } from "@/lib/news/provider-settings";
@@ -56,18 +55,26 @@ import {
 } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import {
+  deleteCustomAiConnectionFn,
   getCustomAiConnectionsFn,
+  testCustomAiConnectionFn,
   type PublicCustomAiConnection,
 } from "@/lib/news/custom-ai-settings";
-import { getXaiOauthStatusFn } from "@/lib/news/xai-oauth";
-import { isCustomModelChoice } from "@/lib/news/model-choice";
+import { disconnectXaiOauthFn, getXaiOauthStatusFn } from "@/lib/news/xai-oauth";
+import { isCustomModelChoice, modelChoiceLabel, type ModelChoiceOption } from "@/lib/news/model-choice";
 import type { LocalModelEntry, LocalServer } from "@/lib/news/local-models";
 import {
   JOB_STATUS_LABEL,
   MODEL_JOBS,
   cleanJobEffort,
+  connectionWord,
+  jobEffortLabel,
+  jobEffortOptionTitle,
   jobEffortOptions,
   jobModelOptions,
+  jobOptionLabel,
+  jobOptionTitle,
+  jobSlotEmptyLabel,
   jobStatusHelp,
   jobStatusKind,
   resolveJobModel,
@@ -95,8 +102,10 @@ import {
 } from "@/lib/news/model-assignments-settings";
 import {
   defaultModelEffort,
-  modelEffortLabel,
+  providersFor,
   type ModelEffort,
+  type ProviderEntry,
+  type ProviderKind,
   type ProviderSurface,
 } from "@/lib/news/provider-registry";
 
@@ -134,6 +143,14 @@ function ModelsPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<ModelsTab>(search.tab ?? "assign");
   const [note, setNote] = useState("");
+  /*
+    The Connections tab's one dialog, held up here because TWO buttons open it:
+    the header's "+ Add a connection", which the design draws beside the
+    heading, and the empty state's "Set up" and each card's Settings, which live
+    inside the tab. One piece of state, so those buttons cannot disagree about
+    what is open.
+  */
+  const [connDialog, setConnDialog] = useState<ConnectionDialog | null>(null);
 
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const isOwner = me.data?.role === "owner";
@@ -234,17 +251,15 @@ function ModelsPage() {
           </button>
         ) : null}
         {isOwner ? (
+          /*
+            Opens the form rather than scrolling to it: the design draws the
+            button on the header line, and the form it opens is a dialog now, so
+            there is nothing on the page to scroll to.
+          */
           <InkButton
             onClick={() => {
               setTab("conn");
-              /*
-                After the paint, not before: the panel is `hidden` until the
-                tab switches, and an element inside a hidden subtree has no box
-                to scroll to.
-              */
-              window.setTimeout(() => {
-                document.getElementById("add-connection")?.scrollIntoView({ block: "start" });
-              }, 0);
+              setConnDialog({ kind: "add" });
             }}
           >
             + Add a connection
@@ -315,7 +330,37 @@ function ModelsPage() {
         aria-labelledby="models-tab-conn"
         hidden={tab !== "conn"}
       >
-        <ConnectionsTab isOwner={isOwner} onNote={setNote} />
+        <ConnectionsTab isOwner={isOwner} onNote={setNote} onOpen={setConnDialog} />
+
+        {/*
+          The one dialog for this tab, in the phase 0 component. It is rendered
+          here rather than inside the tab so that the header's button and the
+          tab's own buttons open the same thing, and `open` gates the panel
+          inside: Radix mounts no portal while closed, so the setup form's
+          queries do not run on a page nobody is editing.
+        */}
+        <Dialog
+          open={connDialog !== null}
+          onClose={() => setConnDialog(null)}
+          title={connDialog?.kind === "connection" ? "Connection settings" : "Add a connection"}
+          subtitle={
+            connDialog?.kind === "connection" ? undefined : (
+              <>
+                Connect an OpenAI-compatible endpoint, including LiteLLM or Gemini. Saving does not
+                call a model, spend provider credit, or change the desk default.
+              </>
+            )
+          }
+          primaryLabel="Done"
+          onPrimary={() => setConnDialog(null)}
+        >
+          <CustomAiConnectionsPanel
+            showHeading={false}
+            /* A card's Settings opens the same form with that connection already
+               in edit: one form, two ways in. */
+            initialEditId={connDialog?.kind === "connection" ? connDialog.id : undefined}
+          />
+        </Dialog>
       </div>
     </DeskShell>
   );
@@ -590,6 +635,8 @@ function JobRow({
     available: availability.data ? availability.data[resolvedSaved.providerId] !== false : null,
     localNotLoaded:
       resolvedSaved.providerId === "local-model" ? localEntry?.loaded === false : false,
+    /* "Nothing saved" is not the same claim as "ready": see the chip below. */
+    fromDefault: resolvedSaved.source === "surface-default",
   };
   const kind = jobStatusKind(facts);
 
@@ -627,6 +674,7 @@ function JobRow({
             label={`First choice for ${job?.label ?? jobKey}`}
             value={draft.first.providerId}
             options={menu}
+            emptyLabel={jobSlotEmptyLabel("first")}
             disabled={disabled}
             onChange={(next) =>
               onPatch(jobKey, "first", {
@@ -639,24 +687,37 @@ function JobRow({
             }
           />
           <select
-            className={`${inputClass} shrink-0`}
-            style={{ width: "130px" }}
+            className="shrink-0"
+            style={{ ...SELECT_STYLE, width: EFFORT_WIDTH }}
             aria-label={`Effort for ${job?.label ?? jobKey}`}
+            title={
+              efforts.length
+                ? shownEffort
+                  ? jobEffortOptionTitle(shownEffort)
+                  : "This model declares no effort levels; the desk sends none"
+                : PROVIDER_DEFAULT_HELP
+            }
             disabled={disabled || !efforts.length}
             value={efforts.length ? shownEffort : ""}
             onChange={(event) => onPatch(jobKey, "first", { effort: event.target.value })}
           >
             {efforts.length ? (
+              /*
+                The drawn single word ("medium"), not the registry's sentence
+                ("Medium — balanced"): the sentence is 105px in a 130px box and
+                the word is 53px. Each option keeps the sentence as its `title`,
+                and the closed control wears the selected option's title.
+              */
               efforts.map((effort: ModelEffort) => (
-                <option key={effort} value={effort}>
-                  {modelEffortLabel(effort, firstExact)}
+                <option key={effort} value={effort} title={jobEffortOptionTitle(effort)}>
+                  {jobEffortLabel(effort)}
                 </option>
               ))
             ) : (
               /* No levels declared for this exact model: the desk sends
                  nothing and the provider decides. Naming that beats an empty
                  select, and it is the same answer the pickers give. */
-              <option value="">Provider default</option>
+              <option value="">Default</option>
             )}
           </select>
         </div>
@@ -669,6 +730,7 @@ function JobRow({
           label={`Fallback 1 for ${job?.label ?? jobKey}`}
           value={draft.fallback1.providerId}
           options={menu}
+          emptyLabel={jobSlotEmptyLabel("fallback1")}
           disabled={disabled}
           onChange={(next) => onPatch(jobKey, "fallback1", { providerId: next })}
         />
@@ -680,50 +742,101 @@ function JobRow({
           label={`Fallback 2 for ${job?.label ?? jobKey}`}
           value={draft.fallback2.providerId}
           options={menu}
+          emptyLabel={jobSlotEmptyLabel("fallback2")}
           disabled={disabled}
           onChange={(next) => onPatch(jobKey, "fallback2", { providerId: next })}
         />
       )}
 
-      <StatusChip kind={kind} help={jobStatusHelp(facts)} />
+      <StatusChip
+        kind={kind}
+        help={jobStatusHelp(facts)}
+        /*
+          With nothing saved the chip says "Default", and the line under it
+          names what that default IS -- the same answer `resolveJobModel` gave,
+          in the registry's own label. Without it "Default" is a word the editor
+          cannot act on.
+        */
+        below={kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined}
+      />
     </div>
   );
 }
 
 /**
+ * The prototype's select box (`sel` in `design/Desk Models.dc.html`), shared by
+ * the model select and the effort select beside it: 44px tall, one ink rule,
+ * 15px at weight 700 on the page's own background.
+ *
+ * Not `inputClass`, for two measured reasons. Its 14px text and 12px side
+ * padding are sized for a form, and this row's first column has to hold the
+ * design's own line "Claude Sonnet · sign-in" -- 150px at 700@15px -- in a box
+ * about 185px wide at 1280. The right padding is 18px rather than the
+ * prototype's 8px so the browser's dropdown arrow is drawn in padding instead
+ * of over the last word.
+ */
+const SELECT_STYLE: CSSProperties = {
+  minHeight: "44px",
+  padding: "0 18px 0 9px",
+  background: "var(--bg)",
+  color: "var(--ink)",
+  border: "1px solid var(--ink)",
+  borderRadius: 0,
+  fontFamily: "inherit",
+  fontWeight: 700,
+  fontSize: "15px",
+};
+
+/** The prototype's `selSmall` width for the effort box, as drawn. */
+const EFFORT_WIDTH = "130px";
+
+/** Why the effort box has nothing to choose, on its `title`. */
+const PROVIDER_DEFAULT_HELP =
+  "This exact model declares no effort levels, so the desk sends none and the provider decides.";
+
+/**
  * One model select.
  *
- * The option text is the plain label, with the detail on the option's `title`:
- * the grid column has room for a sentence, unlike the narrow pickers the
- * 34-character convention in ./model-choice.ts was measured for. The empty
- * value is "nothing saved", which is how Automatic and "not set" are both
- * expressed -- one option, because for this table they are the same thing.
+ * The line it shows is the desk's own short line (`jobOptionLabel`: "Codex Sol
+ * · sign-in", "Automatic (ladder)"), not the registry's sentence: a native
+ * `<select>` clips the closed control at its content box and no CSS wraps it,
+ * and the full line -- provider half-line and all -- is the option's and the
+ * select's `title`.
+ *
+ * The empty value is the SLOT's word, not one sentence for both: an empty first
+ * choice means the desk's default runs the job, and an empty fallback means
+ * there is none. "Not set — use the desk's default" was 203px in that box.
  */
 function ModelSelect({
   label,
   value,
   options,
+  emptyLabel,
   disabled,
   onChange,
 }: {
   label: string;
   value: string;
-  options: readonly { value: string; label: string; detail?: string | null }[];
+  options: readonly ModelChoiceOption[];
+  emptyLabel: string;
   disabled: boolean;
   onChange: (next: string) => void;
 }) {
+  const shown = options.find((option) => option.value === value) ?? null;
   return (
     <select
-      className={`${inputClass} w-full min-w-0`}
+      className="w-full min-w-0"
+      style={SELECT_STYLE}
       aria-label={label}
+      title={shown ? jobOptionTitle(shown) : emptyLabel}
       disabled={disabled}
       value={value}
       onChange={(event) => onChange(event.target.value)}
     >
-      <option value="">Not set — use the desk&rsquo;s default</option>
+      <option value="">{emptyLabel}</option>
       {options.map((option) => (
-        <option key={option.value} value={option.value} title={option.detail ?? undefined}>
-          {option.label}
+        <option key={option.value} value={option.value} title={jobOptionTitle(option)}>
+          {jobOptionLabel(option)}
         </option>
       ))}
     </select>
@@ -737,36 +850,64 @@ function ModelSelect({
  * are inline `var()`s because the `.desk-ltr` utilities remap `--ts` and the
  * paper palette but not the state colours, and these four flip in night mode.
  */
-function StatusChip({ kind, help }: { kind: JobStatusKind; help: string }) {
-  const look =
-    kind === "ready"
-      ? { color: "var(--ok)", border: "1px solid var(--ok)" }
-      : kind === "slow"
-        ? { color: "var(--warn)", border: "2px solid var(--warn)" }
-        : kind === "signin"
-          ? { color: "var(--danger)", border: "2px dashed var(--danger)" }
-          : { color: "var(--fg2)", border: "1px solid var(--fg2)" };
-  return (
-    <span
-      className="text-sm font-extrabold"
-      title={help}
-      style={{ ...look, padding: "1px 8px", whiteSpace: "nowrap" }}
-    >
-      {JOB_STATUS_LABEL[kind] ?? "—"}
-    </span>
-  );
+function StatusChip({
+  kind,
+  help,
+  below,
+}: {
+  kind: JobStatusKind;
+  help: string;
+  /**
+   * A second line under the chip. Only "Default" uses it, and it carries the
+   * one fact the word "Default" leaves out: which model that is.
+   */
+  below?: string;
+}) {
+  /*
+    A job's chip and a connection's are the same chip with a different word in
+    it, so they share one implementation and one colour table: the four looks
+    live in `chipLook` and the stacking lives in `Chip`, both below, and neither
+    screen can drift from the other.
+  */
+  const tone: ChipTone =
+    kind === "ready" ? "ready" : kind === "slow" ? "slow" : kind === "signin" ? "signin" : "quiet";
+  return <Chip tone={tone} label={JOB_STATUS_LABEL[kind] ?? "—"} help={help} below={below} />;
 }
 
 /* --------------------------------------------------------------------------
    Connections
    -------------------------------------------------------------------------- */
 
+/**
+ * Which of this tab's two ways into the setup form is open, if any.
+ *
+ * One value rather than two booleans: the tab shows one dialog at a time, so a
+ * card must not be able to leave "Add" and a connection's Settings open at
+ * once. The Grok sign-in is deliberately NOT a third case -- the design draws
+ * that card with no action on it at all, and the one Grok form that exists
+ * stays reachable on Server settings, which this tab links to.
+ */
+type ConnectionDialog = { kind: "add" } | { kind: "connection"; id: string };
+
+/**
+ * The surface a card's model list is read from.
+ *
+ * A connection card answers "what can this sign-in run", so it lists every
+ * entry the registry offers for that transport. `story` is used because every
+ * entry offered on any surface is offered here -- it is the widest menu -- and
+ * because the card is a sign-in's inventory, not one job's menu. Which model a
+ * particular job uses is the other tab's question.
+ */
+const CONNECTION_SURFACE: ProviderSurface = "story";
+
 function ConnectionsTab({
   isOwner,
   onNote,
+  onOpen,
 }: {
   isOwner: boolean;
   onNote: (text: string) => void;
+  onOpen: (dialog: ConnectionDialog) => void;
 }) {
   if (!isOwner) {
     /*
@@ -787,16 +928,7 @@ function ConnectionsTab({
         title="Frontier · API key"
         note="Pay per use. Key stored on the server; never shown again after saving."
       >
-        <div
-          id="add-connection"
-          className="min-w-0"
-          /* One column wide, not one card wide: this is a form and a stack of
-             cards, and squeezed into a 320px grid cell the form's own rows
-             would wrap for no reason. */
-          style={{ gridColumn: "1 / -1" }}
-        >
-          <CustomAiConnectionsPanel showHeading={false} />
-        </div>
+        <ApiKeyConnections onNote={onNote} onOpen={onOpen} />
       </ConnectionGroup>
 
       <ConnectionGroup
@@ -812,15 +944,7 @@ function ConnectionsTab({
           </>
         }
       >
-        {/*
-          The same card Server settings draws, with the same countdowns and the
-          same one-time codes -- one implementation, so a fix lands on both.
-          `times={[]}` because the per-provider time limits belong to the panel
-          that owns them on /desk/ops; this is the place they are LINKED to, not
-          a second place to edit them.
-        */}
-        <SubscriptionCards onNote={onNote} />
-        <XaiOauthConnection onNote={onNote} />
+        <SignInConnections onNote={onNote} />
       </ConnectionGroup>
 
       <ConnectionGroup
@@ -834,11 +958,511 @@ function ConnectionsTab({
 }
 
 /**
+ * The four looks a card's chip can wear.
+ *
+ * Named after what the colour MEANS rather than after a provider, so the same
+ * four are available to a job's status chip and to a connection's, and neither
+ * has to know the other's words.
+ */
+type ChipTone = "ready" | "slow" | "signin" | "quiet";
+
+function chipLook(tone: ChipTone): CSSProperties {
+  if (tone === "ready") return { color: "var(--ok)", border: "1px solid var(--ok)" };
+  if (tone === "slow") return { color: "var(--warn)", border: "2px solid var(--warn)" };
+  if (tone === "signin") return { color: "var(--danger)", border: "2px dashed var(--danger)" };
+  return { color: "var(--fg2)", border: "1px solid var(--fg2)" };
+}
+
+/**
+ * One chip, in the card's top-right corner.
+ *
+ * A flex column so an optional second line costs the card's own columns no
+ * width -- the same reason the job row's chip stacks. `title` carries the help
+ * sentence: a chip is two words, and the sentence that explains them does not
+ * fit on the card.
+ */
+function Chip({
+  tone,
+  label,
+  help,
+  below,
+}: {
+  tone: ChipTone;
+  label: string;
+  help: string;
+  below?: string;
+}) {
+  return (
+    <div className="flex flex-col items-end gap-0.5" title={help}>
+      <span
+        className="text-sm font-extrabold"
+        style={{ ...chipLook(tone), padding: "1px 8px", whiteSpace: "nowrap" }}
+      >
+        {label}
+      </span>
+      {below ? (
+        <span className="text-sm text-ink-2" style={{ whiteSpace: "nowrap" }}>
+          {below}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The words a CONNECTION card's chip says.
+ *
+ * Deliberately NOT the job vocabulary in `JOB_STATUS_LABEL`: "✓ Ready" is a
+ * claim about a job whose model can actually run, and a connection card that
+ * said it would be the same kind of lie Defect 3 was about. A connection is
+ * "✓ Connected", "✓ Signed in", "✓ Running", "Not set up", "Turned off",
+ * "Retired" or "Could not reach"; the job it feeds is a separate question and
+ * has its own chip on the other tab.
+ */
+type ConnectionChipKind =
+  | "connected"
+  | "signedin"
+  | "running"
+  | "off"
+  | "notset"
+  | "retired"
+  | "unreachable"
+  | "slow";
+
+const CONNECTION_CHIP: Readonly<
+  Record<ConnectionChipKind, { tone: ChipTone; label: string; help: string }>
+> = {
+  connected: {
+    tone: "ready",
+    label: "✓ Connected",
+    help: "A key is stored on the server and this connection is switched on, so a job assigned to it can run.",
+  },
+  signedin: {
+    tone: "ready",
+    label: "✓ Signed in",
+    help: "This sign-in works, so a job assigned to it can run.",
+  },
+  running: {
+    tone: "ready",
+    label: "✓ Running",
+    help: "This server answers and a model is already in memory, so the first call starts working straight away.",
+  },
+  off: {
+    tone: "quiet",
+    label: "Turned off",
+    help: "This connection is switched off. No picker offers it and no job can run on it until it is switched on again in Settings.",
+  },
+  notset: {
+    tone: "quiet",
+    label: "Not set up",
+    help: "Nothing is stored for this connection yet, so no job can run on it. Set it up to make its models available.",
+  },
+  retired: {
+    tone: "quiet",
+    label: "Retired",
+    help: "Retired by the owner: offered in no picker and in no ladder. Only its transport stays registered, so a stored value can still be read and removed.",
+  },
+  unreachable: {
+    tone: "signin",
+    label: "Could not reach",
+    help: "This address did not answer. Check that the server is running and that the address in Settings is right.",
+  },
+  slow: {
+    tone: "slow",
+    label: "! Slow",
+    help: "The server answers but nothing is in memory, so the first call loads a model and can take a minute or more. TownReporter never loads a model for you.",
+  },
+};
+
+function ConnectionChip({
+  kind,
+  label,
+  help,
+}: {
+  kind: ConnectionChipKind;
+  label?: string;
+  help?: string;
+}) {
+  const look = CONNECTION_CHIP[kind];
+  return <Chip tone={look.tone} label={label ?? look.label} help={help ?? look.help} />;
+}
+
+/**
+ * One drawn connection card: name, how it is connected, its chip, its models,
+ * its own actions.
+ *
+ * `min-w-0` on the flex column and on the name block is load-bearing: a long
+ * base URL or a long model id in an `auto`-sized grid track would otherwise
+ * push the card wider than its column and take the page sideways with it.
+ */
+function ConnectionCard({
+  title,
+  how,
+  chip,
+  children,
+  actions,
+}: {
+  title: string;
+  how: string;
+  chip: React.ReactNode;
+  children?: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-2.5 p-4"
+      style={{ background: "var(--bg2)", border: "1px solid var(--line)" }}
+    >
+      <div className="flex items-start justify-between gap-2.5">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-lg font-extrabold">{title}</span>
+          <span className="text-sm break-all text-ink-2">{how}</span>
+        </div>
+        {chip}
+      </div>
+      {children}
+      {actions ? <div className="flex flex-wrap gap-1.5">{actions}</div> : null}
+    </div>
+  );
+}
+
+/** The registry's entries for one transport, in picker order. */
+function entriesOfKind(kind: ProviderKind): readonly ProviderEntry[] {
+  return providersFor(CONNECTION_SURFACE).filter((entry) => entry.kind === kind);
+}
+
+/**
+ * The effort levels one exact model takes, as chips.
+ *
+ * The same function the pickers and the assignment table use, so a level shown
+ * on a card is a level the run will actually send. No levels means no chips --
+ * "this model declares none" is not a fact a two-word chip can carry, and the
+ * card's model row already says what the transport is.
+ */
+function EffortChips({
+  providerId,
+  exactModel,
+}: {
+  providerId: string;
+  exactModel?: string | null;
+}) {
+  const efforts = jobEffortOptions(providerId, exactModel);
+  if (!efforts.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1" style={{ gridColumn: "1 / -1" }}>
+      {efforts.map((effort) => (
+        <span
+          key={effort}
+          title={jobEffortOptionTitle(effort)}
+          className="text-sm font-bold"
+          style={{ border: "1px solid var(--line)", color: "var(--fg2)", padding: "0 6px" }}
+        >
+          {jobEffortLabel(effort)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The models a transport brings, one row each.
+ *
+ * The row says the registry's own label and half-line, and the transport it
+ * arrives by ("sign-in" / "API" / "on this computer") -- the connection word
+ * the whole screen shares. The prototype draws "200K context · tools" here;
+ * this build has no per-model context or tool table for a hosted provider, and
+ * inventing one would be the second registry rule 3 forbids, so the row states
+ * what the registry actually declares.
+ */
+function ProviderModelRows({ entries }: { entries: readonly ProviderEntry[] }) {
+  return (
+    <div className="flex flex-col">
+      {entries.map((entry) => (
+        <div
+          key={entry.id}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0,1fr) auto",
+            gap: "2px 10px",
+            padding: "8px 0",
+            borderTop: "1px solid var(--line)",
+          }}
+        >
+          <span className="text-base font-bold break-words">{entry.label}</span>
+          <span
+            className="text-right text-sm text-ink-2"
+            style={{ whiteSpace: "nowrap" }}
+            title={entry.detail}
+          >
+            {entry.optionDetail ?? entry.detail} · {connectionWord(entry.kind)}
+          </span>
+          <EffortChips providerId={entry.id} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The API-key connections, one card each.
+ *
+ * A card is a saved connection, because that is the record the desk keeps: it
+ * has a name the owner typed, a base URL, a model id and a key. The prototype
+ * draws three named provider cards (Anthropic, OpenAI, Google); this build's
+ * store is one generic OpenAI-compatible connection, so a card is that
+ * connection and its title is the name its owner gave it. Nothing here names a
+ * service, for the same reason nothing here names a model.
+ */
+function ApiKeyConnections({
+  onNote,
+  onOpen,
+}: {
+  onNote: (text: string) => void;
+  onOpen: (dialog: ConnectionDialog) => void;
+}) {
+  const qc = useQueryClient();
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+  });
+  /* The Grok sign-in's own status: the retired card appears only when there is
+     something of Grok's to remove, which is what the design draws. */
+  const xai = useQuery({ queryKey: ["xai-oauth-status"], queryFn: () => getXaiOauthStatusFn() });
+
+  function refresh() {
+    void qc.invalidateQueries({ queryKey: ["custom-ai-connections"] });
+    void qc.invalidateQueries({ queryKey: PROVIDER_AVAILABILITY_QUERY_KEY, refetchType: "all" });
+  }
+
+  const remove = useMutation({
+    mutationFn: (row: PublicCustomAiConnection) => deleteCustomAiConnectionFn({ data: { id: row.id } }),
+    onSuccess: (_res, row) => {
+      onNote(`${row.name} was removed.`);
+      refresh();
+    },
+    onError: () => onNote("That connection could not be removed."),
+  });
+  const test = useMutation({
+    mutationFn: (row: PublicCustomAiConnection) => testCustomAiConnectionFn({ data: { id: row.id } }),
+    onSuccess: (res, row) => {
+      onNote(
+        res.ok
+          ? `${row.name} answered in ${(res.latencyMs / 1000).toFixed(1)} seconds.`
+          : `${row.name} did not answer: ${res.message}`,
+      );
+      refresh();
+    },
+    onError: () => onNote("That check did not run."),
+  });
+  const disconnectGrok = useMutation({
+    mutationFn: () => disconnectXaiOauthFn(),
+    onSuccess: () => {
+      onNote("The Grok sign-in was removed.");
+      void qc.invalidateQueries({ queryKey: ["xai-oauth-status"] });
+      void qc.invalidateQueries({ queryKey: PROVIDER_AVAILABILITY_QUERY_KEY, refetchType: "all" });
+    },
+    onError: () => onNote("That Grok sign-in could not be removed."),
+  });
+
+  if (connections.isPending) return <ListSkeleton rows={2} />;
+  if (connections.isError && !connections.data) {
+    return (
+      <div
+        className="flex flex-col items-start gap-3 border border-rule p-4"
+        role="alert"
+        style={{ gridColumn: "1 / -1" }}
+      >
+        <p>Could not read the API connections. Existing writing models are unchanged.</p>
+        <InkButton tone="quiet" onClick={() => void connections.refetch()}>
+          Try again
+        </InkButton>
+      </div>
+    );
+  }
+  const rows = connections.data ?? [];
+  const grokConnected = xai.data?.connected === true;
+  return (
+    <>
+      {rows.map((row) => (
+        <ConnectionCard
+          key={row.id}
+          title={row.name}
+          how={`${row.hasApiKey ? "API key — stored on the server" : "No API key"} · ${hostOf(row.baseUrl)}${row.modelId ? ` · ${row.modelId}` : ""}`}
+          chip={
+            <ConnectionChip
+              kind={!row.hasApiKey ? "notset" : row.enabled ? "connected" : "off"}
+              label={!row.hasApiKey ? undefined : row.enabled ? undefined : "Turned off"}
+            />
+          }
+          actions={
+            <>
+              <InkButton
+                tone="quiet"
+                disabled={test.isPending || !row.hasApiKey}
+                onClick={() => {
+                  if (
+                    !confirm(
+                      `Testing sends a small prompt to ${row.name} and may incur a charge. Continue?`,
+                    )
+                  )
+                    return;
+                  test.mutate(row);
+                }}
+              >
+                {test.isPending ? "Testing…" : "Test"}
+              </InkButton>
+              <InkButton tone="quiet" onClick={() => onOpen({ kind: "connection", id: row.id })}>
+                Settings
+              </InkButton>
+              <InkButton
+                tone="quiet-danger"
+                disabled={remove.isPending}
+                onClick={() => {
+                  if (confirm(`Remove ${row.name}? This cannot be undone.`)) remove.mutate(row);
+                }}
+              >
+                {remove.isPending ? "Removing…" : "Remove"}
+              </InkButton>
+            </>
+          }
+        >
+          <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
+        </ConnectionCard>
+      ))}
+
+      {grokConnected ? (
+        <ConnectionCard
+          title="Grok (SuperGrok sign-in)"
+          how="Retired by the owner · never offered in any picker or in Automatic"
+          chip={<ConnectionChip kind="retired" />}
+          actions={
+            <InkButton
+              tone="quiet-danger"
+              disabled={disconnectGrok.isPending}
+              onClick={() => {
+                if (confirm("Remove the Grok sign-in from this desk? This cannot be undone."))
+                  disconnectGrok.mutate();
+              }}
+            >
+              {disconnectGrok.isPending ? "Removing…" : "Remove"}
+            </InkButton>
+          }
+        />
+      ) : null}
+
+      {/*
+        A provider with nothing configured is a card with one button, not a
+        form: an empty form on a page nobody is editing reads as unfinished
+        work. The brief draws exactly this card, and "+ Add a connection" above
+        is the same door.
+      */}
+      {!rows.length && !grokConnected ? (
+        <ConnectionCard
+          title="No API connection yet"
+          how="Nothing is stored on this server"
+          chip={<ConnectionChip kind="notset" />}
+          actions={<InkButton onClick={() => onOpen({ kind: "add" })}>Set up</InkButton>}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The CLI sign-ins: the same card Server settings draws, plus the retired Grok
+ * card beside it.
+ *
+ * The cards are `li`s because the component that draws them is the one Server
+ * settings draws, markup included -- `li[data-provider]` is what
+ * scripts/provider-signin-e2e.mjs drives. So the grid here is a real list.
+ * `times={[]}` because the per-provider time limits belong to the panel that
+ * owns them on /desk/ops; this is the place they are LINKED to, not a second
+ * place to edit them.
+ */
+function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
+  const statuses = useQuery({
+    queryKey: ["provider-statuses"],
+    queryFn: () => getProviderStatuses(),
+    refetchInterval: 60_000,
+  });
+  if (statuses.isPending) return <ListSkeleton rows={2} />;
+  if (statuses.isError && !statuses.data) {
+    return (
+      <div
+        className="flex flex-col items-start gap-3 border border-rule p-4"
+        role="alert"
+        style={{ gridColumn: "1 / -1" }}
+      >
+        <p>Could not read the sign-ins. Existing drafts are unchanged.</p>
+        <InkButton tone="quiet" onClick={() => void statuses.refetch()}>
+          Try again
+        </InkButton>
+      </div>
+    );
+  }
+  return (
+    <>
+      <ul
+        className="m-0 grid list-none grid-cols-1 gap-3.5 p-0 md:grid-cols-2"
+        style={{ gridColumn: "1 / -1" }}
+      >
+        {(statuses.data ?? []).map((status) => (
+          <ProviderStatusCard
+            key={status.provider}
+            status={status}
+            onNote={onNote}
+            times={[]}
+            chip={
+              <ConnectionChip
+                kind={status.signedIn ? "signedin" : status.installed ? "notset" : "unreachable"}
+                label={status.installed ? undefined : "Not installed"}
+                help={
+                  status.signedIn
+                    ? CONNECTION_CHIP.signedin.help
+                    : status.installed
+                      ? "This sign-in has not been made yet, so a job assigned to it cannot run."
+                      : "This machine has no such command installed, so no job assigned to it can run."
+                }
+              />
+            }
+          >
+            {/* What this sign-in can actually run: the registry's own entries
+                for that transport, not a typed-out list of model names. */}
+            <ProviderModelRows
+              entries={entriesOfKind(status.provider === "claude" ? "claude-code" : "codex")}
+            />
+          </ProviderStatusCard>
+        ))}
+      </ul>
+
+      {/*
+        Grok stays on this screen as a RETIRED card and nothing else: the design
+        draws it with the note, a Retired chip and no button at all, and the
+        owner's standing instruction is that no picker offers it. Nothing here
+        offers the sign-in either. The one Grok form that exists lives on Server
+        settings, which the group's own note links to.
+
+        Drawn whether or not a Grok sign-in exists, because "retired" is a fact
+        about the transport, not about this desk's copy of it -- and the card
+        claims nothing that depends on one.
+      */}
+      <ConnectionCard
+        title="Grok (SuperGrok sign-in)"
+        how="Retired from pickers · the sign-in transport stays registered"
+        chip={<ConnectionChip kind="retired" />}
+      />
+    </>
+  );
+}
+
+/**
  * One drawn group: the heading rule, the note, then the cards.
  *
  * `below` is for the sentence that belongs to the group but not to any card --
  * the OAuth group's pointer at the time-limit fields, which stay where they
  * are. It sits outside the card grid so the grid's own columns are untouched.
+ * There is no action slot: the design puts "+ Add a connection" on the PAGE
+ * header, beside "Test all connections", not on a group rule.
  */
 function ConnectionGroup({
   title,
@@ -857,69 +1481,18 @@ function ConnectionGroup({
         <span className="text-2xl font-extrabold">{title}</span>
         <span className="text-base text-ink-2">{note}</span>
       </div>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))",
-          gap: "14px",
-          alignItems: "start",
-        }}
-      >
-        {children}
-      </div>
+      {/*
+        TWO columns above 768px, one below, per the design.
+
+        Not `auto-fit`: a 360px floor in a 1240px group fits THREE tracks, and
+        the design draws two cards per row -- "as drawn" is the whole point of
+        this unit, so the count is fixed and the columns are fractions. Below
+        768px one column is the only thing that does not squeeze a card's host
+        line into a one-word-per-line column.
+      */}
+      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">{children}</div>
       {below ? <p className="text-sm text-ink-2">{below}</p> : null}
     </section>
-  );
-}
-
-/**
- * The CLI sign-ins, read from the same statuses query the whole desk uses.
- *
- * The cards are `li`s because the component that draws them is the one Server
- * settings draws, markup included -- `li[data-provider]` is what
- * scripts/provider-signin-e2e.mjs drives. So the grid here is a real list.
- */
-function SubscriptionCards({ onNote }: { onNote: (text: string) => void }) {
-  const statuses = useQuery({
-    queryKey: ["provider-statuses"],
-    queryFn: () => getProviderStatuses(),
-    refetchInterval: 60_000,
-  });
-  if (statuses.isPending) return <ListSkeleton rows={2} />;
-  if (statuses.isError && !statuses.data) {
-    return (
-      <div className="flex flex-col items-start gap-3 border border-rule p-4" role="alert">
-        <p>Could not read the sign-ins. Existing drafts are unchanged.</p>
-        <InkButton tone="quiet" onClick={() => void statuses.refetch()}>
-          Try again
-        </InkButton>
-      </div>
-    );
-  }
-  return (
-    <ul
-      className="m-0 grid list-none gap-3.5 p-0"
-      style={{ gridColumn: "1 / -1", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}
-    >
-      {(statuses.data ?? []).map((status) => (
-        <ProviderStatusCard
-          key={status.provider}
-          status={status}
-          onNote={onNote}
-          times={[]}
-          chip={
-            <StatusChip
-              kind={status.signedIn ? "ready" : "signin"}
-              help={
-                status.signedIn
-                  ? "This sign-in works, so jobs assigned to it can run."
-                  : "This sign-in has lapsed; every job assigned to it will fail until it is fixed."
-              }
-            />
-          }
-        />
-      ))}
-    </ul>
   );
 }
 
@@ -952,21 +1525,32 @@ function LocalServers({ onNote }: { onNote: (text: string) => void }) {
   if (catalog.isPending) return <ListSkeleton rows={2} />;
   const servers: LocalServer[] = catalog.data?.servers ?? [];
   if (!servers.length) {
+    /*
+      The empty state is a card too, in the same grid as a server card, so the
+      group looks the same whether or not anything answered -- and it carries
+      the two honest actions: look again, or go change the address.
+    */
     return (
-      <div
-        className="flex flex-col items-start gap-2 border border-rule p-4"
-        style={{ gridColumn: "1 / -1" }}
+      <ConnectionCard
+        title="No local server answering"
+        how="Nothing on this machine's loopback or the configured address answered"
+        chip={<ConnectionChip kind="unreachable" />}
+        actions={
+          <>
+            <InkButton tone="quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+              {refresh.isPending ? "Checking…" : "Check again"}
+            </InkButton>
+            <a className="btn quiet" href="/desk/ops">
+              Settings
+            </a>
+          </>
+        }
       >
-        <p className="text-base font-extrabold">No local server answering</p>
         <p className="text-sm text-ink-2">
-          Nothing on this machine&rsquo;s loopback or the configured address answered. Start LM
-          Studio or Ollama and check again — TownReporter never starts a server and never loads a
-          model for you.
+          Start LM Studio or Ollama and check again — TownReporter never starts a server and never
+          loads a model for you.
         </p>
-        <InkButton tone="quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-          {refresh.isPending ? "Checking…" : "Check again"}
-        </InkButton>
-      </div>
+      </ConnectionCard>
     );
   }
   return (
@@ -991,36 +1575,47 @@ function LocalServerCard({ server }: { server: LocalServer }) {
   const origin = originOf(server.baseUrl);
   const inMemory = server.models.filter((model) => model.loaded === true).length;
   return (
-    <div
-      className="flex flex-col gap-2.5 p-4"
-      style={{ background: "var(--bg2)", border: "1px solid var(--line)" }}
+    <ConnectionCard
+      title={`${kindLabel} · ${loopback ? "this machine" : "remote"}`}
+      how={
+        hostOf(server.baseUrl) +
+        (server.reachable
+          ? inMemory
+            ? ` · ${inMemory} in memory`
+            : " · nothing in memory"
+          : " · not reachable")
+      }
+      chip={<ConnectionChip kind={!server.reachable ? "unreachable" : inMemory ? "running" : "slow"} />}
+      actions={
+        <>
+          {/*
+            "Open LM Studio ↗" and "Open Ollama ↗" -- hand-off links, which is
+            all a browser can honestly do here: the server's own console lives
+            at that address, and there is deliberately no Load and no Pull
+            button. The Settings link goes to the address field these two are
+            read from.
+          */}
+          {server.reachable ? (
+            <a
+              className="btn"
+              href={origin}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={`Open ${origin} — the ${kindLabel} server's own address`}
+            >
+              {server.kind === "lmstudio"
+                ? "Open LM Studio ↗"
+                : server.kind === "ollama"
+                  ? "Open Ollama ↗"
+                  : `Open ${kindLabel} ↗`}
+            </a>
+          ) : null}
+          <a className="btn quiet" href="/desk/ops">
+            Settings
+          </a>
+        </>
+      }
     >
-      <div className="flex items-start justify-between gap-2.5">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-lg font-extrabold">
-            {kindLabel} · {loopback ? "this machine" : "remote"}
-          </span>
-          <span className="text-sm break-all text-ink-2">
-            {hostOf(server.baseUrl)}
-            {server.reachable
-              ? inMemory
-                ? ` · ${inMemory} in memory`
-                : " · nothing in memory"
-              : " · not reachable"}
-          </span>
-        </div>
-        <StatusChip
-          kind={!server.reachable ? "signin" : inMemory ? "ready" : "slow"}
-          help={
-            !server.reachable
-              ? "This address did not answer. Check that the server is running and that the address in Server settings is right."
-              : inMemory
-                ? "A model is already in memory, so the first call starts working straight away."
-                : "The server answers but nothing is in memory. The first call loads a model, which can take a minute or more."
-          }
-        />
-      </div>
-
       <div className="flex flex-col">
         {server.models.length === 0 ? (
           <p className="py-2 text-sm text-ink-2" style={{ borderTop: "1px solid var(--line)" }}>
@@ -1059,53 +1654,12 @@ function LocalServerCard({ server }: { server: LocalServer }) {
                 {model.vision ? " · reads images" : ""}
                 {model.thinking ? " · thinks by default" : ""}
               </span>
-              <div className="flex flex-wrap gap-1" style={{ gridColumn: "1 / -1" }}>
-                {jobEffortOptions("local-model", model.id).map((effort) => (
-                  <span
-                    key={effort}
-                    className="text-sm font-bold"
-                    style={{
-                      border: "1px solid var(--line)",
-                      color: "var(--fg2)",
-                      padding: "0 6px",
-                    }}
-                  >
-                    {modelEffortLabel(effort, model.id)}
-                  </span>
-                ))}
-              </div>
+              <EffortChips providerId="local-model" exactModel={model.id} />
             </div>
           ))
         )}
       </div>
-
-      {/*
-        "Open LM Studio ↗" and "Open Ollama ↗" -- hand-off links, which is all a
-        browser can honestly do here: the server's own console lives at that
-        address, and there is deliberately no Load and no Pull button. The
-        Settings link goes to the address field these two are read from.
-      */}
-      <div className="flex flex-wrap gap-1.5">
-        {server.reachable ? (
-          <a
-            className="btn"
-            href={origin}
-            target="_blank"
-            rel="noreferrer noopener"
-            title={`Open ${origin} — the ${kindLabel} server's own address`}
-          >
-            {server.kind === "lmstudio"
-              ? "Open LM Studio ↗"
-              : server.kind === "ollama"
-                ? "Open Ollama ↗"
-                : `Open ${kindLabel} ↗`}
-          </a>
-        ) : null}
-        <a className="btn quiet" href="/desk/ops">
-          Settings
-        </a>
-      </div>
-    </div>
+    </ConnectionCard>
   );
 }
 
