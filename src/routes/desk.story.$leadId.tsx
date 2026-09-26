@@ -1303,7 +1303,7 @@ function StoryPage() {
           <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.
         </Notice>
       ) : null}
-      <h1 className="astra-wb-title">Story workbench</h1>
+      <h1 className="astra-wb-title">Story workspace</h1>
       {/*
         The workbench's top bar (redesign phase 2b, "Desk Story.dc.html"): the
         way back, and where this lead stands. The stage cells are spans, not

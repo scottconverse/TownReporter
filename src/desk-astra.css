@@ -2532,10 +2532,27 @@
 }
 
 /*
-  The drawn top bar labels the whole workbench "Story workbench". The page's
-  real title is the lead's headline and lives in the shell's own heading
-  (`hideTitle` on DeskShell keeps that one the document's h1), so this one is
-  for the screen-reader outline and for the drawing's shape, and is not shown.
+  "change" / "pick the section" is a standalone action in the publish row, not
+  a link inside a sentence, so it is a hit target and the design system's 44px
+  minimum applies. Measured before this rule: 22px tall, the only control on
+  the page under the minimum that this unit introduced.
+*/
+.desk-ltr.astra .astra-publish-section-change {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+}
+
+/*
+  The drawn top bar carries the way back and the stepper only -- it draws no
+  title of its own. The page's real title is the lead's headline and lives in
+  the shell's own heading (`hideTitle` on DeskShell keeps that one the
+  document's h1), so this one is for the screen-reader outline and for the
+  drawing's shape, and is not shown. Its words are the shell's own crumb for
+  this route (`desk-chrome.tsx`, "Story workspace"), which three existing walks
+  look up by accessible name -- renaming it here would fail them for no gain,
+  since nothing draws it.
   Same geometry as `.sr-only` in styles.css, repeated here because this block
   is scoped to the desk and must not depend on load order.
 */
