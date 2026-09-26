@@ -664,6 +664,55 @@ change, choose **Needs correction**, write the correction, and use **Publish
 correction**. Completed review history remains with the published article; it
 does not silently edit the printed story.
 
+### Finding videos with Google's official YouTube Data API
+
+**Where the key goes:** open **Server → YouTube** (the direct link is
+`/desk/ops#youtube-key`). Paste the key, then **Save key**.
+
+**Making the key.** In Google Cloud, create a project, turn on **YouTube Data
+API v3** for it, then create an API key and restrict that key to the YouTube
+Data API. TownReporter pays nothing for this: the API allows 10,000 units a
+day free, and every call this desk makes costs 1 unit. It never uses
+`search.list`, which alone would cost 100.
+
+**The key is write-only.** It is encrypted before it is stored and it is never
+sent back to the page — the box says *A key is saved* or *No key*, and there is
+no control anywhere that shows the key again. If you lose it, make a new one in
+Google Cloud and paste that; there is nothing to recover here.
+
+- **Test** spends one unit and asks Google about the first channel the desk
+  watches. It answers *Key works. Google answered for the channel …* or
+  Google's refusal in plain words, for example *Google says this key is not
+  allowed to use the YouTube Data API. Check that the key is right, that the
+  YouTube Data API v3 is turned on for its project, and that the key is not
+  restricted to another API.* Type a key and press **Test** to check it before
+  saving it — a tested key is not stored.
+- **Remove** takes the key back out. The desk reads the public feed again from
+  the next scan.
+- **YouTube units used today: N of 10,000** sits next to the box, so you can
+  see a scan eating into the day's allowance before it runs out.
+
+**What changes with a key set.** Channel videos, durations and live/upcoming
+state come from Google's documented service instead of the channel page HTML,
+the public RSS feed, and the yt-dlp listing. The scan receipt says which reader
+actually ran — *Read YouTube with the official API.* or *… Read the public feed
+instead.* — and the Meeting capture line names it too, so a short list is never
+mistaken for a thin channel when the desk had in fact fallen back.
+
+**What does not change.** Transcripts and media still come from yt-dlp and
+textflowkit. The API cannot download captions for videos this desk does not own,
+so nothing about caption or audio capture moves.
+
+**When the allowance runs out.** Google resets it at midnight Pacific. On the
+day Google refuses for quota the desk stops asking, says so under the key box,
+and reads the public feed for the rest of that Pacific day rather than spending
+more calls on refusals. It tries the official API again the next day. A key
+that is missing, rejected, or unreachable at any moment falls back the same
+way: the scan keeps running on the public feed and says so, instead of failing.
+
+An owner can also put `YOUTUBE_API_KEY` in the app's environment. A key set
+there is used in place of any saved one, and overrides it — see `.env.example`.
+
 ---
 
 ## Dark Desk (`/desk/dark`)
@@ -1204,7 +1253,7 @@ The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Sta
 
 **Edit and review:** the story workspace keeps headline, summary and body on the writing surface. Its toolbar has Save, Preview, Redraft, Check draft against evidence and Publish. Checks contains the existing name results and evidence entry points; Sources contains documents and download links; Reporting contains the model/research choices, reporting notes and claim-of-absence controls. The full finding/evidence review remains below the editor. Preview shows the current text without publishing it. Existing evidence and publication checks still apply.
 
-**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Proposed and Dropped groups. Server has nine panels: Writing models, Custom connections, Daily scan, Routine notices, Paper identity, Sections, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
+**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Proposed and Dropped groups. Server has twelve panels, in this order: Writing models, Custom connections, Daily scan, Meeting capture, YouTube, Routine notices, Paper identity, Sections, Named outlets, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
 
 
 ### Recheck a draft against uploaded documents

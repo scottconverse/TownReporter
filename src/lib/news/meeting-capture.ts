@@ -481,7 +481,17 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const archiveText = await readArchive(archivePath);
   const reconciled = reconcileArchive(archiveText, finalRecords);
   if (reconciled.changed) regenerateArchive(archivePath, finalRecords);
-  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed${skippedLiveOrUpcoming ? `, ${skippedLiveOrUpcoming} live/upcoming skipped` : ""}${waitingForMetadata ? `, ${waitingForMetadata} waiting for status metadata (will retry)` : ""}`;
+  // Which reader found these videos is part of the receipt: "read with the
+  // official API" and "read the public feed" fail in different ways, and an
+  // editor looking at a short list needs to know which one they are looking at.
+  const readBy = found.length
+    ? found.every((v) => v.tab === "api")
+      ? " (read with the official API)"
+      : found.some((v) => v.tab === "api")
+        ? " (read with the official API and the public feed)"
+        : " (read from the public feed)"
+    : "";
+  const coverageLine = `meetings: ${found.length} found, ${finalRecords.filter((r) => r.status === "captured").length} captured, ${failed.length} failed${skippedLiveOrUpcoming ? `, ${skippedLiveOrUpcoming} live/upcoming skipped` : ""}${waitingForMetadata ? `, ${waitingForMetadata} waiting for status metadata (will retry)` : ""}${readBy}`;
   return {
     configured: true, found, uncaptured, captured: finalRecords, failed, coverageLine,
     failures: namedMeetingFailures(failures, failed),
