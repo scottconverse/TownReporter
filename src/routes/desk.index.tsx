@@ -1,4 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { ActiveStoryJobs } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";

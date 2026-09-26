@@ -1,5 +1,6 @@
 import { after, before, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { integrationRequested, probePostgres, resolveAdminUrl, withDatabase } from "../test-support/pg-admin.ts";
 import type { DraftRow } from "./types.ts";
@@ -28,6 +29,12 @@ if (probe.ok) {
     await sql.query(`create table articles(id serial primary key, body text)`);
     await sql.query(`create table newsroom_members(user_id text primary key, newsroom_id integer, role text)`);
     await sql.query(`create table desk_jobs(id serial primary key, newsroom_id integer, user_id text, status text, stage text, error text, result_json text not null default '{}', claim_token text, updated_at timestamptz, finished_at timestamptz)`);
+    // A hand-built copy of `desk_jobs` carries the migrations too (PROJECT-BRIEF
+    // rule 14). 0099 is the structured-progress columns the claim/lease code
+    // reads, and this test is exactly about that code.
+    await sql.query(
+      await readFile(new URL("../../../migrations/0099_desk_job_progress.sql", import.meta.url), "utf8"),
+    );
     await sql.query(`insert into leads values(1,81,'drafted')`);
     await sql.query(`insert into drafts(lead_id,newsroom_id,headline,dek,body,topic,source_urls) values(1,81,'Reviewed','','Reviewed draft','community','[]')`);
     await sql.query(`insert into leads values(2,82,'new')`);
