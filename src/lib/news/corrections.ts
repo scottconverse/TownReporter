@@ -68,13 +68,41 @@ export async function performAddCorrection(
   const saved = await withTransaction(async (sql) => {
     let articleId: number | null = null;
     if (input.articleSlug) {
-      const rows = await sql<{ id: number; body: string | null }>`
-        select id, body from articles
-        where slug = ${input.articleSlug}
-          and newsroom_id = ${context.newsroomId}
-          and status = 'published'
-        limit 1
-      `;
+      /*
+        Two statements, not one, and the predicate is the same in both on
+        purpose: the note-only path reads the story's `id` and nothing else.
+        `body` is only ever needed to build the history record when the editor
+        is fixing the text, and asking for it here made a note-only correction
+        depend on a column it never used -- a desk that can publish a note about
+        a story it cannot read the text of is a desk that works on a schema
+        without `body` at all (which is what
+        corrections-newsroom-boundary.test.ts's own fixture is). Do not merge
+        these back into one `select id, body`: a conditional expression still
+        names the column, so the parse fails on a table that has no `body`.
+      */
+      /*
+        `body` is optional in the annotation because the note-only statement
+        below does not select it: the desk has no text for a row it never read,
+        and `bodyEditRecord` is only ever handed one from the branch that did
+        (the `fixing` guard). Left bare, the two statement types would collapse
+        into one row type that claims a `body` the note-only path never asked
+        for -- which is the shape that started this.
+      */
+      const rows: { id: number; body?: string | null }[] = fixing
+        ? await sql<{ id: number; body: string | null }>`
+            select id, body from articles
+            where slug = ${input.articleSlug}
+              and newsroom_id = ${context.newsroomId}
+              and status = 'published'
+            limit 1
+          `
+        : await sql<{ id: number }>`
+            select id from articles
+            where slug = ${input.articleSlug}
+              and newsroom_id = ${context.newsroomId}
+              and status = 'published'
+            limit 1
+          `;
       if (!rows[0]) return { ok: false as const, error: "That published story is not available in this newsroom." };
       articleId = rows[0].id;
       /*
