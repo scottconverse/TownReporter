@@ -289,10 +289,162 @@ export function normalizeSourceUrl(raw: string): string {
   return s;
 }
 
+/**
+ * Unit AK item 3 (2026-09-26): the words a URL can END at and still be a
+ * section front rather than a story. `/news`, `/local-news`, `/sports` and
+ * the Daily Camera and Times-Call crime fronts are all one such word.
+ */
+const SECTION_FRONT_WORDS = new Set([
+  "news",
+  "newsroom",
+  "local-news",
+  "stories",
+  "latest",
+  "section",
+  "sections",
+  "category",
+  "categories",
+  "topic",
+  "topics",
+  "tag",
+  "tags",
+  "author",
+  "authors",
+  "search",
+  "archive",
+  "archives",
+  "index",
+  "feed",
+  "feeds",
+  "rss",
+  "sitemap",
+  "crime",
+  "crime-public-safety",
+  "public-safety",
+  "sports",
+  "obituaries",
+  "classifieds",
+  "meetings",
+  "events",
+  "calendar",
+]);
+
+/**
+ * A word that can be followed by exactly one short section slug and still be
+ * the section rather than a story: `/category/longmont`,
+ * `/news/crime-public-safety`, `/sports/high-school-sports`,
+ * `/author/jane-doe`.
+ */
+const SECTION_CONTAINER_WORDS = new Set([
+  "news",
+  "newsroom",
+  "local-news",
+  "stories",
+  "section",
+  "sections",
+  "category",
+  "categories",
+  "topic",
+  "topics",
+  "tag",
+  "tags",
+  "author",
+  "authors",
+  "sports",
+  "crime",
+  "crime-public-safety",
+  "public-safety",
+  "archive",
+  "archives",
+  "search",
+  "meetings",
+  "events",
+  "calendar",
+]);
+
+/** Feeds: an .rss/.atom/.xml document is a list of everything, never one
+ * story. */
+const FEED_EXTENSION = /\.(rss|atom|xml)$/;
+
+/** A section slug carries no date and reads as a place or a beat. Digits (a
+ * year in `/news/2026-...`), a file extension, or a long slug all mean the
+ * URL addresses one document. */
+const SECTION_SLUG = /^[a-z][a-z-]*$/;
+const SECTION_SLUG_MAX = 24;
+
+/**
+ * Is this URL a section, listing or index page rather than one story?
+ *
+ * Unit AK item 3, from the real queue: leads 218 (held, a Loomiller Park
+ * stabbing) and 209 (killed, a "juvenile altercation") both cited the Daily
+ * Camera's crime front -- `/news/crime-public-safety/` -- and the matcher
+ * read that shared URL as "same source". An index page carries every crime
+ * in the county, so sharing one says nothing about whether two leads are the
+ * same story; it is the weakest possible evidence, and it was linking
+ * unrelated leads as duplicates of each other.
+ *
+ * The rule is a closed, enumerated list of shapes rather than a general
+ * "looks short" heuristic, deliberately: the matcher must never demote a URL
+ * it cannot classify, because a false "not the same source" verdict re-files
+ * a lead an editor already killed or held. So only these count as index
+ * pages --
+ *
+ *   - a site root (`https://www.dailycamera.com/`, `https://bouldercounty.gov`);
+ *   - a feed (`https://www.reddit.com/r/longmont/.rss`, `.../feed.xml`);
+ *   - a path ENDING at a section word (`/news`, `/local-news`, `/sports`,
+ *     `/news/crime-public-safety`, `/meetings`, `/events`);
+ *   - a section container followed by one short dateless slug
+ *     (`/category/longmont`, `/tag/carbon-valley`, `/author/jane-doe`).
+ *
+ * Everything else keeps its full weight as a shared source, including every
+ * document-shaped URL the local sources publish:
+ * `timescall.com/2026/08/12/longmont-council-ranked-choice-voting/`,
+ * `longmontleader.com/agenda/sept-council`,
+ * `longmont.primegov.com/portal/meeting/12345`,
+ * `longmontcitycouncil.org/meetings/2026-09-15/`,
+ * `longmontcolorado.gov/agendas/2026-08-25-packet.pdf`. "agenda", "portal",
+ * "meeting" and "council" are therefore NOT section words, and neither is
+ * "notices" or "election-information" -- those name records, not lists,
+ * in this newsroom's sources table (see src/lib/paper.ts and
+ * src/lib/news/extract.ts's dropListingUrls, which keeps them for the same
+ * reason).
+ *
+ * This is intentionally NOT report.ts's isIndexUrl (that one asks whether a
+ * source is a bare front worth skipping during extraction) and NOT
+ * extract.ts's looksLikeSectionFront (that one is gated on a watched host --
+ * `isWatchedSectionFront` -- and without the gate it flags
+ * `longmontleader.com/agenda/sept-council`, a real story page the matcher's
+ * own tests share; see src/lib/news/lead-match.test.ts).
+ */
+export function isIndexPageUrl(raw: string): boolean {
+  const normalized = normalizeSourceUrl(raw);
+  if (!normalized) return false;
+  const slash = normalized.indexOf("/");
+  const path = slash < 0 ? "" : normalized.slice(slash).replace(/\/+$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0) return true;
+  const last = segments[segments.length - 1]!;
+  if (FEED_EXTENSION.test(last)) return true;
+  if (SECTION_FRONT_WORDS.has(last)) return true;
+  if (segments.length === 2 && SECTION_CONTAINER_WORDS.has(segments[0]!)) {
+    return SECTION_SLUG.test(last) && last.length <= SECTION_SLUG_MAX;
+  }
+  return false;
+}
+
+/** The URLs of this lead that address one story. Index, section and feed
+ * URLs are dropped: two leads citing the Daily Camera's crime front are not
+ * citing the same source (see isIndexPageUrl). */
+function storyUrls(urls: string[]): string[] {
+  return urls.filter((u) => !isIndexPageUrl(u));
+}
+
 function sharesUrl(a: string[], b: string[]): boolean {
-  if (a.length === 0 || b.length === 0) return false;
-  const setA = new Set(a.map(normalizeSourceUrl).filter(Boolean));
-  for (const u of b) {
+  const realA = storyUrls(a);
+  const realB = storyUrls(b);
+  if (realA.length === 0 || realB.length === 0) return false;
+  const setA = new Set(realA.map(normalizeSourceUrl).filter(Boolean));
+  for (const u of realB) {
     if (setA.has(normalizeSourceUrl(u))) return true;
   }
   return false;
@@ -519,7 +671,14 @@ export function matchStrength(
   const symmetricOk = symmetricDiffAllVariants(ca, cb);
 
   const shareUrl = sharesUrl(candidateUrls, existingUrls);
-  const bothSidesHaveUrls = candidateUrls.length > 0 && existingUrls.length > 0;
+  // Unit AK item 3: a lead whose only URLs are index pages has not really
+  // cited a source for this story, so it falls into the no-URL branch here
+  // exactly as a lead that was filed with no URLs at all -- two leads with an
+  // identical headline and only the crime front between them can still be
+  // "strong" at score >= 0.95, but a shared section front can no longer make
+  // two different stories "strong" by itself.
+  const bothSidesHaveUrls =
+    storyUrls(candidateUrls).length > 0 && storyUrls(existingUrls).length > 0;
   const urlOk = shareUrl || (!bothSidesHaveUrls && score >= 0.95);
 
   if (score >= 0.85 && symmetricOk && urlOk) return "strong";
