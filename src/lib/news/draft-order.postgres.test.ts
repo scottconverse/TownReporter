@@ -26,7 +26,7 @@ if (probe.ok) {
     const sql = await db.getSql();
     await sql.query(`create table leads(id integer primary key, newsroom_id integer, status text)`);
     await sql.query(`create table drafts(id serial primary key, lead_id integer, newsroom_id integer, headline text, dek text, body text, topic text, source_urls text, updated_at timestamptz default now())`);
-    await sql.query(`create table articles(id serial primary key, body text)`);
+    await sql.query(`create table articles(id serial primary key, body text, area text)`);
     await sql.query(`create table newsroom_members(user_id text primary key, newsroom_id integer, role text)`);
     await sql.query(`create table desk_jobs(id serial primary key, newsroom_id integer, user_id text, status text, stage text, error text, result_json text not null default '{}', claim_token text, updated_at timestamptz, finished_at timestamptz)`);
     // A hand-built copy of `desk_jobs` carries the migrations too (PROJECT-BRIEF

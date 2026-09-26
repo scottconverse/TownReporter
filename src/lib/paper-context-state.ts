@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo } from "react";
-import { formatDate, formatShortDate, formatDateTime } from "./paper";
+import { formatDate, formatDayStamp, formatShortDate, formatDateTime } from "./paper";
 import { DEFAULT_PAPER_IDENTITY, type PaperIdentity } from "./paper-identity";
 
 export const paperContext = createContext<PaperIdentity>(DEFAULT_PAPER_IDENTITY);
@@ -15,6 +15,8 @@ export function usePaperDateFormatters() {
   return useMemo(
     () => ({
       formatDate: (iso: string | Date | null | undefined) => formatDate(iso, timezone),
+      /** "Sat, Sep 26" -- the paper's dateline. */
+      formatDayStamp: (iso: string | Date | null | undefined) => formatDayStamp(iso, timezone),
       formatShortDate: (iso: string | Date | null | undefined) => formatShortDate(iso, timezone),
       formatDateTime: (iso: string | Date | null | undefined) => formatDateTime(iso, timezone),
     }),

@@ -14,6 +14,8 @@ import type { ModelEffort } from "./provider-registry.ts";
   only `schema.ts` and `desk-copy.ts`, so the graph stays acyclic.
 */
 import { TODO_DETAIL_MAX, TODO_TEXT_MAX, clipTodoText } from "./notes.ts";
+/* The four geography keys, owned by the paper's pills; this file only asks. */
+import { cleanStoryArea } from "../story-area.ts";
 
 /*
   Bounded input for the server functions this unit was scoped to: publish,
@@ -319,13 +321,28 @@ export function cleanPublishId(raw: unknown): number | null {
  * above: a request is not the place to discover that the section name is long.
  * A clipped section that does not match the draft's own is refused by the gate
  * with a plain sentence, which is the honest outcome.
+ *
+ * 0.6.71 adds `area`: the geography the publish step chose, for the paper's
+ * pills. It is dropped rather than refused when it is not one of the four keys
+ * -- absent means the home town, so a caller from before this release and a
+ * select the editor never touched land in the same place, and neither is an
+ * error. `cleanStoryArea` is the one place that decides what a key is.
  */
-export function cleanPublishRequest(raw: unknown): { leadId: number | null; topic?: string } {
+export function cleanPublishRequest(raw: unknown): {
+  leadId: number | null;
+  topic?: string;
+  area?: string;
+} {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-    const o = raw as { leadId?: unknown; topic?: unknown };
+    const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown };
     const leadId = cleanPublishId(o.leadId);
     const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, LIMITS.topic) : "";
-    return topic ? { leadId, topic } : { leadId };
+    const area = cleanStoryArea(o.area);
+    return {
+      leadId,
+      ...(topic ? { topic } : {}),
+      ...(area ? { area } : {}),
+    };
   }
   return { leadId: cleanPublishId(raw) };
 }

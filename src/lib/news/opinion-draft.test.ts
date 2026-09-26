@@ -8,7 +8,7 @@ import type { DraftRow } from "./types.ts";
 before(async () => {
  const sql=await getSql();
  await sql.query(`create table drafts(id serial primary key, newsroom_id integer, lead_id integer, form text, headline text, dek text, body text, topic text, source_urls text, provenance_json text, found_note text, unanswered text, research_json text,updated_at timestamptz default now())`);
- await sql.query(`create table articles(id serial primary key,body text,source_urls text,headline text,status text,newsroom_id integer,slug text)`);
+ await sql.query(`create table articles(id serial primary key,body text,source_urls text,headline text,status text,newsroom_id integer,slug text,area text)`);
  await sql.query(`create table editorial_extras(draft_id integer,fact_sheet text,image_prompt text)`);
  for(const [id,form,lead] of [[1,'report',11],[2,'editorial',12],[3,'editorial',null],[4,'editorial',null]] as const) {
  await sql`insert into drafts(id,newsroom_id,lead_id,form,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json) values(${id},81,${lead},${form},'Original','','Original body','opinion','["https://example.org/record"]','[]','','[]','{}')`;

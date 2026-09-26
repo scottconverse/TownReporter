@@ -12,6 +12,7 @@ import {
 } from "@/lib/news/draft-evidence";
 import { auditDraft } from "@/lib/news/draft-audit";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
+import { AREA_LABELS, AREA_PILLS, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -164,6 +165,17 @@ function StoryPage() {
     return () => window.removeEventListener("resize", resize);
   }, [body, headline, dek]);
   const [topic, setTopic] = useState("council");
+  /*
+    The geography the paper's pills filter on (0.6.71). One more field on the
+    existing publish step, not a new step: the editor sets it here and the
+    request carries it, exactly as the section travels.
+
+    Default is the home town, which is also what a story with no stored area
+    reads as on the paper -- so the default the editor sees and the default a
+    scripted publish gets are the same ground, and neither is a decision nobody
+    made.
+  */
+  const [area, setArea] = useState<string>(HOME_AREA);
   const [scratch, setScratch] = useState("");
   const [storyDirection, setStoryDirection] = useState("");
   const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
@@ -893,7 +905,7 @@ function StoryPage() {
         );
       }
       return {
-        result: await publishLead({ data: { leadId: id, topic: topic.trim() } }),
+        result: await publishLead({ data: { leadId: id, topic: topic.trim(), area } }),
         notesProblem,
       };
     },
@@ -2087,6 +2099,39 @@ function StoryPage() {
                     printed.
                   </p>
                 )}
+              </div>
+              {/*
+                THE GROUND THIS STORY STANDS ON (0.6.71).
+
+                The paper's front page carries four geography pills, and the
+                only place that knows which one a story belongs to is the person
+                publishing it. One select, on the publish step that already
+                exists -- not a new step and not a desk re-layout (that is a
+                later phase).
+
+                Longmont is the default and the fallback: a story with no stored
+                area reads as the home town on the paper, so leaving this alone
+                is not an omission the reader ever sees.
+              */}
+              <div id="story-area">
+                <Field label="Geography">
+                  <select
+                    id="story-area-select"
+                    value={area}
+                    onChange={(e) => setArea(e.target.value)}
+                    disabled={onPaper}
+                  >
+                    {AREA_PILLS.map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <p className="note">
+                  Which pill this story answers to on the front page — {AREA_LABELS[HOME_AREA]} is
+                  the home town and the default.
+                </p>
               </div>
               {/*
                 THE NAMED-OUTLET CHECK (0.6.62).

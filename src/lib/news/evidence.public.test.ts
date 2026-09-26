@@ -39,6 +39,8 @@ async function ensureArticlesSchema() {
   await sql.query(`alter table articles add column if not exists found_note text not null default ''`);
   await sql.query(`alter table articles add column if not exists unanswered text not null default '[]'`);
   await sql.query(`alter table articles add column if not exists newsroom_id integer not null default 1`);
+  /* 0098's column, spelled the way 0098 spells it: nullable, no default. */
+  await sql.query(`alter table articles add column if not exists area text`);
 }
 
 describe("public evidence publication", { timeout: 60000 }, () => {

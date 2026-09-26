@@ -223,7 +223,7 @@ function asDate(iso: string | Date | null | undefined): Date | null {
   paper-context.tsx), not in this module, so the caller -- which already has
   that context via usePaperIdentity() -- is the right place to supply it. A
   caller that passes nothing renders exactly what it renders today, which is
-  the "no settings row" no-behaviour-change requirement.
+  the "no settings row" no-behavior-change requirement.
 */
 export function formatDate(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
@@ -244,6 +244,24 @@ export function formatShortDate(iso: string | Date | null | undefined, timeZone:
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone,
+  });
+}
+
+/*
+  The paper's dateline: "Sat, Sept. 26" (design-system/README.md, front page
+  top bar). Separate from `formatShortDate` because it carries the weekday --
+  a reader checking whether today's edition has been set reads the weekday
+  before the number -- and separate from `formatDate` because that one spells
+  everything out and is used inside story text.
+*/
+export function formatDayStamp(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
     timeZone,
   });
 }

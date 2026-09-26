@@ -104,10 +104,26 @@
 .reader p {
   margin: 0;
 }
+/*
+  HEADLINES ARE 700 OR 800, NEVER 500 (0.6.71).
+
+  This was a blanket `font-weight: 500` on every heading in the reader, and it
+  is the bug the handoff's typography table names: the front-page lead computed
+  500 because nothing more specific had claimed it, and so did the masthead,
+  the section heads and every grid headline. Bricolage at 500 is the UI weight
+  -- labels, buttons, nav -- and a headline set in it reads as a caption.
+
+  The redesign's scale (design-system/README.md §4) asks for two: 800 for the
+  display sizes (masthead, lead, section head, article h1) and 700 for the
+  smaller headline set (grid and story cells, opinion). 800 is the default
+  here so a heading that forgets to say still lands on a display weight; the
+  700s are named rule by rule in the "Redesign phase 1" block at the foot of
+  this file, next to the sizes they belong to.
+*/
 .reader h1,
 .reader h2,
 .reader h3 {
-  font-weight: 500;
+  font-weight: 800;
 }
 .reader p {
   line-height: 1.65;
@@ -1892,4 +1908,1478 @@
 }
 .reader .riversentinel {
   height: 1px;
+}
+
+/* ===========================================================================
+   REDESIGN PHASE 1 (0.6.71) -- the paper set to the 2026-09-26 handoff.
+
+   Everything below is a RESTYLE. No route, feature, data source or link is
+   added or removed here: the tokens are the handoff's own
+   (design-system/README.md, "Article page" token block), and the class names
+   are the ones the ported components in src/components/paper/ emit.
+
+   Three rules this block is built on:
+
+     1. YELLOW IS A FILL, NEVER A TEXT COLOUR ON CREAM. `--yel` is 1.42:1
+        against the page, so it is used as a ground (the dateline bar, a
+        section tag, the opinion panel, a 3px underline) and the text ON it is
+        always the fixed #111 -- in both themes, because `--ink` flips to bone
+        in the dark one and bone on yellow is the pairing the design system
+        rules out. Where yellow has to be legible as type it sits on the block
+        ground (`--tagInk` on `--block`, 12.1:1 light / 9.9:1 dark).
+     2. RULES COME FROM A 1px GAP, NOT FROM BORDERS. A grid paints `--grid` and
+        its cells paint `--bg` back over it, so a rule stops at the cell edge
+        instead of two cell borders doubling to 2px where they meet.
+     3. BANDS REACH THE PAGE EDGE BY NEGATIVE MARGIN, NOT BY `100vw`. `--px` is
+        the page gutter (40px, 60px from 1500 up, 18px on a phone) and it is
+        the same number the wrap uses, so `margin-inline: calc(-1 * var(--px))`
+        reaches the viewport edge exactly. `100vw` includes the scrollbar and
+        would make scrollWidth exceed innerWidth at 390.
+   =========================================================================== */
+
+/* The gutter. `.wrap` is min(1240px, 100% - 80px), 100% - 120px from 1500 up
+   and 100% - 36px below 760, so these are the same three numbers. */
+.reader {
+  --px: 40px;
+  --grid: #111111;
+  --block: #111111;
+  --blockInk: #ffffff;
+  --blockInk2: #cfcfcf;
+  --blockRule: #444444;
+  --yel: #ffd23f;
+  --tagInk: #ffd23f;
+}
+.reader.mode-dark,
+:root[data-appearance="reader-dark"] .reader {
+  --grid: #3b3631;
+  --block: #27231f;
+  --blockInk: #e8e6e1;
+  --blockInk2: #bdbab3;
+  --blockRule: #3b3631;
+  --yel: #e6c35c;
+  --tagInk: #e6c35c;
+}
+@media (min-width: 1500px) {
+  .reader {
+    --px: 60px;
+  }
+}
+@media (max-width: 760px) {
+  .reader {
+    --px: 18px;
+  }
+}
+/* The front page is a full-bleed paper, not a column: its wrap runs to `--px`
+   from the edge (1600px ceiling, so a very wide screen still has gutters).
+   `:has` picks the front page out by the band only it prints; without `:has`
+   support the wrap stays 1240px and the bands simply stop short of the edge,
+   which is a narrower paper rather than a broken one. */
+.reader .wrap:has(> .ledgerow) {
+  width: min(1600px, calc(100% - 2 * var(--px)));
+}
+/* The article page too: header and story, not the footer. The rail in
+   `Article Daily.dc.html` is the grid's `1fr`, so it is exactly what the
+   reading measure leaves over -- at 1440 the 1240px measure left the "Dates in
+   this story" panel 264px against the design's 384, narrow enough that a
+   three-word event breaks mid-word. `:has` picks the article out by the layout
+   only it prints (`articles.$slug.tsx`). Above 1320 this is the only rule that
+   changes anything: `min(1240px, 100% - 80px)` and `100% - 2 * 40px` are the
+   same number at 1280 and below, so the 1280 and 1024 measurements are the
+   same before and after, as the design's own are. */
+.reader:has(.articlelayout) > header .wrap,
+.reader:has(.articlelayout) > main.wrap {
+  width: min(1600px, calc(100% - 2 * var(--px)));
+}
+/* The bands that reach the viewport edge. Only ever written on an element that
+   is a direct child of `.wrap`, so the negative margin always lands on the
+   gutter and never inside a column. */
+.reader .ledgerow,
+.reader .storygrid,
+.reader .trustbar,
+.reader .regionband,
+.reader .river,
+.reader .aboutstrip,
+.reader .keepreading {
+  margin-inline: calc(-1 * var(--px));
+}
+/* The front page's own h1: the edition title is the dateline in the top bar,
+   so the heading is for a screen reader and a crawler only. It must not print
+   twice on a screen, and it must not be `display: none` (a hidden h1 is not a
+   heading). */
+.reader .vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   The dateline bar.
+   --------------------------------------------------------------------------- */
+.reader .topbar {
+  background: var(--yel);
+  color: #111;
+}
+.reader .topbarin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+  min-height: 44px;
+  padding-block: 5px;
+}
+.reader .dateline {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111;
+}
+.reader .topactions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+/* Every utility in the bar is the same thing: a 44px link on yellow. The
+   reading-size control arrives as a `.btn.small` (it is the same dialog opener
+   as everywhere else), so it is flattened here rather than special-cased in the
+   component -- one control, two places it can sit. */
+.reader .topbar .toplink,
+.reader .topbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #111;
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .topbar .toplink:hover,
+.reader .topbar .btn:hover {
+  background: rgba(17, 17, 17, 0.14);
+  color: #111;
+}
+.reader .topbar .toplink svg,
+.reader .topbar .btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Masthead: the wordmark, the town chip, the geography pills, one 3px rule.
+   --------------------------------------------------------------------------- */
+.reader header {
+  background: var(--bg);
+  border-bottom: 0;
+}
+/* One row: the wordmark and the town chip on the left, the geography pills on
+   the RIGHT, exactly as `Front Daily.dc.html` draws it -- `space-between` with
+   the pills as the second child, rather than the stacked block Unit BD shipped.
+   It wraps to two rows on a narrow screen, which the prototype also does. */
+.reader .mast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 18px;
+  height: auto;
+  /* The 3px rule that closes the masthead. It sits on the wrap, so on a wide
+     screen it stops at the gutter exactly as the rules inside the bands do. */
+  padding: 22px 0 16px;
+  border-bottom: 3px solid var(--grid);
+}
+.reader .identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.reader .brand {
+  font-family: var(--fd);
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -2.2px;
+  line-height: 1;
+}
+.reader .brand span {
+  color: var(--ink);
+}
+/* The town chip. `--tagInk` on `--block` is the light theme's yellow-on-ink and
+   the dark theme's; the chip stays visible at every width (it used to be hidden
+   below 1100px, which left the masthead with a wordmark and no place). */
+.reader header .locality {
+  display: inline-block;
+  padding: 6px 11px;
+  border: 0;
+  background: var(--block);
+  color: var(--tagInk);
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+.reader .geopills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.reader .geopill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 2px solid var(--grid);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .geopill:hover {
+  background: var(--soft);
+}
+/* The pressed ground is the page's own ink with the page's own background as
+   its type, which is what the prototype draws (and what flips correctly in the
+   dark theme, where `--ink` is bone and `--bg` is the dark ground). */
+.reader .geopill.on {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+/* ---------------------------------------------------------------------------
+   Section nav: 16/700, and the current section carries a 4px yellow inset.
+   --------------------------------------------------------------------------- */
+.reader .navrow {
+  min-height: 52px;
+  border-top: 0;
+  border-bottom: 1px solid var(--grid);
+}
+.reader .sections a {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 16px 0;
+}
+.reader .sections a.active {
+  color: var(--ink);
+}
+.reader .sections a.active:after {
+  background: var(--yel);
+  height: 4px;
+}
+.reader .navrow > .textlink,
+.reader .navrow .about-newsroom {
+  font-size: 15px;
+}
+
+/* The article page's header: one compact row. The sections sit in the masthead
+   itself (`Article Daily.dc.html`), at the prototype's 8px/22px rhythm with the
+   current section's yellow inset, and there is no pill row and no second nav
+   row. `.mast-compact` is on the mast, not on `main`, because the header is
+   outside `<main>` -- `.reader-compact` cannot reach it. */
+.reader .mast-compact {
+  padding-bottom: 14px;
+}
+/* Above 760px only: below it the nav is the mobile menu's own column list, and
+   these rules (three classes, so they win) would take its padding and its
+   stacking away from it. */
+@media (min-width: 761px) {
+  /*
+    `margin-left: auto` is what keeps the links on the right when they do not
+    fit: the prototype's own list is six sections and sits beside the wordmark,
+    but this paper publishes nine, and at 1280 they are ~875px wide against the
+    ~700px the row has left. A `justify-content` cannot help there -- the nav
+    wraps as a whole to the mast's second line, which is a `space-between` row
+    with one item in it, and that puts a lone item on the left. The auto margin
+    absorbs the free space either way, so the links hug the right edge on one
+    line and on two (the section list is content, and content is what wraps).
+  */
+  .reader .mast-compact > .sections {
+    gap: 8px 22px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+  .reader .mast-compact > .sections a {
+    padding: 9px 0;
+  }
+  .reader .mast-compact > .sections a.active:after {
+    bottom: 2px;
+    height: 4px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The yellow section tag.
+   --------------------------------------------------------------------------- */
+.reader .sectiontag {
+  display: inline-block;
+  padding: 5px 9px;
+  background: var(--yel);
+  color: #111;
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  margin-bottom: 16px;
+}
+.reader .sectiontag:hover {
+  /* A hover on a fill cannot be a second color without a second token, and a
+     tag is never the only path to the section (the nav is), so it underlines
+     rather than restating the ground. */
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.reader .breadcrumbs .sectiontag {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   The lead and "This week".
+   --------------------------------------------------------------------------- */
+.reader .ledgerow {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 1px;
+  background: var(--grid);
+  border-bottom: 3px solid var(--grid);
+}
+.reader .ledgerow > .lead {
+  background: var(--bg);
+  padding: 32px var(--px) 36px;
+}
+/* The panel is the ink block in BOTH themes, and it is stated here rather than
+   left to the `.datespanel` rule below: this selector carries three classes to
+   that rule's two, so a shared `background: var(--bg)` on the row's children
+   silently repainted the panel cream and put white event text and white date
+   numbers on it (measured at 1.02:1 before Unit BD2). */
+.reader .ledgerow > .datespanel {
+  background: var(--block);
+  color: var(--blockInk);
+  padding: 32px 32px 36px;
+}
+.reader .lead h2.leadhead {
+  font-family: var(--fd);
+  font-size: 50px;
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -1.9px;
+  max-width: 20ch;
+}
+.reader .lead .leadhead a {
+  color: var(--ink);
+}
+.reader .lead h2.leadhead a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-decoration-color: var(--yel);
+  text-underline-offset: 6px;
+}
+.reader .lead .dek {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin-top: 18px;
+  max-width: 60ch;
+}
+.reader .lead .meta {
+  margin-top: 16px;
+}
+.reader .lead .leadbottom {
+  margin-top: 26px;
+}
+
+/* ---------------------------------------------------------------------------
+   "This week" / "Dates in this story": a block panel with yellow day labels.
+   --------------------------------------------------------------------------- */
+.reader .datespanel {
+  background: var(--block);
+  color: var(--blockInk);
+  padding: 32px var(--px);
+}
+/* The article rail's panel is the prototype's own block, and the prototype pads
+   it 24px on every side (`Article Daily.dc.html`, the aside's `padding:24px`),
+   where the front page's panel keeps the row's 32px. Only the INLINE padding
+   decides the event text's column, and at the rail's 224px at 1280 the page
+   gutter's 40px cost the text 16px a side: 86px for a word ("attachments" in
+   Literata 400 at 16px) that needs 94.6 to sit on one line, so `break-word`
+   had nowhere to put it but the middle of the word. 24px leaves 118px. The
+   vertical padding is left at 32px -- it changes nothing about the wrap. */
+.reader:has(.articlelayout) .datespanel {
+  padding: 32px 24px;
+}
+/* (The front page's panel keeps the row's 32px inline padding, set above.) */.reader .datespanel h2 {
+  font-family: var(--fd);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.8px;
+  color: var(--yel);
+  margin-bottom: 12px;
+}
+.reader .dateslist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.reader .dateslist > li {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+  padding: 13px 0;
+  border-top: 1px solid var(--blockRule);
+  /* A flex item's automatic minimum size is its min-content width, which is how
+     a long link and its host pushed 35px past the panel's right edge. */
+  min-width: 0;
+}
+.reader .dateday {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 42px;
+}
+.reader .datedow {
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--yel);
+  line-height: 1.3;
+}
+.reader .datenum {
+  font-family: var(--fd);
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--blockInk);
+}
+.reader .datewhat {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--blockInk);
+  /* The item text wraps inside the panel rather than running out of it: that is
+     `min-width: 0` below, which the flex item needs so it may shrink below the
+     width of its longest word -- BD2's 35px overhang. What the TEXT does at the
+     line break is a separate question: `anywhere` (what BD2 shipped) also
+     breaks ordinary words, so "attachments" printed as "attachmen / ts" in a
+     panel the design has room for. `break-word` breaks only a word longer than
+     the line, which is the event title's rule; the domain below it keeps
+     `anywhere` because a host has nowhere else to break. */
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.reader .datewhat a {
+  color: var(--blockInk);
+  text-decoration: underline;
+  text-decoration-color: var(--yel);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 3px;
+}
+.reader .datenote {
+  display: block;
+  font-family: var(--fd);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--blockInk2);
+  margin-top: 4px;
+  /* The one line in the panel allowed to break inside a word: it is a host
+     (`story-dates.ts` prints the host alone when the record's organization is a
+     whole URL), and a host longer than the line has no space to break at. */
+  overflow-wrap: anywhere;
+}
+/* A date that will not happen is struck through: a panel of dates that prints
+   a cancellation as if it were an event is worse than no panel. */
+.reader .dateslist > li.cancelled .datewhat,
+.reader .dateslist > li.cancelled .datewhat a {
+  color: var(--blockInk2);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.reader .datesempty {
+  font-family: var(--fd);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--blockInk2);
+  max-width: 44ch;
+}
+.reader .dateslink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 12px;
+  color: var(--yel);
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+}
+.reader .dateslink:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   The ruled story grid: three across, two on a tablet, one on a phone.
+   The 1px lines are the container's `--grid` showing through the gap, so the
+   outermost cells take the page gutter as their own padding -- which is why
+   the edge padding is written per column count and rewritten when the column
+   count changes.
+   --------------------------------------------------------------------------- */
+.reader .storygrid {
+  display: grid;
+  gap: 1px;
+  background: var(--grid);
+  border-bottom: 3px solid var(--grid);
+}
+.reader .storygrid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.reader .storygrid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reader .storygrid.cols-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+.reader .storycell {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding: 26px 32px 30px;
+}
+.reader .storygrid.cols-3 > :nth-child(3n + 1),
+.reader .storygrid.cols-2 > :nth-child(2n + 1),
+.reader .storygrid.cols-1 > :nth-child(n) {
+  padding-left: var(--px);
+}
+.reader .storygrid.cols-3 > :nth-child(3n),
+.reader .storygrid.cols-2 > :nth-child(2n),
+.reader .storygrid.cols-1 > :nth-child(n) {
+  padding-right: var(--px);
+}
+.reader .storysec,
+.reader .storycell .storysec {
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.reader a.storysec:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.reader .storycell h3 {
+  font-family: var(--fd);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.5px;
+}
+.reader .storycell h3 a {
+  color: var(--ink);
+}
+.reader .storycell h3 a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-decoration-color: var(--yel);
+  text-underline-offset: 5px;
+}
+.reader .storymeta {
+  margin-top: auto;
+  padding-top: 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+   The line under the grid. It is the only band that is a sentence rather than
+   a story, so it keeps the 1px rule and nothing else.
+   --------------------------------------------------------------------------- */
+.reader .trustbar {
+  padding: 14px var(--px);
+  border-top: 1px solid var(--grid);
+  border-bottom: 1px solid var(--grid);
+  font-size: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   Around the region, beside Opinion.
+   --------------------------------------------------------------------------- */
+.reader .regionband {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 1px;
+  background: var(--grid);
+  border-bottom: 3px solid var(--grid);
+}
+.reader .regioncol {
+  background: var(--bg);
+  padding: 30px var(--px);
+}
+.reader .regioncol .sectionhead h2 {
+  font-family: var(--fd);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+.reader .regionlist {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.reader .regionlist > li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 0;
+  border-top: 1px solid var(--grid);
+}
+.reader .regionplace {
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reader .regionlist a {
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.reader .regionlist a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-decoration-color: var(--yel);
+  text-underline-offset: 4px;
+}
+.reader .regionempty {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 46ch;
+  margin-bottom: 12px;
+}
+.reader .opinionpanel {
+  background: var(--yel);
+  color: #111;
+  padding: 30px var(--px);
+}
+.reader .opinionpanel h2 {
+  font-family: var(--fd);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  color: #111;
+}
+.reader .opinionpanel h3 {
+  font-family: var(--fd);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.4px;
+  color: #111;
+  margin: 14px 0 10px;
+}
+.reader .opinionpanel h3:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 5px;
+}
+.reader .opinionpanel p {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  color: #111;
+  margin-bottom: 14px;
+}
+.reader .opinionpanel .textlink {
+  color: #111;
+}
+
+/* ---------------------------------------------------------------------------
+   The river, and the back of the book.
+   --------------------------------------------------------------------------- */
+.reader .river {
+  padding: 30px var(--px) 40px;
+  border-top: 0;
+}
+.reader .river .sectionhead h2 {
+  font-family: var(--fd);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+.reader .river .newsrow {
+  border-top: 1px solid var(--grid);
+}
+.reader .river .newsrow h3 {
+  font-family: var(--fd);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.35px;
+}
+.reader .backmatter {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+  padding: 34px 0 8px;
+}
+.reader .backmatter .sidebarcard {
+  margin-bottom: 0;
+}
+.reader .aboutstrip {
+  margin: 22px calc(-1 * var(--px)) 0;
+  padding: 30px var(--px);
+}
+
+/* ---------------------------------------------------------------------------
+   The footer, as an ink block: the wordmark and the links in `--blockInk`.
+   --------------------------------------------------------------------------- */
+.reader footer {
+  border-top: 3px solid var(--grid);
+  background: var(--block);
+  color: var(--blockInk);
+  padding: 40px 0 26px;
+}
+.reader footer .footergrid .brand,
+.reader footer .brand {
+  font-family: var(--fd);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -1.1px;
+  color: var(--blockInk);
+}
+.reader footer .footergrid p {
+  color: var(--blockInk2);
+}
+.reader .footerlinks b {
+  color: var(--blockInk2);
+}
+.reader .footerlinks a,
+.reader .footer-button {
+  color: var(--blockInk);
+}
+.reader .footerlinks a:hover,
+.reader .footer-button:hover {
+  color: var(--yel);
+}
+.reader .footerbottom {
+  color: var(--blockInk2);
+  border-top: 1px solid var(--blockRule);
+  margin-top: 30px;
+  padding-top: 18px;
+}
+
+/* ---------------------------------------------------------------------------
+   The article page: headline over a wide measure, then a 3-column layout --
+   jump list, story, panel. The story column is the reading measure (680px) and
+   the third column soaks up whatever is left, so `justify-content: center` no
+   longer shifts the group: the jump list stays flush with the headline above
+   it, which is the alignment the prototype has and the old 170/720/170 grid
+   did not.
+   --------------------------------------------------------------------------- */
+.reader .articlehead {
+  max-width: 1000px;
+  text-align: left;
+}
+.reader .breadcrumbs {
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+.reader .articlehead h1 {
+  font-family: var(--fd);
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -2px;
+}
+.reader .articlehead .dek {
+  font-family: var(--serif);
+  font-size: 22px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 62ch;
+  margin-top: 16px;
+}
+/* The byline bar: two 1px rules across the full column, the badge, and the
+   three controls at the right. */
+.reader .bylinebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 22px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--grid);
+  border-bottom: 1px solid var(--grid);
+  padding: 14px 0;
+  margin: 26px 0 30px;
+}
+.reader .bylinewho {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+/* The badge. Light theme: ink chip, yellow initials. Dark theme: yellow chip,
+   ink initials -- because `--a` (#e6c35c) on `--ink` (#e8e6e1) is about 1.6:1,
+   so the light pairing cannot simply be carried over. */
+.reader .trbadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  background: var(--block);
+  color: var(--yel);
+  font-family: var(--fd);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.reader.mode-dark .trbadge,
+:root[data-appearance="reader-dark"] .reader .trbadge {
+  background: var(--yel);
+  color: #111;
+}
+.reader .bylinenames {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.3;
+}
+.reader .bylinenames strong {
+  font-family: var(--fd);
+  font-size: 17px;
+  font-weight: 700;
+}
+.reader .bylinenames > span {
+  font-size: 14px;
+  color: var(--muted);
+}
+/* Save / Share / "Aa Text size": 2px ink outline, 44px, 15/700. */
+.reader .readingtools {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.reader .readingtools .btn {
+  border: 2px solid var(--grid);
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 8px 13px;
+}
+.reader .readingtools .btn:hover {
+  background: var(--soft);
+  color: var(--ink);
+}
+.reader .readingtools .btn.saved {
+  background: var(--yel);
+  color: #111;
+}
+
+.reader .articlelayout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 680px) minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+  justify-content: center;
+}
+/* The jump list. Its rail is a 4px ink rule and the current entry is the same
+   rule in yellow -- one mark, moved, rather than a second highlight. */
+.reader .contents {
+  position: sticky;
+  top: 96px;
+  display: grid;
+  gap: 0;
+  align-content: start;
+  border-left: 4px solid var(--grid);
+  padding-left: 0;
+}
+.reader .contents .contentslabel {
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 0 10px 12px;
+}
+.reader .contents a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--muted);
+}
+.reader .contents a:hover {
+  color: var(--ink);
+}
+.reader .contents a.on {
+  color: var(--ink);
+  box-shadow: inset 4px 0 0 var(--yel);
+}
+.reader .articlebody {
+  line-height: 1.65;
+}
+.reader .articlebody > div {
+  line-height: 1.7;
+}
+.reader .articleaside {
+  display: block;
+  position: sticky;
+  top: 96px;
+  padding-top: 0;
+  min-width: 0;
+}
+.reader .articleaside .asidecard {
+  margin-top: 22px;
+  border: 2px solid var(--grid);
+  padding: 18px;
+}
+.reader .articleaside .asidecard .tag {
+  margin-bottom: 10px;
+}
+.reader .articleaside .asidecard p {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.reader .articleaside .asidecard .textlink {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-decoration-color: var(--yel);
+  text-underline-offset: 4px;
+}
+/* The panels stack into one column once the aside is under the story, so the
+   two of them are not sticky there (a sticky aside inside a short column
+   detaches from the thing it describes). */
+@media (max-width: 1180px) {
+  .reader .articlelayout {
+    grid-template-columns: minmax(0, 680px) minmax(0, 1fr);
+    gap: 34px;
+  }
+  .reader .contents {
+    grid-column: 1 / -1;
+    position: static;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   "How we reported this". It lives inside the story column, so it is ruled,
+   never bled: a negative margin there would open into the layout gaps and
+   stop, which is worse than not bleeding at all.
+   --------------------------------------------------------------------------- */
+.reader .evidence {
+  margin-top: 36px;
+  border-top: 3px solid var(--grid);
+  padding-top: 22px;
+}
+.reader .evidence .evidencehead .kicker {
+  display: block;
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.reader .evidence .evidencehead h2 {
+  font-family: var(--fd);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  margin-bottom: 18px;
+}
+.reader .evidence .evidenceform {
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+.reader .sourcegrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--grid);
+}
+.reader .sourcegrid > .sourcecard-new {
+  background: var(--bg);
+  padding: 20px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* An odd number of records leaves one cell empty beside the last card, which
+   reads as a missing record rather than a layout choice. */
+.reader .sourcegrid > .sourcecard-new:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+.reader .sourcecard-new .sourcerole {
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reader .sourcecard-new > b {
+  font-family: var(--fd);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.3px;
+}
+.reader .sourcecard-new .sourcehost {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+  word-break: break-word;
+}
+.reader .sourcecard-new .sourceactionrow {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.reader .evidence .sourcelink {
+  font-family: var(--fd);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-decoration-color: var(--yel);
+  text-underline-offset: 4px;
+  padding-block: 5px;
+}
+.reader .evidence .sourcelink:hover {
+  text-decoration-color: var(--ink);
+}
+.reader .evidence p.sourcecardnote {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+.reader .findingblock {
+  margin-top: 30px;
+  border-top: 3px solid var(--grid);
+  padding-top: 22px;
+}
+.reader .findingtitle {
+  font-family: var(--fd);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.7px;
+  margin-bottom: 6px;
+}
+.reader .findinglist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.reader .findinglist > li {
+  padding: 18px 0;
+  border-top: 1px solid var(--grid);
+}
+.reader .evidence .findinglist p {
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.reader .evidence p.findingsource {
+  font-family: var(--fd);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-top: 8px;
+  word-break: break-all;
+}
+.reader .evidence p.trustline {
+  font-family: var(--fd);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin-top: 24px;
+  border-top: 1px solid var(--grid);
+  padding-top: 14px;
+}
+/* The disclosure sits at the head of `#sources`, above the records it points
+   at: a 4px yellow rule, the sentence, and no box. */
+.reader .evidence p.ai-disclosure {
+  font-family: var(--fd);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+  border-left: 4px solid var(--yel);
+  padding: 2px 0 2px 14px;
+  margin: 0 0 22px;
+  background: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   The foot of the story: corrections beside the reprint panel, as two halves
+   of one ruled band. In the yellow half the ink is fixed #111, as everywhere a
+   yellow ground is used.
+   --------------------------------------------------------------------------- */
+.reader .articlefoot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--grid);
+  margin-top: 36px;
+}
+.reader .articlefoot > .sources {
+  border-top: 0;
+  padding: 24px 24px 26px;
+  margin-top: 0;
+  background: var(--bg);
+}
+.reader .articlefoot > .sources h2 {
+  font-family: var(--fd);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.7px;
+}
+.reader .articlefoot > .sources > p {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.reader .articlefoot .sourcecard {
+  border-top: 1px solid var(--grid);
+  padding: 14px 0;
+  margin: 0;
+}
+.reader .articlefoot .sourcecard strong {
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reader .articlefoot .sourcecard p {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  margin-top: 6px;
+}
+.reader .articlefoot .sharepanel {
+  background: var(--yel);
+  color: #111;
+}
+.reader .articlefoot .sharepanel h2,
+.reader .articlefoot .sharepanel > p {
+  color: #111;
+}
+.reader .articlefoot .sharepanel .btn {
+  border: 2px solid #111;
+  background: #111;
+  color: var(--yel);
+  font-size: 15px;
+  font-weight: 700;
+  min-height: 44px;
+}
+.reader .articlefoot .sharepanel .btn:hover {
+  background: transparent;
+  color: #111;
+}
+
+/* ---------------------------------------------------------------------------
+   Keep reading: the same ruled 3-up as the front page's grid, at the foot of
+   the article page. It is a direct child of `.wrap`, so it bleeds.
+   --------------------------------------------------------------------------- */
+.reader .keepreading {
+  padding: 30px 0 44px;
+  border-top: 3px solid var(--grid);
+}
+.reader .keepreading .sectionhead h2 {
+  font-family: var(--fd);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+.reader .keepreadinggrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--grid);
+  border-bottom: 1px solid var(--grid);
+}
+.reader .keepreadinggrid > .newsrow {
+  grid-template-columns: minmax(0, 1fr) 35px;
+  background: var(--bg);
+  padding: 22px 26px 24px;
+  border-top: 0;
+}
+.reader .keepreadinggrid > :nth-child(3n + 1) {
+  padding-left: var(--px);
+}
+.reader .keepreadinggrid > :nth-child(3n) {
+  padding-right: var(--px);
+}
+.reader .keepreadinggrid .datebox {
+  display: none;
+}
+.reader .keepreadinggrid .newsrow h3 {
+  font-family: var(--fd);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.35px;
+}
+
+/* ---------------------------------------------------------------------------
+   Below the fold of the layout: how the page gives way.
+   --------------------------------------------------------------------------- */
+@media (max-width: 1280px) {
+  .reader .lead h2.leadhead {
+    font-size: 44px;
+  }
+}
+@media (max-width: 1024px) {
+  /* Three across becomes two -- and the edge cells change with the column
+     count, so the gutter padding is rewritten in the same breath. */
+  .reader .storygrid.cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reader .storygrid.cols-3 > :nth-child(3n + 1),
+  .reader .storygrid.cols-3 > :nth-child(3n) {
+    padding-inline: 32px;
+  }
+  .reader .storygrid.cols-3 > :nth-child(2n + 1) {
+    padding-left: var(--px);
+  }
+  .reader .storygrid.cols-3 > :nth-child(2n) {
+    padding-right: var(--px);
+  }
+  .reader .keepreadinggrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reader .keepreadinggrid > :nth-child(3n + 1),
+  .reader .keepreadinggrid > :nth-child(3n) {
+    padding-inline: 26px;
+  }
+  .reader .keepreadinggrid > :nth-child(2n + 1) {
+    padding-left: var(--px);
+  }
+  .reader .keepreadinggrid > :nth-child(2n) {
+    padding-right: var(--px);
+  }
+}
+@media (max-width: 900px) {
+  .reader .ledgerow,
+  .reader .regionband {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .ledgerow > .datespanel {
+    padding-inline: var(--px);
+  }
+  .reader .articlelayout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 30px;
+  }
+  .reader .articleaside {
+    position: static;
+  }
+  .reader .articlehead {
+    max-width: none;
+  }
+  .reader .backmatter {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reader .articlefoot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .sourcegrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .sourcegrid > .sourcecard-new:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+}
+@media (max-width: 760px) {
+  .reader .mast {
+    padding-top: 18px;
+  }
+  .reader .identity {
+    gap: 10px 12px;
+    padding-bottom: 12px;
+  }
+  .reader .brand {
+    font-size: 36px;
+    letter-spacing: -1.4px;
+  }
+  .reader header .locality {
+    font-size: 14px;
+    padding: 5px 9px;
+  }
+  .reader .topbarin {
+    min-height: 0;
+    padding-block: 4px;
+  }
+  .reader .dateline,
+  .reader .topbar .toplink,
+  .reader .topbar .btn {
+    font-size: 14px;
+  }
+  .reader .topactions {
+    gap: 0;
+  }
+  /* The nav wraps to two rows: the menu button and "About the newsroom", then
+     the sections two across while they are open. */
+  .reader .mobilemenu {
+    font-size: 15px;
+    font-weight: 700;
+    min-height: 44px;
+  }
+  .reader .sections.open {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    flex-direction: row;
+    gap: 0 18px;
+    width: 100%;
+    border-top: 1px solid var(--grid);
+  }
+  .reader .sections.open a {
+    min-height: 44px;
+    padding: 12px 0;
+    font-size: 15px;
+  }
+  .reader .sections a.active {
+    background: transparent;
+    box-shadow: inset 4px 0 0 var(--yel);
+  }
+  .reader .lead h2.leadhead {
+    font-size: 32px;
+    letter-spacing: -1.1px;
+  }
+  .reader .lead .dek {
+    font-size: 18px;
+  }
+  .reader .ledgerow > .lead,
+  .reader .ledgerow > .datespanel {
+    padding: 24px var(--px) 26px;
+  }
+  .reader .datespanel h2,
+  .reader .regioncol .sectionhead h2,
+  .reader .river .sectionhead h2,
+  .reader .opinionpanel h2,
+  .reader .keepreading .sectionhead h2 {
+    font-size: 24px;
+  }
+  /* One story per row on the smallest screens, and only the first four: a
+     single-column river of six would push everything after it off the page. */
+  .reader .storygrid,
+  .reader .storygrid.cols-3,
+  .reader .storygrid.cols-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .storygrid > :nth-child(n) {
+    padding-inline: var(--px);
+  }
+  .reader .storygrid > :nth-child(n + 5) {
+    display: none;
+  }
+  .reader .storycell {
+    padding-block: 22px 24px;
+  }
+  .reader .keepreadinggrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reader .keepreadinggrid > :nth-child(n) {
+    padding-inline: var(--px);
+  }
+  .reader .backmatter {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .reader .articlehead h1 {
+    font-size: 34px;
+    letter-spacing: -1.2px;
+  }
+  .reader .articlehead .dek {
+    font-size: 19px;
+  }
+  .reader .bylinebar {
+    padding: 12px 0;
+    margin: 20px 0 24px;
+  }
+  .reader .contents {
+    position: static;
+    top: auto;
+  }
+  .reader .articleaside {
+    display: block;
+    position: static;
+  }
+  .reader footer {
+    padding: 32px 0 22px;
+  }
+  .reader footer .footergrid .brand,
+  .reader footer .brand {
+    font-size: 28px;
+  }
+}
+@media (max-width: 560px) {
+  .reader .lead h2.leadhead {
+    font-size: 30px;
+  }
+  .reader .datenum {
+    font-size: 21px;
+  }
+  .reader .evidence .evidencehead h2 {
+    font-size: 27px;
+  }
+  .reader .articlehead h1 {
+    font-size: 32px;
+  }
+}
+/* Anchors the jump list points at have to clear nothing more than the gap
+   below the byline bar, but they must not land under it either. */
+.reader .articlebody [id],
+.reader .sources[id],
+.reader .keepreading[id] {
+  scroll-margin-top: 24px;
 }

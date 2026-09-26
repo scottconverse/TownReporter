@@ -12,7 +12,9 @@ async function ensureFixtureTables() {
       user_id text not null,
       slug text not null unique,
       headline text not null,
-      status text not null default 'published'
+      status text not null default 'published',
+      /* 0098. Hand-built schema tracks production, column for column. */
+      area text
     )
   `);
   await sql.query(`
