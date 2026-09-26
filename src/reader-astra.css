@@ -104,10 +104,25 @@
 .reader p {
   margin: 0;
 }
+/*
+  HEADLINES ARE 700 OR 800, NEVER 500 (0.6.71).
+
+  This was a blanket `font-weight: 500` on every heading in the reader, and it
+  is the bug the handoff's typography table names: the front-page lead computed
+  500 because nothing more specific had claimed it, and so did the masthead,
+  the section heads and every grid headline. Bricolage at 500 is the UI weight
+  -- labels, buttons, nav -- and a headline set in it reads as a caption.
+
+  The redesign's scale (design-system/README.md §4) asks for two: 800 for the
+  display sizes (masthead, lead, section head, article h1) and 700 for the
+  smaller headline set (grid and story cells, opinion). 800 is the default
+  here so a heading that forgets to say still lands on a display weight; the
+  700s are named rule by rule in `paper-daily.css`.
+*/
 .reader h1,
 .reader h2,
 .reader h3 {
-  font-weight: 500;
+  font-weight: 800;
 }
 .reader p {
   line-height: 1.65;

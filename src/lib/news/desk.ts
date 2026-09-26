@@ -27,6 +27,7 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
+import { cleanStoryArea } from "../story-area.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
@@ -2955,6 +2956,20 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     not file under, and printing either one on their behalf would be a guess.
   */
   sectionFromEditor?: string,
+  /*
+    The ground this story stands on, as the editor chose it on the publish step
+    (0.6.71). One of the four keys the paper's geography pills read, or absent.
+
+    Absent is not an error and is not a second decision to make: it means no
+    area was shown to the editor, and a story with no recorded area reads as the
+    home town -- the owner's rule (2026-09-26) and the same fallback every story
+    printed before 0098 gets. So a scripted call, an older client and "the
+    editor left the select alone" all land on the home town rather than refusing
+    the print. A value that is not one of the four keys is dropped for the same
+    reason the clean-up helper drops it: the column is not the place to discover
+    a typo.
+  */
+  areaFromEditor?: string,
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
   const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
   const already = await getSql().then(
@@ -3044,6 +3059,8 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   */
   const confirmedTopic = parseNotes(notesRows[0]?.notes_json).topicConfirmation;
   const draftTopic = String(row.topic ?? "").trim();
+  /* `null` for anything that is not one of the four keys, including absent. */
+  const area = cleanStoryArea(areaFromEditor);
   const editorTopic = String(sectionFromEditor ?? "").trim();
   if (editorTopic && editorTopic !== draftTopic) {
     return {
@@ -3202,7 +3219,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
-        provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text
+        provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text, area
       )
       values (
         ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
@@ -3211,7 +3228,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         /* The line the editor chose on the import screen, carried on the draft.
            Empty for every story the desk wrote, which prints the standard AI
            line exactly as before. */
-        ${row.disclosure_text || ""}
+        ${row.disclosure_text || ""},
+        /* The geography pill this story answers to. NULL is the home town on the
+           paper, which is the rule for the whole pre-0098 archive too -- see
+           story-area.ts, which owns the four keys. */
+        ${area}
       ) returning id
     `;
       await recordPublishedMeetingEvidence(sql, {
@@ -3275,12 +3296,16 @@ export const publishLead = createServerFn({ method: "POST" })
     0.6.67: the request may also carry `topic`, the section the desk's Publish
     button showed. The bare id every older caller sends is still accepted, and
     an absent topic means "unconfirmed", never "confirmed blank".
+
+    0.6.71: it may also carry `area`, the geography the publish step chose.
+    Absent means the home town, which is where every story printed before 0098
+    already sits -- so an older client is not a client that prints wrong.
   */
   .validator((raw: unknown) => cleanPublishRequest(raw))
   .handler(async ({ context, data }) =>
     data.leadId === null
       ? { ok: false as const, error: "There is no such story." }
-      : performPublish(context, data.leadId, data.topic),
+      : performPublish(context, data.leadId, data.topic, data.area),
   );
 
 /**

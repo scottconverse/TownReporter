@@ -204,7 +204,7 @@ async function ensureSchema() {
     lead_id integer, headline text, dek text default '', body text not null, topic text not null,
     source_urls text default '[]', provenance_json text default '[]', disclosure_text text not null default '',
     research_json text default '{}', updated_at timestamptz default now())`);
-  await sql.query(`create table if not exists articles (id serial primary key, newsroom_id integer)`);
+  await sql.query(`create table if not exists articles (id serial primary key, newsroom_id integer, area text)`);
   return sql;
 }
 
