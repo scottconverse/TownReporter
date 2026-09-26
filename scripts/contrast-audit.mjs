@@ -73,7 +73,7 @@ function resolveHex(value) {
 
 /** The named desk tokens (--bg, --fg, --mut, ...), resolved to hex, per theme. */
 function deskTokens(overrideVars) {
-  const names = ["bg", "bg2", "fg", "fg2", "mut", "line", "a", "adeep", "warn"];
+  const names = ["bg", "bg2", "fg", "fg2", "mut", "line", "a", "adeep", "sel", "ok", "warn", "danger"];
   const out = {};
   for (const name of names) {
     const raw = overrideVars.has(name) ? overrideVars.get(name) : deskLightVars.get(name);
@@ -127,24 +127,37 @@ const PAIRS = [
   { fg: "fg2", bg: "bg", label: ".lead-why / .side-why / .worth-line / text-ink-2, on page bg", kind: "text", size: "normal" },
   { fg: "fg2", bg: "bg2", label: "fg2 text inside a bg2 panel", kind: "text", size: "normal" },
   { fg: "fg", bg: "bg", label: "primary body/heading text (.h1, .sec-title, default)", kind: "text", size: "normal" },
-  { fg: "warn", bg: "bg", label: ".chip.st-killed / .warn-inline / .wire-warn, on page bg", kind: "text", size: "normal" },
+  { fg: "warn", bg: "bg", label: ".warn-inline / .wire-warn / .chip.dnp / .note-gate -- attention, on page bg", kind: "text", size: "normal" },
+  { fg: "danger", bg: "bg", label: ".chip.st-killed / .screen-error-message / .note.err / .of-stop.err -- failure, on page bg", kind: "text", size: "normal" },
+  { fg: "ok", bg: "bg", label: ".chip.st-published, on page bg", kind: "text", size: "normal" },
   { fg: "adeep", bg: "bg", label: ".chip.st-drafted / .kick / .inline-link / .np-link, on page bg", kind: "text", size: "normal" },
-  { fg: "a", bg: "bg", label: "a:hover / .nav-item.on underline color, on page bg", kind: "ui", size: "large" },
-  { fg: "bg", bg: "fg", label: "inverted solid buttons/chips (.btn.solid, .nav-dark, .seg-opt.on, .chip.st-published, .filter.on)", kind: "text", size: "normal" },
-  { fg: "bg", bg: "warn", label: ".btn.danger.solid (Yes, delete / Yes, do it) -- bg text on warn fill", kind: "text", size: "normal" },
+  // This row used to check `--a` on `--bg`, which is 1.42:1 in light (yellow on
+  // cream) and was reported as a FAIL. Nothing paints it any more: every
+  // indicator that has to be seen reads `--sel` (ink in light, gold in dark),
+  // which is the whole reason `--sel` exists as a token. The audit follows the
+  // CSS rather than the old name.
+  { fg: "sel", bg: "bg", label: "accent-colored native controls (accent-color on checkboxes /.document-progress) and the current-step marks, on page bg", kind: "ui", size: "large" },
+  { fg: "bg", bg: "fg", label: "inverted ink fills (.nav-dark, .seg-opt.on) -- the two that survived the redesign's move of .btn.solid to the yellow", kind: "text", size: "normal" },
+  { fg: "bg", bg: "danger", label: ".btn.danger.solid (Yes, delete / Yes, do it) -- bg text on the danger fill", kind: "text", size: "normal" },
   { fg: "line", bg: "bg", label: "hairline borders (.rule1, .chip border, .sechead) -- decorative dividers, not asserted", kind: "decorative", size: "large" },
-  { fg: "warn", bg: "bg2", label: ".notice-err text on the notice's bg2 panel", kind: "text", size: "normal" },
-  { fg: "adeep", bg: "bg2", label: ".notice-warn text on the notice's bg2 panel", kind: "text", size: "normal" },
-  { fg: "fg", bg: "bg2", label: ".notice-ok text on the notice's bg2 panel", kind: "text", size: "normal" },
+  // Notice (states.tsx) carries the README's three shapes: ok is a solid 1px
+  // `--ok`, err is 2px dashed `--danger`, warn is solid 2px `--warn` (amber).
+  // All three sit on the notice's own `--bg2` panel, which is what these rows
+  // check -- the shape is not contrast, but the colour still has to be legible.
+  { fg: "danger", bg: "bg2", label: ".notice-err text on the notice's bg2 panel", kind: "text", size: "normal" },
+  { fg: "warn", bg: "bg2", label: ".notice-warn text on the notice's bg2 panel", kind: "text", size: "normal" },
+  { fg: "ok", bg: "bg2", label: ".notice-ok text on the notice's bg2 panel", kind: "text", size: "normal" },
 ];
 
-// score.hot is a special case: white text in light mode, but the dark desk's
-// lighter accent (--n-a) forces a swap to dark ink (see the override next to
-// `.score.hot` in styles.css) -- checked directly rather than through a
-// named desk token pair.
+// score.hot is a special case: the number sits on the accent FILL, and text on
+// the yellow is #111 in both themes (styles.css `.score.hot`, and the same
+// answer for the primary button and the `new` chip). #111 is ~13:1 on #ffd23f
+// and ~11:1 on #e6c35c; white would be 1.7:1 and the dark theme's own ground
+// 1.5:1, which is why this is checked as its own pair rather than through a
+// named desk token.
 const SCORE_HOT = {
-  light: { fg: "#ffffff", bg: light.a },
-  dark: { fg: dark.bg, bg: dark.a },
+  light: { fg: "#111111", bg: light.a },
+  dark: { fg: "#111111", bg: dark.a },
 };
 
 // ── Compute + report ─────────────────────────────────────────────────────
@@ -226,6 +239,7 @@ const SCREEN_PAGE_PAIRS = [
   { fg: "mut", label: 'ScreenPending hint ("Setting type...") and meta' },
   { fg: "adeep", label: "ScreenPending kicker (EDITOR DESK) and links" },
   { fg: "warn", label: "ScreenPending error copy (.warn-inline)" },
+  { fg: "danger", label: "error copy on the pending/error screens (.screen-error, .notice-err)" },
   { fg: "color-danger", label: "error-component.tsx danger text (text-danger)" },
 ];
 
@@ -253,15 +267,17 @@ test("the pending/error screens meet WCAG AA on the desk's dark palette", () => 
     "these pending/error-screen pairings fail WCAG AA contrast for readable text",
   );
   // The palette really is the desk's dark one, not the letterpress black this
-  // screen used to paint -- and the parse found the rule at all.
-  assert.equal(bgHex.toLowerCase(), "#182024");
+  // screen used to paint, and not the blue-black it painted between those two
+  // -- and the parse found the rule at all. Since the redesign the desk's dark
+  // and this screen's dark are the same warm black, which is the point.
+  assert.equal(bgHex.toLowerCase(), "#1b1916");
   assert.equal(rows.length, SCREEN_PAGE_PAIRS.length);
 });
 
 test("desk tokens parsed from styles.css are the ones the CSS actually declares", () => {
   // A change to a hex value in styles.css should move this audit's numbers
   // without anyone touching this file -- sanity-check the parse itself.
-  assert.equal(light.bg.toLowerCase(), "#f6f1e7");
-  assert.equal(dark.bg.toLowerCase(), "#000000");
+  assert.equal(light.bg.toLowerCase(), "#fffdf7");
+  assert.equal(dark.bg.toLowerCase(), "#1b1916");
   assert.equal(dark.mut.toLowerCase(), dark.fg2.toLowerCase());
 });

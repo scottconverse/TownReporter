@@ -53,7 +53,7 @@ const onServer = () => false;
  *
  * The provider's attribute write has to land BEFORE the browser paints, or a
  * client-side navigation shows one frame of the outgoing page's surface --
- * dark desk to light article repaints as a #182024 body behind a light reader
+ * dark desk to light article repaints as a #1b1916 body behind a light reader
  * panel, and desk to desk keeps the outgoing palette for the frame the new
  * route is being committed. A layout effect runs in the same commit, before
  * paint, so there is no such frame.

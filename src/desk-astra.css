@@ -1,26 +1,60 @@
 /* Astra editor desk. Deliberately scoped: the public newspaper keeps its design. */
+/*
+  The astra editor desk, on the redesign's tokens
+  (docs/design/handoff-2026-09-26/design-system/tokens/).
+
+  This shell is what an editor actually works in -- deskShellClassName always
+  appends "astra" -- so this palette, not the letterpress one in styles.css, is
+  the desk the redesign is about.
+
+  The ground is the same cream as the paper and the dark is the same warm black
+  (see the `.night` block below): an editor switching the desk to Dark and then
+  opening the paper should not be looking at two different newspapers. The
+  accent is yellow and, as everywhere else, it is a FILL only -- `--adeep`,
+  which every accent-text rule in this file now reads, is ink.
+
+  `--fd`/`--fb` are the tokens' `--font-display`/`--font-body` verbatim:
+  Bricolage Grotesque does the talking, Literata does the reading. This shell
+  used to be Georgia plus the Windows UI sans, which is the one thing the
+  redesign is most visibly not.
+*/
 .desk-ltr.astra {
-  --bg: #f6f7f8;
-  --bg2: #eef1f2;
-  --surface: #fff;
-  --fg: #202a30;
-  --fg2: #44535c;
-  --mut: #637078;
-  --line: #dce2e5;
-  --a: #155b60;
-  --adeep: #10484c;
-  --accent-soft: #e4f0ed;
-  --warn: #a63e38;
-  --hover: #e8eded;
-  --fd: Georgia, "Times New Roman", serif;
-  --fb: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --bg: #fffdf7;
+  --bg2: #f6f2e7;
+  --surface: #f6f2e7;
+  --fg: #111111;
+  --fg2: #3a3a3a;
+  --mut: #3a3a3a;
+  --line: #d8d3c4;
+  --a: #ffd23f;
+  --adeep: #111111;
+  --sel: #111111;
+  --ok: #1e6b34;
+  --accent-soft: #f6f2e7;
+  /* Attention (amber) and danger (red) are two colours in the design tokens,
+     not one -- see the `.desk-ltr` block in styles.css for the full note. */
+  --warn: #8a4b00;
+  --danger: #b3261e;
+  --hover: #f6f2e7;
+  --fd: "Bricolage Grotesque", system-ui, sans-serif;
+  --fb: "Literata", Georgia, serif;
   --color-ink: var(--fg);
   --color-ink-2: var(--fg2);
   --color-paper: var(--surface);
   --color-paper-2: var(--bg2);
   --color-muted: var(--mut);
   --color-rule: var(--line);
-  --color-rust: var(--warn);
+  /*
+     `rust` is the one old-brand name the redesign kept in the markup: ~40 desk
+     sites read `text-rust` and almost all of them are failures ("Could not read
+     the server", "Could not read the stats"), so it has to keep following the
+     failure colour. It used to be `var(--warn)`, which was the danger red back
+     when the desk had a single alert token; now that `--warn` is the design's
+     amber, rust follows `--danger` instead. That also settles the theme
+     automatically -- the night block above redefines `--danger`, and a var()
+     reference is substituted on the element, so rust is red in both.
+  */
+  --color-rust: var(--danger);
   --font-display: var(--fd);
   --font-serif: var(--fb);
   display: grid;
@@ -47,7 +81,7 @@
   the server it cannot: it is the reason the desk arrived light and flipped
   dark a paint later. `:root[data-appearance="desk-dark"]` is stamped on <html>
   by the inline <head> script before the first paint, from the same
-  localStorage, so the first frame is already this palette. #182024 is the
+  localStorage, so the first frame is already this palette. #1b1916 is the
   desk's dark, and it is also what `DESK_NIGHT_BG` in src/lib/appearance.ts
   reports to the `<meta name="theme-color">` update -- if either colour moves,
   the test in src/lib/appearance.test.ts fails rather than the address bar
@@ -55,18 +89,21 @@
 */
 .desk-ltr.astra.night,
 :root[data-appearance="desk-dark"] .desk-ltr.astra {
-  --bg: #182024;
-  --bg2: #1c262b;
-  --surface: #222c31;
-  --fg: #edf2f3;
-  --fg2: #c1cdd1;
-  --mut: #a7b5ba;
-  --line: #39474d;
-  --a: #8bcac3;
-  --adeep: #a4dad4;
-  --accent-soft: #283f40;
-  --hover: #304046;
-  --warn: #f3a19b;
+  --bg: #1b1916;
+  --bg2: #27231f;
+  --surface: #27231f;
+  --fg: #e8e6e1;
+  --fg2: #bdbab3;
+  --mut: #bdbab3;
+  --line: #3b3631;
+  --a: #e6c35c;
+  --adeep: #e8e6e1;
+  --sel: #e6c35c;
+  --ok: #9fd4a8;
+  --accent-soft: #27231f;
+  --hover: #27231f;
+  --warn: #f0b27a;
+  --danger: #f0998c;
   color-scheme: dark;
 }
 /*
@@ -75,7 +112,7 @@
   page of Normal type that reflowed a paint in.
 */
 :root[data-desk-size="large"] .desk-ltr.astra {
-  --ts: 1.125;
+  --ts: 1.2;
 }
 .desk-ltr.astra * {
   box-sizing: border-box;
@@ -91,8 +128,8 @@
   touch-action: manipulation;
 }
 .desk-ltr.astra :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
-  outline: 3px solid #4d939d;
-  outline-offset: 3px;
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 .desk-ltr.astra :is(button, summary) {
   cursor: pointer;
@@ -184,7 +221,7 @@
   gap: 12px;
   text-decoration: none;
   padding: 10px 13px;
-  border-radius: 8px;
+  border-radius: 0;
   margin: 2px 0;
   min-height: 44px;
   font-weight: 500;
@@ -197,7 +234,7 @@
   color: var(--fg);
 }
 .desk-ltr.astra .astra-nav.active {
-  color: var(--a);
+  color: var(--adeep);
   background: var(--accent-soft);
   font-weight: 650;
 }
@@ -269,7 +306,7 @@
   text-decoration: none;
 }
 .desk-ltr.astra .astra-breadcrumb > a:hover {
-  color: var(--a);
+  color: var(--adeep);
   text-decoration: underline;
 }
 .desk-ltr.astra .astra-top-actions {
@@ -292,7 +329,7 @@
 .desk-ltr.astra kbd {
   font: 400 calc(14px * var(--ts)) var(--fb);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 2px 5px;
 }
 .desk-ltr.astra .astra-icon {
@@ -303,7 +340,7 @@
   justify-content: center;
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   color: var(--fg);
   flex-shrink: 0;
 }
@@ -318,7 +355,7 @@
   min-height: 40px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--surface);
   color: var(--fg);
   font-size: calc(14px * var(--ts));
@@ -353,7 +390,7 @@
   font: 650 calc(14px * var(--ts)) var(--fb);
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: var(--a);
+  color: var(--adeep);
   margin: 0 0 12px;
 }
 .desk-ltr.astra .h1 {
@@ -391,54 +428,68 @@
   font-size: calc(16px * var(--ts));
   letter-spacing: -0.2px;
 }
+/*
+  One button family (design-system/components/core/Button.jsx, README section
+  6). Square corners, a 2px emphasis border, a 44px floor, and a YELLOW primary
+  with #111 on it.
+
+  Three things the old shell did are gone because the redesign forbids them: the
+  8px radius on every control, the drop shadow that appeared on hover, and the
+  teal-filled primary whose on-colour had to be re-specified per theme. The
+  primary is now the same yellow in both themes and its text is always #111 --
+  one rule, no theme branch, and it is the only colour that clears AA on
+  #ffd23f (12.1:1) and on #e6c35c (9.9:1).
+*/
 .desk-ltr.astra :is(.btn, .document-add-button) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 15px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+  border: 2px solid var(--fg);
+  border-radius: 0;
+  background: transparent;
   color: var(--fg);
-  font: 600 calc(14px * var(--ts))/1.4 var(--fb);
+  font: 700 calc(15px * var(--ts))/1.4 var(--fd);
   text-decoration: none;
-  transition:
-    background 0.15s,
-    box-shadow 0.15s;
+  transition: background var(--motion-fast);
   white-space: normal;
   text-align: center;
 }
 .desk-ltr.astra :is(.btn, .document-add-button):hover:not(:disabled) {
   background: var(--hover);
-  box-shadow: 0 2px 7px #172e3909;
   color: var(--fg);
 }
 .desk-ltr.astra :is(.btn.solid, .document-add-button) {
   background: var(--a);
   border-color: var(--a);
-  color: var(--surface);
+  color: #111;
+  font-weight: 800;
 }
 .desk-ltr.astra.night :is(.btn.solid, .document-add-button) {
-  color: #17282a;
+  color: #111;
 }
 .desk-ltr.astra :is(.btn.solid, .document-add-button):hover:not(:disabled) {
-  background: var(--adeep);
-  color: var(--surface);
+  background: color-mix(in srgb, var(--a) 88%, #111);
+  color: #111;
 }
 .desk-ltr.astra .btn.quiet {
-  border-color: transparent;
+  border: 1px solid var(--line);
   background: transparent;
-  color: var(--a);
+  color: var(--fg);
 }
 .desk-ltr.astra .btn.danger {
-  border-color: var(--warn);
-  color: var(--warn);
-  background: var(--surface);
+  border: 2px solid var(--danger);
+  color: var(--danger);
+  background: transparent;
+}
+.desk-ltr.astra .btn.gated {
+  border: 2px dashed var(--line);
+  color: var(--fg2);
 }
 .desk-ltr.astra .btn.solid.danger {
-  background: var(--warn);
+  background: var(--danger);
   color: var(--surface);
 }
 .desk-ltr.astra .btn.small {
@@ -451,7 +502,7 @@
   background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 0;
   padding: 11px 12px;
   min-height: 42px;
   max-width: 100%;
@@ -467,7 +518,10 @@
   opacity: 0.85;
 }
 .desk-ltr.astra :is(input[type="checkbox"], input[type="radio"]) {
-  accent-color: var(--a);
+  /* --sel, not --a: a native control paints this colour itself, and a
+     yellow tick on the cream ground is 1.42:1 (WCAG 1.4.11 wants 3:1 for a
+     non-text indicator). --sel is ink in light and gold in dark. */
+  accent-color: var(--sel);
   min-width: 17px;
   min-height: 17px;
 }
@@ -493,7 +547,7 @@
 .desk-ltr.astra .file-form {
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 16px 20px;
   margin: 0 0 20px;
 }
@@ -502,7 +556,7 @@
   min-height: 28px;
   line-height: 28px;
   font: 600 calc(14px * var(--ts))/28px var(--fb);
-  color: var(--a);
+  color: var(--adeep);
 }
 .desk-ltr.astra .file-form[open] summary {
   margin-bottom: 18px;
@@ -526,10 +580,19 @@
   text-transform: none;
   min-height: 44px;
 }
+/*
+  The three "you are here / this is filled" rules. `.filter.on` marks the
+  current step, which is a nav state and not an accent: it reads `--sel` (ink in
+  light, gold in dark), the same token the desk's active nav rows use, so the
+  step you are on is legible at 15px. The badge and the waiting count are yellow
+  FILLS, and text on yellow is #111 in both themes -- #111 is 12.1:1 on #ffd23f
+  and 9.9:1 on #e6c35c, where the theme's own ground would be 1.42:1 and 1.6:1.
+  Same rule as .score.hot and the primary button.
+*/
 .desk-ltr.astra .filter.on {
-  color: var(--a);
+  color: var(--fg);
   background: none;
-  border-bottom-color: var(--a);
+  border-bottom-color: var(--sel);
   font-weight: 650;
 }
 /*
@@ -542,42 +605,49 @@
   display: inline-block;
   min-width: 1.6em;
   padding: 2px 6px;
-  border-radius: 99px;
+  border-radius: 0;
   background: var(--accent-soft);
-  color: var(--a);
+  color: var(--adeep);
   font: 600 calc(14px * var(--ts))/1.4 var(--fb);
   letter-spacing: 0;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-/* --a flips light-to-dark with the theme, so --bg is the readable ink on it
-   in both (white on #155b60, near-black on #8bcac3) -- white would fail AA
-   in the night desk, the same way it does for .score.hot. */
 .desk-ltr.astra .filter.on .filter-badge {
   background: var(--a);
-  color: var(--bg);
+  color: #111;
 }
 .desk-ltr.astra .filter .filter-badge.waiting {
   background: var(--a);
-  color: var(--bg);
+  color: #111;
   font-weight: 700;
 }
+/*
+  Chips and scores, on the redesign's state colours (README section 6).
+
+  The state colours themselves are set once, in `.desk-ltr .chip.*` in
+  styles.css; this shell only has to stop overriding them with a filled teal
+  pill. A chip here is now the same chip as on every other desk surface: a 1px
+  outline, dashed when the state is not settled, yellow fill only for `new`.
+  The score badge keeps its filled look on the neutral panel ground, so it reads
+  as a number on a card rather than as a second accent.
+*/
 .desk-ltr.astra .chip {
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: var(--accent-soft);
-  color: var(--a);
-  font: 600 calc(14px * var(--ts))/1.5 var(--fb);
+  padding: 1px 8px;
+  border: 1px solid var(--fg2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg2);
+  font: 800 calc(14px * var(--ts))/1.5 var(--fd);
   letter-spacing: 0.3px;
 }
 .desk-ltr.astra .score {
-  border: 0;
+  border: 1px solid var(--line);
   background: var(--accent-soft);
-  color: var(--a);
-  border-radius: 8px;
+  color: var(--fg);
+  border-radius: 0;
   min-width: 36px;
   min-height: 36px;
   display: inline-flex;
@@ -626,7 +696,7 @@
   :is(.story-composer, .recent-story-work, .gc-queue, .gc-darkdesk, .gc-followups, .gc-wire) {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 24px;
   margin: 0;
   min-width: 0;
@@ -677,7 +747,7 @@
   gap: 0;
   padding: 20px 24px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   background: var(--surface);
   margin: 0;
 }
@@ -694,7 +764,7 @@
   border-top: 1px solid var(--line);
   font-size: calc(14px * var(--ts));
   text-decoration: none;
-  color: var(--a);
+  color: var(--adeep);
 }
 .desk-ltr.astra .recent-story-heading {
   display: flex;
@@ -741,7 +811,7 @@
 }
 .desk-ltr.astra .recent-story-status {
   font: 600 calc(14px * var(--ts)) var(--fb);
-  color: var(--a);
+  color: var(--adeep);
   margin-bottom: 5px;
   display: block;
 }
@@ -765,7 +835,7 @@
 .desk-ltr.astra .document-dropzone {
   padding: 22px;
   border: 1.5px dashed #a8bfc1;
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg);
   text-align: left;
   display: grid;
@@ -781,7 +851,7 @@
 .desk-ltr.astra .document-upload-icon {
   grid-column: 1;
   grid-row: 1 / span 2;
-  color: var(--a);
+  color: var(--adeep);
   margin: 6px 0;
 }
 .desk-ltr.astra .document-dropzone h3 {
@@ -807,7 +877,7 @@
 }
 .desk-ltr.astra .document-file-row {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--bg);
   padding: 12px 14px;
   margin-top: 10px;
@@ -824,7 +894,7 @@
 .desk-ltr.astra .document-remove {
   font-size: calc(14px * var(--ts));
   min-height: 36px;
-  color: var(--warn);
+  color: var(--danger);
 }
 .desk-ltr.astra :is(.composer-pasted, .composer-instructions) {
   margin-top: 20px;
@@ -881,14 +951,14 @@
   margin: 0 0 16px;
   background: var(--accent-soft);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--a);
+  border-radius: 0;
+  color: var(--adeep);
   font-family: var(--fb);
 }
 .desk-ltr.astra :is(.lead-list, .pub-list, .scan-hist, .src-sec) {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   overflow: hidden;
 }
 .desk-ltr.astra .gc-queue .lead-list {
@@ -961,7 +1031,7 @@
 .desk-ltr.astra .scan-bar {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 24px;
   margin: 20px 0;
   gap: 20px;
@@ -970,7 +1040,7 @@
 .desk-ltr.astra .scan-result {
   background: var(--accent-soft);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 24px;
   margin: 24px 0;
 }
@@ -1008,7 +1078,7 @@
   min-width: 0;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   background: var(--surface);
   position: sticky;
   top: 92px;
@@ -1036,7 +1106,7 @@
 }
 .desk-ltr.astra .astra-inspector-tabs button[aria-selected="true"] {
   border-bottom-color: var(--a);
-  color: var(--a);
+  color: var(--adeep);
   font-weight: 650;
 }
 .desk-ltr.astra .astra-inspector > section {
@@ -1076,7 +1146,7 @@
   flex-wrap: wrap;
   padding: 16px 18px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--surface);
   margin: 0;
   position: relative;
@@ -1094,7 +1164,7 @@
   margin-top: 14px;
   padding: 22px;
   border: 1px solid var(--a);
-  border-radius: 12px;
+  border-radius: 0;
   background: var(--surface);
   scroll-margin-top: 92px;
 }
@@ -1138,7 +1208,7 @@
   width: 100%;
   border: 1px solid var(--line);
   border-left: 4px solid var(--a);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 18px 20px;
   background: var(--accent-soft);
   color: var(--fg);
@@ -1187,7 +1257,7 @@
 .desk-ltr.astra .evidence-check-compare article {
   min-width: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   background: var(--bg2);
 }
@@ -1212,7 +1282,7 @@
 }
 .desk-ltr.astra .evidence-check-findings pre {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 0;
 }
 .desk-ltr.astra .evidence-check-decisions {
   display: flex;
@@ -1223,7 +1293,7 @@
 .desk-ltr.astra .work-form {
   padding: 32px 38px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   background: var(--surface);
   margin: 0;
 }
@@ -1265,14 +1335,16 @@
   containing it; `aria-describedby` on the textarea is then what the screen
   reader reads, and it names the same short word.
 
-  Contrast, measured on the pairs the desk actually paints: --a on --bg2 is
-  6.8:1 in the light palette (#155b60 on #eef1f2) and 8.3:1 in the dark one
-  (#8bcac3 on #1c262b), both over AA for text this size.
+  Contrast, measured on the pairs the desk actually paints: --adeep on --bg2 is
+  16.9:1 in the light palette (#111111 on #f6f2e7) and 12.5:1 in the dark one
+  (#e8e6e1 on #27231f), both far over AA for text this size. The hint is accent
+  TEXT, so it reads --adeep and never --a: the yellow is a fill, and 1.42:1 is
+  not text.
 */
 .desk-ltr.astra .astra-headline-box {
   position: relative;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg2);
   padding: 10px 78px 10px 12px;
   transition: border-color 120ms ease, background-color 120ms ease;
@@ -1292,7 +1364,7 @@
   font-weight: 700;
   letter-spacing: 0.7px;
   text-transform: uppercase;
-  color: var(--a);
+  color: var(--adeep);
   pointer-events: none;
 }
 .desk-ltr.astra .astra-headline-actions {
@@ -1317,7 +1389,7 @@
   text-align: left;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--surface);
   color: var(--fg);
   font-family: var(--fd);
@@ -1369,7 +1441,7 @@
 }
 .desk-ltr.astra .astra-settings-nav button {
   border: 0;
-  border-radius: 7px;
+  border-radius: 0;
   padding: 12px;
   text-align: left;
   background: none;
@@ -1382,16 +1454,16 @@
 }
 .desk-ltr.astra .astra-settings-nav button[aria-current="page"] {
   background: var(--surface);
-  color: var(--a);
+  color: var(--fg);
   font-weight: 650;
-  box-shadow: 0 1px 4px #00000008;
+  border-left: var(--state-bar) solid var(--sel);
 }
 .desk-ltr.astra .astra-settings-body {
   min-width: 0;
   max-width: 960px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 26px;
 }
 .desk-ltr.astra .astra-settings-body > div > :first-child {
@@ -1404,12 +1476,12 @@
 }
 .desk-ltr.astra[data-desk-page="stats"] main > section {
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   background: var(--surface);
   padding: 24px;
 }
 .desk-ltr.astra[data-desk-page="stats"] li.border {
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg);
   padding: 20px;
 }
@@ -1426,19 +1498,21 @@
   :is(.op-compose, .op-form, .op-list, .ed-compose, .editorial-form) {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 24px;
 }
 .desk-ltr.astra :is(.op-row, .ed-row) {
   border-bottom: 1px solid var(--line);
   padding: 24px;
 }
+/* The one place the redesign allows a shadow (tokens/spacing.css,
+   `--shadow-dialog`), plus the scrim that dims the page behind it. */
 .desk-ltr.astra .astra-dialog {
-  background: var(--surface);
+  background: var(--bg2);
   color: var(--fg);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  box-shadow: 0 30px 100px #0003;
+  border: 2px solid var(--fg);
+  border-radius: 0;
+  box-shadow: var(--shadow-dialog);
   padding: 0;
   width: min(640px, calc(100vw - 32px));
   max-height: 88dvh;
@@ -1479,7 +1553,7 @@
   gap: 16px;
   padding: 15px 12px;
   text-decoration: none;
-  border-radius: 8px;
+  border-radius: 0;
   color: var(--fg);
   font-size: calc(14px * var(--ts));
 }
@@ -1603,8 +1677,10 @@
     position: fixed;
     left: -255px;
     width: 240px;
-    transition: left 0.18s;
-    box-shadow: 0 12px 40px #172e3922;
+    transition: left var(--motion-fast);
+    /* No drop shadow: the redesign allows exactly one, on dialogs. The drawer
+       separates from the page with its own rule instead. */
+    border-right: 1px solid var(--line);
   }
   .desk-ltr.astra .astra-sidebar.is-open {
     left: 0;
@@ -1733,14 +1809,6 @@
 .desk-ltr.astra .desk-home > * {
   order: 0;
 }
-.desk-ltr.astra .nightpanel.gc-darkdesk {
-  --bg: var(--surface);
-  --fg: inherit;
-  --fg2: var(--mut);
-  --a: var(--adeep);
-  --line: #dce2e5;
-  color: inherit;
-}
 .desk-ltr.astra .nightpanel.gc-darkdesk :is(.np-kind, .np-meta, .np-n, .worth-sub) {
   color: var(--mut);
   font-family: var(--fb);
@@ -1760,7 +1828,7 @@
 .desk-ltr.astra #draft-batch {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 24px;
   margin: 22px 0;
   display: grid;
@@ -1787,7 +1855,7 @@
 .desk-ltr.astra[data-desk-page="opinion"] main > section {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 26px;
   margin: 22px 0;
 }
@@ -1802,16 +1870,18 @@
 }
 .desk-ltr.astra[data-desk-page="dark"] :is(.tipbox.top, .nightpanel, .deskfile, .of-grid) {
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   background: var(--surface);
   padding: 22px;
 }
 .desk-ltr.astra[data-desk-page="dark"] .nightpanel {
   --bg: var(--surface);
-  --fg: #edf2f3;
-  --fg2: #c1cdd1;
-  --a: #8bcac3;
-  --line: #39474d;
+  --fg: #e8e6e1;
+  --fg2: #bdbab3;
+  --a: #e6c35c;
+  --adeep: #e8e6e1;
+  --sel: #e6c35c;
+  --line: #3b3631;
 }
 .desk-ltr.astra[data-desk-page="dark"] .tipbox.top {
   margin: 0 0 24px;
@@ -1885,37 +1955,46 @@
 .desk-ltr.astra .story-composer-heading .composer-kicker {
   font: 650 calc(14px * var(--ts)) var(--fb);
   letter-spacing: 1.5px;
-  color: var(--a);
+  color: var(--adeep);
 }
+/* The composer scopes its own palette, so a light panel can sit inside a night
+   desk (and the reverse). Same tokens as the shell it is on, so the panel is
+   the same newspaper as the page around it. */
 .desk-ltr.astra .nightpanel.gc-darkdesk {
-  --bg: #fff;
-  --bg2: #eef1f2;
-  --fg: #202a30;
-  --fg2: #44535c;
-  --mut: #637078;
-  --a: #155b60;
-  --adeep: #10484c;
-  --line: #dce2e5;
-  --warn: #a63e38;
+  --bg: #fffdf7;
+  --bg2: #f6f2e7;
+  --fg: #111111;
+  --fg2: #3a3a3a;
+  --mut: #3a3a3a;
+  --a: #ffd23f;
+  --adeep: #111111;
+  --sel: #111111;
+  --ok: #1e6b34;
+  --line: #d8d3c4;
+  --warn: #8a4b00;
+  --danger: #b3261e;
   color: var(--fg);
   color-scheme: light;
 }
 .desk-ltr.astra.night .nightpanel.gc-darkdesk {
-  --bg: #222c31;
-  --bg2: #1c262b;
-  --fg: #edf2f3;
-  --fg2: #c1cdd1;
-  --mut: #a7b5ba;
-  --a: #8bcac3;
-  --adeep: #a4dad4;
-  --line: #39474d;
-  --warn: #f3a19b;
+  --bg: #1b1916;
+  --bg2: #27231f;
+  --fg: #e8e6e1;
+  --fg2: #bdbab3;
+  --mut: #bdbab3;
+  --a: #e6c35c;
+  --adeep: #e8e6e1;
+  --sel: #e6c35c;
+  --ok: #9fd4a8;
+  --line: #3b3631;
+  --warn: #f0b27a;
+  --danger: #f0998c;
   color-scheme: dark;
 }
 .desk-ltr.astra .story-name-check {
   border: 1px solid var(--line);
   border-left: 3px solid var(--warn);
-  border-radius: 7px;
+  border-radius: 0;
   background: var(--bg);
   padding: 14px;
   margin: 18px 0;
@@ -1958,7 +2037,7 @@
 .desk-ltr.astra #finding-evidence-review {
   scroll-margin-top: 92px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 0;
   padding: 24px;
   background: var(--surface);
   margin-top: 24px;
@@ -1992,7 +2071,7 @@
   margin: 8px 6px 0 0;
 }
 .desk-ltr.astra .astra-settings-body li.border {
-  border-radius: 10px;
+  border-radius: 0;
 }
 
 .desk-ltr.astra .astra-sidebar-close {
