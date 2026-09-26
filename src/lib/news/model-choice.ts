@@ -18,7 +18,7 @@ import {
   type PickerProviderId,
   type ProviderSurface,
 } from "./provider-registry.ts";
-import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
+import { LOCAL_MODEL_UNCONFIGURED, localServerName } from "./preflight.ts";
 
 export type ModelChoiceOption = {
   value: StoryModelChoice;
@@ -417,7 +417,7 @@ export function opinionProviderProblem(
  * model-picker.tsx so it can be unit-tested directly: this repo has no
  * component-rendering test harness (no jsdom/testing-library dependency,
  * and `node --test`'s type-stripping cannot parse JSX), so the picker's
- * render behaviour is pinned here instead of through a DOM assertion.
+ * render behavior is pinned here instead of through a DOM assertion.
  */
 export function localModelOptionLabel(model: {
   id: string;
@@ -439,4 +439,106 @@ export function localModelOptionLabel(model: {
     .filter(Boolean)
     .join(" · ");
   return suffix ? `${model.id} · ${suffix}` : model.id;
+}
+
+/*
+  ---------------------------------------------------------------------------
+  Unit BB: showing what is loaded, and never loading a model
+  ---------------------------------------------------------------------------
+*/
+
+/**
+ * The stored value behind the picker's first local option, "Use whatever is
+ * loaded".
+ *
+ * It is a sentinel -- `*` in both halves of the pick, the same shape every
+ * other pick has -- rather than a new column or a new table: `base_url` and
+ * `model_id` in `newsroom_local_model_choices` are plain `text not null` with
+ * no value constraint, and `cleanLocalModelInput` (request-input.ts) stores
+ * any two non-empty strings. So no migration, and `readProviderOverrides` /
+ * `resolveLocalModelChoice` recognize it here and resolve it to a real model
+ * before it can reach a call. Nothing that talks to a server ever sees `*`.
+ *
+ * `*` also survives the picker's own `split(" ")` round trip as the option
+ * value `"* *"`, and cannot collide with a stored pick: a real one always has
+ * a server address in `baseUrl`.
+ */
+export const USE_LOADED_LOCAL_MODEL = "*";
+
+/** What the option says. Deliberately a sentence, not a model id. */
+export const USE_LOADED_LOCAL_MODEL_LABEL = "Use whatever is loaded";
+
+export function isUseLoadedLocalModelPick(
+  pick: { baseUrl?: string | null; id?: string | null } | null | undefined,
+): boolean {
+  return Boolean(pick && pick.baseUrl === USE_LOADED_LOCAL_MODEL && pick.id === USE_LOADED_LOCAL_MODEL);
+}
+
+/**
+ * Item 1: the local option text says which models are loaded, id first.
+ *
+ * The id comes first because that is what an editor is choosing between; the
+ * load state is the qualifier. `loaded === null` (a server that reports no
+ * load state at all) says nothing -- an unknown state is not an unloaded one.
+ */
+export function localModelOptionText(model: { id: string; loaded: boolean | null }): string {
+  return model.loaded === true ? `${model.id} · loaded` : model.id;
+}
+
+/**
+ * Item 1: loaded models first inside each server group, then the rest, by id
+ * within each group. Stable and non-mutating -- the catalog array belongs to
+ * `local-models.ts` and the next refresh re-reads it.
+ */
+export function sortLocalModelsForPicker<T extends { id: string; loaded: boolean | null }>(models: T[]): T[] {
+  const byId = (a: T, b: T) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return models
+    .slice()
+    .sort((a, b) => (a.loaded === true) === (b.loaded === true) ? byId(a, b) : a.loaded === true ? -1 : 1);
+}
+
+/** How the shown pick was arrived at. `resolveLocalModelChoice` owns this. */
+export type LocalModelSource = "stored" | "loaded" | "default";
+
+/**
+ * Item 1's help line, in words: is the shown model loaded now, not loaded, or
+ * a cloud model -- and for the other two sources, which model will actually
+ * run and why.
+ *
+ * The picker renders the selected model's own metadata, so this takes the
+ * catalog entry rather than reaching into `local-models.ts` (which is
+ * `.server.ts` and cannot be imported by a component).
+ */
+export function localModelSelectionHelp(input: {
+  model: { id: string; loaded: boolean | null; cloud: boolean } | null;
+  /** The catalog's kind for the server that model is on, e.g. "lmstudio". */
+  serverKind: string | null;
+  source: LocalModelSource;
+}): string {
+  const server = input.serverKind ? localServerName(input.serverKind) : "the local server";
+
+  if (input.source === "loaded") {
+    return input.model
+      ? `Uses whichever model is loaded when the run starts — currently ${input.model.id}. The desk never loads a model for you.`
+      : "Nothing is loaded in LM Studio or Ollama right now, so a run picked now will stop and say so. The desk never loads a model for you.";
+  }
+
+  if (input.source === "default") {
+    return `Nothing is loaded in LM Studio or Ollama right now, so this run will use ${input.model?.id ?? "the shipped default"} instead. Load a model and pick Use whatever is loaded to run it here.`;
+  }
+
+  const model = input.model;
+  if (!model) return "";
+  if (model.cloud) {
+    return `This model runs on Ollama's hosted service, not on this computer, so nothing needs loading. It needs an internet connection.`;
+  }
+  if (model.loaded === true) {
+    return `This model is loaded in ${server} now, so it answers right away.`;
+  }
+  if (model.loaded === false) {
+    // Same tail as the refusal a run gives (preflight.ts), so the picker and
+    // the error say the same thing about the same situation.
+    return `This model is not loaded in ${server} now, so a run that picks it stops before the call. Load it there, or pick Use whatever is loaded.`;
+  }
+  return `${server} does not report which models are loaded, so TownReporter cannot tell whether this model is in memory. The first call can take a minute or more.`;
 }

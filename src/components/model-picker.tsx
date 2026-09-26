@@ -3,7 +3,13 @@ import {
   FORCED_MODEL_CHOICES,
   OPINION_MODEL_CHOICES,
   STORY_MODEL_CHOICES,
+  USE_LOADED_LOCAL_MODEL,
+  USE_LOADED_LOCAL_MODEL_LABEL,
+  isUseLoadedLocalModelPick,
   localModelOptionLabel,
+  localModelOptionText,
+  localModelSelectionHelp,
+  sortLocalModelsForPicker,
   isCustomModelChoice,
   modelChoiceHelp,
   pickerOptionText,
@@ -135,7 +141,12 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
     mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: { ...picked, scope } }),
     onSuccess: (_result, picked) => {
       qc.invalidateQueries({ queryKey: ["local-model-choice"] });
-      announceToDesk(`Local model set to ${picked.id}.`);
+      // Reading out "set to *" would be the sentinel leaking to an editor.
+      announceToDesk(
+        isUseLoadedLocalModelPick(picked)
+          ? "Local model set to whatever is loaded."
+          : `Local model set to ${picked.id}.`,
+      );
     },
   });
   const refresh = useMutation({
@@ -153,9 +164,18 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   const servers = catalog.data?.servers ?? [];
   const reachable = servers.filter((s) => s.reachable);
   const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
-  const selectedModel = selected
-    ? reachable.find((server) => server.baseUrl === selected.baseUrl)?.models.find((model) => model.id === selected.id)
+  /*
+    Item 2/3: "Use whatever is loaded" is shown by its own first option, not
+    by the model it happens to resolve to right now. The server resolves the
+    sentinel per run (`resolveLocalModelChoice`), so `selected` is still the
+    model that would run THIS minute -- that is what the help line names.
+  */
+  const source = choice.data?.source ?? "stored";
+  const useLoaded = source === "loaded";
+  const selectedServer = selected
+    ? reachable.find((server) => server.baseUrl === selected.baseUrl) ?? null
     : null;
+  const selectedModel = selectedServer?.models.find((model) => model.id === selected?.id) ?? null;
   const notice = choice.data?.notice;
 
   if (catalog.isLoading) return null;
@@ -174,43 +194,64 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
         <>
           <select
             id={selectId}
-            value={selected ? `${selected.baseUrl} ${selected.id}` : ""}
+            value={
+              useLoaded
+                ? `${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`
+                : selected
+                  ? `${selected.baseUrl} ${selected.id}`
+                  : ""
+            }
             onChange={(event) => {
               const [baseUrl, id] = event.target.value.split(" ");
               if (baseUrl && id) save.mutate({ baseUrl, id });
             }}
           >
-            {!selected ? <option value="">Choose a model…</option> : null}
-            {selected && !reachable.some((server) => server.baseUrl === selected.baseUrl && server.models.some((model) => model.id === selected.id))
+            {!selected && !useLoaded ? <option value="">Choose a model…</option> : null}
+            {/* Item 2: the first option, always, before any server group. */}
+            <option
+              value={`${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`}
+              title="Runs whichever model is in memory when the run starts. TownReporter never loads a model for you."
+            >
+              {USE_LOADED_LOCAL_MODEL_LABEL}
+            </option>
+            {selected && !selectedModel
               ? <option value={`${selected.baseUrl} ${selected.id}`}>{selected.id} (currently unavailable)</option>
               : null}
             {reachable.map((server) => (
               <optgroup key={server.baseUrl} label={localServerLabel(server.kind, server.baseUrl)}>
-                {server.models.map((model) => (
+                {sortLocalModelsForPicker(server.models).map((model) => (
                   /*
-                    The id alone: a catalog label is the model id plus up to
-                    four facts ("deepseek-v4.1-flash:cloud · Ollama Cloud ·
-                    1M context · thinking off · vision" measured 465px), which
-                    no select this wide can show -- and the id is the part an
-                    editor is choosing between. The facts stay in the title
-                    and, for the model actually selected, in the help line
-                    directly under this select.
+                    The id plus " · loaded" when it is: the id is the part an
+                    editor is choosing between, and whether it is in memory is
+                    the thing this picker previously hid in a hover title that
+                    a touch screen never shows (Scott, 2026-09-26). The other
+                    facts a catalog label carries ("1M context · thinking off
+                    · vision" measured 465px) stay in the title and, for the
+                    model actually selected, in the help line below.
                   */
                   <option
                     key={model.id}
                     value={`${server.baseUrl} ${model.id}`}
                     title={localModelOptionLabel(model)}
                   >
-                    {model.id}
+                    {localModelOptionText(model)}
                   </option>
                 ))}
               </optgroup>
             ))}
           </select>
           <span className="model-picker-help">
+            {localModelSelectionHelp({
+              model: selectedModel,
+              serverKind: selectedServer?.kind ?? null,
+              source,
+            }) || `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.`}
             {selectedModel?.cloud
-              ? `This model runs on Ollama's hosted service, not on this computer, and may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}${selectedModel.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`
-              : `This model runs on the computer hosting TownReporter. Loaded models answer faster; the first call can take a minute or more.${selectedModel?.vision ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it." : ""}`}
+              ? ` It may use your Ollama allowance${selectedModel.contextLength ? ` · ${selectedModel.contextLength.toLocaleString()}-token context` : ""}. ${modelEffortsFor("local-model", selectedModel.id).includes("none") ? "TownReporter requests thinking off by default for this model." : "This model's thinking behavior is set by the provider; check its output before using it."}`
+              : ""}
+            {selectedModel?.vision
+              ? " Vision means it can read attached images and scanned pages; ordinary web search and extracted text do not need it."
+              : ""}
           </span>
           {notice ? <span className="model-picker-help">{notice}</span> : null}
         </>
