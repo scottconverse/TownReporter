@@ -56,6 +56,13 @@
   */
   --color-rust: var(--danger);
   --font-display: var(--fd);
+  /* Job card status (redesign phase 3). Running and failed reuse the desk's own
+     accent and warn; stalled and done had no equivalent on the desk -- its
+     palette is teal and one red -- so they are added here rather than invented
+     per component. Scoped to .desk-ltr.astra like every other token above: the
+     public paper is untouched. */
+  --job-ok: #1e6b34;
+  --job-warn: #8a4b00;
   --font-serif: var(--fb);
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
@@ -104,6 +111,8 @@
   --hover: #27231f;
   --warn: #f0b27a;
   --danger: #f0998c;
+  --job-ok: #9fd4a8;
+  --job-warn: #f0b27a;
   color-scheme: dark;
 }
 /*
@@ -2140,4 +2149,174 @@
   .desk-ltr.astra .recent-story-row .btn {
     align-self: flex-start;
   }
+}
+
+/*
+  Job card (redesign phase 3).
+
+  Ported from docs/design/handoff-2026-09-26/design-system/components/desk/
+  JobCard.jsx. The reference is inline-styled and names the PROTOTYPE's tokens
+  (--yel, --panel, --ink, --ink2, --ok, --danger, --warn), which the shipped
+  desk does not define -- a literal port would have rendered with every color
+  unset. The geometry, copy, state rules and motion are the reference's; the
+  colors are the desk's, and the buttons are the desk's own .btn vocabulary
+  (which is also what gives every one of them a 44px tap target).
+
+  The card owns its own box, so a screen that places it only ever adds a
+  placement class -- see .story-running-banner and .desk-active-story in
+  styles.css, which used to draw their own box around the text they held.
+*/
+.desk-ltr.astra .job-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--job-col, var(--a));
+  color: var(--fg);
+  font-family: var(--fb);
+}
+.desk-ltr.astra .job-card.compact {
+  gap: 8px;
+  padding: 12px;
+}
+.desk-ltr.astra .job-card.state-running { --job-col: var(--a); }
+.desk-ltr.astra .job-card.state-stalled { --job-col: var(--job-warn); }
+.desk-ltr.astra .job-card.state-done { --job-col: var(--job-ok); }
+.desk-ltr.astra .job-card.state-failed { --job-col: var(--warn); }
+
+.desk-ltr.astra .job-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.desk-ltr.astra .job-card-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.desk-ltr.astra .job-card-dot {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  background: var(--job-col);
+}
+/* Only a running job pulses. A stalled one must look stopped, and a done or
+   failed one is not doing anything at all. */
+.desk-ltr.astra .job-card.state-running .job-card-dot {
+  animation: trPulse 1.2s ease-in-out infinite;
+}
+.desk-ltr.astra .job-card-title {
+  font-size: calc(1rem * var(--ts));
+  font-weight: 700;
+}
+.desk-ltr.astra .job-card-model {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .job-card-elapsed {
+  font-size: calc(1rem * var(--ts));
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.desk-ltr.astra .job-card-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.desk-ltr.astra .job-card-chip {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 700;
+  padding: 1px 7px;
+  color: var(--fg2);
+  border: 1px dashed var(--line);
+}
+.desk-ltr.astra .job-card-chip.done {
+  color: var(--job-ok);
+  border: 1px solid var(--job-ok);
+}
+/* The current stage is accent-soft on accent, the same pairing the running
+   banner already uses for "this is the live one", rather than a solid fill:
+   a filled chip at this size reads as a button next to the real buttons. */
+.desk-ltr.astra .job-card-chip.cur {
+  color: var(--a);
+  background: var(--accent-soft);
+  border: 1px solid var(--a);
+}
+
+.desk-ltr.astra .job-card-track {
+  position: relative;
+  height: 8px;
+  background: var(--line);
+  overflow: hidden;
+}
+.desk-ltr.astra .job-card-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--job-col);
+  transition: width 0.6s;
+}
+/* No percentage to show: a third-width bar sweeping the track, which is what
+   says "working" when there is no number to say it with. */
+.desk-ltr.astra .job-card-fill.indeterminate {
+  width: 33%;
+  animation: trSlide 1.4s linear infinite;
+}
+
+.desk-ltr.astra .job-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: calc(0.875rem * var(--ts));
+}
+.desk-ltr.astra .job-card-now {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .job-card.state-failed .job-card-now {
+  color: var(--warn);
+}
+.desk-ltr.astra .job-card-quiet {
+  color: var(--mut);
+}
+
+.desk-ltr.astra .job-card-stall {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 2px solid var(--job-warn);
+}
+.desk-ltr.astra .job-card-stall-note {
+  font-size: calc(0.9375rem * var(--ts));
+  font-weight: 700;
+  color: var(--job-warn);
+}
+
+.desk-ltr.astra .job-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.desk-ltr.astra .job-card-error {
+  color: var(--warn);
+}
+
+/* Defined locally because phase 0's motion keyframes are not on main yet;
+   trPulse and trSlide are the names the reference uses, so a later phase that
+   lands the shared file only has to delete these two blocks. */
+@keyframes trPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@keyframes trSlide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
 }

@@ -1,4 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { ActiveStoryJobs } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -434,25 +435,33 @@ function DeskHome() {
 
   return (
     <DeskShell title="A clear desk. A good story." kicker="Your newsroom">
-      {recentStories.data
-        ?.filter((story) => story.status === "running" || story.status === "queued")
-        .map((story) => (
-          <div className="desk-active-story" key={story.id}>
-            <div>
-              <strong>
-                Your story is {story.status === "queued" ? "queued" : "being written"}
-              </strong>
-              <p>{story.stage || "Preparing your sources…"}</p>
-            </div>
-            <Link
-              className="btn solid"
-              to="/desk/story/$leadId"
-              params={{ leadId: String(story.lead_id) }}
-            >
-              Open your story
-            </Link>
-          </div>
-        ))}
+      {/*
+        The job cards (redesign phase 3). This strip used to print the job's
+        `stage` sentence for every open story; the card replaces that text and
+        adds the two things the sentence could not say -- that the worker has
+        gone quiet, and what to do about it.
+
+        A finished job stays here for ten minutes, because "the draft you asked
+        for just failed" is news and last week's failure is not. The old strip
+        only ever showed open jobs, so this is the one place the card's Done and
+        Failed states appear on Today.
+
+        The destination is decided per row: a finished draft opens the draft, an
+        open job opens its story. Both are typed routes, so the navigation is
+        built from the ids rather than from the server's href string.
+      */}
+      <ActiveStoryJobs
+        onNavigate={(job) => {
+          if (job.status === "completed" && job.resultDraftId != null) {
+            void navigate({
+              to: "/desk/story/draft/$draftId",
+              params: { draftId: String(job.resultDraftId) },
+            });
+            return;
+          }
+          void navigate({ to: "/desk/story/$leadId", params: { leadId: String(job.leadId) } });
+        }}
+      />
 
       <div className="astra-metrics" aria-label="Newsroom at a glance">
         <Link to="/desk/queue">

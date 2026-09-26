@@ -3,7 +3,7 @@ import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { withClaimedLeadDraftLock } from "./draft-order.server.ts";
-import { enqueueJob, setJobFailoverNote, setJobModelRuntime, setJobStage, type DeskJob } from "./jobs.ts";
+import { enqueueJob, progressReporterFor, setJobFailoverNote, setJobModelRuntime, waitForModel, type DeskJob } from "./jobs.ts";
 import { parseClaims, parseFindings, serializeFindings, REPORT_EDIT_SYSTEM, STORY_FORMS, type ReportChat } from "./report.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
 import { storyModelChoice } from "./model-choice.ts";
@@ -25,7 +25,7 @@ import { documentReviewManifest, parseDocumentClaims, prepareDocumentReconcileEv
 type ReconcileDeps = {
   chat?: ReportChat;
   enqueue?: typeof enqueueJob;
-  stage?: typeof setJobStage;
+  stage?: (text: string) => Promise<void>;
   probe?: typeof probeProvider;
 };
 
@@ -51,6 +51,13 @@ function sameCaptureUrl(left: string, right: string): boolean {
 
 export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDeps = {}): Promise<void> {
   if (job.kind !== "reconcile") throw new Error("Expected a reconcile job.");
+  /*
+    Every boundary in this worker goes through one reporter, which carries the
+    sentence AND the stage index that sentence implies -- see
+    `progressReporterFor`. `deps.stage` stays the seam the adversarial tests
+    inject, now one-argument, because the job id was always the same one.
+  */
+  const stage = deps.stage ?? progressReporterFor(job);
   const sql = await getSql();
   const [member] = await sql<{user_id:string}>`select user_id from newsroom_members where newsroom_id=${job.newsroom_id} and user_id=${job.user_id} and role in ('owner','editor')`;
   if (!member) throw new Error("Draft reconciliation requires an active newsroom editor.");
@@ -89,7 +96,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const fallback = fallbackUrls.length ? await sql<{url:string;title:string;full_text:string;extraction_method:string;id:number;captured_at:string}>`select distinct on(url) id,url,title,full_text,coalesce(to_jsonb(artifact_versions)->>'extraction_method','') as extraction_method,captured_at::text as captured_at from artifact_versions where newsroom_id=${job.newsroom_id} and url=any(${fallbackUrls}) order by url,captured_at desc,id desc` : [];
   const captures = [...exact,...fallback];
   if (!captures.length && !documents.length) throw new Error("No matching saved capture or uploaded document is available for this draft. The draft was preserved without calling the model.");
-  await (deps.stage ?? setJobStage)(job.id, "Checking the saved draft against the evidence");
+  await stage("Checking the saved draft against the evidence");
   const evidence = captures.map(c => `SOURCE ${c.url}\nCAPTURE VERSION ${c.id}\nCAPTURED ${c.captured_at}\n${c.title}\n${c.full_text}`).join("\n\n") || "(No saved captured evidence matched this draft.)";
   const choice = effectiveStoryModelChoice(job.model_choice);
   let savedEffort: ModelEffort | null = null;
@@ -101,6 +108,10 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     await readProviderOverrides(job.newsroom_id, "story").catch(() => ({})),
   );
   const budget = providerBudget(choice, overrides);
+  // The rung reconciliation is actually on. `active` is only reassigned once a
+  // failed call returns, so a ticker reading it would name the model that has
+  // already failed for the whole of the wait.
+  let liveLabel = modelChoiceLabel(choice);
   const runChat: ReportChat = async (system,user,maxTokens,_modelChoice,options) => {
     const attempted = await runPinnedCallWithFailover({
       snapshot: active,
@@ -115,8 +126,9 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       resolve: async (candidate) => ({ modelChoice: candidate, modelEffort: modelEffort(candidate, active.modelEffort) }),
       onSwitch: async ({previousLabel,nextLabel,nextChoice,reason}) => {
         const nextEffort = modelEffort(nextChoice, active.modelEffort);
+        liveLabel = nextLabel;
         await setJobModelRuntime(job.id,nextChoice,nextEffort);
-        await (deps.stage ?? setJobStage)(job.id,`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel,reason)}`);
+        await stage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel,reason)}`);
         await setJobFailoverNote(job.id,failoverNoteSentence(nextLabel,previousLabel,reason));
       },
     });
@@ -124,10 +136,14 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     return attempted.result;
   };
   const draftToEdit = JSON.stringify({headline:draft.headline,dek:draft.dek,body:draft.body,topic:draft.topic,source_urls:json(draft.source_urls),form:draft.form,found:json(draft.found_note),unanswered:json(draft.unanswered)});
-  const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, active.modelChoice, text => (deps.stage ?? setJobStage)(job.id, text), budget.callMs);
-  await (deps.stage ?? setJobStage)(job.id, "Reconciling the draft with the saved evidence");
+  const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, active.modelChoice, text => stage(text), budget.callMs);
+  await stage("Reconciling the draft with the saved evidence");
   const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and the tightest page/character locator around the supporting passage; never cite an entire document range merely because a name appears somewhere inside it. Never expose private document IDs, download paths or invented URLs in the story or source_urls. A supplied segment establishes what that segment discusses, not that a different policy, benefit, event or action did not exist elsewhere; narrow negative language to the scope of the evidence unless a source affirmatively supports the negative. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty. Return document_claims for selected load-bearing claims supported by uploads as [{"fact":"claim","kind":"primary|record","documentId":"exact private document ID from the evidence label","excerpt":"exact supporting passage"}]. This is a verified passage inventory, not a claim that every sentence was exhaustively inventoried. Do not put an uploaded document in URL-based claims and do not invent a URL.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
-  const response = await runChat(REPORT_EDIT_SYSTEM, prompt, 1800, active.modelChoice, {timeoutMs:budget.callMs});
+  const response = await waitForModel({
+    jobId: job.id,
+    label: () => liveLabel,
+    run: () => runChat(REPORT_EDIT_SYSTEM, prompt, 1800, active.modelChoice, {timeoutMs:budget.callMs}),
+  });
   if (!response.ok) throw new Error(response.error);
   const edited = coerceDraft(response.text, {headline:draft.headline,dek:draft.dek,topic:draft.topic});
   if (!edited.body) throw new Error("Evidence reconciliation returned an unreadable draft. The saved draft was preserved.");
@@ -141,7 +157,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     ],
     searchAllowed: false, search: async () => [], open: async () => {},
     timeLeft: () => budget.wallMs - (Date.now() - nameCheckStarted),
-    stage: text => (deps.stage ?? setJobStage)(job.id, text),
+    stage: text => stage(text),
     chat: (system, user, maxTokens) => runChat(system, user, maxTokens, active.modelChoice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - nameCheckStarted) - 2000)) }),
   });
   Object.assign(edited, names.draft);
@@ -199,7 +215,10 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const { writerCheckpoint: _completedWriterCheckpoint, ...currentResearch } = research;
     const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
       values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
-    await tx`update desk_jobs set result_json=(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})}::jsonb)::text where id=${job.id} and claim_token=${job.claim_token}`;
+    // The Done card's Open button, written in the same statement as the receipt
+    // (0099) so a completed reconcile row is never briefly linkless. It points
+    // at the draft this run SAVED, not the one it read.
+    await tx`update desk_jobs set result_json=(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify({originalDraftId:draft.id,newDraftId:saved.id,evidenceCheckIncomplete:false})}::jsonb)::text, result_href=${`/desk/story/draft/${saved.id}`} where id=${job.id} and claim_token=${job.claim_token}`;
   });
 }
 
@@ -253,7 +272,13 @@ export async function requestDraftReconciliation(
   }
   const job = await (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor",resultJson:JSON.stringify(initialModelRuntimeReceipt({requestedRuntime:requested,requestedEffort:modelEffort(requested,input.modelEffort),actualRuntime:choice,actualEffort:modelEffort(choice,input.modelEffort),localModel,preflightFailover:preflight}))});
   if (preflight) {
-    await setJobStage(job.id, preflight.stage);
+    /*
+      The preflight switch happens before the row is claimed, so it has no stage
+      list yet and `stageIndexFor` finds nothing -- the sentence and the beat are
+      still worth recording, and this is the same reporter every boundary inside
+      the worker uses rather than a second way to write a stage.
+    */
+    await progressReporterFor(job)(preflight.stage);
     await setJobFailoverNote(job.id, preflight.note);
   }
   return job;
