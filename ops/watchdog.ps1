@@ -454,8 +454,8 @@ if ($env:WATCHDOG_TEST_MODE -ne '1') {
   Also optional, and also never fatal.
 
   "Automatic" walks its local rungs in order (src\lib\news\provider-registry.ts
-  `automaticLadder`): DeepSeek v4.1 Flash on Ollama, then Qwen 3.6 35B on LM
-  Studio when that model is already loaded. Ollama being down is not the paper
+  `automaticLadder`): DeepSeek v4.1 Flash on Ollama, then whichever model LM
+  Studio has loaded on 1234. Ollama being down is not the paper
   being down -- the ladder moves to the next rung -- so this section starts it
   and says what it found.
 

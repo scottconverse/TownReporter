@@ -31,7 +31,7 @@
  *                                     the last attempt to start it came to. Two
  *                                     small files, read-only; the page never
  *                                     starts anything itself.
- *           lms ps --json             Qwen on this computer, read-only
+ *           lms ps --json             the model loaded in LM Studio, read-only
  *           scan_runs (SELECT)        the last scan
  *   runs    exactly the six menu actions, each a fixed executable with a fixed
  *           argument ARRAY and shell:false. No user-supplied argument ever
@@ -675,17 +675,37 @@ function readStagedPort(file) {
 export const STAGE_START_WINDOW_MS = 150_000;
 
 /**
- * Qwen on this computer, through LM Studio's own read-only process listing.
- * NEVER load or unload: the owner may have a model mid-draft, and this page's
- * whole promise is that it does not disturb the machine.
+ * What is loaded in LM Studio on this computer, by name, through LM Studio's
+ * own read-only process listing. NEVER load or unload: the owner may have a
+ * model mid-draft, and this page's whole promise is that it does not disturb
+ * the machine.
+ *
+ * 0.6.69 (Unit AL item 4): this used to look for a Qwen and answer anything
+ * else with "no Qwen among them". The rung that runs on this computer now runs
+ * whatever LM Studio has LOADED -- the owner switches models for other work --
+ * so the card has to name what is loaded rather than check for one vendor's
+ * model. `models` stays the raw listing; `loaded` is the names the card uses.
+ *
+ * Blind spot worth naming, since a claim of "nothing loaded" is the one this
+ * card makes: some `lms ps --json` builds carry no field saying whether an
+ * entry is a chat model or an embedding model, so an embedding model that is
+ * loaded would be named here too. The ladder itself is not fooled -- the app
+ * reads LM Studio's own `type` off /api/v0/models (local-models.ts) -- this
+ * card is the cruder instrument, and it errs by naming too much rather than by
+ * claiming a model a run cannot use. Where a build DOES report a type, an
+ * embedding model is left out.
+ *
+ * `run` is the spawner, injected so a test can hold a listing without spawning
+ * anything at all -- the same reason every other side effect on this page is a
+ * seam. What it runs in production is `lms ps --json`, and nothing else.
  */
-export async function probeQwen({ exe = null, timeoutMs = 20_000 } = {}) {
+export async function probeQwen({ exe = null, timeoutMs = 20_000, run = spawnFixed } = {}) {
   const lms = exe || resolveOnPath("lms");
-  if (!lms) return { ok: true, found: false, detail: "LM Studio not found" };
-  const { code, output } = await spawnFixed(lms, ["ps", "--json"], { timeoutMs });
+  if (!lms) return { ok: true, found: false, models: [], loaded: [], detail: "LM Studio not found" };
+  const { code, output } = await run(lms, ["ps", "--json"], { timeoutMs });
   const text = output.join("\n");
   if (code !== 0 && !text.trim()) {
-    return { ok: true, found: true, models: [], detail: "LM Studio is not answering" };
+    return { ok: true, found: true, models: [], loaded: [], detail: "LM Studio is not answering" };
   }
   let models = [];
   try {
@@ -693,14 +713,25 @@ export async function probeQwen({ exe = null, timeoutMs = 20_000 } = {}) {
     const parsed = start >= 0 ? JSON.parse(text.slice(start)) : [];
     models = Array.isArray(parsed) ? parsed : [];
   } catch {
-    return { ok: true, found: true, models: [], detail: "LM Studio answered in a shape this page does not know" };
+    return { ok: true, found: true, models: [], loaded: [], detail: "LM Studio answered in a shape this page does not know" };
   }
-  const qwen = models.filter((m) => /qwen/i.test(String(m?.modelKey || m?.identifier || "")));
-  if (!models.length) return { ok: true, found: true, models, detail: "nothing is loaded in LM Studio" };
-  if (!qwen.length) {
-    return { ok: true, found: true, models, detail: `${models.length} model(s) loaded, no Qwen among them` };
+  const loaded = models
+    .filter((m) => !/embedding/i.test(String(m?.type || m?.kind || m?.modelType || "")))
+    .map((m) => String(m?.modelKey || m?.identifier || m?.path || "").trim())
+    .filter(Boolean);
+  if (!loaded.length) {
+    return { ok: true, found: true, models, loaded, detail: "nothing is loaded in LM Studio" };
   }
-  return { ok: true, found: true, models, qwen: qwen.map((m) => String(m.modelKey || m.identifier)), detail: `Qwen loaded: ${qwen.map((m) => String(m.modelKey || m.identifier)).join(", ")}` };
+  return {
+    ok: true,
+    found: true,
+    models,
+    loaded,
+    detail:
+      loaded.length === 1
+        ? `${loaded[0]} is loaded`
+        : `${loaded.length} models loaded: ${loaded.join(", ")}`,
+  };
 }
 
 /**
@@ -1103,11 +1134,14 @@ export async function collectStatus({
     },
     // The probe reports `ok` for "not installed" / "not answering" because
     // those are answers, not failures -- but a card is a verdict, and the only
-    // verdict Qwen loaded earns is OK.
+    // verdict a loaded model earns is OK. The detail is the model's own name
+    // (0.6.69, Unit AL item 4): the rung that runs here runs whatever is
+    // loaded, so "nothing is loaded" is the state an operator needs told, and
+    // a name is what tells them the rest of the time.
     card(
       "qwen",
-      "Qwen on this computer",
-      Array.isArray(qwen.qwen) && qwen.qwen.length ? "ok" : "note",
+      "Model server (LM Studio)",
+      Array.isArray(qwen.loaded) && qwen.loaded.length ? "ok" : "note",
       qwen.detail,
     ),
     card("last-scan", "Last scan", scan.state, scan.detail),

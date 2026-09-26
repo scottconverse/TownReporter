@@ -284,8 +284,8 @@ export function DailyScanSettings() {
       />
       <p id="daily-scan-heading" className="mt-3 max-w-2xl text-sm text-muted">
         Choose the model for every scheduled run. Automatic works down the writing ladder — DeepSeek
-        v4.1 Flash first, then Qwen 3.6 35B if it is already loaded, then Codex Terra — and the run
-        record names the model that actually ran. If the chosen model is unavailable, out of quota,
+        v4.1 Flash first, then a model on this computer if one is already loaded, then Codex Terra —
+        and the run record names the model that actually ran. If the chosen model is unavailable, out of quota,
         signed out, or returns no output, the unfinished model call can move to the next ready
         writing model and the run records that switch. A content refusal stops the run. Saved Custom
         AI connections, including OpenAI-compatible Gemini endpoints, resolve their encrypted

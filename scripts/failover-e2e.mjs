@@ -13,13 +13,14 @@
  * desk_jobs.model_choice plus (0.6.8) the durable .failover_note, which is the
  * one piece of the switch the editor also sees on the page ("Model note: ...").
  *
- * WHAT IT PROVES NOW. The ladder is DeepSeek v4.1 Flash -> Qwen 3.6 35B (only
- * if it is ALREADY loaded) -> Codex Terra, and this walk drives TWO drafts over
- * it, because the new ladder can fail in two different places:
+ * WHAT IT PROVES NOW. The ladder is DeepSeek v4.1 Flash -> "Local model" (the
+ * model LM Studio has loaded right now, and only if one IS loaded) -> Codex
+ * Terra, and this walk drives TWO drafts over it, because the new ladder can
+ * fail in two different places:
  *
  *   draft 1 -- rung 1's endpoint is DOWN (503 on every route). Automatic's
- *              preflight walks past it, records that rung 2 was skipped "not
- *              loaded", and pins Codex Terra BEFORE the job is enqueued. No
+ *              preflight walks past it, records that rung 2 was skipped
+ *              "nothing loaded in LM Studio", and pins Codex Terra BEFORE the job is enqueued. No
  *              hop happens mid-run: the receipt on the job row says requested
  *              "auto", actual "codex-balanced", names the skipped rung, and
  *              says nothing was switched at preflight time (preflightFailover
@@ -70,10 +71,14 @@
  *   FAKE_CODEX_SIGNED_IN=1 FAKE_CODEX_VALID_DRAFT=1 FAKE_CODEX_DELAY_MS=1500 \
  *   FAILOVER_BASE_URL=http://127.0.0.1:3317 node scripts/failover-e2e.mjs
  *
- * On a machine that already runs LM Studio on 1234 with the rung's own model
- * loaded, run with TOWNREPORTER_QWEN_MODEL set to a model that server does NOT
- * have (that is what makes rung 2 skip "not loaded" instead of being tried for
- * real); the walk checks this and says so rather than quietly calling it.
+ * On a machine that already runs LM Studio on 1234, what matters since 0.6.69
+ * (Unit AL item 4) is not which models it has on DISK but whether one is
+ * LOADED: a loaded chat model makes rung 2 runnable and this walk would call it
+ * for real. The walk reads the load state itself (see `ensureRungTwoServer`)
+ * and refuses to run on a machine that has one loaded, naming it -- the
+ * alternative, setting TOWNREPORTER_QWEN_MODEL to a model the server does not
+ * have, pins the rung to that model instead, which skips with "not loaded";
+ * the walk asserts whichever sentence its own configuration produces.
  */
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -101,12 +106,28 @@ const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 // src/lib/news/automatic-failover.ts. Asserted verbatim so a rename there
 // fails this walk instead of silently changing what it proves.
 const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
-const QWEN_LABEL = "Qwen 3.6 35B";
+// Rung 2's label is "Local model" since 0.6.69 (Unit AL item 4): it names no
+// model of its own, because it runs whatever LM Studio has loaded.
+const LOCAL_LABEL = "Local model";
 const TERRA_LABEL = "Codex Terra";
-const QWEN_SKIP = `${QWEN_LABEL} skipped: not loaded`;
 const RUNG_ONE_QUOTA = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
-/** The rung's own model: what rung 2's catalog lookup is asked for. */
-const QWEN_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "halo/qwen3.6-35b-a3b").trim();
+
+/**
+ * Why rung 2 is skipped, which depends on how this walk was configured, since
+ * the two sentences come from two different branches of
+ * `resolveRungLocalModel` (src/lib/news/ai.ts):
+ *
+ *   - PINNED (TOWNREPORTER_QWEN_MODEL set): the rung asks that exact model and
+ *     is skipped "not loaded" when the server does not have it. This is the pin
+ *     the owner keeps for other work, and the only way this walk can run on a
+ *     machine whose LM Studio has a model loaded.
+ *   - UNPINNED (the shipped default): the rung asks what is loaded, and with
+ *     nothing loaded it is skipped in the brief's own words.
+ */
+const PINNED_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "").trim();
+const LOCAL_SKIP = PINNED_MODEL
+  ? `${LOCAL_LABEL} skipped: not loaded`
+  : `${LOCAL_LABEL} skipped: nothing loaded in LM Studio`;
 
 /**
  * Rung 1's thinking time, standing in for a real provider's. Draft 2's whole
@@ -271,7 +292,7 @@ function preconditions() {
   if (process.env.TOWNREPORTER_LOCAL_DISCOVERY === "0") {
     problems.push(
       "TOWNREPORTER_LOCAL_DISCOVERY=0: rung 2's server is never probed, so its skip reads " +
-        '"its server did not answer" instead of "not loaded".',
+        `"its server did not answer" instead of "${LOCAL_SKIP}".`,
     );
   }
   if (problems.length) throw new Error(`preconditions:\n  ${problems.join("\n  ")}`);
@@ -280,24 +301,68 @@ function preconditions() {
 /**
  * Rung 2's server. In CI there is none, so the fake is started. On a machine
  * that already runs LM Studio, that fake cannot bind 1234 and must not: the
- * walk uses the real server's own catalog, and only requires that it does not
- * offer the rung's model -- otherwise the skip would be a real 35B call.
+ * walk uses the real server's own catalog, and requires that the rung would
+ * really be SKIPPED -- otherwise this walk calls the owner's loaded local model
+ * for real (and spends the owner's time on a run that proves nothing).
+ *
+ * PINNED, what has to hold is the old rule: the server must not have the pinned
+ * model. UNPINNED -- the shipped default, and what CI proves -- the rung runs
+ * whatever is loaded, so the load state is the thing to check, from LM
+ * Studio's own native listing. A machine whose LM Studio has a chat model
+ * loaded cannot run this walk unpinned, and is told so with the model's name.
  */
 async function ensureRungTwoServer() {
   const live = await readJson(`${LMSTUDIO_BASE}/models`);
   if (live) {
-    const ids = (live.data ?? [])
-      .map((entry) => entry?.id)
-      .filter((id) => typeof id === "string");
-    if (ids.includes(QWEN_MODEL)) {
-      throw new Error(
-        `a server is already on ${LMSTUDIO_BASE} and lists ${QWEN_MODEL}, so rung 2 would be ` +
-          `tried for real. Run this walk with TOWNREPORTER_QWEN_MODEL=<a model that server does ` +
-          `not have>. (CI has no local server and starts ` +
-          `scripts/fakes/fake-lmstudio-endpoint.mjs on ${LMSTUDIO_PORT} instead.)`,
+    if (PINNED_MODEL) {
+      const ids = (live.data ?? [])
+        .map((entry) => entry?.id)
+        .filter((id) => typeof id === "string");
+      if (ids.includes(PINNED_MODEL)) {
+        throw new Error(
+          `a server is already on ${LMSTUDIO_BASE} and has ${PINNED_MODEL}, so rung 2 would be ` +
+            `tried for real. Run this walk with TOWNREPORTER_QWEN_MODEL=<a model that server does ` +
+            `not have>. (CI has no local server and starts ` +
+            `scripts/fakes/fake-lmstudio-endpoint.mjs on ${LMSTUDIO_PORT} instead.)`,
+        );
+      }
+      return (
+        `kept the server already on ${LMSTUDIO_BASE}; it does not have the pinned ` +
+        `${PINNED_MODEL} (no fake started)`
       );
     }
-    return `kept the server already on ${LMSTUDIO_BASE}; it does not list ${QWEN_MODEL} (no fake started)`;
+    /*
+      Unpinned. Two ways a real server can still spoil the proof, and both are
+      about load state rather than the model list -- `/models` answers with
+      everything on disk, which is exactly what the rung stopped caring about.
+    */
+    const native = await readJson(`${LMSTUDIO_BASE}/api/v0/models`);
+    const entries = Array.isArray(native?.data) ? native.data : [];
+    const loaded = entries
+      .filter((m) => m?.state === "loaded" && m?.type !== "embeddings")
+      .map((m) => String(m?.id ?? ""))
+      .filter(Boolean);
+    if (loaded.length) {
+      throw new Error(
+        `a server is already on ${LMSTUDIO_BASE} with ${loaded.join(", ")} LOADED, so rung 2 is ` +
+          `runnable and this walk would write with it for real. Either leave the picker's ` +
+          `middle rung nothing to run, or run this walk with TOWNREPORTER_QWEN_MODEL=<a model ` +
+          `that server does not have> to pin the rung and get its "not loaded" skip. (CI has no ` +
+          `local server and starts scripts/fakes/fake-lmstudio-endpoint.mjs on ${LMSTUDIO_PORT}.)`,
+      );
+    }
+    if (!entries.some((m) => typeof m?.state === "string")) {
+      throw new Error(
+        `a server is already on ${LMSTUDIO_BASE} but its /api/v0/models listing carries no load ` +
+          `state this walk can read, so rung 2 would be skipped "load state unknown" -- not the ` +
+          `sentence this walk asserts. Run it with TOWNREPORTER_QWEN_MODEL=<a model that server ` +
+          `does not have> to pin the rung and get its "not loaded" skip instead.`,
+      );
+    }
+    return (
+      `kept the server already on ${LMSTUDIO_BASE}; it reports no loaded chat model ` +
+      `(no fake started)`
+    );
   }
   const line = await startFake("scripts/fakes/fake-lmstudio-endpoint.mjs", {
     FAKE_LMSTUDIO_PORT: String(LMSTUDIO_PORT),
@@ -410,7 +475,7 @@ async function main() {
   assertReceipt(firstReceipt, {
     who: "draft 1 (rung 1 down at preflight)",
     actualRuntime: "codex-balanced",
-    skippedRungs: [QWEN_SKIP],
+    skippedRungs: [LOCAL_SKIP],
   });
   if (first.job.model_choice !== "codex-balanced") {
     throw new Error(

@@ -12,6 +12,7 @@ import {
   formatLocalTime,
   probeAlerts,
   probeOffsiteCopy,
+  probeQwen,
   probeTestCopy,
   describeTestCopy,
   STAGE_START_WINDOW_MS,
@@ -450,7 +451,10 @@ function probeSet(overrides = {}) {
     // so the card is built from the field the real page reads. "none" is a
     // machine that has never staged anything: a Note, and no button.
     testCopy: async () => ({ ok: true, port: 3100, up: false, version: null, verdict: "none" }),
-    qwen: async () => ({ ok: true, qwen: [], detail: "LM Studio is not running" }),
+    // The shape probeQwen really returns since 0.6.69 (Unit AL item 4):
+    // `loaded` is the names LM Studio reports, and this fake is a machine with
+    // nothing loaded -- the state the card has to read as a Note, never OK.
+    qwen: async () => ({ ok: true, found: true, models: [], loaded: [], detail: "nothing is loaded in LM Studio" }),
     lastScan: async () => ({ ok: false, reason: "unreachable", detail: "Could not read the last scan" }),
     backup: () => ({ ok: false, found: false, dir: "nowhere" }),
     // A healthy machine: three copies verified on the other drive, nothing
@@ -1285,4 +1289,137 @@ test("Start the test copy runs the start-only script, and only that", async () =
   } finally {
     await server.close();
   }
+});
+
+/* ─────────────── the model server card, and the name on it (0.6.69) ─────────────── */
+
+/**
+ * Unit AL item 4 on this page: the model server card names the model LM Studio
+ * has LOADED.
+ *
+ * The card used to look for a Qwen and answer anything else "no Qwen among
+ * them". The desk's rung that runs on this computer runs whatever is loaded --
+ * the owner switches models for other work -- so a card that only speaks when
+ * one vendor's model happens to be up is a card that is wrong on most days.
+ *
+ * The probe reads `lms ps --json` and nothing else; `run` is injected here, so
+ * nothing in this file starts LM Studio, asks it anything, or spawns at all.
+ * The listing below is the shape LM Studio's own CLI prints, one entry per
+ * loaded model, `modelKey` first and `identifier` the fallback -- which is
+ * exactly the pair the probe reads.
+ */
+
+/** `lms ps --json`, held still. Asserts the argv, so a probe that asked LM
+ *  Studio something else would fail here rather than answer a different
+ *  question convincingly. */
+function lmsListing(models) {
+  return async (exe, args) => {
+    assert.deepEqual(args, ["ps", "--json"], "the model server probe must ask for the process listing");
+    return { code: 0, output: [JSON.stringify(models)] };
+  };
+}
+
+test("the model server probe names whatever is loaded, not a Qwen it went looking for", async () => {
+  const exe = "C:\\fake\\lms.exe";
+
+  // One model loaded, and it is not a Qwen: the case that used to be a Note
+  // saying "no Qwen among them" while the desk was perfectly able to draft.
+  const one = await probeQwen({ exe, run: lmsListing([{ modelKey: "google/gemma-4-12b-qat" }]) });
+  assert.equal(one.ok, true);
+  assert.equal(one.found, true);
+  assert.deepEqual(one.loaded, ["google/gemma-4-12b-qat"]);
+  assert.equal(one.detail, "google/gemma-4-12b-qat is loaded");
+
+  // Two loaded: both are named. Which one a RUN would pick is the ladder's
+  // business, not this card's, and it is pinned in local-models.test.ts.
+  const two = await probeQwen({
+    exe,
+    run: lmsListing([{ modelKey: "halo/qwen3.6-35b-a3b" }, { identifier: "google/gemma-4-12b-qat" }]),
+  });
+  assert.deepEqual(two.loaded, ["halo/qwen3.6-35b-a3b", "google/gemma-4-12b-qat"]);
+  assert.equal(two.detail, "2 models loaded: halo/qwen3.6-35b-a3b, google/gemma-4-12b-qat");
+
+  // A build that reports a type: an embedding model is left out, because no
+  // run can be sent to one. Where the build reports no type, an entry is named
+  // -- the probe's own docstring says so, and this is the honest half of that
+  // blind spot: it over-names, it never invents a name.
+  const typed = await probeQwen({
+    exe,
+    run: lmsListing([
+      { identifier: "nomic-embed-text-v1.5", type: "embeddings" },
+      { identifier: "halo/qwen3.6-35b-a3b", type: "llm" },
+    ]),
+  });
+  assert.deepEqual(typed.loaded, ["halo/qwen3.6-35b-a3b"]);
+
+  // Nothing loaded is the state the page exists to say out loud -- and it is
+  // still an ANSWER, so the probe is not a failure.
+  const none = await probeQwen({ exe, run: lmsListing([]) });
+  assert.deepEqual(none.loaded, []);
+  assert.equal(none.detail, "nothing is loaded in LM Studio");
+  assert.equal(none.ok, true);
+});
+
+test("a listing this page cannot read never turns into a model name", async () => {
+  const exe = "C:\\fake\\lms.exe";
+
+  // LM Studio answering in a shape this page does not know: a Note with the
+  // reason, never a green row over a listing nobody could parse. (`lms` is
+  // read from its first "[" -- it prints progress lines before the JSON -- so
+  // a broken body is one that HAS a bracket and still will not parse.)
+  const odd = await probeQwen({ exe, run: async () => ({ code: 0, output: ["[{\"modelKey\""] }) });
+  assert.deepEqual(odd.loaded, []);
+  assert.equal(odd.detail, "LM Studio answered in a shape this page does not know");
+
+  // A process that died with nothing to say.
+  const silent = await probeQwen({ exe, run: async () => ({ code: 1, output: [] }) });
+  assert.deepEqual(silent.loaded, []);
+  assert.equal(silent.detail, "LM Studio is not answering");
+
+  // No `lms` on PATH at all, with the spawner rigged to throw if it is reached:
+  // the probe must decline before it runs anything.
+  const savedPath = process.env.PATH;
+  process.env.PATH = path.join(os.tmpdir(), "no-lms-on-this-path");
+  try {
+    const missing = await probeQwen({
+      exe: null,
+      run: async () => {
+        throw new Error("nothing may be spawned when there is no lms to spawn");
+      },
+    });
+    assert.equal(missing.found, false);
+    assert.deepEqual(missing.loaded, []);
+    assert.equal(missing.detail, "LM Studio not found");
+  } finally {
+    process.env.PATH = savedPath;
+  }
+});
+
+test("the card is green over a loaded model and names it, and a Note when nothing is loaded", async () => {
+  const page = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    timeZone: DENVER,
+    probes: probeSet({
+      qwen: async () => ({
+        ok: true,
+        found: true,
+        models: [{ modelKey: "google/gemma-4-12b-qat" }],
+        loaded: ["google/gemma-4-12b-qat"],
+        detail: "google/gemma-4-12b-qat is loaded",
+      }),
+    }),
+  });
+  const row = cardFor(page, "qwen");
+  assert.equal(row.label, "Model server (LM Studio)");
+  assert.equal(row.state, "ok");
+  assert.equal(row.ok, true);
+  assert.equal(row.detail, "google/gemma-4-12b-qat is loaded");
+
+  // Nothing loaded: the same row, as a Note, with LM Studio's own words.
+  const empty = await collectStatus({ appRoot: ".", now: NOW, timeZone: DENVER, probes: probeSet() });
+  assert.equal(cardFor(empty, "qwen").label, "Model server (LM Studio)");
+  assert.equal(cardFor(empty, "qwen").state, "note");
+  assert.equal(cardFor(empty, "qwen").ok, false);
+  assert.equal(cardFor(empty, "qwen").detail, "nothing is loaded in LM Studio");
 });

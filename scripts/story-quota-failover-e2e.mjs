@@ -19,8 +19,10 @@
  * (scripts/fakes/fake-deepseek-endpoint.mjs) in its quota mode: /models
  * answers 200 (the rung is genuinely ready and gets pinned BEFORE the job
  * exists), /chat/completions answers a provider-shaped 429 (the rung is
- * genuinely out of quota moments later). Rung 2, Qwen 3.6 35B, is skipped for
- * the reason the desk now records -- "not loaded" -- via
+ * genuinely out of quota moments later). Rung 2, "Local model", is skipped for
+ * the reason the desk now records -- nothing is loaded in LM Studio, since
+ * 0.6.69 (Unit AL item 4) the rung runs whatever that server has loaded rather
+ * than a model of its own -- via
  * scripts/fakes/fake-lmstudio-endpoint.mjs on port 1234. Rung 3 is
  * scripts/fakes/fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1, and it is
  * Codex Terra that reads the retained document and writes the story.
@@ -45,9 +47,11 @@
  *   FAKE_CODEX_SIGNED_IN=1 FAKE_CODEX_VALID_DRAFT=1 FAKE_CODEX_DELAY_MS=1500 \
  *   node scripts/story-quota-failover-e2e.mjs
  *
- * On a machine that already runs LM Studio on 1234 with the rung's own model
- * loaded, run with TOWNREPORTER_QWEN_MODEL set to a model that server does NOT
- * have; the walk checks this and says so rather than quietly calling it.
+ * On a machine that already runs LM Studio on 1234 with a chat model LOADED,
+ * rung 2 is runnable and this walk would call it for real -- so it checks the
+ * load state and refuses, naming the model (see `ensureRungTwoServer`). Pin the
+ * rung with TOWNREPORTER_QWEN_MODEL=<a model that server does not have> to run
+ * it there instead.
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -73,7 +77,8 @@ const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
 const TERRA_LABEL = "Codex Terra";
 const SWITCH_NOTE = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
-const QWEN_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "halo/qwen3.6-35b-a3b").trim();
+/** The pin, when the operator set one: rung 2 then asks for this exact model. */
+const PINNED_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "").trim();
 
 /**
  * Long enough that the pinned-but-not-yet-failed job is observable between the
@@ -173,24 +178,64 @@ function preconditions() {
   }
   if (process.env.TOWNREPORTER_LOCAL_DISCOVERY === "0") {
     problems.push(
-      'TOWNREPORTER_LOCAL_DISCOVERY=0: rung 2\'s skip reads "its server did not answer", not "not loaded".',
+      "TOWNREPORTER_LOCAL_DISCOVERY=0: rung 2's server is never probed, so its skip reads " +
+        '"its server did not answer" -- and this walk needs rung 2 passed over for a reason the ' +
+        "desk itself found (src/lib/news/ai.ts's resolveRungLocalModel).",
     );
   }
   if (problems.length) throw new Error(`preconditions:\n  ${problems.join("\n  ")}`);
 }
 
-/** Rung 2's server: the fake in CI, the machine's own LM Studio if one is already up. */
+/**
+ * Rung 2's server: the fake in CI, the machine's own LM Studio if one is
+ * already up -- but only if that server would really SKIP the rung, because
+ * this walk's whole premise is that rung 2 is passed over. Pinned, that means
+ * "does not have the pinned model"; unpinned (the shipped default) it means
+ * "reports nothing loaded", which is a question only LM Studio's own native
+ * listing can answer -- `/models` lists what is on disk, loaded or not.
+ */
 async function ensureRungTwoServer() {
   const live = await readJson(`${LMSTUDIO_BASE}/models`);
   if (live) {
-    const ids = (live.data ?? []).map((entry) => entry?.id).filter((id) => typeof id === "string");
-    if (ids.includes(QWEN_MODEL)) {
-      throw new Error(
-        `a server is already on ${LMSTUDIO_BASE} and lists ${QWEN_MODEL}, so rung 2 would be tried ` +
-          `for real. Run this walk with TOWNREPORTER_QWEN_MODEL=<a model that server does not have>.`,
+    if (PINNED_MODEL) {
+      const ids = (live.data ?? []).map((entry) => entry?.id).filter((id) => typeof id === "string");
+      if (ids.includes(PINNED_MODEL)) {
+        throw new Error(
+          `a server is already on ${LMSTUDIO_BASE} and has ${PINNED_MODEL}, so rung 2 would be ` +
+            `tried for real. Run this walk with TOWNREPORTER_QWEN_MODEL=<a model that server ` +
+            `does not have>.`,
+        );
+      }
+      return (
+        `kept the server already on ${LMSTUDIO_BASE}; it does not have the pinned ` +
+        `${PINNED_MODEL} (no fake started)`
       );
     }
-    return `kept the server already on ${LMSTUDIO_BASE}; it does not list ${QWEN_MODEL} (no fake started)`;
+    const native = await readJson(`${LMSTUDIO_BASE}/api/v0/models`);
+    const entries = Array.isArray(native?.data) ? native.data : [];
+    const loaded = entries
+      .filter((m) => m?.state === "loaded" && m?.type !== "embeddings")
+      .map((m) => String(m?.id ?? ""))
+      .filter(Boolean);
+    if (loaded.length) {
+      throw new Error(
+        `a server is already on ${LMSTUDIO_BASE} with ${loaded.join(", ")} LOADED, so rung 2 is ` +
+          `runnable and this walk would write with it for real. Pin the rung with ` +
+          `TOWNREPORTER_QWEN_MODEL=<a model that server does not have>, or leave the machine's ` +
+          `LM Studio with nothing loaded.`,
+      );
+    }
+    if (!entries.some((m) => typeof m?.state === "string")) {
+      throw new Error(
+        `a server is already on ${LMSTUDIO_BASE} but its /api/v0/models listing carries no load ` +
+          `state this walk can read, so rung 2's skip would read "load state unknown". Pin the ` +
+          `rung with TOWNREPORTER_QWEN_MODEL=<a model that server does not have>.`,
+      );
+    }
+    return (
+      `kept the server already on ${LMSTUDIO_BASE}; it reports no loaded chat model ` +
+      `(no fake started)`
+    );
   }
   const line = await startFake("scripts/fakes/fake-lmstudio-endpoint.mjs", {
     FAKE_LMSTUDIO_PORT: String(LMSTUDIO_PORT),

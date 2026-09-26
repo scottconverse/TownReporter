@@ -179,8 +179,8 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic records that gateway as the preferred first runtime.
-Otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it
-is loaded, then Codex Terra — choosing the first ready provider before
+Otherwise it uses DeepSeek v4.1 Flash first, then the local model this computer
+has loaded if there is one, then Codex Terra — choosing the first ready provider before
 enqueueing, and storing that effective choice on the job. A
 named model is also the recorded first choice. If that model reaches a usage
 limit, becomes unavailable, loses its login, times out, or returns no output,
@@ -193,7 +193,7 @@ There are **two Automatic ladders**, and they are not the same order:
 
 | Automatic covers       | The order it walks                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Stories, scans, Dark Desk | DeepSeek v4.1 Flash → Qwen 3.6 35B **on this computer, when it is loaded** → Codex Terra                    |
+| Stories, scans, Dark Desk | DeepSeek v4.1 Flash → **the local model, whichever one LM Studio has loaded** → Codex Terra                    |
 | Opinion                | Codex Sol → Claude Sonnet                                                                                        |
 
 Opinion is the only surface whose Automatic ends at Claude Sonnet. Opus, Codex
@@ -252,7 +252,7 @@ For **Automatic**, a configured gateway is tried first; named choices in Story, 
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | `ANTHROPIC_API_KEY`                             | credentials for selected Claude models or the final Sonnet retry            |
-| _nothing_                                       | stories, scans and Dark Desk walk the Automatic ladder above (DeepSeek → local Qwen → Codex Terra); Opinion walks Codex Sol → Claude Sonnet |
+| _nothing_                                       | stories, scans and Dark Desk walk the Automatic ladder above (DeepSeek → the loaded local model → Codex Terra); Opinion walks Codex Sol → Claude Sonnet |
 | `XAI_API_KEY`                                   | Grok                                                                        |
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
@@ -262,8 +262,8 @@ Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
 Haiku, Local model, and saved custom connections. Codex Sol is selected by
 default. **Opinion's own Automatic** tries Codex Sol first and moves to Claude
 Sonnet once if Codex is unavailable — that is the Opinion ladder, not the desk's
-global order; stories, scans and Dark Desk walk DeepSeek v4.1 Flash → local Qwen
-3.6 35B when it is loaded → Codex Terra. An explicit choice remains the recorded
+global order; stories, scans and Dark Desk walk DeepSeek v4.1 Flash → the local
+model this computer has loaded if there is one → Codex Terra. An explicit choice remains the recorded
 first choice; a recognized technical failure can move only the unfinished call.
 The writer reads the configured private voice file, and a provider refusal or
 invalid delivery leaves the request failed without a draft.
@@ -447,7 +447,7 @@ Opinion and Write a story share large-document upload, OCR, long pasted text and
 
 Dark Desk uses a separate cost-aware Automatic path: a configured gateway wins;
 otherwise it walks the desk's own Automatic ladder — DeepSeek v4.1 Flash, then
-Qwen 3.6 35B on this computer when it is loaded, then Codex Terra — and only the
+the local model on this computer when one is loaded, then Codex Terra — and only the
 unfinished stage moves to the next provider if a login has lapsed or synthesis
 does not respond in time. Claude Sonnet is not on that ladder; it is a hand pick,
 and Opinion is the only surface whose Automatic ends there.

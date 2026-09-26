@@ -138,7 +138,11 @@ function fakeStatus() {
         fix: "start-test-copy",
         fixLabel: "Start the test copy",
       },
-      { id: "qwen", label: "Model server (Qwen)", state: "ok", ok: true, optional: true, detail: "1 model loaded", fix: null },
+      // The model server row, in the state a working machine shows it. The
+      // name in the detail is the loaded model's own (0.6.69, Unit AL item 4):
+      // the rung that runs on this computer runs whatever is loaded, so the
+      // card names it instead of checking for one vendor's model.
+      { id: "qwen", label: "Model server (LM Studio)", state: "ok", ok: true, optional: true, detail: "halo/qwen3.6-35b-a3b is loaded", fix: null },
       // The card this walk's first new check is about: a probe that could not
       // read its answer. It is a Note, and it must never be painted green --
       // "OK: Could not read the last scan" was the bug the coordinator found.

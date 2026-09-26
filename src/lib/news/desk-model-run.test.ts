@@ -21,9 +21,15 @@ import { modelChoiceLabel } from "./model-choice.ts";
  * through injected fakes, the same pattern `perform-scan-failover.test.ts`
  * already uses for the Scan half of the same mechanism.
  *
- * 0.6.63 Unit Y moved the ladder to DeepSeek v4.1 Flash -> Qwen 3.6 35B ->
- * Codex Terra. Two things in this file followed it, and both are fixture
- * truth rather than assertions being relaxed:
+ * 0.6.63 Unit Y moved the ladder to DeepSeek v4.1 Flash -> the LM Studio rung
+ * -> Codex Terra. That middle rung named one pinned model ("Qwen 3.6 35B")
+ * until 0.6.69 (Unit AL item 4), when it became whatever LM Studio has LOADED
+ * and took the bare label "Local model". The fake probe below answers with the
+ * registry's own label for the rung it was asked about, so the stage strings
+ * here read "Local model"; the picked model's own name reaches the page as
+ * "Local model (<name>)" from a real probe and from the job receipt. Two
+ * things in this file followed the ladder change, and both are fixture truth
+ * rather than assertions being relaxed:
  *
  *  - A hop only ever goes FORWARD (`planAutomaticFailover` slices the ladder
  *    after `current`), so a row sitting on Codex Terra -- the last rung -- has
@@ -191,12 +197,12 @@ describe("failOverAndRetry", () => {
     assert.deepEqual(modelChoiceCalls, [[41, "qwen-local"]]);
     assert.deepEqual(runReportCalls, ["qwen-local"], "the retry must run on the next rung");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash sign-in lapsed"),
+      stageMessages.some((s) => s === "Switched to Local model: DeepSeek v4.1 Flash sign-in lapsed"),
       `expected the auth-lapse stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.equal(
       noteWritten,
-      "This draft moved to Qwen 3.6 35B because DeepSeek v4.1 Flash sign-in lapsed",
+      "This draft moved to Local model because DeepSeek v4.1 Flash sign-in lapsed",
       "the durable failover_note must carry the same 'sign-in lapsed' wording as the stage",
     );
   });
@@ -231,12 +237,12 @@ describe("failOverAndRetry", () => {
     assert.deepEqual(modelChoiceCalls, [[41, "qwen-local"]]);
     assert.deepEqual(runReportCalls, ["qwen-local"], "the retry must run on the next rung");
     assert.ok(
-      stageMessages.some((s) => s === "Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash timed out"),
+      stageMessages.some((s) => s === "Switched to Local model: DeepSeek v4.1 Flash timed out"),
       `expected the timeout stage wording, got: ${JSON.stringify(stageMessages)}`,
     );
     assert.equal(
       noteWritten,
-      "This draft moved to Qwen 3.6 35B because DeepSeek v4.1 Flash timed out",
+      "This draft moved to Local model because DeepSeek v4.1 Flash timed out",
       "the durable failover_note must carry the same 'timed out' wording as the stage",
     );
   });
@@ -333,9 +339,9 @@ describe("Story provider failure and stage failover", () => {
 
   it("keeps Automatic's unavailable-next-rung detail in Story quota copy", () => {
     const message = storyProviderFailure(
-      "Codex error 429: usage limit reached. Automatic tried Qwen 3.6 35B next, but it was not ready: Qwen is unavailable.",
+      "Codex error 429: usage limit reached. Automatic tried Local model next, but it was not ready: Local model is unavailable.",
     );
-    assert.match(message, /Automatic tried Qwen 3\.6 35B next, but it was not ready/);
+    assert.match(message, /Automatic tried Local model next, but it was not ready/);
     assert.doesNotMatch(message, /Opinion request/);
   });
 
@@ -345,7 +351,7 @@ describe("Story provider failure and stage failover", () => {
     assert.equal(storyProviderFailure(refusal), refusal);
   });
 
-  it("fails over a document-reading stage once and resumes it on Qwen 3.6 35B", async () => {
+  it("fails over a document-reading stage once and resumes it on the local rung", async () => {
     const calls: string[] = [];
     const stages: string[] = [];
     const result = await failOverOperationAndRetry({
@@ -364,7 +370,9 @@ describe("Story provider failure and stage failover", () => {
     });
     assert.deepEqual(result, { ok: true, value: "document evidence", choice: "qwen-local" });
     assert.deepEqual(calls, ["qwen-local"]);
-    assert.deepEqual(stages, ["Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash reached its usage limit"]);
+    assert.deepEqual(stages, [
+      "Switched to Local model: DeepSeek v4.1 Flash reached its usage limit",
+    ]);
   });
 
   it("reroutes an explicit document model on technical failure but keeps refusal terminal", async () => {

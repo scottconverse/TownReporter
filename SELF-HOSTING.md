@@ -288,8 +288,8 @@ trusted automatically.
 No API key. When an editor selects a Claude model, or Opinion's Automatic
 reaches its final Claude Sonnet rung, the desk shells out to the local **Claude
 Code** login, so the subscription powers it. Claude Sonnet is on Opinion's
-ladder only; stories, scans and Dark Desk walk DeepSeek v4.1 Flash, then Qwen
-3.6 35B on this computer when it is loaded, then Codex Terra, and do not select
+ladder only; stories, scans and Dark Desk walk DeepSeek v4.1 Flash, then the
+local model this computer has loaded if there is one, then Codex Terra, and do not select
 Claude on their own. No automatic ladder selects Opus; Opus is an
 explicit editor choice. The CLI may also make a small internal Haiku call that
 cannot be turned off from here.
@@ -310,9 +310,9 @@ the run.
 
 | Desk work           | Provider rule                                                                                                | Recovery                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or the shared ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; named choices are tried first   | technical recovery retries only the unfinished call and records requested/actual model and effort             |
+| Scan and Dark Desk  | per-run picker; Automatic uses a configured gateway first or the shared ladder — DeepSeek v4.1 Flash, then the local model (whichever one LM Studio has loaded), then Codex Terra; named choices are tried first   | technical recovery retries only the unfinished call and records requested/actual model and effort             |
 | Daily scan          | one named Codex or Claude model, Local model, or saved Custom AI connection is tried first; technical switches are recorded | repair provider credentials when no ready fallback exists and resume the schedule |
-| Story — Automatic   | configured `LLM_*` first when present; otherwise the shared readiness ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
+| Story — Automatic   | configured `LLM_*` first when present; otherwise the shared readiness ladder — DeepSeek v4.1 Flash, then the local model (whichever one LM Studio has loaded), then Codex Terra | recognized technical failures retry only the unfinished call and record requested/actual model and effort; refusals stop |
 | Story — named       | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
 | Opinion             | Automatic starts Codex Sol → Claude Sonnet; named choices are tried first; technical retry is per unfinished call | the completed row records the provider that delivered; refusals stop |
 

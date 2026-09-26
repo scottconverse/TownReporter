@@ -191,9 +191,9 @@ Story routing and a separate Opinion frontier path:
 | Work               | Current provider rule                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | Scan and Dark Desk | the configured provider (`LLM_*`, Anthropic, or Claude Code), or an explicit picker choice including Local model                  |
-| Story — Automatic  | configured `LLM_*` gateway when present; otherwise Automatic's ladder — DeepSeek v4.1 Flash, then Qwen on this computer if it is loaded, then Codex Terra |
+| Story — Automatic  | configured `LLM_*` gateway when present; otherwise Automatic's ladder — DeepSeek v4.1 Flash, then the local model this computer has loaded if there is one, then Codex Terra |
 | Story — named      | Codex Astra, Sol, Terra or Luna; Claude Fable, Opus, Sonnet or Haiku; Local model; or a saved custom connection is tried first; recognized technical failures move only the unfinished call |
-| Dark — Automatic   | configured gateway when present; otherwise the same ladder — DeepSeek v4.1 Flash, then Qwen on this computer if it is loaded, then Codex Terra; technical retry is per failed call and does not replay searches or completed reads |
+| Dark — Automatic   | configured gateway when present; otherwise the same ladder — DeepSeek v4.1 Flash, then the local model this computer has loaded if there is one, then Codex Terra; technical retry is per failed call and does not replay searches or completed reads |
 | Opinion            | Automatic uses Codex Sol → Claude Sonnet; a named choice is tried first and the same technical-only per-call retry applies |
 
 Pointing `LLM_BASE_URL` at LM Studio therefore makes that gateway the configured
@@ -434,8 +434,8 @@ is text-only for this path. OCR starts with the model selected for the run and,
 after a recognized technical failure, can try the next ready vision-capable
 cloud runtime. **Unattended OCR has its own order, and it is not the writing
 ladder:** Codex Terra, then Claude, then a local model marked `· vision`. The
-writing ladder for stories and scans (DeepSeek v4.1 Flash, then Qwen 3.6 35B on
-this computer, then Codex Terra) never re-points OCR. Claude here uses Sonnet or
+writing ladder for stories and scans (DeepSeek v4.1 Flash, then the local model
+this computer has loaded, then Codex Terra) never re-points OCR. Claude here uses Sonnet or
 Haiku, never an automatic Opus default. This
 does not guarantee that a particular scan will be readable. A **local** model can only do it if it
 was built to accept images at all — an ordinary text-only local model

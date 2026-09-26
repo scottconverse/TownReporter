@@ -124,7 +124,7 @@ The following is the low-level configured-provider resolution. Story, Scan and D
 | --- | --------------------------------------------- | --------------------------------------------------------------------------- |
 | 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models; Claude Sonnet is the last rung of Opinion's Automatic only |
-| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra; Opinion walks Codex Sol, then Claude Sonnet |
+| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer (whichever one LM Studio has loaded), then Codex Terra; Opinion walks Codex Sol, then Claude Sonnet |
 | 4   | `XAI_API_KEY`                                 | Grok                                                                        |
 
 #### Claude Code — configured-provider default, no key
@@ -251,8 +251,8 @@ sign in for you.
 
 Every active Queue row and the story workbench default to **Automatic**. A
 configured `LLM_*` gateway is forced for Automatic. Without one, TownReporter
-uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded,
-then Codex Terra, and stores the first ready provider on the job before it is
+uses DeepSeek v4.1 Flash first, then the local model this computer has loaded
+if there is one, then Codex Terra, and stores the first ready provider on the job before it is
 enqueued. Every pass in that Story run uses the same
 effective provider unless it reaches a usage limit, becomes unavailable,
 loses its login, or times out mid-run. Automatic then moves the unfinished
@@ -305,8 +305,8 @@ Opinion displays Automatic, all named Codex and Claude models, Local model,
 plus saved custom connections. Codex Sol is selected by default. **Opinion's own
 Automatic** tries Codex Sol, then Claude Sonnet once if Codex is unavailable.
 That is the Opinion ladder only. Stories, scans and Dark Desk walk the desk's
-own Automatic ladder: DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer
-when it is loaded, then Codex Terra. Claude Sonnet is a hand pick on those
+own Automatic ladder: DeepSeek v4.1 Flash, then the local model on this computer
+(whichever one LM Studio has loaded), then Codex Terra. Claude Sonnet is a hand pick on those
 surfaces. Explicit choices remain the requested first
 runtime and can move only an unfinished call after a recognized technical
 failure. An invalid

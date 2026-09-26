@@ -13,7 +13,8 @@
  *   FAKE_CODEX_QUOTA_PROMPTS "1" returns a usage-limit failure for every exec call
  *   FAKE_CODEX_VALID_DRAFT "1" answers every pass with content that describes
  *                           the CURRENT ladder (0.6.63 Unit Y: DeepSeek, then
- *                           Qwen, then Codex Terra) instead of the retired
+ *                           the local model, then Codex Terra -- "Local model"
+ *                           since 0.6.69, Unit AL item 4) instead of the retired
  *                           Claude-then-Codex one. The shapes and the marker
  *                           handling are identical either way, so a walk that
  *                           does not set this knob reads exactly what it read

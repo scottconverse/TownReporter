@@ -104,15 +104,21 @@ describe("planDarkRoundFailover", () => {
       },
     );
 
+    /*
+      The label is the registry's own for the rung, which is the bare "Local
+      model" since 0.6.69 (Unit AL item 4): the rung names no model of its own.
+      A real probe labels the picked model as "Local model (<name>)", and the
+      fake probe here is deliberately the plain registry label.
+    */
     assert.deepEqual(result, {
       next: "qwen-local",
-      label: "Qwen 3.6 35B",
+      label: "Local model",
       switchedBecause: "DeepSeek v4.1 Flash sign-in lapsed",
     });
     assert.deepEqual(probed, ["qwen-local"], "a hop stops at the first ready rung");
     assert.deepEqual(modelChoiceCalls, [[99, "qwen-local"]]);
     assert.deepEqual(stageMessages, [
-      "Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash sign-in lapsed",
+      "Switched to Local model: DeepSeek v4.1 Flash sign-in lapsed",
     ]);
   });
 
@@ -137,12 +143,12 @@ describe("planDarkRoundFailover", () => {
 
     assert.deepEqual(result, {
       next: "qwen-local",
-      label: "Qwen 3.6 35B",
+      label: "Local model",
       switchedBecause: "DeepSeek v4.1 Flash timed out",
     });
     assert.deepEqual(probed, ["qwen-local"]);
     assert.deepEqual(modelChoiceCalls, [[99, "qwen-local"]]);
-    assert.deepEqual(stageMessages, ["Switched to Qwen 3.6 35B: DeepSeek v4.1 Flash timed out"]);
+    assert.deepEqual(stageMessages, ["Switched to Local model: DeepSeek v4.1 Flash timed out"]);
   });
 
   it("routes an editor's explicit model choice around a technical failure", async () => {
