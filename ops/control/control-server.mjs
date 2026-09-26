@@ -102,12 +102,14 @@ const POWERSHELL = path.win32.join(SYSTEM32, "WindowsPowerShell", "v1.0", "power
 const SCHTASKS = path.win32.join(SYSTEM32, "schtasks.exe");
 
 /**
- * The six menu items, by fixed id, exactly as `TownReporter Control.cmd`
- * offers them. Every one is a fixed executable plus a fixed argument ARRAY run
- * with shell:false -- Node passes an argv vector, so no argument is ever
- * re-parsed by a shell and no request body can add one. The `explain` text is
- * the menu's own wording: the operator already knows what these sentences mean,
- * and a second phrasing for the same button is a second thing to get wrong.
+ * The menu items, by fixed id, exactly as `TownReporter Control.cmd` offers
+ * them -- plus `back-up-now`, which the menu does not have and which the owner
+ * asked for as a button. Every one is a fixed executable plus a fixed argument
+ * ARRAY run with shell:false -- Node passes an argv vector, so no argument is
+ * ever re-parsed by a shell and no request body can add one. The `explain` text
+ * is the menu's own wording: the operator already knows what these sentences
+ * mean, and a second phrasing for the same button is a second thing to get
+ * wrong.
  *
  * `spawns` is a list of argv vectors run in order. `refresh` is the odd one
  * out: "check" has nothing to run, it re-reads the status.
@@ -162,6 +164,24 @@ export const ACTIONS = {
       {
         exe: POWERSHELL,
         args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path.join(OPS_DIR, "redlib.ps1"), "restart"],
+        settleMs: 0,
+      },
+    ],
+  },
+  // Not one of the six menu items: the menu has no "back the paper up" on it,
+  // and the owner asked for a button. Same script the nightly run and the menu
+  // promotions use, so a press here cannot prune or report differently from
+  // 2 AM. -Force because a person asking has already decided, and with no lock
+  // wait: "another backup is running, try again in a minute" is the right
+  // answer to a press, where a silent stall would just look broken.
+  "back-up-now": {
+    label: "Back up now",
+    explain:
+      "Saves a copy of the paper's database now, copies it to the other drive and tidies up. Safe to press while the paper is running.",
+    spawns: [
+      {
+        exe: POWERSHELL,
+        args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path.join(OPS_DIR, "backup.ps1"), "-Force"],
         settleMs: 0,
       },
     ],
@@ -351,6 +371,139 @@ export function probeBackup({ dir = DEFAULT_BACKUP_DIR, now = Date.now } = {}) {
   if (!newest) return { ok: false, found: false, dir, detail: `No backup found in ${dir}` };
   const ageMinutes = Math.max(0, Math.round((now() - newest.mtimeMs) / 60000));
   return { ok: true, found: true, dir, ...newest, ageMinutes };
+}
+
+/**
+ * A JSON report a PowerShell run left in `logs\`, read the same forgiving way
+ * the library reads it: a missing file is "nobody has said", a corrupt one is
+ * "could not read it", and neither is ever an exception on a status page.
+ */
+function readJsonState(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { ok: false, exists: false, value: null };
+  }
+  const start = text.indexOf("{");
+  if (start < 0) return { ok: false, exists: true, value: null };
+  try {
+    return { ok: true, exists: true, value: JSON.parse(text.slice(start)) };
+  } catch {
+    return { ok: false, exists: true, value: null };
+  }
+}
+
+/** PowerShell writes `$true` as JSON `true`; anything else is not a yes. */
+const isTrue = (value) => value === true || value === "true" || value === "True";
+
+/** Gigabytes the way the owner reads a drive: 4.3 TB, not 4400 GB. */
+const formatFreeSpace = (gb) => {
+  if (!Number.isFinite(gb)) return "";
+  if (gb >= 1000) return `${(gb / 1000).toFixed(1)} TB free`;
+  return `${Math.round(gb)} GB free`;
+};
+
+/** The offsite folder, when no run has reported one yet. */
+export const DEFAULT_OFFSITE_DIR = "D:\\TownReporter-backups";
+
+/**
+ * What the last backup run knows about the copy on the other drive, out of
+ * `logs\backup-state.json`.
+ *
+ * Out of that file and NOT out of a listing of D: for one reason: this page's
+ * whole promise is that looking at it does not disturb the machine, and a
+ * listing of a removable drive blocks for as long as that drive takes to wake
+ * up. The run has already asked these questions -- how many copies verified,
+ * how much room is left, what failed the last time -- and wrote the answers
+ * down; the page only has to read them.
+ *
+ * Never green on a file it could not read. "No run has reported yet" and "the
+ * report is unreadable" are Notes with the reason in the sentence, because a
+ * green light nobody earned is the one thing this page must not print.
+ */
+export function probeOffsiteCopy({ appRoot = null, stateFile = null } = {}) {
+  const dirFromEnv = appRoot ? readEnvFile(appRoot).BACKUP_OFFSITE_DIR : null;
+  const fallback = dirFromEnv || DEFAULT_OFFSITE_DIR;
+  const file = stateFile || (appRoot ? path.join(appRoot, "logs", "backup-state.json") : null);
+  const read = file ? readJsonState(file) : { ok: false, exists: false, value: null };
+  if (!read.ok) {
+    return {
+      ok: false,
+      known: false,
+      dir: fallback,
+      verified: 0,
+      freeGb: null,
+      at: null,
+      failing: false,
+      reason: read.exists ? "the backup state file could not be read" : null,
+      detail: read.exists
+        ? "the backup run's report could not be read, so nothing is known about the copy on the other drive"
+        : `no backup run has reported on the copy to ${fallback} yet`,
+    };
+  }
+  const state = read.value || {};
+  const dir = state.offsiteDir || fallback;
+  const freeGb = Number(state.offsiteFreeGb);
+  const reported = state.offsiteOk !== undefined && state.offsiteOk !== null;
+  return {
+    ok: true,
+    known: reported,
+    dir,
+    verified: Number(state.offsiteVerified) || 0,
+    freeGb: Number.isFinite(freeGb) ? freeGb : null,
+    at: state.offsiteAt || state.lastSuccessAt || state.updatedAt || null,
+    failing: reported && !isTrue(state.offsiteOk),
+    reason: state.offsiteReason || null,
+    localCount: Number(state.localCount) || 0,
+    detail: reported
+      ? null
+      : `no backup run has looked at ${dir} yet (the last one only dumped or was skipped)`,
+  };
+}
+
+/**
+ * Whether anything is wrong, out of `logs\alerts.json` -- the file the alerts
+ * library writes and the card the owner is asked to read.
+ *
+ * The rule is the alert library's, not this file's: a condition is in `firing`
+ * only after it has been alerted, and it leaves `firing` when it recovers. So
+ * "is the card green" is "is `firing` empty", and this probe does not re-derive
+ * anything from the checks above it. Two places deciding whether the owner
+ * should be worried is one place too many.
+ */
+export function probeAlerts({ appRoot = null, stateFile = null } = {}) {
+  const file = stateFile || (appRoot ? path.join(appRoot, "logs", "alerts.json") : null);
+  const read = file ? readJsonState(file) : { ok: false, exists: false, value: null };
+  if (!read.ok) {
+    return {
+      ok: false,
+      known: false,
+      firing: [],
+      problem: null,
+      updatedAt: null,
+      detail: read.exists
+        ? "the alert state file could not be read, so this page cannot say whether anything needs attention"
+        : "nothing has been checked for alerts on this machine yet; the watchdog writes this when it next runs",
+    };
+  }
+  const state = read.value || {};
+  const bucket = state.firing && typeof state.firing === "object" ? state.firing : {};
+  const firing = Object.entries(bucket).map(([id, entry]) => ({
+    id,
+    message: entry?.message || id,
+    detail: entry?.detail || "",
+    since: entry?.since || null,
+    firedAt: entry?.firedAt || null,
+  }));
+  return {
+    ok: true,
+    known: true,
+    firing,
+    problem: state.problem || null,
+    updatedAt: state.updatedAt || null,
+    detail: null,
+  };
 }
 
 /** Whether a test copy is answering on 3100, and what version it says. */
@@ -601,6 +754,8 @@ export async function collectStatus({
     qwen: probeQwen,
     lastScan: probeLastScan,
     backup: probeBackup,
+    offsite: probeOffsiteCopy,
+    alerts: probeAlerts,
     ...probes,
   };
   const probed = await read.status({ appRoot, repoRoot, onOutput });
@@ -637,6 +792,11 @@ export async function collectStatus({
   ]);
 
   const backup = read.backup({ dir: backupDir, now });
+  // Both of these read a report the backup run or the watchdog left in the
+  // install's own `logs\`, so they take the install being described and never
+  // the folder this page happens to be running from.
+  const offsite = read.offsite({ appRoot });
+  const alerts = read.alerts({ appRoot });
 
   // Every card below carries a real `state` -- "ok" / "note" / "down" -- and
   // `ok` derived from it, so the page cannot print OK over a probe that did not
@@ -681,6 +841,26 @@ export async function collectStatus({
     ),
     // A test copy that is not running is normal, and normal is not the same
     // word as healthy: Note, so the card is never a green light nobody checked.
+    // The copy on the other drive, in the owner's own terms: how many are
+    // there, when the last one was checked, and how much room is left. Down
+    // only when the run said the copying failed -- an unreadable report is a
+    // Note with the reason, never a fault the page invented.
+    card(
+      "offsite",
+      "Copy on D:",
+      offsite.known ? (offsite.failing ? "down" : offsite.verified > 0 ? "ok" : "note") : "note",
+      !offsite.known
+        ? offsite.detail
+        : offsite.failing
+          ? `the last copy to ${offsite.dir} failed: ${offsite.reason || "no reason was given"}`
+          : [
+              `${offsite.verified} ${offsite.verified === 1 ? "copy" : "copies"} on ${offsite.dir}`,
+              offsite.at ? `checked ${formatLocalTime(offsite.at, { now, timeZone })}` : "",
+              formatFreeSpace(offsite.freeGb),
+            ]
+              .filter(Boolean)
+              .join("; "),
+    ),
     card(
       "test-copy",
       "Test copy on 3100",
@@ -699,6 +879,28 @@ export async function collectStatus({
       qwen.detail,
     ),
     card("last-scan", "Last scan", scan.state, scan.detail),
+    // What the owner is asked to read first. The wording when there is nothing
+    // wrong is the plainest sentence this page owns, and it says when it was
+    // last checked, because "nothing needs attention" with no time on it is a
+    // claim about a moment nobody can place.
+    card(
+      "alerts",
+      "Attention",
+      !alerts.known || alerts.problem ? "note" : alerts.firing.length ? "down" : "ok",
+      !alerts.known
+        ? alerts.detail
+        : alerts.problem
+          ? `the alert state file could not be read (${alerts.problem})`
+          : alerts.firing.length
+            ? alerts.firing
+                .map((a) => (a.detail ? `${a.message} -- ${a.detail}` : a.message))
+                .join("; ")
+            : `Nothing needs attention${
+                formatLocalTime(alerts.updatedAt, { now, timeZone })
+                  ? ` (last checked ${formatLocalTime(alerts.updatedAt, { now, timeZone })})`
+                  : ""
+              }`,
+    ),
   ];
 
   return {

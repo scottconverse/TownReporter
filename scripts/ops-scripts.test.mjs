@@ -60,6 +60,14 @@ const REQUIRED = [
   // can see, fails on the machine that keeps the paper online.
   "lib-migrate.ps1",
   "redlib-relocate.ps1",
+  // The backups and the alerts. lib-backup.ps1 is one backup path shared by
+  // promote.ps1, the nightly run and the Control page's button; lib-alert.ps1
+  // is the one place that decides whether the owner is told. Losing either
+  // does not fail loudly in CI -- it fails at 2 AM on the machine that keeps
+  // the paper's only copy of the database, which is the point of this list.
+  "lib-backup.ps1",
+  "lib-alert.ps1",
+  "backup.ps1",
   // The Control page, and the launcher the Desktop icon runs. The page is the
   // operator's non-terminal way in now, so the same argument that put
   // status.ps1 in this list applies twice over: a missing file fails on the
@@ -1461,6 +1469,264 @@ test(
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
+  },
+);
+
+/* -------------------------------------------------------------------------
+   The backups, the copy to D: and the alerts (unit AJ, 0.6.68).
+
+   The owner's rules are enforced for real by scripts\ci-backup.ps1, which runs
+   the library against fake folders in a temp directory. These are the checks
+   that have to hold on a Linux CI runner too: that the files are there, that
+   the watchdog's two new sections are gated and cannot take the paper down
+   with them, that the conditions have one definition and no caller hands them
+   to the library as an array, and that 267009 is not read as a failure. The
+   last test executes the PowerShell harness on Windows, the way the
+   boot-recovery one does.
+   ------------------------------------------------------------------------- */
+
+test("the watchdog takes one backup a night and reports what is wrong, in its own gated sections", () => {
+  /*
+    The owner is shrinking programs, not adding them: the Watchdog task already
+    runs every five minutes, so "is a backup due" is one more question it asks
+    rather than one more scheduled task on the machine. The two sections are
+    read here for the two ways they could hurt the paper -- throwing into the
+    app's path, and running at all in test mode -- and for the one thing that
+    must be true of a backup: that it goes through the library, so the nightly
+    run, promote.ps1 and the Control page's button cannot prune differently.
+  */
+  const wd = read("watchdog.ps1");
+  const backupAt = wd.indexOf("# --- Nightly backup ---");
+  const alertAt = wd.indexOf("# --- Alerts ---");
+  const reachAt = wd.indexOf("# --- Public reachability ---");
+  assert.ok(backupAt > 0 && alertAt > backupAt, "could not find the nightly backup and the alerts sections");
+  assert.ok(
+    reachAt > 0 && reachAt < backupAt,
+    "both sections must sit AFTER the public reachability probe: above it are the measured facts they read ($appHealthy, $siteHealthy, $pgUp), and below it is what CI can slice without running PowerShell",
+  );
+
+  const backup = stripComments(wd.slice(backupAt, alertAt));
+  const alerts = stripComments(wd.slice(alertAt));
+  assert.ok(backup.length > 0 && alerts.length > 0, "could not slice the two new sections");
+
+  for (const [name, section] of [
+    ["backup", backup],
+    ["alerts", alerts],
+  ]) {
+    assert.match(
+      section,
+      /if \(\$env:WATCHDOG_TEST_MODE -ne '1'\) \{/,
+      `the ${name} section must be skipped in test mode -- a runner has no database to dump and 5433 never means a runner's Postgres`,
+    );
+    assert.ok(
+      [...section.matchAll(/catch\s*\{/g)].length >= 1,
+      `the ${name} section must catch its own failures`,
+    );
+    assert.match(
+      section,
+      new RegExp(`Write-Log "${name}: check failed: \\$\\(\\$_\\.Exception\\.Message\\) -- the paper is unaffected"`),
+      `a failure in the ${name} section must be reported and must say the paper is unaffected rather than throw`,
+    );
+    assert.doesNotMatch(
+      section,
+      /Stop-Process|Start-ScheduledTask|Start-Process/,
+      `the ${name} section must not start or stop anything -- neither is a backup or an alert`,
+    );
+    assert.doesNotMatch(section, /\bthrow\b/, `the ${name} section must not throw into the paper's path`);
+  }
+
+  // The backup itself. One rule, one lock, one prune: the library's.
+  for (const fn of ["Test-TownReporterBackupDue", "Test-TownReporterDeskBusy", "Invoke-TownReporterBackupRun"]) {
+    assert.match(backup, new RegExp(fn), `the nightly backup must go through ${fn}`);
+  }
+  assert.match(
+    backup,
+    /\. \(Join-Path \$PSScriptRoot "lib-backup\.ps1"\)/,
+    "the section must dot-source the library itself, not rely on an earlier section having done it",
+  );
+  assert.match(backup, /an editor job is running; leaving it for the next run/, "a busy desk defers the backup, in plain words");
+  assert.match(
+    backup,
+    /the last attempt failed \$minutesSinceAttempt minute\(s\) ago; waiting half an hour/,
+    "a failed dump leaves no file, so without this the due rule would retry it every five minutes all day",
+  );
+  assert.match(backup, /if \(-not \$due\.Due\) \{/, "the 2 AM / 20 hour rule decides, not a second copy of it written here");
+
+  // The alerts. The facts come from above; only the scan needs asking, and it
+  // is asked read-only through psql the way ops\control\last-scan.cjs asks.
+  assert.doesNotMatch(
+    alerts,
+    /Invoke-WebRequest|Invoke-RestMethod|Test-NetConnection/,
+    "the alert section must read the facts already measured above, not probe the paper a second time",
+  );
+  assert.match(alerts, /Get-TownReporterScanState -App \$app -PgPort \(\[int\]\$pgPort\)/, "the daily scan must be read the way the Control page reads it");
+  assert.match(alerts, /Test-TownReporterScanAlert -State \$scan -Now/, "and judged by the library, not by a rule written here");
+  assert.match(
+    alerts,
+    /Active = \$null; Detail = 'Postgres is down, so the daily scan could not be read'/,
+    "a database that cannot be read must leave scan-missing UNEVALUATED: clearing an alert about a scan nobody could check is worse than saying nothing",
+  );
+  assert.match(
+    alerts,
+    /Invoke-TownReporterAlertCheck -App \$app -EnvFile \$envFile -Conditions \$conditions -Now/,
+    "the run must hand the whole list to the library in one call",
+  );
+  for (const id of ["paper-down", "site-down", "scan-missing"]) {
+    assert.match(alerts, new RegExp(`'${id}'`), `the watchdog must report the ${id} condition`);
+  }
+  assert.match(alerts, /Get-TownReporterBackupAlertConditions -App \$app -EnvFile \$envFile -MinFreeGb 100/, "and the three backup conditions must come from the library");
+  assert.match(alerts, /\$conditions \+= Get-TownReporterBackupAlertConditions/, "appended straight, not wrapped in @() -- see the note in lib-backup.ps1");
+});
+
+test("the three backup conditions have one definition, and no caller hands them over as an array", () => {
+  /*
+    Measured on 2026-09-25, the day this was written: Get-TownReporterBackupAlertConditions
+    hands back its list with a unary comma, so a direct assignment and a += both
+    see the three conditions, but @() around the call does NOT flatten them --
+    it makes a ONE-item array whose single item IS the array. [string] on that
+    item's Id then joins the ids into "scan-missing offsite-failing", written to
+    logs\alerts.json as one key. The Control page would show one nonsense row
+    and the real alerts would never fire. The library now flattens one level so
+    a caller that wraps anyway still gets its alerts; this test is the other
+    half -- that the callers shipped on this machine do not wrap.
+  */
+  const lib = read("lib-backup.ps1");
+  assert.match(lib, /function Get-TownReporterBackupAlertConditions/, "lib-backup.ps1 must own the conditions");
+  assert.match(lib, /return ,@\(\$conditions\)/, "and must hand them back with the unary comma, the way Get-TownReporterBackupList does");
+  for (const id of ["backup-stale", "offsite-failing", "offsite-low-space"]) {
+    assert.match(lib, new RegExp(`Id = '${id}'`), `the library must build the ${id} condition`);
+  }
+  assert.match(
+    read("lib-alert.ps1"),
+    /if \(\$c -is \[array\]\) \{ foreach \(\$inner in \$c\) \{ \[void\]\$flat\.Add\(\$inner\) \} \}/,
+    "the alert consumer must flatten one level, so a caller that wraps the list still gets one alert per condition instead of one joined id",
+  );
+
+  // Every caller, found by reading the directory rather than by naming two
+  // files: a third caller added later is exactly the one that would wrap.
+  const callers = readdirSync(OPS)
+    .filter((f) => f.endsWith(".ps1"))
+    .filter((f) => stripComments(read(f)).includes("Get-TownReporterBackupAlertConditions"))
+    .sort();
+  assert.deepEqual(
+    callers,
+    ["backup.ps1", "lib-backup.ps1", "watchdog.ps1"],
+    "the conditions must be defined once and called from the nightly run and the manual run, and nothing else",
+  );
+  for (const caller of ["backup.ps1", "watchdog.ps1"]) {
+    assert.doesNotMatch(
+      stripComments(read(caller)),
+      /@\(\s*Get-TownReporterBackupAlertConditions/,
+      `${caller} must not wrap the conditions call in @(): that makes one item which IS the list, and the ids collapse into a sentence`,
+    );
+  }
+});
+
+test("267009 is the logon start still running, not a start that failed", () => {
+  /*
+    Found by the reboot test of 2026-09-25: a cold boot spends a minute or more
+    in Postgres recovery, the start task was therefore still running, and the
+    watchdog read its LastTaskResult of 267009 (SCHED_S_TASK_RUNNING) as a
+    failure -- logging a repair it had not needed and, once outside the grace,
+    starting the task a second time. Both 267009 cases mean "the start is
+    somewhere else"; neither is this run's to repair.
+  */
+  const wd = read("watchdog.ps1");
+  assert.match(
+    wd,
+    /\$startRunning = \[bool\]\(\$startHasRun -and \$startInfo\.LastTaskResult -eq 267009\)/,
+    "267009 must be recognised as its own state, not folded into the failure test",
+  );
+  assert.match(
+    wd,
+    /\$startFailed = \[bool\]\(\$startHasRun -and \$startInfo\.LastTaskResult -ne 0 -and -not \$startRunning\)/,
+    "and a start that is running must not also count as failed",
+  );
+  assert.match(wd, /\$runTheTask = \(\$startFailed -and/, "the repair must be driven by the failure, so 267009 can never start the task again");
+
+  const runningAt = wd.indexOf("} elseif ($startRunning) {");
+  assert.ok(runningAt > 0, "could not find the 267009 branch");
+  const running = stripComments(wd.slice(runningAt, wd.indexOf("} elseif ($startFailed) {", runningAt)));
+  assert.ok(running.length > 0, "could not slice the 267009 branch");
+  assert.match(running, /start still running \(waiting for the database\)/, "the log must say what 267009 actually is, in the owner's words");
+  assert.doesNotMatch(
+    running,
+    /Start-ScheduledTask|Start-Process|Stop-Process|\bthrow\b/,
+    "the 267009 branch waits and says so -- it repairs nothing, because nothing is broken",
+  );
+  assert.match(
+    wd,
+    /\$whyWait = if \(\$startRunning\) \{ 'start still running \(waiting for the database\)' \}/,
+    "and the no-repair line at the bottom must use the same words, because a FAILED there was the lie on the reboot test",
+  );
+});
+
+test(
+  "the backups, the copy to D: and the alerts pass every check without a database",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The owner's rules, executed. scripts\ci-backup.ps1 runs the REAL library
+      -- New-TownReporterBackup, Copy-TownReporterBackupOffsite,
+      Remove-TownReporterBackupOld, Invoke-TownReporterBackupRun,
+      Invoke-TownReporterAlertCheck -- against fake folders in a temp
+      directory: six local backups, an empty "D:", a missing drive, an
+      unwritable one, a copy whose hash does not match, a truncated dump, and
+      the wrapped and appended forms of the conditions call.
+
+      The dump seam is -DumpCommand, so no pg_dump is launched and no Postgres
+      is touched: the harness's own stub is what throws "there is no pg_dump on
+      this machine". The three assertions about what the harness may contain
+      are as load-bearing as the ones about what it prints -- this file must
+      never be a way to touch the live paper or the real backup folders.
+    */
+    const fixture = join(ROOT, "scripts", "ci-backup.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-backup.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-backup.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.doesNotMatch(
+      text,
+      /Start-Process|Get-NetTCPConnection|Invoke-WebRequest|Invoke-RestMethod|Invoke-Command/,
+      "the fixture must touch nothing live -- fake folders in a temp directory only",
+    );
+    assert.match(text, /GetTempPath\(\)/, "and its fake world must be built under the OS temp directory");
+    assert.match(text, /\$script:backupDir = Join-Path \$script:world "townreporter-backups"/, "with the local folder inside that temp world, never the real sibling");
+    assert.match(text, /throw 'there is no pg_dump on this machine'/, "the dumps must be written by a stub, so no database is ever dumped");
+    assert.ok(text.includes("-DumpCommand $dumpGood"), "and every run must be given that stub");
+    // 5433 appears twice, and both times as text written into a fake .env --
+    // the port is read for the database NAME off the URL and never connected
+    // to. Anything else containing the live port is the start of a real
+    // connection to this machine's cluster.
+    const withPort = text.split("\n").filter((l) => l.includes("5433"));
+    assert.equal(withPort.length, 2, `5433 must appear only in the fake .env the fixture writes, but it is on ${withPort.length} line(s)`);
+    for (const line of withPort) {
+      assert.match(
+        line,
+        /DATABASE_URL=postgres:\/\/postgres@127\.0\.0\.1:5433\/townreporter/,
+        "a line naming the live port that is not the fake DATABASE_URL is a real connection to Postgres 5433",
+      );
+    }
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture],
+        { encoding: "utf8", timeout: 600_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a backup or alert check failed:\n${out}`);
+    assert.match(out, /backups and alerts: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
   },
 );
 

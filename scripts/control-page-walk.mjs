@@ -111,6 +111,19 @@ function fakeStatus() {
     extras: [
       { id: "version", label: "Version", state: "ok", ok: true, optional: true, detail: "0.6.66", fix: null },
       { id: "backup", label: "Last backup", state: "ok", ok: true, optional: true, detail: "townreporter.sql, 3 hours ago", fix: null },
+      // The copy on the other drive and the Attention card, in the states a
+      // healthy machine shows them: copies verified, nothing firing. Both are
+      // built the way the real probes build them, 12-hour local time and all,
+      // so the wording checks below are about the page rather than the fixture.
+      {
+        id: "offsite",
+        label: "Copy on D:",
+        state: "ok",
+        ok: true,
+        optional: true,
+        detail: "3 copies on D:\\TownReporter-backups; checked today at 2:04 AM; 4.3 TB free",
+        fix: null,
+      },
       { id: "qwen", label: "Model server (Qwen)", state: "ok", ok: true, optional: true, detail: "1 model loaded", fix: null },
       // The card this walk's first new check is about: a probe that could not
       // read its answer. It is a Note, and it must never be painted green --
@@ -122,6 +135,15 @@ function fakeStatus() {
         ok: false,
         optional: true,
         detail: "could not reach the database",
+        fix: null,
+      },
+      {
+        id: "alerts",
+        label: "Attention",
+        state: "ok",
+        ok: true,
+        optional: true,
+        detail: "Nothing needs attention (last checked today at 3:05 PM)",
         fix: null,
       },
     ],
@@ -381,6 +403,54 @@ async function noGreenOverCouldNot() {
   );
 }
 
+/**
+ * The two cards the owner asked for, read off the rendered page rather than off
+ * the fixture that fed it.
+ *
+ * "Copy on D:" has to say how many copies are there and how much room is left,
+ * and "Attention" has to say in the plainest words that nothing needs attention
+ * and when that was last checked. The time is asserted as a 12-hour clock: the
+ * bug this page already fixed once was a backup timestamp printed as UTC on a
+ * 24-hour clock, on a page read by one person sitting at that machine, and a new
+ * card is exactly where that would come back.
+ */
+async function theNewCards() {
+  const cards = await page.locator("#cards .card").evaluateAll((els) =>
+    els.map((element) => ({
+      label: (element.querySelector("h3")?.textContent || "").trim(),
+      verdict: (element.querySelector(".verdict")?.textContent || "").trim(),
+      state: element.dataset.state || null,
+      text: (element.textContent || "").trim().replace(/\s+/g, " "),
+    })),
+  );
+  const offsite = cards.find((card) => card.label === "Copy on D:");
+  must(
+    offsite,
+    `the page draws no "Copy on D:" card; it draws ${JSON.stringify(cards.map((c) => c.label))}`,
+  );
+  must(offsite.verdict === "OK:", `the "Copy on D:" card reads "${offsite.verdict}"`);
+  must(/\b\d+ copies? on D:/.test(offsite.text), `the "Copy on D:" card does not say how many copies: ${offsite.text}`);
+  must(/TB free/.test(offsite.text), `the "Copy on D:" card does not say how much room is left: ${offsite.text}`);
+
+  const attention = cards.find((card) => card.label === "Attention");
+  must(
+    attention,
+    `the page draws no "Attention" card; it draws ${JSON.stringify(cards.map((c) => c.label))}`,
+  );
+  must(attention.verdict === "OK:", `the "Attention" card reads "${attention.verdict}"`);
+  must(
+    /Nothing needs attention/.test(attention.text),
+    `with nothing firing the "Attention" card must say so plainly, and it reads: ${attention.text}`,
+  );
+  const clock = attention.text.match(/\d{1,2}:\d{2}\s?(AM|PM)/i);
+  must(
+    clock,
+    `the "Attention" card names no 12-hour local time, so the page is printing a raw timestamp: ${attention.text}`,
+  );
+  facts.push({ offsite: offsite.text, attention: attention.text });
+  step(`the "Copy on D:" and "Attention" cards are on the page: "${attention.text.slice(0, 60)}..."`);
+}
+
 /** Contrast of two computed colours, the WCAG way. */
 function contrast(first, second) {
   const luminance = (text) => {
@@ -414,7 +484,7 @@ function actionPaint() {
 /**
  * Stop everything must look like the one that takes the paper offline.
  *
- * Fix 5: all six buttons were one flat accent colour. This compares the painted
+ * Fix 5: all the buttons were one flat accent colour. This compares the painted
  * fill against every other action button in BOTH themes -- the toggle is real,
  * so this is the operator's own view, not a stylesheet read -- and checks the
  * label's contrast against its own fill, since a red nobody can read is not an
@@ -425,7 +495,7 @@ async function theStopButtonLooksDangerous() {
   const stop = dark.find((row) => row.id === "stop-all");
   must(stop, `the page renders no button for stop-all; it rendered ${JSON.stringify(dark.map((r) => r.id))}`);
   const others = dark.filter((row) => row.id !== "stop-all");
-  must(others.length === 5, `expected the other five action buttons, found ${others.length}`);
+  must(others.length === 6, `expected the other six action buttons, found ${others.length}`);
   for (const other of others) {
     must(
       stop.bg !== other.bg,
@@ -480,6 +550,7 @@ async function theWording(server) {
     "Start everything",
     "Stop everything",
     "Restart the Reddit reader",
+    "Back up now",
   ]) {
     must(labels.includes(want), `the page offers no button labelled "${want}"`);
   }
@@ -496,7 +567,7 @@ async function theWording(server) {
     must(hrefs.includes(want), `the page links nowhere near ${want}; it links ${JSON.stringify(hrefs)}`);
   }
   facts.push({ buttons: labels.length, links: hrefs });
-  step(`all ${labels.length} menu buttons are on the page with the menu's own words, plus the three links`);
+  step(`all ${labels.length} buttons are on the page with the menu's own words, plus the three links`);
   must(server.token.length > 0, "no token: the page could not POST at all");
 }
 
@@ -640,6 +711,7 @@ try {
   await keyboardReaches();
   await theLightToggle();
   await theWording(server);
+  await theNewCards();
   await theHeadline();
   await noGreenOverCouldNot();
   await theStopButtonLooksDangerous();

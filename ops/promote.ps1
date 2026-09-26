@@ -10,7 +10,9 @@
   What it does, in order:
 
     1. refuses if this checkout has uncommitted work, so nothing is lost
-    2. backs the database up, and refuses to continue if the dump looks empty
+    2. backs the database up, and refuses to continue if the dump looks empty;
+       copies it to the offsite drive and verifies it there, then prunes the
+       local folder back to the newest three (see ops\lib-backup.ps1)
     3. records what is on the paper now, to compare against afterwards
     3b. refuses if an editor has a desk job running or queued, unless
         -WaitForJobs (poll up to 15 min) or -Force (proceed anyway) is passed
@@ -64,6 +66,7 @@ Assert-TownReporterLegacyOwnership
 $ops = $PSScriptRoot
 $app = Split-Path -Parent $ops
 . (Join-Path $ops "lib-port.ps1")
+. (Join-Path $ops "lib-backup.ps1")
 
 function Say($msg) { Write-Host "  $msg" }
 function Die($msg) { Write-Host ""; Write-Host "  STOP. $msg" -ForegroundColor Yellow; Write-Host ""; exit 1 }
@@ -112,22 +115,49 @@ if ($dirty) {
 }
 
 # --- 2. backup --------------------------------------------------------------
-$dbUrl = (Get-Content (Join-Path $app ".env") | Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } | Select-Object -First 1)
+<#
+  The dump itself moved to ops\lib-backup.ps1 on 2026-09-25, unchanged: same
+  pg_dump, same flags, same <database>_YYYY-MM-DD_HHmm.sql name, same 100000
+  byte floor. It is a library because this was the ONLY place in the tree that
+  ran pg_dump -- no scheduled task did -- so the paper's only copy of itself
+  was whatever the last promotion happened to leave behind. The nightly run in
+  watchdog.ps1 needs exactly this code, and a second copy of it would be a
+  second place for the flags to drift.
+
+  What is new here is what happens after the dump: it is copied to the offsite
+  drive and verified there, and the local folder is pruned back to the newest
+  three -- but only for files proven identical on the other drive. The library
+  refuses to delete anything locally if the copy did not verify, and refuses
+  again if the offsite drive is short of room. So a promotion can no longer
+  quietly be the reason there is nowhere left to restore from.
+
+  The gate is still the backup, and only the backup: a failed dump stops the
+  promotion here, as it always has. A failed COPY does not, because the local
+  backup it just wrote is intact and the paper being down is the worse problem
+  -- it prints, it alerts, and it deletes nothing.
+
+  -LockWaitSeconds: a promotion that refused to run because a nightly dump was
+  mid-flight would take the paper down for nothing. Wait for it.
+#>
+$backupNote = "(no backup taken: -WhatIf)"
+$dbUrl = Read-OpsEnvValue -EnvFile (Join-Path $app ".env") -Name 'DATABASE_URL'
 if (-not $dbUrl) { Die "No DATABASE_URL in .env, so there is nothing to back up and no paper to promote." }
 $dbName = ($dbUrl -split '/')[-1].Trim()
-$backupDir = Join-Path (Split-Path -Parent $app) "townreporter-backups"
-New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-$backup = Join-Path $backupDir ("{0}_{1}.sql" -f $dbName, (Get-Date -Format "yyyy-MM-dd_HHmm"))
+if ($PSCmdlet.ShouldProcess($dbName, "back up, copy the backup to the offsite drive, and prune the local backups")) {
+  $run = Invoke-TownReporterBackupRun -Database $dbName -App $app -Force -LockWaitSeconds 120 -LogFile (Join-Path $app "logs\backup.log")
+  if ($run.Skipped) { Die "Could not take a backup ($($run.Reason)). Not promoting without one." }
+  # DumpOk, not Ok: -Force means this run always attempts a dump, so a $null or
+  # $false here means there is no backup on this machine and the promotion must
+  # not proceed. Ok would also fail on a failed COPY, and refusing to promote
+  # over a full D: drive would take the paper down for no reason at all.
+  if ($run.DumpOk -ne $true) { Die "Could not take a backup ($($run.Reason)). Not promoting without one." }
 
-if ($PSCmdlet.ShouldProcess($dbName, "back up to $backup")) {
-  & "$env:USERPROFILE\scoop\apps\postgresql\current\bin\pg_dump.exe" -p 5433 -U postgres -d $dbName -f $backup
-  if (-not (Test-Path $backup)) { Die "pg_dump wrote nothing. Not promoting without a backup." }
-  $bytes = (Get-Item $backup).Length
-  # A dump of a real newsroom is megabytes. Anything tiny means it dumped an
-  # empty or wrong database, and continuing would promote over live data with
-  # no way back.
-  if ($bytes -lt 100000) { Die "The backup is only $bytes bytes, which is too small to be this database. Not promoting." }
-  Say "backup: $backup ($([math]::Round($bytes/1MB,1)) MB)"
+  $backup = Join-Path (Get-TownReporterBackupDir -App $app) $run.State.lastName
+  $backupNote = "$backup ($([math]::Round($run.State.lastBytes/1MB,1)) MB)"
+  Say "backup: $backupNote"
+  foreach ($line in $run.Lines) {
+    if ($line -notlike 'took a backup:*') { Say "  $line" }
+  }
 }
 
 # --- 2b. can we even fast-forward? -----------------------------------------
@@ -298,7 +328,7 @@ if ($lockBefore -ne $lockAfter) {
 if ($PSCmdlet.ShouldProcess("the app", "build")) {
   Say "building"
   & npm run build
-  if ($LASTEXITCODE -ne 0) { Die "The build failed. The paper is still down. Backup: $backup" }
+  if ($LASTEXITCODE -ne 0) { Die "The build failed. The paper is still down. Backup: $backupNote" }
 }
 
 # --- 8. start ---------------------------------------------------------------
@@ -439,8 +469,8 @@ Write-Host ""
 Remove-Item (Join-Path $app "logs\promote-in-progress") -Force -ErrorAction SilentlyContinue
 if ($fail.Count -gt 0) {
   $fail | ForEach-Object { Write-Host "  [FAIL] $_" -ForegroundColor Yellow }
-  Die "Promotion finished but the paper is not healthy. The backup is at $backup"
+  Die "Promotion finished but the paper is not healthy. The backup is at $backupNote"
 }
 Write-Host "  Promoted. The paper is up and the archive is intact." -ForegroundColor Green
-Write-Host "  Backup kept at $backup"
+Write-Host "  Backup kept at $backupNote"
 Write-Host ""
