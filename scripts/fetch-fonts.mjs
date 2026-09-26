@@ -18,10 +18,17 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+/*
+  The families and weights are the redesign's (docs/design/handoff-2026-09-26/
+  design-system/tokens/fonts.css:2, and design-system/README.md §4): Bricolage
+  Grotesque does the talking at 500/700/800, Literata does the reading at
+  400/500/600 roman plus 400 italic for Opinion headlines. Keep this string in
+  step with that line -- it is the only place production asks for the fonts.
+*/
 const GOOGLE_CSS =
   "https://fonts.googleapis.com/css2" +
-  "?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700" +
-  "&family=Source+Serif+4:ital,wght@0,400;0,600;1,400;1,600" +
+  "?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800" +
+  "&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400" +
   "&display=swap";
 
 // Google serves woff2 only to a browser-shaped request; anything else gets the

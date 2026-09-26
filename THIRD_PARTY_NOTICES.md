@@ -1,21 +1,24 @@
 # Third-party notices
 
-## Fraunces webfont
+## Bricolage Grotesque webfont
 
-TownReporter self-hosts latin and latin-ext WOFF2 subsets of Fraunces.
-Fraunces is licensed under the SIL Open Font License 1.1. Copyright 2018
-The Fraunces Project Authors (<https://github.com/undercasetype/Fraunces>).
-The complete license text is included at
-[`licenses/fonts/Fraunces-OFL.txt`](licenses/fonts/Fraunces-OFL.txt).
-
-## Source Serif 4 webfont
-
-TownReporter self-hosts latin and latin-ext WOFF2 subsets of Source Serif 4.
-Source Serif 4 is licensed under the SIL Open Font License 1.1. Copyright 2014
-The Source Serif 4 Project Authors
-(<https://github.com/adobe-fonts/source-serif>). The complete license text is
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of Bricolage
+Grotesque, in the 500, 700 and 800 weights the design tokens ask for
+(`docs/design/handoff-2026-09-26/design-system/tokens/fonts.css`). Bricolage
+Grotesque is licensed under the SIL Open Font License 1.1. Copyright 2022 The
+Bricolage Grotesque Project Authors
+(<https://github.com/ateliertriay/bricolage>). The complete license text is
 included at
-[`licenses/fonts/Source-Serif-4-OFL.txt`](licenses/fonts/Source-Serif-4-OFL.txt).
+[`licenses/fonts/Bricolage-Grotesque-OFL.txt`](licenses/fonts/Bricolage-Grotesque-OFL.txt).
+
+## Literata webfont
+
+TownReporter self-hosts latin and latin-ext WOFF2 subsets of Literata, in the
+400/500/600 roman and 400 italic cuts the design tokens ask for. Literata is
+licensed under the SIL Open Font License 1.1. Copyright 2017 The Literata
+Project Authors (<https://github.com/googlefonts/literata>). The complete
+license text is included at
+[`licenses/fonts/Literata-OFL.txt`](licenses/fonts/Literata-OFL.txt).
 
 ## dsh-xai reference
 
