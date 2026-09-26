@@ -3,7 +3,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { addCorrection, deleteArticle, listMemory, listPublishedDesk, resolveMeetingArticleReview } from "@/lib/news/desk";
+import {
+  addCorrection,
+  deleteArticle,
+  listMemory,
+  listPublishedDesk,
+  resolveMeetingArticleReview,
+  updateArticleHeadline,
+} from "@/lib/news/desk";
+import { editorActionError } from "@/lib/news/desk-copy";
 import { myDesk } from "@/lib/news/claim";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -28,6 +36,16 @@ function PublishedPage() {
   const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Which story is asking to be taken off the paper. Null when none is.
   const [killFor, setKillFor] = useState<string | null>(null);
+  /*
+    The headline of a printed story, being rewritten.
+
+    Keyed by slug because that is what identifies the row on this page; the
+    write itself goes by article id (`p.id`), which is what `articles` is keyed
+    by. The slug never changes here -- a printed link must keep working -- so
+    this is a change of words only.
+  */
+  const [headFor, setHeadFor] = useState<string | null>(null);
+  const [headBySlug, setHeadBySlug] = useState<Record<string, string>>({});
   // The trash id of the last removal, so Undo is right here.
   const [undo, setUndo] = useState<number | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
@@ -58,7 +76,9 @@ function PublishedPage() {
     onError: (err) => {
       setNote({
         kind: "err",
-        text: err instanceof Error ? err.message : "Could not post that correction.",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "post that correction") ??
+          "Could not post that correction.",
       });
     },
   });
@@ -93,7 +113,11 @@ function PublishedPage() {
     },
     onError: (error) => setNote({
       kind: "err",
-      text: error instanceof Error ? error.message : "Could not save the transcript review.",
+      text:
+        editorActionError(
+          error instanceof Error ? error.message : "",
+          "save the transcript review",
+        ) ?? "Could not save the transcript review.",
     }),
   });
 
@@ -122,7 +146,9 @@ function PublishedPage() {
     onError: (err) =>
       setNote({
         kind: "err",
-        text: err instanceof Error ? err.message : "Could not remove that.",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "remove that") ??
+          "Could not remove that.",
       }),
   });
 
@@ -143,7 +169,44 @@ function PublishedPage() {
     onError: (err) =>
       setNote({
         kind: "err",
-        text: err instanceof Error ? err.message : "That would not go back.",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "put it back") ??
+          "That would not go back.",
+      }),
+  });
+
+  /**
+   * Rewrite the headline of a story that is already on the paper.
+   *
+   * The paper prints the truth once; this is not a correction, so no notice
+   * goes on the page (the corrections rule in lib/news/corrections.ts never
+   * mentions headlines). The desk does keep the record: the server writes the
+   * old words, the account and the time to `article_headline_history` and the
+   * action log, so "when did that headline change?" has an answer.
+   */
+  const editHeadline = useMutation({
+    mutationFn: (input: { articleId: number; slug: string; headline: string }) =>
+      updateArticleHeadline({ data: { articleId: input.articleId, headline: input.headline } }),
+    onSuccess: (res, input) => {
+      if (!res.ok) {
+        setNote({
+          kind: "err",
+          text: editorActionError(res.error, "change that headline") ?? "Could not change that headline.",
+        });
+        return;
+      }
+      setHeadFor(null);
+      setNote({ kind: "ok", text: "The paper now reads that headline." });
+      void qc.invalidateQueries({ queryKey: ["published-desk"] });
+      void qc.invalidateQueries({ queryKey: ["paper"] });
+      void qc.invalidateQueries({ queryKey: ["article", input.slug] });
+    },
+    onError: (err) =>
+      setNote({
+        kind: "err",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "change that headline") ??
+          "Could not change that headline.",
       }),
   });
 
@@ -205,7 +268,10 @@ function PublishedPage() {
       {pubIsError && !rows.length ? (
         <ScreenError
           message={
-            pubError instanceof Error ? pubError.message : "Could not load what's published."
+            editorActionError(
+              pubError instanceof Error ? pubError.message : "",
+              "load what's published",
+            ) ?? "Could not load what's published."
           }
           onRetry={() => void pubRefetch()}
           retrying={pubRefetching}
@@ -230,6 +296,45 @@ function PublishedPage() {
                   UIUX-04.
                 */}
                 <h2 className="pub-h">{p.headline}</h2>
+                {/*
+                  Rewriting the headline of a story already on the paper. It
+                  sits directly under the h2 that shows the words live right
+                  now, so the editor is looking at what they are replacing.
+                */}
+                {headFor === p.slug ? (
+                  <div className="corr-form head-edit">
+                    <label htmlFor={`pub-head-${p.slug}`}>
+                      Type the headline this story should read instead. The link does not change,
+                      so nothing that points here breaks. The paper keeps a record of the old words.
+                    </label>
+                    <textarea
+                      id={`pub-head-${p.slug}`}
+                      rows={2}
+                      value={headBySlug[p.slug] ?? p.headline}
+                      onChange={(e) =>
+                        setHeadBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
+                      }
+                    />
+                    <div className="row-acts static">
+                      <InkButton
+                        small
+                        disabled={!(headBySlug[p.slug] ?? "").trim() || editHeadline.isPending}
+                        onClick={() =>
+                          editHeadline.mutate({
+                            articleId: p.id,
+                            slug: p.slug,
+                            headline: (headBySlug[p.slug] ?? "").trim(),
+                          })
+                        }
+                      >
+                        {editHeadline.isPending ? "Saving…" : "Save the new headline"}
+                      </InkButton>
+                      <InkButton tone="quiet" small onClick={() => setHeadFor(null)}>
+                        Cancel
+                      </InkButton>
+                    </div>
+                  </div>
+                ) : null}
                 {p.dek ? <p className="pub-dek">{p.dek}</p> : null}
                 {p.corrections.map((c, i) => (
                   <p key={i} className="pub-corr">
@@ -379,6 +484,18 @@ function PublishedPage() {
                     Legal removal
                   </a>
                 )}
+                <InkButton
+                  tone="quiet"
+                  small
+                  onClick={() => {
+                    // Seed the box with the words on the paper, so pressing
+                    // Edit twice is never a way to lose them.
+                    setHeadBySlug((prev) => (prev[p.slug] ? prev : { ...prev, [p.slug]: p.headline }));
+                    setHeadFor(headFor === p.slug ? null : p.slug);
+                  }}
+                >
+                  {headFor === p.slug ? "Close headline" : "Edit headline"}
+                </InkButton>
                 <InkButton tone="quiet" small onClick={() => setCorrFor(p.slug)}>
                   Post correction
                 </InkButton>

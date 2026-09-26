@@ -227,6 +227,41 @@ describe("getViewStats", () => {
     );
   });
 
+  /*
+    The one number on Stats that is not a view count (0.6.67).
+
+    The desk logs each section the editor printed under that the model did not
+    choose on the audit trail -- `section-override`, one JSON line -- and Stats
+    reports how many there were. It has to be the trail row that is counted,
+    and it has to be this newsroom's rows only: the trail is shared, and a
+    count that swept every paper's decisions would tell an editor nothing
+    about their own scanner. Written against the table rather than through
+    publish, because publish needs a whole printed story to reach the line --
+    the walk covers that end of it.
+  */
+  it("counts this newsroom's section divergences from the audit trail, and no other paper's", async () => {
+    const sql = await getSql();
+    const otherNewsroom = 9299;
+    await sql`
+      insert into audit_events (user_id, action, detail, newsroom_id) values
+        (${userId}, 'section-override', ${'{"leadId":41,"modelSection":"council","editorSection":"schools"}'}, ${newsroomId}),
+        (${userId}, 'section-override', ${'{"leadId":42,"modelSection":"council","editorSection":"schools"}'}, ${newsroomId}),
+        (${userId}, 'section-override', ${'{"leadId":43,"modelSection":"council","editorSection":"schools"}'}, ${otherNewsroom}),
+        (${userId}, 'publish', ${'not a divergence'}, ${newsroomId})
+    `;
+
+    const stats = await getViewStats(userId);
+    assert.equal(stats.sectionOverrides, 2, "two this paper's, not the third paper's and not the publish line");
+
+    // And it reads the log rather than a counter kept alongside it: a row
+    // written after the last read shows up on the next one.
+    await sql`
+      insert into audit_events (user_id, action, detail, newsroom_id)
+      values (${userId}, 'section-override', ${'{"leadId":44,"modelSection":"schools","editorSection":"council"}'}, ${newsroomId})
+    `;
+    assert.equal((await getViewStats(userId)).sectionOverrides, 3);
+  });
+
   it("rejects a stranger with no newsroom membership", async () => {
     // requireEditor auto-seats a brand-new stranger as owner of
     // DEFAULT_NEWSROOM_ID if that newsroom has no members at all yet -- see

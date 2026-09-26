@@ -1,6 +1,19 @@
 # Changelog
 
-Current software version: **0.6.66**. Publication state is recorded by GitHub.
+Current software version: **0.6.67**. Publication state is recorded by GitHub.
+
+## 0.6.67 — 2026-09-25
+
+- **A long machine-written to-do no longer blocks Save or Publish.** The desk wrote to-dos longer than its own limit for reading them back (227 characters against 200), so saving a drafted story answered with raw validation JSON naming `todos,0,t`. Every path that writes a to-do now clips it to one shared bound at a word boundary and drops the dangling punctuation, the gate that reads to-dos reads that same bound, and the round trip of a to-do already stored is normalised on the server rather than refused — so an item written before this release is never the reason a save fails.
+- **A notes failure never stops the printing.** Publishing saves the draft and the editor's notes separately; a failure in the notes is said in a plain sentence beside a story that is on the paper anyway, rather than blocking a valid draft.
+- **No raw validation output reaches an editor.** The story page reads every field error through one shared formatter that names the field in words and says nothing was lost, replacing the exception's own message wherever it could print a validation dump.
+- **The headline box looks like a box.** A visible edge that strengthens on hover and takes the accent colour while typing, with a small **Edit** hint, both palettes, AA contrast.
+- **A redraft no longer silently replaces an edited headline.** The desk records the headline the model wrote separately from the one on the row, and who last decided — so a redraft keeps the editor's headline once the editor has changed it (or the row's headline already differs from the model's), and an editor who only rewrote the body leaves the headline to the model. Two buttons sit by the box: **Use the lead's headline** restores the scan's own line, and **Suggest headlines** asks the story model for three options that apply only when clicked.
+- **A printed story can be re-headed, on its story page and on the Published page.** The write changes `articles.headline` only, so the slug and every link to the story keep working; the old headline, the account and the time are recorded in the additive `article_headline_history` table (migration `0093_editor_headline_control.sql`) and in the action log. The public page, front page and RSS read the new headline on their next render. No correction notice is published — the paper's correction rules never covered headlines.
+- **Publishing names its section and confirms it in the same press.** The publish button reads **Publish in <Section name>** with a **change** link that focuses the chooser; the press records the section confirmation for the version being printed and then publishes. When the scanner placed no section, publish is disabled until the editor picks one, with the reason printed beside the button. The separate Confirm-section button and its reset warning are gone. The server still refuses a draft whose section nobody confirmed, and refuses a carried section that is not the draft's own rather than printing the wrong one.
+- **A section chosen by hand is logged and counted.** Every publish whose section differs from the model's choice is recorded with the lead, both sections and the time, and the Stats page counts them under **Section chosen by hand**. A story whose model section was never recorded is not counted — an absent record is not evidence of a disagreement.
+
+The packaged release note names `v0.6.67` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.66 — 2026-09-25
 

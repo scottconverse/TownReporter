@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Paste one story I already have, in a browser: one paste, one Add to Queue,
- * then edit it, confirm its section and publish it like any other story.
+ * then edit it, confirm its section and publish it like any other story -- the
+ * confirmation being the press on a button that names the section (0.6.67).
  *
  * The owner's need, in his own words (2026-09-24): "the same function in opinion
  * that just lets me paste in an already written story, just one, to dump in the
@@ -26,6 +27,10 @@
  *   - the draft holds the paste word for word with the first line as its
  *     headline and not repeated as the body's first line (step G), and the
  *     sentence the editor edits is the sentence the reader gets;
+ *   - a pasted story arrives with its section UNCONFIRMED, the desk names the
+ *     section on the Publish button and says the press is what confirms it,
+ *     and the server refuses the same publish when no section is carried at
+ *     all -- so a paste cannot print under a section nobody confirmed;
  *   - a pasted story with a cited page prints it under Sources beneath FOLLOW
  *     THE EVIDENCE; a pasted story with none prints no such heading and says in
  *     words that there are no source records (coordinator review of the Unit X
@@ -39,9 +44,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { fromCrossJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -362,23 +367,147 @@ async function theEditorEditsASentence(bodyField) {
   step("the editor edits one sentence and saves the draft");
 }
 
-/** Confirm the section and publish on the ordinary button. */
-async function publishIt() {
-  // A pasted story keeps the section an editor chose, and still has to be
-  // confirmed by a person before it can print, exactly like a written one.
+/** The lead the story page is showing, read off its own URL. */
+function leadIdOnScreen() {
+  const found = /\/desk\/story\/(\d+)/.exec(page.url());
+  must(found, `the story page is not a story page: ${page.url()}`);
+  return Number(found[1]);
+}
+
+/**
+ * Ask the server to publish without a section, and read back its refusal.
+ *
+ * This is the caller shape an older desk sent -- the bare leadId, before
+ * 0.6.67 taught the request to carry the section (`cleanPublishRequest`:
+ * "an absent topic means 'unconfirmed', never 'confirmed blank'"). It is the
+ * only way to put the paste's central question to the server itself rather
+ * than to a disabled button.
+ */
+async function theServerRefusesAPublishWithNoSection(publishUrl, leadId) {
+  const body = JSON.stringify(await toJSONAsync({ data: { leadId } }));
+  const answer = await page.evaluate(
+    async ({ url, payload }) => {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          "x-tsr-serverFn": "true",
+        },
+        body: payload,
+      });
+      return {
+        status: res.status,
+        serialized: res.headers.has("x-tss-serialized"),
+        body: await res.json(),
+      };
+    },
+    { url: publishUrl, payload: body },
+  );
+  must(answer.status === 200, `the publish server function answered HTTP ${answer.status}`);
+  const decoded = answer.serialized ? fromCrossJSON(answer.body, {}) : answer.body;
+  const result = decoded?.result ?? decoded;
   must(
-    (await page.getByRole("button", { name: "Confirm this section", exact: true }).count()) === 1,
+    result?.ok === false,
+    `the server printed a story with no confirmed section: ${JSON.stringify(result)}`,
+  );
+  must(
+    /no editor has confirmed that for the version being printed/.test(String(result.error)),
+    `the server refused, but not for the unconfirmed section: "${result.error}"`,
+  );
+  step("the server refuses to print the pasted story with no section confirmed");
+  return result.error;
+}
+
+/**
+ * The section is confirmed by the press that names it, and by nothing else.
+ *
+ * 0.6.67 removed the separate "Confirm this section" button. The Publish
+ * button now reads "Publish in <section>" and the request carries that
+ * section, which the server records for the version it prints (desk.ts,
+ * performPublish). A pasted story is no exception: it arrives with no
+ * confirmation of its own, and this proves that in the two places it can be
+ * proved -- the desk names the section on the button and says the press is
+ * what confirms it, and the server refuses the same publish when no section is
+ * carried at all.
+ */
+async function publishIt() {
+  const publishButton = page.getByRole("button", { name: /^Publish in / });
+  await publishButton.waitFor({ timeout: 45_000 });
+  must(
+    (await page.getByRole("button", { name: "Confirm this section", exact: true }).count()) === 0,
+    "a second Confirm step is back on the story page, so this walk proves nothing about the new one",
+  );
+  must(
+    (await page.getByText(/Section confirmed for this saved draft/).count()) === 0,
     "the pasted story arrived with its section already confirmed, so nothing was confirmed here",
   );
-  await confirmSectionAndWaitForPublishable(page);
-  await page.getByRole("button", { name: "Publish to the paper", exact: true }).click();
-  // The desk asks once more before it goes out, as it does for every story.
-  await page.getByRole("button", { name: "Yes, print it", exact: true }).click();
+  const said = ((await page.locator("#story-topic").innerText()) ?? "").replace(/\s+/g, " ");
+  must(
+    said.includes("The Publish button names") &&
+      said.includes("confirms the section for the version being printed"),
+    `the desk does not say the press is what confirms the section: "${said}"`,
+  );
+  must(
+    await publishButton.isEnabled(),
+    "the desk is holding Publish down for a story nothing is blocking",
+  );
+  const named = (await publishButton.innerText()).replace(/\s+/g, " ").trim();
+  step(`the pasted story arrives unconfirmed, with "${named}" as the way to confirm it`);
+
+  /*
+    The desk's own publish request is taken and thrown away before it leaves:
+    the story must still be a draft when the server is asked the unconfirmed
+    question below, and the request's address is the only way to ask it. The
+    draft save the same press fires is let through -- it carries the headline
+    and the body, which is how the publish request is told apart from it.
+  */
+  const leadId = leadIdOnScreen();
+  let publishUrl = null;
+  const taken = [];
+  const holdThePublish = async (route) => {
+    const request = route.request();
+    const payload = request.postData() ?? "";
+    if (request.method() === "POST" && request.headers()["x-tsr-serverfn"] === "true") {
+      taken.push(payload);
+      if (payload.includes("leadId") && !payload.includes("headline")) publishUrl = request.url();
+      if (publishUrl && request.url() === publishUrl) {
+        await route.abort();
+        return;
+      }
+    }
+    await route.continue();
+  };
+  await page.route("**/*", holdThePublish);
+  await publishButton.click();
+  await page.getByRole("button", { name: /^Yes, print it in / }).click();
+  for (let i = 0; i < 60 && !publishUrl; i += 1) await new Promise((r) => setTimeout(r, 500));
+  await page.unroute("**/*", holdThePublish);
+  must(
+    Boolean(publishUrl),
+    `the desk never sent a publish request this walk could refuse: ${JSON.stringify(taken.slice(0, 4))}`,
+  );
+
+  await theServerRefusesAPublishWithNoSection(publishUrl, leadId);
+
+  // Nothing printed: a refused publish leaves the story a draft.
+  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
+  await page.locator(".lead-row", { hasText: FIRST_LINE }).first().waitFor({ timeout: 45_000 });
+  step("the refused publish printed nothing: the story is still a draft in the Queue");
+
+  // Now the press that names the section, which is the confirmation itself.
+  await page.goto(`${base}/desk/story/${leadId}`, { waitUntil: "networkidle" });
+  const button = page.getByRole("button", { name: /^Publish in / });
+  await button.waitFor({ timeout: 45_000 });
+  await button.click();
+  // The desk asks once more before it goes out, and names the section again.
+  await page.getByRole("button", { name: /^Yes, print it in / }).click();
   const read = page.getByRole("link", { name: "Read it on the paper", exact: true });
   await read.waitFor({ timeout: 60_000 });
   const href = (await read.getAttribute("href")) ?? "";
   must(/^\/articles\//.test(href), `the published story links to "${href}"`);
-  step("the pasted story confirms its section and publishes on the normal button");
+  step("the press that names the section is the confirmation, and it publishes the story");
   return href;
 }
 

@@ -3,6 +3,17 @@ import { z } from "zod";
 // drift from it without a compile error. Erased at runtime, so this file still
 // imports nothing but zod.
 import type { ModelEffort } from "./provider-registry.ts";
+/*
+  The to-do bound, imported rather than restated (0.6.67). `notes.ts` holds the
+  writer's ceiling and this file holds the wire's; they disagreed by 200 and
+  the disagreement was the bug -- the desk sends the stored list back whole on
+  every save and publish, so one stored line over 200 characters made the
+  round trip invalid and neither button worked again. `notes-todo-bound.test.ts`
+  fails if these two ever drift apart again. This file still imports nothing but
+  zod and `notes.ts`; `notes.ts` reaches only `write-story.ts`, which reaches
+  only `schema.ts` and `desk-copy.ts`, so the graph stays acyclic.
+*/
+import { TODO_DETAIL_MAX, TODO_TEXT_MAX, clipTodoText } from "./notes.ts";
 
 /*
   Bounded input for the server functions this unit was scoped to: publish,
@@ -210,6 +221,18 @@ export const LIMITS = {
   importLinks: 100,
   /** A reader-facing disclosure line the editor typed themselves. */
   disclosureOther: 400,
+  /**
+   * A published headline, edited on the story page or the Published page.
+   *
+   * The same ceiling as a hand-typed draft headline (`draftHeadline`), and for
+   * a reason worth stating: `articles.headline` is copied from `drafts.headline`
+   * with no clamp of its own (`desk.ts:2822`), so any headline the desk will
+   * print is a headline the editor must be able to correct afterwards. A tighter
+   * number here would make a printed story uneditable -- the same one-bound-one-
+   * writer mistake that made Save and Publish refuse a stored 227-character
+   * to-do. `headline-control.ts` reads this as `HEADLINE_MAX`.
+   */
+  headlineEdit: 2_400,
 } as const;
 
 /*
@@ -261,6 +284,60 @@ export function cleanPublishId(raw: unknown): number | null {
   const parsed = publishId.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
+
+/**
+ * A publish request: the lead, and the section the editor saw on the button.
+ *
+ * The section travels with the request because the button now reads "Publish in
+ * <section>" and pressing it is the editor's confirmation of that section
+ * (`desk.ts` `performPublish`). Two shapes are accepted, deliberately: the bare
+ * id every existing caller sends, and `{leadId, topic}` from the desk. An
+ * absent topic is not an error and cannot be -- it means "no section was shown
+ * to me", which the gate treats as unconfirmed rather than as a blank yes. So
+ * this never refuses a request the old shape allowed; it only carries more.
+ *
+ * The topic is clipped rather than refused for the same reason as the to-do
+ * above: a request is not the place to discover that the section name is long.
+ * A clipped section that does not match the draft's own is refused by the gate
+ * with a plain sentence, which is the honest outcome.
+ */
+export function cleanPublishRequest(raw: unknown): { leadId: number | null; topic?: string } {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const o = raw as { leadId?: unknown; topic?: unknown };
+    const leadId = cleanPublishId(o.leadId);
+    const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, LIMITS.topic) : "";
+    return topic ? { leadId, topic } : { leadId };
+  }
+  return { leadId: cleanPublishId(raw) };
+}
+
+/**
+ * A published-headline edit. `headline` is clipped to the desk's own ceiling
+ * and blanked when it is not text; the handler answers a plain sentence for a
+ * blank, because "you left the headline empty" is a thing to say to a person,
+ * not a 500 to show them.
+ */
+export const updateArticleHeadlineInput = z.object({
+  /* `publishId` and `rowId` are the same bound; the former is already declared
+     above the publish section and the latter further down the file. */
+  articleId: publishId,
+  headline: z.preprocess(
+    (v) =>
+      typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
+    z.string(),
+  ),
+});
+
+/** "Suggest headlines": the lead, and the headline the editor is looking at. */
+export const suggestHeadlinesInput = z.object({
+  leadId: publishId,
+  headline: z
+    .preprocess(
+      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
+      z.string(),
+    )
+    .optional(),
+});
 
 /*
   ---------------------------------------------------------------------------
@@ -638,17 +715,48 @@ export const writeStoryInput = z.object({
 });
 
 /**
+ * A stored to-do line, clipped to the writer's own bound rather than refused.
+ *
+ * THE BUG THIS CLOSES (0.6.67). `t` was `z.string().max(LIMITS.listItem)` (200)
+ * while `notes.ts` wrote lines up to 400, so a lead whose machine-written to-do
+ * was 227 characters -- "Claim of absence: <sentence>", or a lead's own
+ * unanswered question -- failed validation on the way back in. The desk sends
+ * the stored list whole on every save, draft and publish (`desk.story.$leadId.tsx`),
+ * so ONE long stored line disabled both buttons on a finished story, and the
+ * editor was shown the raw zod array (`too_big`, maximum 200, path `todos,0,t`).
+ *
+ * The fix is normalisation, not a bigger number: `clipTodoText` shortens at a
+ * word boundary to the one bound both sides now read (`notes.ts` `TODO_TEXT_MAX`),
+ * so what the server stored is always something the server accepts back. The
+ * shape checks around it are untouched -- a row with no `t`, a `done` that is
+ * not a boolean, or a `src` outside the three known values is still refused --
+ * and the list itself is still capped at `LIMITS.noteList`.
+ */
+const todoText = z.preprocess(
+  (v) => clipTodoText(typeof v === "string" ? v : ""),
+  // Clipped, then required: shortening is about length, and a row with no line
+  // in it is still not a to-do. (The preprocess maps a missing or non-string
+  // `t` to "" so the refusal is this one check, not two.) `notes.ts` drops
+  // blank lines on the way out too, so no writer sends one.
+  z.string().min(1).max(TODO_TEXT_MAX),
+);
+const todoDetail = z.preprocess(
+  (v) => clipTodoText(typeof v === "string" ? v : "", TODO_DETAIL_MAX),
+  z.string().max(TODO_DETAIL_MAX),
+);
+
+/**
  * A stored todo, read back and written whole: loose, because the list is the
  * editor's own notes and a key this file does not know must still round-trip
- * (`notes.ts:13-24` names the five that exist today).
+ * (`notes.ts` names the five that exist today).
  */
 export const noteTodo = z.looseObject({
-  t: z.string().max(LIMITS.listItem),
+  t: todoText,
   done: z.boolean(),
   src: z.enum(["you", "machine", "gate"]),
-  q: z.string().max(LIMITS.listItem).optional(),
+  q: todoDetail.optional(),
   queries: z
-    .array(z.looseObject({ query: z.string().max(LIMITS.listItem), hit: z.boolean() }))
+    .array(z.looseObject({ query: todoDetail, hit: z.boolean() }))
     .max(50)
     .optional(),
 });

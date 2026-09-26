@@ -5,7 +5,7 @@ import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { MeetingsActivity } from "@/components/meetings-activity";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
-import { editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
+import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
@@ -274,7 +274,13 @@ function ScanPage() {
         </Notice>
       ) : null}
       {scan.error ? (
-        <Notice kind="err">{scan.error instanceof Error ? scan.error.message : "Scan failed"}</Notice>
+        // "Select all shown" adds every visible accepted source, and
+        // `runScanInput.customSourceIds` caps the pack at 200: a paper with
+        // more than that selected reached this line with the issues array.
+        <Notice kind="err">
+          {editorActionError(scan.error instanceof Error ? scan.error.message : "", "start that scan") ??
+            "Scan failed"}
+        </Notice>
       ) : null}
 
       <SecHead
@@ -532,7 +538,14 @@ function CustomSourcePicker(props: {
           disabled={disabled}
         />
       ) : null}
-      {mutation.isError ? <p className="wire-warn">{mutation.error instanceof Error ? mutation.error.message : "Could not save the pack."}</p> : null}
+      {mutation.isError ? (
+        // The pack name box has no `maxLength` and `packSaveInput` caps it at
+        // 120, so a long name printed the schema here.
+        <p className="wire-warn">
+          {editorActionError(mutation.error instanceof Error ? mutation.error.message : "", "save that pack") ??
+            "Could not save the pack."}
+        </p>
+      ) : null}
 
       <div className="max-h-72 overflow-auto border border-rule">
         {visible.length === 0 ? (

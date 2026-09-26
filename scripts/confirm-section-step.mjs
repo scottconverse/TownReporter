@@ -1,56 +1,60 @@
 /*
-  The section, confirmed by a person, before the story prints.
+  The section, saved and ready to publish, before the story prints.
 
-  Since 0.6.62 the section a draft files under has to be read and confirmed
-  before publication. The desk's Publish button is disabled until an editor
-  says yes in the "#story-topic" block, and the server refuses on its own
-  (desk.ts, performPublish) because a disabled button is a suggestion.
+  Since 0.6.62 the section a draft files under has to be read by a person
+  before publication, and the server refuses on its own (desk.ts,
+  performPublish) because a disabled button is a suggestion.
 
-  A walk that files a lead, types a body and clicks Publish now lands on a
-  disabled button -- CI run 36042635212 failed three walks that way, and the
-  captured DOM said why in the desk's own words: "Confirm the section first.
-  Go to the section". So every walk takes the editor's step first.
+  0.6.67 removed the separate "Confirm this section" button. Pressing Publish
+  is now the confirmation: the button reads "Publish in <section>" and the
+  request carries that section, which performPublish records for the version
+  it prints (`cleanPublishRequest` treats an absent topic as "unconfirmed",
+  never "confirmed blank"). So there is no button to press here any more.
 
-  Clicking "Confirm this section" IS the desk's save-then-confirm: it saves
-  what is in the editor and then records the confirmation against the version
-  it just saved (confirmTopic, desk.story.$leadId.tsx). That ordering is why
-  this must run AFTER every edit the walk means to publish -- editing the
-  body or the section afterwards puts the gate straight back, by design.
+  What the old click ALSO did was save the draft, and that part is still
+  needed: a walk types into the box and the server only ever reads the saved
+  version, so a body that names an outlet, or an edit the walk means to print,
+  is invisible until it is saved. This helper therefore presses "Save edits"
+  when the desk says there are unsaved changes -- the same save-then-publish
+  ordering the Confirm button had, and this must run AFTER every edit the walk
+  means to publish, because editing the body or the section afterwards puts
+  the gate straight back, by design.
 
   `publishable: false` is for the walk that means to leave the button down.
   scripts/named-outlets-e2e.mjs writes a body that names an outlet and shows
   the reader nothing, on purpose: the named-outlet gate is what it is there to
   photograph, and the override on the story screen is the only way past it
-  (desk.ts, performOverrideNamedOutlet). The section still has to be confirmed
-  there -- the override needs a saved draft -- but waiting for an enabled
-  Publish button would wait for a state that walk exists to disprove.
+  (desk.ts, performOverrideNamedOutlet). The draft still has to be saved
+  there -- the override records against a saved draft, and the notice is
+  computed from the saved body -- but waiting for an enabled Publish button
+  would wait for a state that walk exists to disprove.
 */
 export async function confirmSectionAndWaitForPublishable(page, { publishable = true } = {}) {
   const block = page.locator("#story-topic");
   await block.waitFor({ state: "visible", timeout: 45_000 });
-  const confirm = block.getByRole("button", { name: "Confirm this section" });
-  // Already confirmed for the version on screen: the desk shows the record
-  // instead of the button, and there is nothing to click.
-  if ((await confirm.count()) > 0) {
-    await confirm.scrollIntoViewIfNeeded();
-    await confirm.click();
-    /*
-      The button is replaced by the record of what was confirmed. Waiting for
-      that text is the proof the server accepted it -- a click that lands
-      before hydration does nothing, and a walk clicks faster than a person.
-    */
-    await block.getByText(/Section confirmed for this saved draft/).waitFor({ timeout: 30_000 });
+  /*
+    Save first, and only when there is something to save: pressing "Save edits"
+    on an already-saved draft is a no-op the desk may well have disabled, and a
+    walk that waits on a disabled button would hang on a healthy desk.
+  */
+  const saveState = page.locator(".astra-save-state");
+  if ((await saveState.filter({ hasText: "Unsaved changes" }).count()) > 0) {
+    await page.getByRole("button", { name: "Save edits", exact: true }).click();
+    // The desk's own word that the server took it -- a click that lands before
+    // hydration does nothing, and a walk clicks faster than a person.
+    await saveState.filter({ hasText: "Saved draft" }).waitFor({ timeout: 45_000 });
   }
   if (!publishable) return;
   /*
-    The unconfirmed section is what was holding the button down. Wait for the
-    desk to enable it, so the walk's next click is a click on a live button
-    and a failure here says the gate did not clear rather than "not enabled".
+    The section is named on the button and the desk has not been left with an
+    unchosen one. Wait for it to be enabled, so the walk's next click is a
+    click on a live button and a failure here says the gate did not clear
+    rather than "not enabled".
   */
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll("button")].some(
-        (button) => button.textContent?.trim() === "Publish to the paper" && !button.disabled,
+        (button) => /^Publish in /.test(button.textContent?.trim() ?? "") && !button.disabled,
       ),
     null,
     { timeout: 45_000 },

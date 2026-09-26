@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 import {
   blockedDigBannerText,
   composeZeroLeadSummary,
   editorError,
+  editorActionError,
   editorDraftError,
   editorFetchError,
   editorKindLabel,
@@ -23,6 +25,7 @@ import {
   tierFromKind,
   topicFromText,
   looksLikeInternalSummary,
+  looksLikeValidationDump,
   nearDuplicate,
   openLeads,
   plainEditorText,
@@ -61,7 +64,9 @@ import {
   buildScanUserMessage,
   mergeFocusSelection,
   suggestFocusLeads,
+  validationFieldLabel,
 } from "./desk-copy.ts";
+import { darkOpenInput, importStoriesInput, reportingNotesInput } from "./request-input.ts";
 import { STALE_RUNNING_SECONDS } from "./jobs.ts";
 import { presentWorthItem, rankWorthItems } from "./worth-a-look.ts";
 
@@ -1383,5 +1388,168 @@ describe("scan coverage accounting (P0-3)", () => {
       error: null,
     });
     assert.equal(legacy, null, "a pre-migration run must not claim 0 analyzed as if it were measured");
+  });
+});
+
+/*
+  The plain-language rule for a failed story-page action (0.6.67, live bug).
+
+  The editor's story page showed a raw zod array (`too_big`, maximum 200, path
+  `todos,0,t`) instead of a sentence, because `setMsg(err.message)` renders
+  whatever arrives. The fixtures below are REAL zod messages rather than
+  hand-written ones: zod v4 pretty-prints them (`"path": [\n  0,\n  "t"\n]`),
+  and a single-line fixture passed here while a real dump lost its field name.
+*/
+const elementDump = z.array(z.object({ t: z.string().max(200) })).safeParse([{ t: "x".repeat(227) }])
+  .error!.message;
+
+/** A real dump from the wire the user actually presses: 600 to-dos, cap 500. */
+const listDump = reportingNotesInput.safeParse({
+  leadId: 240,
+  todos: Array.from({ length: 600 }, () => ({ t: "x", done: false, src: "machine" })),
+}).error!.message;
+
+/*
+  The Import screen's own boundary, from the wire an editor presses: a paste
+  past the 400,000-character cap on "Import finished stories". Both import
+  calls validate client-side before the request leaves the browser, so this is
+  the text the review screen's `onError` had to print (0.6.67).
+*/
+const importDump = importStoriesInput.safeParse({
+  text: "x".repeat(400_001),
+  stories: [],
+}).error!.message;
+
+/*
+  The Dark Desk's paste box, capped at 200,000 characters and validated in the
+  browser like every other input. `editorError` is the formatter that box goes
+  through (`desk.dark.tsx`), and it used to answer a dump with
+  `plainEditorText(raw)` -- its input, unchanged.
+*/
+const darkPasteDump = darkOpenInput.safeParse({ paste: "x".repeat(200_001) }).error!.message;
+
+describe("a validation dump never reaches the editor", () => {
+  it("knows a real zod message for what it is, and a sentence for what it is", () => {
+    assert.equal(looksLikeValidationDump(elementDump), true);
+    assert.equal(looksLikeValidationDump(listDump), true);
+    assert.equal(looksLikeValidationDump("The desk could not save the notes."), false);
+    assert.equal(looksLikeValidationDump('{"leadId":240,"saved":true}'), false);
+    assert.equal(looksLikeValidationDump('{"path":"/annexation"}'), false);
+    assert.equal(looksLikeValidationDump(""), false);
+  });
+
+  it("names the field the dump names, in the editor's words", () => {
+    // The live dump named the first to-do's text -- the field that was too long.
+    assert.equal(validationFieldLabel(elementDump), "a to-do line");
+    assert.equal(validationFieldLabel(listDump), "the to-do list");
+    // The Import paste is one field the editor typed, so it is named.
+    assert.equal(validationFieldLabel(importDump), "the text you pasted");
+    // So is the Dark Desk's paste box, whose field is spelled `paste`.
+    assert.equal(validationFieldLabel(darkPasteDump), "the text you pasted");
+    // A field this file does not know is named as nothing rather than guessed.
+    assert.equal(validationFieldLabel('{"code":"too_big","path":["somethingElse"]}'), "");
+    assert.equal(validationFieldLabel("no path here"), "");
+  });
+
+  it("answers the live dump with one sentence, and no JSON", () => {
+    const said = editorActionError(elementDump, "save the notes");
+    assert.ok(said);
+    assert.match(said, /^The desk could not save the notes — a to-do line is longer than the desk can store\./);
+    assert.match(said, /Nothing was lost/);
+    for (const said2 of [editorActionError(elementDump), editorActionError(listDump, "print this story")]) {
+      assert.doesNotMatch(said2 ?? "", /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
+    }
+  });
+
+  it("says which field when the dump names one, and that it was empty when that was the reason", () => {
+    const empty = z.object({ headline: z.string().min(1) }).safeParse({ headline: "" }).error!.message;
+    assert.match(editorActionError(empty, "save the headline") ?? "", /the headline is empty/);
+    // A dump naming nothing this file knows still reads as a sentence.
+    const unknown = z.object({ whatever: z.array(z.string()).max(1) }).safeParse({ whatever: ["a", "b"] }).error!.message;
+    assert.match(editorActionError(unknown, "save the notes") ?? "", /one of the fields on this page is longer than the desk can store/);
+  });
+
+  it("gives the Import screen a sentence for its own paste cap, not the schema", () => {
+    /*
+      The last two raw renders in the desk were on Import finished stories:
+      both its calls cap the paste at 400,000 characters and both validated in
+      the browser, so a long paste put the pretty-printed issues array in the
+      notice bar. Asserted through the real schema rather than a hand-typed
+      dump, so the copy stays matched to what zod actually emits.
+    */
+    for (const what of ["read that text", "import those stories"]) {
+      const said = editorActionError(importDump, what);
+      assert.ok(said, "a dump must produce a sentence, not null");
+      assert.match(said, /the text you pasted is longer than the desk can store/);
+      assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
+    }
+    assert.match(editorActionError("The desk could not read that text.", "read that text") ?? "", /could not read that text/);
+  });
+
+  it("catches a dump on the Dark Desk's path too, where the copy names the paste", () => {
+    /*
+      `editorError` guarded every provider failure (a refusal, a quota, a
+      login, a socket) but not the boundary check that throws before anything
+      is called -- a dump matched none of those patterns and fell out the
+      bottom as `plainEditorText(t)`, which hands its input back unchanged. The
+      Dark Desk's paste box takes 200,000 characters, so this is the sentence
+      it printed instead of the one below (0.6.67).
+    */
+    const said = editorError(darkPasteDump, "start that file");
+    assert.ok(said, "a dump must produce a sentence, not null");
+    assert.match(said, /could not start that file/);
+    assert.match(said, /the text you pasted is longer than the desk can store/);
+    assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/, "no dump, not even a piece of one");
+    /*
+      The other refusal from the same box: `darkOpenInput` also carries the
+      paste's first line as `title`, capped at 180. `title` is a leaf three
+      schemas share with three different caps, so it is deliberately not
+      named -- the point of this assertion is that an unnamed field is still a
+      sentence and not a dump.
+    */
+    const longFirstLine = darkOpenInput.safeParse({
+      paste: "x".repeat(181),
+      title: "x".repeat(181),
+    }).error!.message;
+    const saidTitle = editorError(longFirstLine, "start that file");
+    assert.ok(saidTitle, "a dump must produce a sentence, not null");
+    assert.doesNotMatch(saidTitle, /too_big|"path"|"code"|[{}[\]]|maximum/);
+    // The provider sentences are unaffected by the new guard.
+    assert.match(editorError("xAI API error 403") ?? "", /Keep digging/i);
+  });
+
+  it("turns a bare server failure into something the editor can act on", () => {
+    const said = editorActionError("Unexpected Server Error", "publish");
+    assert.match(said ?? "", /^The desk could not publish just now\./);
+    assert.match(said ?? "", /Try again/);
+    assert.match(editorActionError("Internal Server Error: status code 500", "publish") ?? "", /^The desk could not publish just now\./);
+  });
+
+  it("passes a handler's own refusal through as the sentence it already is", () => {
+    const own = "This story has no section yet. Pick one and publish again.";
+    assert.equal(editorActionError(own, "publish"), own);
+    assert.equal(editorActionError(null), null);
+    assert.equal(editorActionError("   "), null);
+  });
+
+  it("catches a dump on the drafting path too, where the copy is about the model's words", () => {
+    /*
+      Every pattern in editorDraftError is about what a writing model said --
+      a refusal, a quota, a login. A boundary check that throws before a model
+      is called matches none of them and used to fall past all of them into the
+      language pass, which hands its input back unchanged. The dump then went
+      to setMsg on the story page verbatim: the same bug, a different formatter.
+    */
+    const said = editorDraftError(elementDump);
+    assert.ok(said, "a dump must produce a sentence, not null");
+    assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/);
+    assert.match(said, /a to-do line is longer than the desk can store/);
+    assert.match(said, /draft that story/);
+    // The other half: real draft copy still reads as draft copy.
+    assert.match(
+      editorDraftError("The writing model returned nothing this pass.") ?? "",
+      /returned nothing this pass/,
+    );
+    assert.equal(editorDraftError(""), null);
   });
 });

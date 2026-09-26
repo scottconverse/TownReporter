@@ -86,6 +86,24 @@ function StatsPage() {
             </ul>
           </section>
 
+          {/*
+            Stories printed under a section the model did not choose (0.6.67).
+            Not a view count -- it lives here because this is the page that
+            already answers "how is the desk doing?" and the number only means
+            something next to the story counts below. Each one is a decision an
+            editor made, recorded in the action log with the lead, both
+            sections and the time.
+          */}
+          <section className="mt-12">
+            <SecHead
+              title="Section chosen by hand"
+              sub="Stories that printed under a section the scanner did not pick. Each one is logged with the lead, the model's section and the editor's."
+            />
+            <p className="mt-4 font-display text-3xl font-semibold">
+              {stats.data!.sectionOverrides.toLocaleString()}
+            </p>
+          </section>
+
           <section className="mt-12">
             <SecHead
               title="Stories"

@@ -1215,6 +1215,100 @@
   min-height: 88px;
   letter-spacing: -0.4px;
 }
+/*
+  The headline box has to look like a box (0.6.67).
+
+  The headline was a bare textarea with no border of its own -- on purpose, so
+  the story page reads as a page and not as a form -- but an editor who had not
+  been told could look at the top of a story and not know those words were
+  theirs to change. This wrapper gives the words a visible edge, and a label
+  that only appears as one: the box is the affordance.
+
+  The "Edit" hint is a <span>, not a button: it sits outside the field's
+  <label> wrapper where no button may go (only inert elements do), and
+  `pointer-events: none` means a click aimed at it reaches the text underneath
+  instead. That "outside the label" is load-bearing, and was not true until
+  AH5: the field is built by `Field`, its label used to WRAP the box, and a
+  browser reads a label's whole text into the control's accessible name -- so
+  the box measured as "Headline Edit" and an exact-name locator missed it.
+  The field now passes `htmlFor`, so the label names the textarea without
+  containing it; `aria-describedby` on the textarea is then what the screen
+  reader reads, and it names the same short word.
+
+  Contrast, measured on the pairs the desk actually paints: --a on --bg2 is
+  6.8:1 in the light palette (#155b60 on #eef1f2) and 8.3:1 in the dark one
+  (#8bcac3 on #1c262b), both over AA for text this size.
+*/
+.desk-ltr.astra .astra-headline-box {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg2);
+  padding: 10px 78px 10px 12px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.desk-ltr.astra .astra-headline-box:hover {
+  border-color: var(--mut);
+}
+.desk-ltr.astra .astra-headline-box:focus-within {
+  border-color: var(--a);
+  background: var(--surface);
+}
+.desk-ltr.astra .astra-headline-hint {
+  position: absolute;
+  top: 13px;
+  right: 12px;
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--a);
+  pointer-events: none;
+}
+.desk-ltr.astra .astra-headline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -8px 0 22px;
+}
+/* The three suggested headlines, one click each. Nothing is applied until one
+   is pressed, so they are laid out as choices -- full-width, left-aligned,
+   readable at a glance -- rather than as chrome. */
+.desk-ltr.astra .astra-headline-options {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: -12px 0 22px;
+  padding: 0;
+}
+.desk-ltr.astra .astra-headline-options button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--fd);
+  font-size: calc(17px * var(--ts));
+  line-height: 1.4;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-headline-options button:hover,
+.desk-ltr.astra .astra-headline-options button:focus-visible {
+  border-color: var(--a);
+  background: var(--accent-soft);
+}
+/* The same rewrite, offered on the Published list, under the headline it would
+   replace. Sits inside the page's own `.corr-form` box. */
+.desk-ltr.astra .head-edit label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: calc(14px * var(--ts));
+  line-height: 1.5;
+  color: var(--mut);
+}
 .desk-ltr.astra .work-form .astra-dek {
   font-size: calc(18px * var(--ts));
   line-height: 1.5;
@@ -1727,6 +1821,19 @@
   display: block;
 }
 .desk-ltr.astra .f > span {
+  font: 600 calc(14px * var(--ts))/1.5 var(--fb);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--mut);
+  margin-bottom: 8px;
+}
+/* The second shape of a Field: a label that is a SIBLING of its control
+   rather than its wrapper, so the words painted beside the control (the
+   headline's "Edit" hint) cannot be read into the field's accessible name.
+   Same paint as `.f > span` above; the label element only has to be given
+   the `display: block` an inline label does not have by default. */
+.desk-ltr.astra .f > label {
+  display: block;
   font: 600 calc(14px * var(--ts))/1.5 var(--fb);
   letter-spacing: 0;
   text-transform: none;

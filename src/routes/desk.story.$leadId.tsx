@@ -29,12 +29,13 @@ import {
   pullTodo,
   resolveDraftMeetingReview,
   continuePullJob,
-  confirmDraftTopic,
   overrideNamedOutlet,
   recordFollowUpReply,
   saveDraft,
   saveReportingNotes,
   stopPullJob,
+  suggestHeadlines,
+  updateArticleHeadline,
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { FollowUpItem } from "@/components/follow-up-item";
@@ -51,6 +52,7 @@ import {
   type ReportingNotes,
 } from "@/lib/news/notes";
 import {
+  editorActionError,
   editorDraftError,
   expectedDraftJobHasLanded,
   recoverExpectedDraftJobId,
@@ -117,6 +119,9 @@ function StoryPage() {
   const bodyField = useRef<HTMLTextAreaElement>(null);
   const { sections } = useEditorSections();
   const TOPICS = sections.map((s) => s.key);
+  /* The section's reader-facing name, for the sentences and the button that
+     name it. Falls back to the key, which is what the desk stored. */
+  const sectionName = (key: string) => sections.find((s) => s.key === key)?.name ?? key;
   const { formatShortDate } = usePaperDateFormatters();
   const { leadId } = Route.useParams();
   const id = Number(leadId);
@@ -162,6 +167,29 @@ function StoryPage() {
   const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  /*
+    Whether a person has chosen the section on this page (0.6.67).
+
+    The select shows a section from the moment the page loads: the model's when
+    the model named one, the desk's fallback guess when it did not. Publish
+    carries the section the editor is looking at and the server records that as
+    the confirmation for the version it prints, so the desk must never send
+    that guess on its own. Showing a section the model chose and pressing the
+    button is a person confirming it. For a lead the model filed nowhere
+    (`topic_unchosen`) the same press would be printing a guess, so the request
+    carries nothing until this flips -- and the server, with no section and no
+    stored confirmation for this draft version, refuses.
+  */
+  const [topicTouched, setTopicTouched] = useState(false);
+  /*
+    Headline suggestions are held here and applied on a click, never before --
+    the whole contract of the button. The note is the page's own line about
+    the last headline action, shown beside the box: on a published story the
+    draft area's notice is not rendered at all, so a headline change there
+    would otherwise happen silently.
+  */
+  const [headlineSuggestions, setHeadlineSuggestions] = useState<string[]>([]);
+  const [headlineNote, setHeadlineNote] = useState("");
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
   const [slowWait, setSlowWait] = useState(false);
   const hadBodyAtStart = useRef(false);
@@ -253,7 +281,13 @@ function StoryPage() {
     const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
     if (!waitingSince) {
       if (appliedFp.current === "") {
-        setHeadline(d.headline);
+        /*
+          On a published story the box starts from what the paper prints, not
+          from the draft: the headline is the article's field and may have been
+          changed after the story went up. An edit here then continues from the
+          reader's headline instead of silently reverting it to the draft's.
+        */
+        setHeadline(data?.articleId && data.articleHeadline ? data.articleHeadline : d.headline);
         setDek(d.dek);
         setBody(stripReporterNotebook(d.body ?? ""));
         setTopic(d.topic);
@@ -452,42 +486,56 @@ function StoryPage() {
       setMsg("Citation review saved against the current transcript. The draft text and original evidence remain unchanged.");
       await qc.invalidateQueries({ queryKey: ["lead", id] });
     },
-    onError: (error) => setMsg(error instanceof Error ? error.message : "Could not save the citation review."),
-  });
-
-  const save = useMutation({
-    mutationFn: async () => {
-      await saveReportingNotes({
-        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
-      });
-      return saveDraft({ data: { leadId: id, headline, dek, body, topic } });
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["lead", id] });
-      setMsg("Saved.");
-    },
-    onError: (err) => {
-      setMsg(err instanceof Error ? err.message : "Could not save.");
-    },
+    onError: (error) =>
+      setMsg(
+        editorActionError(error instanceof Error ? error.message : "", "save the citation review") ??
+          "Could not save the citation review.",
+      ),
   });
 
   /*
-    Confirming the section: save what is in the editor first, then ask the
-    server to record the section of the saved draft. The server reads the
-    section off its own copy of the draft, so this button cannot confirm a
-    section the draft does not actually have.
+    Saving the reporting notes cannot stop the story (0.6.67).
+
+    Save edits and Publish both `await`ed the notes save first, with no error
+    handling around it. The notes carry the running checklist that machine
+    passes write into, so one machine-written line past the length the wire
+    accepted made that save throw -- and a valid draft could not be saved or
+    printed, ending at a raw schema dump the editor could do nothing with
+    (lead 240: a 227-character to-do, "too_big", "maximum", path "todos,0,t").
+
+    The notes are the desk's working file, not the story. A failure here is
+    returned as a sentence and the draft save goes ahead; both callers put that
+    sentence in front of the editor next to what did happen.
   */
-  const confirmTopic = useMutation({
+  const saveNotesQuietly = useCallback(async (): Promise<string> => {
+    try {
+      await saveReportingNotes({
+        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
+      });
+      return "";
+    } catch (err) {
+      return (
+        editorActionError(err instanceof Error ? err.message : "", "save your reporting notes") ??
+        "Your reporting notes did not save."
+      );
+    }
+  }, [id, scratch, storyDirection, researchScope, data?.lead.notes_json]);
+
+  const save = useMutation({
     mutationFn: async () => {
+      const notesProblem = await saveNotesQuietly();
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
-      return confirmDraftTopic({ data: id });
+      return { notesProblem };
     },
-    onSuccess: async (res) => {
+    onSuccess: async ({ notesProblem }) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
-      setMsg(res.ok ? `Section confirmed: ${res.topic}.` : res.error);
+      setMsg(notesProblem ? `Saved. ${notesProblem}` : "Saved.");
     },
     onError: (err) => {
-      setMsg(err instanceof Error ? err.message : "Could not confirm the section.");
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "save your edits") ??
+          "Could not save.",
+      );
     },
   });
 
@@ -509,7 +557,10 @@ function StoryPage() {
       );
     },
     onError: (err) => {
-      setMsg(err instanceof Error ? err.message : "Could not record the override.");
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "record the override") ??
+          "Could not record the override.",
+      );
     },
   });
 
@@ -531,7 +582,10 @@ function StoryPage() {
       setMsg("Saved.");
     },
     onError: (error) =>
-      setMsg(error instanceof Error ? error.message : "Evidence review could not be saved."),
+      setMsg(
+        editorActionError(error instanceof Error ? error.message : "", "save the evidence review") ??
+          "Evidence review could not be saved.",
+      ),
   });
 
   const applyCheckedDraft = useCallback(async (
@@ -669,7 +723,8 @@ function StoryPage() {
     },
     onError: (cause) => {
       setReconcileNote(
-        cause instanceof Error ? cause.message : "The evidence check could not be queued.",
+        editorActionError(cause instanceof Error ? cause.message : "", "start the evidence check") ??
+          "The evidence check could not be queued.",
       );
       setReconcileNoteError(true);
     },
@@ -693,7 +748,8 @@ function StoryPage() {
         .then(() => setEvidenceReviewOpen(false))
         .catch((cause) => {
           setReconcileNote(
-            cause instanceof Error ? cause.message : "The checked draft could not be loaded.",
+            editorActionError(cause instanceof Error ? cause.message : "", "load the checked draft") ??
+              "The checked draft could not be loaded.",
           );
           setReconcileNoteError(true);
         });
@@ -713,38 +769,143 @@ function StoryPage() {
       })
       .catch((cause) => {
         setReconcileNote(
-          cause instanceof Error ? cause.message : "The checked draft could not be loaded.",
+          editorActionError(cause instanceof Error ? cause.message : "", "load the checked draft") ??
+            "The checked draft could not be loaded.",
         );
         setReconcileNoteError(true);
         setReconcileNoteWarning(false);
       });
   }, [reconcileStatus.data, applyCheckedDraft]);
 
+  /*
+    THE PUBLISH CLICK CONFIRMS THE SECTION (0.6.67).
+
+    The section was the last thing about a draft that printed on a machine's
+    word: the classifier picked it, the select showed it, and Publish printed
+    whatever the select said -- unless a person had pressed a separate Confirm
+    button first, which read as a step of its own and was easy to leave until
+    the button below refused.
+
+    Publish now carries the section the editor is looking at, and the server
+    records that as this draft version's confirmation inside the transaction
+    that prints it. One click, and the button says which section it will file
+    under -- "Publish in Council" -- so the editor is confirming something they
+    can read. The server's guarantee is untouched: a request that arrives with
+    no section and no stored confirmation for the version being printed is
+    still refused, in a sentence.
+  */
   const publish = useMutation({
     mutationFn: async () => {
-      await saveReportingNotes({
-        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
-      });
-      await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
-      return publishLead({ data: id });
+      const notesProblem = await saveNotesQuietly();
+      /*
+        The draft save is the story. If it fails, the server is about to print
+        a version the editor is not looking at, so the print stops -- with a
+        sentence that names what did not save, never a schema dump.
+      */
+      try {
+        await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+      } catch (err) {
+        throw new Error(
+          editorActionError(err instanceof Error ? err.message : "", "save your edits") ??
+            "The desk could not save your edits, so nothing was published. Try again.",
+        );
+      }
+      return {
+        result: await publishLead({ data: { leadId: id, topic: topic.trim() } }),
+        notesProblem,
+      };
     },
-    onSuccess: async (res) => {
-      if (!answered(res)) {
+    onSuccess: async ({ result, notesProblem }) => {
+      if (!answered(result)) {
         setMsg(NO_ANSWER);
         return;
       }
-      if (!res.ok) {
-        setMsg(res.error);
+      if (!result.ok) {
+        setMsg(result.error);
         return;
       }
       await qc.invalidateQueries({ queryKey: ["leads"] });
       await qc.invalidateQueries({ queryKey: ["paper"] });
       await qc.invalidateQueries({ queryKey: ["published-desk"] });
-      setPublishedSlug(res.slug);
-      setMsg("On the paper.");
+      setPublishedSlug(result.slug);
+      setMsg(notesProblem ? `On the paper. ${notesProblem}` : "On the paper.");
     },
     onError: (err) => {
-      setMsg(err instanceof Error ? err.message : "Could not publish.");
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "publish that story") ??
+          "Could not publish.",
+      );
+    },
+  });
+
+  /*
+    "Suggest headlines": three lines from the story model, on the provider
+    ladder the rest of the desk uses. The whole contract is that nothing is
+    applied without a click -- this holds the options, the list below the
+    headline offers them, and only a click writes the box.
+
+    A model that cannot be reached, or that answers with paragraphs instead of
+    headlines, is not an error the editor has to act on: the headline on the
+    page is untouched and the sentence says so.
+  */
+  const suggest = useMutation({
+    mutationFn: () =>
+      suggestHeadlines({ data: { leadId: id, headline: headline.trim() || undefined } }),
+    onSuccess: (res) => {
+      if (!answered(res)) {
+        setHeadlineNote(NO_ANSWER);
+        return;
+      }
+      if (!res.ok) {
+        setHeadlineNote(res.error);
+        return;
+      }
+      setHeadlineSuggestions(res.options);
+      setHeadlineNote(
+        res.options.length
+          ? ""
+          : "The story model offered no headlines this time. Your headline is exactly as you left it.",
+      );
+    },
+    onError: (err) => {
+      setHeadlineNote(
+        editorActionError(err instanceof Error ? err.message : "", "reach the story model") ??
+          "The story model could not be reached just now. Your headline is exactly as you left it.",
+      );
+    },
+  });
+
+  /*
+    A published story's headline lives on the article, not on the draft: the
+    draft is what the story was written from, and the paper prints
+    `articles.headline`. Changing it here changes the printed headline and
+    nothing else -- the slug stays, so every link to the story still works --
+    and the server keeps the old headline with who changed it and when.
+  */
+  const savePublishedHeadline = useMutation({
+    mutationFn: () =>
+      updateArticleHeadline({ data: { articleId: data?.articleId ?? 0, headline } }),
+    onSuccess: async (res) => {
+      if (!answered(res)) {
+        setHeadlineNote(NO_ANSWER);
+        return;
+      }
+      if (!res.ok) {
+        setHeadlineNote(res.error);
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      await qc.invalidateQueries({ queryKey: ["paper"] });
+      await qc.invalidateQueries({ queryKey: ["published-desk"] });
+      setHeadlineNote(
+        "Headline changed. The story's link is unchanged, and the headline it replaced is on the record.",
+      );
+    },
+    onError: (err) => {
+      setHeadlineNote(
+        editorActionError(err instanceof Error ? err.message : "", "change the headline") ??
+          "Could not change the headline.",
+      );
     },
   });
 
@@ -760,7 +921,12 @@ function StoryPage() {
       return (
         <DeskShell title="Missing" kicker="Workbench">
           <ScreenError
-            message={error instanceof Error ? error.message : "Could not load that lead."}
+            message={
+              editorActionError(
+                error instanceof Error ? error.message : "",
+                "load that story",
+              ) ?? "Could not load that lead."
+            }
             onRetry={() => void refetch()}
             retrying={isRefetching}
           />
@@ -861,13 +1027,28 @@ function StoryPage() {
   /*
     The section a story files under was the last thing about a draft that
     printed on a machine's word alone: the classifier picks it, the select
-    shows it, and publish used to print whatever the select said. It is now a
-    step an editor takes on purpose, and like the claims of absence it is the
-    server that refuses -- this only says so before the editor reaches for the
-    button. A confirmation covers the draft version it was made against, so
-    editing the body or the section after confirming puts the gate back.
+    shows it, and publish printed whatever the select said unless somebody had
+    pressed a separate Confirm button first.
+
+    Publish itself is now the confirmation (see the publish mutation): the
+    button reads "Publish in <section>" and the request carries that section,
+    which the server records for the version it prints. So what this has to
+    answer is narrower than before -- is there a section a person is looking at
+    and can put their name to?
+
+      - the model named one and the desk is showing it: yes. Pressing the
+        button is the person confirming the model's choice.
+      - the model named none (`topic_unchosen`): the select is showing the
+        desk's own fallback guess, and sending that unasked would print a
+        guess. Somebody has to pick.
+      - a person already confirmed this exact section for this saved version:
+        yes, without a second press.
   */
-  const topicConfirmed = Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
+  const sectionChosenByModel = Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
+  const sectionAlreadyConfirmed =
+    Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
+  const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
+  const sectionNameNow = sectionName(topic);
   /*
     Naming another newsroom's reporting and not showing the reader where it
     came from blocks printing, the same way an unconfirmed claim of absence
@@ -886,9 +1067,9 @@ function StoryPage() {
       : `Confirm the ${openClaims.length} claims of absence first`
     : outletBlocked
       ? outletBlocked
-      : topicConfirmed
+      : sectionReady
         ? ""
-        : "Confirm the section first";
+        : "Pick the section this story files under first";
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
@@ -1002,9 +1183,10 @@ function StoryPage() {
                 setEvidenceReviewOpen(true);
                 void applyCheckedDraft(resultDraftId, originalDraftId, undefined, true).catch((cause) => {
                   setReconcileNote(
-                    cause instanceof Error
-                      ? cause.message
-                      : "The checked draft could not be loaded.",
+                    editorActionError(
+                      cause instanceof Error ? cause.message : "",
+                      "load the checked draft",
+                    ) ?? "The checked draft could not be loaded.",
                   );
                   setReconcileNoteError(true);
                   setReconcileNoteWarning(false);
@@ -1047,7 +1229,7 @@ function StoryPage() {
                   <InkButton
                     disabled={
                       publish.isPending ||
-                      !topicConfirmed ||
+                      !sectionReady ||
                       data.namedOutlets.length > 0 ||
                       evidenceStale ||
                       reviewEvidence.isPending ||
@@ -1058,7 +1240,7 @@ function StoryPage() {
                       publish.mutate();
                     }}
                   >
-                    {publish.isPending ? "Publishing…" : "Yes, print it"}
+                    {publish.isPending ? "Publishing…" : `Yes, print it in ${sectionNameNow}`}
                   </InkButton>
                   <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
                     Not yet
@@ -1072,7 +1254,7 @@ function StoryPage() {
                       !headline.trim() ||
                       !body.trim() ||
                       openClaims.length > 0 ||
-                      !topicConfirmed ||
+                      !sectionReady ||
                       data.namedOutlets.length > 0 ||
                       evidenceStale ||
                       reviewEvidence.isPending ||
@@ -1080,8 +1262,27 @@ function StoryPage() {
                     }
                     onClick={() => setConfirmingPublish(true)}
                   >
-                    Publish to the paper
+                    {`Publish in ${sectionNameNow}`}
                   </InkButton>
+                  {/*
+                    The section is on the button, so the editor can read what
+                    they are about to confirm. This is the way back to the
+                    select when the name on the button is not the one they
+                    want -- and the focus, not just the scroll, because the
+                    point of pressing it is to change that field.
+                  */}
+                  <button
+                    type="button"
+                    className="inline-link astra-publish-section-change"
+                    onClick={() => {
+                      document.getElementById("story-topic-select")?.focus();
+                      document
+                        .getElementById("story-topic")
+                        ?.scrollIntoView({ block: "center" });
+                    }}
+                  >
+                    {sectionReady ? "change" : "pick the section"}
+                  </button>
                   {/*
                         A greyed button with no sentence beside it is a dead
                         end -- the editor cannot tell whether it is broken,
@@ -1467,8 +1668,16 @@ function StoryPage() {
             />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
+          {/*
+            A successful action that also has something to report -- the draft
+            saved but the reporting notes did not -- still reads as a success:
+            the story was saved, and a red box would say otherwise. Both of
+            those sentences begin with the thing that worked, which is what the
+            colour below reads. The sentence stays the first thing inside the
+            notice, where the editor reads it before the button under it.
+          */}
           {draftProblem && !onPaper ? (
-            <Notice kind={msg === "Saved." ? "ok" : "err"}>
+            <Notice kind={/^(Saved\.|On the paper\.)/.test(msg) ? "ok" : "err"}>
               {draftProblem}
               {/*
                 The one error the desk could describe but never act on. A
@@ -1500,15 +1709,116 @@ function StoryPage() {
 
           {data.draft || body ? (
             <form className="work-form" onSubmit={(e) => e.preventDefault()}>
-              <Field label="Headline">
-                <textarea
-                  rows={2}
-                  className="astra-headline"
-                  value={headline}
-                  onChange={(e) => setHeadline(e.target.value)}
-                  disabled={onPaper}
-                />
+              {/*
+                THE HEADLINE IS AN EDITOR'S FIELD (0.6.67).
+
+                Two things were wrong with it.
+
+                It looked printed. The headline carried the same treatment as
+                the dek and the body -- no border, no background -- so an editor
+                read it as a caption rather than something to type in. The
+                wrapper and its "Edit" hint are the fix; the rules are in
+                desk-astra.css.
+
+                And on a published story it was disabled outright, which left
+                the one edit editors make most often reachable only from the
+                Published page. A printed story's headline now stays editable
+                here, and saving it changes the article the reader is looking at
+                -- same slug, same link, with the headline it replaced written
+                down against the editor's name (see `savePublishedHeadline`).
+              */}
+              <Field label="Headline" htmlFor="story-headline">
+                <div className="astra-headline-box">
+                  <textarea
+                    id="story-headline"
+                    rows={2}
+                    className="astra-headline"
+                    value={headline}
+                    onChange={(e) => setHeadline(e.target.value)}
+                    aria-describedby="headline-edit-hint"
+                  />
+                  <span className="astra-headline-hint" id="headline-edit-hint">
+                    Edit
+                  </span>
+                </div>
               </Field>
+              <div className="astra-headline-actions">
+                {onPaper ? (
+                  <InkButton
+                    disabled={savePublishedHeadline.isPending || !data.articleId || !headline.trim()}
+                    onClick={() => savePublishedHeadline.mutate()}
+                  >
+                    {savePublishedHeadline.isPending ? "Saving…" : "Save headline"}
+                  </InkButton>
+                ) : null}
+                {/*
+                  The scan's own headline, one press away. The model's redrafts
+                  can drift from it, and the words the desk read on the lead are
+                  often the ones an editor wants back.
+                */}
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setHeadline(data.lead.headline);
+                    setHeadlineSuggestions([]);
+                    setHeadlineNote(
+                      onPaper
+                        ? "The lead's headline is in the box. Save headline to put it on the paper."
+                        : "The lead's headline is in the box. Save edits to keep it.",
+                    );
+                  }}
+                >
+                  Use the lead's headline
+                </button>
+                {/*
+                  Three options from the story model, on the provider ladder the
+                  rest of the desk uses. Nothing is applied without a click --
+                  the options appear below the box and one of them has to be
+                  chosen.
+                */}
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={suggest.isPending || waiting}
+                  onClick={() => suggest.mutate()}
+                >
+                  {suggest.isPending ? "Asking the story model…" : "Suggest headlines"}
+                </button>
+              </div>
+              {headlineSuggestions.length > 0 ? (
+                <ul className="astra-headline-options" aria-label="Suggested headlines">
+                  {headlineSuggestions.map((option) => (
+                    <li key={option}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHeadline(option);
+                          setHeadlineSuggestions([]);
+                          setHeadlineNote(
+                            onPaper
+                              ? "That headline is in the box. Save headline to put it on the paper."
+                              : "That headline is in the box. Save edits to keep it.",
+                          );
+                        }}
+                      >
+                        {option}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {/*
+                The page's own line about the last headline action. On a
+                published story the draft area's notice is not rendered at all,
+                so without this a headline change would happen with nothing
+                said.
+              */}
+              {headlineNote ? (
+                <p className="note" role="status">
+                  {headlineNote}
+                </p>
+              ) : null}
               <Field label="Dek">
                 <textarea
                   rows={2}
@@ -1520,16 +1830,27 @@ function StoryPage() {
               </Field>
               {/*
                 The section is a field an editor confirms, not a default a
-                machine left behind. It is saved with the draft first, so what
-                is confirmed is the section of the version the desk has, and
-                the server records that confirmation against that version.
+                machine left behind. Publish is where it is confirmed: the
+                draft is saved first, the request carries this section, and the
+                server records it against the version it is about to print, so
+                what is confirmed is always the section of the version the desk
+                has. See the publish mutation.
               */}
               <div id="story-topic">
                 <Field label="Topic">
-                  <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
+                  <select
+                    id="story-topic-select"
+                    value={topic}
+                    onChange={(e) => {
+                      setTopic(e.target.value);
+                      /* A person moved it. See `topicTouched`. */
+                      setTopicTouched(true);
+                    }}
+                    disabled={onPaper}
+                  >
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
-                        {sections.find((s) => s.key === t)?.name ?? t}
+                        {sectionName(t)}
                       </option>
                     ))}
                     {topic && !TOPICS.includes(topic as (typeof TOPICS)[number]) ? (
@@ -1544,37 +1865,35 @@ function StoryPage() {
                   and this select show one -- but it is the desk's fallback,
                   not a decision, and printing it as though it were is how a
                   guessed section reaches the paper. The notice is the same
-                  words the Queue row carries, and it goes away when somebody
-                  confirms a section below.
+                  words the Queue row carries, and it goes away when the editor
+                  picks a section above -- or when the section has already been
+                  confirmed for this saved draft, which is what a person
+                  pressing Publish does.
                 */}
-                {!onPaper && data.lead.topic_unchosen && !topicConfirmed ? (
+                {!onPaper && data.lead.topic_unchosen && !sectionReady ? (
                   <p className="note publish-blocked">
                     Section not chosen — pick one. The scan filed this lead under{" "}
-                    {sections.find((s) => s.key === data.lead.topic)?.name ?? data.lead.topic} because
-                    the model named no section this newsroom files under. Choose the section above,
-                    save the draft, then confirm it.
+                    {sectionName(data.lead.topic)} because the model named no section this newsroom
+                    files under. Choose the section above, then publish: the Publish button names the
+                    section and pressing it is the confirmation.
                   </p>
                 ) : null}
-                {onPaper ? null : topicConfirmed ? (
+                {/*
+                  No separate Confirm button (0.6.67). It was a second step for
+                  a decision the editor had already made in the select above,
+                  and its reset nag -- "editing the section or the body means
+                  confirming it again" -- taught people to press a button that
+                  did nothing they could see. Publish carries this section and
+                  the server records it for the version it prints, so the
+                  guarantee is stronger than before and the desk is one press
+                  shorter.
+                */}
+                {onPaper || !sectionReady ? null : (
                   <p className="note">
-                    Section confirmed for this saved draft:{" "}
-                    {sections.find((s) => s.key === data.topicConfirmed)?.name ?? data.topicConfirmed}.
-                    Editing the section or the body means confirming it again.
+                    Publishing this draft files it under {sectionNameNow}. The Publish button names
+                    that section, and pressing it confirms the section for the version being
+                    printed.
                   </p>
-                ) : (
-                  <>
-                    <InkButton
-                      tone="quiet"
-                      disabled={confirmTopic.isPending || save.isPending || !topic.trim()}
-                      onClick={() => confirmTopic.mutate()}
-                    >
-                      {confirmTopic.isPending ? "Confirming…" : "Confirm this section"}
-                    </InkButton>
-                    <p className="note publish-blocked">
-                      Publishing needs a person to confirm the section this draft files under.
-                      Saving is not confirming — this button is the confirmation.
-                    </p>
-                  </>
                 )}
               </div>
               {/*
@@ -2023,7 +2342,10 @@ function ReportingNotesPane({
     },
     onError: (err) => {
       setStartingPullIndex(null);
-      setPullMsg(err instanceof Error ? err.message : "Pull failed.");
+      setPullMsg(
+        editorActionError(err instanceof Error ? err.message : "", "start the Pull") ??
+          "Pull failed.",
+      );
     },
   });
   const stopPull = useMutation({
@@ -2032,7 +2354,11 @@ function ReportingNotesPane({
       if (!res.ok) setPullMsg(res.error);
       void qc.invalidateQueries({ queryKey: ["pull-jobs", leadId] });
     },
-    onError: (err) => setPullMsg(err instanceof Error ? err.message : "Could not stop Pull."),
+    onError: (err) =>
+      setPullMsg(
+        editorActionError(err instanceof Error ? err.message : "", "stop the Pull") ??
+          "Could not stop Pull.",
+      ),
   });
   const continuePull = useMutation({
     mutationFn: (jobId: number) => continuePullJob({ data: { jobId } }),
@@ -2040,7 +2366,11 @@ function ReportingNotesPane({
       setPullMsg(res.ok ? "Pull continued from its saved checkpoint." : res.error);
       void qc.invalidateQueries({ queryKey: ["pull-jobs", leadId] });
     },
-    onError: (err) => setPullMsg(err instanceof Error ? err.message : "Could not continue Pull."),
+    onError: (err) =>
+      setPullMsg(
+        editorActionError(err instanceof Error ? err.message : "", "continue the Pull") ??
+          "Could not continue Pull.",
+      ),
   });
 
   /*

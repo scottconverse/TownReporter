@@ -12,6 +12,25 @@ describe("N-2 manual meeting run", () => {
     assert.doesNotMatch(ui, /overwrites the stored transcript/i);
   });
 
+  it("does not offer an editable form when the settings never loaded", () => {
+    /*
+      0.6.67, found by the dump sweep. `settings.isPending` was the only guard,
+      so a failed read fell through to the form with every field at its
+      initial value: `enabled ?? false`, `channels ?? []`,
+      `retentionMode ?? "transcript-only"`. Save was live, so one click after
+      a transient failure wrote the paper's defaults over its real settings.
+      The ordering is the assertion -- the refusal has to come before the
+      fallbacks are read into the form.
+    */
+    const ui = readFileSync(new URL("../../components/meeting-capture-settings.tsx", import.meta.url), "utf8");
+    assert.match(ui, /if \(settings\.isError\)/, "the read failure has no branch");
+    assert.match(ui, /could not read the meeting capture settings/);
+    assert.ok(
+      ui.indexOf("settings.isError") < ui.indexOf("const list = channels ?? []"),
+      "the refusal must come before the defaults are read",
+    );
+  });
+
   it("writes execution_origin='manual' with daily_reservation_id NULL (not a reservation)", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(modPath, "utf8");

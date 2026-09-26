@@ -62,19 +62,55 @@ const dbProbe = integrationRequested()
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
 /**
- * A person reading the section and confirming it, through the desk's control.
+ * The section a person is reading on the button that would print the story.
  *
- * Neither editor can arm Publish until the section is confirmed: since 0.6.62
- * the server refuses an unconfirmed draft and the desk disables the button.
- * The confirmation is recorded against the draft version on screen, so it
- * comes after the edit the test means to publish -- and it is one newsroom's
- * record for one draft, so a single editor's confirmation is what both
- * contexts read back.
+ * The section a draft files under is a claim about the story, like its sources,
+ * and since 0.6.62 the desk will not print one nobody read: the server refuses
+ * an unconfirmed draft (`performPublish`, desk.ts) and the desk holds the
+ * button down while the section is unconfirmed, because a disabled button is a
+ * suggestion.
+ *
+ * Until 0.6.67 that took a SECOND press -- "Confirm this section" wrote a
+ * record against the draft version, any later edit reset it, and the record
+ * and the print could disagree. 0.6.67 removed that button: the Publish button
+ * now reads "Publish in <section>" and the press IS the confirmation, recorded
+ * by `performPublish` in the same transaction that prints, against the version
+ * it prints, refusing outright if the section sent is not the draft's own.
+ *
+ * So there is nothing left to press here. What this reads back is the section
+ * both editors are looking at -- the one the two presses below will carry --
+ * and it waits for the button to come alive first, because a race over a
+ * button that is still gated would be measuring the gate, not the publish.
  */
-async function confirmSection(page: Page) {
-  const block = page.locator("#story-topic");
-  await block.getByRole("button", { name: "Confirm this section" }).click();
-  await block.getByText(/Section confirmed for this saved draft/).waitFor({ timeout: 30_000 });
+async function sectionOnTheButton(page: Page): Promise<{ name: string; key: string }> {
+  await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("button")].some(
+        (button) => /^Publish in /.test(button.textContent?.trim() ?? "") && !button.disabled,
+      ),
+    null,
+    { timeout: 45_000 },
+  );
+  const label =
+    ((await page.getByRole("button", { name: /^Publish in / }).first().textContent()) ?? "").trim();
+  const name = label.replace(/^Publish in /, "").trim();
+  assert.ok(name, `the Publish button must name the section it would print, got: ${label}`);
+  /*
+    The name on the button is the select's own, not a second spelling of the
+    section that could drift from it. The key is what the article row stores,
+    so both are read from the one control the editor is looking at.
+  */
+  const shown = await page.locator("#story-topic-select").evaluate((element) => {
+    const select = element as HTMLSelectElement;
+    return {
+      key: select.value,
+      name: (select.options[select.selectedIndex]?.textContent ?? "").trim(),
+    };
+  });
+  assert.equal(name, shown.name, "the Publish button must name the section the select is showing");
+  assert.ok(shown.key, "the section select must carry the key the article will file under");
+  return { name, key: shown.key };
 }
 
 async function signUpAndEnter(page: Page, name: string, email: string) {
@@ -267,6 +303,7 @@ describe("two editors on one story", () => {
     async () => {
       if (!ownerPage || !editorPage || !db) throw new Error("no session");
       const storyUrl = await fileLead(ownerPage, "Race story three: published twice at once");
+      const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       await ownerPage
         .getByLabel("Body")
@@ -274,12 +311,15 @@ describe("two editors on one story", () => {
       await ownerPage.getByRole("button", { name: "Save edits" }).click();
       await ownerPage.waitForTimeout(1200);
       /*
-        The section, confirmed once, before either editor arms Publish. It is
-        the owner's confirmation because the owner wrote the body the race is
-        about, and it covers the draft version both contexts are looking at --
-        the desk shows the record rather than the button on both pages after.
+        The section both editors are about to print under, read off the desk's
+        own button. It is one newsroom's section for one draft, so both
+        contexts see the same name -- and the presses below carry it, which is
+        what confirms it (0.6.67). See `sectionOnTheButton`.
       */
-      await confirmSection(ownerPage);
+      const section = await sectionOnTheButton(ownerPage);
+      // The name the button shows, and the key the printed row files under.
+      const sectionName = section.name;
+      const sectionKey = section.key;
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
       await editorPage.getByLabel("Body").waitFor();
@@ -287,23 +327,66 @@ describe("two editors on one story", () => {
       /*
       Publish is deliberately two-step (arm, then confirm) -- one unconfirmed
       click must never print. So each editor arms first, and then the two
-      CONFIRMS race. The first run of this test clicked once per editor: both
-      armed, neither printed, and the assertion read 0 articles -- which was
-      the product being right and the test being wrong.
+      CONFIRMS race. Both buttons are matched by their own wording with the
+      section named on them, so a press that does not carry the section this
+      draft files under cannot be clicked into existence here.
+
+      Under 0.6.62 an editor also had to press "Confirm this section" before
+      arming; 0.6.67 made the publishing press the confirmation, and the
+      section guarantee is asserted below against the printed article and the
+      record the press left, which is the same guarantee measured one step
+      closer to the reader.
     */
-      await ownerPage.getByRole("button", { name: "Publish to the paper" }).click();
-      await editorPage.getByRole("button", { name: "Publish to the paper" }).click();
+      await ownerPage.getByRole("button", { name: `Publish in ${sectionName}`, exact: true }).click();
+      await editorPage.getByRole("button", { name: `Publish in ${sectionName}`, exact: true }).click();
       await ownerPage.waitForTimeout(400);
+      /*
+        Both editors have armed and neither has confirmed. The paper is still
+        empty: this is the "one unconfirmed click must never print" half of the
+        two-step, asserted where it happens rather than assumed. The first run
+        of this test clicked once per editor, both armed, and the end-of-test
+        assertion read 0 articles -- the product being right and the test wrong.
+      */
+      const armed = await db.query(
+        `select count(*)::int as c from articles where headline like 'Race story three%'`,
+      );
+      assert.equal(armed.rows[0].c, 0, "an armed but unconfirmed publish must print nothing");
       await Promise.all([
-        ownerPage.getByRole("button", { name: "Yes, print it" }).click(),
-        editorPage.getByRole("button", { name: "Yes, print it" }).click(),
+        ownerPage
+          .getByRole("button", { name: `Yes, print it in ${sectionName}`, exact: true })
+          .click(),
+        editorPage
+          .getByRole("button", { name: `Yes, print it in ${sectionName}`, exact: true })
+          .click(),
       ]);
       await ownerPage.waitForTimeout(3000);
 
       const arts = await db.query(
-        `select count(*)::int as c from articles where headline like 'Race story three%'`,
+        `select count(*)::int as c, min(topic) as topic from articles where headline like 'Race story three%'`,
       );
       assert.equal(arts.rows[0].c, 1, "two simultaneous publishes must print exactly one article");
+      /*
+        The section the editor read is the section the reader gets: the press
+        that printed carried it, `performPublish` wrote it on the article, and
+        recorded the confirmation against the version it printed. A story that
+        printed under a section nobody read -- the 0.6.62 complaint -- cannot
+        pass this line, and neither can a press that confirmed one section
+        while printing another.
+      */
+      assert.equal(
+        arts.rows[0].topic,
+        sectionKey,
+        "the printed article must file under the section the desk named on the button",
+      );
+      const record = await db.query(
+        `select notes_json::json->'topicConfirmation'->>'topic' as topic from leads where id = $1`,
+        [leadId],
+      );
+      assert.equal(
+        record.rows[0]?.topic,
+        sectionKey,
+        "the press that printed must have recorded the section confirmation it carried",
+      );
     },
   );
 

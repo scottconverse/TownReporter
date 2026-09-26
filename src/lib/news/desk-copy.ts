@@ -121,9 +121,27 @@ export function editorStatus(status: string): string {
   }
 }
 
-export function editorError(raw: string | null | undefined): string | null {
+/**
+ * One plain sentence for a failed Dark Desk action.
+ *
+ * `what` names the action for the boundary-check branch below ("start that
+ * file", "find something"); the rest of the copy is about what a provider
+ * did, so the default only ever reaches a dump.
+ */
+export function editorError(raw: string | null | undefined, what = "continue with that"): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  /*
+    Every test below is about what a provider did -- a refusal, a quota, a
+    login, a socket. A boundary check that throws before anything is called
+    matches none of them, and would fall out the bottom as `plainEditorText(t)`,
+    which hands its input back unchanged: the Dark Desk's paste box took 200,000
+    characters and `openDarkInvestigation` capped it there, so a longer paste
+    printed the issues array (0.6.67). Same branch as `editorActionError` and
+    `editorDraftError`, and it has to come before the provider tests because a
+    dump carries neither a login nor a model failure.
+  */
+  if (looksLikeValidationDump(t)) return editorActionError(t, what);
   // Login first: a mid-round 401 also matches the "writing model did not
   // finish" branch below (it contains "Claude Code" and "API Error"), which
   // used to send the editor back into "Click Keep digging to continue" — the
@@ -519,6 +537,17 @@ function providerSignInCopy(raw: string, again: string): string {
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  /*
+    A dumped boundary check is not draft copy and nothing below would recognize
+    it: every pattern here is about what a writing model said, and this is what
+    the wire refused before a model was ever called. Without this branch the
+    dump fell through every test and out the bottom as `plainEditorText(t)`,
+    which returns it unchanged -- so `setMsg` on the story page printed the
+    issues array verbatim, the same bug `editorActionError` closes. A refusal
+    below still wins over an earlier provider failure, because a dump carries
+    neither.
+  */
+  if (looksLikeValidationDump(t)) return editorActionError(t, "draft that story");
   // A final refusal takes precedence over an earlier provider's quota or
   // transport failure in saved Automatic-run errors. A reset cannot resolve it.
   const refusal = t.match(/declined (?:to produce the requested editorial|this request)\b/i);
@@ -579,6 +608,143 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   }
   if (/lead not found/i.test(t)) return "That lead is not on this desk.";
   if (/restore this lead/i.test(t)) return t;
+  return plainEditorText(t);
+}
+
+/*
+  ---------------------------------------------------------------------------
+  A raw error, as one sentence an editor can act on (0.6.67)
+  ---------------------------------------------------------------------------
+
+  THE BUG THIS CLOSES. A stored to-do line the machine wrote at 227 characters
+  failed `request-input.ts`'s 200-character wire bound, and the desk rendered
+  `err.message` straight into the status line. A thrown ZodError in this stack
+  arrives as a seroval-serialised object whose `message` is the raw definition
+  JSON, so the editor was shown, verbatim:
+
+    [{"code":"too_big","maximum":200,"inclusive":true,"path":["todos",0,"t"],
+      "message":"Too big: expected string to have <=200 characters"}]
+
+  on a finished story where neither Save nor Publish would work again. The
+  cause is fixed at the source (one bound, in `notes.ts`); this is the belt to
+  that braces, so no boundary error anywhere on the story page can ever reach a
+  person as a validation dump again.
+
+  WHAT IT DOES NOT DO. It does not hide a real refusal: `res.error` strings the
+  handlers wrote themselves pass through untouched, which is most of them. Only
+  two shapes are rewritten -- a validation dump, which has no reader, and a
+  framework 500 wrapper, which has no cause the editor can act on.
+*/
+
+/**
+ * Is this a raw validation dump rather than a sentence?
+ *
+ * Deliberately narrow: it wants JSON (an array or object as the whole text)
+ * AND one of zod's own keys. A handler that legitimately answers with JSON
+ * would still pass through if it carried none of these, and a sentence that
+ * happens to contain "path" is not JSON and does not match.
+ */
+export function looksLikeValidationDump(raw: string): boolean {
+  const t = raw.trim();
+  if (!/^[[{]/.test(t)) return false;
+  if (!/"code"\s*:/.test(t) && !/"path"\s*:/.test(t)) return false;
+  return /too_big|too_small|invalid_type|invalid_format|invalid_union|unrecognized_keys|not_multiple_of|invalid_value|"issues"\s*:/.test(
+    t,
+  );
+}
+
+/**
+ * The desk's plain name for a field a boundary check named.
+ *
+ * The parts are trimmed and unquoted before the leaf is taken: zod v4 pretty-
+ * prints the message (`inst.message = JSON.stringify(def, null, 2)`), so a real
+ * dump reads `"path": [\n  0,\n  "t"\n]` -- the leaf arrives as `"t"` with
+ * whitespace around it, not as `t`. Reading it raw found no leaf at all, which
+ * lost the field name from every real dump.
+ */
+function fieldLabelFromPath(path: string): string {
+  const leaf =
+    path
+      .split(/[.,[\]]/)
+      .map((part) => part.trim().replace(/^["']|["']$/g, ""))
+      .filter(Boolean)
+      .pop() ?? "";
+  const names: Record<string, string> = {
+    todos: "the to-do list",
+    todo: "the to-do list",
+    t: "a to-do line",
+    q: "a to-do detail line",
+    queries: "the search list on a to-do",
+    query: "a search line on a to-do",
+    headline: "the headline",
+    dek: "the summary line",
+    body: "the story text",
+    /*
+      `text` is the pasted box on three screens (0.6.67): the sources paste,
+      "write a story" (`writeStoryInput`), and both halves of Import finished
+      stories. Each has exactly one field the editor typed, so naming it beats
+      the anonymous "one of the fields on this page" -- an editor who pasted
+      400,001 characters wants to be told it was the paste.
+    */
+    text: "the text you pasted",
+    /*
+      The Dark Desk's paste box (`darkOpenInput`, 200,000) is the only schema
+      with a `paste`, so the leaf is unambiguous. Its `title` -- the paste's
+      first line, sent alongside -- is NOT named here: three schemas in
+      request-input.ts carry a `title` with three different caps
+      (`sourceTitle`, `leadHeadline`, `redditTitle`), so naming it would be a
+      guess. A paste whose first line is over 180 characters is caught by the
+      guard and reads as the anonymous field, which is a sentence either way.
+    */
+    paste: "the text you pasted",
+    topic: "the section",
+    scratch: "the working notes",
+    storyDirection: "the direction you wrote",
+    add: "the note you added",
+    leadId: "this story",
+    articleId: "this story",
+  };
+  return names[leaf] ?? "";
+}
+
+/**
+ * The path a dump complains about, as the editor's words for it. `""` when the
+ * dump names nothing this file knows.
+ */
+export function validationFieldLabel(raw: string): string {
+  const match = raw.match(/"path"\s*:\s*\[([^\]]*)\]/);
+  return match ? fieldLabelFromPath(match[1]) : "";
+}
+
+/**
+ * One plain sentence for a failed story-page action.
+ *
+ * `what` names the action in the fallback ("save the notes", "publish"), so a
+ * bare 500 still tells the editor which button did not finish and that nothing
+ * was lost.
+ */
+export function editorActionError(
+  raw: string | null | undefined,
+  what = "do that",
+): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  if (looksLikeValidationDump(t)) {
+    const field = validationFieldLabel(t);
+    const tooLong = /"code"\s*:\s*"too_big"/.test(t);
+    const tooShort = /"code"\s*:\s*"too_small"/.test(t);
+    const reason = tooLong
+      ? "is longer than the desk can store"
+      : tooShort
+        ? "is empty"
+        : "is not something the desk could read";
+    return field
+      ? `The desk could not ${what} — ${field} ${reason}. Nothing was lost; your text is still on the page.`
+      : `The desk could not ${what} — one of the fields on this page ${reason}. Nothing was lost; your text is still on the page.`;
+  }
+  if (/unexpected server error|internal server error|status code 500/i.test(t)) {
+    return `The desk could not ${what} just now. Nothing was lost; your text is still on the page. Try again, and if it keeps failing reload the story.`;
+  }
   return plainEditorText(t);
 }
 

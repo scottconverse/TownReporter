@@ -9,7 +9,8 @@ it("real saves persist invalidation, reject stale review, preserve removed evide
   const sql = await getSql();
   await sql.query(`create table drafts (id serial primary key, newsroom_id integer, user_id text, lead_id integer,
     headline text, dek text, body text, topic text, source_urls text default '[]', provenance_json text default '[]',
-    found_note text default '', unanswered text default '[]', research_json text default '{}', updated_at timestamptz default now())`);
+    found_note text default '', unanswered text default '[]', research_json text default '{}',
+    headline_source text default 'model', updated_at timestamptz default now())`);
   await sql.query(`create table leads (id integer primary key, newsroom_id integer)`);
   await sql.query(`insert into leads values (7001,91)`);
   await sql.query(`insert into drafts (newsroom_id,user_id,lead_id,headline,dek,body,topic,source_urls,found_note)

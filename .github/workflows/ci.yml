@@ -1436,3 +1436,55 @@ jobs:
           BETTER_AUTH_SECRET: ci-redraft-scan-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/redraft-scan-e2e.mjs
+
+  # The three editor controls 0.6.67 exists to ship (Unit AH), walked together
+  # in a browser because each one is a press an editor makes and the failures
+  # were failures of the press, not of a function.
+  #
+  # 1. A lead whose STORED machine to-do is 227 characters saves. `notes.ts`
+  #    writes to-do lines up to 400 characters and the wire used to refuse
+  #    anything over 200, and the desk sends a lead's stored to-do list back
+  #    WHOLE on every save and publish -- so one long line the machine itself
+  #    wrote made Save edits and Publish both dead on a finished story, with the
+  #    raw zod array (`too_big`, `maximum 200`, path `todos,0,t`) shown to the
+  #    editor. This walk stores the line lead 240 really carried and presses
+  #    Save.
+  # 2. An editor's headline survives Redraft (a redraft INSERTs a new row, and
+  #    before this the model's headline silently replaced the editor's), the
+  #    headline box reads as editable, and "Use the lead's headline" puts the
+  #    scan's line back in one press.
+  # 3. Publish READS the section it will file under ("Publish in Council") and
+  #    one press records that confirmation for the version being printed -- no
+  #    separate Confirm button. Then the published headline is edited on
+  #    /desk/published, the old words go on the record, and the public page
+  #    shows the new headline at the SAME url, so nothing that links to the
+  #    story breaks.
+  #
+  # ONE fake endpoint on 3522 stands in for the model and is the ONLY model the
+  # desk can reach: it is the configured gateway (LLM_BASE_URL + LLM_MODEL,
+  # which Automatic resolves before its ladder runs) and both CLI rungs point at
+  # files that do not exist. Its `ready` headline is asserted on by name, which
+  # is what makes "the redraft kept the editor's headline" a fact. Nothing is
+  # downloaded or called off the runner, and no credential is used.
+  #
+  # Port 3521, which no other integration file may bind
+  # (scripts/integration-ports-are-unique.test.mjs). The walk boots its own copy
+  # of the built server on in-memory PGlite, so there is no `npm start` step here.
+  editor-controls-0667:
+    name: A long to-do saves, a headline survives a redraft, and Publish confirms its section
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Save a 227-character to-do, keep a headline through a redraft, publish under its section, then re-headline the printed story
+        env:
+          BETTER_AUTH_SECRET: ci-editor-controls-0667-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/editor-controls-0667-walk.mjs

@@ -623,21 +623,61 @@ export function Field({
   label,
   chip,
   hint,
+  htmlFor,
   children,
 }: {
   label: string;
   chip?: string;
   hint?: string;
+  /**
+   * Set when the label must name a control it does not contain -- the story
+   * screen's headline box, whose "Edit" hint is painted inside the box and so
+   * had to stop being a descendant of the label. See the branch below.
+   */
+  htmlFor?: string;
   children: React.ReactNode;
 }) {
+  const wording = (
+    <>
+      {label}
+      {chip ? <span className="chip dnp">{chip}</span> : null}
+    </>
+  );
+  const tail = hint ? <p className="meta">{hint}</p> : null;
+  /*
+    TWO SHAPES, ONE FIELD (AH5).
+
+    The usual one wraps everything in the <label>, so the control inside is
+    named by the label's text. That is a trap for any field that paints words
+    beside its control: a browser builds the accessible name out of a label's
+    whole text, so the story headline -- a textarea with a decorative "Edit"
+    <span> inside `.astra-headline-box` -- was announced as "Headline Edit",
+    and an exact `getByRole("textbox", { name: "Headline" })` could no longer
+    find it. Measured in Chromium, with `aria-describedby` pointing at the
+    span: name "Headline Edit". `aria-describedby` does not keep text out of
+    the name; only not being inside the label does.
+
+    A field that passes `htmlFor` therefore gets the other shape: a plain
+    wrapper holding the label (bound to its control by id) and then the
+    control and the hint beside it, outside it. That field's name is its
+    label; the "Edit" span stays reachable as the control's description. The
+    wrapper keeps the class `f`, so the CSS that positions the label text is
+    the only thing that has to know about the second shape (desk-astra.css).
+  */
+  if (htmlFor) {
+    return (
+      <div className="f">
+        <label htmlFor={htmlFor}>{wording}</label>
+        {children}
+        {tail}
+      </div>
+    );
+  }
   return (
     <label className="f">
-      <span className={chip ? "f-lab" : undefined}>
-        {label}
-        {chip ? <span className="chip dnp">{chip}</span> : null}
-      </span>
+      <span className={chip ? "f-lab" : undefined}>{wording}</span>
       {children}
-      {hint ? <p className="meta">{hint}</p> : null}
+      {tail}
     </label>
   );
 }

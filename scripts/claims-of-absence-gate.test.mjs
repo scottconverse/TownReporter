@@ -27,9 +27,16 @@ test("Publish is disabled while a claim of absence is unchecked", () => {
     /const openClaims = uncheckedGateTodos\(notes\);/,
     "the story page must read the unconfirmed claims off the lead's notes",
   );
+  /*
+    The button's own words moved in 0.6.67: it now reads "Publish in
+    <Section>", carrying the section the press will confirm, so the claim of
+    absence is one of the reasons inside `disabled` rather than a label the
+    pattern could anchor on. What this test is for is unchanged -- a claim of
+    absence keeps the button down until a person confirms it.
+  */
   assert.match(
     story,
-    /<InkButton[\s\S]{0,1200}?disabled=\{[\s\S]{0,500}?openClaims\.length > 0[\s\S]{0,500}?\}[\s\S]{0,250}?Publish to the paper/,
+    /<InkButton[\s\S]{0,1200}?disabled=\{[\s\S]{0,500}?openClaims\.length > 0[\s\S]{0,500}?\}[\s\S]{0,250}?Publish in \$\{sectionNameNow\}/,
     "the Publish button must be disabled while a claim of absence is unchecked",
   );
 });

@@ -141,22 +141,32 @@ if (dbProbe.ok) {
 }
 
 /**
- * The editor's section confirmation, taken through the desk's own control.
+ * The draft saved and Publish armed, before the test presses it.
  *
  * Since 0.6.62 the server refuses to print a draft whose section nobody has
- * read (desk.ts, performPublish), and the desk disables the Publish button
- * while it is unconfirmed. Clicking "Confirm this section" saves what is in
- * the editor and then records the confirmation against the version it just
- * saved, so it has to come after every edit the test means to publish --
- * editing the body or the section afterwards puts the gate straight back.
+ * read (desk.ts, performPublish). 0.6.67 removed the separate "Confirm this
+ * section" button: Publish now reads "Publish in <section>" and pressing it
+ * confirms that section for the version it prints. What the old click also
+ * did was SAVE the editor, and the server only reads the saved version, so
+ * this still saves first when the desk reports unsaved changes, then waits
+ * for the named Publish button to be live. Same steps as
+ * scripts/confirm-section-step.mjs, which the browser walks share.
  */
 async function confirmSection(page: Page) {
-  const block = page.locator("#story-topic");
-  await block.getByRole("button", { name: "Confirm this section" }).click();
-  // The button is replaced by the record of what was confirmed. Waiting for
-  // that text is the proof the server accepted it, and the desk's own report
-  // that this draft version is the one covered.
-  await block.getByText(/Section confirmed for this saved draft/).waitFor({ timeout: 30_000 });
+  await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
+  const saveState = page.locator(".astra-save-state");
+  if ((await saveState.filter({ hasText: "Unsaved changes" }).count()) > 0) {
+    await page.getByRole("button", { name: "Save edits", exact: true }).click();
+    await saveState.filter({ hasText: "Saved draft" }).waitFor({ timeout: 45_000 });
+  }
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("button")].some(
+        (button) => /^Publish in /.test(button.textContent?.trim() ?? "") && !button.disabled,
+      ),
+    null,
+    { timeout: 45_000 },
+  );
 }
 
 describe("the uncredited-source publish warning, rendered", () => {
@@ -206,7 +216,7 @@ describe("the uncredited-source publish warning, rendered", () => {
     // section nobody has read, and the warning under test only appears once
     // Publish is armed.
     await confirmSection(page);
-    await page.getByRole("button", { name: "Publish to the paper" }).click();
+    await page.getByRole("button", { name: /^Publish in / }).click();
     try {
       await page
         .getByText(new RegExp(`The body never names ${OUTLET_NAME}`))

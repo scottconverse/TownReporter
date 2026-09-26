@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { editorActionError } from "@/lib/news/desk-copy";
 import { Notice, WorkbenchSkeleton, EmptyState, ScreenError } from "@/components/states";
 import {
   deleteEditorial,
@@ -69,7 +70,11 @@ function EditorialPage() {
   const review = useMutation({
     mutationFn: (decision: EvidenceDecision) => saveEditorialDraft({ data: {draftId:id,headline,dek,body,topic,evidenceDecision:decision,evidenceToken:q.data?.evidenceToken} }),
     onSuccess: () => { setMsg("Evidence review saved."); void qc.invalidateQueries({queryKey:["editorial-draft",id]}); },
-    onError: (e) => setMsg(e instanceof Error ? e.message : "Evidence review did not save."),
+    onError: (e) =>
+      setMsg(
+        editorActionError(e instanceof Error ? e.message : "", "save the evidence review") ??
+          "The evidence review did not save. Try again.",
+      ),
   });
 
   const save = useMutation({
@@ -78,7 +83,11 @@ function EditorialPage() {
       setMsg(r?.ok ? "Saved." : "That did not save.");
       void qc.invalidateQueries({ queryKey: ["editorial-draft", id] });
     },
-    onError: (e) => setMsg(e instanceof Error ? e.message : "That did not save."),
+    onError: (e) =>
+      setMsg(
+        editorActionError(e instanceof Error ? e.message : "", "save this editorial") ??
+          "That did not save. Try again.",
+      ),
   });
 
   const publish = useMutation({
@@ -87,24 +96,32 @@ function EditorialPage() {
       return publishEditorial({ data: id });
     },
     onSuccess: (r) => {
-      setMsg(r?.ok ? "On the paper." : (r?.error ?? "That did not print."));
+      setMsg(r?.ok ? "On the paper." : (editorActionError(r?.error, "print it") ?? "That did not print."));
       void qc.invalidateQueries({ queryKey: ["editorial-draft", id] });
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
-    onError: (e) => setMsg(e instanceof Error ? e.message : "That did not print."),
+    onError: (e) =>
+      setMsg(
+        editorActionError(e instanceof Error ? e.message : "", "print it") ??
+          "That did not print. Try again.",
+      ),
   });
 
   const remove = useMutation({
     mutationFn: () => deleteEditorial({ data: id }),
     onSuccess: (r) => {
       if (!r?.ok) {
-        setMsg(r?.error ?? "That did not delete.");
+        setMsg(editorActionError(r?.error, "delete the draft") ?? "That did not delete.");
         return;
       }
       void qc.invalidateQueries({ queryKey: ["editorials"] });
       void navigate({ to: "/desk/opinion" });
     },
-    onError: (e) => setMsg(e instanceof Error ? e.message : "That did not delete."),
+    onError: (e) =>
+      setMsg(
+        editorActionError(e instanceof Error ? e.message : "", "delete the draft") ??
+          "That did not delete. Try again.",
+      ),
   });
 
   if (q.isPending) {
@@ -120,7 +137,12 @@ function EditorialPage() {
       return (
         <DeskShell title="Editorial" kicker="Editor desk">
           <ScreenError
-            message={q.error instanceof Error ? q.error.message : "Could not load that editorial."}
+            message={
+              editorActionError(
+                q.error instanceof Error ? q.error.message : "",
+                "load that editorial",
+              ) ?? "Could not load that editorial."
+            }
             onRetry={() => void q.refetch()}
             retrying={q.isRefetching}
           />

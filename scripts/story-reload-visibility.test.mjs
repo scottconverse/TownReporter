@@ -15,9 +15,16 @@ test("Story reload hydrates the durable draft and retains the latest job result"
     "getLead must reload the durable draft job instead of relying on mutation memory",
   );
   assert.match(desk, /return\s*\{[\s\S]*?lead,[\s\S]*?draft,[\s\S]*?job,/);
+  /*
+    0.6.67: on a published story the headline box starts from the article's
+    own headline, which an editor may have changed since it went up, and falls
+    back to the draft's. Either way the field is hydrated from what was saved,
+    which is the property here -- the dek, body and section still come from the
+    draft alone.
+  */
   assert.match(
     story,
-    /if\s*\(!waitingSince\)[\s\S]*?setHeadline\(d\.headline\)[\s\S]*?setBody\(stripReporterNotebook\(d\.body\s*\?\?\s*""\)\)/,
+    /if\s*\(!waitingSince\)[\s\S]*?setHeadline\([\s\S]{0,160}?d\.headline\)[\s\S]*?setBody\(stripReporterNotebook\(d\.body\s*\?\?\s*""\)\)/,
     "a newly loaded page must hydrate its editor fields from the saved draft",
   );
 });

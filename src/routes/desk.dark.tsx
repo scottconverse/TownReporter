@@ -389,7 +389,12 @@ function DarkPage() {
       afterOpen(res.investigationId, "paste");
     },
     onError: (err) => {
-      showPasteNotice(editorError(err instanceof Error ? err.message : "Could not start"));
+      // This box is capped at 200,000 characters by `darkOpenInput`, so the
+      // one refusal that gets here is the paste: name it.
+      showPasteNotice(
+        editorError(err instanceof Error ? err.message : "Could not start", "start that file") ??
+          "Could not start",
+      );
       clearPhase();
     },
   });

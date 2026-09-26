@@ -102,10 +102,12 @@ async function main() {
   await page.getByLabel("Body").fill(body);
   /*
     The editor confirms the section before printing. The section the drafter
-    picked is a claim about the story the same way its sources are, and since
-    0.6.62 the desk will not print one nobody read -- clicking "Confirm this
-    section" saves what is in the editor and confirms that version. See
-    confirm-section-step.mjs.
+    picked is a claim about the story the same way its sources are, and the
+    desk will not print one nobody read. 0.6.67 removed the separate "Confirm
+    this section" button: the Publish button now reads "Publish in <section>"
+    and pressing it records the section for the version it prints, so the
+    helper below saves the editor and waits for that button to come alive
+    under the section's name. See confirm-section-step.mjs.
   */
   await confirmSectionAndWaitForPublishable(page);
   /*
@@ -114,10 +116,12 @@ async function main() {
     It used to be a single unconfirmed click that put a story on a public
     website -- while Delete, which keeps a copy for thirty days, asked
     twice. If someone removes the confirmation, the second click here finds
-    no "Yes, print it" and this walk fails, which is the behaviour we want.
+    no "Yes, print it in <section>" and this walk fails, which is the
+    behaviour we want. The section is named on BOTH buttons (0.6.67), so the
+    second one is matched by its own wording and not by the first's.
   */
-  await page.getByRole("button", { name: "Publish to the paper" }).click();
-  await page.getByRole("button", { name: "Yes, print it" }).click();
+  await page.getByRole("button", { name: /^Publish in / }).click();
+  await page.getByRole("button", { name: /^Yes, print it/ }).click();
   await page.getByText("On the paper").waitFor({ timeout: 30_000 });
 
   await page.getByRole("link", { name: "Read it on the paper" }).click();

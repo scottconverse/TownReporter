@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.66](releases/0.6.66.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
+For [TownReporter 0.6.67](releases/0.6.67.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
 
 ## Start with evidence
 
@@ -24,9 +24,19 @@ Use the story workspace's Checks, Sources and Reporting tabs beside the writing 
 
 Names and spellings are checked against opened written evidence. Supported corrections are applied. A name marked **needs review** has not been established by those sources; captions and OCR are not spelling authorities. Changing the text can make previous checks stale.
 
-Opinion must contain **Claims and sources**. Missing or unusable appendix material is an explicit review problem and blocks publication until repaired. The private fact sheet and image prompt do not print. Review sources, names, quotations and the preview, then use **Publish to the paper** and its existing confirmation. Published stories appear on the public paper and under Published.
+Opinion must contain **Claims and sources**. Missing or unusable appendix material is an explicit review problem and blocks publication until repaired. The private fact sheet and image prompt do not print. Review sources, names, quotations and the preview, then press **Publish in \<Section\>** — the button names the section the story prints under and confirms it in the same press, so there is no separate Confirm step. When the desk could not place the story, the button is disabled and says **pick the section** until you choose one. Published stories appear on the public paper and under Published.
 
 See the [complete editor guide](editor.md) for Sources, Scan, investigations, settings, routine notices and Stats.
+
+## The story's words are yours
+
+Three things on the story page are the editor's, and 0.6.67 made the desk behave as if they are.
+
+The **headline** sits in a box with a visible edge and a small **Edit** hint. A **Redraft** will not replace a headline you have changed: the desk keeps the model's own headline separately and remembers who decided, so your words stay and the model's new attempt is filed beside them. **Use the lead's headline** puts back the line the scan filed the lead under; **Suggest headlines** asks the story model for three options and applies one only when you click it. A story that has already printed can be re-headed too — on its story page, or with **Edit headline** on the Published page. The URL never changes, so no link breaks, and the desk keeps the old headline, your account and the time.
+
+A long **to-do** the desk wrote for itself is shortened at a word boundary, and a to-do stored by an earlier version can always be saved back. If the notes themselves fail to save, that is one plain sentence and the story still saves and prints: your notes are never the reason a valid draft stays off the paper.
+
+**Publish in \<Section\>** records your confirmation of that section for the exact version being printed, then publishes. The server refuses a draft whose section nobody confirmed for that version, and refuses a section that is not the draft's own rather than printing the wrong one. When the scanner placed no section, the button is disabled and the reason is printed beside it. A section that differed from the scanner's is logged and counted on Stats under **Section chosen by hand**.
 
 ## 0.6.52 behavior
 
