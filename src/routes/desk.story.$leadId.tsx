@@ -85,7 +85,7 @@ import {
   DraftReconcileControl,
   type EvidenceCheckReview,
 } from "@/components/draft-reconcile-control";
-import { StoryJobProgress } from "@/components/JobCard";
+import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
 import { jobProgressView } from "@/lib/news/job-progress";
 import {
   assessCheckedDraftResult,
@@ -254,6 +254,13 @@ function StoryPage() {
   const [checkedDraftStale, setCheckedDraftStale] = useState(false);
   const [evidenceReview, setEvidenceReview] = useState<EvidenceCheckReview | null>(null);
   const [evidenceReviewOpen, setEvidenceReviewOpen] = useState(false);
+  /*
+    "Preview viewed" is a checklist item in the drawing, not a gate: opening the
+    preview is a thing this session has done or has not, and the publish button
+    below is still refused by exactly the list it always was. Nothing here reads
+    it to disable anything.
+  */
+  const [previewSeen, setPreviewSeen] = useState(false);
 
   const waiting = waitingSince !== null;
 
@@ -1241,295 +1248,105 @@ function StoryPage() {
         ? ""
         : "Pick the section this story files under first";
 
+  /*
+    The two rows the drawing puts around the work (Desk Story.dc.html): the
+    stage stepper in the top bar, and the gate chips on the publish bar.
+
+    Neither is a control and neither decides anything. The stage row reads the
+    record -- the lead exists, a draft exists, the evidence check is
+    satisfied, the story is on the paper -- and the gate chips say the same
+    things the page already knows about the draft in front of the editor.
+    Every chip is a `<li>`; the one thing the publish bar must not grow is a
+    second set of blockers, so what actually refuses a publish is still the
+    `disabled` list on the button below, unchanged.
+  */
+  const checkClear =
+    Boolean(data.draft) &&
+    !evidenceStale &&
+    openClaims.length === 0 &&
+    !reconcileActive &&
+    !reviewEvidence.isPending;
+  const stagePlan = [
+    { label: "Lead", done: true },
+    { label: "Draft", done: Boolean(data.draft) },
+    { label: "Check", done: checkClear },
+    { label: "Publish", done: onPaper },
+  ];
+  const firstOpenStage = stagePlan.findIndex((stage) => !stage.done);
+  const stages = stagePlan.map((stage, i) => ({
+    label: `${stage.done ? "✓" : i + 1} ${stage.label}`,
+    state: stage.done ? "done" : i === firstOpenStage ? "now" : "next",
+  }));
+  const namesToReview = data.namedOutlets.length;
+  const publishGates = [
+    { label: `${hasUnsavedDraftEdits ? "!" : "✓"} Saved`, done: !hasUnsavedDraftEdits },
+    { label: `${checkClear ? "✓" : "!"} Evidence checked`, done: checkClear },
+    {
+      label: namesToReview
+        ? `! ${namesToReview} name${namesToReview === 1 ? "" : "s"} to review`
+        : "✓ Names reviewed",
+      done: namesToReview === 0,
+    },
+    { label: `${previewSeen ? "✓" : "!"} Preview viewed`, done: previewSeen },
+  ];
+
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
-      {data.job && (data.job.status === "queued" || data.job.status === "running") ? (
-        /*
-          The JobCard replaces this banner's progress text (redesign phase 3).
-          The condition, the placement and the reassurance line are the old
-          banner's, kept deliberately: the card owns the box now, so what is
-          left outside it is what the card does not say.
-
-          `initial` is this page's own job row, mapped by the same function the
-          server function uses, so the card is right on the first paint instead
-          of after the first poll -- this page already reloads every 2 s while
-          waiting, and a progress bar that arrives a beat late is a flicker.
-        */
-        <StoryJobProgress
-          leadId={data.lead.id}
-          initial={[jobProgressView(data.job, data.lead.id, data.draft?.id ?? null)]}
-          note={
-            <p className="story-running-note">
-              Your submission is saved. The draft will appear here automatically. You can return from{" "}
-              <Link to="/desk">Desk → Your recent drafts</Link>.
-            </p>
-          }
-        />
-      ) : null}
+      {/*
+        The phase 3 progress card used to sit here, above the title. Phase 2b
+        moves it down into the writing surface, under the action row, which is
+        where the drawing puts it -- see the "under the actions" block below the
+        form. The condition and the reassurance line travelled with it.
+      */}
       {completedDraftNeedsReview ? (
         <Notice kind="err">
           <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.
         </Notice>
       ) : null}
-      <Link to="/desk/queue" className="crumb">
-        ← Queue
-      </Link>
-      <div className="astra-story-heading">
-        <div>
-          <p className="kick">Your newsroom</p>
-          <h1 className="h1">Story workspace</h1>
-        </div>
+      <h1 className="astra-wb-title">Story workbench</h1>
+      {/*
+        The workbench's top bar (redesign phase 2b, "Desk Story.dc.html"): the
+        way back, and where this lead stands. The stage cells are spans, not
+        buttons -- the stage is derived from the record, and Do 3 of this unit's
+        brief keeps today's control wherever the drawing's button has no
+        behavior behind it, so a row of presses that go nowhere is the one thing
+        this row must not be.
+      */}
+      <div className="astra-wb-top">
+        <Link to="/desk" className="astra-wb-back">
+          ← Today
+        </Link>
+        <ol className="astra-wb-stages" aria-label="Story stages">
+          {stages.map((stage) => (
+            <li
+              key={stage.label}
+              className={`astra-wb-stage is-${stage.state}`}
+              aria-current={stage.state === "now" ? "step" : undefined}
+            >
+              {stage.label}
+            </li>
+          ))}
+        </ol>
+      </div>
+      {/*
+        v3.1 fix: the context line is its own row, under the bar, rather than a
+        third item wrapped into it. It reads as a caption on the whole page
+        instead of competing with the stepper for the same line, and it is what
+        the reference calls for.
+
+        The status chip rides at the end of it. The drawing's top bar holds
+        exactly two things -- the way back and the stepper -- and the chip was
+        the third; the caption row is where it belongs, because the stepper
+        only tells progress, and the status word is the one thing on this page
+        that says a lead was killed or spiked.
+      */}
+      <div className="astra-wb-context">
+        <span>
+          Story from lead · {sectionNameNow} · score {score}
+        </span>
         <Chip s={data.lead.status} />
       </div>
-      <div className="work-bar astra-story-actions">
-        <button
-          className="btn"
-          type="button"
-          aria-expanded={modelResearchOpen}
-          aria-controls="story-model-research"
-          onClick={() => setModelResearchOpen((open) => !open)}
-        >
-          Model & research · {modelChoiceLabel(modelChoice)}
-        </button>
-        {retiredModelNote ? (
-          <p className="note" role="status">
-            {retiredModelNote}
-          </p>
-        ) : null}
-        <span className="astra-save-state" role="status">
-          {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
-        </span>
-        {body && (
-          <InkButton tone="ghost" onClick={() => preview.current?.showModal()}>
-            Preview
-          </InkButton>
-        )}
-        <a className="btn astra-checks-jump" href="#story-inspector">
-          Checks & sources
-        </a>
-        {/*
-          Unit AK item 5: the press that opens the side-by-side view. It used
-          to be a link on the Queue that opened the other lead's page, which
-          had no comparison on it at all.
-        */}
-        {comparePair ? (
-          <button
-            className="btn"
-            type="button"
-            aria-expanded={compareShown}
-            aria-controls="lead-compare"
-            onClick={() => setCompareOpen(!compareShown)}
-          >
-            Compare
-          </button>
-        ) : null}
-        {!locked && !onPaper ? (
-          <>
-            <InkButton
-              disabled={waiting || reconcileActive}
-              onClick={() => {
-                if (waiting) return;
-                draft.mutate();
-              }}
-            >
-              {jobState === "recovering"
-                ? "Recovering…"
-                : waiting
-                  ? data.job?.failover_note
-                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
-                    : "Drafting…"
-                  : data.draft?.body
-                    ? "Redraft"
-                    : "Draft with AI"}
-            </InkButton>
-          </>
-        ) : null}
-        {data.draft && !locked && !onPaper ? (
-          <>
-            <InkButton
-              tone="ghost"
-              disabled={save.isPending || reconcileActive}
-              onClick={() => save.mutate()}
-            >
-              Save edits
-            </InkButton>
-            <DraftReconcileControl
-              status={reconcileStatus.data}
-              active={reconcileActive}
-              disabled={waiting || reconcileActive || savePending || hasUnsavedDraftEdits}
-              dirty={hasUnsavedDraftEdits}
-              note={reconcileNote}
-              noteError={reconcileNoteError}
-              noteWarning={reconcileNoteWarning}
-              checkedDraftReady={checkedDraftReady}
-              checkedDraftStale={checkedDraftStale}
-              modelLabel={modelChoiceLabel(reconcileStatus.data?.modelChoice ?? modelChoice)}
-              review={evidenceReview}
-              reviewOpen={evidenceReviewOpen}
-              onStart={() => reconcile.mutate()}
-              onReload={() => {
-                const resultDraftId = reconcileStatus.data?.resultDraftId;
-                if (!resultDraftId) return;
-                const originalDraftId = reconcileStatus.data?.draftId;
-                if (!originalDraftId) return;
-                setEvidenceReviewOpen(true);
-                void applyCheckedDraft(resultDraftId, originalDraftId, undefined, true).catch((cause) => {
-                  setReconcileNote(
-                    editorActionError(
-                      cause instanceof Error ? cause.message : "",
-                      "load the checked draft",
-                    ) ?? "The checked draft could not be loaded.",
-                  );
-                  setReconcileNoteError(true);
-                  setReconcileNoteWarning(false);
-                });
-              }}
-              onKeepChecked={() => {
-                setEvidenceReviewOpen(false);
-                setReconcileNote("The checked version remains the current saved draft.");
-                setReconcileNoteError(false);
-                setReconcileNoteWarning(false);
-              }}
-              onRestoreOriginal={() => {
-                if (!evidenceReview) return;
-                setHeadline(evidenceReview.original.headline);
-                setDek(evidenceReview.original.dek);
-                setBody(stripReporterNotebook(evidenceReview.original.body));
-                setTopic(evidenceReview.original.topic);
-                setEvidenceReviewOpen(false);
-                setReconcileNote(
-                  "Previous version loaded as unsaved text. Click Save edits to make it the current saved draft.",
-                );
-                setReconcileNoteError(false);
-                setReconcileNoteWarning(true);
-              }}
-            />
-            {canPublish ? (
-              confirmingPublish ? (
-                <>
-                  <span className="note">
-                    This puts the story on the public paper and in the feed, under your name, now.
-                    Corrections are published, not silent edits.
-                  </span>
-                  {uncredited.length > 0 ? (
-                    <span className="note">
-                      {uncredited.length === 1
-                        ? `The body never names ${uncredited[0]}, though it's in the sources. If the story leans on their reporting, we said we'd say so.`
-                        : `The body never names ${uncredited.join(" or ")}, though they're in the sources. If the story leans on their reporting, we said we'd say so.`}
-                    </span>
-                  ) : null}
-                  <InkButton
-                    disabled={
-                      publish.isPending ||
-                      !sectionReady ||
-                      data.namedOutlets.length > 0 ||
-                      evidenceStale ||
-                      reviewEvidence.isPending ||
-                      reconcileActive
-                    }
-                    onClick={() => {
-                      setConfirmingPublish(false);
-                      publish.mutate();
-                    }}
-                  >
-                    {publish.isPending ? "Publishing…" : `Yes, print it in ${sectionNameNow}`}
-                  </InkButton>
-                  <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
-                    Not yet
-                  </InkButton>
-                </>
-              ) : (
-                <>
-                  <InkButton
-                    disabled={
-                      publish.isPending ||
-                      !headline.trim() ||
-                      !body.trim() ||
-                      openClaims.length > 0 ||
-                      !sectionReady ||
-                      data.namedOutlets.length > 0 ||
-                      evidenceStale ||
-                      reviewEvidence.isPending ||
-                      reconcileActive
-                    }
-                    onClick={() => setConfirmingPublish(true)}
-                  >
-                    {`Publish in ${sectionNameNow}`}
-                  </InkButton>
-                  {/*
-                    The section is on the button, so the editor can read what
-                    they are about to confirm. This is the way back to the
-                    select when the name on the button is not the one they
-                    want -- and the focus, not just the scroll, because the
-                    point of pressing it is to change that field.
-                  */}
-                  <button
-                    type="button"
-                    className="inline-link astra-publish-section-change"
-                    onClick={() => {
-                      document.getElementById("story-topic-select")?.focus();
-                      document
-                        .getElementById("story-topic")
-                        ?.scrollIntoView({ block: "center" });
-                    }}
-                  >
-                    {sectionReady ? "change" : "pick the section"}
-                  </button>
-                  {/*
-                        A greyed button with no sentence beside it is a dead
-                        end -- the editor cannot tell whether it is broken,
-                        still loading, or refusing on purpose. The reason is
-                        text, not opacity, and it points at the work.
-                      */}
-                  {blockedReason ? (
-                    <span className="note publish-blocked">
-                      {blockedReason}.{" "}
-                      {openClaims.length > 0 ? (
-                        <button
-                          type="button"
-                          className="inline-link"
-                          onClick={() => {
-                            setInspector("reporting");
-                            document
-                              .getElementById("story-inspector")
-                              ?.scrollIntoView({ block: "start" });
-                          }}
-                        >
-                          Open reporting notes
-                        </button>
-                      ) : outletBlocked ? (
-                        <button
-                          type="button"
-                          className="inline-link"
-                          onClick={() =>
-                            document
-                              .getElementById("story-outlets")
-                              ?.scrollIntoView({ block: "center" })
-                          }
-                        >
-                          Go to the named outlets
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="inline-link"
-                          onClick={() =>
-                            document
-                              .getElementById("story-topic")
-                              ?.scrollIntoView({ block: "center" })
-                          }
-                        >
-                          Go to the section
-                        </button>
-                      )}
-                    </span>
-                  ) : null}
-                </>
-              )
-            ) : null}
-          </>
-        ) : null}
-        {onPaper ? (
+      {onPaper ? (
           <p className="note">
             On the paper.{" "}
             <Link to="/desk/published" className="inline-link">
@@ -1545,7 +1362,6 @@ function StoryPage() {
             ) : null}
           </p>
         ) : null}
-      </div>
       {comparePair && compareShown ? (
         <div id="lead-compare">
           <LeadComparePanel
@@ -1557,59 +1373,6 @@ function StoryPage() {
             formatDate={formatShortDate}
           />
         </div>
-      ) : null}
-      {!locked && !onPaper ? (
-        <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
-          <textarea
-            rows={2}
-            value={storyDirection}
-            onChange={(e) => setStoryDirection(e.target.value)}
-            maxLength={1000}
-            disabled={waiting}
-            placeholder="For example: Cover the vote on Ordinance 2026-57 and what changes for residents."
-          />
-        </Field>
-      ) : null}
-      {modelResearchOpen && !locked && !onPaper ? (
-        <section
-          className="astra-model-research"
-          id="story-model-research"
-          ref={modelResearchPanel}
-          aria-labelledby="story-model-research-heading"
-        >
-          <div className="astra-model-research-heading">
-            <div>
-              <p className="kick">Redraft settings</p>
-              <h2 id="story-model-research-heading">Choose the model and research scope</h2>
-            </div>
-            <button className="btn" type="button" onClick={() => setModelResearchOpen(false)}>
-              Close
-            </button>
-          </div>
-          <div className="astra-model-research-controls">
-            <ModelPicker
-              value={modelChoice}
-              onChange={(choice) => {
-                modelChoiceTouched.current = true;
-                setModelChoice(choice);
-                setModelEffort(defaultModelEffort(choice));
-              }}
-              effort={modelEffort}
-              onEffortChange={setModelEffort}
-              disabled={waiting || reconcileActive || savePending}
-              compact
-            />
-            <DraftScopePicker
-              value={researchScope}
-              onChange={setResearchScope}
-              disabled={waiting}
-            />
-          </div>
-          <p className="meta">
-            Redraft uses these settings. Your current saved draft stays in place until a new draft
-            finishes successfully.
-          </p>
-        </section>
       ) : null}
       <div className="story-grid">
         <aside
@@ -1798,6 +1561,87 @@ function StoryPage() {
         </aside>
 
         <section className="story-work">
+          {/*
+            The writer row (Desk Story.dc.html): who is being asked, and how the
+            draft in front of the editor stands. The drawing's two selects -- the
+            model and its effort -- are today's "Model & research" toggle and the
+            panel it opens, kept as they are, and the save state moves up here
+            from the action row so the answer to "did my last edit stick?" is the
+            first thing on the surface rather than the last.
+          */}
+          <div className="astra-wb-writer">
+            <span className="astra-wb-writer-label">Writer</span>
+            <button
+              className="btn"
+              type="button"
+              aria-expanded={modelResearchOpen}
+              aria-controls="story-model-research"
+              onClick={() => setModelResearchOpen((open) => !open)}
+            >
+              Model & research · {modelChoiceLabel(modelChoice)}
+            </button>
+            {retiredModelNote ? (
+              <p className="note" role="status">
+                {retiredModelNote}
+              </p>
+            ) : null}
+            <span className="astra-save-state" role="status">
+              {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
+            </span>
+          </div>
+          {!locked && !onPaper ? (
+            <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
+              <textarea
+                rows={2}
+                value={storyDirection}
+                onChange={(e) => setStoryDirection(e.target.value)}
+                maxLength={1000}
+                disabled={waiting}
+                placeholder="For example: Cover the vote on Ordinance 2026-57 and what changes for residents."
+              />
+            </Field>
+          ) : null}
+          {modelResearchOpen && !locked && !onPaper ? (
+            <section
+              className="astra-model-research"
+              id="story-model-research"
+              ref={modelResearchPanel}
+              aria-labelledby="story-model-research-heading"
+            >
+              <div className="astra-model-research-heading">
+                <div>
+                  <p className="kick">Redraft settings</p>
+                  <h2 id="story-model-research-heading">Choose the model and research scope</h2>
+                </div>
+                <button className="btn" type="button" onClick={() => setModelResearchOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <div className="astra-model-research-controls">
+                <ModelPicker
+                  value={modelChoice}
+                  onChange={(choice) => {
+                    modelChoiceTouched.current = true;
+                    setModelChoice(choice);
+                    setModelEffort(defaultModelEffort(choice));
+                  }}
+                  effort={modelEffort}
+                  onEffortChange={setModelEffort}
+                  disabled={waiting || reconcileActive || savePending}
+                  compact
+                />
+                <DraftScopePicker
+                  value={researchScope}
+                  onChange={setResearchScope}
+                  disabled={waiting}
+                />
+              </div>
+              <p className="meta">
+                Redraft uses these settings. Your current saved draft stays in place until a new draft
+                finishes successfully.
+              </p>
+            </section>
+          ) : null}
           {evidenceStale && !onPaper ? (
             <div className="note publish-blocked" role="status">
               <p>
@@ -2331,8 +2175,291 @@ function StoryPage() {
               }
             />
           ) : null}
+    <div className="work-bar astra-story-actions">
+            {body && (
+              <InkButton
+                tone="ghost"
+                onClick={() => {
+                  setPreviewSeen(true);
+                  preview.current?.showModal();
+                }}
+              >
+                Preview
+              </InkButton>
+            )}
+            <a className="btn astra-checks-jump" href="#story-inspector">
+              Checks & sources
+            </a>
+            {/*
+              Unit AK item 5: the press that opens the side-by-side view. It used
+              to be a link on the Queue that opened the other lead's page, which
+              had no comparison on it at all.
+            */}
+            {comparePair ? (
+              <button
+                className="btn"
+                type="button"
+                aria-expanded={compareShown}
+                aria-controls="lead-compare"
+                onClick={() => setCompareOpen(!compareShown)}
+              >
+                Compare
+              </button>
+            ) : null}
+            {!locked && !onPaper ? (
+              <>
+                <InkButton
+                  disabled={waiting || reconcileActive}
+                  onClick={() => {
+                    if (waiting) return;
+                    draft.mutate();
+                  }}
+                >
+                  {jobState === "recovering"
+                    ? "Recovering…"
+                    : waiting
+                      ? data.job?.failover_note
+                        ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
+                        : "Drafting…"
+                      : data.draft?.body
+                        ? "Redraft"
+                        : "Draft with AI"}
+                </InkButton>
+              </>
+            ) : null}
+            {data.draft && !locked && !onPaper ? (
+              <>
+                <InkButton
+                  tone="ghost"
+                  disabled={save.isPending || reconcileActive}
+                  onClick={() => save.mutate()}
+                >
+                  Save edits
+                </InkButton>
+                <DraftReconcileControl
+                  status={reconcileStatus.data}
+                  active={reconcileActive}
+                  disabled={waiting || reconcileActive || savePending || hasUnsavedDraftEdits}
+                  dirty={hasUnsavedDraftEdits}
+                  note={reconcileNote}
+                  noteError={reconcileNoteError}
+                  noteWarning={reconcileNoteWarning}
+                  checkedDraftReady={checkedDraftReady}
+                  checkedDraftStale={checkedDraftStale}
+                  modelLabel={modelChoiceLabel(reconcileStatus.data?.modelChoice ?? modelChoice)}
+                  review={evidenceReview}
+                  reviewOpen={evidenceReviewOpen}
+                  onStart={() => reconcile.mutate()}
+                  onReload={() => {
+                    const resultDraftId = reconcileStatus.data?.resultDraftId;
+                    if (!resultDraftId) return;
+                    const originalDraftId = reconcileStatus.data?.draftId;
+                    if (!originalDraftId) return;
+                    setEvidenceReviewOpen(true);
+                    void applyCheckedDraft(resultDraftId, originalDraftId, undefined, true).catch((cause) => {
+                      setReconcileNote(
+                        editorActionError(
+                          cause instanceof Error ? cause.message : "",
+                          "load the checked draft",
+                        ) ?? "The checked draft could not be loaded.",
+                      );
+                      setReconcileNoteError(true);
+                      setReconcileNoteWarning(false);
+                    });
+                  }}
+                  onKeepChecked={() => {
+                    setEvidenceReviewOpen(false);
+                    setReconcileNote("The checked version remains the current saved draft.");
+                    setReconcileNoteError(false);
+                    setReconcileNoteWarning(false);
+                  }}
+                  onRestoreOriginal={() => {
+                    if (!evidenceReview) return;
+                    setHeadline(evidenceReview.original.headline);
+                    setDek(evidenceReview.original.dek);
+                    setBody(stripReporterNotebook(evidenceReview.original.body));
+                    setTopic(evidenceReview.original.topic);
+                    setEvidenceReviewOpen(false);
+                    setReconcileNote(
+                      "Previous version loaded as unsaved text. Click Save edits to make it the current saved draft.",
+                    );
+                    setReconcileNoteError(false);
+                    setReconcileNoteWarning(true);
+                  }}
+                />
+              </>
+            ) : null}
+          </div>
+          {/*
+            "A full JobCard under the actions while a check or redraft runs"
+            (phase 2b, item 1). Two cards, because this page runs two jobs: the
+            draft (the phase 3 banner's own component, moved here from above the
+            title) and the evidence check (the same JobCard, filtered to the
+            `reconcile` kind). Both render nothing when their job is not open.
+          */}
+          <StoryJobProgress
+            leadId={data.lead.id}
+            initial={
+              data.job && (data.job.status === "queued" || data.job.status === "running")
+                ? [jobProgressView(data.job, data.lead.id, data.draft?.id ?? null)]
+                : null
+            }
+            note={
+              <p className="story-running-note">
+                Your submission is saved. The draft will appear here automatically. You can return from{" "}
+                <Link to="/desk">Desk → Your recent drafts</Link>.
+              </p>
+            }
+          />
+          <StoryCheckJobProgress leadId={data.lead.id} />
         </section>
       </div>
+      {canPublish ? (
+        /*
+          The sticky publish bar. What is drawn on it is what is true: the four
+          chips read this page's own state, and the button keeps every rule it
+          had -- 0.6.67's section confirmed in the same press, the named-outlet
+          and stale-evidence gates, and phase 1's area select, which stays in
+          the form above so the press that prints is the press that confirms.
+          The gates are the drawing's; they are not new blockers. Disabling is
+          still exactly the `disabled` list on the button, which is the rule
+          the claims-of-absence test pins.
+        */
+        <div className="astra-publish-bar">
+          <ul className="astra-gates" aria-label="Publish gates">
+            {publishGates.map((gate) => (
+              <li key={gate.label} className={`astra-gate${gate.done ? "" : " is-todo"}`}>
+                {gate.label}
+              </li>
+            ))}
+          </ul>
+          <div className="astra-publish-actions">
+            {canPublish ? (
+              confirmingPublish ? (
+                <>
+                  <span className="note">
+                    This puts the story on the public paper and in the feed, under your name, now.
+                    Corrections are published, not silent edits.
+                  </span>
+                  {uncredited.length > 0 ? (
+                    <span className="note">
+                      {uncredited.length === 1
+                        ? `The body never names ${uncredited[0]}, though it's in the sources. If the story leans on their reporting, we said we'd say so.`
+                        : `The body never names ${uncredited.join(" or ")}, though they're in the sources. If the story leans on their reporting, we said we'd say so.`}
+                    </span>
+                  ) : null}
+                  <InkButton
+                    disabled={
+                      publish.isPending ||
+                      !sectionReady ||
+                      data.namedOutlets.length > 0 ||
+                      evidenceStale ||
+                      reviewEvidence.isPending ||
+                      reconcileActive
+                    }
+                    onClick={() => {
+                      setConfirmingPublish(false);
+                      publish.mutate();
+                    }}
+                  >
+                    {publish.isPending ? "Publishing…" : `Yes, print it in ${sectionNameNow}`}
+                  </InkButton>
+                  <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
+                    Not yet
+                  </InkButton>
+                </>
+              ) : (
+                <>
+                  <InkButton
+                    disabled={
+                      publish.isPending ||
+                      !headline.trim() ||
+                      !body.trim() ||
+                      openClaims.length > 0 ||
+                      !sectionReady ||
+                      data.namedOutlets.length > 0 ||
+                      evidenceStale ||
+                      reviewEvidence.isPending ||
+                      reconcileActive
+                    }
+                    onClick={() => setConfirmingPublish(true)}
+                  >
+                    {`Publish in ${sectionNameNow}`}
+                  </InkButton>
+                  {/*
+                    The section is on the button, so the editor can read what
+                    they are about to confirm. This is the way back to the
+                    select when the name on the button is not the one they
+                    want -- and the focus, not just the scroll, because the
+                    point of pressing it is to change that field.
+                  */}
+                  <button
+                    type="button"
+                    className="inline-link astra-publish-section-change"
+                    onClick={() => {
+                      document.getElementById("story-topic-select")?.focus();
+                      document
+                        .getElementById("story-topic")
+                        ?.scrollIntoView({ block: "center" });
+                    }}
+                  >
+                    {sectionReady ? "change" : "pick the section"}
+                  </button>
+                  {/*
+                        A greyed button with no sentence beside it is a dead
+                        end -- the editor cannot tell whether it is broken,
+                        still loading, or refusing on purpose. The reason is
+                        text, not opacity, and it points at the work.
+                      */}
+                  {blockedReason ? (
+                    <span className="note publish-blocked">
+                      {blockedReason}.{" "}
+                      {openClaims.length > 0 ? (
+                        <button
+                          type="button"
+                          className="inline-link"
+                          onClick={() => {
+                            setInspector("reporting");
+                            document
+                              .getElementById("story-inspector")
+                              ?.scrollIntoView({ block: "start" });
+                          }}
+                        >
+                          Open reporting notes
+                        </button>
+                      ) : outletBlocked ? (
+                        <button
+                          type="button"
+                          className="inline-link"
+                          onClick={() =>
+                            document
+                              .getElementById("story-outlets")
+                              ?.scrollIntoView({ block: "center" })
+                          }
+                        >
+                          Go to the named outlets
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="inline-link"
+                          onClick={() =>
+                            document
+                              .getElementById("story-topic")
+                              ?.scrollIntoView({ block: "center" })
+                          }
+                        >
+                          Go to the section
+                        </button>
+                      )}
+                    </span>
+                  ) : null}
+                </>
+              )
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <dialog
         ref={preview}
         className="astra-dialog astra-preview"

@@ -317,6 +317,35 @@ export function StoryJobProgress({
 }
 
 /**
+ * The story page's evidence-check card: the RECONCILE job for this lead, full
+ * size, directly under the draft card.
+ *
+ * Phase 2b ("a full JobCard under the actions while a check or redraft runs").
+ * It is deliberately the same card as `StoryJobProgress` with one field
+ * changed -- the kind it filters on, and the label its section carries -- so
+ * the two jobs this page can run at once look like the same kind of thing,
+ * because they are.
+ *
+ * No `initial`: this page's own `data.job` row is the draft job, and the
+ * reconcile row arrives from the same 2 s poll `useDeskJobs` already runs for
+ * `DraftReconcileControl`. Queueing a second fetch here to shave one poll off
+ * the first paint would be two requests for the same row.
+ */
+export function StoryCheckJobProgress({ leadId }: { leadId: number }) {
+  const jobs = useDeskJobs();
+  const job = useMemo(() => {
+    const mine = jobs.data?.filter((row) => row.leadId === leadId && row.kind === "reconcile") ?? [];
+    return mine.find((row) => row.status === "queued" || row.status === "running") ?? null;
+  }, [jobs.data, leadId]);
+  if (!job) return null;
+  return (
+    <section className="story-running-banner" aria-label="Evidence check progress">
+      <DeskJobCard job={job} />
+    </section>
+  );
+}
+
+/**
  * How long a finished story job keeps its card on Today. The strip's job is
  * "something you just started has stopped"; the failure that stopped the draft
  * you asked for five minutes ago is that, and last week's is not -- a desk that

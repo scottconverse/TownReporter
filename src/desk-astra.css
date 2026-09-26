@@ -1101,22 +1101,30 @@
   font: 500 calc(14px * var(--ts)) var(--fd);
   margin-bottom: 18px;
 }
+/*
+  Unit BH (redesign phase 2b). The story workbench is drawn 420px | 1fr with
+  the Checks · Sources · Reporting panel on the LEFT and the writing surface on
+  the right, so the two column assignments below are the mirror of what they
+  were. The DOM order is unchanged (the aside is still written first), which is
+  what keeps the reading order -- and every screen-reader path through this
+  page -- identical to what it was.
+*/
 .desk-ltr.astra .story-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 334px;
+  grid-template-columns: 420px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
   margin-top: 22px;
 }
 .desk-ltr.astra .story-work {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 1;
   min-width: 0;
   padding: 0;
   border: 0;
 }
 .desk-ltr.astra .story-side {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
   min-width: 0;
   padding: 0;
@@ -1660,7 +1668,7 @@
     gap: 18px;
   }
   .desk-ltr.astra .story-grid {
-    grid-template-columns: minmax(0, 1fr) 295px;
+    grid-template-columns: 340px minmax(0, 1fr);
     gap: 18px;
   }
   .desk-ltr.astra .work-form {
@@ -2319,4 +2327,253 @@
 @keyframes trSlide {
   from { transform: translateX(-100%); }
   to { transform: translateX(300%); }
+}
+
+/*
+  ---------------------------------------------------------------------------
+  Unit BH -- redesign phase 2b: the story workbench (top bar, context row,
+  stage stepper, writer row, action row, sticky publish bar) and the restyled
+  inspector tabs.
+
+  Geometry is the reference's (docs/design/handoff-2026-09-26/design/
+  "Desk Story.dc.html"), re-expressed in the desk's own tokens. Two deliberate
+  departures, both because the prototype's context is not this app's:
+
+  1. The stage cells are 44px, not the drawn 40px. They are the only thing in
+     the top bar that reads as a control at a glance, and the design system's
+     own hit-target floor is 44px; four pixels is not a visible difference at
+     the size the stepper occupies.
+  2. The stepper is spans, not buttons. Nothing on this page navigates between
+     stages -- the stage is derived -- so a row of presses that do nothing is
+     the thing the brief's Do 3 forbids. Same for the gate chips.
+  ---------------------------------------------------------------------------
+*/
+
+.desk-ltr.astra .astra-wb-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 32px;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-wb-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  text-decoration: none;
+}
+.desk-ltr.astra .astra-wb-back:hover {
+  border-color: var(--fg2);
+}
+.desk-ltr.astra .astra-wb-stages {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.desk-ltr.astra .astra-wb-stage {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  font: 800 calc(15px * var(--ts)) var(--fd);
+  color: var(--fg2);
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-wb-stage + .astra-wb-stage {
+  border-left: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-wb-stage.is-done {
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-wb-stage.is-now {
+  background: var(--a);
+  color: #111111;
+}
+.desk-ltr.astra .astra-wb-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px 32px;
+  border-bottom: 1px solid var(--line);
+  font: 700 calc(15px * var(--ts))/1.5 var(--fd);
+  color: var(--fg2);
+}
+
+/* The writer row: who is being asked, and how this draft stands. */
+.desk-ltr.astra .astra-wb-writer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: calc(15px * var(--ts));
+}
+.desk-ltr.astra .astra-wb-writer .astra-wb-writer-label {
+  font-family: var(--fd);
+  font-weight: 700;
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-wb-writer .astra-save-state {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+/*
+  The action row sits under the text it acts on, which is the reference's
+  order, so it overrides the `.work-bar` box it used to be: the old rule gave
+  the bar its own border and fill above the grid, and here it is a rule between
+  the text and the publish bar.
+*/
+.desk-ltr.astra .work-bar.astra-story-actions {
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+.desk-ltr.astra .astra-wb-kbd {
+  margin-left: 8px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  font: 700 calc(14px * var(--ts)) var(--fd);
+}
+.desk-ltr.astra .astra-wb-saved {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+/* The sticky publish bar: the last thing on the page and the first thing in
+   reach, with the gates that stand between the draft and the paper. */
+.desk-ltr.astra .astra-publish-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-top: 6px;
+  padding: 14px 32px;
+  background: var(--surface);
+  border-top: 3px solid var(--a);
+}
+.desk-ltr.astra .astra-gates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.desk-ltr.astra .astra-gate {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font: 800 calc(14px * var(--ts))/1.4 var(--fd);
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-gate.is-todo {
+  border: 2px solid var(--warn);
+  color: var(--warn);
+}
+
+/* The tabs: three equal cells, 48px, the active one a 4px yellow underline
+   sitting on the panel it names. */
+.desk-ltr.astra .astra-inspector-tabs {
+  gap: 0;
+  padding: 0;
+}
+.desk-ltr.astra .astra-inspector-tabs button {
+  flex: 1;
+  min-height: 48px;
+  padding: 0 8px;
+  font-size: calc(15px * var(--ts));
+  font-weight: 800;
+  text-align: center;
+}
+.desk-ltr.astra .astra-inspector-tabs button[aria-selected="true"] {
+  border-bottom-color: transparent;
+  background: var(--bg);
+  box-shadow: inset 0 -4px 0 var(--sel);
+  color: var(--fg);
+  font-weight: 800;
+}
+
+/* The story text keeps the reference's 760px measure inside the 1fr column. */
+.desk-ltr.astra .work-form .astra-story-body {
+  max-width: 760px;
+}
+
+/* On the publish bar, the gates lead and the actions follow. The bar wraps on
+   a narrow screen, so the actions wrap with it rather than shrinking. */
+.desk-ltr.astra .astra-publish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/*
+  The drawn top bar labels the whole workbench "Story workbench". The page's
+  real title is the lead's headline and lives in the shell's own heading
+  (`hideTitle` on DeskShell keeps that one the document's h1), so this one is
+  for the screen-reader outline and for the drawing's shape, and is not shown.
+  Same geometry as `.sr-only` in styles.css, repeated here because this block
+  is scoped to the desk and must not depend on load order.
+*/
+.desk-ltr.astra .astra-wb-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 960px) {
+  /* Stacked, the panel follows the writing surface rather than leading it --
+     the editor came here to write, and the checks are the thing they consult. */
+  .desk-ltr.astra .story-work {
+    order: 1;
+  }
+  .desk-ltr.astra .story-side {
+    order: 2;
+  }
+  .desk-ltr.astra .astra-wb-top,
+  .desk-ltr.astra .astra-wb-context {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .desk-ltr.astra .astra-wb-stages {
+    width: 100%;
+  }
+  .desk-ltr.astra .astra-wb-stage {
+    flex: 1;
+    justify-content: center;
+    padding: 0 8px;
+  }
+  .desk-ltr.astra .astra-publish-bar {
+    padding: 14px 18px;
+  }
 }
