@@ -1459,4 +1459,25 @@ describe("a validation dump never reaches the editor", () => {
     assert.equal(editorActionError(null), null);
     assert.equal(editorActionError("   "), null);
   });
+
+  it("catches a dump on the drafting path too, where the copy is about the model's words", () => {
+    /*
+      Every pattern in editorDraftError is about what a writing model said --
+      a refusal, a quota, a login. A boundary check that throws before a model
+      is called matches none of them and used to fall past all of them into the
+      language pass, which hands its input back unchanged. The dump then went
+      to setMsg on the story page verbatim: the same bug, a different formatter.
+    */
+    const said = editorDraftError(elementDump);
+    assert.ok(said, "a dump must produce a sentence, not null");
+    assert.doesNotMatch(said, /too_big|"path"|"code"|[{}[\]]|maximum/);
+    assert.match(said, /a to-do line is longer than the desk can store/);
+    assert.match(said, /draft that story/);
+    // The other half: real draft copy still reads as draft copy.
+    assert.match(
+      editorDraftError("The writing model returned nothing this pass.") ?? "",
+      /returned nothing this pass/,
+    );
+    assert.equal(editorDraftError(""), null);
+  });
 });

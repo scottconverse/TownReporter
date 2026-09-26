@@ -519,6 +519,17 @@ function providerSignInCopy(raw: string, again: string): string {
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  /*
+    A dumped boundary check is not draft copy and nothing below would recognize
+    it: every pattern here is about what a writing model said, and this is what
+    the wire refused before a model was ever called. Without this branch the
+    dump fell through every test and out the bottom as `plainEditorText(t)`,
+    which returns it unchanged -- so `setMsg` on the story page printed the
+    issues array verbatim, the same bug `editorActionError` closes. A refusal
+    below still wins over an earlier provider failure, because a dump carries
+    neither.
+  */
+  if (looksLikeValidationDump(t)) return editorActionError(t, "draft that story");
   // A final refusal takes precedence over an earlier provider's quota or
   // transport failure in saved Automatic-run errors. A reset cannot resolve it.
   const refusal = t.match(/declined (?:to produce the requested editorial|this request)\b/i);

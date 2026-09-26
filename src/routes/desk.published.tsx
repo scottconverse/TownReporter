@@ -76,7 +76,9 @@ function PublishedPage() {
     onError: (err) => {
       setNote({
         kind: "err",
-        text: err instanceof Error ? err.message : "Could not post that correction.",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "post that correction") ??
+          "Could not post that correction.",
       });
     },
   });
@@ -111,7 +113,11 @@ function PublishedPage() {
     },
     onError: (error) => setNote({
       kind: "err",
-      text: error instanceof Error ? error.message : "Could not save the transcript review.",
+      text:
+        editorActionError(
+          error instanceof Error ? error.message : "",
+          "save the transcript review",
+        ) ?? "Could not save the transcript review.",
     }),
   });
 
@@ -140,7 +146,9 @@ function PublishedPage() {
     onError: (err) =>
       setNote({
         kind: "err",
-        text: err instanceof Error ? err.message : "Could not remove that.",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "remove that") ??
+          "Could not remove that.",
       }),
   });
 
@@ -161,7 +169,9 @@ function PublishedPage() {
     onError: (err) =>
       setNote({
         kind: "err",
-        text: err instanceof Error ? err.message : "That would not go back.",
+        text:
+          editorActionError(err instanceof Error ? err.message : "", "put it back") ??
+          "That would not go back.",
       }),
   });
 
@@ -258,7 +268,10 @@ function PublishedPage() {
       {pubIsError && !rows.length ? (
         <ScreenError
           message={
-            pubError instanceof Error ? pubError.message : "Could not load what's published."
+            editorActionError(
+              pubError instanceof Error ? pubError.message : "",
+              "load what's published",
+            ) ?? "Could not load what's published."
           }
           onRetry={() => void pubRefetch()}
           retrying={pubRefetching}
