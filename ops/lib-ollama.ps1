@@ -2,8 +2,9 @@
   Ollama, the local server the paper's first Automatic rung runs on.
 
   "Automatic" walks its local rungs in order: DeepSeek v4.1 Flash on Ollama
-  (http://127.0.0.1:11434/v1), then Qwen 3.6 35B on LM Studio when that model
-  is loaded (src/lib/news/provider-registry.ts, `automaticLadder`). Ollama
+  (http://127.0.0.1:11434/v1), then whichever model LM Studio has LOADED on
+  1234 (src/lib/news/provider-registry.ts, `automaticLadder`; the label reads
+  "Local model"). Ollama
   being down is NOT the paper being down: the ladder moves to the next rung,
   which is why ops/status.ps1 says "the paper will use the next model" rather
   than calling it a fault. Nothing here may fail a caller.
@@ -13,7 +14,7 @@
   * It never stops Ollama, and never looks for a reason to. A model may be
     mid-draft on it; a wedged Ollama is the operator's to restart.
   * It never touches LM Studio or its models. The second rung's server owns
-    its own memory management (that rung is skipped unless the model is
+    its own memory management (that rung is skipped unless a chat model is
     already loaded, precisely so a draft is never pinned to a model that has
     to be paged in from disk). Probing or unloading anything on 1234 from here
     would reach into another program's state for no reason.

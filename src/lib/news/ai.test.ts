@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { resetLocalCatalogCacheForTests } from "./local-models.ts";
+import type { LocalCatalog, LocalModelEntry, LocalModelKind, LocalServerKind } from "./local-models.ts";
 import {
   plannerModel,
   GROK_UNAVAILABLE,
@@ -127,6 +129,37 @@ const BARE = { TOWNREPORTER_CLAUDE_CODE: "0" };
 const FAKE_CODEX = fileURLToPath(
   new URL("../../../scripts/fakes/fake-codex-cli.mjs", import.meta.url),
 );
+
+const LM_STUDIO_V1 = "http://127.0.0.1:1234/v1";
+
+/**
+ * A local catalog exactly as `discoverLocalModels` would report one, for the
+ * rung tests below.
+ *
+ * They inject `resolveLocalCatalog` rather than starting an HTTP server, so no
+ * test here talks to a real LM Studio on 1234 -- which matters twice over: the
+ * owner's loaded model must not be disturbed, and `enrichLmStudio`'s
+ * `/api/v0/models` call is what carries load state, so a fixture is the only
+ * way to say "loaded", "not loaded" and "this server cannot say" in one file.
+ * The separate `probeProvider`-against-a-fake-server coverage lives in
+ * scripts/ and the failover walks.
+ */
+function localCatalog(models: LocalModelEntry[], kind: LocalServerKind = "lmstudio"): LocalCatalog {
+  return {
+    servers: [{ kind, baseUrl: LM_STUDIO_V1, reachable: true, models }],
+    defaultModel: null,
+    checkedAt: Date.now(),
+  };
+}
+
+/** One model as LM Studio's list reports it. */
+function localEntry(
+  id: string,
+  loaded: boolean | null,
+  kind: LocalModelKind = "chat",
+): LocalModelEntry {
+  return { id, label: id, loaded, kind, thinking: false, vision: false, cloud: false, contextLength: null };
+}
 
 describe("isGrokAvailable", () => {
   it("is false with no key and the local CLI ruled out", () => {
@@ -1083,8 +1116,14 @@ describe("model-picker provider readiness", () => {
     memory while the editor watches a job that looks stuck. The desk never
     loads a model (owner rule: "if it is loaded"), so the rung is skipped and
     the ladder moves to Codex Terra.
+
+    0.6.69 (Unit AL item 4): the rung names no model either -- it runs whatever
+    LM Studio reports loaded. The three tests here are the three refusals in
+    the new words (nothing loaded, load state unknown, server did not answer),
+    which are `resolveRungLocalModel`'s own sentences; the three after them
+    cover the pick itself, the pin, and a pin that is not the loaded one.
   */
-  it("skips a rung whose local model is not loaded and runs the next one instead", async () => {
+  it("skips a rung when nothing is loaded in LM Studio and runs the next one instead", async () => {
     const originalFetch = globalThis.fetch;
     let fetched = 0;
     globalThis.fetch = async () => {
@@ -1098,45 +1137,23 @@ describe("model-picker provider readiness", () => {
           // Rung 1 out of the way by its own off switch, so rung 2 is the one
           // under test; rung 3 is Codex, reached through the fake CLI.
           TOWNREPORTER_DEEPSEEK: "0",
-          TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+          TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1,
           CODEX_CLI_PATH: FAKE_CODEX,
           FAKE_CODEX_SIGNED_IN: "1",
         },
         async () => {
           const result = await probeProvider("auto", undefined, {
-            resolveLocalCatalog: async () => ({
-              servers: [
-                {
-                  kind: "lmstudio",
-                  baseUrl: "http://127.0.0.1:1234/v1",
-                  reachable: true,
-                  models: [
-                    {
-                      id: "halo/qwen3.6-35b-a3b",
-                      label: "Qwen 3.6 35B",
-                      loaded: false,
-                      // LM Studio reports a text model as `chat`; "lmstudio"
-                      // is the SERVER kind and is not a `LocalModelKind`.
-                      kind: "chat",
-                      thinking: false,
-                      vision: false,
-                      cloud: false,
-                      // A real LM Studio entry carries its context window;
-                      // `LocalModelEntry` requires the field, absent or not.
-                      contextLength: null,
-                    },
-                  ],
-                },
-              ],
-              defaultModel: null,
-              checkedAt: Date.now(),
-            }),
+            resolveLocalCatalog: async () =>
+              localCatalog([localEntry("halo/qwen3.6-35b-a3b", false)]),
           });
           assert.equal(result.ok, true);
           if (result.ok) {
             assert.equal(result.choice, "codex-balanced");
             assert.equal(result.label, "Codex Terra");
-            assert.deepEqual(result.skippedRungs, ["Qwen 3.6 35B skipped: not loaded"]);
+            // The brief's own words, verbatim.
+            assert.deepEqual(result.skippedRungs, [
+              "Local model skipped: nothing loaded in LM Studio",
+            ]);
           }
         },
       );
@@ -1148,48 +1165,220 @@ describe("model-picker provider readiness", () => {
     }
   });
 
+  it("runs the lowest-id loaded model, never an embedding, and names it on the probe", async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      urls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          data: [
+            { id: "halo/qwen3.6-35b-a3b" },
+            { id: "google/gemma-4-12b-qat" },
+            { id: "all-minilm-l6-v2" },
+          ],
+        }),
+        { status: 200 },
+      );
+    };
+    try {
+      await withEnvAsync(
+        { ...BARE, TOWNREPORTER_DEEPSEEK: "0", TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1 },
+        async () => {
+          const result = await probeProvider("qwen-local", undefined, {
+            resolveLocalCatalog: async () =>
+              localCatalog([
+                // Listed first, and loaded -- but not the lowest id, so a pick
+                // that took LM Studio's own list order would take this one.
+                localEntry("halo/qwen3.6-35b-a3b", true),
+                localEntry("google/gemma-4-12b-qat", true),
+                // Loaded, lowest id of the three, and cannot write a sentence:
+                // only its kind keeps it out of the running.
+                localEntry("all-minilm-l6-v2", true, "embedding"),
+                // On disk and not in memory, so it is not a candidate at all.
+                localEntry("halo/qwen3.6-35b-a3b-gguf", false),
+              ]),
+          });
+          assert.deepEqual(result, {
+            ok: true,
+            label: "Local model (google/gemma-4-12b-qat)",
+            choice: "qwen-local",
+            localModel: { baseUrl: LM_STUDIO_V1, id: "google/gemma-4-12b-qat" },
+          });
+          // The one model the probe asked the endpoint to confirm is the one
+          // the catalog said was loaded -- and the pair a caller pins is it.
+          assert.deepEqual(urls, [`${LM_STUDIO_V1}/models`]);
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("reads the load state off LM Studio's own model list, with no catalog handed in", async () => {
+    /*
+      The two tests above inject the catalog; this one proves the wire the real
+      machine uses, against a stubbed LM Studio the way the preflight test
+      around line 810 does. `/v1/models` is what the picker's default model
+      comes from and lists everything on DISK; `/api/v0/models` is the endpoint
+      the code already reads for `state` and `type` (local-models.ts's
+      `enrichLmStudio`), and it is the only one that can say what is loaded.
+    */
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url === `${LM_STUDIO_V1}/models`) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "aaa-embedding-model" },
+              { id: "halo/qwen3.6-35b-a3b" },
+              { id: "google/gemma-4-12b-qat" },
+            ],
+          }),
+          // Discovery refuses a 200 that is not JSON (port 8080 on this machine
+          // serves an HTML app), so a stub has to say what it is.
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url === "http://127.0.0.1:1234/api/v0/models") {
+        return new Response(
+          JSON.stringify({
+            data: [
+              // Lowest id of all, loaded, and an embedding: never a candidate.
+              { id: "aaa-embedding-model", state: "loaded", type: "embeddings" },
+              // On disk, not in memory: the rung must not ask for it.
+              { id: "halo/qwen3.6-35b-a3b", state: "not-loaded", type: "llm" },
+              { id: "google/gemma-4-12b-qat", state: "loaded", type: "llm" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new TypeError(`connection refused: ${url}`);
+    };
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          TOWNREPORTER_DEEPSEEK: "0",
+          // The rung's own endpoint. On the live machine the rung is also
+          // enabled by discovery's reachable flag; a test process has no
+          // background refresh, so the endpoint is named here.
+          TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1,
+        },
+        async () => {
+          resetLocalCatalogCacheForTests();
+          const result = await probeProvider("qwen-local", undefined, {});
+          assert.deepEqual(result, {
+            ok: true,
+            label: "Local model (google/gemma-4-12b-qat)",
+            choice: "qwen-local",
+            localModel: { baseUrl: LM_STUDIO_V1, id: "google/gemma-4-12b-qat" },
+          });
+        },
+      );
+      // Discovery read both lists; the confirmation probe asked /v1/models for
+      // the one model it had just been told was loaded.
+      assert.deepEqual(urls.filter((u) => u === `${LM_STUDIO_V1}/models`).length, 2);
+      assert.ok(urls.includes("http://127.0.0.1:1234/api/v0/models"));
+    } finally {
+      resetLocalCatalogCacheForTests();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps sending the pinned TOWNREPORTER_QWEN_MODEL when the operator set one", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          data: [{ id: "halo/qwen3.6-35b-a3b" }, { id: "google/gemma-4-12b-qat" }],
+        }),
+        { status: 200 },
+      );
+    try {
+      await withEnvAsync(
+        {
+          ...BARE,
+          TOWNREPORTER_DEEPSEEK: "0",
+          TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1,
+          // Set on purpose: a pin is not a suggestion. Both models are loaded,
+          // and the pin is deliberately NOT the lowest id -- so a rung that
+          // picked instead of pinning would ask for google/gemma-4-12b-qat.
+          TOWNREPORTER_QWEN_MODEL: "halo/qwen3.6-35b-a3b",
+        },
+        async () => {
+          const result = await probeProvider("qwen-local", undefined, {
+            resolveLocalCatalog: async () =>
+              localCatalog([
+                localEntry("halo/qwen3.6-35b-a3b", true),
+                localEntry("google/gemma-4-12b-qat", true),
+              ]),
+          });
+          assert.deepEqual(result, {
+            ok: true,
+            label: "Local model (halo/qwen3.6-35b-a3b)",
+            choice: "qwen-local",
+            localModel: { baseUrl: LM_STUDIO_V1, id: "halo/qwen3.6-35b-a3b" },
+          });
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("skips the rung when the pinned model is not the one that is loaded", async () => {
+    await withEnvAsync(
+      {
+        ...BARE,
+        TOWNREPORTER_DEEPSEEK: "0",
+        TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1,
+        TOWNREPORTER_QWEN_MODEL: "halo/qwen3.6-35b-a3b",
+        TOWNREPORTER_CODEX: "0",
+      },
+      async () => {
+        const result = await probeProvider("auto", undefined, {
+          // Something is loaded -- just not the pinned model. A pin that
+          // quietly ran the other one would be worse than a skip, because the
+          // receipt would name a model the operator never asked for.
+          resolveLocalCatalog: async () =>
+            localCatalog([
+              localEntry("halo/qwen3.6-35b-a3b", false),
+              localEntry("google/gemma-4-12b-qat", true),
+            ]),
+        });
+        assert.equal(result.ok, false);
+        if (!result.ok) {
+          assert.deepEqual(result.skippedRungs, ["Local model skipped: not loaded"]);
+        }
+      },
+    );
+  });
+
   it("keeps saying which rungs Automatic passed over when the ladder runs out", async () => {
     await withEnvAsync(
       {
         ...BARE,
         TOWNREPORTER_DEEPSEEK: "0",
-        TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1,
         TOWNREPORTER_CODEX: "0",
       },
       async () => {
         const result = await probeProvider("auto", undefined, {
-          resolveLocalCatalog: async () => ({
-            servers: [
-              {
-                kind: "lmstudio",
-                baseUrl: "http://127.0.0.1:1234/v1",
-                reachable: true,
-                models: [
-                  {
-                    id: "halo/qwen3.6-35b-a3b",
-                    label: "Qwen 3.6 35B",
-                    // A server that cannot say whether it is loaded cannot
-                    // answer the question, and the rule is "only when it IS
-                    // loaded" -- so unknown skips too.
-                    loaded: null,
-                    kind: "chat",
-                    thinking: false,
-                    vision: false,
-                    cloud: false,
-                    contextLength: null,
-                  },
-                ],
-              },
-            ],
-            defaultModel: null,
-            checkedAt: Date.now(),
-          }),
+          // A server that cannot say whether anything is loaded cannot answer
+          // the question, and the rule is "only when one IS loaded" -- so
+          // unknown skips too rather than guessing at a model to page in.
+          resolveLocalCatalog: async () => localCatalog([localEntry("halo/qwen3.6-35b-a3b", null)]),
         });
         assert.equal(result.ok, false);
         if (!result.ok) {
           assert.match(result.error, /No model in the Automatic ladder is ready/);
-          assert.match(result.error, /Qwen 3.6 35B skipped: load state unknown/);
-          assert.deepEqual(result.skippedRungs, ["Qwen 3.6 35B skipped: load state unknown"]);
+          assert.match(result.error, /Local model skipped: load state unknown/);
+          assert.deepEqual(result.skippedRungs, ["Local model skipped: load state unknown"]);
         }
       },
     );
@@ -1200,7 +1389,7 @@ describe("model-picker provider readiness", () => {
       {
         ...BARE,
         TOWNREPORTER_DEEPSEEK: "0",
-        TOWNREPORTER_QWEN_BASE_URL: "http://127.0.0.1:1234/v1",
+        TOWNREPORTER_QWEN_BASE_URL: LM_STUDIO_V1,
         TOWNREPORTER_CODEX: "0",
       },
       async () => {
@@ -1215,7 +1404,7 @@ describe("model-picker provider readiness", () => {
         assert.equal(result.ok, false);
         if (!result.ok) {
           assert.deepEqual(result.skippedRungs, [
-            "Qwen 3.6 35B skipped: its server did not answer",
+            "Local model skipped: its server did not answer",
           ]);
         }
       },

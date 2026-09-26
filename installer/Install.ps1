@@ -56,7 +56,20 @@ function Get-VerifiedDependency($dependency, [string]$name) {
     try { Invoke-WebRequest -UseBasicParsing -Uri $dependency.url -OutFile $archive -TimeoutSec 900 }
     finally { $ProgressPreference = $priorProgress }
   }
-  if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $dependency.sha256) {
+  # Get-FileHash lives in Microsoft.PowerShell.Utility and is unreachable in a
+  # Windows PowerShell 5.1 session that inherited PowerShell 7's PSModulePath
+  # (measured 2026-09-26: CommandNotFoundException). This installer cannot
+  # dot-source ops\lib-backup.ps1 for its module-free version, and this
+  # function is also run on its own by scripts\windows-installer-contract.ps1,
+  # so the same .NET SHA256 is inline here. Lower-case hex, matching the
+  # dependencies.json digests exactly rather than case-folding them.
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::Open($archive, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try { $bytes = $sha.ComputeHash($stream) } finally { $stream.Dispose() }
+  } finally { $sha.Dispose() }
+  $actualSha256 = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+  if ($actualSha256 -ne $dependency.sha256) {
     throw "Checksum mismatch for $name. Nothing from this archive was run. Remove only $archive and retry."
   }
   $target = Join-Path $toolsRoot $dependency.directory

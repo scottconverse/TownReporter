@@ -247,8 +247,8 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 Scan has the same **Writing model** picker Story and the queue have, next to
 **Run scan**: Automatic (the default), every named Codex and Claude model, or
 Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is
-loaded, then Codex Terra. If the first one's login
+otherwise it uses DeepSeek v4.1 Flash first, then the local model this computer
+has loaded, if there is one, then Codex Terra. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
 A named choice is the recorded first provider. A recognized technical failure
@@ -283,7 +283,8 @@ Statuses you will use:
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
 operator's configured gateway when one is set; otherwise it uses DeepSeek v4.1
-Flash first, then Qwen on this computer if it is loaded, then Codex Terra. If
+Flash first, then the local model this computer has loaded if there is one, then
+Codex Terra. If
 the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
 which provider took over and why. A named choice is the first recorded provider;
@@ -424,8 +425,8 @@ Changing the body of a draft with reporting evidence requires a new evidence rev
 
 The picker beside it controls this run. **Automatic** uses a configured
 `LLM_*` gateway exclusively when present; otherwise it uses DeepSeek v4.1 Flash
-first, then Qwen on this computer if it is loaded, then Codex Terra —
-choosing the first ready one before enqueueing, and keeping it
+first, then the local model this computer has loaded if there is one, then Codex
+Terra — choosing the first ready one before enqueueing, and keeping it
 for every reporting and writing pass unless it reaches a usage limit, becomes
 unavailable, loses its login, or times out. Automatic moves the unfinished work
 once to the next ready provider and shows the switch in the workbench. A model
@@ -683,8 +684,8 @@ Next to **Keep digging** there is a **Digging model** picker, the same one the
 queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
 Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
 Dark Desk Automatic uses a configured gateway when present; otherwise it uses
-DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then
-Codex Terra. Planning uses Claude Haiku or the cheaper Codex
+DeepSeek v4.1 Flash first, then the local model this computer has loaded if
+there is one, then Codex Terra. Planning uses Claude Haiku or the cheaper Codex
 planning model. If synthesis times out, only synthesis moves to the next model;
 completed searches and document reads do not run again. A model you name is the
 recorded first choice. A recognized technical failure can move only the failed
@@ -789,8 +790,8 @@ saved custom connections are offered too. Codex Sol is selected by default.
 **Opinion's own Automatic** tries
 Codex Sol, then Claude Sonnet once if Codex is unavailable — that order belongs
 to Opinion. Stories, scans and Dark Desk walk the desk's own Automatic ladder:
-DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then
-Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
+DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
+then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
 A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
@@ -905,7 +906,7 @@ They start disabled. The owner chooses a local time in the paper's configured
 timezone, selects as many as 12 accepted sources from any reporting beat, and
 chooses the model for each scheduled run. **Automatic** is the default for a
 newsroom that has never saved the schedule, and works down the same writing
-ladder a story uses: DeepSeek v4.1 Flash first, then Qwen 3.6 35B if it is
+ladder a story uses: DeepSeek v4.1 Flash first, then the local model if one is
 already loaded, then Codex Terra. The owner may instead name one explicit
 model: Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku;
 the already selected local model; or a saved Custom AI connection such as an

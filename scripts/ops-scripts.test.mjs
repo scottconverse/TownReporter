@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { assertStagingDatabase } from "./stage-editor.mjs";
-import { ACTIONS } from "../ops/control/control-server.mjs";
+import { ACTIONS, STAGE_START_WINDOW_MS } from "../ops/control/control-server.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -68,6 +68,14 @@ const REQUIRED = [
   "lib-backup.ps1",
   "lib-alert.ps1",
   "backup.ps1",
+  // What brings the staged copy on 3100 back after a reboot, without a second
+  // stage. lib-stage.ps1 decides and starts nothing; start-stage.ps1 is the
+  // only thing that starts, and it declines unless what ops\stage.ps1 left on
+  // disk is there and the port is free. Both are called by ops\watchdog.ps1 and
+  // by the Control page's one start button, so a missing file fails at 3 AM on
+  // the machine whose walkthrough is waiting, not in CI.
+  "lib-stage.ps1",
+  "start-stage.ps1",
   // The Control page, and the launcher the Desktop icon runs. The page is the
   // operator's non-terminal way in now, so the same argument that put
   // status.ps1 in this list applies twice over: a missing file fails on the
@@ -690,9 +698,13 @@ test("the watchdog repairs the reader and the model server without ever aiming a
   assert.match(wd, /Start-RedlibIfDown/, "the watchdog must start the reader if it is down");
   assert.match(wd, /Start-OllamaIfDown/, "the watchdog must start Ollama if it is down");
 
-  // The two optional sections sit between the app and the tunnel sections and
-  // are each skipped in test mode. Sliced, then read for what must not appear.
-  const optionalRaw = wd.slice(wd.indexOf("--- Reddit reader (Redlib)"), wd.indexOf("--- Tunnel ---"));
+  // The two optional sections sit between the app and the staged copy's own
+  // section (the fourth thing the watchdog keeps alive, and the one with its
+  // own test) and are each skipped in test mode. Sliced to that next section
+  // so this is about the two sections it names and nothing else -- the count
+  // below is one catch per section, and a slice that ran to the tunnel would
+  // count a section this test does not describe.
+  const optionalRaw = wd.slice(wd.indexOf("--- Reddit reader (Redlib)"), wd.indexOf("--- The staged copy"));
   assert.ok(optionalRaw.length > 0, "could not find the optional-service sections");
   const optional = stripComments(optionalRaw);
   assert.match(optional, /WATCHDOG_TEST_MODE -ne '1'/, "both sections must be skipped in test mode");
@@ -1730,3 +1742,565 @@ test(
   },
 );
 
+
+/**
+ * A file hash must not depend on a module being reachable.
+ *
+ * Measured on this machine on 2026-09-26: a Windows PowerShell 5.1 session
+ * that inherited PowerShell 7's PSModulePath cannot call Get-FileHash at all
+ * -- `Get-Command` still lists it, the call throws CommandNotFoundException.
+ * Two places hashed a file that way. ops\promote.ps1 checks the lockfile in
+ * step 5, with the live paper already stopped by step 4; installer\
+ * Install.ps1 checks a downloaded archive's digest. Both now use .NET
+ * SHA256 -- ops\promote.ps1 through Get-TownReporterFileHash in
+ * ops\lib-backup.ps1, which it already dot-sources, and the installer
+ * inline, because it cannot dot-source ops\.
+ *
+ * The scan below is the cheap half and catches a third one being added
+ * anywhere the paper runs. scripts\ci-hash-no-module.ps1 is the half that
+ * executes the real changed code inside a session where the cmdlet is
+ * genuinely gone -- and refuses to pass unless the sabotage itself worked.
+ */
+test("no script the paper runs hashes a file with a cmdlet that a 5.1 session may not have", () => {
+  const dirs = [
+    ["ops", OPS],
+    ["installer", join(ROOT, "installer")],
+  ];
+  const callers = [];
+  for (const [label, dir] of dirs) {
+    for (const name of readdirSync(dir).filter((f) => f.endsWith(".ps1"))) {
+      const text = readFileSync(join(dir, name), "utf8");
+      // Comments may name the cmdlet -- the explanation of why it is gone
+      // belongs next to the code. Only a real call is the defect, so strip
+      // both comment forms first.
+      let inBlock = false;
+      text.split("\n").forEach((line, i) => {
+        let code = line;
+        if (inBlock) {
+          const end = code.indexOf("#>");
+          if (end === -1) return;
+          code = code.slice(end + 2);
+          inBlock = false;
+        }
+        const open = code.indexOf("<#");
+        if (open !== -1) {
+          const end = code.indexOf("#>", open + 2);
+          if (end === -1) {
+            code = code.slice(0, open);
+            inBlock = true;
+          } else {
+            code = code.slice(0, open) + code.slice(end + 2);
+          }
+        }
+        if (code.trimStart().startsWith("#")) return;
+        if (/Get-FileHash\b/.test(code)) callers.push(`${label}/${name}:${i + 1}`);
+      });
+    }
+  }
+  assert.deepEqual(
+    callers,
+    [],
+    `Get-FileHash is unreachable when PSModulePath comes from PowerShell 7 -- use Get-TownReporterFileHash (ops/) or inline .NET SHA256 (installer/) at ${callers.join(", ")}`,
+  );
+});
+
+test(
+  "the changed hash paths run in a PowerShell 5.1 session that cannot reach Get-FileHash",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The real code, in the broken session: the two lockfile lines lifted out
+      of ops\promote.ps1 and evaluated, and installer\Install.ps1's
+      Get-VerifiedDependency extracted the same way
+      scripts\windows-installer-contract.ps1 extracts it -- so no Common.ps1
+      repair is in scope for the installer either. Both must produce the same
+      answers they produce with the module present, including refusing a
+      mismatched download.
+    */
+    const fixture = join(ROOT, "scripts", "ci-hash-no-module.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-hash-no-module.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-hash-no-module.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.doesNotMatch(
+      text,
+      /Start-Process|Get-NetTCPConnection|Invoke-WebRequest|Invoke-RestMethod|Invoke-Command/,
+      "the fixture must touch nothing live -- a temp directory only",
+    );
+    assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a hash check failed:\n${out}`);
+    assert.match(out, /file hashing without a module: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
+
+/* ─────────── the staged copy on 3100 comes back after a reboot ─────────── */
+
+/**
+ * The two files that bring back what ops\stage.ps1 already staged.
+ *
+ * The reboot is the case: the restored townreporter_dev, the build and the
+ * files it wrote all survive it, the running server does not, and the only way
+ * back used to be the whole stage again -- drop the database, restore the
+ * backup, rebuild. ops\lib-stage.ps1 decides and starts nothing; the watchdog
+ * calls ops\start-stage.ps1, which starts and still decides for itself.
+ *
+ * Every assertion below is one of the three rules those files are built on:
+ * it starts and never stops; it starts only what was already staged; and it
+ * never puts a second copy on a port something already holds.
+ */
+const STAGE_LIB = read("lib-stage.ps1");
+const STAGE_START = read("start-stage.ps1");
+// Comments stripped for the negative assertions: both files say in prose that
+// they never kill anything, and a bare doesNotMatch would fail on the sentence
+// that makes the promise rather than on a line that breaks it.
+const STAGE_LIB_CODE = stripComments(STAGE_LIB);
+const STAGE_CODE = stripComments(STAGE_START);
+
+test("the staged copy's start path is start-only, and stays ASCII for 5.1", () => {
+  for (const [name, text] of [
+    ["lib-stage.ps1", STAGE_LIB],
+    ["start-stage.ps1", STAGE_START],
+  ]) {
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `ops\\${name} has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+  }
+
+  for (const [name, code] of [
+    ["lib-stage.ps1", STAGE_LIB_CODE],
+    ["start-stage.ps1", STAGE_CODE],
+  ]) {
+    assert.doesNotMatch(
+      code,
+      /Stop-Process|taskkill|Remove-Item[^\n]*\.stage\.pid/,
+      `ops\\${name} must never stop anything: a copy on that port belongs to the operator, and ops\\stage.ps1 -Stop is the only stop`,
+    );
+  }
+  assert.doesNotMatch(
+    STAGE_CODE,
+    /\bpsql\b|Invoke-Sqlcmd|drop database|createdb|\brestore\b/i,
+    "the start path restores nothing -- it is the half of staging a reboot did not take away",
+  );
+  assert.doesNotMatch(STAGE_CODE, /npm (run )?build|vite build/i, "and it builds nothing: the build is already on disk");
+
+  // The port comes from ops\.stage.json through the shared decision, never from
+  // a literal typed into this file. 3100 is only the default; a state file may
+  // name any safe port, and a number written here would be a second, silently
+  // disagreeing answer to a question the file already answers.
+  assert.doesNotMatch(STAGE_CODE, /\b3100\b|\b3000\b/, "ops\\start-stage.ps1 must not name a port of its own");
+  assert.match(STAGE_CODE, /\$stagePort = \$info\.Port/, "the port must come from Get-TownReporterStageInfo");
+  // It does read 5433 -- as the input that lets the library refuse a state file
+  // naming the database's port. Nothing is ever started on it.
+  assert.match(STAGE_CODE, /-PgPort 5433/, "the database's port is passed to the verifier so it can be refused by name");
+  assert.match(
+    STAGE_CODE,
+    /\. \(Join-Path \$PSScriptRoot "lib-ownership\.ps1"\)[\s\S]{0,400}Assert-TownReporterLegacyOwnership -Watchdog/,
+    "a script that starts a server on this checkout must ask the same opt-in question the watchdog asked",
+  );
+
+  // Nothing is started while the port is taken: every verdict but 'down' and a
+  // watchdog-owned 'starting' declines, in the decision's own words.
+  assert.match(STAGE_CODE, /switch \(\$info\.Verdict\)/, "the decision to start must be the library's verdict, not a second opinion");
+  const declines = [...STAGE_CODE.matchAll(/'(none|up|wedged)'\s+\{ Decline/g)].map((m) => m[1]);
+  assert.deepEqual(declines.sort(), ["none", "up", "wedged"], "none, up and wedged must all decline");
+  assert.match(
+    STAGE_CODE,
+    /'starting' \{\s*\n\s*if \(-not \$Watchdog\) \{ Decline/,
+    "a start already in flight is declined unless the watchdog says the record is its own handwriting",
+  );
+  assert.match(STAGE_CODE, /\[switch\]\$Watchdog/, "the -Watchdog switch the watchdog passes must exist");
+
+  // The order that makes a failed start survivable: the attempt is written
+  // before the process is spawned, and the pid file before the wait, so a
+  // process that dies on its first line is still on record and still visible.
+  const recordedAt = STAGE_CODE.indexOf("Save-TownReporterStageStartRecord");
+  const spawnedAt = STAGE_CODE.indexOf("Start-Process -FilePath $nodeExe");
+  assert.ok(recordedAt >= 0 && spawnedAt > recordedAt, "the attempt must be recorded BEFORE the spawn, or the floor is not a floor");
+  const pidAt = STAGE_CODE.indexOf("Set-Content -Path $paths.Pid");
+  const waitedAt = STAGE_CODE.indexOf("for ($i = 0; $i -lt 100; $i++)");
+  assert.ok(pidAt >= 0 && waitedAt > pidAt, "the pid file must be written before the wait, so the page can see what is starting");
+
+  // The build goes on the command line as an absolute path in quotes, exactly
+  // as ops\start-townreporter.ps1 writes it: Windows reports a command line as
+  // it was typed, and Test-TownReporterServerProcess matches that path, which is
+  // how a copy started from here is recognised as ours. ops\stage.ps1 passes
+  // the same file relative, and lib-stage.ps1 has a weaker wording for that.
+  assert.match(
+    STAGE_CODE,
+    /-ArgumentList @\("scripts\/with-app-env\.mjs", "node", "`"\$outputServer`""\)/,
+    "the built server must go on the command line as a quoted absolute path, or the copy is not recognised as ours",
+  );
+});
+
+test("start-stage.ps1 starts the staged copy in stage.ps1's own environment, to the letter", () => {
+  /*
+    Two files now start "the staged copy", and if they disagree about the
+    database or the host then a reboot quietly hands the operator a different
+    server than the one they were walking: the same port, pointing at the live
+    townreporter database. So the environment block is compared line for line,
+    with each file's own variables resolved to what they actually are today --
+    which is also why the two resolutions below are asserted separately: a
+    `$dbName` that drifted off townreporter_dev would otherwise be normalised
+    away and this test would pass while agreeing about nothing.
+  */
+  const stageText = read("stage.ps1");
+  const dbName = stageText.match(/\$dbName = "([^"]+)"/);
+  const pgPort = stageText.match(/\$pgPort = (\d+)/);
+  assert.ok(dbName && pgPort, "could not find $dbName or $pgPort in ops\\stage.ps1");
+  assert.equal(dbName[1], "townreporter_dev", "staging targets townreporter_dev and nothing else");
+  assert.equal(pgPort[1], "5433", "staging's Postgres port is 5433");
+
+  const resolve = (value) =>
+    value
+      .replace(/\$(Port|stagePort)\b/g, "<port>")
+      .replace(/\$pgPort\b/g, pgPort[1])
+      .replace(/\$dbName\b/g, dbName[1]);
+  const envBlock = (ps) =>
+    new Map([...ps.matchAll(/^\$env:([A-Z_]+)\s*=\s*"([^"]*)"/gm)].map((m) => [m[1], resolve(m[2])]));
+
+  const staged = envBlock(STAGE_START);
+  const stage = envBlock(stageText);
+  assert.deepEqual([...staged.keys()].sort(), [...stage.keys()].sort(), "the two start paths must set the same variables");
+  for (const [name, value] of stage) {
+    assert.equal(staged.get(name), value, `$env:${name} disagrees: ops\\start-stage.ps1 says "${staged.get(name)}", ops\\stage.ps1 says "${value}"`);
+  }
+  assert.equal(
+    staged.get("DATABASE_URL"),
+    `postgres://postgres@127.0.0.1:5433/${dbName[1]}`,
+    "the staged copy must come back on the restored database, not on whatever .env says",
+  );
+  assert.equal(staged.get("PORT"), "<port>", "the port must be the staged one, from ops\\.stage.json");
+  assert.equal(staged.get("TOWNREPORTER_TUNNEL"), "0", "a staged copy must never take the paper's public hostname over");
+});
+
+test("the page's start window and the library's are the same 150 seconds", () => {
+  /*
+    The one number the Control page and ops\lib-stage.ps1 share. A drift makes
+    the page's WORDS wrong and nothing else -- the library decides, and the page
+    never starts anything -- which is exactly why it would go unnoticed. The
+    page's own comment promises this test exists.
+  */
+  const window = STAGE_LIB.match(/\$StartWindowSeconds = (\d+)/);
+  assert.ok(window, "could not find StartWindowSeconds in ops\\lib-stage.ps1");
+  assert.equal(
+    Number(window[1]) * 1000,
+    STAGE_START_WINDOW_MS,
+    `ops\\lib-stage.ps1's StartWindowSeconds is ${window[1]}s but the Control page's STAGE_START_WINDOW_MS is ${STAGE_START_WINDOW_MS}ms`,
+  );
+});
+
+test("the watchdog brings the staged copy back, start-only, behind the paper's health", () => {
+  /*
+    The caller, and the reason the reboot case is fixed at all: the watchdog
+    already runs every five minutes, so nothing new has to be scheduled for
+    this. Four rules, each one a way it could have gone wrong instead --
+    starting something while the paper is down, stopping what holds the port,
+    retrying a start that cannot work every five minutes forever, and reading
+    its own attempt record back as somebody else's.
+  */
+  const wd = readFileSync(join(OPS, "watchdog.ps1"), "utf8");
+  // The section's doc comment sits ABOVE the gate; the code it describes sits
+  // inside it. So the slice to judge is the gate to the next section.
+  const gate = wd.indexOf("if ($appHealthy) {");
+  const section = wd.indexOf("# --- The staged copy");
+  const tunnel = wd.indexOf("# --- Tunnel");
+  assert.ok(gate >= 0 && section >= 0 && tunnel > gate, "could not find the stage section or the paper's health gate");
+  const gated = wd.slice(gate, tunnel);
+  assert.match(gated, /Get-TownReporterStageInfo/, "the stage section must be inside the paper's health gate");
+  assert.doesNotMatch(
+    gated.slice(0, gated.indexOf("Get-TownReporterStageInfo")),
+    /^\}$/m,
+    "the stage section must sit inside the paper's health gate: nothing is started while the paper is down",
+  );
+  const code = stripComments(gated);
+  assert.match(code, /Get-TownReporterStageInfo -App \$stageApp -AppPort \(\[int\]\$port\) -PgPort \(\[int\]\$pgPort\)/, "the watchdog must ask the shared decision, with its own ports");
+  assert.doesNotMatch(
+    code,
+    /Stop-Process|taskkill/,
+    "the watchdog is start-only here: what holds that port is the operator's copy, and stopping it is ops\\stage.ps1 -Stop's job",
+  );
+  assert.match(code, /Test-TownReporterStageStartDue -App \$stageApp -Minutes 30/, "the thirty-minute floor must be asked of the shared record");
+  assert.match(code, /-Minutes 30/, "the floor is 30 minutes");
+
+  const recordedAt = code.indexOf("Save-TownReporterStageStartRecord");
+  const spawnedAt = code.indexOf("Start-Process -FilePath $stageShell");
+  assert.ok(recordedAt >= 0 && spawnedAt > recordedAt, "the watchdog must record the attempt before it spawns the start");
+  assert.match(
+    code,
+    /"-File", \(Join-Path \$stageApp "ops\\start-stage\.ps1"\), "-App", "`"\$stageApp`"", "-Quiet", "-Watchdog"/,
+    "the spawn must run the staged checkout's own start script, name that checkout, and pass -Watchdog, or the child reads the watchdog's own record as an attempt in flight and declines itself",
+  );
+  // The resolution above is the whole of Unit AL2's watchdog half: when this
+  // checkout has nothing staged, the copy it starts is the one the pointer
+  // names. And the silent answer must leave $stageApp alone -- assigning the
+  // resolver's App unconditionally puts "" there, and the next line throws on
+  // the empty string every five minutes on a machine that never staged.
+  assert.match(
+    code,
+    /Resolve-TownReporterStageApp -App \$stageApp -AppPort \(\[int\]\$port\) -PgPort \(\[int\]\$pgPort\)/,
+    "the watchdog must put the pointer through the shared gate before it starts anything from it",
+  );
+  assert.match(
+    code,
+    /if \(\$resolve\.Ok\) \{ \$stageApp = \$resolve\.App \}/,
+    "only a resolver that answered Ok may replace the checkout: the silent answer carries no path",
+  );
+  assert.doesNotMatch(
+    code,
+    /^\s*\$stageApp = \$resolve\.App\s*$/m,
+    "an unconditional assignment blanks the checkout on the silent answer and the next line throws",
+  );
+  assert.match(
+    code,
+    /not answering, but \$\(\$due\.Reason\); leaving it for a later run/,
+    "the thirty-minute floor still declines in the library's own words",
+  );
+  // Only 'down' starts anything, and 'nothing staged' says nothing at all: an
+  // ordinary log line every five minutes on a machine that has never staged is
+  // how an operator learns to stop reading the log.
+  assert.match(code, /'down' \{/, "only the down verdict may start anything");
+  assert.match(code, /if \(\$stage\.StateExists\) \{ Write-Log "stage: \$\(\$stage\.Reason\)" \}/, "nothing staged says nothing; a state file that names an unusable port is worth a line");
+  assert.match(
+    wd,
+    /if \(\$env:WATCHDOG_TEST_MODE -eq '1' -and \$env:WATCHDOG_STAGE_APP\) \{ \$stageApp = \$env:WATCHDOG_STAGE_APP \}/,
+    "the stage world must be redirectable for CI, and only in test mode",
+  );
+  assert.match(wd, /^\s*WATCHDOG_STAGE_APP\s+-/m, "and the seam must be documented with the others");
+});
+
+test(
+  "the staged copy comes back after a reboot, and the floors hold, without touching 3000 or 3100",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      The reboot, executed. scripts\ci-stage-start.ps1 builds a disposable
+      world in the temp directory -- a checkout holding copies of the real
+      ops\ files, a stub build that answers 200, a stub Postgres listener, a
+      stub app -- and runs the REAL ops\watchdog.ps1 against it through the
+      TEST-003 seams plus WATCHDOG_STAGE_APP.
+
+      It proves the five scenarios in its own header, and the assertions below
+      are as load-bearing as the ones above: this file must never become a way
+      to touch the machine's own copy on 3100, the paper on 3000 or Postgres.
+    */
+    const fixture = join(ROOT, "scripts", "ci-stage-start.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-stage-start.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-stage-start.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.match(text, /WATCHDOG_STAGE_APP/, "the harness must run the real watchdog against its disposable stage world");
+    assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
+    assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+    assert.match(
+      text,
+      /foreach \(\$processId in \$script:spawned\) \{\s*\n\s*Stop-Process -Id \$processId/,
+      "cleanup stops the pids THIS run started, one by one -- never by image name",
+    );
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a stage-start check failed:\n${out}`);
+    assert.match(out, /ci-stage-start\.ps1 : every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);
+
+/*
+  Unit AL2. The gap the staging work above left open, measured on this machine:
+  ops\watchdog.ps1 runs from the LIVE checkout and looked for ops\.stage.json
+  in that same checkout -- but a build is never made in the live checkout (the
+  owner's rule), so the copy on 3100 is staged from a worker or a dev checkout.
+  After a reboot the live watchdog found nothing and started nothing, and the
+  operator's copy stayed down until somebody started it by hand.
+
+  The fix is one small written-down fact: ops\stage.ps1 records which checkout
+  it just staged, machine-wide, and every reader -- the watchdog,
+  ops\start-stage.ps1 with no arguments, the Control page -- puts that record
+  through the same gate in ops\lib-stage.ps1 before starting anything from it.
+  The assertions below are the shape of that: one writer, one gate, three
+  readers, and a refusal that is silent the first time only.
+*/
+test("which checkout was staged last is written down machine-wide, and one gate guards it", () => {
+  const STAGE = read("stage.ps1");
+
+  // One place, outside every checkout. A pointer inside the live checkout is
+  // the bug it exists to fix; one inside the worker is invisible to the
+  // watchdog that has to read it.
+  assert.match(
+    STAGE_LIB,
+    /function Get-TownReporterStagedCopyPointerPath \{[\s\S]*?\$env:LOCALAPPDATA[\s\S]*?'TownReporter\\staged-copy\.json'/,
+    "ops\\lib-stage.ps1 must own the pointer's path: %LOCALAPPDATA%\\TownReporter\\staged-copy.json",
+  );
+  assert.match(
+    STAGE_LIB,
+    /function Get-TownReporterStagedCopyPointerPath \{[\s\S]*?\$PointerFile/,
+    "and honor an explicit -PointerFile, which is how a test points it at a temp folder",
+  );
+
+  // Atomic, like every other state file in this layer: a reader must never see
+  // half a document, and the watchdog is a reader that runs unattended.
+  const save = STAGE_LIB.slice(STAGE_LIB.indexOf("function Save-TownReporterStagedCopyPointer"));
+  assert.match(save, /\$tmp = "\$path\.tmp"/, "the pointer must be written beside its target first");
+  assert.match(save, /Move-Item -LiteralPath \$tmp -Destination \$path -Force/, "and moved over it, so no reader sees a partial file");
+  for (const field of ["app", "port", "commit", "version", "database", "time"]) {
+    assert.match(save, new RegExp(`^\\s{4}${field}\\s`, "m"), `the pointer must name the ${field} the brief asks a reader to have`);
+  }
+
+  // The writer is ops\stage.ps1, and it is the one place that knows a restore
+  // and a build just succeeded. Written AFTER the state file on purpose: every
+  // reader checks the two against each other, so a pointer that arrived first
+  // would be refused by all of them.
+  const pointerWrite = STAGE.indexOf("Save-TownReporterStagedCopyPointer -App $app");
+  const stateWrite = STAGE.indexOf("$state | ConvertTo-Json | Set-Content -Path $stateFile");
+  assert.ok(stateWrite >= 0, "ops\\stage.ps1 must still write the checkout's own ops\\.stage.json");
+  assert.ok(pointerWrite > stateWrite, "the machine-wide pointer must be written after the state file it is checked against");
+  assert.match(STAGE, /^ {2}commit {2}= \$commit$/m, "the state file must record the commit the pointer is compared against");
+  assert.match(
+    STAGE,
+    /if \(Remove-TownReporterStagedCopyPointer -App \$app\)/,
+    "-Stop must remove the pointer, and only for the checkout it just stopped: a pointer naming another checkout is a copy still running there",
+  );
+
+  // The gate. One function, one answer, and the reasons a reader may refuse.
+  const resolve = STAGE_LIB.slice(
+    STAGE_LIB.indexOf("function Resolve-TownReporterStageApp"),
+    STAGE_LIB.indexOf("function Get-TownReporterStageInfo"),
+  );
+  const ownStateAt = resolve.indexOf("ops\\.stage.json')");
+  const pointerAt = resolve.indexOf("Get-TownReporterStagedCopyPointer -PointerFile $PointerFile");
+  assert.ok(ownStateAt >= 0 && pointerAt > ownStateAt, "this checkout's own staging wins: the pointer is only read when nothing is staged here");
+  for (const [what, pattern] of [
+    ["a checkout with no build at .output\\server\\index.mjs", /\$outputServer/],
+    ["a folder that is not there any more", /is not there any more/],
+    ["a folder outside the one this checkout lives in", /is not under \$root/],
+    ["the live paper's own checkout", /the live paper's own/],
+    ["a folder whose package.json names something else", /packageName -ne 'townreporter'/],
+    ["a commit that no longer matches the checkout's own state file", /the checkout has been staged again since/],
+    ["a port the staged copy must not use", /Test-TownReporterStagePortSafe/],
+  ]) {
+    assert.match(resolve, pattern, `the gate must refuse ${what} by name`);
+  }
+  assert.match(
+    resolve,
+    /App = ''; Ok = \$false; From = 'none'; Silent = \$true; Reason = ''/,
+    "a machine with nothing staged here and no pointer anywhere must answer SILENTLY -- an ordinary log line every five minutes is how an operator stops reading the log",
+  );
+
+  // Said once. The watchdog runs every five minutes; the same broken pointer is
+  // not news the sixth time, and a different one is.
+  assert.match(
+    STAGE_LIB,
+    /function Test-TownReporterStageNoticeIsNew \{[\s\S]{0,900}\$last -ceq \$Reason/,
+    "the same refusal must not be repeated on every run, and a different one must still be said",
+  );
+
+  // The two readers that start something. Both go through the gate: neither
+  // reads the pointer file's fields for itself, or they would drift apart.
+  const start = STAGE_START;
+  assert.match(
+    start,
+    /Resolve-TownReporterStageApp -App \$app -AppPort \$appPort -PgPort 5433/,
+    "ops\\start-stage.ps1 with no -App must put the pointer through the shared gate",
+  );
+  assert.match(start, /Decline "the machine-wide staged-copy pointer cannot be trusted: \$\(\$resolve\.Reason\)"/, "and decline with the gate's own plain reason");
+  assert.match(start, /if \(\$resolve\.Ok\) \{/, "only an Ok answer may set the target");
+  assert.match(
+    STAGE_LIB,
+    /function Resolve-TownReporterStageApp \{[\s\S]{0,120}\[string\]\$PointerFile = ''/,
+    "the gate takes -PointerFile so a test can hand it a temp folder instead of this machine's own",
+  );
+});
+
+test(
+  "the machine-wide pointer is exercised end to end, in another checkout, off this machine",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    /*
+      Unit AL2's own fixture, and the reason it can run at all: the pointer's
+      path is read from %LOCALAPPDATA% at the moment it is used, by both the
+      PowerShell and the JavaScript side, so a fake LOCALAPPDATA in a
+      disposable world is the seam -- no new WATCHDOG_* variable had to be
+      invented for it, and this machine's real pointer is never read or
+      written. The world is two checkouts side by side: 'live', which the
+      watchdog runs from and which has nothing staged, and 'worker', which the
+      pointer names and which holds the build.
+
+      The checks below are the ones that matter for a fixture nothing else
+      guards: it must not be able to touch this machine's own copy, and it must
+      really run the real watchdog.
+    */
+    const fixture = join(ROOT, "scripts", "ci-stage-pointer.ps1");
+    assert.ok(existsSync(fixture), "scripts/ci-stage-pointer.ps1 is missing");
+    const text = readFileSync(fixture, "utf8");
+    const bad = [...text].filter((c) => c.charCodeAt(0) > 127);
+    assert.equal(
+      bad.length,
+      0,
+      `scripts/ci-stage-pointer.ps1 has ${bad.length} non-ASCII character(s) (e.g. ${JSON.stringify(bad.slice(0, 3).join(""))}) -- PS 5.1 will mangle them`,
+    );
+    assert.match(text, /GetTempPath\(\)/, "its world must be built under the OS temp directory");
+    assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
+    assert.match(
+      text,
+      /\$env:LOCALAPPDATA = \$fakeLocal/,
+      "the pointer must be redirected into the disposable world, so the operator's real pointer is neither read nor written",
+    );
+    assert.match(
+      text,
+      /foreach \(\$processId in \$script:spawned\) \{\s*\n\s*Stop-Process -Id \$processId/,
+      "cleanup stops the pids THIS run started, one by one -- never by image name",
+    );
+    assert.match(text, /\$env:LOCALAPPDATA = \$previousLocalAppData|Remove-Item Env:\\LOCALAPPDATA/, "and puts the real LOCALAPPDATA back");
+
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fixture, "-AppRoot", ROOT],
+        { encoding: "utf8", timeout: 300_000 },
+      );
+    } catch (err) {
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+      code = err.status ?? -1;
+    }
+    assert.doesNotMatch(out, /FAIL/, `a pointer check failed:\n${out}`);
+    assert.match(out, /ci-stage-pointer\.ps1 : every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
+  },
+);

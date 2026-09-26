@@ -1,0 +1,180 @@
+# TownReporter next patch — Unit AL, machine upkeep (unreleased)
+
+**State:** Candidate work in progress. This document does not assert a release,
+tag, GitHub publication, production deployment, or a promoted candidate. The
+version number is not bumped by this work.
+
+Four pieces of machine upkeep, three of them about the paper staying up and
+backed up while nobody is watching, and the fourth about the middle rung of the
+writing ladder no longer naming a model that may not be the one in memory. A
+fifth piece, section 5, is the follow-up that makes the first of them work on
+the machine as it is actually laid out.
+
+## 1. The hash check no longer needs a PowerShell module
+
+`ops/promote.ps1` and `installer/Install.ps1` checked a downloaded file with
+`Get-FileHash`. On this machine that command is missing from a Windows
+PowerShell 5.1 session whose `PSModulePath` was inherited from PowerShell 7 —
+measured 2026-09-26 — so a promotion or an install run from that shell stopped
+at the first hash. Both now hash with the same .NET SHA-256 code
+`ops/lib-backup.ps1` already used (`Get-TownReporterFileHash`); the installer
+carries its own copy of that code, because it cannot dot-source `ops/`.
+
+Evidence: `node --test scripts/ops-scripts.test.mjs` exit 0, 59/59 — including
+the case that runs the changed paths under `powershell.exe` with a
+`PSModulePath` that cannot reach `Get-FileHash`, and was checked red against the
+old code first.
+
+## 2. Hand-named backups get an off-disk copy too
+
+The nightly backup copied the timestamped `*.sql` series to the second drive,
+and a hand-named safety copy — `townreporter_2026-09-24_1510_pre-provider-recovery.sql`,
+the kind made before touching anything risky — was never copied anywhere. Every
+other `*.sql` and `*.dump` in the local backup folder now goes to
+`<offsite>\other-safety-copies\` with the same discipline as the series: written
+as `.partial`, verified by size and SHA-256, then renamed onto the real name; a
+file already there with the same hash is skipped; the keep-three local prune
+never counts them and never deletes them, and nothing on the second drive is
+deleted by any code path.
+
+Evidence: `powershell -ExecutionPolicy Bypass -File scripts/ci-backup.ps1` —
+"backups and alerts: every check passed", exit 0. It covers a hand-named `.sql`
+and `.dump` arriving on the second drive byte-identical, a second run copying
+neither again, a `.incomplete` and a `.partial` copied nowhere, a safety copy
+that cannot be copied reported without stopping the series copy, and a safety
+copy still on this machine after the prune.
+
+## 3. The test copy on 3100 comes back after a reboot
+
+The owner's rule is that the test copy on 3100 is always running, but nothing
+started it after a reboot and the Control page said "nothing is answering on
+3100 (that is normal; it is not always running)". `ops/stage.ps1` restores a
+backup over the test copy each time it runs, so running that at boot would wipe
+test data. The new `ops/start-stage.ps1` is **start-only**: it starts the
+already-staged copy on 3100 with the same environment and database stage.ps1
+recorded, and if nothing was ever staged it does nothing and says so. It is
+reached three ways — by hand, by a **Start the test copy** button on the Control
+page, and by the watchdog that already runs every five minutes (no new scheduled
+task). The watchdog starts it only when 3100 is not answering *and* the paper on
+3000 is healthy, at most once per 30 minutes, and it checks the command line of
+whatever holds 3100 before touching it — anything that is not ours is left
+alone. The Control page's 3100 card now says **down — the watchdog will start
+it**, **starting**, or **up, version X**, and the two other cards that assumed
+3100 never runs (the soft-failure count and the start window) were corrected.
+
+Evidence: `node --test scripts/ops-scripts.test.mjs` exit 0, 59/59, including
+the 18-second case that proves the start path is start-only and never names 3000
+or 3100 as something to stop; `node --test scripts/control-page-server.test.mjs`
+exit 0, 35/35; and `node scripts/control-page-walk.mjs` exit 0, which drives the
+real page in a browser and presses the start button against a stub runner.
+
+## 4. "Local model" means whatever LM Studio has loaded
+
+The middle rung of the writing ladder — DeepSeek v4.1 Flash, then the local
+model, then Codex Terra — was fixed to `halo/qwen3.6-35b-a3b`. The owner runs LM
+Studio for other work and switches the loaded model, so that rung skipped all
+day while he had something else loaded, and asking LM Studio for the named model
+would have paged a 35B in from disk. The rung now reads LM Studio's own load
+state — the native `/api/v0/models` listing, the endpoint the code already
+probed, because `/v1/models` lists what is on disk and not what is in memory —
+and runs the loaded chat model (never an embedding model). Two loaded picks the
+lowest id, so two calls in a row pick the same one and the receipt can name what
+ran. Zero loaded, or a listing that cannot say, skips the rung with "Local model
+skipped: nothing loaded in LM Studio". The picker entry and the job receipt read
+**Local model (halo/…)**, and the Control page's LM Studio card names the loaded
+model. `TOWNREPORTER_QWEN_MODEL` still pins the rung to one exact model when it
+is set, and is skipped unless LM Studio reports that one loaded. Nothing in the
+app ever asks a local server for a model that is not loaded, and nothing loads
+or unloads one on the owner's behalf.
+
+Evidence: `npx tsc --noEmit` exit 0; `npm run typecheck:test` exit 0; ESLint on
+every changed code file exit 0; the focused source tests — the ai ladder, the
+daily scan, the model choice and picker suites, provider registry, local model
+discovery, failover and OCR routing — 307 tests in 50 suites, 0 fail, exit 0.
+The whole script suite (`node --test --test-concurrency=1
+"scripts/**/*.test.mjs"`: 520 tests, 517 pass, 3 skipped, 0 fail) is green, including
+the picker-render test that reads the ladder sentence out of the registry.
+
+**What is not proved here.** The two browser ladder walks
+(`scripts/failover-e2e.mjs`, `scripts/story-quota-failover-e2e.mjs`,
+`scripts/daily-scan-automatic-e2e.mjs`) and their fake LM Studio endpoint were
+updated for the new rule and syntax-checked, but not driven end to end in this
+unit — they need a built server and are driven by CI. The fake endpoint's model
+now reports itself **not loaded** by default, which is what keeps those walks
+from calling a real local model; `FAKE_LMSTUDIO_STATE=loaded` flips it if the
+opposite case is ever wanted. No claim is made about a real LM Studio's loaded
+model: this unit never loaded, unloaded or chatted with one. The loaded-model
+pick is deterministic by id, not by any measure of which model is better.
+
+## 5. The copy on 3100 is found wherever it was staged
+
+**After a reboot the watchdog brings back the test copy you last staged.**
+
+Section 3 built the start-only path, and on the machine it was measured on it
+could not find anything to start. `ops/watchdog.ps1` runs from the **live**
+checkout, and it looked for `ops\.stage.json` in that checkout — but the owner's
+rule is that a build never happens in production, so the copy on 3100 is staged
+from a worker or a dev checkout and its state file is over there. Measured
+2026-09-26 10:15: `Get-ChildItem C:\Users\scott\Desktop\Code\*\ops\.stage.json
+-Force` found none anywhere, and 3100 was answering from a process that had been
+started by hand after a reboot, without `ops\stage.ps1`. After a real reboot
+there would have been nothing on 3100 and nothing that would bring it back.
+
+So staging now writes down where it happened. `ops/stage.ps1`, on success,
+writes one small file outside every checkout:
+
+```
+%LOCALAPPDATA%\TownReporter\staged-copy.json
+```
+
+naming the checkout, port, commit, version, database and time of the copy it
+just brought up — written the way the library writes every other state file
+(tmp file, then a rename onto the real name, so a reader never sees half a
+file). `ops\stage.ps1 -Stop` removes it. No copy, no pointer.
+
+Three readers follow it, all through one gate in `ops\lib-stage.ps1`:
+
+- `ops/watchdog.ps1`, when its own checkout has no state file. Everything else
+  AL added is unchanged: the paper on 3000 must be healthy, 3100 must be free of
+  anything that is not ours, and at most one start per 30 minutes. The watchdog
+  runs the staged checkout's **own** `ops\start-stage.ps1`, naming that
+  checkout, so the copy is started where it lives.
+- `ops\start-stage.ps1` with no arguments, which is what the button runs.
+- The Control page's 3100 card, which now reads "staged **in
+  <folder>** (version X) and nothing is answering on 127.0.0.1:3100" — the
+  folder is the operator's answer to "what would that button start?".
+
+The pointer is not trusted on sight: it is a text file anyone can edit and a
+real server is started from it. The path must be absolute, under
+`C:\Users\scott\Desktop\Code\`, a TownReporter checkout, not the live checkout
+itself when that checkout is the paper on 3000, and it must hold an
+`ops\.stage.json` that agrees with the pointer on port and commit plus a
+`.output\server\index.mjs` build and its own `ops\start-stage.ps1`. Any failure
+starts nothing and says the plain reason **once**, not every five minutes. No
+pointer at all is silence — the ordinary state of a machine that has never
+staged anything.
+
+Two faults in section 3's watchdog code were found by the new fixture and fixed
+here: the checkout variable was overwritten with the empty string the resolver
+returns when it is silently declining (a red watchdog line every five minutes on
+a machine that had simply never staged anything), and the spawned child named
+the watchdog's own `ops\ops\start-stage.ps1` instead of the staged checkout's,
+so the start never happened even when the copy was found.
+
+Evidence: `scripts/ci-stage-pointer.ps1` exit 0 — "every check passed", 32 named
+checks over five sections, including a real watchdog run against a worker
+checkout whose only staged copy is one folder away, the same run with no pointer
+(silent), and a refusal memoised to one log line; the world it builds is a fake
+`LOCALAPPDATA` in the OS temp directory, so the operator's real pointer is
+neither read nor written. `scripts/ci-stage-start.ps1` exit 0, every check
+passed. `node --test scripts/ops-scripts.test.mjs` exit 0, 59/59;
+`node --test scripts/control-page-server.test.mjs` exit 0, 35/35;
+`node scripts/control-page-walk.mjs` exit 0, which drives the real page in a
+browser and asserts the row names the folder and the version without pressing
+the button; `npx tsc --noEmit` exit 0 and ESLint on every changed file exit 0.
+
+**What is not proved here.** No reboot was performed and no real pointer was
+written: every run above used a disposable world, and 3100's real process was
+not touched. The pointer that a real `ops\stage.ps1` run writes on this machine
+is exercised by the same code path under the fake `LOCALAPPDATA`, not by
+staging a real copy.

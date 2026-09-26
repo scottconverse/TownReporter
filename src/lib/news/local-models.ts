@@ -295,6 +295,41 @@ async function probeServer(
   return { kind, baseUrl: base, reachable: true, models };
 }
 
+/**
+ * The ONE model on this server a call may be sent to, or null when the answer
+ * is "nothing is loaded".
+ *
+ * 0.6.69 (Unit AL item 4): the Automatic ladder's LM Studio rung no longer
+ * names a model. The owner switches the loaded model for other work, so a rung
+ * fixed to `halo/qwen3.6-35b-a3b` either skipped all day while he had something
+ * else in memory or -- worse -- asked LM Studio for a model that was not loaded,
+ * which is both a failed draft and a request that could page a 35B in from disk
+ * (never do that: see `requiresLoadedLocalModel`). The rung now reads the load
+ * state LM Studio reports and runs what is there.
+ *
+ * The rule, in one place, because two callers need the same answer:
+ * `pickDefault` below (what the pickers call the default) and `ai.ts`'s
+ * `resolveRungLocalModel` (what a rung may ask for). Two filters that drifted
+ * would mean an editor picking the model the picker calls default while a
+ * scheduled draft runs on a different one.
+ *
+ * - `loaded === true` only. A server that reports no load state at all
+ *   (`loaded === null`, a plain OpenAI-compatible endpoint) has nothing to
+ *   say here, so it yields null and the caller decides what that means.
+ * - Never an embedding model. `text-embedding-nomic` is loaded, answers the
+ *   list, and cannot write a sentence.
+ * - Deterministic: lowest id first, byte order. LM Studio lists models in
+ *   whatever order it likes and the order can change between calls; a receipt
+ *   that names the model is only useful if the same catalog always picks the
+ *   same one.
+ */
+export function pickLoadedLocalModel(server: LocalServer): LocalModelEntry | null {
+  const loaded = server.models
+    .filter((m) => m.loaded === true && m.kind !== "embedding")
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return loaded[0] ?? null;
+}
+
 function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | null {
   const priority: LocalServerKind[] = ["lmstudio", "ollama", "llamacpp", "openai-compatible"];
   const ordered = servers
@@ -303,7 +338,7 @@ function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | 
     .sort((a, b) => priority.indexOf(a.kind) - priority.indexOf(b.kind));
 
   for (const server of ordered) {
-    const loaded = server.models.find((m) => m.loaded === true && m.kind !== "embedding");
+    const loaded = pickLoadedLocalModel(server);
     if (loaded) return { baseUrl: server.baseUrl, id: loaded.id };
   }
   const wantedModel = env("LLM_MODEL");

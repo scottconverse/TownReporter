@@ -26,11 +26,19 @@
  *           https://townreporter.org  the published version, 10s timeout
  *           <backup folder>/*.sql     the newest backup
  *           127.0.0.1:3100            the test copy, if one is up
- *           lms ps --json             Qwen on this computer, read-only
+ *           ops\.stage.json +         what is STAGED there -- the build and the
+ *           logs\stage-start.json     database that survive a reboot -- and what
+ *                                     the last attempt to start it came to. Two
+ *                                     small files, read-only; the page never
+ *                                     starts anything itself.
+ *           lms ps --json             the model loaded in LM Studio, read-only
  *           scan_runs (SELECT)        the last scan
  *   runs    exactly the six menu actions, each a fixed executable with a fixed
  *           argument ARRAY and shell:false. No user-supplied argument ever
- *           reaches a command line. See ACTIONS below.
+ *           reaches a command line. See ACTIONS below -- plus "start the test
+ *           copy", which is not on the menu and is start-only: it runs
+ *           ops\start-stage.ps1, which restores nothing, builds nothing and
+ *           kills nothing.
  *
  * SECURITY SHAPE (copied from stock-dsh/mission-control/mission-control.mjs)
  *
@@ -182,6 +190,25 @@ export const ACTIONS = {
       {
         exe: POWERSHELL,
         args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path.join(OPS_DIR, "backup.ps1"), "-Force"],
+        settleMs: 0,
+      },
+    ],
+  },
+  // The staged copy is the one service on this machine that does NOT come back
+  // by itself after a full stop: it is not a scheduled task, and its whole
+  // point is to be started for a walkthrough and stopped again. So the button
+  // is here, and ops\start-stage.ps1 behind it is start-only -- no restore, no
+  // build, no kill. It declines in its own words when there is nothing staged,
+  // when something already holds the port, or when a start is already in
+  // flight, so pressing this on a stale page cannot start a second copy.
+  "start-test-copy": {
+    label: "Start the test copy",
+    explain:
+      "Brings back the test copy already staged on this machine, after a reboot. Nothing is restored or rebuilt, and the paper is not touched. Does nothing if it is already running.",
+    spawns: [
+      {
+        exe: POWERSHELL,
+        args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path.join(OPS_DIR, "start-stage.ps1")],
         settleMs: 0,
       },
     ],
@@ -506,34 +533,342 @@ export function probeAlerts({ appRoot = null, stateFile = null } = {}) {
   };
 }
 
-/** Whether a test copy is answering on 3100, and what version it says. */
-export async function probeTestCopy({ port = 3100, timeoutMs = 3000 } = {}) {
+/**
+ * The test copy: is one answering, and is one staged?
+ *
+ * The old probe asked one question -- an HTTP GET of 3100, three seconds, "did
+ * it answer". That is still here, and it is still a read that changes nothing.
+ * What is new is the second question, because after a reboot the copy is GONE
+ * and "nothing is answering" no longer means "nothing is here": the build and
+ * the database are on disk, and ops\start-stage.ps1 can put a server back in
+ * front of them. So this also reads the two small files the watchdog and that
+ * script write -- `ops\.stage.json` and `logs\stage-start.json` -- and says
+ * what they say.
+ *
+ * This is a VIEW, not the decision. Whether anything may be started lives in
+ * ops\lib-stage.ps1 and only there; this page starts nothing itself, it posts
+ * the `start-test-copy` action and that script applies its own gate. The one
+ * rule repeated here is the port: a state file naming 3000 or 5433 is not a
+ * test copy, it is the paper or the database, and the page will not describe
+ * it as something to start.
+ *
+ * `up` means answered 200. A 503 comes back as a STATUS, not as an exception,
+ * and the old probe called that "up" -- the same lie ops\lib-stage.ps1 was
+ * fixed not to tell. "Another program answered 503" is a different fact from
+ * "nothing is there", and the page prints both.
+ */
+export async function probeTestCopy({
+  port = 3100,
+  timeoutMs = 3000,
+  appRoot = null,
+  stateFile = null,
+  recordFile = null,
+  pointerFile = null,
+  localAppData = undefined,
+} = {}) {
+  // WHICH CHECKOUT (Unit AL2). This one if something is staged here -- or if
+  // the caller named the files by hand -- otherwise the one the machine-wide
+  // pointer names, and only if it passes every check in readStagedCopyPointer.
+  // The record and the state file then come from that same checkout, because
+  // that is where ops\start-stage.ps1 writes them.
+  let root = appRoot;
+  let stagedIn = null;
+  let pointerRefusal = null;
+  const ownState = stateFile || (appRoot ? path.join(appRoot, "ops", ".stage.json") : null);
+  if (appRoot && !stateFile && !fs.existsSync(ownState)) {
+    const pointer = readStagedCopyPointer(appRoot, { pointerFile, localAppData });
+    if (pointer.usable) {
+      root = pointer.app;
+      stagedIn = pointer.folder;
+    } else if (pointer.found) {
+      pointerRefusal = pointer;
+      stagedIn = pointer.folder;
+    }
+  }
+  if (root && !stagedIn) stagedIn = path.basename(path.resolve(root));
+  const statePath = stateFile || (root ? path.join(root, "ops", ".stage.json") : null);
+  const staged = pointerRefusal
+    ? { found: true, usable: false, reason: pointerRefusal.reason, port: null, version: null, started: null }
+    : statePath
+      ? readStagedPort(statePath)
+      : { found: false, usable: false, reason: null, port: null, version: null, started: null };
+  const probePort = staged.usable ? staged.port : port;
+
+  const recordPath = recordFile || (root ? path.join(root, "logs", "stage-start.json") : null);
+  const recordState = recordPath ? readJsonState(recordPath) : { ok: false, exists: false, value: null };
+  const record = recordState.ok ? recordState.value || {} : null;
+  const lastAttempt = record
+    ? {
+        at: record.lastAttemptAt || null,
+        outcome: record.lastOutcome || null,
+        reason: record.lastReason || null,
+        pid: record.lastPid || null,
+      }
+    : null;
+  const sinceMs = lastAttempt ? Date.now() - Date.parse(String(lastAttempt.at ?? "")) : NaN;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let answered = null;
+  let body = "";
+  let errorCode = null;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/`, { signal: controller.signal });
-    const body = await res.text();
-    const m = body.match(/0\.6\.\d+/);
-    return { ok: true, up: true, version: m ? m[0] : null, status: res.status };
-  } catch {
-    return { ok: true, up: false, version: null };
+    const res = await fetch(`http://127.0.0.1:${probePort}/`, { signal: controller.signal });
+    answered = res.status;
+    body = await res.text();
+  } catch (error) {
+    // ECONNREFUSED is "nothing is listening"; everything else -- a reset, a
+    // timeout on a socket that accepted -- is something being there and not
+    // answering, which is the half-dead listener ops\lib-stage.ps1 calls
+    // wedged. The page says which of the two it found.
+    errorCode = error?.cause?.code || error?.code || null;
   } finally {
     clearTimeout(timer);
   }
+
+  const up = answered === 200;
+  const version = body.match(/0\.6\.\d+/)?.[0] ?? null;
+  const listening = answered !== null ? true : errorCode !== null && errorCode !== "ECONNREFUSED";
+
+  let verdict;
+  if (up) verdict = "up";
+  else if (listening) verdict = "wedged";
+  else if (!staged.found) verdict = "none";
+  else if (!staged.usable) verdict = "unsafe";
+  else if (Number.isFinite(sinceMs) && sinceMs >= 0 && sinceMs < STAGE_START_WINDOW_MS) verdict = "starting";
+  else verdict = "down";
+
+  return {
+    ok: true,
+    port: probePort,
+    up,
+    version,
+    status: answered,
+    errorCode,
+    verdict,
+    staged: staged.usable,
+    stagedRaw: staged.found,
+    stagedVersion: staged.version,
+    stagedStarted: staged.started,
+    stagedReason: staged.reason,
+    stagedIn,
+    lastAttempt,
+    minutesSinceAttempt: Number.isFinite(sinceMs) ? Math.floor(sinceMs / 60_000) : null,
+  };
 }
 
 /**
- * Qwen on this computer, through LM Studio's own read-only process listing.
- * NEVER load or unload: the owner may have a model mid-draft, and this page's
- * whole promise is that it does not disturb the machine.
+ * The port `ops\.stage.json` names, when it names one this page may describe.
+ *
+ * A file anyone can hand-edit, so the number is a claim and not a fact: out of
+ * range, or 3000, or 5433, and there is nothing here a person should be offered
+ * a start button for. The refusal is the same one ops\lib-stage.ps1's
+ * Test-TownReporterStagePortSafe makes, in this page's words.
  */
-export async function probeQwen({ exe = null, timeoutMs = 20_000 } = {}) {
+function readStagedPort(file) {
+  const read = readJsonState(file);
+  if (!read.exists) return { found: false, usable: false, reason: null, port: null, version: null, started: null };
+  if (!read.ok) {
+    return { found: true, usable: false, reason: "ops\\.stage.json could not be read", port: null, version: null, started: null };
+  }
+  const state = read.value || {};
+  const raw = String(state.port ?? "").trim();
+  const base = { found: true, version: state.version || null, started: state.started || null };
+  if (!/^\d+$/.test(raw)) {
+    return { ...base, usable: false, reason: `ops\\.stage.json does not name a port ('${raw}')`, port: null };
+  }
+  const stagedPort = Number(raw);
+  if (stagedPort < 1024 || stagedPort > 65535) {
+    return { ...base, usable: false, reason: `ops\\.stage.json names port ${stagedPort}, which is not a usable port`, port: stagedPort };
+  }
+  if (stagedPort === 3000) {
+    return { ...base, usable: false, reason: "ops\\.stage.json names port 3000, which belongs to the live paper", port: stagedPort };
+  }
+  if (stagedPort === 5433) {
+    return { ...base, usable: false, reason: "ops\\.stage.json names port 5433, which belongs to the database", port: stagedPort };
+  }
+  return { ...base, usable: true, reason: null, port: stagedPort };
+}
+
+/**
+ * The machine-wide pointer `ops\stage.ps1` writes when it stages a checkout:
+ * one small JSON file naming the checkout, port, commit, version, database and
+ * time of the copy on 3100.
+ *
+ * It is machine-wide because the copy is not always in the checkout this page
+ * runs from. The owner's rule is that a build never happens in the live
+ * checkout, so the copy on 3100 is staged from a worker or a dev checkout --
+ * which is why the 3100 card used to say "nothing is staged" on a machine with
+ * a perfectly good build sitting in the next folder along.
+ */
+export function stagedCopyPointerFile({ localAppData = process.env.LOCALAPPDATA, pointerFile = null } = {}) {
+  if (pointerFile) return path.resolve(pointerFile);
+  if (!localAppData) return null;
+  return path.join(localAppData, "TownReporter", "staged-copy.json");
+}
+
+/** Windows paths, folded the way the filesystem folds them for comparison. */
+const foldCase = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
+const samePath = (a, b) => foldCase(path.resolve(a)) === foldCase(path.resolve(b));
+const underPath = (child, parent) => {
+  const c = foldCase(path.resolve(child));
+  const p = foldCase(path.resolve(parent)).replace(/[\\/]+$/, "");
+  return c === p || c.startsWith(p + path.sep);
+};
+
+/**
+ * The pointer, put through the same gate `Resolve-TownReporterStageApp` in
+ * ops\lib-stage.ps1 puts it through before anything is started from it.
+ *
+ * This is a VIEW and the gate in that library is the decision -- the button
+ * runs ops\start-stage.ps1, which applies the real one. But a page that
+ * described a pointer it had not checked would be offering a start from a path
+ * anyone with a text editor can write into, and the reasons have to be the
+ * same words or the operator has two stories about one fact.
+ *
+ * Refused: unreadable, a relative path, a folder that is not there, a folder
+ * outside this checkout's own parent, this checkout when it is the live
+ * paper's, a folder that is not a TownReporter checkout, no `ops\.stage.json`
+ * (or one that disagrees with the pointer on port or commit), no build, no
+ * ops\start-stage.ps1. Silence -- no LOCALAPPDATA, no file -- is `found:false`,
+ * which is the ordinary "this machine has never staged anything".
+ */
+export function readStagedCopyPointer(appRoot, { pointerFile = null, localAppData = undefined } = {}) {
+  const none = { found: false, usable: false, app: null, folder: null, port: null, commit: null, version: null, reason: null, file: null };
+  if (!appRoot) return none;
+  const file = stagedCopyPointerFile(localAppData === undefined ? { pointerFile } : { pointerFile, localAppData });
+  if (!file) return none;
+  if (!fs.existsSync(file)) return { ...none, file };
+  let pointer;
+  try {
+    pointer = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return { ...none, found: true, file, reason: `the staged-copy pointer ${file} could not be read` };
+  }
+  const named = String(pointer?.app ?? "").trim();
+  const folder = named ? path.basename(named.replace(/[\\/]+$/, "")) : null;
+  const rawPointerPort = String(pointer?.port ?? "").trim();
+  const base = {
+    found: true,
+    file,
+    app: named || null,
+    folder,
+    port: /^\d+$/.test(rawPointerPort) ? Number(rawPointerPort) : null,
+    commit: String(pointer?.commit ?? "").trim() || null,
+    version: String(pointer?.version ?? "").trim() || null,
+  };
+  const refuse = (reason) => ({ ...base, usable: false, reason });
+
+  if (!named) return refuse(`the staged-copy pointer ${file} does not name a checkout`);
+  if (!path.isAbsolute(named)) return refuse(`the staged-copy pointer names '${named}', which is not an absolute path`);
+  const target = path.resolve(named);
+  let isDir = false;
+  try {
+    isDir = fs.statSync(target).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) return refuse(`the staged-copy pointer names ${target}, which is not there any more`);
+
+  // The same folder as this checkout -- on this machine, the Code folder every
+  // checkout is a sibling in. Derived from the page's own root rather than
+  // hard-coded, for the reason the backup card gives about its own path.
+  const root = path.dirname(path.resolve(appRoot));
+  if (!underPath(target, root)) {
+    return refuse(`the staged-copy pointer names ${target}, which is not under ${root} -- the folder this checkout lives in`);
+  }
+
+  // The live paper's own checkout, recognised the way the library recognises
+  // it: this checkout, serving 3000. A build never happens there.
+  const paperPort = Number(readEnvFile(appRoot).PORT ?? 3000) || 3000;
+  if (paperPort === 3000 && samePath(target, appRoot)) {
+    return refuse(
+      `the staged-copy pointer names this checkout (${target}), which is the live paper's own -- the test copy is built in another checkout, never here`,
+    );
+  }
+
+  const pkg = readJsonState(path.join(target, "package.json"));
+  const pkgName = String(pkg.value?.name ?? "").trim();
+  if (pkgName !== "townreporter") {
+    const what = pkgName ? `its package.json names '${pkgName}'` : "it has no readable package.json";
+    return refuse(`the staged-copy pointer names ${target}, which is not a TownReporter checkout (${what})`);
+  }
+
+  const staged = readStagedPort(path.join(target, "ops", ".stage.json"));
+  if (!staged.found) {
+    return refuse(`the staged-copy pointer names ${target}, but there is no ops\\.stage.json there -- nothing is staged in it`);
+  }
+  if (!staged.usable) {
+    return refuse(`the staged-copy pointer names ${target}, whose ${staged.reason}`);
+  }
+  if (base.port !== staged.port) {
+    return refuse(
+      `the staged-copy pointer names port ${base.port} but ${target}'s own ops\\.stage.json names port ${staged.port}; one of the two is out of date`,
+    );
+  }
+  const stateCommit = String(readJsonState(path.join(target, "ops", ".stage.json")).value?.commit ?? "").trim();
+  if (!stateCommit) {
+    return refuse(
+      `the staged-copy pointer names commit '${base.commit}' but ${target}'s own ops\\.stage.json records no commit, so the two cannot be shown to agree`,
+    );
+  }
+  if (stateCommit !== base.commit) {
+    return refuse(
+      `the staged-copy pointer names commit ${base.commit} but ${target}'s own ops\\.stage.json records ${stateCommit}; the checkout has been staged again since, so the pointer is out of date`,
+    );
+  }
+  if (!fs.existsSync(path.join(target, ".output", "server", "index.mjs"))) {
+    return refuse(`the staged-copy pointer names ${target}, which has no build at .output\\server\\index.mjs`);
+  }
+  if (!fs.existsSync(path.join(target, "ops", "start-stage.ps1"))) {
+    return refuse(`the staged-copy pointer names ${target}, which has no ops\\start-stage.ps1 -- a copy staged there could not be started`);
+  }
+  return { ...base, usable: true, reason: null };
+}
+
+/**
+ * How long after a recorded start an unanswered port still counts as "a start
+ * is in flight" rather than "it did not come back". The same 150 seconds
+ * `Get-TownReporterStageInfo` uses (its StartWindowSeconds), and the only
+ * number this page shares with it. A drift between the two makes the page's
+ * WORDS wrong and nothing else: the decision to start anything is that
+ * library's, and this page never starts anything. scripts/ops-scripts.test.mjs
+ * asserts the two numbers are still the same one.
+ */
+export const STAGE_START_WINDOW_MS = 150_000;
+
+/**
+ * What is loaded in LM Studio on this computer, by name, through LM Studio's
+ * own read-only process listing. NEVER load or unload: the owner may have a
+ * model mid-draft, and this page's whole promise is that it does not disturb
+ * the machine.
+ *
+ * 0.6.69 (Unit AL item 4): this used to look for a Qwen and answer anything
+ * else with "no Qwen among them". The rung that runs on this computer now runs
+ * whatever LM Studio has LOADED -- the owner switches models for other work --
+ * so the card has to name what is loaded rather than check for one vendor's
+ * model. `models` stays the raw listing; `loaded` is the names the card uses.
+ *
+ * Blind spot worth naming, since a claim of "nothing loaded" is the one this
+ * card makes: some `lms ps --json` builds carry no field saying whether an
+ * entry is a chat model or an embedding model, so an embedding model that is
+ * loaded would be named here too. The ladder itself is not fooled -- the app
+ * reads LM Studio's own `type` off /api/v0/models (local-models.ts) -- this
+ * card is the cruder instrument, and it errs by naming too much rather than by
+ * claiming a model a run cannot use. Where a build DOES report a type, an
+ * embedding model is left out.
+ *
+ * `run` is the spawner, injected so a test can hold a listing without spawning
+ * anything at all -- the same reason every other side effect on this page is a
+ * seam. What it runs in production is `lms ps --json`, and nothing else.
+ */
+export async function probeQwen({ exe = null, timeoutMs = 20_000, run = spawnFixed } = {}) {
   const lms = exe || resolveOnPath("lms");
-  if (!lms) return { ok: true, found: false, detail: "LM Studio not found" };
-  const { code, output } = await spawnFixed(lms, ["ps", "--json"], { timeoutMs });
+  if (!lms) return { ok: true, found: false, models: [], loaded: [], detail: "LM Studio not found" };
+  const { code, output } = await run(lms, ["ps", "--json"], { timeoutMs });
   const text = output.join("\n");
   if (code !== 0 && !text.trim()) {
-    return { ok: true, found: true, models: [], detail: "LM Studio is not answering" };
+    return { ok: true, found: true, models: [], loaded: [], detail: "LM Studio is not answering" };
   }
   let models = [];
   try {
@@ -541,14 +876,25 @@ export async function probeQwen({ exe = null, timeoutMs = 20_000 } = {}) {
     const parsed = start >= 0 ? JSON.parse(text.slice(start)) : [];
     models = Array.isArray(parsed) ? parsed : [];
   } catch {
-    return { ok: true, found: true, models: [], detail: "LM Studio answered in a shape this page does not know" };
+    return { ok: true, found: true, models: [], loaded: [], detail: "LM Studio answered in a shape this page does not know" };
   }
-  const qwen = models.filter((m) => /qwen/i.test(String(m?.modelKey || m?.identifier || "")));
-  if (!models.length) return { ok: true, found: true, models, detail: "nothing is loaded in LM Studio" };
-  if (!qwen.length) {
-    return { ok: true, found: true, models, detail: `${models.length} model(s) loaded, no Qwen among them` };
+  const loaded = models
+    .filter((m) => !/embedding/i.test(String(m?.type || m?.kind || m?.modelType || "")))
+    .map((m) => String(m?.modelKey || m?.identifier || m?.path || "").trim())
+    .filter(Boolean);
+  if (!loaded.length) {
+    return { ok: true, found: true, models, loaded, detail: "nothing is loaded in LM Studio" };
   }
-  return { ok: true, found: true, models, qwen: qwen.map((m) => String(m.modelKey || m.identifier)), detail: `Qwen loaded: ${qwen.map((m) => String(m.modelKey || m.identifier)).join(", ")}` };
+  return {
+    ok: true,
+    found: true,
+    models,
+    loaded,
+    detail:
+      loaded.length === 1
+        ? `${loaded[0]} is loaded`
+        : `${loaded.length} models loaded: ${loaded.join(", ")}`,
+  };
 }
 
 /**
@@ -598,6 +944,86 @@ export async function probeLastScan({ repoRoot = REPO_ROOT, appRoot = null, time
     return JSON.parse(text.slice(start));
   } catch {
     return { ok: false, detail: "Could not read the last scan" };
+  }
+}
+
+/**
+ * The test copy as one honest row: what is answering, what is staged, and what
+ * the last attempt to bring it back came to.
+ *
+ * "Nothing is running" is not a fault -- this page never starts a copy by
+ * itself -- so the row is a Note, and the only thing that earns a button is
+ * the one state a press can repair: staged on disk, nothing answering, no
+ * start in flight, and a port this page is allowed to describe. Everything
+ * else says why not, in the same words ops\lib-stage.ps1 would use, because a
+ * second phrasing for the same fact is a second thing to get wrong.
+ *
+ * The press is a POST of `start-test-copy`, which runs ops\start-stage.ps1.
+ * That script is the gate -- it re-reads all of this itself and declines in
+ * its own words, so a button pressed on a stale page cannot start anything
+ * this row would not have offered.
+ */
+export function describeTestCopy(testCopy, { now = Date.now, timeZone = LOCAL_TZ } = {}) {
+  const where = `127.0.0.1:${testCopy?.port ?? 3100}`;
+  const attempt = testCopy?.lastAttempt;
+  const when = attempt?.at ? formatLocalTime(attempt.at, { now, timeZone }) : "";
+  // What the last attempt came to, appended to whatever else the row says. The
+  // distinction that matters is 'failed' versus 'started': one says this has
+  // never worked, the other says it worked and stopped since.
+  const lastLine = !attempt || !attempt.outcome
+    ? "; no start has been tried yet"
+    : attempt.outcome === "failed"
+      ? `; the last start${when ? `, ${when},` : ""} failed: ${attempt.reason || "no reason was given"}`
+      : attempt.outcome === "started"
+        ? `; the last start${when ? `, ${when},` : ""} reported it answering, so it has stopped since`
+        : "";
+
+  switch (testCopy?.verdict) {
+    case "up":
+      return {
+        state: "ok",
+        detail: `answering${testCopy.version ? `, version ${testCopy.version}` : ""}`,
+        fix: null,
+      };
+    case "unsafe":
+      return {
+        state: "note",
+        detail: `${testCopy.stagedReason}; this page will not offer to start anything from it`,
+        fix: null,
+      };
+    case "wedged":
+      return {
+        state: "note",
+        detail:
+          `something is listening on ${where} but ${testCopy.status ? `answered ${testCopy.status}` : "did not answer"}` +
+          "; nothing is started while the port is taken" +
+          (testCopy.staged ? lastLine : ""),
+        fix: null,
+      };
+    case "starting":
+      return {
+        state: "note",
+        detail: `a start was recorded ${testCopy.minutesSinceAttempt} minute(s) ago and nothing is answering yet; giving it a moment`,
+        fix: null,
+      };
+    case "down":
+      // The folder is named because the copy is not always in the checkout
+      // this page runs from: "staged in townreporter-deepseek-2 (version
+      // 0.6.67)" is the operator's answer to "what would that button start?".
+      return {
+        state: "note",
+        detail:
+          `staged${testCopy.stagedIn ? ` in ${testCopy.stagedIn}` : ""}${testCopy.stagedVersion ? ` (version ${testCopy.stagedVersion})` : ""} and nothing is answering on ${where}` +
+          lastLine,
+        fix: "start-test-copy",
+        fixLabel: "Start the test copy",
+      };
+    default:
+      return {
+        state: "note",
+        detail: `nothing is answering on ${where} (that is normal; it is not always running)`,
+        fix: null,
+      };
   }
 }
 
@@ -745,6 +1171,13 @@ export async function collectStatus({
    *  rather than reaching for the network, the machine's PowerShell or a
    *  database; nothing here changes a probe's defaults. */
   probes = {},
+  /** Where the machine-wide staged-copy pointer is looked for. Unset, the
+   *  probe reads %LOCALAPPDATA% -- the right answer for a page describing THIS
+   *  machine. A test hands it a temp folder (`localAppData: null` for "no
+   *  pointer at all") so its verdict does not depend on what the operator
+   *  happened to have staged the day it ran. */
+  pointerFile = null,
+  localAppData = undefined,
 } = {}) {
   const read = {
     status: probeStatus,
@@ -786,7 +1219,7 @@ export async function collectStatus({
   const [version, publicVersion, testCopy, qwen, lastScan] = await Promise.all([
     Promise.resolve(read.version({ repoRoot })),
     read.publicVersion({ site: status.site || "https://townreporter.org" }),
-    read.testCopy({}),
+    read.testCopy({ appRoot, pointerFile, localAppData }),
     read.qwen({}),
     read.lastScan({ repoRoot, appRoot, onOutput }),
   ]);
@@ -826,6 +1259,7 @@ export async function collectStatus({
         : `This install is ${version.label}; the public site answered but named no version`;
 
   const scan = describeLastScan(lastScan, { now, timeZone });
+  const copy = describeTestCopy(testCopy, { now, timeZone });
 
   const extras = [
     card("version", "Version", sameVersion ? "ok" : "note", versionDetail),
@@ -839,8 +1273,6 @@ export async function collectStatus({
         ? `${backup.name} - ${bytes(backup.size)}, written ${formatLocalTime(backup.mtimeMs, { now, timeZone })} (${backup.ageMinutes} minutes ago)`
         : `No backup found in ${backup.dir}`,
     ),
-    // A test copy that is not running is normal, and normal is not the same
-    // word as healthy: Note, so the card is never a green light nobody checked.
     // The copy on the other drive, in the owner's own terms: how many are
     // there, when the last one was checked, and how much room is left. Down
     // only when the run said the copying failed -- an unreadable report is a
@@ -861,21 +1293,28 @@ export async function collectStatus({
               .filter(Boolean)
               .join("; "),
     ),
-    card(
-      "test-copy",
-      "Test copy on 3100",
-      testCopy.up ? "ok" : "note",
-      testCopy.up
-        ? `answering${testCopy.version ? `, version ${testCopy.version}` : ""}`
-        : "nothing is answering on 3100 (that is normal; it is not always running)",
-    ),
+    // The staged copy. Not answering is normal -- it is not a scheduled task
+    // and it does not come back by itself -- so the row is a Note and never a
+    // green light nobody checked; the only thing that earns a button is the one
+    // state a press can repair, which is what describeTestCopy decides.
+    // The port in the label is the port the row is about, not always 3100: a
+    // staged copy can be on any safe port, and a card titled 3100 over a
+    // sentence about 3199 is two facts that disagree.
+    {
+      ...card("test-copy", `Test copy on ${testCopy.port ?? 3100}`, copy.state, copy.detail),
+      fix: copy.fix ?? null,
+      ...(copy.fixLabel ? { fixLabel: copy.fixLabel } : {}),
+    },
     // The probe reports `ok` for "not installed" / "not answering" because
     // those are answers, not failures -- but a card is a verdict, and the only
-    // verdict Qwen loaded earns is OK.
+    // verdict a loaded model earns is OK. The detail is the model's own name
+    // (0.6.69, Unit AL item 4): the rung that runs here runs whatever is
+    // loaded, so "nothing is loaded" is the state an operator needs told, and
+    // a name is what tells them the rest of the time.
     card(
       "qwen",
-      "Qwen on this computer",
-      Array.isArray(qwen.qwen) && qwen.qwen.length ? "ok" : "note",
+      "Model server (LM Studio)",
+      Array.isArray(qwen.loaded) && qwen.loaded.length ? "ok" : "note",
       qwen.detail,
     ),
     card("last-scan", "Last scan", scan.state, scan.detail),
@@ -1472,7 +1911,10 @@ function renderCards(target, cards, withFix) {
     if (withFix && card.fix && stateOf(card) !== "ok") {
       var b = document.createElement("button");
       b.type = "button";
-      b.textContent = "Fix this";
+      // The label, when there is one, IS the button: "Start the test copy" is
+      // the words the operator was given for that action, and "Fix this" over
+      // it is a different thing to press. Rows without one keep the old word.
+      b.textContent = card.fixLabel || "Fix this";
       b.setAttribute("aria-label", "Fix this: " + (card.fixLabel || card.fix));
       b.addEventListener("click", function () { runAction(card.fix, b); });
       box.appendChild(b);
@@ -1590,7 +2032,9 @@ function loadStatus(force) {
       h.className = "headline " + (data.attention > 0 ? (data.attention > 2 ? "bad" : "warn") : "ok");
       el("advice").textContent = data.advice || "";
       var paperCards = (data.checks || []).map(function (c) {
-        return { id: c.id, label: c.label, state: c.state, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix };
+        // fixLabel travels with fix: dropping it here was why every fix button
+        // read "Fix this", including the one the server had already named.
+        return { id: c.id, label: c.label, state: c.state, ok: c.ok, optional: c.optional, detail: c.detail, fix: c.fix, fixLabel: c.fixLabel };
       });
       // Every row is shown, healthy or not: the owner looks here to see that the
       // Reddit reader and DeepSeek are up, not only to learn when they are down.

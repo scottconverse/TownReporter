@@ -213,7 +213,15 @@ describe("daily scan on Automatic", () => {
           assert.deepEqual(probed, ["deepseek-flash", "qwen-local", "codex-balanced"]);
           assert.equal(snapshot.modelChoice, "codex-balanced");
           assert.equal(snapshot.transport, "codex");
-          assert.deepEqual(snapshot.skippedRungs, ["Qwen 3.6 35B skipped: not loaded"]);
+          /*
+            0.6.69 (Unit AL item 4): the rung names no model of its own, so the
+            skip says the rung's own words -- nothing loaded in LM Studio -- not
+            a model id. The catalog above still lists the model as downloaded
+            (`loaded: false`), which is exactly the case that has to skip.
+          */
+          assert.deepEqual(snapshot.skippedRungs, [
+            "Local model skipped: nothing loaded in LM Studio",
+          ]);
         } finally {
           restore();
         }
@@ -313,11 +321,17 @@ describe("daily scan on Automatic", () => {
           assert.equal(receipt.previousChoice, "deepseek-flash");
           assert.equal(receipt.previousLabel, "DeepSeek v4.1 Flash");
           assert.equal(receipt.nextChoice, "qwen-local");
-          assert.equal(receipt.nextLabel, "Qwen 3.6 35B");
+          /*
+            The probe is the real one here, so the label is the one it reports
+            for a rung that picks at call time: the picked model by name (0.6.69,
+            Unit AL item 4). The switch note therefore names the model that will
+            actually be asked, not just the rung.
+          */
+          assert.equal(receipt.nextLabel, "Local model (halo/qwen3.6-35b-a3b)");
           assert.equal(receipt.reason, "quota");
           assert.match(
             receipt.switchNote,
-            /moved to Qwen 3\.6 35B because DeepSeek v4\.1 Flash reached its usage limit/i,
+            /moved to Local model \(halo\/qwen3\.6-35b-a3b\) because DeepSeek v4\.1 Flash reached its usage limit/i,
           );
           const resolved = seen.resolved;
           assert.ok(resolved);

@@ -15,7 +15,7 @@ import {
  *
  * "auto" is here since 0.6.64 (Unit AA): the scheduled scan can run Automatic
  * and walks the same writing ladder a story does. A rung is still NOT here --
- * DeepSeek v4.1 Flash and Qwen 3.6 35B are what Automatic RESOLVED to on the
+ * DeepSeek v4.1 Flash and the local rung are what Automatic RESOLVED to on the
  * day, which the run record names, never a hand pick an editor can store (the
  * old value was `Exclude<StoryModelChoice, "auto" | AutomaticRungId>`).
  */

@@ -140,10 +140,16 @@ describe("model choice contract", () => {
     }
   });
 
-  it("labels a pinned rung with the model that actually wrote the draft", () => {
+  it("labels a pinned rung by the registry name the editor reads", () => {
     // "Automatic" would be a lie on the line the editor reads to find out.
     assert.equal(modelChoiceLabel("deepseek-flash"), "DeepSeek v4.1 Flash");
-    assert.equal(modelChoiceLabel("qwen-local"), "Qwen 3.6 35B");
+    /*
+      0.6.69 (Unit AL item 4): the LM Studio rung names no model of its own --
+      it runs whatever is loaded -- so its label is the bare "Local model".
+      The model that actually wrote the draft reaches the page from the probe
+      and the job receipt instead, as "Local model (<name>)".
+    */
+    assert.equal(modelChoiceLabel("qwen-local"), "Local model");
   });
 
   it("falls a stored SuperGrok choice back to Automatic and says so", () => {
@@ -212,7 +218,7 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Qwen 3.6 35B, then Codex Terra. A model on this computer is used only when it is already loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Terra. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
@@ -228,7 +234,7 @@ describe("model choice contract", () => {
     */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Qwen 3.6 35B, then Codex Terra. A model on this computer is used only when it is already loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Terra. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
@@ -247,7 +253,7 @@ describe("model choice contract", () => {
       reordered or retired rung cannot leave this wording behind.
     */
     const help = modelChoiceHelp("auto", "scan");
-    assert.match(help, /DeepSeek v4\.1 Flash, Qwen 3\.6 35B, then Codex Terra/);
+    assert.match(help, /DeepSeek v4\.1 Flash, Local model, then Codex Terra/);
     assert.match(help, /records which one ran/i);
     assert.doesNotMatch(help, /configured gateway/i);
     /*
@@ -261,7 +267,7 @@ describe("model choice contract", () => {
     assert.ok(pickerOptionText(automatic!).length <= PICKER_OPTION_TEXT_MAX);
     assert.match(
       pickerOptionTitle(automatic!),
-      /DeepSeek v4\.1 Flash, Qwen 3\.6 35B, then Codex Terra/,
+      /DeepSeek v4\.1 Flash, Local model, then Codex Terra/,
     );
   });
 
@@ -397,7 +403,7 @@ describe("the Writing models panel's ladder sentence", () => {
     const sentence = await orderSentenceFn();
     assert.equal(
       sentence(),
-      "Automatic uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then Codex Terra.",
+      "Automatic uses DeepSeek v4.1 Flash first, then the model on this computer if it is loaded, then Codex Terra.",
     );
   });
 

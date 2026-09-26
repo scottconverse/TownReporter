@@ -533,14 +533,16 @@ jobs:
           }
           node scripts/provider-signin-e2e.mjs
 
-  # Automatic walks its ladder in rank order -- DeepSeek v4.1 Flash, then Qwen
-  # 3.6 35B if it is loaded, then Codex Terra -- and finishes on the first rung
+  # Automatic walks its ladder in rank order -- DeepSeek v4.1 Flash, then
+  # whichever model LM Studio has loaded ("Local model" since 0.6.69, Unit AL
+  # item 4), then Codex Terra -- and finishes on the first rung
   # that is ready. It shipped with unit tests only -- never driven through the
   # desk. Model-free, same trick as provider-signin: the walk starts
   # fake-deepseek-endpoint.mjs (an OpenAI-compatible rung 1 that can answer its
   # readiness probe and then fail a real call the way the test needs),
   # fake-lmstudio-endpoint.mjs (rung 2's server, on 1234 because that is how
-  # local discovery recognises an LM Studio one, listing no rung-2 model), and
+  # local discovery recognises an LM Studio one, whose one model reports itself
+  # NOT loaded so the rung has nothing to run), and
   # fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1 as the last rung. Nothing
   # here spends allowance or touches a real credential. See the walk under
   # scripts/, named for what it proves.
