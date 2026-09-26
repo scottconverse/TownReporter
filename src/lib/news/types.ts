@@ -68,7 +68,7 @@ export type DraftRow = {
    * Empty = the publish path falls back to the standard line. */
   disclosure_text?: string | null;
   /** Migration 0093. The headline the model wrote, kept even when `headline`
-   * holds the editor's. Null/absent = written before 0.6.66, not recorded. */
+   * holds the editor's. Null/absent = written before 0.6.67, not recorded. */
   model_headline?: string | null;
   /** Migration 0093. The section the model chose, kept alongside `topic`
    * (which is what prints and may be the editor's). */

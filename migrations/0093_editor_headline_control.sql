@@ -1,4 +1,4 @@
--- The editor's headline and the editor's section, recorded (0.6.66).
+-- The editor's headline and the editor's section, recorded (0.6.67).
 --
 -- Two things an editor owns that the desk used to overwrite or lose:
 --
@@ -22,11 +22,11 @@
 -- an empty string that would read as "the model wrote nothing".
 alter table drafts add column if not exists model_headline text;
 comment on column drafts.model_headline is
-  'The headline the model wrote, kept even when headline holds the editor''s. Null = written before 0.6.66, not recorded.';
+  'The headline the model wrote, kept even when headline holds the editor''s. Null = written before 0.6.67, not recorded.';
 
 alter table drafts add column if not exists model_topic text;
 comment on column drafts.model_topic is
-  'The section the model chose, kept alongside topic (which is what prints and may be the editor''s). Null = written before 0.6.66, not recorded.';
+  'The section the model chose, kept alongside topic (which is what prints and may be the editor''s). Null = written before 0.6.67, not recorded.';
 
 alter table drafts add column if not exists headline_source text not null default 'model';
 comment on column drafts.headline_source is

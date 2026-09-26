@@ -16,7 +16,7 @@ export async function saveDraftForEditor(context: { userId: string; newsroomId: 
       if (decision && data.evidenceToken !== evidenceReviewToken(existing[0])) throw new Error("The draft or its evidence changed. Reload and review the current evidence before confirming.");
       const evidence = reconcileDraftEvidence(existing[0], body, decision);
       /*
-        WHO WROTE THIS HEADLINE (0.6.66). A redraft replaces the row, so the
+        WHO WROTE THIS HEADLINE (0.6.67). A redraft replaces the row, so the
         desk has to know whether the headline it is about to replace was the
         editor's. `headline_source` is that answer; it is stamped on every
         editor save from the headline actually being saved, so an editor who

@@ -1392,7 +1392,7 @@ describe("scan coverage accounting (P0-3)", () => {
 });
 
 /*
-  The plain-language rule for a failed story-page action (0.6.66, live bug).
+  The plain-language rule for a failed story-page action (0.6.67, live bug).
 
   The editor's story page showed a raw zod array (`too_big`, maximum 200, path
   `todos,0,t`) instead of a sentence, because `setMsg(err.message)` renders

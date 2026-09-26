@@ -103,7 +103,7 @@ export type ViewStats = {
   site30d: number;
   /**
    * How many stories printed under a section the model did not choose
-   * (0.6.66). Read out of the action log, which is where the desk records the
+   * (0.6.67). Read out of the action log, which is where the desk records the
    * decision -- lead, the model's section, the editor's, and when. A count,
    * not a list: the logged line is JSON for a human to read, and the number is
    * what tells an editor whether the section the scanner picks is landing

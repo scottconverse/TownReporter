@@ -539,7 +539,7 @@ export const getLead = createServerFn({ method: "GET" })
       articleSlug: live[0]?.slug ?? null,
       /*
         The id and the printed headline of the article, so the story page can
-        edit the headline that is actually on the paper (0.6.66). A published
+        edit the headline that is actually on the paper (0.6.67). A published
         story has no editable draft -- its words live in `articles`, and the
         paper's headline may have been changed after it went up -- so the
         headline box needs both the row it would be changing and the words the
@@ -1559,7 +1559,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           "The draft changed while the writer was working. The editor's newer draft was preserved.",
         );
       /*
-        WHOSE HEADLINE PRINTS -- at a checkpoint too (0.6.66).
+        WHOSE HEADLINE PRINTS -- at a checkpoint too (0.6.67).
 
         A checkpoint is a draft revision the same way the final write is: it
         INSERTs a row. It used to take the model's headline unconditionally, so
@@ -1901,7 +1901,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         "The draft changed while reporting was finishing. The editor's newer draft was preserved.",
       );
     /*
-      WHOSE HEADLINE PRINTS (0.6.66).
+      WHOSE HEADLINE PRINTS (0.6.67).
 
       A redraft inserts a new row, so the model's headline replaced the editor's
       without anything noticing. Lead 240, 2026-09-25: the scan headline was
@@ -2678,7 +2678,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   context: { userId: string; newsroomId?: number },
   leadId: number,
   /*
-    The section the editor saw on the button they pressed (0.6.66).
+    The section the editor saw on the button they pressed (0.6.67).
 
     The desk used to make a person confirm the section with a second button and
     then publish with a first, and any text edit reset the confirmation -- so the
@@ -2900,7 +2900,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       if (stale.length) return { blocked: true as const, error: staleCitationNotice(stale) };
 
       /*
-        THE PRESS THAT CARRIED THE SECTION IS THE CONFIRMATION (0.6.66).
+        THE PRESS THAT CARRIED THE SECTION IS THE CONFIRMATION (0.6.67).
 
         Written here, in the transaction that prints the story, against the
         token of the row actually being printed -- so the record cannot survive
@@ -2976,7 +2976,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   if (published.blocked) return { ok: false as const, error: published.error };
 
   /*
-    A SECTION THE MODEL DID NOT CHOOSE (0.6.66).
+    A SECTION THE MODEL DID NOT CHOOSE (0.6.67).
 
     "the model filed this under Council, the editor published it under Schools"
     is the fact the paper wants to be able to count. Recorded on the existing
@@ -3012,7 +3012,7 @@ export const publishLead = createServerFn({ method: "POST" })
     declared type that nothing enforced. `cleanPublishRequest` answers `null`
     for anything that is not a positive 32-bit integer, and the handler refuses.
 
-    0.6.66: the request may also carry `topic`, the section the desk's Publish
+    0.6.67: the request may also carry `topic`, the section the desk's Publish
     button showed. The bare id every older caller sends is still accepted, and
     an absent topic means "unconfirmed", never "confirmed blank".
   */

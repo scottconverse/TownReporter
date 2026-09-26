@@ -216,7 +216,7 @@ test("a later writer checkpoint cannot supersede an intervening editor draft",as
 });
 
 /*
-  0.6.66. A writer checkpoint is a revision, not a scratch pad: it INSERTs a
+  0.6.67. A writer checkpoint is a revision, not a scratch pad: it INSERTs a
   row, and it used to take the model's headline unconditionally. So a redraft
   after an editor had rewritten the headline replaced it -- and, because the
   checkpoint row then became the newest one, the finished draft's own

@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.66](releases/0.6.66.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
+For [TownReporter 0.6.67](releases/0.6.67.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
 
 ## Start with evidence
 
@@ -30,7 +30,7 @@ See the [complete editor guide](editor.md) for Sources, Scan, investigations, se
 
 ## The story's words are yours
 
-Three things on the story page are the editor's, and 0.6.66 made the desk behave as if they are.
+Three things on the story page are the editor's, and 0.6.67 made the desk behave as if they are.
 
 The **headline** sits in a box with a visible edge and a small **Edit** hint. A **Redraft** will not replace a headline you have changed: the desk keeps the model's own headline separately and remembers who decided, so your words stay and the model's new attempt is filed beside them. **Use the lead's headline** puts back the line the scan filed the lead under; **Suggest headlines** asks the story model for three options and applies one only when you click it. A story that has already printed can be re-headed too — on its story page, or with **Edit headline** on the Published page. The URL never changes, so no link breaks, and the desk keeps the old headline, your account and the time.
 

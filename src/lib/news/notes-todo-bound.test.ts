@@ -4,7 +4,7 @@ import { TODO_DETAIL_MAX, TODO_TEXT_MAX, clipTodoText, parseNotes } from "./note
 import { reportingNotesInput } from "./request-input.ts";
 
 /**
- * The to-do round trip, which is the live bug 0.6.66 exists to close.
+ * The to-do round trip, which is the live bug 0.6.67 exists to close.
  *
  * The story: `notes.ts` wrote to-do lines up to 400 characters; the wire
  * (`request-input.ts`) refused anything over `LIMITS.listItem`, 200. The desk

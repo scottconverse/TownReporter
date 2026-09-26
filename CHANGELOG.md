@@ -1,8 +1,8 @@
 # Changelog
 
-Current software version: **0.6.66**. Publication state is recorded by GitHub.
+Current software version: **0.6.67**. Publication state is recorded by GitHub.
 
-## 0.6.66 — 2026-09-25
+## 0.6.67 — 2026-09-25
 
 - **A long machine-written to-do no longer blocks Save or Publish.** The desk wrote to-dos longer than its own limit for reading them back (227 characters against 200), so saving a drafted story answered with raw validation JSON naming `todos,0,t`. Every path that writes a to-do now clips it to one shared bound at a word boundary and drops the dangling punctuation, the gate that reads to-dos reads that same bound, and the round trip of a to-do already stored is normalised on the server rather than refused — so an item written before this release is never the reason a save fails.
 - **A notes failure never stops the printing.** Publishing saves the draft and the editor's notes separately; a failure in the notes is said in a plain sentence beside a story that is on the paper anyway, rather than blocking a valid draft.
@@ -13,7 +13,7 @@ Current software version: **0.6.66**. Publication state is recorded by GitHub.
 - **Publishing names its section and confirms it in the same press.** The publish button reads **Publish in <Section name>** with a **change** link that focuses the chooser; the press records the section confirmation for the version being printed and then publishes. When the scanner placed no section, publish is disabled until the editor picks one, with the reason printed beside the button. The separate Confirm-section button and its reset warning are gone. The server still refuses a draft whose section nobody confirmed, and refuses a carried section that is not the draft's own rather than printing the wrong one.
 - **A section chosen by hand is logged and counted.** Every publish whose section differs from the model's choice is recorded with the lead, both sections and the time, and the Stats page counts them under **Section chosen by hand**. A story whose model section was never recorded is not counted — an absent record is not evidence of a disagreement.
 
-The packaged release note names `v0.6.66` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
+The packaged release note names `v0.6.67` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.65 — 2026-09-25
 

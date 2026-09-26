@@ -93,7 +93,7 @@ describe("the flag an editor's save writes", () => {
   });
 
   it("marks an unrecorded row as the editor's for any headline it shows", () => {
-    // A draft from before 0.6.66: the desk cannot show the editor a headline
+    // A draft from before 0.6.67: the desk cannot show the editor a headline
     // and then claim the model wrote it.
     assert.equal(headlineSourceAfterEdit({ headline: "Something" }, "Something"), "editor");
   });
@@ -195,7 +195,7 @@ describe("a section the editor printed under that the model did not choose", () 
   });
 
   it("does not count an unrecorded model choice as a disagreement", () => {
-    // Counting NULL as "the editor changed it" would put every pre-0.6.66
+    // Counting NULL as "the editor changed it" would put every pre-0.6.67
     // story in the count and make the number mean nothing.
     assert.equal(sectionOverridden(null, "council"), false);
     assert.equal(sectionOverridden("", "council"), false);

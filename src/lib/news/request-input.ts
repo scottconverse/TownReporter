@@ -4,7 +4,7 @@ import { z } from "zod";
 // imports nothing but zod.
 import type { ModelEffort } from "./provider-registry.ts";
 /*
-  The to-do bound, imported rather than restated (0.6.66). `notes.ts` holds the
+  The to-do bound, imported rather than restated (0.6.67). `notes.ts` holds the
   writer's ceiling and this file holds the wire's; they disagreed by 200 and
   the disagreement was the bug -- the desk sends the stored list back whole on
   every save and publish, so one stored line over 200 characters made the
@@ -717,7 +717,7 @@ export const writeStoryInput = z.object({
 /**
  * A stored to-do line, clipped to the writer's own bound rather than refused.
  *
- * THE BUG THIS CLOSES (0.6.66). `t` was `z.string().max(LIMITS.listItem)` (200)
+ * THE BUG THIS CLOSES (0.6.67). `t` was `z.string().max(LIMITS.listItem)` (200)
  * while `notes.ts` wrote lines up to 400, so a lead whose machine-written to-do
  * was 227 characters -- "Claim of absence: <sentence>", or a lead's own
  * unanswered question -- failed validation on the way back in. The desk sends

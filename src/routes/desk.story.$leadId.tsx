@@ -168,7 +168,7 @@ function StoryPage() {
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   /*
-    Whether a person has chosen the section on this page (0.6.66).
+    Whether a person has chosen the section on this page (0.6.67).
 
     The select shows a section from the moment the page loads: the model's when
     the model named one, the desk's fallback guess when it did not. Publish
@@ -494,7 +494,7 @@ function StoryPage() {
   });
 
   /*
-    Saving the reporting notes cannot stop the story (0.6.66).
+    Saving the reporting notes cannot stop the story (0.6.67).
 
     Save edits and Publish both `await`ed the notes save first, with no error
     handling around it. The notes carry the running checklist that machine
@@ -778,7 +778,7 @@ function StoryPage() {
   }, [reconcileStatus.data, applyCheckedDraft]);
 
   /*
-    THE PUBLISH CLICK CONFIRMS THE SECTION (0.6.66).
+    THE PUBLISH CLICK CONFIRMS THE SECTION (0.6.67).
 
     The section was the last thing about a draft that printed on a machine's
     word: the classifier picked it, the select showed it, and Publish printed
@@ -1705,7 +1705,7 @@ function StoryPage() {
           {data.draft || body ? (
             <form className="work-form" onSubmit={(e) => e.preventDefault()}>
               {/*
-                THE HEADLINE IS AN EDITOR'S FIELD (0.6.66).
+                THE HEADLINE IS AN EDITOR'S FIELD (0.6.67).
 
                 Two things were wrong with it.
 
@@ -1873,7 +1873,7 @@ function StoryPage() {
                   </p>
                 ) : null}
                 {/*
-                  No separate Confirm button (0.6.66). It was a second step for
+                  No separate Confirm button (0.6.67). It was a second step for
                   a decision the editor had already made in the select above,
                   and its reset nag -- "editing the section or the body means
                   confirming it again" -- taught people to press a button that

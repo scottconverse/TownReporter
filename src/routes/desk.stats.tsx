@@ -87,7 +87,7 @@ function StatsPage() {
           </section>
 
           {/*
-            Stories printed under a section the model did not choose (0.6.66).
+            Stories printed under a section the model did not choose (0.6.67).
             Not a view count -- it lives here because this is the page that
             already answers "how is the desk doing?" and the number only means
             something next to the story counts below. Each one is a decision an

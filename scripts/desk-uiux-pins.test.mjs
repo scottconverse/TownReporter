@@ -91,7 +91,7 @@ test("the story editor's own-note and follow-up inputs have accessible names", a
 test("the story page tells the editor when the scan never chose the section", async () => {
   const story = await readFile(new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
   /*
-    0.6.66 renamed the condition, not the rule. The desk used to hold a
+    0.6.67 renamed the condition, not the rule. The desk used to hold a
     separate `topicConfirmed` flag set by a Confirm button; that button is gone
     and Publish itself records the confirmation for the version it prints, so
     the one state that matters is `sectionReady` -- the model chose a section,

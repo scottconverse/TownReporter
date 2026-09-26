@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Browser acceptance for the three editor controls 0.6.66 exists to ship
+ * Browser acceptance for the three editor controls 0.6.67 exists to ship
  * (Unit AH), walked end to end on the built server and the real desk UI.
  *
  * WHAT WAS WRONG, in the order an editor hit it.
@@ -71,7 +71,7 @@
  * The server under test must be BUILT (`npm run build`); this walk imports
  * `.output/server/index.mjs` itself.
  *
- *   node scripts/editor-controls-0666-walk.mjs
+ *   node scripts/editor-controls-0667-walk.mjs
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -84,7 +84,7 @@ import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** This walk's own listen port; see scripts/integration-ports-are-unique.test.mjs. */
-const PORT_EDITOR_CONTROLS_0666 = 3521;
+const PORT_EDITOR_CONTROLS_0667 = 3521;
 /** The stub model, on a port of this walk's own; nothing else may bind it. */
 const PORT_FAKE_DEEPSEEK = 3522;
 
@@ -93,11 +93,11 @@ const FAKE_MODEL = "deepseek-v4.1-flash:cloud";
 /** READY_WRITE.headline in scripts/fakes/fake-deepseek-endpoint.mjs. */
 const MODEL_HEADLINE = "DeepSeek v4.1 Flash drafted this on the new Automatic ladder";
 
-const base = checkedUrl(`http://127.0.0.1:${PORT_EDITOR_CONTROLS_0666}`);
+const base = checkedUrl(`http://127.0.0.1:${PORT_EDITOR_CONTROLS_0667}`);
 
 const stamp = Date.now();
-const email = `editor-controls-0666-${stamp}@townreporter.test`;
-const password = "editor-controls-0666-pass";
+const email = `editor-controls-0667-${stamp}@townreporter.test`;
+const password = "editor-controls-0667-pass";
 
 /**
  * The lead-240 line, at its real length: 227 characters.
@@ -259,10 +259,10 @@ async function preconditions() {
  * rungs are pointed at files that do not exist.
  */
 async function bootTheServer() {
-  process.env.PORT = String(PORT_EDITOR_CONTROLS_0666);
+  process.env.PORT = String(PORT_EDITOR_CONTROLS_0667);
   process.env.HOST = "127.0.0.1";
   process.env.DATABASE_URL = ""; // PGlite in memory; never the shared Postgres
-  process.env.BETTER_AUTH_SECRET ||= "editor-controls-0666-secret";
+  process.env.BETTER_AUTH_SECRET ||= "editor-controls-0667-secret";
   process.env.LLM_BASE_URL = FAKE_BASE;
   process.env.LLM_MODEL = FAKE_MODEL;
   delete process.env.TOWNREPORTER_DEEPSEEK_BASE_URL;
@@ -318,7 +318,7 @@ async function seedTheDraftedLead() {
     found: [],
     verify: [],
     opened: [],
-    scratch: "Fixture for the 0.6.66 editor controls walk.",
+    scratch: "Fixture for the 0.6.67 editor controls walk.",
   });
   const lead = await pg.query(
     `insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, notes_json)
@@ -428,7 +428,7 @@ async function theEditorEditsTheHeadline() {
 
 /**
  * 4. A redraft keeps it. This is the whole of item 2's second half: a redraft
- * INSERTs a new row, and before 0.6.66 that row's headline was the model's.
+ * INSERTs a new row, and before 0.6.67 that row's headline was the model's.
  */
 async function aRedraftKeepsTheEditorsHeadline(seededDraftId) {
   await page.getByRole("button", { name: "Redraft", exact: true }).click();

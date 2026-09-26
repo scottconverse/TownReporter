@@ -59,7 +59,7 @@ export type HeadlineProvenance = {
  *      row written between the migration and this rule, or edited by a path
  *      that did not stamp it), and it is the case the editor actually hit.
  *
- * A row from before 0.6.66 has no `model_headline`, so only (1) can speak, and
+ * A row from before 0.6.67 has no `model_headline`, so only (1) can speak, and
  * it reads 'model'. That is deliberate: the desk did not record who wrote those
  * headlines and must not claim to know.
  */
@@ -99,7 +99,7 @@ export function headlineForRedraft(
  * model's headline alone -- an editor who only rewrote the body -- keeps
  * `model`, and the next redraft is free to replace it.
  *
- * A row with no recorded model headline (a draft from before 0.6.66) reads
+ * A row with no recorded model headline (a draft from before 0.6.67) reads
  * "editor" for any non-empty headline, because the desk cannot show the editor
  * a headline and then claim the model wrote it.
  */
@@ -184,7 +184,7 @@ export function sectionOverridden(
   const model = String(modelTopic ?? "").trim();
   const printed = String(printedTopic ?? "").trim();
   /*
-    An unrecorded model choice (a draft from before 0.6.66) is not evidence of
+    An unrecorded model choice (a draft from before 0.6.67) is not evidence of
     a disagreement. Counting NULL as "the model chose nothing, the editor
     changed it" would put every old story in the override count and make the
     number mean nothing.

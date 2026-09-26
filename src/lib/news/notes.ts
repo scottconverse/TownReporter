@@ -13,7 +13,7 @@ export type NoteTodoQuery = { query: string; hit: boolean };
 /**
  * How long a stored to-do line, and its supporting detail, may be.
  *
- * These are the writer's bounds, and they are what 0.6.66 made the wire's
+ * These are the writer's bounds, and they are what 0.6.67 made the wire's
  * bounds too. They used to disagree: this file clamped a line at 400 while
  * `request-input.ts`'s `noteTodo` refused anything over `LIMITS.listItem`
  * (200). The desk sends the stored list back whole on every save, publish and

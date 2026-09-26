@@ -28,7 +28,7 @@ test("Publish is disabled while a claim of absence is unchecked", () => {
     "the story page must read the unconfirmed claims off the lead's notes",
   );
   /*
-    The button's own words moved in 0.6.66: it now reads "Publish in
+    The button's own words moved in 0.6.67: it now reads "Publish in
     <Section>", carrying the section the press will confirm, so the claim of
     absence is one of the reasons inside `disabled` rather than a label the
     pattern could anchor on. What this test is for is unchanged -- a claim of

@@ -584,7 +584,7 @@ export function editorDraftError(raw: string | null | undefined): string | null 
 
 /*
   ---------------------------------------------------------------------------
-  A raw error, as one sentence an editor can act on (0.6.66)
+  A raw error, as one sentence an editor can act on (0.6.67)
   ---------------------------------------------------------------------------
 
   THE BUG THIS CLOSES. A stored to-do line the machine wrote at 227 characters

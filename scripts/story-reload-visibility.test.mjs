@@ -16,7 +16,7 @@ test("Story reload hydrates the durable draft and retains the latest job result"
   );
   assert.match(desk, /return\s*\{[\s\S]*?lead,[\s\S]*?draft,[\s\S]*?job,/);
   /*
-    0.6.66: on a published story the headline box starts from the article's
+    0.6.67: on a published story the headline box starts from the article's
     own headline, which an editor may have changed since it went up, and falls
     back to the draft's. Either way the field is hydrated from what was saved,
     which is the property here -- the dek, body and section still come from the
