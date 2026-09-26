@@ -217,7 +217,7 @@ export function repairFlattenedRhythm(before: DraftAuditResult, after: DraftAudi
  */
 export function repairInstructions(
   result: DraftAuditResult,
-  limit = DRAFT_REPAIR_LIMITS.maxFindingsSent,
+  limit: number = DRAFT_REPAIR_LIMITS.maxFindingsSent,
 ): DraftRepairInstruction[] {
   return result.findings
     .filter((finding: DraftAuditFinding) => finding.severity === "fix" && finding.paragraph > 0)

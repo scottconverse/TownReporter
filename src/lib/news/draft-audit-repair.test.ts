@@ -335,6 +335,14 @@ describe("repairDraftStyle: a provider that fails", () => {
 });
 
 describe("repairKeepsFacts", () => {
+  /*
+    `repairKeepsFacts` answers null when it accepts a rewrite, and
+    `assert.match` will not take a null -- nor should it, since a null must
+    never read as a refusal. This turns "accepted" into the empty string,
+    which matches no reason.
+  */
+  const refusalReason = (previous: string, next: string) => repairKeepsFacts(previous, next) ?? "";
+
   const before = [
     "The council voted 5-2 on Tuesday.",
     '"We cannot afford this," Delgado said.',
@@ -358,34 +366,34 @@ describe("repairKeepsFacts", () => {
   });
 
   it("refuses an empty rewrite", () => {
-    assert.match(repairKeepsFacts(before, "   "), /returned nothing/);
+    assert.match(refusalReason(before, "   "), /returned nothing/);
   });
 
   it("refuses a rewrite that changes a number", () => {
-    assert.match(repairKeepsFacts(before, before.replace("40 miles", "45 miles")), /changed a number/);
+    assert.match(refusalReason(before,before.replace("40 miles", "45 miles")), /changed a number/);
   });
 
   it("refuses a rewrite that drops a name", () => {
-    assert.match(repairKeepsFacts(before, before.replace("Delgado said", "an official said")), /dropped the name "Delgado"/);
+    assert.match(refusalReason(before,before.replace("Delgado said", "an official said")), /dropped the name "Delgado"/);
   });
 
   it("refuses a rewrite that invents a name", () => {
     assert.match(
-      repairKeepsFacts(before, before.replace("Delgado said", "Delgado and Alvarez said")),
+      refusalReason(before, before.replace("Delgado said", "Delgado and Alvarez said")),
       /added the name "Alvarez"/,
     );
   });
 
   it("refuses a rewrite that rewrites a quotation", () => {
-    assert.match(repairKeepsFacts(before, before.replace("cannot afford this", "cannot afford that")), /quoted words/);
+    assert.match(refusalReason(before,before.replace("cannot afford this", "cannot afford that")), /quoted words/);
   });
 
   it("refuses a rewrite that changes a link", () => {
-    assert.match(repairKeepsFacts(before, before.replace("/agenda/2026", "/agenda/2027")), /changed a link/);
+    assert.match(refusalReason(before,before.replace("/agenda/2026", "/agenda/2027")), /changed a link/);
   });
 
   it("refuses a rewrite that loses most of the draft", () => {
-    assert.match(repairKeepsFacts(before, "The fee went up."), /cut the draft down/);
+    assert.match(refusalReason(before, "The fee went up."), /cut the draft down/);
   });
 });
 
