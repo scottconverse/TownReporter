@@ -954,9 +954,18 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * list, not the call, was what lagged: the sweep was red on lane 2's own HEAD
    * with both names absent from its copy of the same regex. Adding them admits
    * two schema calls and nothing else; a bare cast still fails below.
+   *
+   * The same story again in 0.6.67, three names at once. `cleanPublishRequest`
+   * replaced `cleanPublishId` on the publish button so the request can carry
+   * the section the editor saw, and it checks rather than casts: the id goes
+   * through `cleanPublishId` (a positive 32-bit integer or null) and the
+   * section is clipped to `LIMITS.topic`. `updateArticleHeadlineInput` and
+   * `suggestHeadlinesInput` are the editor's headline edit and the three
+   * suggestions, both strict `z.object`s in the same file as the rest. The
+   * calls are right; the list had not heard of them.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|importStructureInput|importStoriesInput|opsAction)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to
