@@ -6,6 +6,10 @@ import { htmlToPlainText } from "./html-text.ts";
    pull that into the browser bundle. Re-exported below because this is where
    every existing importer reads them from. */
 import { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS } from "../paper.ts";
+/* The pure half of the YouTube Data API client: URL building, response parsing
+   and wording, with no socket or credential in it, so this import is safe from
+   the client bundle the same way ./html-text.ts is. */
+import { youtubeReadPathLine } from "./youtube-data-api.ts";
 import { createServerOnlyFn } from "@tanstack/react-start";
 
 /*
@@ -23,6 +27,22 @@ import { createServerOnlyFn } from "@tanstack/react-start";
 */
 const loadMediaToolSpawner = createServerOnlyFn(
   async () => (await import("./media-tool-process.server.ts")).spawnMediaTool,
+);
+
+/*
+  The YouTube Data API client (0.6.70) is loaded the same way and for the same
+  reason: it is a `.server.ts` module, and this file is in the /desk bundle
+  because ingest.ts imports it. Handing the call to createServerOnlyFn lets the
+  client build prune it while the server still gets the real one.
+*/
+const listChannelVideosWithApi = createServerOnlyFn(
+  async (channelUrl: string) =>
+    (await import("./youtube-data-api.server.ts")).listChannelVideosWithApi(channelUrl),
+);
+
+const youtubeCaptureReadinessFromApi = createServerOnlyFn(
+  async (videoId: string) =>
+    (await import("./youtube-data-api.server.ts")).youtubeCaptureReadinessFromApi(videoId),
 );
 
 /** Same ceiling as ingest ARCHIVE_TEXT_CAP. Retrieval slices; storage does not. */
@@ -120,7 +140,11 @@ export type ListedVideo = {
   published: string;
   url: string;
   duration: number;
-  tab: "streams" | "videos" | "rss";
+  tab: "streams" | "videos" | "rss" | "api";
+  /** How the official API read this video, when it did. Absent on scraped rows. */
+  live?: "upcoming" | "live" | "ended" | "vod";
+  /** ISO instant a scheduled stream starts, when the API reported one. */
+  scheduled?: string;
 };
 
 export { MEETING_KEYWORDS, LONGMONT_YOUTUBE_CHANNELS };
@@ -405,6 +429,48 @@ export function needsYtDlpChannelFallback(rows: ListedVideo[]): boolean {
 }
 
 export async function listChannelVideos(channelUrl: string): Promise<ListedVideo[]> {
+  return (await listChannelVideosDetailed(channelUrl)).videos;
+}
+
+/** Which reader answered, so the scan receipt can say so out loud. */
+export type YouTubeReadPath = "api" | "feed";
+
+export type YouTubeListing = {
+  videos: ListedVideo[];
+  path: YouTubeReadPath;
+  /** Why the public feed was read instead. "" when the API ran, or when there is simply no key. */
+  fallbackReason: string;
+};
+
+/**
+ * Read a channel's recent videos, official API first (0.6.70).
+ *
+ * With a key set and Google answering, the channel tab HTML, the public RSS
+ * feed and the yt-dlp listing are all skipped: one documented service answers
+ * the whole question. Without a key — or when Google refuses for any reason —
+ * the old path runs unchanged, and the reason is carried back so the scan
+ * receipt can name the path that actually ran instead of implying one.
+ */
+export async function listChannelVideosDetailed(channelUrl: string): Promise<YouTubeListing> {
+  const viaFeed = async (fallbackReason: string): Promise<YouTubeListing> => ({
+    videos: await listChannelVideosFromFeed(channelUrl),
+    path: "feed",
+    fallbackReason,
+  });
+  let outcome: Awaited<ReturnType<typeof listChannelVideosWithApi>>;
+  try {
+    outcome = await listChannelVideosWithApi(channelUrl);
+  } catch {
+    return viaFeed("YouTube's official API could not be reached.");
+  }
+  if (outcome.used) return { videos: outcome.value, path: "api", fallbackReason: "" };
+  // No key is the ordinary case, not a failure: it gets the plain wording.
+  if (outcome.reason === "no-key") return viaFeed("");
+  return viaFeed(outcome.message);
+}
+
+/** Today's path, unchanged: RSS + the streams and videos tabs, yt-dlp as last resort. */
+export async function listChannelVideosFromFeed(channelUrl: string): Promise<ListedVideo[]> {
   const seen = new Map<string, ListedVideo>();
   const out: ListedVideo[] = [];
   const push = (row: ListedVideo) => {
@@ -571,11 +637,22 @@ async function fetchPlayer(videoId: string): Promise<PlayerSnapshot | null> {
 }
 
 /**
- * Read only the player metadata needed to decide whether a stream can be
- * captured yet. This does not fetch captions or media. A missing/failed player
- * response is unknown, not evidence that the stream has ended.
+ * Read only the metadata needed to decide whether a stream can be captured yet.
+ * This does not fetch captions or media. A missing/failed response is unknown,
+ * not evidence that the stream has ended.
+ *
+ * The official API answers this first when a key is set (0.6.70): one
+ * `videos.list` call, no page scrape, and no yt-dlp process. Its "unknown" —
+ * Google has no duration for the video yet — deliberately falls through, since
+ * a player page can still name an upcoming stream the API has not classified.
  */
 export async function youtubeCaptureReadiness(videoId: string): Promise<YoutubeCaptureReadiness> {
+  try {
+    const viaApi = await youtubeCaptureReadinessFromApi(videoId);
+    if (viaApi.used && viaApi.value !== "unknown") return viaApi.value;
+  } catch {
+    /* the player page and yt-dlp are still there */
+  }
   let primary: YoutubeCaptureReadiness = "unknown";
   try {
     const player = await fetchPlayer(videoId);
@@ -804,7 +881,8 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
     return { text, title, extras };
   }
 
-  const listed = await listChannelVideos(url.toString());
+  const listing = await listChannelVideosDetailed(url.toString());
+  const listed = listing.videos;
   const notes: string[] = [];
   const handle = url.toString().toLowerCase();
   for (const ch of settings.channels) {
@@ -836,9 +914,13 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
   const title = listed[0]?.title
     ? `YouTube channel ${url.pathname}`
     : url.hostname;
+  const readBy = listing.path === "api" ? "the official API" : "the streams + videos tabs, plus RSS";
   const lines = [
     `YouTube channel ${url.toString()}.`,
-    `Listed ${listed.length} recent videos; ${meetings.length} look like meetings (streams + videos tabs, plus RSS).`,
+    // The receipt says which reader ran. An editor reading a thin listing needs
+    // to know whether Google answered or the desk fell back.
+    youtubeReadPathLine(listing.path, listing.fallbackReason || null),
+    `Listed ${listed.length} recent videos; ${meetings.length} look like meetings (via ${readBy}).`,
     "Full transcripts are stored on each watch URL — not sliced into this catalog. Dark desk reads the whole meeting from those records.",
     notes.length ? `Sister channel:\n${notes.slice(0, 12).join("\n")}` : "",
     "",
