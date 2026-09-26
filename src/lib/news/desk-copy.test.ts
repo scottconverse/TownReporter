@@ -151,6 +151,51 @@ describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
       );
     });
   });
+
+  // Unit AK item 1: a same-run merge is a change to how many leads exist, so
+  // the summary has to say it rather than leave the editor to notice that two
+  // AI-returned leads produced one row.
+  describe("Unit AK item 1: mergedSameScan", () => {
+    it("speaks even when nothing resurfaced -- a merge is never invisible", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        mergedSameScan: 1,
+      });
+      assert.equal(
+        sentence,
+        "one story was found twice in this scan and kept as one lead, with both sources.",
+      );
+    });
+
+    it("counts more than one merge", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 0,
+        resurfacedOpen: 0,
+        mergedSameScan: 2,
+      });
+      assert.match(sentence, /^2 stories were each found twice in this scan/);
+    });
+
+    it("combines with the resurfaced and possible bits", () => {
+      const sentence = resurfacedSummarySentence({
+        resurfacedKilled: 1,
+        resurfacedOpen: 0,
+        possibleMatched: 1,
+        mergedSameScan: 1,
+      });
+      assert.match(sentence, /^1 lead matched a story you already killed/);
+      assert.match(sentence, /; 1 filed and marked maybe-same-as an existing lead; /);
+      assert.match(sentence, /one story was found twice in this scan/);
+    });
+
+    it("omitting mergedSameScan reproduces the pre-AK output (back-compat)", () => {
+      assert.equal(
+        resurfacedSummarySentence({ resurfacedKilled: 2, resurfacedOpen: 1 }),
+        "2 leads matched stories you already killed and were stamped, not refiled; 1 matched an open lead.",
+      );
+    });
+  });
 });
 
 describe("editor copy", () => {

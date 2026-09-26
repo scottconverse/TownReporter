@@ -1149,6 +1149,13 @@ export function resurfacedSummarySentence(input: {
    * nothing to flag stays silent, same as before this tier existed. */
   filedNew?: number;
   firstDiscardedHeadline?: string;
+  /** Unit AK item 1: same-run candidates merged into a lead this same run
+   * had already filed (one story found twice inside one scan). Counted
+   * separately from the resurfaced bits because nothing was stamped and the
+   * old lead is not "existing" in the editor's sense -- it was created
+   * seconds ago. Optional so this function's pre-AK tests still pass
+   * unchanged. */
+  mergedSameScan?: number;
 }): string {
   const bits: string[] = [];
   if (input.resurfacedKilled > 0) {
@@ -1167,6 +1174,14 @@ export function resurfacedSummarySentence(input: {
       possibleMatched === 1
         ? `1 filed and marked maybe-same-as an existing lead`
         : `${possibleMatched} filed and marked maybe-same-as existing leads`,
+    );
+  }
+  const mergedSameScan = input.mergedSameScan ?? 0;
+  if (mergedSameScan > 0) {
+    bits.push(
+      mergedSameScan === 1
+        ? "one story was found twice in this scan and kept as one lead, with both sources"
+        : `${mergedSameScan} stories were each found twice in this scan and kept as one lead, with both sources`,
     );
   }
   if (!bits.length) return "";

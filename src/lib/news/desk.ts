@@ -1243,6 +1243,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       resurfacedOpen,
       possibleMatched,
       firstDiscardedHeadline,
+      mergedSameScan,
     } = await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
 
     let proposed = 0;
@@ -1277,6 +1278,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       possibleMatched,
       filedNew: leadsCreated - possibleMatched,
       firstDiscardedHeadline,
+      mergedSameScan,
     });
     if (resurfacedSentence)
       summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;

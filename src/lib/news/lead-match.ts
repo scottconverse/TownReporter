@@ -589,6 +589,65 @@ function pairMatches(
   return false;
 }
 
+/**
+ * Unit AK item 1 (2026-09-26): is this candidate the same story as a lead
+ * THIS SAME SCAN RUN just filed? If so the two become one lead (their source
+ * URLs merged) rather than two rows for one story.
+ *
+ * The real case: leads 207 and 212, same city page, same second, one of them
+ * later published while the other sat on the Queue with a "≈ PRINTED" badge.
+ * The scan batches de-duplicate leads by byte-identical headline only
+ * (scan-batches.ts:109), and fileScanLeads discards a repeat only at the
+ * "strong" tier (lead-filing.ts:111), so a pair the matcher flagged as
+ * "possible" -- and it does flag them, findMatchingLead has already returned
+ * the match id -- fell through to the insert and both were filed.
+ *
+ * THE BAR IS matchStrength === "strong", and nothing looser. That is
+ * deliberate, and it is the only bar that does not contradict the matcher's
+ * own tested guarantees:
+ *
+ *   - "strong" is the tier this codebase already trusts to DISCARD a finding
+ *     outright (lead-filing.ts:111, `continue`, only a counter moves). Saying
+ *     "these two are one lead, keep both source URLs" is strictly less
+ *     destructive than what that tier already does today, so the merge adds no
+ *     new risk of losing a story.
+ *   - Every lexical bar below "strong" merges pairs QA-1 (2026-09-02) proved
+ *     are different stories, and those pairs are locked in by tests in
+ *     ./lead-match.test.ts. Two real ones, both flagged "possible" and both
+ *     clearing content-token overlap: NEG-7 ("...broadband expansion for rural
+ *     EAST county schools" vs "WEST county schools") scores 0.71 Jaccard, and
+ *     NEG-4 (closed-door session on "jail expansion" vs "staff pay raises")
+ *     clears it too. A prose-only merge bar therefore silently swallows the
+ *     second story -- exactly what the owner asked about ("Do I miss the real
+ *     2nd story?").
+ *
+ * So the bar cannot be softened; what is left for those pairs is to keep both
+ * rows and make the link unmissable and one-press resolvable, which is what
+ * the Queue's "Looks already printed" chip, "Kill as duplicate" and the Compare
+ * view do (unit AK items 4, 5 and 7).
+ *
+ * CONSEQUENCE, stated plainly so it is not mistaken for a complete fix: a
+ * same-run pair that is merely "possible" still files two rows. A same-run
+ * "strong" pair previously also produced one row, but by stamping resurfaced
+ * on a row that was seconds old; it now merges the source URLs into that row
+ * instead, and is counted. So the pairs still filing two rows are exactly the
+ * ones no available rule can distinguish from two different stories.
+ */
+export function sameStoryForMerge(
+  candidate: { headline: string; source_urls?: string[] },
+  existing: { headline: string; source_urls?: string[] },
+): boolean {
+  const candidateHeadline = candidate.headline ?? "";
+  const existingHeadline = existing.headline ?? "";
+  if (!candidateHeadline.trim() || !existingHeadline.trim()) return false;
+  return (
+    matchStrength(
+      { headline: candidateHeadline, source_urls: candidate.source_urls ?? [] },
+      { headline: existingHeadline, source_urls: existing.source_urls ?? [] },
+    ) === "strong"
+  );
+}
+
 export function findMatchingLead(
   candidate: { headline: string; source_urls: string[] },
   existing: MatchCandidateLead[],

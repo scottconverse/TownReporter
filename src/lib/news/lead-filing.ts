@@ -1,5 +1,11 @@
 import { sanitizePublicUrls } from "./schema.ts";
-import { findMatchingLead, matchStrength, type MatchCandidateLead } from "./lead-match.ts";
+import {
+  findMatchingLead,
+  matchStrength,
+  normalizeSourceUrl,
+  sameStoryForMerge,
+  type MatchCandidateLead,
+} from "./lead-match.ts";
 
 /**
  * The narrow slice of `Sql` (src/lib/db.ts) this module actually calls: the
@@ -20,6 +26,23 @@ function parseLeadSourceUrls(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** Union two source-URL lists, keeping every URL once, compared the way the
+ * matcher compares them (normalizeSourceUrl) so a trailing slash or a `www.`
+ * cannot smuggle in a second copy of the same page. Order: the existing lead's
+ * URLs first, then anything the second sighting adds -- merging must never
+ * drop a source an editor could need. */
+function mergeSourceUrls(a: string[], b: string[]): string[] {
+  const out = [...a];
+  const seen = new Set(a.map(normalizeSourceUrl).filter(Boolean));
+  for (const url of b) {
+    const key = normalizeSourceUrl(url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(url);
+  }
+  return out;
 }
 
 /** One AI-returned lead, as parsed out of the scan model's JSON. */
@@ -65,6 +88,18 @@ export type ScanAiLead = {
  * `existing` is mutated in place with each newly-inserted lead so two
  * AI-returned leads that are the same story within one scan don't both get
  * inserted.
+ *
+ * Unit AK item 1 (2026-09-26) -- that promise used to hold only for the
+ * "strong" tier. A pair the matcher flagged as "possible" fell through to the
+ * insert below, so one story found twice in one scan run was filed twice:
+ * leads 207 and 212, same city page, same second, one of them later published
+ * while the other sat on the Queue under a "≈ PRINTED" badge. Any candidate
+ * that `sameStoryForMerge` says is the same story as a lead THIS RUN already
+ * inserted is now merged into it instead: the later sighting's source URLs are
+ * unioned onto the row that already exists, `mergedSameScan` is counted so the
+ * scan summary can say it happened, and no second row is created. The merge
+ * only ever looks at leads this call inserted -- never at a row an editor has
+ * already seen, killed or held.
  */
 export async function fileScanLeads(
   sql: SqlTag,
@@ -88,16 +123,43 @@ export async function fileScanLeads(
    * trace. A "possible" match is never discarded -- it is filed -- so it
    * never sets this. */
   firstDiscardedHeadline?: string;
+  /** Unit AK item 1: how many AI-returned candidates were the same story as
+   * a lead this same run had already inserted, and were merged into it
+   * instead of becoming a second row for one story. Not included in
+   * `leadsCreated`. */
+  mergedSameScan: number;
 }> {
   let leadsCreated = 0;
   let resurfacedKilled = 0;
   let resurfacedOpen = 0;
   let possibleMatched = 0;
+  let mergedSameScan = 0;
   let firstDiscardedHeadline: string | undefined;
+  /* Leads THIS call inserted, newest last. A candidate is only ever merged
+   * into one of these -- see sameStoryForMerge's doc comment for why a row an
+   * editor has already seen is never touched. */
+  const insertedThisRun: MatchCandidateLead[] = [];
 
   for (const lead of aiLeads) {
     if (!lead.headline?.trim()) continue;
     const candidateUrls = sanitizePublicUrls(lead.source_urls);
+
+    const sibling = insertedThisRun.find((prior) =>
+      sameStoryForMerge({ headline: lead.headline!, source_urls: candidateUrls }, prior),
+    );
+    if (sibling) {
+      const merged = mergeSourceUrls(sibling.source_urls, candidateUrls);
+      await sql`
+          update leads set source_urls = ${JSON.stringify(merged)}
+          where id = ${sibling.id} and newsroom_id = ${newsroomId}
+        `;
+      // Same object as the one in `existing`: keeping it in step means a third
+      // sighting later in this run sees the union, not the first URL list.
+      sibling.source_urls = merged;
+      mergedSameScan += 1;
+      continue;
+    }
+
     const matchId = findMatchingLead({ headline: lead.headline, source_urls: candidateUrls }, existing);
 
     let possibleDuplicateOf: number | null = null;
@@ -146,16 +208,25 @@ export async function fileScanLeads(
         returning id, status, headline
       `;
     leadsCreated += 1;
-    existing.push({
+    const insertedRow: MatchCandidateLead = {
       id: inserted[0]!.id,
       status: inserted[0]!.status,
       headline: inserted[0]!.headline,
       source_urls: candidateUrls,
       created_at: new Date().toISOString(),
-    });
+    };
+    existing.push(insertedRow);
+    insertedThisRun.push(insertedRow);
   }
 
-  return { leadsCreated, resurfacedKilled, resurfacedOpen, possibleMatched, firstDiscardedHeadline };
+  return {
+    leadsCreated,
+    resurfacedKilled,
+    resurfacedOpen,
+    possibleMatched,
+    mergedSameScan,
+    firstDiscardedHeadline,
+  };
 }
 
 export { parseLeadSourceUrls };
