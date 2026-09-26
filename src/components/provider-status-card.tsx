@@ -46,11 +46,18 @@ export function ProviderStatusCard({
    * corner. Server settings passes nothing, so that page is unchanged.
    */
   chip,
+  /**
+   * The models this sign-in brings, when the caller has a list to draw. The
+   * Models screen passes the registry's entries for the transport; Server
+   * settings passes nothing.
+   */
+  children,
 }: {
   status: ProviderStatus;
   onNote: (text: string) => void;
   times: ProviderTimeSetting[];
   chip?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   const qc = useQueryClient();
   const [err, setErr] = useState("");
@@ -254,6 +261,13 @@ export function ProviderStatusCard({
       ) : null}
 
       {err ? <p className="mt-2 text-sm text-rust">{err}</p> : null}
+
+      {/*
+        What this sign-in can run, drawn by the caller. The Models screen fills
+        it with the registry's own entries for this transport; Server settings
+        passes nothing, so that page's cards are the same cards they were.
+      */}
+      {children}
 
       {times.map((row) => (
         <ProviderTimeField key={row.providerId} row={row} onNote={onNote} />

@@ -31,7 +31,17 @@ import {
   type PublicCustomAiConnection,
 } from "@/lib/news/custom-ai-settings";
 
-export function CustomAiConnectionsPanel({ showHeading = true }: { showHeading?: boolean }) {
+export function CustomAiConnectionsPanel({
+  showHeading = true,
+  /**
+   * Hand the form a saved connection to open in edit. The Models screen's card
+   * Settings buttons pass one; every other caller gets the blank form.
+   */
+  initialEditId,
+}: {
+  showHeading?: boolean;
+  initialEditId?: string;
+}) {
   const qc = useQueryClient();
   const connections = useQuery({
     queryKey: ["custom-ai-connections"],
@@ -57,6 +67,7 @@ export function CustomAiConnectionsPanel({ showHeading = true }: { showHeading?:
     <CustomAiConnections
       connections={connections.data ?? []}
       showHeading={showHeading}
+      initialEditId={initialEditId}
       onSave={async (data) => {
         const saved = await saveCustomAiConnectionAndCache(
           data,

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Field, InkButton } from "./desk-chrome";
 import { inputClass } from "./desk-chrome-utils";
 import type {
@@ -21,6 +21,15 @@ type Props = {
    * false; every other caller gets it.
    */
   showHeading?: boolean;
+  /**
+   * Open the form already editing this saved connection.
+   *
+   * The Models screen's cards each carry a Settings button, and the form behind
+   * it is this one -- so the card hands the form an id and the form arrives in
+   * the same state the card's old inline Edit button produced. Undefined means
+   * "as before": the blank form.
+   */
+  initialEditId?: string;
   onSave(input: CustomAiConnectionInput & { id?: string }): Promise<PublicCustomAiConnection>;
   onDiscover(id: string): Promise<string[]>;
   onTest(id: string): Promise<ConnectionProbeResult>;
@@ -31,6 +40,7 @@ type Props = {
 export function CustomAiConnections({
   connections,
   showHeading = true,
+  initialEditId,
   onSave,
   onDiscover,
   onTest,
@@ -49,6 +59,32 @@ export function CustomAiConnections({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const locked = managementActionsLocked(busy, busyAction);
+  /*
+    `initialEditId`, applied once per id.
+
+    The ref is what makes "once" true: the effect's other dependency is the
+    connections list, which is refetched after every save and after every
+    Delete -- without the guard, saving an edit would push the freshly-typed
+    form back to the stored values a second later. The id is remembered rather
+    than a boolean so that a second card's Settings (a remount, in practice)
+    still seeds.
+  */
+  const seeded = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!initialEditId || seeded.current === initialEditId) return;
+    const row = connections.find((item) => item.id === initialEditId);
+    if (!row) return;
+    seeded.current = initialEditId;
+    setEditingId(row.id);
+    setModels([]);
+    setForm({
+      name: row.name,
+      baseUrl: row.baseUrl,
+      apiKey: "",
+      modelId: row.modelId || "",
+    });
+    setResult("Editing this connection. Leave API key blank to keep the stored key.");
+  }, [initialEditId, connections]);
   async function act(key: string, work: () => Promise<void>) {
     setBusyAction(key);
     setResult(null);
