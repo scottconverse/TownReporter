@@ -181,6 +181,31 @@ Check "it says in plain words that the paper was not started" ($text -match 'wou
 Check "it names the last thing the database said" ($text -match 'last thing it said was: the database system is starting up') $text
 
 # ---------------------------------------------------------------------------
+# 2b. The real probe's SHAPE: a quoted program path followed by quoted
+#     arguments, the way Get-TownReporterPgProbe builds the psql line.
+#     2026-09-25 9:25 PM: plain `cmd /c` stripped the first and last quote of
+#     that line, printed "The filename, directory name, or volume label syntax
+#     is incorrect.", and the live paper stayed down for six minutes. Every stub
+#     above is ONE quoted token, which cmd leaves alone, so none of them could
+#     have caught it. This one has a space in its directory, like a real path
+#     can, and quotes on both sides of it.
+# ---------------------------------------------------------------------------
+Write-Host "  2b. a quoted program with quoted arguments, like the real psql line"
+$argsCmd = Join-Path $temp "echo args\echo-args.cmd"
+Write-Stub -Path $argsCmd -Lines @(
+  "@echo off",
+  "echo %~4",
+  "exit /b 0"
+)
+$shapeOut = Join-Path $temp "shape.out"
+$shapeErr = Join-Path $temp "shape.err"
+$shapeLine = '"' + $argsCmd + '" -d "' + $dbUrl + '" -tAc "select 1"'
+$shape = Invoke-TownReporterCommand -CommandLine $shapeLine -StdOutFile $shapeOut -StdErrFile $shapeErr
+$shapeText = ((Get-Content -LiteralPath $shapeOut -ErrorAction SilentlyContinue) -join "`n") + ((Get-Content -LiteralPath $shapeErr -ErrorAction SilentlyContinue) -join "`n")
+Check "a quoted program with quoted arguments runs (exit 0)" ($shape.Code -eq 0) $shapeText
+Check "its quoted argument arrives whole" ($shapeText -match 'select 1') $shapeText
+
+# ---------------------------------------------------------------------------
 # 3. No client tool at all: go on to migrate, which retries.
 # ---------------------------------------------------------------------------
 Write-Host "  3. a cluster with no psql.exe or pg_isready.exe"
