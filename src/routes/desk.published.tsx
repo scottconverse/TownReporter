@@ -105,7 +105,21 @@ function PublishedPage() {
         setCorrWrongBySlug((prev) => ({ ...prev, [slug]: "" }));
         setCorrRightBySlug((prev) => ({ ...prev, [slug]: "" }));
         setCorrFixBySlug((prev) => ({ ...prev, [slug]: false }));
-        setCorrBodyBySlug((prev) => ({ ...prev, [slug]: "" }));
+        /*
+          DELETED, not set to "". An empty string is still a KEY, and the box's
+          value is `corrBodyBySlug[slug] ?? p.body` -- `??` only falls through
+          on null and undefined, so a key holding "" wins over the story's own
+          text. That is the blank box the walk caught: after a note-only
+          correction, the next "Also fix the story text" opened on nothing, and
+          the editor would have been editing an empty page over a story that
+          already printed. Absent is what "not touched since the last post"
+          means, so the next open seeds itself from the freshly refetched row.
+        */
+        setCorrBodyBySlug((prev) => {
+          const next = { ...prev };
+          delete next[slug];
+          return next;
+        });
         setWordingFor(null);
         setCorrFor(null);
         setCorrReviewFor((previous) => ({ ...previous, [slug]: undefined }));
@@ -673,9 +687,25 @@ function PublishedPage() {
                       <input
                         type="checkbox"
                         checked={corrFixBySlug[p.slug] === true}
-                        onChange={(e) =>
-                          setCorrFixBySlug((prev) => ({ ...prev, [p.slug]: e.target.checked }))
-                        }
+                        onChange={(e) => {
+                          const opened = e.target.checked;
+                          setCorrFixBySlug((prev) => ({ ...prev, [p.slug]: opened }));
+                          /*
+                            Opening the box puts the story's printed text in it,
+                            as state rather than only as a render fallback: the
+                            POST reads this state, so a box that showed the
+                            story while the post carried "" would be the editor
+                            pressing Publish on words the desk never sent. Seeded
+                            only when the key is absent -- a box the editor has
+                            already typed in, or deliberately cleared to an empty
+                            string, keeps what they left there.
+                          */
+                          if (opened) {
+                            setCorrBodyBySlug((prev) =>
+                              prev[p.slug] === undefined ? { ...prev, [p.slug]: p.body } : prev,
+                            );
+                          }
+                        }}
                       />
                       Also fix the story text
                     </label>
