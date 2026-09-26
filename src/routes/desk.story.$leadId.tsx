@@ -84,6 +84,8 @@ import {
   DraftReconcileControl,
   type EvidenceCheckReview,
 } from "@/components/draft-reconcile-control";
+import { StoryJobProgress } from "@/components/JobCard";
+import { jobProgressView } from "@/lib/news/job-progress";
 import {
   assessCheckedDraftResult,
   assessRefreshedCheckedDraft,
@@ -1230,21 +1232,27 @@ function StoryPage() {
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
       {data.job && (data.job.status === "queued" || data.job.status === "running") ? (
-        <section className="story-running-banner" aria-label="Draft progress" role="status">
-          <strong>
-            {data.job.status === "queued" ? "Your story is queued" : "Your story is being written"}
-          </strong>
-          <p>{data.job.stage || "Preparing your sources…"}</p>
-          {data.job.failover_note ? (
-            <p className="story-model-switch-note">
-              <strong>Model switch:</strong> {data.job.failover_note}
+        /*
+          The JobCard replaces this banner's progress text (redesign phase 3).
+          The condition, the placement and the reassurance line are the old
+          banner's, kept deliberately: the card owns the box now, so what is
+          left outside it is what the card does not say.
+
+          `initial` is this page's own job row, mapped by the same function the
+          server function uses, so the card is right on the first paint instead
+          of after the first poll -- this page already reloads every 2 s while
+          waiting, and a progress bar that arrives a beat late is a flicker.
+        */
+        <StoryJobProgress
+          leadId={data.lead.id}
+          initial={[jobProgressView(data.job, data.lead.id, data.draft?.id ?? null)]}
+          note={
+            <p className="story-running-note">
+              Your submission is saved. The draft will appear here automatically. You can return from{" "}
+              <Link to="/desk">Desk → Your recent drafts</Link>.
             </p>
-          ) : null}
-          <span>
-            Your submission is saved. The draft will appear here automatically. You can return from{" "}
-            <Link to="/desk">Desk → Your recent drafts</Link>.
-          </span>
-        </section>
+          }
+        />
       ) : null}
       {completedDraftNeedsReview ? (
         <Notice kind="err">

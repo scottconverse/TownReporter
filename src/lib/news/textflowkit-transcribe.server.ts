@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
-import { enqueueJob, findOpenJob, type DeskJob } from "./jobs.ts";
+import { enqueueJob, findOpenJob, waitForModel, type DeskJob } from "./jobs.ts";
 import { probeTextflowkit, transcribeAudioWithTextflowkit } from "./textflowkit-cli.server.ts";
 import { TEXTFLOWKIT_SOURCE_METHOD, resolveTextflowkitConfig } from "./textflowkit.ts";
 import type { CaptionCaptureResult } from "./meeting-capture-ytdlp.ts";
@@ -231,11 +231,24 @@ export async function performAudioTranscribeWork(job: DeskJob, deps: AudioTransc
   const release = await acquireTranscriptionSlot();
   try {
     await assertClaim();
-    const run = await (deps.transcribe ?? transcribeAudioWithTextflowkit)({
-      audioPath: audio.storage_path,
-      outputDir: tempDir,
-      durationSeconds: capture.duration_seconds,
-      config,
+    /*
+      Transcription can hold its slot for the better part of an hour, so this is
+      the one await in the codebase where the difference between "still working"
+      and "gone" matters most -- and the one where the editor is most likely to
+      press Cancel. Both are the ticker's job: it beats so the card says
+      "Waiting on textflowkit · 312s" rather than offering a retry, and it reads
+      `cancel_requested` so Cancel lands without waiting for the hour.
+    */
+    const run = await waitForModel({
+      jobId: job.id,
+      label: "textflowkit",
+      run: () =>
+        (deps.transcribe ?? transcribeAudioWithTextflowkit)({
+          audioPath: audio.storage_path,
+          outputDir: tempDir,
+          durationSeconds: capture.duration_seconds,
+          config,
+        }),
     });
     if (!run.ok) {
       // The reason is the operator-facing sentence. It is thrown, not logged,

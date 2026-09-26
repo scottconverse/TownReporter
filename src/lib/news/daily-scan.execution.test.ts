@@ -57,6 +57,14 @@ async function reset() {
   await pg.exec(
     await readFile(new URL("../../../migrations/0097_suggested_source_origin.sql", import.meta.url), "utf8"),
   );
+  // 0099 is the structured-progress columns (stage_index, pct, step_text,
+  // beat_at, cancel_requested, ...) that `executeJob` and the JobCard read.
+  // Same rule as 0097 above: a hand-built copy of `desk_jobs` that omits a
+  // migration is a fixture that lies about the schema. `exec`, not `query`:
+  // one file, several statements.
+  await pg.exec(
+    await readFile(new URL("../../../migrations/0099_desk_job_progress.sql", import.meta.url), "utf8"),
+  );
   await sql.query("alter table desk_jobs add column if not exists failover_note text not null default ''");
   await sql.query("alter table desk_jobs add column if not exists result_json text not null default '{}'");
   for (const t of [

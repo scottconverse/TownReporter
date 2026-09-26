@@ -99,6 +99,8 @@ import {
   setJobModelRuntime,
   setJobFailoverNote,
   setJobStage,
+  throwIfJobCancelled,
+  waitForModel,
   type DeskJob,
 } from "./jobs.ts";
 import {
@@ -2565,6 +2567,10 @@ export async function performArtifactOcrWork(
   for (let index = 0; index < batches.length; index++) {
     const batch = batches[index]!;
     await assertClaim();
+    // Batch boundaries are where a read of a long PDF can be stopped: every
+    // batch already read is committed through `saveBatch`, so the pages stay
+    // and the job's reason is the editor's, not a truncation's.
+    await throwIfJobCancelled(job.id);
     const elapsed = Date.now() - jobStarted;
     if (elapsed >= OCR_TOTAL_BUDGET_MS || modelCalls >= ARTIFACT_OCR_MAX_MODEL_CALLS) {
       budgetPaused = true;
@@ -2581,30 +2587,37 @@ export async function performArtifactOcrWork(
     await setOwnedStage(
       `Reading batch ${index + 1} of ${batches.length} · PDF pages ${batch.start}-${batch.end} · ${retainedPages.size}${totalPages ? ` of ${totalPages}` : ""} already saved…`,
     );
-    const read = await (deps.ocr ?? productionOcr)(bytes, {
-      provider: ocrChoice,
-      reasoningEffort: ocrEffort,
-      pageRange: batch,
-      newsroomId: String(job.newsroom_id),
-      jobLabel: `Dark artifact ${request.artifactId}, pages ${batch.start}-${batch.end}`,
-      startedAt: jobStarted,
-      maxModelCalls: ARTIFACT_OCR_MAX_MODEL_CALLS - modelCalls,
-      onProviderSwitch: async ({ transport, model, reason }) => {
-        const nextChoice: EffectiveProviderChoice | null = transport === "codex"
-          ? "codex-balanced"
-          : transport === "anthropic" || transport === "claude-code"
-            ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
-            : null;
-        if (!nextChoice || nextChoice === ocrChoice) return;
-        const previousLabel = modelChoiceLabel(ocrChoice);
-        const nextLabel = modelChoiceLabel(nextChoice);
-        const nextEffort = validatedModelEffort(nextChoice, ocrEffort);
-        await setJobModelRuntime(job.id, nextChoice, nextEffort);
-        await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-        await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
-        ocrChoice = nextChoice;
-        ocrEffort = nextEffort;
-      },
+    const read = await waitForModel({
+      jobId: job.id,
+      // `ocrChoice` is reassigned by the switch handler below, so the ticker
+      // names the transport this batch is actually reading on after a hop.
+      label: () => modelChoiceLabel(ocrChoice),
+      run: () =>
+        (deps.ocr ?? productionOcr)(bytes, {
+          provider: ocrChoice,
+          reasoningEffort: ocrEffort,
+          pageRange: batch,
+          newsroomId: String(job.newsroom_id),
+          jobLabel: `Dark artifact ${request.artifactId}, pages ${batch.start}-${batch.end}`,
+          startedAt: jobStarted,
+          maxModelCalls: ARTIFACT_OCR_MAX_MODEL_CALLS - modelCalls,
+          onProviderSwitch: async ({ transport, model, reason }) => {
+            const nextChoice: EffectiveProviderChoice | null = transport === "codex"
+              ? "codex-balanced"
+              : transport === "anthropic" || transport === "claude-code"
+                ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
+                : null;
+            if (!nextChoice || nextChoice === ocrChoice) return;
+            const previousLabel = modelChoiceLabel(ocrChoice);
+            const nextLabel = modelChoiceLabel(nextChoice);
+            const nextEffort = validatedModelEffort(nextChoice, ocrEffort);
+            await setJobModelRuntime(job.id, nextChoice, nextEffort);
+            await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+            ocrChoice = nextChoice;
+            ocrEffort = nextEffort;
+          },
+        }),
     });
     modelCalls += read.modelCalls ?? read.pages.length;
     totalPages ||= read.pagesTotal ?? 0;
@@ -3673,6 +3686,10 @@ export async function performBriefWork(job: DeskJob) {
     modelChoice: effectiveStoryModelChoice(job.model_choice),
     modelEffort: savedJobEffort(job),
   };
+  // Tracks the rung the brief is actually on, for the same reason the scan
+  // batch does: `active` is only reassigned once the failed call returns, so a
+  // ticker reading it would name the model that already failed.
+  let briefLabel = modelChoiceLabel(active.modelChoice);
   const callWithFallback: typeof grokChat = async (system, user, maxTokens, options) => {
     const attempted = await runPinnedCallWithFailover({
       snapshot: active,
@@ -3691,6 +3708,7 @@ export async function performBriefWork(job: DeskJob) {
       onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
         const resolvedChoice = effectiveStoryModelChoice(nextChoice);
         const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
+        briefLabel = nextLabel;
         await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
         await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
         await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
@@ -3699,16 +3717,24 @@ export async function performBriefWork(job: DeskJob) {
     active = attempted.snapshot;
     return attempted.result;
   };
-  const result = await buildBrief(
-    job.user_id,
-    newsroomId,
-    job.subject_id,
-    active.modelChoice,
-    overrides,
-    callWithFallback,
-    undefined,
-    active.modelEffort,
-  );
+  const result = await waitForModel({
+    jobId: job.id,
+    label: () => briefLabel,
+    // The whole brief is the wait: `buildBrief` fans out over its own calls and
+    // has no single await to wrap, and a ticker per inner call would report the
+    // same job four times over.
+    run: () =>
+      buildBrief(
+        job.user_id,
+        newsroomId,
+        job.subject_id,
+        active.modelChoice,
+        overrides,
+        callWithFallback,
+        undefined,
+        active.modelEffort,
+      ),
+  });
   /*
     A brief that could not be written is a real failure of a job the editor
     started and is watching, so it is thrown rather than swallowed. That is

@@ -474,9 +474,9 @@ export async function setJobStage(id: number, stage: string) {
     of the whole job surface at once, instead of sixty edits that the next new
     worker would forget to copy.
 
-    `step` only. The stage list and the percent are things a worker knows and
-    this function does not, so those stay explicit `reportProgress` calls at the
-    boundaries that can compute them.
+    A worker that holds its own job row should use `progressReporterFor(job)`
+    instead: same delegation, plus the stage index that sentence implies, which
+    this function cannot know because it was handed an id and not a row.
   */
   await reportProgress(id, { step: stage });
 }
@@ -670,11 +670,22 @@ export async function reattachDurableJobsOnStartup(): Promise<{ ran: number }> {
 export async function executeJob(job: DeskJob): Promise<boolean> {
   const sql = await getSql();
   const token = mintClaimToken();
+  /*
+    The stage list is part of the claim, and the row handed to the worker below
+    carries it. Both halves matter: written any later, the first boundaries of a
+    fast job would report an index into a list nobody had stored yet; handed to
+    the worker from the stale `job` argument instead, `stageIndexFor` would be
+    reading the null it arrived with and every chip after the first would be
+    missing.
+  */
+  const stages = JOB_STAGE_LISTS[job.kind] ?? null;
   const claimed = await sql<{ id: number }>`
     update desk_jobs
     set status = ${"running"}, stage = ${"Working…"}, claim_token = ${token},
         started_at = coalesce(started_at, now()), updated_at = now(),
-        beat_at = now()
+        beat_at = now(),
+        stages_json = ${stages && stages.length ? JSON.stringify(stages) : null},
+        stage_index = 0
     where id = ${job.id}
       and (
         status = ${"queued"}
@@ -683,6 +694,11 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     returning id
   `;
   if (!claimed[0]) return false;
+  const seeded: DeskJob = {
+    ...job,
+    stages_json: stages && stages.length ? JSON.stringify(stages) : null,
+    stage_index: 0,
+  };
 
   /*
     Claiming IS the worker's first sign of life, so `beat_at` starts here
@@ -690,10 +706,10 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     the packet, reading the memory, fetching the meeting material) takes a
     minute should not look quiet merely because it has not reached a stage yet.
 
-    A `stage_index` is deliberately NOT set here. Null means "this job has no
-    stage list", which is the honest state for a kind that never calls
-    `setJobStages`, and seeding 0 would claim a position in a list that does
-    not exist.
+    `stage_index` is seeded to 0 only for a kind that HAS a list, and the list
+    is cleared for one that does not -- a reclaimed row from an older build
+    must not keep chips for a vocabulary this build no longer reports. Null
+    means "no stage list", which is what the card renders as no chip row.
   */
 
   /**
@@ -723,7 +739,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
       before the claim.
     */
     await throwIfJobCancelled(job.id);
-    await runWork({ ...job, claim_token: token });
+    await runWork({ ...seeded, claim_token: token });
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.
     // Derive the editor-facing terminal stage from the receipt in the same
@@ -903,6 +919,70 @@ export function jobStages(
 }
 
 /**
+ * Each kind's stage list, in the order the worker walks it.
+ *
+ * THE RULE, and it is the whole reason this table can be trusted: every phrase
+ * here must be a string the worker actually writes through the reporter -- see
+ * `progressReporterFor`. The card cannot then show a chip that contradicts the
+ * "Now:" line beside it, because the chip IS that line, remembered. A phrase
+ * nothing ever writes is a chip that never lights up: a stage the editor waits
+ * for and never sees finish.
+ *
+ * That is also why the lists are shorter than the workers' vocabulary: these
+ * are the arrivals, and the sentences in between ("Interpreting packet.pdf:
+ * part 2 of 7") move the step line without moving the chip.
+ *
+ * A kind with no entry reports its step and heartbeats exactly like the others;
+ * it simply has no chip row, which is what `stages_json` null means everywhere.
+ */
+export const JOB_STAGE_LISTS: Partial<Record<JobKind, readonly string[]>> = {
+  draft: [
+    "Opening source material",
+    "Looking for primary sources",
+    "Planning the reporting",
+    "Writing the draft",
+    "Checking the draft against the evidence",
+    "Connecting the story to saved sources",
+  ],
+  reconcile: [
+    "Checking the saved draft against the evidence",
+    "Reconciling the draft with the saved evidence",
+  ],
+};
+
+/**
+ * Where `step` sits in this job's stage list, or undefined.
+ *
+ * Read off the row the worker was already handed, not out of the database: the
+ * list is written once when the job is claimed and never changes during the
+ * run, so the copy the worker holds is the copy the card is reading. Undefined
+ * means "this sentence is not an arrival at a stage" -- a failover note, a
+ * per-document message -- and `reportProgress` leaves `stage_index` alone for
+ * it, which keeps the chip row on the last stage the job actually reached.
+ */
+export function stageIndexFor(
+  job: Pick<DeskJob, "stages_json"> | null | undefined,
+  step: string,
+): number | undefined {
+  const stages = jobStages(job);
+  if (!stages) return undefined;
+  const at = stages.indexOf(step);
+  return at < 0 ? undefined : at;
+}
+
+/**
+ * `setJobStage` for a worker that is holding its own job row. Every worker has
+ * one of these in scope, so this is the one line that gives the whole job
+ * surface a stage index as well as a sentence, without any of the sixty
+ * boundaries having to know its own position in a list.
+ */
+export function progressReporterFor(
+  job: DeskJob,
+): (step: string) => Promise<void> {
+  return (step) => reportProgress(job.id, { step, stageIndex: stageIndexFor(job, step) });
+}
+
+/**
  * Percent, clamped. A worker that computes 103% of a batch, or -1 from an
  * off-by-one, must not paint a bar outside its track or print "Now: -1%"; the
  * clamp is here rather than at each call site so no future call site can
@@ -922,6 +1002,16 @@ export function clampPct(pct: number | null | undefined): number | null {
  *
  * It always bumps `beat_at`, which is the whole point: a worker calling this is
  * a worker that is alive.
+ *
+ * "Absent" means `undefined` and NOT merely "the key is missing from the
+ * object literal". `progressReporterFor` builds its argument as
+ * `{ step, stageIndex: stageIndexFor(...) }`, and that expression produces the
+ * key with an `undefined` VALUE for every sentence that is not a stage arrival
+ * -- a failover note, a per-packet line. An `in` test would call that "present"
+ * and clear the chip row on every such sentence, so a job that had reached
+ * stage 3 would flash back to "no stage list" twice a minute. The three
+ * `!== undefined` tests below are what make the documented contract true for
+ * that caller, which cannot avoid naming the key.
  */
 export async function reportProgress(
   jobId: number,
@@ -933,9 +1023,9 @@ export async function reportProgress(
 ): Promise<void> {
   await ensureJobsSchema();
   const sql = await getSql();
-  const hasIndex = "stageIndex" in progress;
-  const hasPct = "pct" in progress;
-  const hasStep = "step" in progress;
+  const hasIndex = progress.stageIndex !== undefined;
+  const hasPct = progress.pct !== undefined;
+  const hasStep = progress.step !== undefined;
   await sql`
     update desk_jobs
     set stage_index = case when ${hasIndex} then ${progress.stageIndex ?? null}::integer else stage_index end,
@@ -961,19 +1051,6 @@ export async function setJobStages(id: number, stages: string[] | null) {
         stage_index = 0,
         beat_at = now()
     where id = ${id}
-  `;
-}
-
-/**
- * Where the finished result lives. The Done card's Open button is this link,
- * so the server decides the destination once, where it already knows the job
- * kind, rather than the client guessing a route from the kind.
- */
-export async function setJobResultHref(id: number, href: string | null) {
-  await ensureJobsSchema();
-  const sql = await getSql();
-  await sql`
-    update desk_jobs set result_href = ${href}, updated_at = now() where id = ${id}
   `;
 }
 
@@ -1042,35 +1119,86 @@ export function jobProgressStalled(
  * this. The ticker is `unref`ed so it never holds the process open by itself,
  * and it stops before the caller's own terminal writes (see `executeJob`).
  *
- * `now` and `report` are injection seams: the tests drive a fake clock instead
- * of waiting 12 real seconds, and assert on the reported steps.
+ * THIS IS ALSO WHERE CANCEL REACHES A CALL IN FLIGHT. A twenty-minute model
+ * call has no stage boundary in it, so before this the editor's Cancel did
+ * nothing at all until the model answered -- the button was honest and useless.
+ * The same tick that reports progress asks whether the editor has asked to
+ * stop, and if so abandons the wait with `JobCancelledError`. The underlying
+ * call is not killed (nothing here can kill a provider's socket); it is left to
+ * finish and its result discarded, which is what "stop cleanly at the next
+ * boundary" means for a boundary that is inside an await.
+ *
+ * `now`, `report` and `cancelPoll` are injection seams: the tests drive a fake
+ * clock instead of waiting 12 real seconds, and assert on the reported steps.
  */
 export async function waitForModel<T>(opts: {
   jobId: number;
-  /** Editor-facing label, already resolved ("Codex Sol", "textflowkit"). */
-  label: string;
+  /**
+   * Editor-facing label, already resolved ("Codex Sol", "textflowkit"). A
+   * function is accepted for the callers whose model can change while the call
+   * is in flight -- the scan and OCR paths hand the work to the failover helper
+   * inside `run`, and a ticker still naming the rung that already failed would
+   * be telling the editor something untrue about the call they are waiting on.
+   */
+  label: string | (() => string);
+  /** The await itself. Any model, OCR or transcription call is a candidate. */
   run: () => Promise<T>;
   tickMs?: number;
   now?: () => number;
   report?: typeof reportProgress;
+  cancelPoll?: (jobId: number) => Promise<boolean>;
 }): Promise<T> {
   const tick = opts.tickMs ?? JOB_TICK_MS;
   const now = opts.now ?? (() => Date.now());
   const report = opts.report ?? reportProgress;
+  const cancelPoll = opts.cancelPoll ?? jobCancelRequested;
+  const labelNow = () => (typeof opts.label === "function" ? opts.label() : opts.label);
   const startedAt = now();
-  const say = (label: string) => {
+  let cancelled = false;
+  let rejectCancel: (err: JobCancelledError) => void = () => undefined;
+  const cancelSignal = new Promise<never>((_, reject) => {
+    rejectCancel = reject;
+  });
+  // Handled up front so that a run which finishes first does not leave this
+  // rejection loose once the ticker stops.
+  void cancelSignal.catch(() => undefined);
+  const say = () => {
     const seconds = Math.max(0, Math.floor((now() - startedAt) / 1000));
-    void report(opts.jobId, { step: `${label} · ${seconds}s` }).catch(() => undefined);
+    void report(opts.jobId, { step: `Waiting on ${labelNow()} · ${seconds}s` }).catch(
+      () => undefined,
+    );
   };
   // Speak once immediately: a worker entering a model call right after a long
   // stretch of local work is alive now, and the card should show that at once
   // rather than 12 seconds later.
-  say(`Waiting on ${opts.label}`);
-  const timer = setInterval(() => say(`Waiting on ${opts.label}`), tick);
+  say();
+  const timer = setInterval(() => {
+    say();
+    void cancelPoll(opts.jobId)
+      .then((yes) => {
+        // Once only: the ticker keeps firing until `finally`, and the second
+        // rejection would be a loose one.
+        if (yes && !cancelled) {
+          cancelled = true;
+          rejectCancel(new JobCancelledError());
+        }
+      })
+      .catch(() => undefined);
+  }, tick);
   (timer as unknown as { unref?: () => void }).unref?.();
+  const run = opts.run();
   try {
-    return await opts.run();
+    return await Promise.race([run, cancelSignal]);
   } finally {
     clearInterval(timer);
+    if (cancelled) {
+      /*
+        The abandoned call will still settle, usually by rejecting -- a provider
+        socket closing, a timeout firing. Nobody is left to hear it, and an
+        unhandled rejection here would take the process down over a job the
+        editor already stopped on purpose.
+      */
+      void run.catch(() => undefined);
+    }
   }
 }

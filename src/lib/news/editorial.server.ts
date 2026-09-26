@@ -12,7 +12,7 @@ import {
 import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { modelChoiceLabel, opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
-import { setJobFailoverNote, setJobModelRuntime, setJobStage } from "./jobs.ts";
+import { setJobFailoverNote, setJobModelRuntime, setJobStage, waitForModel } from "./jobs.ts";
 import {
   persistEditorialCompletion,
   persistEditorialSuccess,
@@ -724,22 +724,29 @@ export async function performEditorialWork(
     throw readingFailure;
   }
   await setJobStage(job.id, "Researching the editorial");
-  const result = await (deps.writeEditorial ?? writeEditorial)({
-    userId: job.user_id,
-    newsroomId: job.newsroom_id,
-    subject: req.subject,
-    sourceText: documentEvidence || req.source_text || req.subject,
-    pointers,
-    ourStory,
-    askedFor: req.asked_for,
-    sourceKind: req.source_kind,
-    sourceRef: req.source_ref,
-    modelChoice: activeChoice,
-    modelEffort: activeEffort,
-    requestedModelChoice: requestedChoice,
-    requestedModelEffort: requestedEffort,
-    completion: { requestId: req.id, jobId: job.id },
-    localModel: queuedLocalModel ?? undefined,
+  const result = await waitForModel({
+    jobId: job.id,
+    // `activeChoice` is reassigned by the reading pass's switch handler above,
+    // and again by the writer's own, so the ticker follows the piece's model.
+    label: () => modelChoiceLabel(activeChoice),
+    run: () =>
+      (deps.writeEditorial ?? writeEditorial)({
+        userId: job.user_id,
+        newsroomId: job.newsroom_id,
+        subject: req.subject,
+        sourceText: documentEvidence || req.source_text || req.subject,
+        pointers,
+        ourStory,
+        askedFor: req.asked_for,
+        sourceKind: req.source_kind,
+        sourceRef: req.source_ref,
+        modelChoice: activeChoice,
+        modelEffort: activeEffort,
+        requestedModelChoice: requestedChoice,
+        requestedModelEffort: requestedEffort,
+        completion: { requestId: req.id, jobId: job.id },
+        localModel: queuedLocalModel ?? undefined,
+      }),
   });
 
   if (!result.ok) {
