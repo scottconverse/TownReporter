@@ -10,7 +10,8 @@ import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { useAppearance } from "@/lib/appearance-context";
 import { Dialog } from "@/components/dialog";
 
-import { Search, Plus, Moon, Sun, Menu, X, ArrowUpRight } from "lucide-react";
+import { Search, Plus, Menu, X, ArrowUpRight } from "lucide-react";
+import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
 import { listLeads, listRecentStoryWork } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 
@@ -447,38 +448,6 @@ function RunningBox({
 }
 
 /**
- * A one-second clock, but only while something is running — an idle desk pays
- * nothing for the elapsed times it is not showing. Returns the epoch in ms, so
- * every row measures against the same instant.
- */
-function useNowMs(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [active]);
-  return now;
-}
-
-type RunningJob = {
-  id: number;
-  headline: string;
-  status: string;
-  stage: string;
-  started_at: string | null;
-  updated_at: string;
-};
-
-/** m:ss, the desk's elapsed format (README "Job card anatomy"). */
-function elapsedLabel(job: RunningJob, nowMs: number): string {
-  const from = Date.parse(job.started_at ?? job.updated_at);
-  if (!Number.isFinite(from)) return "0:00";
-  const secs = Math.max(0, Math.floor((nowMs - from) / 1000));
-  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-}
-
-/**
  * The shortcut sheet behind "?" . Every line is a key the desk actually binds
  * somewhere: the triage keys on Today, ⌘S in the story workbench, Ctrl-K for
  * search here. ⌘S is listed because README "Interactions & behavior" lists it
@@ -826,6 +795,92 @@ export function InkButton({
   );
 }
 
+/** One line of a "More ▾" menu: a word, and what it does. */
+export type DeskMoreItem = {
+  label: string;
+  onSelect?: () => void;
+  disabled?: boolean;
+  /** A remove-or-stop action. The word is already the warning; this only
+   *  colors it, so a Kill in a menu reads the same as a Kill on a row. */
+  danger?: boolean;
+};
+
+/**
+ * "More ▾" — the row menu the redesign draws on Queue, Drafts and Published.
+ *
+ * There is no popover or menu component in this codebase. `<details>` is the
+ * house idiom for one (`model-picker`, `sections-setup`, and the model
+ * chooser on every lead row), so this reuses it rather than adding a
+ * positioning library and a portal: the browser supplies open/close,
+ * keyboard operation, focus order and the `aria-expanded` state for free.
+ *
+ * The two things `<details>` does not supply are added here, because a menu
+ * that stays open after a click and does not close on Escape is a trap:
+ * a pointerdown outside closes it, and Escape closes it and puts focus back
+ * on the summary so the keyboard does not land at the top of the document.
+ *
+ * This is a disclosure, not an ARIA `menu`: a real `menu` role has to own
+ * arrow-key movement between items, and claiming the role without that is a
+ * worse experience than a plain list of buttons. It is a `<ul>` of buttons.
+ */
+export function DeskMoreMenu({
+  label = "More",
+  items,
+  ariaLabel,
+}: {
+  label?: string;
+  items: DeskMoreItem[];
+  /** What this menu acts on, for a screen reader: "More actions for <headline>". */
+  ariaLabel?: string;
+}) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const summary = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const outside = (event: Event) => {
+      const el = ref.current;
+      if (!el?.open) return;
+      if (event.target instanceof Node && el.contains(event.target)) return;
+      el.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      const el = ref.current;
+      if (event.key !== "Escape" || !el?.open) return;
+      el.open = false;
+      summary.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+  return (
+    <details className="more" ref={ref}>
+      <summary className="btn quiet more-sum" ref={summary} aria-label={ariaLabel}>
+        {label} <span aria-hidden>▾</span>
+      </summary>
+      <ul className="more-menu">
+        {items.map((item) => (
+          <li key={item.label}>
+            <button
+              type="button"
+              className={"more-item" + (item.danger ? " danger" : "")}
+              disabled={item.disabled}
+              onClick={() => {
+                if (ref.current) ref.current.open = false;
+                item.onSelect?.();
+              }}
+            >
+              {item.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function Field({
   label,
   chip,
@@ -953,6 +1008,45 @@ export function Busy({ label }: { label: string }) {
     <div className="busy">
       <div className="busy-rule" />
       <p className="busy-label">{label}</p>
+    </div>
+  );
+}
+
+/*
+  ===========================================================================
+  LANE-2 PLACEHOLDER — REPLACE THIS WITH THE REAL JOB CARD.
+  ===========================================================================
+
+  The redesign draws a Job card (README "Job card anatomy"): title, model ·
+  effort, elapsed in m:ss, a stage list with a check for each finished stage and
+  a yellow fill on the current one, a progress bar, the current step, "Last
+  activity m:ss ago", and a state — Running / Stalled / Done / Failed, each with
+  its own actions. The compact variant (no stage list, 12px padding) is what
+  Drafts draws inline on a running row.
+
+  Lane 2 owns that card, and is building it against the same `desk_jobs` rows
+  this reads. Until it lands, this stands in: a `RunningJob`'s title, elapsed
+  time and current `stage` text inside a dashed outline, so a stand-in can
+  never be mistaken at a glance for the drawn card, in a screenshot or in the
+  code.
+
+  ONE SWAP POINT. Today's "Running now" and "In progress", and Drafts' running
+  rows, all render `<JobSlot>` and nothing else; when lane 2's `JobCard` exists,
+  this function's body becomes `<JobCard job={job} compact={compact} />` and
+  those three screens need no change at all. `data-job-slot` marks each one in
+  the DOM so the stand-ins are countable.
+
+  It shows only what the desk already polls: no fake progress bar, no invented
+  stage list, no model name it was not given. A placeholder that fakes the
+  missing half would hide the fact that it is missing.
+*/
+export function JobSlot({ job, nowMs, compact = false }: { job: RunningJob; nowMs: number; compact?: boolean }) {
+  return (
+    <div className={"job-slot" + (compact ? " job-slot-compact" : "")} data-job-slot="">
+      <b className="job-slot-title">{job.headline}</b>
+      <span className="job-slot-meta">
+        {elapsedLabel(job, nowMs)} · {job.stage || "Waiting to start"}
+      </span>
     </div>
   );
 }

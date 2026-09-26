@@ -30,6 +30,17 @@ const deskChromeUtils = moduleUrl(
   await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
   "desk-chrome-utils.ts",
 );
+/*
+  Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
+  desk-chrome.tsx into src/components/desk-jobs.ts (react-refresh wants a file
+  that exports components to export components only). Its only bare import is
+  react, so the REAL module compiles here.
+*/
+const deskJobsUrl = moduleUrl(
+  await readFile(new URL("../src/components/desk-jobs.ts", import.meta.url), "utf8"),
+  "desk-jobs.ts",
+  { react: REACT_URL },
+);
 const { leadOrigin } = await import(deskChromeUtils);
 
 function inlineModule(source) {
@@ -71,6 +82,32 @@ const deskChromeStub = inlineModule(`
   }
   export function leadOrigin() {
     return "scan";
+  }
+  /*
+    Redesign phase 2a: LeadRowView now carries an optional More menu (README
+    "3. Queue": "More ▾ opens the lead menu"). The stub keeps the real element
+    names -- details.more / summary.more-sum / ul.more-menu of button.more-item --
+    so a render assertion about the row still describes the markup the desk
+    ships. The outside-press and Escape behaviour needs a live DOM, and the desk
+    e2e scripts are what exercise it; this test only pins the row's shape.
+  */
+  export function DeskMoreMenu({ label = "More", items = [], ariaLabel }) {
+    return createElement(
+      "details",
+      { className: "more" },
+      createElement("summary", { className: "btn quiet more-sum", "aria-label": ariaLabel }, label),
+      createElement(
+        "ul",
+        { className: "more-menu" },
+        items.map((item) =>
+          createElement(
+            "li",
+            { key: item.label },
+            createElement("button", { type: "button", className: "more-item" }, item.label),
+          ),
+        ),
+      ),
+    );
   }
 `);
 
@@ -595,6 +632,12 @@ const claimStub = inlineModule(`
 `);
 const deskCopyStub = inlineModule(`
   export function createEditorCopy() { return {}; }
+  /*
+    Redesign phase 2a: the shell counts Queue from the same openLeads() the
+    Queue screen uses. The render test does not care about the arithmetic, only
+    that the import resolves.
+  */
+  export function openLeads(leads) { return leads ?? []; }
 `);
 // Chip() does not touch the appearance context, but desk-chrome.tsx imports it
 // (Light/Dark and Normal/Large moved there -- src/lib/appearance-context.ts),
@@ -626,9 +669,22 @@ const { Chip } = await import(
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+      "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,
+      /*
+        Redesign phase 2a: the shell's shortcut sheet ("?") is the phase 0
+        Dialog (src/components/dialog.tsx) -- the only dialog the desk uses.
+        Chip() never opens it, but desk-chrome.tsx cannot load without the
+        specifier resolving, the same reason the appearance context is stubbed
+        here. desk-text-size-render.test.mjs stubs it the same way.
+      */
+      "@/components/dialog": inlineModule(
+        "export function Dialog() { return null; } export function ChoiceCard() { return null; }",
+      ),
       "lucide-react": import.meta.resolve("lucide-react"),
-      "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
+      "@/lib/news/desk": inlineModule(
+        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; }",
+      ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

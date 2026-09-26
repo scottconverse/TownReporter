@@ -50,7 +50,7 @@ test("the drafts list reads the desk's real state out of a text column", async (
     );
     create table desk_jobs (
       id integer primary key, newsroom_id integer, kind text, subject_id integer, status text,
-      stage text, started_at timestamptz, updated_at timestamptz, model_choice text
+      stage text, started_at timestamptz, updated_at timestamptz, model_choice text, error text
     );
   `);
   const nameCheck = (unresolved: number) =>
@@ -92,9 +92,13 @@ test("the drafts list reads the desk's real state out of a text column", async (
             (5,4,1,'Not touched yet','d','housing','news','Not touched yet','model','2026-09-26T07:00:00.000Z','{"nameCheck":{"version":1,"complete":false}}');
     -- Lead 1 is being written right now, so its newest job is 'running' and its
     -- row sorts by the heartbeat rather than by the draft's own updated_at.
-    insert into desk_jobs(id,newsroom_id,kind,subject_id,status,stage,started_at,updated_at,model_choice)
-      values(7,1,'draft',1,'completed','Done','2026-09-26T08:30:00.000Z','2026-09-26T08:35:00.000Z','sonnet'),
-            (8,1,'draft',1,'running','Researching the story','2026-09-26T09:30:00.000Z','2026-09-26T09:59:00.000Z','codex-sol');
+    insert into desk_jobs(id,newsroom_id,kind,subject_id,status,stage,started_at,updated_at,model_choice,error)
+      values(7,1,'draft',1,'completed','Done','2026-09-26T08:30:00.000Z','2026-09-26T08:35:00.000Z','sonnet',null),
+            (8,1,'draft',1,'running','Researching the story','2026-09-26T09:30:00.000Z','2026-09-26T09:59:00.000Z','codex-sol',null),
+            -- A failed job carries the reason the Drafts row prints beside the
+            -- chip; the row for lead 4 shows it and reads the newest job, so a
+            -- later running job on the same lead would hide it.
+            (9,1,'draft',4,'failed','Writing','2026-09-26T07:10:00.000Z','2026-09-26T07:14:00.000Z','codex-sol','Codex quota reached');
   `);
   try {
     const result = await pg.query<Record<string, unknown>>(draftsQuery());
@@ -120,8 +124,11 @@ test("the drafts list reads the desk's real state out of a text column", async (
     assert.equal(bare.names_unresolved, 0, "a name check with no rows counts zero, and does not throw");
     assert.equal(bare.name_check_complete, false);
     assert.equal(bare.evidence_required, false);
-    assert.equal(bare.job_status, null);
     assert.equal(bare.headline, "Not touched yet", "a draft with no headline falls back to the lead's");
+    assert.equal(bare.job_status, "failed");
+    assert.equal(bare.job_error, "Codex quota reached", "the failed row's reason rides with the row");
+    assert.equal(imported.job_status, null, "a lead with no job at all reads null, not undefined");
+    assert.equal(imported.job_error, null);
   } finally {
     await pg.close();
   }

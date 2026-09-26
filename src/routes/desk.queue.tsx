@@ -18,6 +18,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
+import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -29,6 +30,24 @@ import {
 } from "@/lib/news/draft-batch";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
+
+/** The drawn tab set (README "3. Queue"). */
+type QueueFilter = "open" | "held" | "killed" | "printed" | "all";
+
+/** Sort: Best first is the score the scanner gave; the other two are the age
+ *  of the lead, for an editor who came back after a day away. */
+type QueueSort = "best" | "newest" | "oldest";
+
+/**
+ * What "Select all ... leads shown" calls the tab it is selecting. "all" says
+ * nothing extra, so it is left out rather than printed as "all leads shown".
+ */
+function bulkSelectLabel(filter: QueueFilter): string {
+  if (filter === "open") return "open";
+  if (filter === "printed") return "matching printed";
+  if (filter === "all") return "";
+  return filter;
+}
 
 function QueuePage() {
   const { sections } = useEditorSections();
@@ -128,7 +147,18 @@ function QueuePage() {
     },
     onError: (e) => setDeleteError(e instanceof Error ? e.message : "That would not go back."),
   });
-  const [filter, setFilter] = useState<"all" | "new" | "drafted" | "held" | "killed">("all");
+  /*
+    Redesign phase 2a (README "3. Queue"): the tabs are Open, Held, Killed,
+    ≈ Printed and All -- the working set first, then the three ways a lead
+    leaves it, then everything including what has printed. Two filters the old
+    strip carried are gone as TABS (New and Drafted) because both are the Open
+    set; every row still chips its own status, and the search and section
+    controls cover narrowing within Open.
+  */
+  const [filter, setFilter] = useState<QueueFilter>("open");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<QueueSort>("best");
+  const [sectionFilter, setSectionFilter] = useState("all");
   const [focusTarget, setFocusTarget] = useState<3 | 4 | 5>(3);
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
@@ -287,26 +317,71 @@ function QueuePage() {
     killed: leads.filter((l) => l.status === "killed").length,
   };
   const printed = published.data ?? [];
-  const shown =
+  /*
+    "≈ Printed": the leads the desk already matches to a piece that ran
+    (the same `nearDuplicate` the row's chip and "Kill as duplicate" use).
+    It is a real, checkable set on this screen, not a count of nothing.
+  */
+  const printedMatches = leads.filter((l) => nearDuplicate(l, printed) !== null);
+  const queueFilters: { key: QueueFilter; label: string; count: number }[] = [
+    { key: "open", label: "Open", count: working.length },
+    { key: "held", label: "Held", count: counts.held },
+    { key: "killed", label: "Killed", count: counts.killed },
+    { key: "printed", label: "≈ Printed", count: printedMatches.length },
+    { key: "all", label: "All", count: leads.length },
+  ];
+  const byFilter =
     filter === "killed"
+      ? leads.filter((l) => l.status === "killed")
+      : filter === "held"
+        ? leads.filter((l) => l.status === "held")
+        : filter === "printed"
+          ? printedMatches
+          : filter === "open"
+            ? working
+            : leads;
+  const needle = search.trim().toLowerCase();
+  const bySearch = needle
+    ? byFilter.filter((l) =>
+        `${l.headline} ${l.why ?? ""} ${l.topic ?? ""}`.toLowerCase().includes(needle),
+      )
+    : byFilter;
+  const filtered = sectionFilter === "all" ? bySearch : bySearch.filter((l) => l.topic === sectionFilter);
+  const byAge = (a: LeadRow, b: LeadRow) =>
+    sort === "newest"
+      ? Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id
+      : Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id;
+  const shown =
+    sort === "best" && filter === "killed"
       ? // What keeps coming back belongs on top of the Killed tab -- that is
         // the whole point of stamping a resurfaced lead instead of quietly
         // hiding it. Leads never resurfaced (last_resurfaced_at null) sort
         // after ones that have, oldest kill first within that group.
-        leads
-          .filter((l) => l.status === "killed")
-          .sort((a, b) => {
-            const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
-            const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
-            if (at !== bt) return bt - at;
-            return b.id - a.id;
-          })
-      : (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
-          (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+        [...filtered].sort((a, b) => {
+          const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
+          const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
+          if (at !== bt) return bt - at;
+          return b.id - a.id;
+        })
+      : [...filtered].sort(
+          sort === "best" ? (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0) : byAge,
         );
   const shownIds = shown.map((lead) => lead.id);
   const selectedDeleteLeads = selectedDeleteLeadIds.filter((leadId) => shownIds.includes(leadId));
   const allShownSelected = shownIds.length > 0 && shownIds.every((leadId) => selectedDeleteLeadIds.includes(leadId));
+  /*
+    The bulk strip acts on the rows the checkbox column has selected -- the
+    same selection bulk Delete uses, so there is one checkbox per row and one
+    bar, and every press in the bar is a press the row itself already offers.
+  */
+  const selectedLeads = leads.filter((lead) => selectedDeleteLeads.includes(lead.id));
+  const bulkDraftable = selectedLeads.filter(
+    (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
+  );
+  const bulkBusy = setStatus.isPending || startBatch.isPending || bulkRemove.isPending;
+  const bulkSetStatus = (status: "held" | "killed") => {
+    for (const lead of selectedLeads) setStatus.mutate({ id: lead.id, status });
+  };
 
   return (
     <DeskShell title="The queue" kicker="Leads">
@@ -474,82 +549,185 @@ function QueuePage() {
         )}
       </section>
 
-      <div className="filters">
-        {(["all", "new", "drafted", "held", "killed"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            className={"filter" + (filter === k ? " on" : "")}
-            aria-pressed={filter === k}
-            onClick={() => {
-              setFilter(k);
+      <div className="queue-controls">
+        <Field label="Search leads">
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
               setSelectedDeleteLeadIds([]);
               setConfirmingBulkDelete(false);
               setBulkDeleteNotice("");
             }}
-          >
-            {k}{" "}
-            {/*
-              Unit AK item 7: the Held tab's count is a badge, not one more
-              number in a row of numbers -- a lead sitting in Held is waiting
-              on the editor, which is the state the owner could not see. The
-              visible text is still "held <n>", so anything that finds the tab
-              by its words is unchanged.
-            */}
-            <span
-              className={"filter-badge" + (k === "held" && counts.held > 0 ? " waiting" : "")}
+            placeholder="Headline, why now or section"
+          />
+        </Field>
+        <Field label="Sort">
+          <select value={sort} onChange={(event) => setSort(event.target.value as QueueSort)}>
+            <option value="best">Best first</option>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </Field>
+        <Field label="Section">
+          <select value={sectionFilter} onChange={(event) => setSectionFilter(event.target.value)}>
+            <option value="all">All sections</option>
+            {sections.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="seg-strip queue-tabs" role="group" aria-label="Filter leads">
+          {queueFilters.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className={filter === f.key ? "on" : ""}
+              aria-pressed={filter === f.key}
               title={
-                k === "held" && counts.held > 0
-                  ? `${counts.held} lead${counts.held === 1 ? "" : "s"} waiting on you under Held`
+                f.key === "held" && f.count > 0
+                  ? `${f.count} lead${f.count === 1 ? "" : "s"} waiting on you under Held`
                   : undefined
               }
+              onClick={() => {
+                setFilter(f.key);
+                setSelectedDeleteLeadIds([]);
+                setConfirmingBulkDelete(false);
+                setBulkDeleteNotice("");
+              }}
             >
-              {counts[k]}
-            </span>
-          </button>
-        ))}
+              {f.label} ·{" "}
+              {/*
+                Unit AK item 7: the Held count is a badge, not one more number
+                in a row of numbers -- a lead sitting in Held is waiting on the
+                editor, which is the state the owner could not see. The visible
+                text is still "held <n>", so anything that finds the tab by its
+                words is unchanged.
+              */}
+              <span className={"filter-badge" + (f.key === "held" && f.count > 0 ? " waiting" : "")}>
+                {f.count}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {shown.length > 0 ? (
-        <section className="queue-bulk-delete" aria-label="Bulk delete leads">
-          <label>
-            <input
-              type="checkbox"
-              checked={allShownSelected}
-              onChange={(event) => {
-                setConfirmingBulkDelete(false);
-                setBulkDeleteNotice("");
-                setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
-              }}
-            />{" "}
-            Select all {filter === "all" ? "open" : filter} leads shown ({shown.length})
-          </label>
+        <section className="queue-bulk-delete queue-bulk" aria-label="Bulk actions for the leads shown">
+          <span className="queue-bulk-what">
+            <label>
+              <input
+                type="checkbox"
+                className="queue-check"
+                checked={allShownSelected}
+                onChange={(event) => {
+                  setConfirmingBulkDelete(false);
+                  setBulkDeleteNotice("");
+                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+                }}
+              />{" "}
+              Select all{bulkSelectLabel(filter) ? ` ${bulkSelectLabel(filter)}` : ""} leads shown (
+              {shown.length})
+            </label>
+          </span>
           {selectedDeleteLeads.length > 0 ? (
-            confirmingBulkDelete ? (
-              <div className="queue-bulk-delete-confirm">
-                <span>
-                  Delete {selectedDeleteLeads.length} selected lead{selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published articles stay on the paper.
-                </span>
+            <>
+              <span className="queue-bulk-count">{selectedDeleteLeads.length} selected</span>
+              <div className="queue-bulk-acts">
+                {/*
+                  Start N stories is the same batch the desk has always run
+                  (startDraftBatch, one job per lead, five at a time); the bar
+                  is a second way to reach it, not a new mechanism. A held,
+                  killed or printed lead cannot be drafted -- that is the
+                  backend's rule, so the press says so instead of failing.
+                */}
                 <InkButton
-                  tone="danger"
-                  small
-                  disabled={bulkRemove.isPending}
-                  onClick={() => bulkRemove.mutate(selectedDeleteLeads)}
+                  disabled={
+                    startBatch.isPending ||
+                    bulkDraftable.length === 0 ||
+                    bulkDraftable.length > 5
+                  }
+                  ariaLabel={`Start ${bulkDraftable.length} ${
+                    bulkDraftable.length === 1 ? "story" : "stories"
+                  } from the selected leads`}
+                  onClick={() =>
+                    startBatch.mutate({
+                      leadIds: bulkDraftable.map((l) => l.id),
+                      runtime: batchRuntime,
+                      modelEffort: batchEffort,
+                    })
+                  }
                 >
-                  {bulkRemove.isPending ? "Deleting…" : `Yes, delete ${selectedDeleteLeads.length}`}
+                  {startBatch.isPending
+                    ? "Starting…"
+                    : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
-                <InkButton tone="quiet" small disabled={bulkRemove.isPending} onClick={() => setConfirmingBulkDelete(false)}>
-                  Keep
+                <InkButton
+                  tone="quiet"
+                  disabled={setStatus.isPending}
+                  onClick={() => bulkSetStatus("held")}
+                >
+                  Hold
+                </InkButton>
+                <InkButton
+                  tone="quiet-danger"
+                  disabled={setStatus.isPending}
+                  onClick={() => bulkSetStatus("killed")}
+                >
+                  Kill
+                </InkButton>
+                {confirmingBulkDelete ? (
+                  <div className="queue-bulk-delete-confirm">
+                    <span>
+                      Delete {selectedDeleteLeads.length} selected lead{selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published articles stay on the paper.
+                    </span>
+                    <InkButton
+                      tone="danger"
+                      disabled={bulkRemove.isPending}
+                      onClick={() => bulkRemove.mutate(selectedDeleteLeads)}
+                    >
+                      {bulkRemove.isPending ? "Deleting…" : `Yes, delete ${selectedDeleteLeads.length}`}
+                    </InkButton>
+                    <InkButton tone="quiet" disabled={bulkRemove.isPending} onClick={() => setConfirmingBulkDelete(false)}>
+                      Keep
+                    </InkButton>
+                  </div>
+                ) : (
+                  <InkButton tone="quiet-danger" onClick={() => setConfirmingBulkDelete(true)}>
+                    Delete selected ({selectedDeleteLeads.length})
+                  </InkButton>
+                )}
+                <InkButton
+                  tone="quiet"
+                  disabled={bulkBusy}
+                  onClick={() => {
+                    setSelectedDeleteLeadIds([]);
+                    setConfirmingBulkDelete(false);
+                    setBulkDeleteNotice("");
+                  }}
+                >
+                  Clear
                 </InkButton>
               </div>
-            ) : (
-              <InkButton tone="quiet-danger" small onClick={() => setConfirmingBulkDelete(true)}>
-                Delete selected ({selectedDeleteLeads.length})
-              </InkButton>
-            )
+              {bulkDraftable.length !== selectedDeleteLeads.length ? (
+                <span className="queue-bulk-what">
+                  {selectedDeleteLeads.length - bulkDraftable.length} of these cannot be drafted
+                  (held, killed or already printed).
+                </span>
+              ) : null}
+            </>
           ) : null}
         </section>
       ) : null}
+
+      <div className="queue-head" aria-hidden="true">
+        <span>Score</span>
+        <span>Lead</span>
+        <span>Evidence · Filed · Actions</span>
+      </div>
 
       {filter === "killed" && shown.some((l) => (l.resurfaced_count ?? 0) > 0) ? (
         <p className="meta seen-again-note">{SEEN_AGAIN_EXPLAINER}</p>
@@ -611,6 +789,12 @@ function QueuePage() {
           )}
         </p>
       ) : (
+        <>
+        <div className="queue-head" aria-hidden="true">
+          <span>Score</span>
+          <span>Lead</span>
+          <span>Evidence · Filed · Actions</span>
+        </div>
         <div className="lead-list roomy">
           {shown.map((l) => {
             const dupMatch = nearDuplicate(l, printed);
@@ -620,6 +804,41 @@ function QueuePage() {
               lead={l}
               dup={dupMatch}
               roomy
+              /*
+                "More ▾ opens the lead menu" (README "3. Queue"). The labels
+                are deliberately different words from the visible buttons --
+                the desk's own flows find the row's Delete/Hold/Kill by name,
+                and a menu that repeated them exactly would make those queries
+                ambiguous. Every item calls the handler its visible twin calls.
+              */
+              more={[
+                {
+                  label: "Open the story workbench",
+                  onSelect: () =>
+                    void navigate({
+                      to: "/desk/story/$leadId",
+                      params: { leadId: String(l.id) },
+                    }),
+                },
+                ...(l.status !== "held" && l.status !== "killed" && l.status !== "published"
+                  ? [
+                      {
+                        label: "Hold this lead",
+                        onSelect: () => setStatus.mutate({ id: l.id, status: "held" }),
+                      },
+                      {
+                        label: "Kill this lead",
+                        onSelect: () => setStatus.mutate({ id: l.id, status: "killed" }),
+                      },
+                    ]
+                  : [
+                      {
+                        label: "Put it back in the new queue",
+                        onSelect: () => setStatus.mutate({ id: l.id, status: "new" }),
+                      },
+                    ]),
+                { label: "Delete this lead", onSelect: () => remove.mutate(l.id) },
+              ]}
               onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
               onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
               onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
@@ -676,6 +895,7 @@ function QueuePage() {
             );
           })}
         </div>
+        </>
       )}
     </DeskShell>
   );

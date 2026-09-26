@@ -2296,6 +2296,7 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
       job_started_at: string | null;
       job_updated_at: string | null;
       job_model_choice: string | null;
+      job_error: string | null;
       evidence_required: boolean;
       evidence_decision: string | null;
       evidence_checked_at: string | null;
@@ -2311,13 +2312,13 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
                l.headline as lead_headline, l.status as lead_status, l.origin,
                l.newsworthiness, l.why,
                /*
-                 `research_json` is a text column (migration 0010) and is
-                 always written with JSON.stringify. It is projected to jsonb
-                 HERE, in the query, so the handful of small keys this screen
-                 reads -- the evidence review's required/decision, the
-                 imported-text flag and the name check -- do not drag the whole
-                 memo, including the archived original draft body inside
-                 `evidenceReview.original`, across the wire on every poll.
+                 research_json is a text column (migration 0010) and is always
+                 written with JSON.stringify. It is projected to jsonb HERE, in
+                 the query, so the handful of small keys this screen reads --
+                 the evidence review's required/decision, the imported-text
+                 flag and the name check -- do not drag the whole memo,
+                 including the archived original draft body inside
+                 evidenceReview.original, across the wire on every poll.
                */
                coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
         from drafts d
@@ -2335,12 +2336,16 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
              jb.status as job_status, jb.stage as job_stage,
              jb.started_at as job_started_at, jb.updated_at as job_updated_at,
              jb.model_choice as job_model_choice,
-             -- `coalesce(..., false)`: a missing key makes `->>` NULL, and
-             -- `NULL = 'true'` is NULL rather than false, which would arrive on
+             -- The failed row prints WHY it stopped ("Codex quota reached"),
+             -- which is the one thing a "Draft failed" chip cannot say. The job
+             -- writes it to desk_jobs.error (jobs.ts, 800 chars max).
+             jb.error as job_error,
+             -- coalesce(..., false): a missing key makes ->> NULL, and
+             -- NULL = 'true' is NULL rather than false, which would arrive on
              -- the desk as a third value where the row means "no".
              coalesce((v.research->'evidenceReview'->>'required') = 'true', false) as evidence_required,
              v.research->'evidenceReview'->>'decision' as evidence_decision,
-             -- When the reconciliation pass last ran (`draft-reconcile.server.ts`
+             -- When the reconciliation pass last ran (draft-reconcile.server.ts
              -- stamps this key), and when the name check last ran. The row prints
              -- "checked 8:02 a.m." off these two; a row with neither says nothing
              -- rather than a time it does not have.
@@ -2354,13 +2359,13 @@ export const listDraftsDesk = createServerFn({ method: "GET" })
                else 0 end as names_unresolved
       from latest_draft v
       left join lateral (
-        select j.status, j.stage, j.started_at, j.updated_at, j.model_choice
+        select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
         from desk_jobs j
         where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
         order by j.id desc limit 1
       ) jb on true
       -- Newest work first: the draft an editor just touched is the one they
-      -- came back for. A running job moves its own `updated_at` heartbeat, so
+      -- came back for. A running job moves its own updated_at heartbeat, so
       -- a story being written right now holds the top of the list while it is
       -- being written.
       order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc

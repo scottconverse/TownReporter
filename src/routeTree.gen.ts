@@ -24,6 +24,7 @@ import { Route as ApiViewRouteImport } from './routes/api/view'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
 import { Route as DeskDarkRouteImport } from './routes/desk.dark'
+import { Route as DeskDraftsRouteImport } from './routes/desk.drafts'
 import { Route as DeskFollowUpsRouteImport } from './routes/desk.follow-ups'
 import { Route as DeskImportRouteImport } from './routes/desk.import'
 import { Route as DeskLegalRemovalsRouteImport } from './routes/desk.legal-removals'
@@ -116,6 +117,11 @@ const DeskIndexRoute = DeskIndexRouteImport.update({
 const DeskDarkRoute = DeskDarkRouteImport.update({
   id: '/dark',
   path: '/dark',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskDraftsRoute = DeskDraftsRouteImport.update({
+  id: '/drafts',
+  path: '/drafts',
   getParentRoute: () => DeskRoute,
 } as any)
 const DeskFollowUpsRoute = DeskFollowUpsRouteImport.update({
@@ -224,6 +230,7 @@ export interface FileRoutesByFullPath {
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
+  '/desk/drafts': typeof DeskDraftsRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/import': typeof DeskImportRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
+  '/desk/drafts': typeof DeskDraftsRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/import': typeof DeskImportRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
@@ -294,6 +302,7 @@ export interface FileRoutesById {
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
+  '/desk/drafts': typeof DeskDraftsRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/import': typeof DeskImportRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
@@ -331,6 +340,7 @@ export interface FileRouteTypes {
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
+    | '/desk/drafts'
     | '/desk/follow-ups'
     | '/desk/import'
     | '/desk/legal-removals'
@@ -365,6 +375,7 @@ export interface FileRouteTypes {
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
+    | '/desk/drafts'
     | '/desk/follow-ups'
     | '/desk/import'
     | '/desk/legal-removals'
@@ -400,6 +411,7 @@ export interface FileRouteTypes {
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
+    | '/desk/drafts'
     | '/desk/follow-ups'
     | '/desk/import'
     | '/desk/legal-removals'
@@ -548,6 +560,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskDarkRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/drafts': {
+      id: '/desk/drafts'
+      path: '/drafts'
+      fullPath: '/desk/drafts'
+      preLoaderRoute: typeof DeskDraftsRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/follow-ups': {
       id: '/desk/follow-ups'
       path: '/follow-ups'
@@ -679,6 +698,7 @@ declare module '@tanstack/react-router' {
 
 interface DeskRouteChildren {
   DeskDarkRoute: typeof DeskDarkRoute
+  DeskDraftsRoute: typeof DeskDraftsRoute
   DeskFollowUpsRoute: typeof DeskFollowUpsRoute
   DeskImportRoute: typeof DeskImportRoute
   DeskLegalRemovalsRoute: typeof DeskLegalRemovalsRoute
@@ -698,6 +718,7 @@ interface DeskRouteChildren {
 
 const DeskRouteChildren: DeskRouteChildren = {
   DeskDarkRoute: DeskDarkRoute,
+  DeskDraftsRoute: DeskDraftsRoute,
   DeskFollowUpsRoute: DeskFollowUpsRoute,
   DeskImportRoute: DeskImportRoute,
   DeskLegalRemovalsRoute: DeskLegalRemovalsRoute,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Chip, InkButton, Score } from "@/components/desk-chrome";
+import { Chip, DeskMoreMenu, InkButton, Score } from "@/components/desk-chrome";
 import { leadOrigin } from "@/components/desk-chrome-utils";
 import { formatAge } from "@/lib/paper";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -49,6 +49,7 @@ export function LeadRowView({
   batchDisabled = false,
   onBatchSelect,
   roomy = false,
+  more,
 }: {
   lead: LeadRow;
   dup?: PrintedDup | null;
@@ -80,6 +81,16 @@ export function LeadRowView({
   batchDisabled?: boolean;
   onBatchSelect?: (selected: boolean) => void;
   roomy?: boolean;
+  /**
+   * Redesign phase 2a (README "3. Queue": "More ▾ opens the lead menu").
+   *
+   * Secondary actions, so the row's first line is the two or three presses an
+   * editor makes all day. Opt-in: a screen that passes nothing renders exactly
+   * the row it rendered before this prop existed, and every item here calls a
+   * handler the row's visible buttons already call -- the menu adds no action
+   * the desk cannot do.
+   */
+  more?: { label: string; onSelect: () => void }[];
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
@@ -271,6 +282,9 @@ export function LeadRowView({
             )
           ) : null}
         </div>
+        {more && more.length > 0 ? (
+          <DeskMoreMenu ariaLabel={`More actions for ${lead.headline}`} items={more} />
+        ) : null}
         {confirming ? (
           <p className="del-warn">
             Deletes this lead and any draft on it.

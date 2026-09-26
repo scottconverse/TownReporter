@@ -151,6 +151,20 @@ const deskChromeUtilsUrl = moduleUrl(
   "desk-chrome-utils.ts",
 );
 
+/*
+  Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
+  desk-chrome.tsx into src/components/desk-jobs.ts (react-refresh wants a file
+  that exports components to export components only -- desk-chrome.tsx had been
+  exporting useNowMs and elapsedLabel besides). Its only bare import is react,
+  so the REAL module compiles here and the elapsed format stays single-sourced
+  rather than being re-implemented in this stub.
+*/
+const deskJobsUrl = moduleUrl(
+  await readFile(new URL("../src/components/desk-jobs.ts", import.meta.url), "utf8"),
+  "desk-jobs.ts",
+  { react: import.meta.resolve("react") },
+);
+
 const { DeskShell } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
@@ -170,6 +184,7 @@ const { DeskShell } = await import(
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+      "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,
       "@/components/dialog": dialogStub,
       react: import.meta.resolve("react"),

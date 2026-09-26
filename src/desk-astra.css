@@ -2358,3 +2358,567 @@
     align-items: center;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   PHASE 2a: THE SHELL'S OWN SURFACES — Today, Queue, Drafts.
+
+   Everything here is drawn from docs/design/handoff-2026-09-26 (README
+   "Screens: editor's desk") against the tokens design-system/README.md
+   defines. Two rules decide most of what is below and neither is negotiable:
+   square corners everywhere, and 44px as the smallest thing a thumb is asked
+   to hit. Nothing informational is set below 14px -- the floor
+   scripts/desk-min-font.test.mjs guards -- which is also why every size is
+   written `calc(Npx * var(--ts))` and not in rem: Text: Large has to reach
+   these too.
+--------------------------------------------------------------------------- */
+
+/* "More ▾" -- the row menu (DeskMoreMenu in desk-chrome.tsx).
+   Square, 2px ink border, no shadow: the one shadow the design allows is on a
+   dialog, and this is a disclosure attached to its row, not a floating
+   window. */
+.desk-ltr.astra .more {
+  position: relative;
+  display: inline-block;
+}
+.desk-ltr.astra .more-sum {
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.desk-ltr.astra .more-sum::-webkit-details-marker {
+  display: none;
+}
+.desk-ltr.astra .more-sum::marker {
+  content: "";
+}
+.desk-ltr.astra .more[open] .more-sum {
+  background: var(--hover);
+}
+.desk-ltr.astra .more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 232px;
+  background: var(--bg);
+  border: 2px solid var(--fg);
+}
+.desk-ltr.astra .more-menu .more-item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  color: var(--fg);
+  cursor: pointer;
+}
+.desk-ltr.astra .more-menu li:last-child .more-item {
+  border-bottom: 0;
+}
+.desk-ltr.astra .more-menu .more-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--a) 22%, transparent);
+}
+.desk-ltr.astra .more-menu .more-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.desk-ltr.astra .more-menu .more-item.danger {
+  color: var(--danger);
+}
+.desk-ltr.astra .more-menu .more-item.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a
+   stand-in can never be mistaken for the compact Job card the design draws
+   (Job card anatomy: stage list, progress bar, last activity). */
+.desk-ltr.astra .job-slot {
+  border: 1px dashed var(--line);
+  padding: 12px;
+  min-width: 0;
+}
+.desk-ltr.astra .job-slot-title {
+  display: block;
+  font: 700 calc(17px * var(--ts)) var(--fd);
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .job-slot-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+  overflow-wrap: anywhere;
+}
+/* The compact variant the design draws inline in a Drafts row and a Today
+   card: no stage list and 12px padding -- the same box as the full card, one
+   step tighter. Both variants carry the dashed outline so a stand-in can
+   never be mistaken for lane 2's Job card. */
+.desk-ltr.astra .job-slot-compact {
+  padding: 12px;
+  background: var(--bg2);
+}
+
+/* State chips the new screens use on top of the shared `.chip`. The words
+   carry the state; the border carries the tone. */
+.desk-ltr.astra .chip.d-run {
+  background: var(--a);
+  border-color: var(--a);
+  color: #111;
+}
+.desk-ltr.astra .chip.d-ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.desk-ltr.astra .chip.d-warn {
+  border: 2px solid var(--warn);
+  color: var(--warn);
+}
+.desk-ltr.astra .chip.d-danger {
+  border: 2px solid var(--danger);
+  color: var(--danger);
+}
+.desk-ltr.astra .chip.d-quiet {
+  border-style: dashed;
+  border-color: var(--fg2);
+  color: var(--fg2);
+}
+
+/* ---------------------------------------------------------------------------
+   TODAY
+--------------------------------------------------------------------------- */
+
+/* The four-step strip: four equal cells with a 1px --line gap between them,
+   drawn by making the grid's own background the rule. */
+.desk-ltr.astra .today-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  margin-top: 22px;
+}
+.desk-ltr.astra .today-step {
+  background: var(--bg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.desk-ltr.astra .today-step-n {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  font: 800 calc(15px * var(--ts)) var(--fd);
+}
+.desk-ltr.astra .today-step.now .today-step-n {
+  background: var(--a);
+  border-color: var(--a);
+  color: #111;
+}
+.desk-ltr.astra .today-step-name {
+  font: 700 calc(14px * var(--ts)) var(--fd);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg2);
+}
+.desk-ltr.astra .today-step-count {
+  font: 800 calc(40px * var(--ts)) var(--fd);
+  line-height: 1;
+}
+.desk-ltr.astra .today-step-unit {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+
+.desk-ltr.astra .today-running {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+/* Tonight's edition: 2px yellow border, one row per story. */
+.desk-ltr.astra .today-edition {
+  border: 2px solid var(--a);
+  padding: 18px;
+  margin-top: 14px;
+}
+.desk-ltr.astra .today-edition-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 18px;
+  align-items: start;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .today-edition-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.desk-ltr.astra .today-edition-sec {
+  font: 700 calc(14px * var(--ts)) var(--fd);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg2);
+}
+.desk-ltr.astra .today-edition-hl {
+  font: 500 calc(17px * var(--ts)) var(--literata, serif);
+  margin: 4px 0 0;
+}
+.desk-ltr.astra .today-edition-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.desk-ltr.astra .today-edition-act {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+/* In progress: 3 draft cards, each with a 4px top border that carries the
+   stage (line = not started, ink = the editor's own, yellow = running). */
+.desk-ltr.astra .today-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.desk-ltr.astra .today-card {
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--line);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.desk-ltr.astra .today-card.mine {
+  border-top-color: var(--fg);
+}
+.desk-ltr.astra .today-card.live {
+  border-top-color: var(--a);
+}
+.desk-ltr.astra .today-card-stage {
+  font: 700 calc(14px * var(--ts)) var(--fd);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg2);
+}
+.desk-ltr.astra .today-card-hl {
+  font: 700 calc(19px * var(--ts)) var(--fd);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* New leads: a 3px bottom rule under the header, then rows. */
+.desk-ltr.astra .today-leads-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  border-bottom: 3px solid var(--fg);
+  padding-bottom: 10px;
+}
+.desk-ltr.astra .today-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 12px;
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .today-legend kbd {
+  font: 800 calc(14px * var(--ts)) var(--fd);
+  color: var(--fg);
+}
+.desk-ltr.astra .today-lead {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .today-lead.sel {
+  background: var(--bg2);
+  /* inset, so selecting a row never moves the text beside it */
+  box-shadow: inset 4px 0 0 0 var(--sel);
+}
+.desk-ltr.astra .today-lead.acted {
+  opacity: 0.6;
+}
+.desk-ltr.astra .today-lead-hl {
+  font: 700 calc(19px * var(--ts)) var(--fd);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .today-lead-why {
+  font: 400 calc(16px * var(--ts)) var(--literata, serif);
+  color: var(--fg2);
+  margin: 6px 0 0;
+  text-wrap: pretty;
+}
+.desk-ltr.astra .today-lead-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.desk-ltr.astra .today-lead-row2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   DRAFTS
+--------------------------------------------------------------------------- */
+/* The drawn row: `grid-template-columns:200px minmax(0,1fr) 170px auto` --
+   the state chip, then section-and-origin over the headline, then the meta
+   column, then the row's own action and its More menu. */
+.desk-ltr.astra .drafts-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 170px auto;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .drafts-state {
+  justify-self: start;
+}
+.desk-ltr.astra .drafts-main {
+  min-width: 0;
+}
+.desk-ltr.astra .drafts-overline {
+  display: block;
+  font: 800 calc(14px * var(--ts)) var(--fd);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg2);
+}
+.desk-ltr.astra .drafts-hl {
+  display: block;
+  font: 700 calc(17px * var(--ts))/1.25 var(--fd);
+  color: var(--fg);
+  text-decoration: none;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .drafts-meta {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .drafts-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.desk-ltr.astra .drafts-job {
+  grid-column: 1 / -1;
+}
+
+/* ---------------------------------------------------------------------------
+   QUEUE
+--------------------------------------------------------------------------- */
+.desk-ltr.astra .queue-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 18px;
+  margin-top: 8px;
+}
+/* The filter strip the redesign draws on Queue and Drafts: one bordered row of
+   segment choices, the active one filled with ink. `.seg-opt` in styles.css
+   sets its own 5px/12px padding and falls to a 40px floor at <=700
+   (styles.css:1769), both under the 44px tap target the design rules require,
+   so the strip is its own class here rather than an edit to the shared rule a
+   sibling lane is also touching. */
+.desk-ltr.astra .seg-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra .seg-strip > button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: none;
+  color: var(--fg);
+  font: 700 calc(14px * var(--ts)) var(--fd);
+  cursor: pointer;
+}
+.desk-ltr.astra .seg-strip > button:last-child {
+  border-right: 0;
+}
+.desk-ltr.astra .seg-strip > button.on,
+.desk-ltr.astra .seg-strip > button[aria-pressed="true"] {
+  background: var(--fg);
+  color: var(--bg);
+}
+/* The bulk bar is a YELLOW STRIP ON ITS OWN ROW below the controls (the v3.1
+   fix in CHANGELOG-v3.md): it used to sit inline with the filters, where
+   acting on rows moved the controls the editor was aiming at. */
+.desk-ltr.astra .queue-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  background: var(--a);
+  color: #111;
+  border: 2px solid var(--a);
+}
+.desk-ltr.astra .queue-bulk-what {
+  font: 800 calc(15px * var(--ts)) var(--fd);
+}
+.desk-ltr.astra .queue-bulk .btn {
+  border-color: #111;
+  color: #111;
+  background: transparent;
+}
+.desk-ltr.astra .queue-bulk .btn.solid {
+  background: #111;
+  border-color: #111;
+  color: var(--a);
+}
+.desk-ltr.astra .queue-bulk .btn:hover:not(:disabled) {
+  background: color-mix(in srgb, #111 14%, transparent);
+}
+.desk-ltr.astra .queue-bulk .btn.solid:hover:not(:disabled) {
+  background: color-mix(in srgb, #111 84%, var(--a));
+}
+.desk-ltr.astra .queue-check {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+}
+/* The controls row's search box. Inputs in this scope are 42px (desk-astra.css
+   `:where(input...)`), which is two pixels under the floor the design rules
+   set, so the control the editor is aiming at takes the full target. */
+.desk-ltr.astra .queue-search input {
+  min-height: 44px;
+  min-width: 240px;
+}
+.desk-ltr.astra .queue-evidence,
+.desk-ltr.astra .queue-filed {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .queue-filed {
+  white-space: nowrap;
+}
+.desk-ltr.astra .queue-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* The drawn table header (README "3. Queue"), sitting on the same three-column
+   grid the lead rows already use so the labels land over the cells they name:
+   score, then the lead, then the flags/actions column where the evidence and
+   filed ages print. The rows themselves are unchanged -- their internals are
+   pinned by scripts/lead-badge-render.test.mjs and by the desk's own flows --
+   so this line names the columns rather than re-laying-out the row. */
+.desk-ltr.astra .queue-head {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+  padding: 0 0 8px;
+  border-bottom: 3px solid var(--fg);
+  font: 800 calc(14px * var(--ts)) var(--fd);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg2);
+}
+.desk-ltr.astra .queue-head > span:last-child {
+  text-align: right;
+}
+.desk-ltr.astra .queue-bulk-count {
+  font: 800 calc(15px * var(--ts)) var(--fd);
+}
+.desk-ltr.astra .queue-bulk-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* The Held badge rides inside an ink-filled tab when Held is active, so it
+   only keeps its own weight -- the segment's colour already carries the fill. */
+.desk-ltr.astra .seg-strip .filter-badge {
+  font-weight: 800;
+}
+
+/* Fewer columns, same words, as the screen narrows. */
+@media (max-width: 1100px) {
+  .desk-ltr.astra .today-cards,
+  .desk-ltr.astra .today-running {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 860px) {
+  .desk-ltr.astra .today-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .desk-ltr.astra .today-cards,
+  .desk-ltr.astra .today-running,
+  .desk-ltr.astra .today-steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .today-lead {
+    grid-template-columns: 52px minmax(0, 1fr);
+    padding: 16px 8px;
+  }
+  .desk-ltr.astra .today-lead-side {
+    grid-column: 1 / -1;
+    align-items: flex-start;
+  }
+  .desk-ltr.astra .drafts-row,
+  .desk-ltr.astra .today-edition-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .drafts-side,
+  .desk-ltr.astra .today-edition-act {
+    align-items: flex-start;
+  }
+  /* The row menu stops floating: at this width a 232px panel anchored to the
+     right edge of a row would hang off the screen. */
+  .desk-ltr.astra .more-menu {
+    position: static;
+    margin-top: 6px;
+    min-width: 0;
+  }
+  /* The header names columns that no longer stand in columns -- the row is one
+     column here, and its own chips say what each cell is. The bulk strip above
+     it keeps the select-all box, so nothing on this line is the only way to do
+     anything. */
+  .desk-ltr.astra .queue-head {
+    display: none;
+  }
+}
