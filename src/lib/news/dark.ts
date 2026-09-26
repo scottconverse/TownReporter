@@ -11,7 +11,7 @@ import {
 import { subredditFromSources } from "./dark-place.ts";
 import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import {
   grokChat,
@@ -65,7 +65,6 @@ import {
 import { storableText } from "./storable-text.ts";
 import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
-import { proposePassSources } from "./source-seeds.server.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
@@ -385,6 +384,32 @@ const saveDarkSettingsFor = createServerOnlyFn(async (
 const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, runId: number) =>
   (await import("./dark-preferences.server.ts")).snapshotDarkSettingsFor(newsroomId, runId),
 );
+/*
+  The seed writer is a `.server` module and this file is reachable from the
+  browser -- `routes/desk.ops.tsx` imports it -- so a plain import of it is
+  refused outright by import-protection, which is what turned the 0.6.63 client
+  build red. The other three server modules above cross the same boundary the
+  same way.
+
+  A plain import was not pruned here the way the ones inside a `createServerFn`
+  handler are: `queueInvestigationFor` below is exported as a plain function so
+  a test can call it without `deskMiddleware`'s request plumbing, and the client
+  build has no server-fn boundary to prune its body at. A body handed to
+  `createServerOnlyFn` IS such a boundary, so the client drops it and the write
+  still happens on the server, which is the only place `getSql()` can be called.
+*/
+const proposePassSourcesFor = createServerOnlyFn(async (
+  sql: Sql,
+  input: {
+    userId: string;
+    newsroomId: number;
+    proposedBy: "scan" | "research" | "dark" | "editor";
+    leadId?: number | null;
+    scanRunId?: number | null;
+    section?: string | null;
+    pages: { url: string; title?: string; reason?: string }[];
+  },
+) => (await import("./source-seeds.server.ts")).proposePassSources(sql, input));
 
 /**
  * Same question Scan asks before it spends anything: is a model actually
@@ -3071,7 +3096,7 @@ export async function queueInvestigationFor(
     it could offer the file handoff has already offered, and the duplicate guard
     would return nothing.
   */
-  await proposePassSources(sql, {
+  await proposePassSourcesFor(sql, {
     userId,
     newsroomId,
     proposedBy: "dark",
