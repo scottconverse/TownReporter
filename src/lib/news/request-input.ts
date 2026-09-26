@@ -152,6 +152,14 @@ export const LIMITS = {
    * and the server checked only a minimum, so there was no upper bound at all.
    */
   correctionBody: 2000,
+  /**
+   * One of the two lines an editor types to have a correction note written for
+   * them ("what was wrong" / "what is right"). A line, not a paragraph: the
+   * note the desk builds puts it inside a sentence, and 400 characters is
+   * already a long sentence. `correction-wording.ts` reads this as
+   * `CORRECTION_LINE_MAX`.
+   */
+  correctionLine: 400,
   /** `finding-evidence-review.ts:867` refuses a reason over 2000. */
   reviewNote: 2000,
   /** One index per transcript segment: a long meeting has a few hundred. */
@@ -838,6 +846,32 @@ export const correctionInput = z.object({
   articleSlug: z.string().max(LIMITS.slug).optional(),
   body: z.string().max(LIMITS.correctionBody),
   meetingReviewId: rowId.optional(),
+  /*
+    0.6.70: the second half of a correction. The editor may change the printed
+    story text as well as publishing the note, and the two are one act. Absent
+    means note-only, which is what every caller written before this release
+    sends and what the desk still shows first.
+  */
+  alsoFixBody: z.boolean().optional(),
+  /**
+   * The story text the paper should carry. Bounded by `LIMITS.storyText`, the
+   * same ceiling the publish path stores a body under, so a story that could be
+   * published can always be corrected.
+   */
+  storyBody: z.string().max(LIMITS.storyText).optional(),
+});
+
+/**
+ * The two lines an editor types to have a correction note written for them
+ * (`desk.ts` `performSuggestCorrectionWording`). Both are required: a note
+ * built from one of them reads finished and is wrong, which is worse than an
+ * empty box. The ceiling is the correction line's own, so a pasted paragraph
+ * is trimmed before it reaches a prompt rather than after.
+ */
+export const correctionWordingInput = z.object({
+  articleSlug: z.string().max(LIMITS.slug),
+  wasWrong: z.string().max(LIMITS.correctionLine),
+  isRight: z.string().max(LIMITS.correctionLine),
 });
 
 /**
