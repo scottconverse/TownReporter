@@ -964,15 +964,17 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * suggestions, both strict `z.object`s in the same file as the rest. The
    * calls are right; the list had not heard of them.
    *
-   * 0.6.70 brings `correctionWordingInput`, the editor's two lines for a
-   * correction note (unit AM), and inherited `leadDuplicateResolutionInput`
-   * from the lead-matching unit on this branch. Both are strict `z.object`s
-   * with real ceilings, called the same way as every name beside them. The
-   * lead one is worth a note of its own: it was ALREADY missing from this list
-   * at 13b04db0 -- `git show 13b04db0:src/lib/news/desk.ts` has the call at
-   * line 2441 and this regex has never had the name -- so the sweep was red on
-   * this branch before unit AM touched anything. The name is added here, not
-   * the check relaxed: the call was always the right shape.
+   * 0.6.70 brings two more names, and the two lanes met on this line. Unit AM
+   * adds `correctionWordingInput`, the editor's two lines for a correction note.
+   * Unit AK adds `leadDuplicateResolutionInput`, the Compare view's
+   * duplicate-resolution press: a strict `z.object` of a row id and an action
+   * enum in `request-input.ts`, called from `desk.ts:2441` the same way as every
+   * name beside it. Both are strict `z.object`s with real ceilings; both are
+   * added here as names, not the check relaxed, because the calls were always
+   * the right shape. The lead one is worth a note of its own: it was ALREADY
+   * missing from this list at 13b04db0 -- `git show 13b04db0:src/lib/news/desk.ts`
+   * has the call at line 2441 and this regex had never heard of it -- so the
+   * sweep was red on the news lane before either unit touched anything.
    */
   const SWEPT =
     /(?:addSourceInput|bulkSourceInput|sourceStatusInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { parseScanResult } from "./schema.ts";
@@ -140,6 +141,20 @@ describe("the filed row carries the record to the desk", () => {
         resurfaced_count integer default 0, last_resurfaced_at timestamptz,
         last_resurfaced_scan_run_id integer
       )`);
+      /*
+        Migration 0094: fileScanLeads writes `dup_kind` on every row it files
+        (the "possible" / "developing" duplicate kind), so a table built
+        without it fails the insert with `column "dup_kind" of relation
+        "leads" does not exist` -- a missing migration, not a filing bug. The
+        migration file is applied here rather than its column hand-copied, the
+        same way entity-identity-migration.test.ts applies 0044.
+      */
+      await db.exec(
+        await readFile(
+          new URL("../../../migrations/0094_lead_kill_record.sql", import.meta.url),
+          "utf8",
+        ),
+      );
       const sql: SqlTag = async <T>(parts: TemplateStringsArray, ...values: unknown[]) => {
         const query = parts.reduce((out, part, i) => out + (i ? `$${i}` : "") + part, "");
         return (await db.query<T>(query, values)).rows;

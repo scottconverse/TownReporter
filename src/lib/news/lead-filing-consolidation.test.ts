@@ -426,10 +426,14 @@ test("a merged pair inside one run does not bump the resurfaced stamp of anythin
  * of dropping a development on the floor. A same-headline, same-facts repeat
  * keeps today's behaviour exactly: stamp the killed row, file nothing.
  *
- * The fact bar is newFactsIn (./lead-match.ts): at least one new anchor (date,
- * amount, number, or named place) or two new content tokens, compared over
- * `why` + `evidence` and never over the headline -- the headline is already
- * the same story at >= 0.85 Jaccard, so it cannot carry the new fact.
+ * The fact bar is newFactsIn (./lead-match.ts): at least one new concrete
+ * ANCHOR (a date, a dollar amount, or a number), compared over `why` +
+ * `evidence` and never over the headline -- the headline is already the same
+ * story at >= 0.85 Jaccard, so it cannot carry the new fact. It was briefly
+ * "one new anchor or two new content tokens"; the token half refiled a plain
+ * reword of a killed lead's own words (the scan model rewrites `why` every
+ * time), which is what the end-to-end test in lead-resurface.e2e.test.ts and
+ * the "reworded but fact-free" case below both pin.
  */
 
 test("killed lead + new facts: the finding is filed HELD, linked to the killed lead, which is still stamped", async () => {
@@ -469,8 +473,10 @@ test("killed lead + new facts: the finding is filed HELD, linked to the killed l
       [
         {
           headline,
-          // New facts: a named place the killed lead never mentioned and a
-          // date it never carried.
+          // New facts: a 17-year-old (num:17) and a Sept. 25 briefing
+          // (date:09-25) the killed lead never carried -- its own evidence is
+          // "Daily Camera crime index, Sept. 19." A named place alone would
+          // not clear the bar (see newFactsIn in ./lead-match.ts).
           why: "Police arrested a 17-year-old after the Loomiller Park fight, the department said.",
           evidence: "Department briefing, Sept. 25.",
           topic: "council",
@@ -601,6 +607,65 @@ test("killed lead + a reworded but fact-free finding: not a development", async 
     assert.equal(result.leadsCreated, 0);
     assert.equal(result.developingFiled, 0, "a reworded duplicate is not new facts");
     assert.equal(result.resurfacedKilled, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+/*
+ * The pair lead-resurface.e2e.test.ts filed as a development on the 0.6.69
+ * branch (CI on PR #102, and the reason the token half of the bar was dropped).
+ * The killed lead's own words are "Testing a resurfaced kill" with no evidence;
+ * the scan's reworded repeat brings no anchor at all -- no date, no amount, no
+ * number -- but a whole sentence of new words. Counting new words refiled it.
+ */
+test("killed lead + a reworded why with no new anchor: stamped, not refiled", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    const headline = "Longmont council has two closed-door executive sessions on the books for late September";
+    const url = "https://longmontleader.com/agenda/sept-council";
+    await db.query(
+      `insert into leads(id,newsroom_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(7,1,$1,$2,$3,'killed',$4,0)`,
+      [headline, "Testing a resurfaced kill", "", JSON.stringify([url])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      958,
+      [
+        {
+          headline:
+            "Two closed-door executive sessions are on the books for Longmont city council in late September",
+          why: "Same closed-session story, reworded by the scan.",
+          evidence: "",
+          topic: "council",
+          source_urls: [url],
+        },
+      ],
+      [
+        {
+          id: 7,
+          status: "killed",
+          headline,
+          source_urls: [url],
+          why: "Testing a resurfaced kill",
+          evidence: "",
+        },
+      ],
+    );
+    assert.equal(result.leadsCreated, 0, "no new row: this is the same story, reworded");
+    assert.equal(
+      result.developingFiled,
+      0,
+      "a reworded why is not a new fact -- only a new date, amount or number is",
+    );
+    assert.equal(result.resurfacedKilled, 1, "the kill's came-back count still moves");
+    const rows = (await db.query<{ id: number }>("select id from leads order by id")).rows;
+    assert.deepEqual(rows, [{ id: 7 }], "the killed row is the only lead");
   } finally {
     await db.close();
   }

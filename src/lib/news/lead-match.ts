@@ -787,61 +787,51 @@ export function sameStoryForMerge(
  * never said: the owner's question is exactly "Do I miss the real 2nd story?",
  * and a killed lead plus a new fact is the case where dropping it loses one.
  *
- * What counts as a fact: the CONTENT tokens of the two leads' own words
- * (`why` and `evidence` -- deliberately NOT the headline, which the caller has
- * already established is the same story at >= 0.85 Jaccard: letting headline
- * wording count would make every paraphrase look like a new fact), plus the
- * concrete anchors in the same text (dates, dollar amounts, numbers --
- * extractAnchors, filtered by NEW_FACT_ANCHOR_KINDS).
+ * What counts as a fact: a concrete ANCHOR -- a date, a dollar amount, or a
+ * number -- in the two leads' own words (`why` and `evidence`; deliberately
+ * NOT the headline, which the caller has already established is the same story
+ * at >= 0.85 Jaccard, so letting headline wording count would make every
+ * paraphrase look like a new fact). See NEW_FACT_ANCHOR_KINDS.
  *
- * The bar is deliberately not "any new word":
+ * The bar was once "one new anchor OR two new content tokens" (0.6.69 unit AK
+ * as first written). The token half was wrong, and the Postgres end-to-end
+ * test caught it: the scan model REWORDS `why` on every sighting -- the live
+ * pair read "Testing a resurfaced kill" against "Same closed-session story,
+ * reworded by the scan." -- so a plain reword of a killed lead's own words
+ * cleared two new content tokens and was refiled as a development. That is the
+ * exact opposite of what this bar is for: counting new WORDS refiles almost
+ * every killed repeat, which is the noise the "possible" tier already exists to
+ * avoid. Only a new concrete anchor is a fact somebody added.
  *
- *   - at least one new ANCHOR (a date, an amount, or a number the old lead
- *     never carried; a new name is not by itself enough -- see
- *     NEW_FACT_ANCHOR_KINDS), or
- *   - at least NEW_FACT_TOKENS_MIN new content tokens (which is how a new
- *     named place counts: contentTokens keeps non-stoplisted proper nouns).
- *
- * A single new content word is how a rewrite reads ("the city said" vs "city
- * officials said"), and treating that as a new fact would refile every
- * reworded duplicate of every killed lead -- the noise the "possible" tier
- * already exists to avoid. Two new content tokens, or one concrete new
- * anchor, is a fact somebody added.
+ * A new name does not clear it either, and that is deliberate: extractAnchors()
+ * reads any capitalised word as a proper noun, so `noun:` cannot tell a name
+ * from a sentence-initial capital -- "Officials said ..." against "Police said
+ * ..." would refile every reworded duplicate. NEW_FACT_ANCHOR_KINDS lists the
+ * kinds that do count.
  */
-export const NEW_FACT_TOKENS_MIN = 2;
-
-/** The anchor kinds that count as a new fact. `noun:` is deliberately absent:
- * extractAnchors() reads any capitalised word as a proper noun, so it cannot
- * tell a name from a sentence-initial capital -- "Officials said ..." against
- * the old "Police said ..." would read as a new named place and refile every
- * reworded duplicate of every killed lead, which is exactly the noise this
- * bar exists to stop. A genuinely new name still carries weight on the token
- * path: contentTokens() keeps non-stoplisted proper nouns as content words,
- * so a new place plus one more new word clears NEW_FACT_TOKENS_MIN. */
+/** The anchor kinds that count as a new fact. `noun:` and `month:` are
+ * deliberately absent -- see newFactsIn's doc comment (`month:` is a bare
+ * month mention with no day, so "in September" vs "in October" is not the kind
+ * of concrete new fact this bar is for). */
 const NEW_FACT_ANCHOR_KINDS = ["date:", "amount:", "num:"] as const;
 
-function factTokens(why?: string | null, evidence?: string | null): Set<string> {
+/** The concrete anchors in a lead's own words, and nothing else. */
+function factAnchors(why?: string | null, evidence?: string | null): Set<string> {
   const text = `${why ?? ""} ${evidence ?? ""}`;
-  const tokens = new Set<string>(contentTokens(text));
+  const anchors = new Set<string>();
   for (const anchor of extractAnchors(text)) {
-    if (NEW_FACT_ANCHOR_KINDS.some((kind) => anchor.startsWith(kind))) tokens.add(anchor);
+    if (NEW_FACT_ANCHOR_KINDS.some((kind) => anchor.startsWith(kind))) anchors.add(anchor);
   }
-  return tokens;
+  return anchors;
 }
 
 export function newFactsIn(
   candidate: { why?: string | null; evidence?: string | null },
   existing: { why?: string | null; evidence?: string | null },
 ): boolean {
-  const old = factTokens(existing.why, existing.evidence);
-  const fresh = factTokens(candidate.why, candidate.evidence);
-  if (fresh.size === 0) return false;
-  let newTokens = 0;
-  for (const token of fresh) {
-    if (old.has(token)) continue;
-    if (token.includes(":")) return true; // an anchor: date, amount, number, or named place
-    newTokens += 1;
-    if (newTokens >= NEW_FACT_TOKENS_MIN) return true;
+  const old = factAnchors(existing.why, existing.evidence);
+  for (const anchor of factAnchors(candidate.why, candidate.evidence)) {
+    if (!old.has(anchor)) return true;
   }
   return false;
 }

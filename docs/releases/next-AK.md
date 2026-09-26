@@ -21,10 +21,13 @@ story it already has, there are three cases instead of two:
 - **A strong match against a live lead** behaves as before: the lead is held as a
   possible duplicate and its "came back" count goes up.
 - **A strong match against a KILLED lead now depends on the facts.** If the new
-  finding carries facts the killed lead did not have — a different why, extra
-  evidence, added body text — it is filed **HELD**, labelled *"Developing: new facts
-  on a story you killed"*, linked to the old lead, and it shows the old kill reason.
-  A lead whose headline is the same and whose facts are the same is still folded
+  finding carries a concrete fact the killed lead did not have — a **date**, a
+  **dollar amount** or a **number** in its why or its evidence — it is filed
+  **HELD**, labelled *"Developing: new facts on a story you killed"*, linked to the
+  old lead, and it shows the old kill reason. A *reworded* why is not a new fact:
+  the scan rewords its own why nearly every time it re-finds a story, so counting
+  new words refiled almost every killed repeat — the opposite of what was asked. A
+  lead whose headline recurs and whose concrete facts are the same is still folded
   into the old one, and the scan summary says so in those words.
 
 **An index or section page is not a shared source.** A crime list, `/news/`, a
