@@ -257,9 +257,11 @@ describe("Dark Desk carries the editor's model choice onto the job", { timeout: 
     `before` answers every endpoint with `{}` -- a body that is not a model
     list -- so discovery finds no server where the rung points and the skip is
     "its server did not answer". Which of the three skip reasons fires is the
-    shared rule's business and is pinned in ai.test.ts ("not loaded" at
-    src/lib/news/ai.test.ts:1134); what this test pins is that Dark Desk's
-    Automatic path runs that rule at all, and that the editor's receipt says so.
+    shared rule's business and is pinned in ai.test.ts ("not loaded" and
+    "nothing loaded in LM Studio" there); what this test pins is that Dark
+    Desk's Automatic path runs that rule at all, and that the editor's receipt
+    says so. The rung's own name is the bare "Local model" (0.6.69, Unit AL
+    item 4): it runs whatever LM Studio has loaded, so it has no model to name.
   */
   it("skips a local rung it did not find loaded and records why on the receipt", async () => {
     await withEnv(
@@ -281,7 +283,7 @@ describe("Dark Desk carries the editor's model choice onto the job", { timeout: 
         assert.equal(jobs[0]!.model_choice, "codex-balanced");
         const receipt = JSON.parse(jobs[0]!.result_json) as { skippedRungs?: string[] };
         assert.deepEqual(receipt.skippedRungs, [
-          "Qwen 3.6 35B skipped: its server did not answer",
+          "Local model skipped: its server did not answer",
         ]);
       },
     );

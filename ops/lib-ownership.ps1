@@ -16,6 +16,17 @@ function Assert-TownReporterLegacyOwnership {
   }
   if ($Watchdog -and $env:WATCHDOG_TEST_MODE -eq '1') {
     if ($env:WATCHDOG_APP_PORT -notmatch '^\d+$' -or $env:WATCHDOG_PG_PORT -notmatch '^\d+$' -or [int]$env:WATCHDOG_APP_PORT -lt 1024 -or [int]$env:WATCHDOG_PG_PORT -lt 1024 -or $env:WATCHDOG_APP_PORT -eq '3000' -or $env:WATCHDOG_PG_PORT -eq '5433' -or $env:WATCHDOG_START_SCRIPT -ne 'scripts/ci-watchdog-start.ps1') { throw 'Invalid disposable watchdog test configuration.' }
+    # WATCHDOG_STAGE_APP points the staged-copy section at another checkout so
+    # a harness can watch a disposable one instead of this machine's. Unset is
+    # the normal case and means this checkout. Checked here as well as honored
+    # only in test mode (see ops\watchdog.ps1): a value that is not an existing
+    # absolute directory stops the run rather than being passed on to
+    # ops\start-stage.ps1, which would have to fail later and less clearly.
+    if ($env:WATCHDOG_STAGE_APP) {
+      if (![IO.Path]::IsPathRooted($env:WATCHDOG_STAGE_APP) -or !(Test-Path -LiteralPath $env:WATCHDOG_STAGE_APP -PathType Container)) {
+        throw 'WATCHDOG_STAGE_APP must be an existing absolute directory.'
+      }
+    }
     return
   }
   $values = @{}

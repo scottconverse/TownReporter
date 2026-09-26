@@ -57,6 +57,16 @@ $requestedPort = $Port
 . (Join-Path $ops "lib-port.ps1")
 $Port = $requestedPort
 
+# The machine-wide pointer (Unit AL2). A build never happens in the live
+# checkout, so the copy staged here is often in a WORKER checkout -- and the
+# live watchdog, looking for ops\.stage.json in its own checkout, found nothing
+# and started nothing after a reboot. This script is the one place that knows a
+# restore and a build just succeeded, so it is the one place that writes down
+# where. lib-stage.ps1 owns the path, the atomic write and the removal, and
+# Resolve-TownReporterStageApp there is the gate every reader puts the pointer
+# through before starting anything from it.
+. (Join-Path $ops "lib-stage.ps1")
+
 $backupDir = Join-Path (Split-Path -Parent $app) "townreporter-backups"
 $pidFile = Join-Path $ops ".stage.pid"
 $stateFile = Join-Path $ops ".stage.json"
@@ -129,6 +139,13 @@ if ($Stop) {
   Write-Host $killResult.Output
   Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
   Remove-Item $stateFile -Force -ErrorAction SilentlyContinue
+  # The pointer names the checkout staged last, and only that one: removing a
+  # pointer that names a DIFFERENT checkout would forget a copy that is still
+  # running there, which is exactly the copy the watchdog is meant to bring
+  # back. -App says "remove it only if it is about this checkout".
+  if (Remove-TownReporterStagedCopyPointer -App $app) {
+    Say "removed the machine-wide staged-copy pointer"
+  }
   Start-Sleep -Seconds 1
   if (Test-PortFree $stagedPort) {
     Say "port $stagedPort is free"
@@ -173,6 +190,17 @@ if ($dirty -and -not $AllowDirty) {
   $dirty | ForEach-Object { Say "    $_" }
   Die "Commit or stash them first, or pass -AllowDirty."
 }
+
+# The commit this build is. Recorded in ops\.stage.json and in the pointer, and
+# it is what tells a reader whether the two are describing the same staging:
+# Resolve-TownReporterStageApp refuses a pointer whose commit no longer matches
+# the checkout's own ops\.stage.json, which is how a pointer left over from an
+# older staging refuses itself instead of starting a build nobody described.
+$commit = (& git rev-parse HEAD | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{7,40}$') {
+  Die "could not read this checkout's commit (git rev-parse HEAD said '$commit')."
+}
+Say "commit: $commit"
 
 # --- 2. pick a backup --------------------------------------------------------
 if ($Backup) {
@@ -358,8 +386,20 @@ $state = [ordered]@{
   version = $version
   started = (Get-Date -Format o)
   port    = $Port
+  commit  = $commit
 }
 $state | ConvertTo-Json | Set-Content -Path $stateFile -Encoding ASCII
+
+# And the machine-wide pointer, naming this checkout. Written after the state
+# file on purpose: the readers check the two against each other, so a pointer
+# that named a checkout whose ops\.stage.json was not yet on disk would be
+# refused by every one of them.
+if (Save-TownReporterStagedCopyPointer -App $app -Port $Port -Commit $commit -Version "$version" -Database $dbName) {
+  Write-Host "  pointer: $(Get-TownReporterStagedCopyPointerPath) -- the watchdog finds this copy after a reboot"
+} else {
+  Write-Host "  note: no machine-wide staged-copy pointer was written (no LOCALAPPDATA on this machine),"
+  Write-Host "        so after a reboot nothing would know which checkout to bring back"
+}
 
 Write-Host "  STAGING UP: http://127.0.0.1:$Port/desk -- walk the changed screens, then run ops\stage.ps1 -Stop" -ForegroundColor Green
 Write-Host "  stories with a publish date: $storyCount"

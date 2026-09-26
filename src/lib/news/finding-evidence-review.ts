@@ -197,6 +197,13 @@ export function findingEvidenceContentToken(draft: Partial<DraftRow>): string {
   delete research.findingEvidenceReview;
   delete research.claimEvidenceReview;
   delete research.manualClaims;
+  /*
+    The style audit is not part of what the editor judges here. It is written
+    on every save, and its note and rejection trail change without the text,
+    the claims or the evidence changing -- so counting it would throw away
+    judgments about a draft the editor never touched.
+  */
+  delete research.styleAudit;
   return JSON.stringify([
     draft.id ?? null,
     draft.headline ?? "",

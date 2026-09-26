@@ -164,6 +164,52 @@ function Get-TownReporterBackupList {
   return ,@($out | Sort-Object -Property Stamp -Descending)
 }
 
+# --- The files in that folder that are NOT part of the series ---------------
+<#
+  Everything else in the local backup folder that is a plain .sql or .dump:
+  a hand-made export, an old dump somebody saved under their own name, a
+  pg_dump custom-format .dump. The owner's rule is that these are safety
+  copies too, so they go to D: exactly like the series does.
+
+  Read this list is what the SERIES prune never sees. The prune works from
+  Get-TownReporterBackupList, so a file in this list can never be deleted
+  locally by the keep-three rule -- that is deliberate, and it is why these
+  two lists are separate functions rather than one with a flag.
+
+  The extension test is what keeps the walking wounded out, and it is the
+  whole reason this is a -match on the name instead of -Filter '*.sql*':
+  a dump that died is renamed <name>.sql.incomplete and a copy that died is
+  <name>.sql.partial, and neither of those ends in .sql. A file that is not
+  a backup must never be presented to the offsite copy wearing a backup's
+  name, and it must never be hashed and copied to D: as though it were one.
+
+  Oldest first, same as the series pass, so a run that is cut off leaves the
+  newest safety copies already on the other drive.
+#>
+function Get-TownReporterSafetyCopyList {
+  param(
+    [Parameter(Mandatory = $true)][string]$Dir,
+    [string[]]$Exclude = @()
+  )
+  $out = New-Object System.Collections.ArrayList
+  if (-not (Test-Path -LiteralPath $Dir)) { return ,@() }
+  $skip = @{}
+  foreach ($name in @($Exclude)) { if ($name) { $skip[$name] = $true } }
+  foreach ($file in @(Get-ChildItem -LiteralPath $Dir -File -ErrorAction SilentlyContinue)) {
+    if ($file.Name -notmatch '\.(sql|dump)$') { continue }
+    if ($skip.ContainsKey($file.Name)) { continue }
+    [void]$out.Add([pscustomobject]@{
+      Name    = $file.Name
+      Path    = $file.FullName
+      Bytes   = $file.Length
+      Written = $file.LastWriteTime
+    })
+  }
+  # The unary comma again: one file in the folder must still come back as an
+  # array of one, or .Count is $null in Windows PowerShell 5.1.
+  return ,@($out | Sort-Object -Property Written, Name)
+}
+
 # --- Is this dump finished? ------------------------------------------------
 <#
   THE check this whole change is built around. Read the last few kilobytes and
@@ -610,6 +656,17 @@ function New-TownReporterBackup {
     4. Copy to <name>.partial, hash THAT, then rename onto the real name. A
        bad copy never appears under a backup's name, and a good copy already on
        D: is never replaced by a bad one.
+
+  A second pass then does the same thing for every other .sql and .dump in the
+  folder (Get-TownReporterSafetyCopyList), into <offsite>\other-safety-copies\.
+  Those are the owner's hand-named copies, and the same four rules apply with
+  one change: step 1 is not run on them. A .dump is pg_dump's binary custom
+  format and has no text trailer to look for, and a hand-named .sql is not
+  necessarily this series' pg_dump output at all -- so the guarantee for these
+  is "the bytes on D: are the bytes that are on C:", which is exactly what
+  Test-TownReporterCopyMatches proves. They are never added to the series
+  list, so the keep-three prune cannot touch them, and nothing is ever deleted
+  from D:.
 #>
 function Copy-TownReporterBackupOffsite {
   param(
@@ -621,12 +678,13 @@ function Copy-TownReporterBackupOffsite {
   $ready = Test-TownReporterOffsiteReady -Dir $OffsiteDir
   if (-not $ready.Ok) {
     Write-TownReporterBackupLog $LogFile "offsite copy: NOT copying anything -- $($ready.Reason)"
-    return @{ Ok = $false; Reason = $ready.Reason; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb }
+    return @{ Ok = $false; Reason = $ready.Reason; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb; OtherCopied = 0; OtherVerified = 0; OtherFailed = 0; OtherTotal = 0 }
   }
 
   $local = Get-TownReporterBackupList -Dir $BackupDir
-  if ($local.Count -eq 0) {
-    return @{ Ok = $true; Reason = 'there are no local backups to copy'; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb }
+  $safety = Get-TownReporterSafetyCopyList -Dir $BackupDir -Exclude @($local | ForEach-Object { $_.Name })
+  if ($local.Count -eq 0 -and $safety.Count -eq 0) {
+    return @{ Ok = $true; Reason = 'there are no local backups to copy'; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb; OtherCopied = 0; OtherVerified = 0; OtherFailed = 0; OtherTotal = 0 }
   }
 
   $copied = 0
@@ -693,13 +751,124 @@ function Copy-TownReporterBackupOffsite {
     Write-TownReporterBackupLog $LogFile "offsite copy: $($b.Name) verified on $OffsiteDir (same size and SHA256)"
   }
 
+  # --- every other .sql and .dump in the folder -----------------------------
+  # The owner's hand-named safety copies, into a folder of their own so they
+  # can never be mistaken for the series and can never collide with its names.
+  # Same four rules, minus the completeness check: a .dump is binary and has no
+  # text trailer to find, and a hand-made .sql is not this series' pg_dump
+  # output, so the promise here is the hash -- the bytes on D: are the bytes on
+  # C: -- and Test-TownReporterCopyMatches is what proves it. Nothing here is
+  # ever deleted, from either side.
+  $copiesDir = Join-Path $OffsiteDir 'other-safety-copies'
+  $otherCopied = 0
+  $otherVerified = 0
+  $otherFailed = 0
+  $dirReady = $true
+  if ($safety.Count -gt 0 -and -not (Test-Path -LiteralPath $copiesDir -PathType Container)) {
+    try {
+      New-Item -ItemType Directory -Force -Path $copiesDir -ErrorAction Stop | Out-Null
+      # New-Item -Force is silent when something that is NOT a folder is
+      # sitting at the path, so the folder is looked for again rather than
+      # assumed. Measured 2026-09-26 in the harness below: with a file at
+      # <offsite>\other-safety-copies, New-Item threw nothing, the first
+      # Copy-Item failed with "could not find a part of the path", and the
+      # run reported a file that could not be copied instead of the folder
+      # that could not be made -- the right verdict for the wrong reason,
+      # which is the kind of thing that hides a real problem for a year.
+      if (-not (Test-Path -LiteralPath $copiesDir -PathType Container)) {
+        throw "there is a file at $copiesDir, so it cannot be used as a folder"
+      }
+      Write-TownReporterBackupLog $LogFile "offsite copy: made $copiesDir for the other safety copies"
+    } catch {
+      $dirReady = $false
+      $otherFailed = $safety.Count
+      if (-not $firstFailure) { $firstFailure = "the other-safety-copies folder could not be made on $OffsiteDir ($($_.Exception.Message))" }
+      Write-TownReporterBackupLog $LogFile "offsite copy: NOT copying the $($safety.Count) other safety copies -- $copiesDir could not be made: $($_.Exception.Message)"
+    }
+  }
+
+  if ($dirReady) {
+    foreach ($f in $safety) {
+      $dest = Join-Path $copiesDir $f.Name
+      if (Test-TownReporterCopyMatches -Source $f.Path -Dest $dest) { $otherVerified++; continue }
+
+      if ($null -ne $free -and ($free - ($f.Bytes / 1GB)) -lt $MinFreeGb) {
+        $otherFailed++
+        if (-not $firstFailure) { $firstFailure = ("{0} was not copied because {1} would drop below {2} GB free" -f $f.Name, $OffsiteDir, $MinFreeGb) }
+        Write-TownReporterBackupLog $LogFile ("offsite copy: NOT copying the other safety copy $($f.Name) -- {0} has only $free GB free and the limit is $MinFreeGb GB" -f $OffsiteDir)
+        continue
+      }
+
+      $partial = $dest + '.partial'
+      Write-TownReporterBackupLog $LogFile ("offsite copy: copying the other safety copy $($f.Name) ({0} MB) to $copiesDir" -f [math]::Round($f.Bytes / 1MB, 1))
+      Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
+      try {
+        Copy-Item -LiteralPath $f.Path -Destination $partial -Force -ErrorAction Stop
+      } catch {
+        $otherFailed++
+        if (-not $firstFailure) { $firstFailure = "$($f.Name) could not be copied to the other-safety-copies folder ($($_.Exception.Message))" }
+        Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) could not be copied: $($_.Exception.Message)"
+        Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
+        continue
+      }
+
+      if (-not (Test-TownReporterCopyMatches -Source $f.Path -Dest $partial)) {
+        $otherFailed++
+        if (-not $firstFailure) { $firstFailure = "$($f.Name) did not verify after the copy (same size and SHA256 required)" }
+        Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) did NOT verify on $OffsiteDir -- the copy is discarded, nothing is deleted"
+        Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
+        continue
+      }
+
+      try {
+        Move-Item -LiteralPath $partial -Destination $dest -Force -ErrorAction Stop
+      } catch {
+        $otherFailed++
+        if (-not $firstFailure) { $firstFailure = "$($f.Name) verified but could not be put in place ($($_.Exception.Message))" }
+        Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) verified but could not be put in place: $($_.Exception.Message)"
+        Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
+        continue
+      }
+
+      $otherCopied++
+      $otherVerified++
+      if ($null -ne $free) { $free = [math]::Round($free - ($f.Bytes / 1GB), 1) }
+      Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) verified in $copiesDir (same size and SHA256)"
+    }
+  }
+
+  # The tally goes in the log on every path, including the one where the folder
+  # itself could not be made -- that is the case where a person most needs the
+  # count, and it is one line rather than one per file.
+  if ($safety.Count -gt 0) {
+    if ($otherFailed -gt 0) {
+      Write-TownReporterBackupLog $LogFile "offsite copy: $otherFailed of $($safety.Count) other safety copies did not make it. Nothing will be deleted locally."
+    } else {
+      Write-TownReporterBackupLog $LogFile "offsite copy: all $otherVerified of $($safety.Count) other safety copies are in $copiesDir ($otherCopied copied now, $($otherVerified - $otherCopied) already there)"
+    }
+  }
+
   $freeNow = Get-TownReporterDriveFreeGb -Dir $OffsiteDir
+  $totals = @{
+    Copied = $copied; Verified = $verified; Failed = $failed
+    FreeGb = $freeNow; Total = $local.Count
+    OtherCopied = $otherCopied; OtherVerified = $otherVerified; OtherFailed = $otherFailed; OtherTotal = $safety.Count
+  }
   if ($failed -gt 0) {
     Write-TownReporterBackupLog $LogFile "offsite copy: $failed of $($local.Count) did not make it ($firstFailure). Nothing will be deleted locally."
-    return @{ Ok = $false; Reason = $firstFailure; Copied = $copied; Verified = $verified; Failed = $failed; FreeGb = $freeNow; Total = $local.Count }
+    return (@{ Ok = $false; Reason = $firstFailure } + $totals)
   }
-  Write-TownReporterBackupLog $LogFile "offsite copy: all $verified of $($local.Count) backups are on $OffsiteDir ($copied copied now, $($verified - $copied) already there)"
-  return @{ Ok = $true; Reason = 'all verified'; Copied = $copied; Verified = $verified; Failed = 0; FreeGb = $freeNow; Total = $local.Count }
+  if ($local.Count -gt 0) {
+    Write-TownReporterBackupLog $LogFile "offsite copy: all $verified of $($local.Count) backups are on $OffsiteDir ($copied copied now, $($verified - $copied) already there)"
+  }
+  if ($otherFailed -gt 0) {
+    # The backups themselves are all safe on D:, but a file the owner put in
+    # that folder on purpose is not, and silence about a copy that did not
+    # happen is the one thing this whole file exists to prevent. So the run is
+    # reported as not Ok even though the series part of it worked.
+    return (@{ Ok = $false; Reason = $firstFailure } + $totals)
+  }
+  return (@{ Ok = $true; Reason = 'all verified' } + $totals)
 }
 
 # --- Keeping three on the system disk -------------------------------------
@@ -1259,6 +1428,12 @@ function Invoke-TownReporterBackupRun {
       [void]$lines.Add("offsite: $($copy.Verified) of $($copy.Total) backups are on $OffsiteDir")
     } else {
       [void]$lines.Add("offsite: COPY FAILING -- $($copy.Reason)")
+    }
+    # The hand-named safety copies are reported on their own line, whether or
+    # not the series part worked: they are not backups in the series and a
+    # person reading the receipt should not have to guess which count is which.
+    if ($copy.OtherTotal -gt 0) {
+      [void]$lines.Add("offsite: $($copy.OtherVerified) of $($copy.OtherTotal) other safety copies are in $OffsiteDir\other-safety-copies")
     }
 
     # 3. The prune. Runs on the copy's verdict and nothing else.

@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.68](docs/releases/0.6.68.md).** Backups you can trust, and a page that says when something is wrong. One backup routine now runs from two places — the nightly run the watchdog already makes, and a **Back up now** button on the Control page — and every backup is copied to the second drive and checked byte for byte, same size and same SHA-256, before anything is deleted. The local folder keeps the latest three only after all of them are known good elsewhere; if that drive is missing, unwritable, or a copy fails its check, nothing local is removed and the page says so. The Control page gains **Last backup**, **Copy on D:** and **Attention** cards, and the watchdog raises an alert — on that card, as a Windows notification, and as a phone push only if the owner sets a topic — when the paper or the public site is down for more than ten minutes, when the daily scan fails or does not run by 8 AM, when the last good backup is over thirty hours old, when the offsite copy stops working, or when the second drive runs low. Each alert fires once when it starts and once when it clears, and a start task that is still running is no longer called a failure. No migration, no new scheduled task, no new program. GitHub remains the authority for publication state. [0.6.67 release guide](docs/releases/0.6.67.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.69](docs/releases/0.6.69.md).** Nothing the scan finds is silently thrown away any more, and the Queue says what it means. A story the scanner meets twice in one run becomes one lead carrying both source addresses; a finding that strongly matches a lead you killed is filed for review instead of folded away when it brings a concrete date, dollar amount or number the killed lead did not have — **Developing: new facts on a story you killed**, with the old kill reason and a link to it beside it — and a killed lead whose facts have not changed is still folded into the old one, with the scan saying so. An index, section or feed address no longer counts as the same address as an article. The NEW row replaces the bare **≈ PRINTED** chip with **Looks already printed: \<headline\>** and a one-press **Kill as duplicate**; the Held tab carries a count; and **Compare** opens both leads side by side with three presses — not a duplicate, same story, newer facts — each answering in the editor's own words. A killed lead's page now shows the lead, when and why it was killed, and a **Reopen** that keeps the record and says the kill was undone. Alongside, the machine upkeep: the hash check on a promotion or an install no longer depends on `Get-FileHash`, hand-named safety copies are carried to the second drive too, the test copy on port 3100 starts again by itself, and the writing ladder's middle rung runs whichever model LM Studio actually has loaded. One additive migration. GitHub remains the authority for publication state. [0.6.68 release guide](docs/releases/0.6.68.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.68 release guide](docs/releases/0.6.68.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.69 release guide](docs/releases/0.6.69.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -122,7 +122,7 @@ GitHub Pages is that landing, not the newsroom. Enable it once: repo **Settings 
 
 ## Install on Windows
 
-Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.68 package adds the backups, the offsite copy and the alerts recorded in its release guide; the 0.6.67 package added the editor's controls recorded in its release guide; the 0.6.66 package added the reboot fix recorded in its release guide; the 0.6.65 package added the Control page; the 0.6.64 package added the daily scan on Automatic; the 0.6.63 package added the import, paste-one-story and section-source surfaces. The current package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
+Download the Windows x64 installer ZIP named `TownReporter-<version>-windows-x64.zip` from the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest); the source-code ZIP is not the installer. If that asset is missing, stop and use a release that provides it. Extract the ZIP and open **Install TownReporter.cmd**. It provisions private Node/PostgreSQL runtimes, persistent storage and Chromium, builds the application, and checks that the correct server answers before directing you to setup. It does not replace an existing database or install Halo's Windows tasks. The 0.6.69 package adds the lead matching and the machine upkeep recorded in its release guide; the 0.6.68 package added the backups, the offsite copy and the alerts recorded in its release guide; the 0.6.67 package added the editor's controls recorded in its release guide; the 0.6.66 package added the reboot fix recorded in its release guide; the 0.6.65 package added the Control page; the 0.6.64 package added the daily scan on Automatic; the 0.6.63 package added the import, paste-one-story and section-source surfaces. The current package note names the expected tag and assets; the JSON metadata and `.sha256` sidecar are the authorities for source commit and ZIP hash, while GitHub records publication state.
 
 Follow the [Windows installation guide](docs/windows-install.md) for provider setup, your first article, start/stop, data locations and troubleshooting. The target is installation plus a first manual editorial workflow within an hour with working internet; that is a goal, not a measured fresh-machine result, and no fresh-machine human acceptance is documented. Release evidence records only the stated automated installer and package checks and their limits. Public hosting is separate from this local installation.
 
@@ -179,8 +179,8 @@ Every active Queue row has its own **Writing model** picker beside **Draft with
 AI**; the story workbench has the same control beside Draft or Redraft. The
 default is **Automatic**. If `LLM_BASE_URL` or the `LLM_API_KEY` + `LLM_MODEL`
 pair names a gateway, Automatic records that gateway as the preferred first runtime.
-Otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it
-is loaded, then Codex Terra — choosing the first ready provider before
+Otherwise it uses DeepSeek v4.1 Flash first, then the local model this computer
+has loaded if there is one, then Codex Terra — choosing the first ready provider before
 enqueueing, and storing that effective choice on the job. A
 named model is also the recorded first choice. If that model reaches a usage
 limit, becomes unavailable, loses its login, times out, or returns no output,
@@ -193,7 +193,7 @@ There are **two Automatic ladders**, and they are not the same order:
 
 | Automatic covers       | The order it walks                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Stories, scans, Dark Desk | DeepSeek v4.1 Flash → Qwen 3.6 35B **on this computer, when it is loaded** → Codex Terra                    |
+| Stories, scans, Dark Desk | DeepSeek v4.1 Flash → **the local model, whichever one LM Studio has loaded** → Codex Terra                    |
 | Opinion                | Codex Sol → Claude Sonnet                                                                                        |
 
 Opinion is the only surface whose Automatic ends at Claude Sonnet. Opus, Codex
@@ -252,7 +252,7 @@ For **Automatic**, a configured gateway is tried first; named choices in Story, 
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | `ANTHROPIC_API_KEY`                             | credentials for selected Claude models or the final Sonnet retry            |
-| _nothing_                                       | stories, scans and Dark Desk walk the Automatic ladder above (DeepSeek → local Qwen → Codex Terra); Opinion walks Codex Sol → Claude Sonnet |
+| _nothing_                                       | stories, scans and Dark Desk walk the Automatic ladder above (DeepSeek → the loaded local model → Codex Terra); Opinion walks Codex Sol → Claude Sonnet |
 | `XAI_API_KEY`                                   | Grok                                                                        |
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
@@ -262,8 +262,8 @@ Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus, Sonnet and
 Haiku, Local model, and saved custom connections. Codex Sol is selected by
 default. **Opinion's own Automatic** tries Codex Sol first and moves to Claude
 Sonnet once if Codex is unavailable — that is the Opinion ladder, not the desk's
-global order; stories, scans and Dark Desk walk DeepSeek v4.1 Flash → local Qwen
-3.6 35B when it is loaded → Codex Terra. An explicit choice remains the recorded
+global order; stories, scans and Dark Desk walk DeepSeek v4.1 Flash → the local
+model this computer has loaded if there is one → Codex Terra. An explicit choice remains the recorded
 first choice; a recognized technical failure can move only the unfinished call.
 The writer reads the configured private voice file, and a provider refusal or
 invalid delivery leaves the request failed without a draft.
@@ -447,7 +447,7 @@ Opinion and Write a story share large-document upload, OCR, long pasted text and
 
 Dark Desk uses a separate cost-aware Automatic path: a configured gateway wins;
 otherwise it walks the desk's own Automatic ladder — DeepSeek v4.1 Flash, then
-Qwen 3.6 35B on this computer when it is loaded, then Codex Terra — and only the
+the local model on this computer when one is loaded, then Codex Terra — and only the
 unfinished stage moves to the next provider if a login has lapsed or synthesis
 does not respond in time. Claude Sonnet is not on that ladder; it is a hand pick,
 and Opinion is the only surface whose Automatic ends there.

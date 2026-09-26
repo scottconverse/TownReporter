@@ -19,6 +19,13 @@
       newest three on C:, and nothing ever leaves D:
     * a local file that is not a complete dump stops the copy AND the prune.
       Nothing is deleted, and the run says which file and why
+    * every other .sql and .dump in the local folder -- the hand-named safety
+      copies -- is copied to <offsite>\other-safety-copies\ with the same
+      .partial + size + SHA256 + rename discipline, is skipped when it is
+      already there, is never touched by the keep-three prune on either side,
+      and a file that is not one (.incomplete, .partial, anything else) is not
+      copied at all; a safety copy that cannot be copied is reported as a
+      failure of the run without stopping the series copy
     * a copy that cannot be verified deletes nothing
     * a missing D:, an unwritable D: and a D: short of room each delete nothing
       and each raise their own alert
@@ -837,6 +844,111 @@ $appended += Get-TownReporterBackupAlertConditions -App $script:app -EnvFile $en
 Check "a caller that appends the result to its own list gets five conditions" ($appended.Count -eq 5) "got $($appended.Count)"
 Check "and none of the five is a list wearing a condition's name" (@($appended | Where-Object { $_ -is [array] }).Count -eq 0)
 Check "every one of them has an id a person could read" (@($appended | Where-Object { -not $_.Id -or $_.Id -match ' ' }).Count -eq 0) ((@($appended | ForEach-Object { $_.Id })) -join ', ')
+
+# ---------------------------------------------------------------------------
+# 15. The files in the local folder that are not part of the series.
+# ---------------------------------------------------------------------------
+<#
+  The hand-named safety copies. The rules are the ones the series gets --
+  .partial, hash the copy, rename onto the real name, skip what is already
+  identical, never delete -- with one deliberate difference: no
+  completeness check, because a .dump is pg_dump's binary custom format with
+  no text trailer to find and a hand-made .sql is not this series' output.
+  This section proves both halves of that: that the two files land on D: byte
+  for byte, and that a file which is not one of them is left alone.
+#>
+function Get-OffsiteSafetyNames {
+  $dir = Join-Path $script:offsite 'other-safety-copies'
+  if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return ,@() }
+  return ,@(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+}
+
+Reset-World "others"
+Write-Host "  15. the hand-named copies in the local folder go to the other drive too"
+New-SixBackups
+$handSql = Join-Path $script:backupDir 'before-the-migration.sql'
+[IO.File]::WriteAllText($handSql, (New-FakeDumpText -Token 'HANDnamedHANDnamedHANDnamedHANDnamedHANDnamedHANDnamedHANDnamed'), (New-Object Text.UTF8Encoding $false))
+$handDump = Join-Path $script:backupDir 'old-custom-format.dump'
+$dumpBytes = New-Object byte[] 65536
+for ($i = 0; $i -lt $dumpBytes.Length; $i++) { $dumpBytes[$i] = [byte](($i * 31 + 7) % 256) }
+[IO.File]::WriteAllBytes($handDump, $dumpBytes)
+# Four things that are NOT safety copies, two of them wearing a .sql or .dump
+# in the middle of their name -- which is exactly the case the name test has
+# to get right.
+[IO.File]::WriteAllText((Join-Path $script:backupDir 'half-written.sql.partial'), 'half a copy', (New-Object Text.UTF8Encoding $false))
+[IO.File]::WriteAllText((Join-Path $script:backupDir 'half-written.dump.partial'), 'half a copy', (New-Object Text.UTF8Encoding $false))
+[IO.File]::WriteAllText((Join-Path $script:backupDir 'townreporter_2026-09-26_0205.sql.incomplete'), 'a dump that died', (New-Object Text.UTF8Encoding $false))
+[IO.File]::WriteAllText((Join-Path $script:backupDir 'notes.txt'), 'a note to myself', (New-Object Text.UTF8Encoding $false))
+
+# No @() around Get-LocalNames: it returns its list with a unary comma so that
+# callers get an array, and wrapping that in @() makes one item that IS the
+# array -- which -Exclude would then compare every name against, and every
+# series file would come back as a safety copy. That mistake is what this line
+# looked like the first time it ran.
+$localNames = Get-LocalNames
+$safety = Get-TownReporterSafetyCopyList -Dir $script:backupDir -Exclude $localNames
+Check "the safety list is the two hand-named files and nothing else" (((@($safety | ForEach-Object { $_.Name }) | Sort-Object) -join ',') -eq 'before-the-migration.sql,old-custom-format.dump') ((@($safety | ForEach-Object { $_.Name })) -join ', ')
+Check "the series list still holds exactly the six backups" ((Get-LocalNames).Count -eq 6) ((Get-LocalNames).Count)
+Check "a .sql.incomplete is not a safety copy, so it can never be copied as one" (-not (@($safety | ForEach-Object { $_.Name }) -contains 'townreporter_2026-09-26_0205.sql.incomplete'))
+Check "the binary .dump would be refused by the dump-completeness check, which is why that check is not run on these" ((Test-TownReporterDumpComplete -Path $handDump).Ok -eq $false) (Test-TownReporterDumpComplete -Path $handDump).Reason
+
+$run = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "the run is Ok" ($run.Ok -eq $true) $run.Reason
+Check "the series itself still went over, all six verified" ($run.State.offsiteVerified -eq 6) $run.State.offsiteVerified
+Check "the receipt gives the safety copies a line of their own" (@($run.Lines | Where-Object { $_ -match 'other safety copies are in' }).Count -eq 1) ((@($run.Lines)) -join ' | ')
+Check "the other-safety-copies folder was made under the offsite folder" ($text -match 'made .*other-safety-copies for the other safety copies')
+# Read the list into a variable first, for the same unary-comma reason: piping
+# or @()-wrapping the call itself hands the pipeline one item that IS the
+# array, so a Where-Object over it would look at the array and not the names.
+$safetyNames = Get-OffsiteSafetyNames
+Check "both of them are now in that folder" ((($safetyNames | Sort-Object) -join ',') -eq 'before-the-migration.sql,old-custom-format.dump') ($safetyNames -join ', ')
+Check "the .sql on the other drive is the same bytes as the one here" ((Test-TownReporterCopyMatches -Source $handSql -Dest (Join-Path $script:offsite 'other-safety-copies\before-the-migration.sql')) -eq $true)
+Check "and so is the .dump" ((Test-TownReporterCopyMatches -Source $handDump -Dest (Join-Path $script:offsite 'other-safety-copies\old-custom-format.dump')) -eq $true)
+Check "the receipt says how many of them are over there" ($text -match 'all 2 of 2 other safety copies are in')
+Check "nothing that is not a .sql or a .dump was copied" ($safetyNames.Count -eq 2) ($safetyNames -join ', ')
+Check "no half-copied .partial is left behind" (@($safetyNames | Where-Object { $_ -like '*.partial' }).Count -eq 0) ($safetyNames -join ', ')
+Check "the .incomplete stays on this machine only" (-not (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\townreporter_2026-09-26_0205.sql.incomplete')))
+Check "the note stays on this machine only" (-not (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\notes.txt')))
+
+# A second run hashes what is over there and copies nothing.
+$again = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "a second run copies neither of them again -- it found them identical" ($text -match 'all 2 of 2 other safety copies are in .* \(0 copied now, 2 already there\)')
+Check "and that run is Ok too" ($again.Ok -eq $true) $again.Reason
+
+# The keep-three rule is about the series. These are not in that series, on
+# either side, and no number of them changes that.
+$offsiteBefore = (Get-OffsiteSafetyNames).Count
+$prune = Remove-TownReporterBackupOld -LogFile $script:log -BackupDir $script:backupDir -OffsiteDir $script:offsite -Keep 1 -MinFreeGb 0
+Check "the prune did its job on the series: five of the six went" ($prune.Ok -eq $true -and (Get-LocalNames).Count -eq 1) ((Get-LocalNames) -join ', ')
+Check "the hand-named .sql is still on this machine" (Test-Path -LiteralPath $handSql -PathType Leaf)
+Check "the hand-named .dump is still on this machine" (Test-Path -LiteralPath $handDump -PathType Leaf)
+Check "neither of them is in the series list the prune works from" (-not ((Get-LocalNames) -contains 'before-the-migration.sql') -and -not ((Get-LocalNames) -contains 'old-custom-format.dump'))
+Check "and nothing was deleted from the other drive" ((Get-OffsiteSafetyNames).Count -eq $offsiteBefore) ((Get-OffsiteSafetyNames).Count)
+
+# A safety copy that cannot be copied is a failure, said out loud -- but it is
+# not a reason to leave the backups uncopied, and it deletes nothing anywhere.
+Reset-World "others-fail"
+New-SixBackups
+$handOnly = Join-Path $script:backupDir 'keep-this-one.sql'
+[IO.File]::WriteAllText($handOnly, (New-FakeDumpText -Token 'SECONDhandSECONDhandSECONDhandSECONDhandSECONDhandSECONDhandSECON'), (New-Object Text.UTF8Encoding $false))
+# A file where the folder needs to be: the folder cannot be made, so nothing
+# can be copied into it, and the run has to say so instead of saying nothing.
+Set-Content -LiteralPath (Join-Path $script:offsite 'other-safety-copies') -Value 'not a folder' -Encoding ASCII
+$run = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "the run is not Ok" ($run.Ok -eq $false)
+Check "it names the folder it could not make" ($run.Reason -match 'other-safety-copies folder could not be made') $run.Reason
+Check "the state file records the copy as failing" ($run.State.offsiteOk -eq $false)
+Check "the six backups still went over -- one un-copyable safety copy does not stop them" ($run.State.offsiteVerified -eq 6) $run.State.offsiteVerified
+Check "the receipt says how many safety copies did not make it" ($text -match '1 of 1 other safety copies did not make it')
+Check "the log says the folder could not be made, in the machine's own words" ($text -match 'NOT copying the 1 other safety copies')
+Check "the hand-named file is still on this machine, untouched" (Test-Path -LiteralPath $handOnly -PathType Leaf)
+Check "and nothing was deleted from this machine" ((Get-LocalNames).Count -eq 6) ((Get-LocalNames).Count)
 
 # ---------------------------------------------------------------------------
 Write-Host ""

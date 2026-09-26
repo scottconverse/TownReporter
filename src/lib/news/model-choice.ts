@@ -265,27 +265,39 @@ function ladderSentence(ladder: readonly string[] = automaticLadder()): string {
  * memory, and paging a 35B in from disk can take minutes, so Automatic only
  * uses such a rung when it is ALREADY loaded (the preflight skips it
  * otherwise -- see `requiresLoadedLocalModel`). The picker has to say that
- * out loud, or "tries Qwen second" reads as a promise the desk will load it.
- * Read from the registry, so neither the sentence nor this rule can drift from
- * which rungs actually carry the requirement.
+ * out loud, or "tries the local model second" reads as a promise the desk
+ * will load one. Read from the registry, so neither the sentence nor this rule
+ * can drift from which rungs actually carry the requirement.
+ *
+ * 0.6.69 (Unit AL item 4): the second sentence was added because the rung no
+ * longer names a model. It writes with whatever is loaded, and an operator who
+ * switched models for other work needs to read that off the page rather than
+ * guess which one a scheduled draft just used.
  */
 function loadedRungNote(ladder: readonly string[] = automaticLadder()): string {
   return ladder.some((id) => providerEntry(id)?.requiresLoadedLocalModel)
-    ? " A model on this computer is used only when it is already loaded."
+    ? " A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded."
     : "";
 }
 
 /**
  * A rung's name in plain words on the Server page.
  *
- * A rung that has to be LOADED is named by family and location, not by the
- * picker's model id: "Qwen on this computer if it is loaded" is the thing the
- * operator can go and check, where "Qwen 3.6 35B" invites reading the
- * sentence as a promise that the desk will page that exact model in.
+ * A rung that has to be LOADED is named by location, not by the picker's model
+ * id: "the model on this computer if it is loaded" is the thing the operator
+ * can go and check, where naming one exact model invites reading the sentence
+ * as a promise that the desk will page that model in.
+ *
+ * 0.6.69 (Unit AL item 4): this used to take the first word of the label and
+ * glue the detail onto it ("Qwen" + "on this computer"), which only worked
+ * while the label led with a family name. The rung's label is "Local model"
+ * now -- it names no model of its own -- so the first-word trick would have
+ * produced "Local on this computer if it is loaded".
  */
 function plainRungName(id: string): string {
   const entry = providerEntry(id);
   if (!entry) return id;
+  if (entry.picksLoadedLocalModel) return `the model ${entry.detail} if it is loaded`;
   if (!entry.requiresLoadedLocalModel) return entry.label;
   return `${entry.label.split(" ")[0]} ${entry.detail} if it is loaded`;
 }
@@ -293,7 +305,9 @@ function plainRungName(id: string): string {
 /**
  * The Automatic order in plain words, for the Server page's Writing models
  * panel (0.6.63, Unit Y item 5): "Automatic uses DeepSeek v4.1 Flash first,
- * then Qwen on this computer if it is loaded, then Codex Terra."
+ * then the model on this computer if it is loaded, then Codex Terra." The
+ * middle rung reads that way since 0.6.69 (Unit AL item 4): it names no model
+ * of its own, because it runs whatever LM Studio has loaded.
  *
  * Read from `automaticLadder`, like every other sentence the desk shows about
  * Automatic, so a reordered or retired rung cannot leave the Server page

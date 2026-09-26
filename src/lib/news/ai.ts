@@ -35,11 +35,20 @@ export type ProviderProbe =
       ok: true;
       label: string;
       choice: EffectiveProviderChoice;
+      /**
+       * The exact endpoint and model this choice was verified on.
+       *
+       * Two things produce one: the "Local model" pick (the editor's own
+       * choice, which the caller has to be told about), and a rung that picks
+       * its model at call time (`picksLoadedLocalModel` -- the Automatic
+       * ladder's LM Studio rung). A rung that names its own model in the
+       * registry does NOT set this; `rungLocalModel` still answers for it.
+       */
       localModel?: LocalModelOverride;
       /**
        * Rungs Automatic passed over before the one that answered, in the words
-       * the job's receipt shows ("Qwen 3.6 35B skipped: not loaded"). Absent
-       * when nothing was skipped, which is the ordinary case.
+       * the job's receipt shows ("Local model skipped: nothing loaded in LM
+       * Studio"). Absent when nothing was skipped, the ordinary case.
        */
       skippedRungs?: string[];
     }
@@ -134,10 +143,10 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
   /**
-   * Test-only seam for the local-models catalog. Automatic asks it whether a
-   * rung that must already be loaded actually is (see `skippedRungReason`),
-   * and the real answer comes from probing this machine's local ports -- which
-   * a test must not do.
+   * Test-only seam for the local-models catalog. Automatic asks it which model
+   * a rung that must already be loaded may actually be given (see
+   * `resolveRungLocalModel`), and the real answer comes from probing this
+   * machine's local ports -- which a test must not do.
    */
   resolveLocalCatalog?: () => Promise<LocalCatalog>;
 };
@@ -208,7 +217,8 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
  * One rung of the Automatic ladder's own endpoint.
  *
  * A rung is a model with a FIXED home -- DeepSeek v4.1 Flash on the Ollama
- * server, Qwen 3.6 35B on LM Studio's OpenAI-compatible port. Both are local,
+ * server, and the model loaded in LM Studio (whatever it is today) on LM
+ * Studio's OpenAI-compatible port. Both are local,
  * and `localGateway()` above can only describe ONE of them: with no resolved
  * override it reads `LLM_BASE_URL`, so a second rung would be sent to the first
  * rung's server (0.6.63, Unit Y item 1: "use the existing local/custom-connection
@@ -221,22 +231,47 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
  * Only for entries with a `ladderRank`; everything else keeps the gateway it has
  * always had.
  */
-function rungGateway(entry: ProviderEntry): LlmConfig | null {
-  const overrideBase = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
-  const baseUrl = overrideBase || entry.baseUrl;
+function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmConfig | null {
+  const baseUrl = rungBaseUrl(entry);
   if (!baseUrl) return null;
   const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
   const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
+  /*
+    `resolvedModel` is the model a call-time pick landed on (see
+    `resolveRungLocalModel`). It is the ONLY thing that can fill the model of an
+    entry with `picksLoadedLocalModel`, whose registry `model` is empty on
+    purpose: no resolved model, no gateway, no call -- which is how "never
+    request a model that is not loaded" is enforced rather than remembered.
+  */
+  const model = resolvedModel || providerModel(entry);
+  if (!model) return null;
   return {
     apiKey: apiKey || "not-needed",
-    baseUrl: trimSlash(baseUrl),
-    model: providerModel(entry),
-    label: entry.label,
+    baseUrl,
+    model,
+    // A rung that picks its model says which one it picked, everywhere the
+    // desk shows the provider: "Local model (google/gemma-4-12b-qat)".
+    label: entry.picksLoadedLocalModel ? `${entry.label} (${model})` : entry.label,
   };
 }
 
 /**
- * The endpoint a rung actually reaches, named the way a snapshot stores it.
+ * The endpoint a rung's calls go to: its own env override, else the registry.
+ *
+ * Split out of `rungGateway` because the call-time pick has to know WHICH
+ * server to ask for loaded models (`resolveRungLocalModel`) before there is a
+ * model to build a gateway around. Same two sources, so the server that was
+ * asked and the server that is called cannot drift.
+ */
+function rungBaseUrl(entry: ProviderEntry): string | null {
+  const overrideBase = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
+  const baseUrl = overrideBase || entry.baseUrl;
+  return baseUrl ? trimSlash(baseUrl) : null;
+}
+
+/**
+ * The endpoint a rung that NAMES ITS OWN MODEL reaches, the way a snapshot
+ * stores it.
  *
  * `probeProvider` hands a `localModel` override back for the "Local model"
  * choice only, because that choice's endpoint is the editor's own pick and
@@ -249,11 +284,19 @@ function rungGateway(entry: ProviderEntry): LlmConfig | null {
  * Null for anything that is not a rung, and for a rung with no endpoint, which
  * is the same condition `rungGateway` refuses: a misconfigured install is not
  * a runnable model.
+ *
+ * ALSO null for a rung that picks its model at call time (0.6.69, Unit AL item
+ * 4): its pair is not knowable without asking the local server, and this
+ * function is deliberately synchronous and offline. The pair for that rung
+ * comes from the `probeProvider` result that just verified it (`localModel` on
+ * an ok probe), so the model that is PINNED is the model that was CHECKED --
+ * not one resolved again a moment later.
  */
 export function rungLocalModel(choice: string | undefined | null): LocalModelOverride | null {
   if (!isAutomaticRungId(choice)) return null;
   const entry = providerEntry(choice);
-  const gateway = entry ? rungGateway(entry) : null;
+  if (!entry || entry.picksLoadedLocalModel) return null;
+  const gateway = rungGateway(entry);
   return gateway ? { baseUrl: gateway.baseUrl, id: gateway.model } : null;
 }
 
@@ -323,6 +366,7 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
 function explicitProvider(
   choice: StoryModelChoice,
   localOverride?: LocalModelOverride | null,
+  rungModel?: string | null,
 ): Provider | null {
   /*
     Every field below now comes from PROVIDER_REGISTRY: the label the desk
@@ -376,11 +420,15 @@ function explicitProvider(
   }
 
   if (entry.kind === "local") {
-    // A rung carries its own endpoint (see `rungGateway`); the "Local model"
-    // entry keeps the resolved-override-or-LLM_BASE_URL behaviour it has always
-    // had. The two coexist because the rung never reads LLM_BASE_URL.
+    // A rung carries its own endpoint (see `rungGateway`), and a rung that
+    // picks its model at call time can only be built around the model the
+    // caller resolved (`rungModel`); the "Local model" entry keeps the
+    // resolved-override-or-LLM_BASE_URL behaviour it has always had. The two
+    // coexist because the rung never reads LLM_BASE_URL.
     const llm =
-      entry.ladderRank === undefined ? localGateway(localOverride) : rungGateway(entry);
+      entry.ladderRank === undefined
+        ? localGateway(localOverride)
+        : rungGateway(entry, rungModel);
     return llm ? { kind: "openai", ...llm } : null;
   }
 
@@ -391,12 +439,20 @@ function explicitProvider(
 export function resolveProvider(
   choice?: StoryModelChoice | string,
   localOverride?: LocalModelOverride | null,
+  /**
+   * The model a rung that picks at call time resolved to, from
+   * `resolveRungLocalModel`. Ignored by every other entry, and by the
+   * "Local model" pick, whose model comes from `localOverride`.
+   */
+  rungModel?: string | null,
 ): Provider | null {
   if (choice === "configured") {
     const configured = customGateway();
     return configured ? { kind: "openai", ...configured } : null;
   }
-  if (choice && choice !== "auto") return explicitProvider(storyModelChoice(choice), localOverride);
+  if (choice && choice !== "auto") {
+    return explicitProvider(storyModelChoice(choice), localOverride, rungModel);
+  }
   const custom = customGateway();
   if (custom) return { kind: "openai", ...custom };
   const claude = resolveAnthropic();
@@ -596,39 +652,84 @@ async function probeAnthropic(
  */
 export const AUTOMATIC_LADDER = automaticLadder();
 
+/** What a rung that picks its model at call time resolved to, or why it may not run. */
+type RungResolution =
+  | { ok: true; localModel: LocalModelOverride | null }
+  | { ok: false; note: string };
+
+/** What the desk calls each local server it knows how to probe. */
+function localServerName(kind: string): string {
+  if (kind === "lmstudio") return "LM Studio";
+  if (kind === "ollama") return "Ollama";
+  if (kind === "llamacpp") return "llama.cpp";
+  return "the local server";
+}
+
 /**
- * Why Automatic must pass over a rung BEFORE trying it, or null to try it.
+ * Which model a rung may be asked for RIGHT NOW, or why Automatic must pass it
+ * over before trying it.
  *
  * A rung whose model has to be ALREADY loaded (see `requiresLoadedLocalModel`)
  * cannot be checked the ordinary way. LM Studio answers `/v1/models` with every
  * model it has on disk, loaded or not, and paging a 35B into memory takes
  * minutes -- so "the endpoint replied" would pin a draft to a model that is
  * still coming off the disk while the editor watches a job that looks stuck.
- * The desk never loads or unloads a model on the paper's behalf (owner rule:
- * Qwen is used "if it is loaded"), so it skips the rung and records why.
+ * The desk never loads or unloads a model on the paper's behalf, so it skips
+ * the rung and records why.
  *
- * Only rungs that carry the requirement are checked here; every other rung is
- * checked the ordinary way, by asking its endpoint to answer.
+ * 0.6.69 (Unit AL item 4): it also no longer names a model. The owner runs LM
+ * Studio for other work and switches the loaded model, so the rung reads the
+ * load state LM Studio reports and runs what is there (`pickLoadedLocalModel`:
+ * the lowest-id loaded non-embedding model, so two calls in a row pick the
+ * same one and the receipt can name it). Zero loaded is a skip, in exactly the
+ * words the brief asks for: "Local model skipped: nothing loaded in LM
+ * Studio". `TOWNREPORTER_QWEN_MODEL` is still a PIN -- with it set, the rung
+ * asks for that exact model and is skipped unless it is loaded.
+ *
+ * Every answer here is a REFUSAL or a model the server has just reported
+ * loaded; nothing in this file ever asks a local server for a model that is
+ * not in memory. `ok: true` with a null `localModel` means "this rung names
+ * its own model in the registry, nothing to pick" -- which is every rung
+ * except this one.
  */
-async function skippedRungReason(
-  entry: ProviderEntry,
+async function resolveRungLocalModel(
+  choice: string | undefined | null,
   readCatalog?: () => Promise<LocalCatalog>,
-): Promise<string | null> {
-  if (!entry.requiresLoadedLocalModel) return null;
-  const gateway = rungGateway(entry);
-  if (!gateway) return null; // No endpoint named for it: the probe reports that.
-  const catalog = readCatalog
-    ? await readCatalog()
-    : await (await import("./local-models.ts")).discoverLocalModels();
-  const server = catalog.servers.find(
-    (s) => trimSlash(s.baseUrl) === gateway.baseUrl && s.reachable,
-  );
-  if (!server) return "its server did not answer";
-  const model = server.models.find((m) => m.id === gateway.model);
-  if (!model || model.loaded === false) return "not loaded";
-  // A server that does not report load state cannot answer the question, and
-  // the rule is that Qwen is used only when it IS loaded -- so unknown skips.
-  return model.loaded === true ? null : "load state unknown";
+): Promise<RungResolution> {
+  if (!isAutomaticRungId(choice)) return { ok: true, localModel: null };
+  const entry = providerEntry(choice);
+  if (!entry || !entry.requiresLoadedLocalModel) return { ok: true, localModel: null };
+  const label = entry.label;
+  const baseUrl = rungBaseUrl(entry);
+  // No endpoint named: a misconfigured install, not a runnable model. The
+  // probe reports that in its own words (`rungGateway` refuses it too).
+  if (!baseUrl) return { ok: true, localModel: null };
+  const { discoverLocalModels, pickLoadedLocalModel } = await import("./local-models.ts");
+  const catalog = readCatalog ? await readCatalog() : await discoverLocalModels();
+  const server = catalog.servers.find((s) => trimSlash(s.baseUrl) === baseUrl && s.reachable);
+  if (!server) return { ok: false, note: `${label} skipped: its server did not answer` };
+  const pinned = providerModel(entry);
+  if (pinned) {
+    const model = server.models.find((m) => m.id === pinned);
+    if (!model || model.loaded === false) return { ok: false, note: `${label} skipped: not loaded` };
+    // A server that does not report load state cannot answer the question, and
+    // the rule is that a model is used only when it IS loaded -- so unknown skips.
+    if (model.loaded !== true) {
+      return { ok: false, note: `${label} skipped: load state unknown` };
+    }
+    return { ok: true, localModel: { baseUrl, id: pinned } };
+  }
+  const picked = pickLoadedLocalModel(server);
+  if (picked) return { ok: true, localModel: { baseUrl, id: picked.id } };
+  /*
+    Nothing to run. Which sentence is honest depends on whether the server can
+    answer the question at all: a server that reports load state is telling us
+    nothing is loaded, while one that reports none has never been asked a
+    question it can answer.
+  */
+  const reportsLoadState = server.models.some((m) => m.loaded !== null);
+  if (!reportsLoadState) return { ok: false, note: `${label} skipped: load state unknown` };
+  return { ok: false, note: `${label} skipped: nothing loaded in ${localServerName(server.kind)}` };
 }
 
 export async function probeProvider(
@@ -678,16 +779,23 @@ export async function probeProvider(
     callers pass the reason on to the receipt and move to the next rung, so
     the editor reads which model actually wrote the draft and what was passed
     over on the way.
+
+    0.6.69 (Unit AL item 4): the same call also PICKS the model for a rung that
+    does not name one -- the loaded model on that rung's server, named in
+    `localModel` on an ok probe so the caller that pins the run (and the job
+    receipt) carries the exact identifier this probe verified. `rungModel`
+    below is what the gateway is then built around, so the model that was
+    checked is the model that is called.
   */
+  let rungModel: string | null = null;
+  let rungPair: LocalModelOverride | null = null;
   if (typeof choice === "string" && isAutomaticRungId(choice)) {
-    const entry = providerEntry(choice);
-    const skipped = entry
-      ? await skippedRungReason(entry, adapters?.resolveLocalCatalog)
-      : null;
-    if (entry && skipped) {
-      const note = `${entry.label} skipped: ${skipped}`;
-      return { ok: false, error: `${note}.`, skippedRungs: [note] };
+    const resolved = await resolveRungLocalModel(choice, adapters?.resolveLocalCatalog);
+    if (!resolved.ok) {
+      return { ok: false, error: `${resolved.note}.`, skippedRungs: [resolved.note] };
     }
+    rungModel = resolved.localModel?.id ?? null;
+    rungPair = resolved.localModel;
   }
   if (choice === "auto") {
     const configured = customGateway();
@@ -729,7 +837,7 @@ export async function probeProvider(
       ...(skippedRungs.length ? { skippedRungs } : {}),
     };
   }
-  let provider = resolveProvider(choice);
+  let provider = resolveProvider(choice, undefined, rungModel);
   let localOverride: LocalModelOverride | null = null;
   if (choice === "local-model" && (exactLocalModel || scope || !provider)) {
     localOverride = exactLocalModel ?? (adapters?.resolveLocal
@@ -754,7 +862,12 @@ export async function probeProvider(
     return {
       ...result,
       choice: choice === "configured" ? "configured" : storyModelChoice(choice),
-      ...(choice === "local-model" && localOverride ? { localModel: localOverride } : {}),
+      // The editor's own pick, or the model a picking rung just verified.
+      ...(localOverride
+        ? { localModel: localOverride }
+        : rungPair
+          ? { localModel: rungPair }
+          : {}),
     };
   }
   if (provider.kind === "anthropic") {
@@ -888,6 +1001,18 @@ export async function grokChat(
     newsroomId?: number;
     /** Verified per-run reasoning setting for the selected named model. */
     reasoningEffort?: ModelEffort | null;
+    /**
+     * The exact model a rung that picks its model at call time resolved to.
+     *
+     * `undefined` means "not resolved yet" and this call resolves it (see
+     * `resolveRungLocalModel`); `null` means the caller already resolved it and
+     * the rung names its own model in the registry. The Automatic recursion
+     * below hands the walk's answer down this way, so a picking rung is not
+     * resolved twice: a later pass of the same story must not run on a
+     * different model than its first pass because the owner loaded something
+     * else in between.
+     */
+    rungModel?: string | null;
   },
   adapters?: GrokChatAdapters,
 ): Promise<GrokOk | GrokErr> {
@@ -897,7 +1022,30 @@ export async function grokChat(
     // never silently changes author midway through.
     const ready = await (adapters?.probe ?? probeProvider)("auto");
     if (!ready.ok) return ready;
-    return grokChat(system, user, maxTokens, { ...opts, choice: ready.choice }, adapters);
+    return grokChat(
+      system,
+      user,
+      maxTokens,
+      { ...opts, choice: ready.choice, rungModel: ready.localModel?.id ?? null },
+      adapters,
+    );
+  }
+  /*
+    A rung that picks its model at call time is resolved HERE, for every caller
+    that did not come through the ladder walk: a scan's failover hop, or a job
+    that stored a rung as its choice. A rung with nothing loaded is a refusal,
+    in the same words the probe uses, rather than a request for a model nobody
+    has in memory.
+  */
+  let rungModel: string | null = opts?.rungModel ?? null;
+  if (
+    opts?.rungModel === undefined &&
+    typeof opts?.choice === "string" &&
+    isAutomaticRungId(opts.choice)
+  ) {
+    const resolved = await resolveRungLocalModel(opts.choice, adapters?.resolveLocalCatalog);
+    if (!resolved.ok) return { ok: false, error: `${resolved.note}.` };
+    rungModel = resolved.localModel?.id ?? null;
   }
   const custom =
     opts?.choice && isCustomModelChoice(opts.choice)
@@ -913,7 +1061,7 @@ export async function grokChat(
     ? custom.provider
     : xai?.ok
       ? xai.provider
-      : resolveProvider(opts?.choice, opts?.localModel);
+      : resolveProvider(opts?.choice, opts?.localModel, rungModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;

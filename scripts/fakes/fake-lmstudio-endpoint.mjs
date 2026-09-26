@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 /**
  * A stand-in for LM Studio's local server, for the browser walks that must
- * keep Automatic's rung 2 (Qwen 3.6 35B, `qwen-local`) skipping with a real
- * reason on a machine that has no LM Studio running.
+ * keep Automatic's rung 2 (`qwen-local`, label "Local model") skipping with a
+ * real reason on a machine that has no LM Studio running.
  *
  * Rung 2 is the one ladder entry that carries `requiresLoadedLocalModel`, so
- * before it is tried the desk asks the local catalog whether that model is
- * present and loaded (src/lib/news/ai.ts's `skippedRungReason`, reading
- * src/lib/news/local-models.ts). Two conditions have to hold for the desk to
- * say "not loaded" rather than something else:
+ * before it is tried the desk asks the local catalog what LM Studio has
+ * LOADED right now (src/lib/news/ai.ts's `resolveRungLocalModel`, reading
+ * src/lib/news/local-models.ts). Three conditions have to hold for the desk to
+ * say "nothing loaded in LM Studio" rather than something else:
  *
  *   1. a server has to be found AT THE RUNG'S OWN baseUrl and be reachable --
  *      otherwise the reason is "its server did not answer";
- *   2. that server must not list the rung's model as loaded.
+ *   2. that server has to list at least one model in a form the catalog can
+ *      read at all -- an empty /v1/models is not a probing failure here, but
+ *      the rung still needs a listing to reason over;
+ *   3. the native /api/v0/models listing has to report load state and report
+ *      NOTHING loaded -- a server that reports no state at all gets "load
+ *      state unknown" instead, which is a different sentence.
  *
  * Condition 1 is why this fake listens on 1234 by default: local discovery
  * identifies a server as an LM Studio one by its port (`inferKind`), and it
@@ -21,27 +26,37 @@
  * LLM_BASE_URL makes Automatic skip the ladder entirely. A test port cannot
  * be used here.
  *
- * Condition 2 is the point of the fake: /v1/models and /api/v0/models list one
- * small chat model and deliberately NOT the rung's model, so the catalog entry
- * is reachable, is an LM Studio server, reports load state (so the verdict is
- * a definite "not loaded" rather than "load state unknown"), and simply does
- * not have the model.
+ * Condition 3 is the point of the fake, and it is what changed in 0.6.69
+ * (Unit AL item 4). Until then the rung named a model, so "not loaded" was
+ * proven by listing the models and leaving THAT ONE out. The rung now runs
+ * whatever is loaded, so the only way to keep it skipped is to report a model
+ * the server has on disk and NOT loaded -- `state: "not-loaded"` in the native
+ * listing, which is a state LM Studio really uses (`lms ps --json` reports
+ * "not-loaded" for a model that is downloaded but not in memory).
  *
- *   FAKE_LMSTUDIO_PORT  port to listen on (default `LMSTUDIO_PORT`; see above
- *                       -- another port is almost certainly the wrong test)
- *   FAKE_LMSTUDIO_MODEL the one model it does list as loaded
- *                       (default "fake-lmstudio-small", type llm)
+ *   FAKE_LMSTUDIO_PORT   port to listen on (default `LMSTUDIO_PORT`; see above
+ *                        -- another port is almost certainly the wrong test)
+ *   FAKE_LMSTUDIO_MODEL  the one model it lists on disk
+ *                        (default "fake-lmstudio-small", type llm)
+ *   FAKE_LMSTUDIO_STATE  that model's load state in /api/v0/models (default
+ *                        "not-loaded"). Set it to "loaded" to prove the
+ *                        OPPOSITE case -- that the rung becomes runnable and
+ *                        is tried -- and expect the 404 below.
  *
  * There is no /v1/chat/completions route on purpose. If the rung is ever
- * reached, this server must NOT quietly answer as if a real 35B model had
- * written something -- a 404 makes the run fail with the fake's own name in
- * it, which is what a walk wants to see if the skip stopped working.
+ * reached, this server must NOT quietly answer as if a real model had written
+ * something -- a 404 makes the run fail with the fake's own name in it, which
+ * is what a walk wants to see if the skip stopped working.
  */
 import { createServer } from "node:http";
 import { LMSTUDIO_PORT } from "./lmstudio-address.mjs";
 
 const PORT = Number(process.env.FAKE_LMSTUDIO_PORT || LMSTUDIO_PORT);
 const MODEL = process.env.FAKE_LMSTUDIO_MODEL || "fake-lmstudio-small";
+// "not-loaded" keeps rung 2 skipping, which is what every walk here wants:
+// since 0.6.69 the rung runs whatever is loaded, so a listing that says
+// "loaded" would make it runnable and the walk would 404 on chat below.
+const STATE = process.env.FAKE_LMSTUDIO_STATE || "not-loaded";
 
 function send(res, status, body) {
   const text = JSON.stringify(body);
@@ -72,7 +87,7 @@ const server = createServer((req, res) => {
           object: "model",
           type: "llm",
           publisher: "fake",
-          state: "loaded",
+          state: STATE,
           max_context_length: 4096,
         },
       ],
@@ -93,7 +108,7 @@ server.on("error", (error) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   process.stdout.write(
-    `fake-lmstudio: listening on http://127.0.0.1:${PORT} (loaded model ${MODEL}, ` +
-      `no qwen rung model)\n`,
+    `fake-lmstudio: listening on http://127.0.0.1:${PORT} (model ${MODEL} is ${STATE}, ` +
+      `so rung 2 has nothing loaded to run)\n`,
   );
 });

@@ -340,8 +340,10 @@ test("a stored SuperGrok choice shows Automatic, explains itself, and offers no 
   assert.match(html, /value="auto"[^>]*selected=""/, "the control must show Automatic");
   assert.doesNotMatch(html, /value="grok-oauth"/);
   // The note explains the fallback; the surface's own help still says what
-  // Automatic will actually do, read from the ladder itself.
-  assert.match(html, /DeepSeek v4\.1 Flash, Qwen 3\.6 35B, then Codex Terra/);
+  // Automatic will actually do, read from the ladder itself. The middle rung
+  // reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of its
+  // own, because it runs whatever LM Studio has loaded.
+  assert.match(html, /DeepSeek v4\.1 Flash, Local model, then Codex Terra/);
 });
 
 test("a stored SuperGrok choice on a picker that has no Automatic falls back to that surface's first choice", () => {

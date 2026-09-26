@@ -155,7 +155,15 @@ describe("the provider registry is the one description of a writing model", () =
     for (const entry of PROVIDER_REGISTRY) {
       assert.ok(entry.label.trim(), `${entry.id} needs a label the picker can show`);
       assert.ok(entry.detail.trim(), `${entry.id} needs the half-line under its label`);
-      assert.ok(entry.model.trim(), `${entry.id} needs a default model identifier`);
+      /*
+        0.6.69 (Unit AL item 4): a rung that picks the model at call time names
+        none, on purpose -- an empty `model` is what makes it impossible to call
+        without a resolved, verified-loaded model. Every other entry still has
+        to carry one.
+      */
+      if (!entry.picksLoadedLocalModel) {
+        assert.ok(entry.model.trim(), `${entry.id} needs a default model identifier`);
+      }
       assert.ok(KIND_BUDGETS[entry.kind], `${entry.id} has a kind with no default budget`);
       for (const field of ["wallMs", "callMs", "reserveMs"] as const) {
         assert.equal(

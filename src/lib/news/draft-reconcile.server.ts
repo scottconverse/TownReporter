@@ -10,7 +10,7 @@ import { storyModelChoice } from "./model-choice.ts";
 import { probeProvider } from "./ai.ts";
 import { scanPreflight } from "./preflight.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
-import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
+import { modelEffort, providerEntry, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
@@ -241,7 +241,14 @@ export async function requestDraftReconciliation(
   }
   const choice = provider.ok ? provider.choice : requested;
   const localModel = provider.ok ? provider.localModel : undefined;
-  if (choice === "local-model" && !localModel) {
+  /*
+    0.6.69 (Unit AL item 4): the guard covers a rung that picks its model at
+    call time too. Such a rung names no model in the registry, so the pair the
+    probe just verified is the ONLY record of what this job will call -- a job
+    enqueued without it would ask LM Studio for nothing in particular, which is
+    the one thing the brief forbids outright.
+  */
+  if ((choice === "local-model" || providerEntry(choice)?.picksLoadedLocalModel) && !localModel) {
     throw new Error("The selected local model could not be pinned to its exact server and model before enqueueing.");
   }
   const job = await (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor",resultJson:JSON.stringify(initialModelRuntimeReceipt({requestedRuntime:requested,requestedEffort:modelEffort(requested,input.modelEffort),actualRuntime:choice,actualEffort:modelEffort(choice,input.modelEffort),localModel,preflightFailover:preflight}))});

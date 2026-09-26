@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current software version: [0.6.68](releases/0.6.68.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.69](releases/0.6.69.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -256,8 +256,8 @@ One pass: fetch every **accepted** source, then one model read for leads and pro
 Scan has the same **Writing model** picker Story and the queue have, next to
 **Run scan**: Automatic (the default), every named Codex and Claude model, or
 Local model. Automatic uses the operator's configured gateway when one is set;
-otherwise it uses DeepSeek v4.1 Flash first, then Qwen on this computer if it is
-loaded, then Codex Terra. If the first one's login
+otherwise it uses DeepSeek v4.1 Flash first, then the local model this computer
+has loaded, if there is one, then Codex Terra. If the first one's login
 lapses partway through the run, the scan moves to the next rung once, if it
 is ready, reusing the same fetched sources rather than fetching them again.
 A named choice is the recorded first provider. A recognized technical failure
@@ -292,7 +292,8 @@ Statuses you will use:
 Every active lead has its own compact **Writing model** picker beside **Draft
 with AI** (or **Redraft with AI** after a draft exists). Automatic uses the
 operator's configured gateway when one is set; otherwise it uses DeepSeek v4.1
-Flash first, then Qwen on this computer if it is loaded, then Codex Terra. If
+Flash first, then the local model this computer has loaded if there is one, then
+Codex Terra. If
 the first one's login lapses partway through the
 run, the draft moves to the next rung once, if it is ready, and the row shows
 which provider took over and why. A named choice is the first recorded provider;
@@ -433,8 +434,8 @@ Changing the body of a draft with reporting evidence requires a new evidence rev
 
 The picker beside it controls this run. **Automatic** uses a configured
 `LLM_*` gateway exclusively when present; otherwise it uses DeepSeek v4.1 Flash
-first, then Qwen on this computer if it is loaded, then Codex Terra —
-choosing the first ready one before enqueueing, and keeping it
+first, then the local model this computer has loaded if there is one, then Codex
+Terra — choosing the first ready one before enqueueing, and keeping it
 for every reporting and writing pass unless it reaches a usage limit, becomes
 unavailable, loses its login, or times out. Automatic moves the unfinished work
 once to the next ready provider and shows the switch in the workbench. A model
@@ -488,6 +489,16 @@ Choose an editor judgment of **Supports**, **Does not support**, **Contradicts**
 After **Save edits**, the review refreshes for the saved draft without reloading the page. Judgment controls remain unavailable while a replacement draft is queued or running, or while a draft-wide evidence decision is saving. When the replacement job completes, the workbench loads its draft and review together.
 
 If an older record contains incomplete or unreadable structured findings, the panel says so and offers no judgment controls. Review the original material or generate a replacement draft; retrying does not repair the saved record.
+
+### Style check
+
+Everything else the desk checks about a draft is about whether it is true. **Style check** is the one panel about whether it reads. It is measured by code, not by a model, and it looks for shapes rather than facts: a claim attributed to nobody (**Experts say…**), a sentence that asserts importance and reports nothing, a participle tail on the end of a sentence, a dressed-up verb where **said** would do, filler, the same phrase cycling through different synonyms, a paste artifact, a tracking parameter or redirect in a link, a paragraph past the length the story form reads best under, a draft whose sentences are all the same length, a draft with no short sentence next to a long one, and the same six words repeated.
+
+The list is at the bottom of the draft. It says how many things to fix, and for each one where it is — paragraph and sentence — what it is, and the sentence it came from. **Review** findings sit under a fold beneath them: those are for you to read, not to fix. The list measures the text on the page, so it stays current as you type. Every line is a suggestion. Nothing there blocks a save or a publish, and nothing there publishes anything.
+
+**Fix these with the model** runs one repair pass, on demand, using the model the picker is set to. The model is given the list and the draft, and returns the draft with those problems fixed. It may not change a quotation, a number, a name or a link: a rewrite that does is refused, your text is kept, and the desk says why. The result is saved as an ordinary draft revision — the same as **Save** — so it is never a publication. The list then shows whatever is left, which may be nothing.
+
+A model never decides what counts as a fault here. The code names the problems, the model repairs only those, and the code checks the repair.
 
 ### Reporting notes (do not print)
 
@@ -662,6 +673,55 @@ change, choose **Needs correction**, write the correction, and use **Publish
 correction**. Completed review history remains with the published article; it
 does not silently edit the printed story.
 
+### Finding videos with Google's official YouTube Data API
+
+**Where the key goes:** open **Server → YouTube** (the direct link is
+`/desk/ops#youtube-key`). Paste the key, then **Save key**.
+
+**Making the key.** In Google Cloud, create a project, turn on **YouTube Data
+API v3** for it, then create an API key and restrict that key to the YouTube
+Data API. TownReporter pays nothing for this: the API allows 10,000 units a
+day free, and every call this desk makes costs 1 unit. It never uses
+`search.list`, which alone would cost 100.
+
+**The key is write-only.** It is encrypted before it is stored and it is never
+sent back to the page — the box says *A key is saved* or *No key*, and there is
+no control anywhere that shows the key again. If you lose it, make a new one in
+Google Cloud and paste that; there is nothing to recover here.
+
+- **Test** spends one unit and asks Google about the first channel the desk
+  watches. It answers *Key works. Google answered for the channel …* or
+  Google's refusal in plain words, for example *Google says this key is not
+  allowed to use the YouTube Data API. Check that the key is right, that the
+  YouTube Data API v3 is turned on for its project, and that the key is not
+  restricted to another API.* Type a key and press **Test** to check it before
+  saving it — a tested key is not stored.
+- **Remove** takes the key back out. The desk reads the public feed again from
+  the next scan.
+- **YouTube units used today: N of 10,000** sits next to the box, so you can
+  see a scan eating into the day's allowance before it runs out.
+
+**What changes with a key set.** Channel videos, durations and live/upcoming
+state come from Google's documented service instead of the channel page HTML,
+the public RSS feed, and the yt-dlp listing. The scan receipt says which reader
+actually ran — *Read YouTube with the official API.* or *… Read the public feed
+instead.* — and the Meeting capture line names it too, so a short list is never
+mistaken for a thin channel when the desk had in fact fallen back.
+
+**What does not change.** Transcripts and media still come from yt-dlp and
+textflowkit. The API cannot download captions for videos this desk does not own,
+so nothing about caption or audio capture moves.
+
+**When the allowance runs out.** Google resets it at midnight Pacific. On the
+day Google refuses for quota the desk stops asking, says so under the key box,
+and reads the public feed for the rest of that Pacific day rather than spending
+more calls on refusals. It tries the official API again the next day. A key
+that is missing, rejected, or unreachable at any moment falls back the same
+way: the scan keeps running on the public feed and says so, instead of failing.
+
+An owner can also put `YOUTUBE_API_KEY` in the app's environment. A key set
+there is used in place of any saved one, and overrides it — see `.env.example`.
+
 ---
 
 ## Dark Desk (`/desk/dark`)
@@ -692,8 +752,8 @@ Next to **Keep digging** there is a **Digging model** picker, the same one the
 queue and the workbench have: Automatic; Codex Astra, Sol, Terra and Luna;
 Claude Fable, Opus, Sonnet and Haiku; Local model; and saved custom connections.
 Dark Desk Automatic uses a configured gateway when present; otherwise it uses
-DeepSeek v4.1 Flash first, then Qwen on this computer if it is loaded, then
-Codex Terra. Planning uses Claude Haiku or the cheaper Codex
+DeepSeek v4.1 Flash first, then the local model this computer has loaded if
+there is one, then Codex Terra. Planning uses Claude Haiku or the cheaper Codex
 planning model. If synthesis times out, only synthesis moves to the next model;
 completed searches and document reads do not run again. A model you name is the
 recorded first choice. A recognized technical failure can move only the failed
@@ -798,8 +858,8 @@ saved custom connections are offered too. Codex Sol is selected by default.
 **Opinion's own Automatic** tries
 Codex Sol, then Claude Sonnet once if Codex is unavailable — that order belongs
 to Opinion. Stories, scans and Dark Desk walk the desk's own Automatic ladder:
-DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then
-Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
+DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
+then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
 A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
@@ -914,7 +974,7 @@ They start disabled. The owner chooses a local time in the paper's configured
 timezone, selects as many as 12 accepted sources from any reporting beat, and
 chooses the model for each scheduled run. **Automatic** is the default for a
 newsroom that has never saved the schedule, and works down the same writing
-ladder a story uses: DeepSeek v4.1 Flash first, then Qwen 3.6 35B if it is
+ladder a story uses: DeepSeek v4.1 Flash first, then the local model if one is
 already loaded, then Codex Terra. The owner may instead name one explicit
 model: Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku;
 the already selected local model; or a saved Custom AI connection such as an
@@ -1212,7 +1272,7 @@ The sidebar keeps Desk, Sources, Scan, Queue, Published, Opinion, Server and Sta
 
 **Edit and review:** the story workspace keeps headline, summary and body on the writing surface. Its toolbar has Save, Preview, Redraft, Check draft against evidence and Publish. Checks contains the existing name results and evidence entry points; Sources contains documents and download links; Reporting contains the model/research choices, reporting notes and claim-of-absence controls. The full finding/evidence review remains below the editor. Preview shows the current text without publishing it. Existing evidence and publication checks still apply.
 
-**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Suggested sources and Dropped groups. Server has nine panels: Writing models, Custom connections, Daily scan, Routine notices, Paper identity, Sections, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
+**Manage the newsroom:** Sources has Add a source and Import a source registry controls, followed by On watch, Suggested sources and Dropped groups. Server has twelve panels, in this order: Writing models, Custom connections, Daily scan, Meeting capture, YouTube, Routine notices, Paper identity, Sections, Named outlets, Server health, Recently deleted, and Editors & access. Opening another panel preserves unsaved settings in the current page.
 
 
 ### Recheck a draft against uploaded documents

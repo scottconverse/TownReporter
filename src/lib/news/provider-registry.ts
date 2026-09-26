@@ -120,7 +120,7 @@ export type RetiredProviderId = (typeof RETIRED_PROVIDER_IDS)[number];
   The ladder's own rungs, as literals, for the types below.
 
   These are the ids Automatic may pin on a job (0.6.63, Unit Y item 1: DeepSeek
-  v4.1 Flash, then Qwen 3.6 35B on this computer, then Codex Terra). They are
+  v4.1 Flash, then the local model on this computer, then Codex Terra). They are
   INTERNAL ids -- no menu shows them -- but a job still has to be able to hold
   one, because `planAutomaticFailover` returns `storyModelChoice(rung)` and a
   value this type rejected would silently degrade to "auto" and re-probe the
@@ -214,6 +214,29 @@ export type ProviderEntry = {
    * loaded, and moves on.
    */
   requiresLoadedLocalModel?: boolean;
+  /**
+   * True when this entry does NOT name one model and instead picks whatever
+   * the local server reports LOADED, at call time.
+   *
+   * 0.6.69 (Unit AL item 4). The owner runs LM Studio for other work too and
+   * switches the loaded model; a rung pinned to one identifier would skip all
+   * day while he had something else in memory. `model` is therefore EMPTY for
+   * an entry with this flag -- an empty identifier is what makes it impossible
+   * to call the rung without having resolved a model first (see `ai.ts`'s
+   * `resolveRungLocalModel`, which is the only thing that fills it), so
+   * "never request a model that is not loaded" holds by construction rather
+   * than by everyone remembering.
+   *
+   * What is picked, deterministically, is `pickLoadedLocalModel`'s answer:
+   * the lowest-id loaded non-embedding model on the rung's own server. The
+   * model's name goes into the run's receipt and into the rung's label, so a
+   * reader can always tell what actually wrote the draft.
+   *
+   * `TOWNREPORTER_QWEN_MODEL` still wins: an operator who names a model by
+   * hand gets exactly that model, and the rung is skipped when it is not
+   * loaded. An override is a pin; this flag is only the default behaviour.
+   */
+  picksLoadedLocalModel?: boolean;
   /** The variable an operator sets to `0` to take this entry out entirely. */
   offSwitchEnv?: string;
   /** Which pickers offer it. */
@@ -615,8 +638,9 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     Automatic's own local rungs (0.6.63, Unit Y item 1).
 
     Rank 1 is DeepSeek v4.1 Flash on the Ollama endpoint the live paper
-    already points its "Local model" pick at; rank 2 is Qwen 3.6 35B on LM
-    Studio. Both are `kind: "local"`, which is the same OpenAI-compatible
+    already points its "Local model" pick at; rank 2 is whichever model LM
+    Studio has LOADED (0.6.69, Unit AL item 4 -- it named a fixed Qwen 3.6 35B
+    before that). Both are `kind: "local"`, which is the same OpenAI-compatible
     transport the "Local model" entry uses -- they add no third config
     system, no new table and no new wire format. What makes two local
     endpoints coexist is exactly what this registry is for: each rung carries
@@ -664,12 +688,25 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "qwen-local",
-    label: "Qwen 3.6 35B",
+    /*
+      Label "Local model" because that is what the rung IS now: not a named
+      35B, but whichever model this machine has loaded in LM Studio. It read
+      "Qwen 3.6 35B" until 0.6.69 (Unit AL item 4) and the rename is not
+      cosmetic -- the old name would be a lie the moment the owner loaded
+      something else, and the rung's own skip note ("Local model skipped:
+      nothing loaded in LM Studio") is built out of this label.
+    */
+    label: "Local model",
     detail: "on this computer",
     kind: "local",
-    model: "halo/qwen3.6-35b-a3b",
+    // No model of its own: picked at call time from what is LOADED, and the
+    // resolved name is what the label and the receipt carry. See
+    // `picksLoadedLocalModel` above, and `resolveRungLocalModel` in ./ai.ts.
+    model: "",
     baseUrl: "http://127.0.0.1:1234/v1",
     envOverrides: {
+      // A pin, not a suggestion: with this set the rung asks for this exact
+      // model and is skipped unless it is loaded.
       model: "TOWNREPORTER_QWEN_MODEL",
       baseUrl: "TOWNREPORTER_QWEN_BASE_URL",
       apiKey: "TOWNREPORTER_QWEN_API_KEY",
@@ -686,10 +723,13 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       models on `/v1/models` whether or not they are in memory, so a probe
       that only asks "did the endpoint answer" would pin a draft to a model
       that then has to be paged in from disk -- which can take minutes on a
-      big model. The preflight checks local-models.ts's `loaded` flag instead
-      and records "Qwen 3.6 35B skipped: not loaded" in the job's receipt.
+      big model. The preflight reads local-models.ts's `loaded` flag instead
+      and records "Local model skipped: nothing loaded in LM Studio" in the
+      job's receipt (or, when TOWNREPORTER_QWEN_MODEL pins the rung, "Local
+      model skipped: not loaded").
     */
     requiresLoadedLocalModel: true,
+    picksLoadedLocalModel: true,
     // No `efforts`: this exact LM Studio model id has not been measured for a
     // run-scoped reasoning setting, and this file's rule is that an
     // unmeasured model gets the provider default rather than a made-up list.
@@ -870,8 +910,8 @@ export function enabledAutomaticLadder(): readonly ProviderId[] {
  * would kill the run instead of moving it. Unit Y (0.6.63) changed which
  * models Automatic tries; it did not change where an explicitly chosen batch
  * moves, so this stays the order those surfaces have used since 0.6.1 --
- * Balanced, then Sonnet -- and DeepSeek and Qwen reach a batch only when an
- * editor picks them by hand.
+ * Balanced, then Sonnet -- and DeepSeek and the local rung reach a batch only
+ * when an editor picks them by hand.
  *
  * NOT the scheduled daily scan any more (0.6.64, Unit AA): a scan left on
  * Automatic resolves its policy to a rung snapshot before the job is queued

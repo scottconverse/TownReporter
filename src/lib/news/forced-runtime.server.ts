@@ -22,10 +22,11 @@ type LadderChoice = Exclude<ProviderId, "configured">;
 /**
  * A run pinned to one of Automatic's own rungs (0.6.64, Unit AA).
  *
- * DeepSeek v4.1 Flash or Qwen 3.6 35B, both on a local endpoint. `transport:
- * "local"` routes it through the same adapter the "Local model" snapshot uses;
- * the endpoint is the RUNG's, from the registry, so it is never the editor's
- * local-model pick.
+ * DeepSeek v4.1 Flash on Ollama, or whatever model is loaded in LM Studio
+ * (0.6.69, Unit AL item 4: the LM Studio rung picks at call time), both on a
+ * local endpoint. `transport: "local"` routes it through the same adapter the
+ * "Local model" snapshot uses; the endpoint is the RUNG's, from the registry,
+ * so it is never the editor's local-model pick.
  *
  * This is a separate type rather than a variant typed inline, because
  * `parseForcedRuntimeSnapshot` REFUSES one unless the caller asks for it: a
@@ -169,16 +170,19 @@ export async function validateForcedRuntime(
   if (isAutomaticRungId(runtime)) {
     if (!options?.automaticRung) throw new Error("The selected batch model is unavailable in this build.");
     /*
-      A rung, named by the run that resolved to it. The endpoint comes from the
-      registry through `rungLocalModel`, and the probe is the same one the
-      ladder walk used -- so a rung that stopped answering between the walk and
-      this call fails here rather than being stored as if it had run.
+      A rung, named by the run that resolved to it. The probe is the same one
+      the ladder walk used -- so a rung that stopped answering between the walk
+      and this call fails here rather than being stored as if it had run -- and
+      it is also what PICKS the model for a rung that has none of its own, so
+      the pair stored here is the pair that was verified (0.6.69, Unit AL item
+      4). A rung that names its own model in the registry sets no pair; the
+      endpoint for that one still comes from `rungLocalModel`.
     */
     const { probeProvider, rungLocalModel } = await import("./ai.ts");
-    const localModel = rungLocalModel(runtime);
-    if (!localModel) throw new Error("The selected batch model is unavailable in this build.");
     const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
     if (!ready.ok) throw new Error(ready.error);
+    const localModel = ready.localModel ?? rungLocalModel(runtime);
+    if (!localModel) throw new Error("The selected batch model is unavailable in this build.");
     const exactEffort = modelEffort(runtime, effort, localModel.id);
     return {
       runtime,
@@ -541,6 +545,19 @@ export function forcedOcrOptions(
 
 export function forcedRuntimeLabel(snapshot: ForcedRuntimeSnapshot): string {
   if (snapshot.runtime === "local") return `Local model: ${snapshot.localModel.id}`;
+  if (snapshot.transport === "local") {
+    /*
+      A rung on this computer. 0.6.69 (Unit AL item 4): a rung that picks its
+      model at call time is named by the model it picked -- "Local model
+      (halo/qwen3.6-35b-a3b)" -- because "Local model" alone would read exactly
+      like the editor's own Local model pick. A rung that names its own model
+      (DeepSeek on Ollama) keeps the registry label it always had.
+    */
+    const entry = providerEntry(snapshot.modelChoice);
+    return entry?.picksLoadedLocalModel
+      ? `${entry.label} (${snapshot.localModel.id})`
+      : (entry?.label ?? snapshot.modelChoice);
+  }
   if (snapshot.transport === "xai-oauth") return `Grok (SuperGrok): ${snapshot.model}`;
   if (snapshot.transport === "custom") {
     return `${snapshot.label ?? "Custom AI"}: ${snapshot.model}`;

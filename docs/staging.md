@@ -117,7 +117,45 @@ powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Stop
 which backup it was restored from (from `ops\.stage.json`).
 
 `-Stop` tree-kills only the PID recorded in `ops\.stage.pid` -- never by image
-name -- removes the pid file, and confirms the port is free.
+name -- removes the pid file, removes the machine-wide pointer described below,
+and confirms the port is free.
+
+## After a reboot: the test copy comes back on its own
+
+**After a reboot the watchdog brings back the test copy you last staged.**
+
+It can, because staging writes down where it happened. When `ops\stage.ps1`
+brings a copy up it also writes one small file, machine-wide, outside the
+checkout:
+
+```
+%LOCALAPPDATA%\TownReporter\staged-copy.json
+```
+
+That file names the checkout it staged, the port it is on, the commit and
+version it is running, the database it restored into, and when. `ops\stage.ps1
+-Stop` removes it -- no copy, no pointer.
+
+This matters because the copy on 3100 is never staged from the live checkout
+(the rule is that a build never happens in production), while the watchdog and
+the Control page always run from the live checkout. So they cannot find the
+copy by looking at home. Instead:
+
+- `ops\start-stage.ps1` with no arguments starts the copy the pointer names,
+  and so does the **Start the test copy** button on the Control page.
+- The watchdog, which already runs every five minutes, does the same when 3100
+  is not answering and the paper on 3000 is healthy. It runs the
+  already-staged build only: it never restores a backup, so test data is not
+  wiped by a reboot.
+
+The pointer is not trusted on sight -- it is a text file anyone can edit, and a
+server gets started from it. Before anything is started the path must be an
+absolute path under `C:\Users\scott\Desktop\Code\`, a TownReporter checkout, not
+the live checkout itself when that checkout is the paper on 3000, and it must
+have an `ops\.stage.json` that agrees with the pointer on port and commit and a
+`.output\server\index.mjs` build of its own. A pointer that fails any of those
+starts nothing and says the plain reason once. No pointer at all is silence --
+the ordinary state of a machine that has never staged anything.
 
 ## What it never does
 

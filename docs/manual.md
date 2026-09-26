@@ -2,9 +2,9 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name.
 
-**Version 0.6.68 · publication and deployment are recorded separately**
+**Version 0.6.69 · publication and deployment are recorded separately**
 
-[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.68 release guide and evidence boundaries](releases/0.6.68.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
+[Latest published download](https://github.com/scottconverse/TownReporter/releases/latest) · [0.6.69 release guide and evidence boundaries](releases/0.6.69.md). Source, package metadata, GitHub publication, and running production deployment are separate facts.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -281,7 +281,7 @@ choice — Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or
 Haiku; the selected local model; or a
 saved Custom AI connection such as an OpenAI-compatible Gemini endpoint.
 Automatic (0.6.64) walks the same writing ladder a story does — DeepSeek v4.1
-Flash first, then Qwen 3.6 35B when it is loaded, then Codex Terra — and the
+Flash first, then the local model when one is loaded, then Codex Terra — and the
 run record names the model that resolved. The rung is resolved before the run
 is queued, because a scheduled run has to store the model it will use; the
 panel therefore shows the requested and resolved model as a pair. A policy
@@ -460,7 +460,7 @@ Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
 Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Opinion's own Automatic tries Codex Sol, then Claude Sonnet
 once if Codex is unavailable; that order belongs to Opinion. Stories, scans and
 Dark Desk walk the desk's own Automatic ladder instead — DeepSeek v4.1 Flash,
-then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra.
+then the local model on this computer when one is loaded, then Codex Terra.
 Explicit choices remain the requested first
 runtime and use the same technical-only unfinished-call retry. Claude Code
 and Codex both read the complete configured voice through their native instruction-file options. The page
@@ -664,8 +664,8 @@ the registry is the canonical picker definition; provider adapters still impleme
 
 | Feature                               | Provider                                                                                                                                                                                                                                                                 | Model                                                                                                           |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Scan                                  | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
-| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B when it is loaded, then Codex Terra; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
+| Scan                                  | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then the local model when one is loaded, then Codex Terra; a recognized technical failure moves only the unfinished call and reuses already fetched sources; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
+| Draft (Queue or workbench)            | configured gateway first for Automatic when set; otherwise the shared Automatic ladder — DeepSeek v4.1 Flash, then the local model when one is loaded, then Codex Terra; quota, unavailability, lost login, timeout, or no output can move only the unfinished call during the active run; a restarted job may reread saved source material; refusals are terminal | Any named Codex or Claude model, Local model, or saved custom connection |
 | **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Local model, or saved custom connection                                  |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
@@ -675,8 +675,8 @@ the registry is the canonical picker definition; provider adapters still impleme
 and frontier research. Opinion's picker offers Automatic, all four named Codex
 models, all four named Claude models, Local model and custom connections. Opinion's Automatic tries Codex Sol
 then Claude Sonnet once when needed; the desk's own Automatic ladders for
-stories, scans and Dark Desk run DeepSeek v4.1 Flash, then Qwen 3.6 35B on this
-computer when it is loaded, then Codex Terra, and do not select Claude on their
+stories, scans and Dark Desk run DeepSeek v4.1 Flash, then the local model on this
+computer when one is loaded, then Codex Terra, and do not select Claude on their
 own. Explicit choices remain the requested
 first runtime and use the same technical-only unfinished-call retry. (Zen MiMo and the earlier, model-specific
 Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
@@ -1136,7 +1136,7 @@ flowchart TB
     CALL["A model-backed desk action"] --> KIND{"Story/Scan/Dark picker?"}
     KIND -->|yes: Automatic| Q1{"LLM_* configured?"}
     Q1 -->|yes| OAI["Try that gateway first"]
-    Q1 -->|no| READY["First ready<br/>DeepSeek v4.1 Flash → Qwen 3.6 35B if loaded → Codex Terra"]
+    Q1 -->|no| READY["First ready<br/>DeepSeek v4.1 Flash → the loaded local model if any → Codex Terra"]
     KIND -->|yes: named choice| ONE["Try that recorded provider first"]
     OAI --> SAVE["Persist effective provider on job"]
     READY --> SAVE
@@ -1331,7 +1331,7 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then Qwen 3.6 35B on this computer when it is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 notes
 

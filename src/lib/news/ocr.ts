@@ -198,8 +198,8 @@ async function resolveVisionLocal(
   OCR's own unattended order, and deliberately NOT `automaticLadder()`.
 
   Unit Y (0.6.63) re-pointed the WRITING/RESEARCH ladder at DeepSeek v4.1
-  Flash, then Qwen 3.6 35B on this computer, then Codex Terra. Nobody asked OCR
-  to change, and 0.6.62's unattended OCR order was Codex Terra, then Claude
+  Flash, then the local model on this computer, then Codex Terra. Nobody asked
+  OCR to change, and 0.6.62's unattended OCR order was Codex Terra, then Claude
   (Sonnet or Haiku), then a discovered local vision model. Because both of
   those new writing rungs are `kind: "local"` entries -- which OCR treats as a
   *discovery* (`resolveVisionLocal`), not a registry rung -- iterating the
