@@ -5,14 +5,23 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, InkButton, SecHead } from "@/components/desk-chrome";
-import { areaClass, announceToDesk, inputClass } from "@/components/desk-chrome-utils";
-import { LeadRowView } from "@/components/desk-leads";
+import { Busy, Chip, DeskMoreMenu, InkButton, JobSlot, Score, SecHead } from "@/components/desk-chrome";
+import { useNowMs, type RunningJob } from "@/components/desk-jobs";
+import {
+  areaClass,
+  announceToDesk,
+  inputClass,
+  leadOrigin,
+} from "@/components/desk-chrome-utils";
+import { LeadFlags } from "@/components/desk-leads";
+import { formatAge } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   dropFollowUp,
+  draftLead,
   importFinishedStories,
+  listDraftsDesk,
   listFollowUps,
   listLeads,
   listRecentStoryWork,
@@ -65,7 +74,13 @@ import {
   workingQueueEmptyCopy,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
-import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import {
+  deskDraftAction,
+  deskDraftElapsed,
+  deskDraftState,
+  type DeskDraftState,
+} from "@/lib/news/desk-drafts";
+import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -76,9 +91,59 @@ export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
 const OPEN_KEY = "townreporter.dark.openId";
 
+type DraftRow = Awaited<ReturnType<typeof listDraftsDesk>>[number];
+
+/** The tone a state chip is drawn in: the words carry the state, the border
+ *  carries the tone. Same mapping as the Drafts screen. */
+function stateTone(state: DeskDraftState): string {
+  if (state.failed) return "d-danger";
+  if (state.running) return "d-run";
+  if (state.needsYou) return "d-warn";
+  if (state.key === "ready") return "d-ok";
+  return "d-quiet";
+}
+
+/**
+ * "Saturday, Sep 26" in the paper's own timezone.
+ *
+ * The desk's own formatters print the long month ("Saturday, September 26,
+ * 2026"); the drawing's date line is the short one, because it sits in the
+ * 14px kicker above the greeting. An unusable timezone name falls back to the
+ * browser's, which is what the desk would have used before the paper was set
+ * up at all -- a bad setting must not blank the header.
+ */
+function deskDateLine(nowMs: number, timezone: string): string {
+  const opts: Intl.DateTimeFormatOptions = { weekday: "long", month: "short", day: "numeric" };
+  try {
+    return new Date(nowMs).toLocaleDateString("en-US", { ...opts, timeZone: timezone });
+  } catch {
+    return new Date(nowMs).toLocaleDateString("en-US", opts);
+  }
+}
+
+/**
+ * The triage keys the drawn legend bar prints under the list (README "1.
+ * Today"): "J/K next/previous · S start story · H hold · X kill · U undo ·
+ * Enter open lead". The words are the drawing's, and every one of them is a
+ * key the window listener below actually acts on.
+ *
+ * N, ⌘S and ? are bound too, and are in the "?" sheet rather than in this
+ * bar: ⌘S is the story workbench's save and not this screen's, and the bar is
+ * the drawing's, so it carries the drawing's six.
+ */
+const TRIAGE_KEYS: [string, string][] = [
+  ["J / K", "next / previous"],
+  ["S", "start story"],
+  ["H", "hold"],
+  ["X", "kill"],
+  ["U", "undo"],
+  ["Enter", "open lead"],
+];
+
 function DeskHome() {
   const sectionQuery = useEditorSections();
-  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { city, timezone } = usePaper();
+  const { formatDate, formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
   /*
@@ -103,6 +168,17 @@ function DeskHome() {
   const recentStories = useQuery({
     queryKey: ["recent-story-work"],
     queryFn: () => listRecentStoryWork(),
+    refetchInterval: 5000,
+  });
+  /*
+    THE GATE STATE, for Tonight's edition (README "1. Today": the checklist
+    "reads the existing gate state"). Same query key as the Drafts screen, same
+    server function, same 5s cadence, so the two screens cannot disagree about
+    what a draft is waiting on -- and one poll serves both.
+  */
+  const drafts = useQuery({
+    queryKey: ["drafts-desk"],
+    queryFn: () => listDraftsDesk(),
     refetchInterval: 5000,
   });
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
@@ -385,8 +461,8 @@ function DeskHome() {
   const needs: { t: string; to: string; openDark?: number; quiet?: boolean }[] = [];
   if (drafted)
     needs.push({
-      t: `${drafted} draft${drafted > 1 ? "s" : ""} ready to publish`,
-      to: "/desk/queue",
+      t: `${drafted} draft${drafted > 1 ? "s" : ""} on the desk`,
+      to: "/desk/drafts",
     });
   if (errStops.length) {
     needs.push({
@@ -425,6 +501,166 @@ function DeskHome() {
     });
   }
 
+  /*
+    TODAY'S WORK, counted from what the desk already knows. Nothing here is a
+    new source of truth: "new today" comes off `leads`, the writing/checking
+    counts off the same draft rows the Drafts screen prints, and "ready to
+    print" is that screen's `ready` state -- a draft that has cleared both
+    checks. The four step numbers on the strip and the lists below them are the
+    same numbers, so the page cannot say two things at once.
+  */
+  const draftRows = drafts.data ?? [];
+  const nowMs = useNowMs(
+    draftRows.some((r) => r.job_status === "running" || r.job_status === "queued") ||
+      Boolean(recentStories.data?.some((s) => s.status === "running" || s.status === "queued")),
+  );
+  const draftStates: DeskDraftState[] = draftRows.map((row) =>
+    deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
+  );
+  const writingNow = draftStates.filter((s) => s.running).length;
+  const readyToCheck = draftStates.filter((s) => s.needsYou).length;
+  const readyToPrint = draftStates.filter((s) => s.key === "ready").length;
+  const runningJobs = (recentStories.data ?? []).filter(
+    (story) => story.status === "running" || story.status === "queued",
+  );
+  const today = formatDate(new Date(nowMs));
+  const newToday = allLeads.filter((l) => formatDate(l.created_at) === today).length;
+  const heldCount = allLeads.filter((l) => l.status === "held").length;
+  const newLeads = queue.slice(0, 8);
+  const sectionName = (topic: string | null) =>
+    (topic && sectionQuery.sections.find((s) => s.key === topic)?.name) || topic || "";
+
+  /*
+    The four steps of the strip, in the order the drawing draws them. The step
+    that has work waiting is the yellow one -- and when none of the first three
+    does, it is the fourth, because the paper is the step that is always left.
+  */
+  const currentStep = newToday > 0 ? 1 : writingNow > 0 ? 2 : readyToCheck > 0 ? 3 : 4;
+  const STEPS: {
+    n: number;
+    name: string;
+    count: number;
+    unit: string;
+    act: string;
+    to: "/desk/queue" | "/desk/drafts" | "/desk";
+    hash?: "tonight";
+  }[] = [
+    { n: 1, name: "Pick leads", count: newToday, unit: "new today", act: "Review leads", to: "/desk/queue" },
+    { n: 2, name: "Draft", count: writingNow, unit: "writing now", act: "Watch progress", to: "/desk/drafts" },
+    { n: 3, name: "Check", count: readyToCheck, unit: "ready to check", act: "Check draft", to: "/desk/drafts" },
+    { n: 4, name: "Publish", count: readyToPrint, unit: "ready to print", act: "Tonight’s edition", to: "/desk", hash: "tonight" },
+  ];
+
+  /*
+    The checklist chips, one per gate the desk actually stores. A gate that was
+    never run says so ("not run") instead of borrowing the look of a pass, and
+    the section chip names the section the draft is filed under rather than
+    asking the editor to confirm something the desk already knows.
+  */
+  const tonightChips = (row: DraftRow) => ({
+    evidence: row.evidence_required
+      ? row.evidence_decision
+        ? { text: "✓ Evidence checked", tone: "d-ok" }
+        : { text: "! Evidence to check", tone: "d-warn" }
+      : { text: "○ Evidence check not run", tone: "d-quiet" },
+    names:
+      row.names_unresolved > 0
+        ? {
+            text: `! ${row.names_unresolved} name${row.names_unresolved === 1 ? "" : "s"} to review`,
+            tone: "d-warn",
+          }
+        : row.name_check_complete
+          ? { text: "✓ Names checked", tone: "d-ok" }
+          : { text: "○ Names not checked", tone: "d-quiet" },
+    section: row.topic
+      ? { text: `✓ Section: ${sectionName(row.topic)}`, tone: "d-ok" }
+      : { text: "○ No section yet", tone: "d-quiet" },
+  });
+
+  /** The stories tonight actually turns on: through their checks, or waiting
+   *  on the editor. Newest work first within each group. */
+  const tonightRows = draftRows
+    .map((row, index) => ({ row, state: draftStates[index]! }))
+    .filter(({ state }) => state.key === "ready" || state.needsYou)
+    .sort((a, b) => Number(b.state.key === "ready") - Number(a.state.key === "ready"))
+    .slice(0, 3);
+
+  const startDraft = useMutation({
+    mutationFn: (leadId: number) =>
+      draftLead({ data: { leadId, modelChoice: "auto", modelEffort: defaultModelEffort("auto") } }),
+    onSuccess: (res) => {
+      announceToDesk(
+        res?.ok
+          ? "Draft queued — it is writing now."
+          : (res && "error" in res && res.error) || "That draft did not start.",
+      );
+      void qc.invalidateQueries({ queryKey: ["recent-story-work"] });
+      void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
+    },
+    onError: (err) =>
+      announceToDesk(err instanceof Error ? err.message : "That draft did not start."),
+  });
+
+  /*
+    KEYBOARD TRIAGE (README "Interactions & behavior": J/K move, S start,
+    H hold, X kill, U back, Enter open, N new lead, ? the sheet).
+
+    Page level, and it stands down the moment the editor is typing: three
+    textareas and a file picker live on this page, and a J that moved the list
+    instead of typing a letter would make the composer unusable. It also stands
+    down for any modified key, so the shell's Ctrl-K and the browser's own
+    shortcuts keep working.
+  */
+  const [cursor, setCursor] = useState(0);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        el?.isContentEditable === true ||
+        (el ? /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) : false);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const at = (i: number) => newLeads[Math.max(0, Math.min(i, newLeads.length - 1))];
+      const move = (next: number) => {
+        if (newLeads.length === 0) return;
+        const i = Math.max(0, Math.min(next, newLeads.length - 1));
+        setCursor(i);
+        announceToDesk(`Selected: ${newLeads[i]!.headline}`);
+      };
+      const lead = at(cursor);
+      switch (e.key.toLowerCase()) {
+        case "j":
+          move(cursor + 1);
+          break;
+        case "k":
+          move(cursor - 1);
+          break;
+        case "s":
+          if (lead) startDraft.mutate(lead.id);
+          break;
+        case "h":
+          if (lead) setStatus.mutate({ id: lead.id, status: "held" });
+          break;
+        case "x":
+          if (lead) setStatus.mutate({ id: lead.id, status: "killed" });
+          break;
+        case "u":
+          if (lead) setStatus.mutate({ id: lead.id, status: "new" });
+          break;
+        case "enter":
+          if (lead) void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
+          break;
+        case "n":
+          void navigate({ to: "/desk/queue", hash: "file-lead" });
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
   // The two queries the front page cannot render anything useful without.
   // Everything else on this page degrades gracefully to "empty"; these two
@@ -433,54 +669,197 @@ function DeskHome() {
   const bootFailed = (leads.isError && !leads.data) || (sources.isError && !sources.data);
 
   return (
-    <DeskShell title="A clear desk. A good story." kicker="Your newsroom">
-      {recentStories.data
-        ?.filter((story) => story.status === "running" || story.status === "queued")
-        .map((story) => (
-          <div className="desk-active-story" key={story.id}>
-            <div>
-              <strong>
-                Your story is {story.status === "queued" ? "queued" : "being written"}
-              </strong>
-              <p>{story.stage || "Preparing your sources…"}</p>
+    <DeskShell
+      title="Good morning. Here’s today’s paper."
+      kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
+      lede={
+        <div className="today-head-acts">
+          <Link to="/desk/queue" hash="file-lead" className="btn">
+            + Add a lead
+          </Link>
+          <Link to="/desk" hash="story-composer" className="btn solid">
+            + New story <kbd>N</kbd>
+          </Link>
+          <Link to="/desk/opinion" className="btn">
+            + Opinion
+          </Link>
+        </div>
+      }
+    >
+      {/*
+        Above the two-column grid: the strip, the jobs and tonight's checklist
+        run the full width of the desk (their drawn margins are the block-flow
+        ones -- `.today-steps`, `.today-running`, `.today-edition`), and the
+        grid below them holds the work on the left and the rail on the right.
+      */}
+      {/*
+        THE STEP STRIP (README "1. Today"). Four equal cells with 1px gaps: the
+        step's number, its name, the big count and the unit, and the one button
+        that goes there. Each count is read off the data below it on this page:
+        new today off `leads`, writing off the draft rows' jobs, ready to check
+        off the drafts waiting on the editor, ready to print off the drafts that
+        have cleared both checks. The cell whose work is waiting is the yellow
+        one; when nothing is waiting it is the last one, because the paper is
+        the step that is always left.
+      */}
+      <nav className="today-steps" aria-label="Today’s work">
+        {STEPS.map((step) => {
+          const on = step.n === currentStep;
+          return (
+            <div className={"today-step" + (on ? " now" : "")} key={step.n}>
+              <span className="today-step-n" aria-hidden>
+                {step.n}
+              </span>
+              <span className="today-step-name">{step.name}</span>
+              <span className="today-step-count">{step.count}</span>
+              <span className="today-step-unit">{step.unit}</span>
+              <Link to={step.to} hash={step.hash} className={"btn" + (on ? " solid" : "")}>
+                {step.act}
+              </Link>
             </div>
-            <Link
-              className="btn solid"
-              to="/desk/story/$leadId"
-              params={{ leadId: String(story.lead_id) }}
-            >
-              Open your story
-            </Link>
-          </div>
-        ))}
+          );
+        })}
+      </nav>
 
-      <div className="astra-metrics" aria-label="Newsroom at a glance">
-        <Link to="/desk/queue">
-          <strong>{drafted}</strong>
-          <span>Drafts to review</span>
-        </Link>
-        <Link to="/desk/queue">
-          <strong>{queue.length}</strong>
-          <span>Leads in your queue</span>
-        </Link>
-        <Link to="/desk" hash="desk-followups">
-          <strong>{followUps.data?.length ?? 0}</strong>
-          <span>Open follow-ups</span>
-        </Link>
-        <Link to="/desk/published">
-          <strong>{published.data?.length ?? 0}</strong>
-          <span>Published stories</span>
-        </Link>
-      </div>
-      <div className="desk-home">
-        <section className="recent-story-work" aria-labelledby="recent-stories-title">
-          <div className="recent-story-heading">
-            <h2 id="recent-stories-title">Your recent drafts</h2>
-            <Link to="/desk/queue" className="inline-link">
-              View full queue
-            </Link>
+      {/*
+        RUNNING NOW. Every long job the desk is running, read from the same
+        ["recent-story-work"] query the shell's Running box and the Drafts
+        screen poll -- so the elapsed time in the shell's footer and the time on
+        these cards come from one clock (`useNowMs`) and one formatter.
+      */}
+      {runningJobs.length > 0 ? (
+        <section aria-label="Running now">
+          <SecHead
+            title="Running now"
+            count={runningJobs.length}
+            sub="Every long job the desk is running, with the stage it is on."
+            aside={
+              <Link to="/desk/drafts" className="np-link">
+                All drafts
+              </Link>
+            }
+          />
+          <div className="today-running">
+            {runningJobs.map((story) => {
+              const job: RunningJob = {
+                id: story.id,
+                headline: story.headline,
+                status: story.status,
+                stage: story.stage,
+                started_at: story.started_at,
+                updated_at: story.updated_at,
+              };
+              return (
+                <div key={story.id}>
+                  {/* LANE-2 SLOT: lane 2's Job card replaces this JobSlot. The
+                      screen hands it the job row and the clock and renders
+                      nothing else, so the swap is one line. The Open press
+                      stays outside the slot and goes when the card lands --
+                      the drawn card owns its own Open in the Done state, and
+                      until then a running job on Today must not be a dead
+                      end. */}
+                  <JobSlot job={job} nowMs={nowMs} compact />
+                  <Link
+                    className="btn"
+                    to="/desk/story/$leadId"
+                    params={{ leadId: String(story.lead_id) }}
+                  >
+                    Open
+                  </Link>
+                </div>
+              );
+            })}
           </div>
-          <p>Stories you start appear here. Open one to follow its progress or edit the draft.</p>
+        </section>
+      ) : null}
+
+      {/*
+        TONIGHT'S EDITION. The checklist the editor needs before the paper goes
+        out, built from the drafts' own gate fields -- never from a second
+        opinion about them. Every chip is a fact the desk stored: the evidence
+        review's required/decision, the name check, and the section the draft is
+        filed under. A chip with nothing behind it says "not run" rather than
+        claiming a pass. "Preview viewed" is in the drawing and has no backend;
+        it is deliberately absent (see the unit report).
+      */}
+      <section id="tonight" aria-label="Tonight’s edition">
+        <SecHead
+          title="Tonight’s edition"
+          count={readyToPrint + readyToCheck}
+          sub="What still has to be true before the paper goes out."
+          aside={
+            <Link to="/desk/drafts" className="np-link">
+              All drafts
+            </Link>
+          }
+        />
+        {tonightRows.length === 0 ? (
+          <p className="wire-sum">
+            No story is through its checks yet. A draft arrives here once it is written and you
+            have checked its evidence and its names.
+          </p>
+        ) : (
+          <div className="today-edition">
+            {tonightRows.map(({ row, state }) => {
+              const chips = tonightChips(row);
+              return (
+                <div className="today-edition-row" key={row.id}>
+                  <div>
+                    <span className="today-edition-sec">
+                      {sectionName(row.topic) || "No section"}
+                    </span>
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(row.lead_id) }}
+                      className="today-edition-hl hl-link"
+                    >
+                      {row.headline}
+                    </Link>
+                    <span className="today-edition-chips">
+                      <span className={"chip " + stateTone(state)}>{state.label}</span>
+                      <span className={"chip " + chips.evidence.tone}>{chips.evidence.text}</span>
+                      <span className={"chip " + chips.names.tone}>{chips.names.text}</span>
+                      <span className={"chip " + chips.section.tone}>{chips.section.text}</span>
+                    </span>
+                  </div>
+                  {/*
+                    The one next-action button on the row, in the draft's own
+                    vocabulary (lib/news/desk-drafts.ts) -- the same word the
+                    Drafts screen puts on the same draft.
+                  */}
+                  <div className="today-edition-act">
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(row.lead_id) }}
+                      className="btn"
+                    >
+                      {deskDraftAction(state)}
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* The two columns of the rest of Today: the work, and the rail beside
+          it. Everything below to the closing tag is an item in this grid
+          (`display:contents` on .desk-cc-grid keeps the nested sections in it
+          too), and each one is pinned by its own class -- see the grid rules
+          in desk-astra.css. */}
+      <div className="desk-home">
+        <section className="recent-story-work in-progress" aria-label="In progress">
+          <SecHead
+            title="In progress"
+            count={(recentStories.data ?? []).length}
+            sub="Nothing here prints until you press Publish."
+            aside={
+              <Link to="/desk/drafts" className="np-link">
+                All drafts
+              </Link>
+            }
+          />
           {recentStories.isError ? (
             <p role="alert">
               Recent drafts could not load.{" "}
@@ -493,10 +872,27 @@ function DeskHome() {
           ) : !recentStories.data?.length ? (
             <p>No drafts started yet. Add your sources below to begin.</p>
           ) : (
-            recentStories.data.map((story) => (
-              <div className="recent-story-row" key={story.id}>
-                <div>
-                  <span className="recent-story-status">
+            <div className="today-cards">
+              {recentStories.data.map((story) => (
+                /*
+                  The drawn card carries the stage in its 4px top rule: yellow
+                  while the desk is writing, ink once the draft is ready to
+                  edit, line for everything else (queued, or stopped with a
+                  reason). The stage is also in words, because the rule alone
+                  is a colour and the desk never says a state in colour only.
+                */
+                <article
+                  className={
+                    "today-card " +
+                    (story.status === "running"
+                      ? "live"
+                      : story.status === "completed"
+                        ? "mine"
+                        : "idle")
+                  }
+                  key={story.id}
+                >
+                  <span className="today-card-stage">
                     {story.status === "completed"
                       ? "Ready to edit"
                       : story.status === "failed"
@@ -505,32 +901,39 @@ function DeskHome() {
                           ? "Queued"
                           : "Writing in progress"}
                   </span>
-                  <Link
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(story.lead_id) }}
-                    className="recent-story-title"
-                  >
-                    {story.headline}
-                  </Link>
-                  <p>
+                  <h3 className="today-card-hl">
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(story.lead_id) }}
+                      className="hl-link"
+                    >
+                      {story.headline}
+                    </Link>
+                  </h3>
+                  <p className="meta">
                     {story.status === "completed"
                       ? "Draft saved. Review it before publishing."
                       : story.status === "failed"
                         ? "Open the story to see what stopped and resume."
                         : story.stage || "Waiting to start"}
                   </p>
-                </div>
-                <Link
-                  to="/desk/story/$leadId"
-                  params={{ leadId: String(story.lead_id) }}
-                  className="btn"
-                >
-                  {story.status === "running" || story.status === "queued"
-                    ? "View progress"
-                    : "Open draft"}
-                </Link>
-              </div>
-            ))
+                  {/*
+                    One press, not two: the drawn card's "next action and
+                    Open" both land on the story page, and two buttons that go
+                    to the same place make the editor choose for nothing.
+                  */}
+                  <Link
+                    to="/desk/story/$leadId"
+                    params={{ leadId: String(story.lead_id) }}
+                    className="btn"
+                  >
+                    {story.status === "running" || story.status === "queued"
+                      ? "View progress"
+                      : "Open draft"}
+                  </Link>
+                </article>
+              ))}
+            </div>
           )}
         </section>
 
@@ -976,16 +1379,22 @@ function DeskHome() {
           <ListSkeleton rows={6} />
         ) : (
           <div className="desk-cc-grid">
-            <section className="gc-queue">
-              <SecHead
-                title="The queue"
-                count={queue.length}
-                aside={
-                  <Link to="/desk/queue" className="np-link">
-                    Full queue
-                  </Link>
-                }
-              />
+            <section className="gc-queue" aria-label="New leads">
+              <div className="today-leads-head">
+                <SecHead
+                  title="New leads"
+                  sub={last ? `${formatDateTime(last.started_at)} scan · best first` : "Best first"}
+                  aside={
+                    <span className="today-filters">
+                      <span>Open · {queue.length - heldCount}</span>
+                      <span>Held · {heldCount}</span>
+                      <Link to="/desk/queue" className="np-link">
+                        All leads in the Queue
+                      </Link>
+                    </span>
+                  }
+                />
+              </div>
               {queue.length === 0 ? (
                 !last && publishedCount === 0 ? (
                   <p className="wire-sum">
@@ -1026,18 +1435,132 @@ function DeskHome() {
                   </p>
                 )
               ) : (
-                <div className="lead-list">
-                  {queue.slice(0, 8).map((l) => (
-                    <LeadRowView
-                      key={l.id}
-                      lead={l}
-                      dup={nearDuplicate(l, printed)}
-                      onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
-                      onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
-                      onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
-                    />
-                  ))}
-                </div>
+                <>
+                  {/*
+                    README "Interactions & behavior": the keys are on the screen,
+                    not only in the "?" sheet -- an editor triaging a list should
+                    not have to open a dialog to learn what J does.
+                  */}
+                  <p className="today-legend" aria-label="Keys for this list">
+                    {TRIAGE_KEYS.map(([key, what]) => (
+                      <span key={key}>
+                        <kbd>{key}</kbd> {what}
+                      </span>
+                    ))}
+                  </p>
+                  {newLeads.map((l, index) => {
+                    const dup = nearDuplicate(l, printed);
+                    const held = l.status === "held";
+                    return (
+                      /*
+                        The drawn compact row: `52px | 1fr | auto` -- score
+                        badge, the title with its why line and its badges, and
+                        the three presses an editor makes on a lead. The
+                        heavier presses (kill as duplicate, delete, the model
+                        picker) stay on the Queue's full row, which is where
+                        the desk draws them.
+                      */
+                      <div
+                        className={
+                          "today-lead" +
+                          (index === cursor ? " sel" : "") +
+                          (held ? " acted" : "")
+                        }
+                        key={l.id}
+                      >
+                        <Score v={l.newsworthiness ?? 0} />
+                        <div>
+                          <Link
+                            to="/desk/story/$leadId"
+                            params={{ leadId: String(l.id) }}
+                            className="today-lead-hl hl-link"
+                          >
+                            {l.headline}
+                          </Link>
+                          <p className="today-lead-why">{l.why}</p>
+                          <div className="today-lead-row2">
+                            <span className="meta">
+                              {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
+                            </span>
+                            <Chip s={l.status} />
+                            {l.possible_duplicate ? (
+                              <Link
+                                to="/desk/story/$leadId"
+                                params={{ leadId: String(l.id) }}
+                                className="chip maybe-same"
+                                title={
+                                  l.dup_kind === "developing"
+                                    ? `This story came back with facts the killed lead "${l.possible_duplicate.headline}" did not have. Open it to compare.`
+                                    : `Possible duplicate of ${l.possible_duplicate.headline} (${l.possible_duplicate.status}). Open it to compare.`
+                                }
+                              >
+                                {l.dup_kind === "developing"
+                                  ? "New facts · compare"
+                                  : "Possible duplicate · compare"}
+                              </Link>
+                            ) : null}
+                          </div>
+                          {/*
+                            Same component the Queue's row renders, so the two
+                            screens cannot drift on what the desk has found.
+                          */}
+                          <LeadFlags lead={l} dup={dup} />
+                        </div>
+                        <span className="today-lead-side">
+                          <InkButton onClick={() => startDraft.mutate(l.id)}>
+                            Start story <kbd>S</kbd>
+                          </InkButton>
+                          {held ? (
+                            <InkButton
+                              tone="quiet"
+                              onClick={() => setStatus.mutate({ id: l.id, status: "new" })}
+                            >
+                              Back <kbd>U</kbd>
+                            </InkButton>
+                          ) : (
+                            <InkButton
+                              tone="quiet"
+                              onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
+                            >
+                              Hold <kbd>H</kbd>
+                            </InkButton>
+                          )}
+                          <InkButton
+                            tone="quiet-danger"
+                            onClick={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                          >
+                            Kill <kbd>X</kbd>
+                          </InkButton>
+                          <DeskMoreMenu
+                            ariaLabel={`More actions for ${l.headline}`}
+                            items={[
+                              {
+                                label: "Open the lead",
+                                onSelect: () =>
+                                  void navigate({
+                                    to: "/desk/story/$leadId",
+                                    params: { leadId: String(l.id) },
+                                  }),
+                              },
+                              ...(dup
+                                ? [
+                                    {
+                                      label: "The piece it matches",
+                                      onSelect: () =>
+                                        void navigate({
+                                          to: "/articles/$slug",
+                                          params: { slug: dup.slug },
+                                        }),
+                                    },
+                                  ]
+                                : []),
+                            ]}
+                          />
+                        </span>
+                      </div>
+                    );
+                  })}
+                </>
               )}
             </section>
 

@@ -40,7 +40,7 @@ page.on("requestfailed", (r) =>
   errors.push(`reqfail: ${r.url().slice(0, 160)} :: ${r.failure()?.errorText ?? ""}`),
 );
 
-const DESK_HOME = "A clear desk. A good story.";
+const DESK_HOME = "Good morning. Here’s today’s paper.";
 
 async function assertDeskRendered(label) {
   const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");

@@ -106,7 +106,9 @@ export function LeadRowView({
   const score = lead.newsworthiness ?? 0;
   return (
     <div
-      className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}
+      className={
+        "lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")
+      }
     >
       <Score v={score} />
       <div className="lead-main">
@@ -334,77 +336,93 @@ export function LeadRowView({
           </p>
         ) : null}
       </div>
-      <div className="lead-flags">
-        <Chip s={lead.status} />
-        {/*
-          The scan's section list is what the model files under, and when its
-          reply named none of them the desk wrote a fallback key
-          (`schema.ts`) with nothing on the row to say so. An editor saw a
-          section the machine guessed, in the same type as one it chose.
-        */}
-        {lead.topic_unchosen ? (
-          <span
-            className="chip topic-unchosen"
-            title="The scan filed this lead under a section the model did not choose. Open the story and confirm the section it belongs in."
-          >
-            Section not chosen — pick one
-          </span>
-        ) : null}
-        {lead.origin === "import" ? (
-          <span className="chip imported" title="Read out of a report you pasted, not written by the desk.">
-            Imported
-          </span>
-        ) : null}
-        {dup ? (
-          /*
-            Unit AK item 4: "≈ PRINTED" named nothing and went nowhere. The
-            badge now says what it means and links the piece it means, which is
-            the whole of the complaint that opened this unit.
-          */
-          <Link
-            to="/articles/$slug"
-            params={{ slug: dup.slug }}
-            className="chip dup"
-            title={`Covers ground published ${formatShortDate(dup.publishedAt)}. Open the piece, or kill this lead as a duplicate.`}
-          >
-            {printedDuplicateLine(dup.headline)}
-          </Link>
-        ) : null}
-        {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
-          /*
-            Unit AK item 7: the same count, in words. A killed lead that came
-            back says "Came back 3 times" instead of "seen again ×3".
-          */
-          <span className="chip seen-again">
-            {cameBackLabel(lead.resurfaced_count)}
-            {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
-          </span>
-        ) : null}
-        {lead.possible_duplicate ? (
-          /*
-            Unit AK item 5: this opens THIS lead's page, where both sides of the
-            pair are loaded and the Compare view renders -- the old chip opened
-            the other lead, whose page knew nothing about the pair and said so
-            by saying nothing at all.
-          */
-          <Link
-            to="/desk/story/$leadId"
-            params={{ leadId: String(lead.id) }}
-            className="chip maybe-same"
-            title={
-              lead.dup_kind === "developing"
-                ? `This story came back with facts the killed lead "${lead.possible_duplicate.headline}" did not have. Open it to compare.`
-                : `Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`
-            }
-          >
-            {lead.dup_kind === "developing" ? "New facts · compare" : "Possible duplicate · compare"}
-          </Link>
-        ) : lead.possible_duplicate_of ? (
-          <span className="chip maybe-same" title="The earlier lead is unavailable.">
-            Possible duplicate · unavailable
-          </span>
-        ) : null}
-      </div>
+      <LeadFlags lead={lead} dup={dup} />
+    </div>
+  );
+}
+
+/**
+ * The right-hand column of a lead row: its status, and every warning the desk
+ * has about it.
+ *
+ * Extracted in phase 2a, when Today grew the drawn compact row (`.today-lead`,
+ * grid `52px | 1fr | auto`) and needed the same badges the Queue row shows.
+ * Two screens printing the same lead is exactly how one of them ends up
+ * saying something the other does not, so neither owns this: both render it.
+ */
+export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | null }) {
+  const { formatShortDate } = usePaperDateFormatters();
+  return (
+    <div className="lead-flags">
+      <Chip s={lead.status} />
+      {/*
+        The scan's section list is what the model files under, and when its
+        reply named none of them the desk wrote a fallback key
+        (`schema.ts`) with nothing on the row to say so. An editor saw a
+        section the machine guessed, in the same type as one it chose.
+      */}
+      {lead.topic_unchosen ? (
+        <span
+          className="chip topic-unchosen"
+          title="The scan filed this lead under a section the model did not choose. Open the story and confirm the section it belongs in."
+        >
+          Section not chosen — pick one
+        </span>
+      ) : null}
+      {lead.origin === "import" ? (
+        <span className="chip imported" title="Read out of a report you pasted, not written by the desk.">
+          Imported
+        </span>
+      ) : null}
+      {dup ? (
+        /*
+          Unit AK item 4: "≈ PRINTED" named nothing and went nowhere. The
+          badge now says what it means and links the piece it means, which is
+          the whole of the complaint that opened this unit.
+        */
+        <Link
+          to="/articles/$slug"
+          params={{ slug: dup.slug }}
+          className="chip dup"
+          title={`Covers ground published ${formatShortDate(dup.publishedAt)}. Open the piece, or kill this lead as a duplicate.`}
+        >
+          {printedDuplicateLine(dup.headline)}
+        </Link>
+      ) : null}
+      {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
+        /*
+          Unit AK item 7: the same count, in words. A killed lead that came
+          back says "Came back 3 times" instead of "seen again ×3".
+        */
+        <span className="chip seen-again">
+          {cameBackLabel(lead.resurfaced_count)}
+          {lead.last_resurfaced_at ? ` · ${formatShortDate(lead.last_resurfaced_at)}` : ""}
+        </span>
+      ) : null}
+      {lead.possible_duplicate ? (
+        /*
+          Unit AK item 5: this opens THIS lead's page, where both sides of the
+          pair are loaded and the Compare view renders -- the old chip opened
+          the other lead, whose page knew nothing about the pair and said so
+          by saying nothing at all.
+        */
+        <Link
+          to="/desk/story/$leadId"
+          params={{ leadId: String(lead.id) }}
+          className="chip maybe-same"
+          title={
+            lead.dup_kind === "developing"
+              ? `This story came back with facts the killed lead "${lead.possible_duplicate.headline}" did not have. Open it to compare.`
+              : `Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`
+          }
+        >
+          {lead.dup_kind === "developing" ? "New facts · compare" : "Possible duplicate · compare"}
+        </Link>
+      ) : lead.possible_duplicate_of ? (
+        <span className="chip maybe-same" title="The earlier lead is unavailable.">
+          Possible duplicate · unavailable
+        </span>
+      ) : null}
     </div>
   );
 }

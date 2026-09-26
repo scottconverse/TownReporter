@@ -61,13 +61,13 @@ async function assertDeskRoute(label) {
   // The editor desk is server-rendered behind an auth/query gate. Wait for the
   // landmark to exist before reading the whole page, so a legitimately slow
   // route transition is not misreported as the public home still being mounted.
-  await page.getByRole("heading", { name: "A clear desk. A good story.", exact: true }).waitFor({ timeout: 20_000 });
+  await page.getByRole("heading", { name: "Good morning. Here’s today’s paper.", exact: true }).waitFor({ timeout: 20_000 });
   const visible = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   const problems = [];
   if (page.url().replace(/\/$/, "") !== `${base}/desk`) {
     problems.push(`URL is ${page.url()}, expected ${base}/desk`);
   }
-  if (!visible.includes("A clear desk. A good story.")) {
+  if (!visible.includes("Good morning. Here’s today’s paper.")) {
     problems.push("editor desk home landmark missing");
   }
   if (/Independent\.\s*Local\.\s*Accountable\./.test(visible)) {

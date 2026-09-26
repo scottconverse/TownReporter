@@ -548,8 +548,18 @@
   background: var(--danger);
   color: var(--surface);
 }
+/*
+  44px, not 36.
+
+  design-system/README.md:120 — "All buttons: at least 44px tall" — is the
+  rule for every press on the desk, and the base `.btn.small` density (36px,
+  40px at phone widths) is under it. Three classes deep, so this beats both
+  `.desk-ltr .btn.small` steps in styles.css and the phone media query that
+  raised it to 40px: the row actions on the Queue and the small presses
+  elsewhere on the desk are 44px at every width, in both themes.
+*/
 .desk-ltr.astra .btn.small {
-  min-height: 36px;
+  min-height: 44px;
   padding: 7px 11px;
   font-size: calc(14px * var(--ts));
 }
@@ -2686,6 +2696,50 @@
   align-items: center;
   gap: 10px;
   margin-top: 10px;
+}
+
+/* The few rules the screens need on top of the vocabulary above: things the
+   drawing draws as a gap or a block, which the reset cannot express. */
+
+/* The header's three presses sit in a row without touching. `.dark-lede` is a
+   plain block and `.btn` carries no margin of its own. */
+.desk-ltr.astra .today-head-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+/* The drawn Open · N / Held · N filters beside the section title. The count
+   badge is off on this header -- these two numbers are the counts, and a
+   third number in the same line would only disagree with one of them. */
+.desk-ltr.astra .today-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+/* The drawn header row owns the heavy rule; the section head inside it
+   supplies the title, the subtitle and the link, and no gap of its own. */
+.desk-ltr.astra .today-leads-head .sechead {
+  margin: 0;
+}
+/* A linked headline is a block, so the drawn 4px margin above it takes effect
+   (an inline box ignores a top margin). */
+.desk-ltr.astra a.today-edition-hl,
+.desk-ltr.astra a.today-lead-hl {
+  display: block;
+}
+/* The stand-in job box and its Open press are one cell of the running grid. */
+.desk-ltr.astra .today-running .btn {
+  margin-top: 8px;
+}
+/* The key badge inside a press reads as the key, not as a letter in the
+   label: quieter than the label, same size, so nothing drops under 14px. */
+.desk-ltr.astra .btn kbd {
+  font: 800 calc(14px * var(--ts)) var(--fd);
+  color: inherit;
+  opacity: 0.75;
 }
 
 /* ---------------------------------------------------------------------------

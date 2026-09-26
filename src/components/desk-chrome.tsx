@@ -452,13 +452,18 @@ function RunningBox({
  * somewhere: the triage keys on Today, ⌘S in the story workbench, Ctrl-K for
  * search here. ⌘S is listed because README "Interactions & behavior" lists it
  * and it is bound on the workbench, not because the shell intercepts it.
+ *
+ * H and X said "— asks why" until this pass, which was not true of any screen
+ * in the desk: the hold and kill presses set the status and nothing asks
+ * anything (phase 4 adds the reasons). A sheet whose whole job is telling the
+ * editor what a key does cannot promise a prompt that never comes.
  */
 const SHORTCUTS: { keys: string; what: string }[] = [
   { keys: "J / K", what: "Next / previous lead" },
   { keys: "S", what: "Start a story from the selected lead" },
-  { keys: "H", what: "Hold the selected lead — asks why" },
-  { keys: "X", what: "Kill the selected lead — asks why" },
-  { keys: "U", what: "Undo the last hold or kill" },
+  { keys: "H", what: "Hold the selected lead" },
+  { keys: "X", what: "Kill the selected lead" },
+  { keys: "U", what: "Put the selected lead back to new" },
   { keys: "Enter", what: "Open the selected lead" },
   { keys: "N", what: "Start a new story" },
   { keys: "⌘S", what: "Save in the story workbench" },

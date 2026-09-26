@@ -140,7 +140,7 @@ let failure = null;
 async function signIn() {
   if (stateFile) {
     await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("heading", { name: "A clear desk. A good story.", exact: true })
+    await page.getByRole("heading", { name: "Good morning. Here’s today’s paper.", exact: true })
       .waitFor({ timeout: 30_000 });
     return;
   }
