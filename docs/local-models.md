@@ -14,6 +14,12 @@ model for each of those five jobs. An older, unscoped saved choice remains a
 fallback until the editor makes a choice for that job. Refresh the catalog if
 the Ollama model list changes.
 
+The list says which models are in memory right now: a loaded one reads
+`<model> · loaded`, and loaded models are listed first inside each server group.
+The first choice is **Use whatever is loaded**, which runs whichever model is in
+memory when the run starts and names it on the run's record. **The desk never
+loads a model for you** — see "What the picker does not do" below.
+
 On 23 September 2026, four Ollama Cloud candidates were given the same short
 Longmont council evidence packet. `glm-5.2:cloud` produced the cleanest brief;
 `deepseek-v4.1-flash:cloud` produced a usable one. `qwen3.5:397b-cloud`
@@ -383,7 +389,8 @@ IDs end in `:cloud` run in Ollama Cloud; the Ollama service on this computer is
 their authenticated router, not the inference host. The picker labels these
 models **Ollama Cloud** and shows a reported context of at least one million
 tokens as **1M context**. Thinking, vision and load metadata produce the other
-option suffixes. The result is
+option suffixes, including **· loaded** for a model that is in memory right now.
+The result is
 cached 20 seconds and refreshed in the background every 60 seconds, so
 picker loads do not re-probe on every render; the picker's own Refresh
 button forces an immediate re-check.
@@ -393,11 +400,33 @@ is inferred from the model name, not a successful image-read test. Also,
 TownReporter and llama.cpp both default to port 8080: if both run on the same
 server, move one to a free port and set `LLM_BASE_URL` for a moved model server.
 
-**The default.** With nothing configured, "Local model" defaults to the
-first model already **loaded** on LM Studio, then Ollama, then whatever
-`LLM_MODEL` names if it is on a discovered list, then the first model found
-at all. A model that is not loaded still works — the server loads it on the
-first call, which the picker's help text says can take a minute or more.
+**The default.** With no saved choice, "Local model" defaults to **Use whatever
+is loaded** whenever a local server reports a model in memory — LM Studio first,
+then Ollama, the same order the Automatic ladder uses. With nothing loaded, it
+keeps the older default: the preferred cloud model for that job, else the first
+model on a discovered list, and the help line under the picker says which model
+it settled on and why.
+
+`LLM_MODEL` is still consulted for the no-stored-pick, nothing-loaded case, and
+a saved pick is never overridden by what happens to be loaded.
+
+**What the picker does not do.** It does not load a model. A hand-picked model
+that a server reports as **not** loaded stops the run before any call is made,
+with the model and server named — *"gemma4:12b is not loaded in Ollama. Load it
+there, or pick Use whatever is loaded."* Choosing **Use whatever is loaded**
+with an empty memory stops with *"Local model: nothing is loaded in LM Studio or
+Ollama. Load a model there, or pick a model."* Both sentences appear as they are
+written here, in the picker's own help line and in the run's error.
+
+Two cases are deliberately not blocked:
+
+- **A server that does not report load state** — llama.cpp on this endpoint —
+  behaves exactly as before. TownReporter cannot tell whether its model is in
+  memory, so a pick there is tried and the first call can take a minute or more,
+  which the help text says.
+- **A cloud model** (`:cloud`, running on Ollama's hosted service) is never
+  "not loaded" in the local sense. It is not held in this computer's memory at
+  all, and blocking it would be wrong.
 
 **Thinking off, automatically.** A reasoning model (Gemma 4, the Qwen3
 family, DeepSeek-R1, DeepSeek V4, gpt-oss, …) answers with the actual draft in a separate
@@ -411,9 +440,12 @@ explicit override), the desk says exactly that instead of "Empty model
 response".
 
 **Per-newsroom pick.** Choosing a model in the picker saves that choice for
-this newsroom — every draft, scan, and dig uses it until changed. If that
-model later disappears from the server's list, the desk falls back to the
-current default and the picker says so in one line, rather than failing.
+this newsroom — every draft, scan, and dig uses it until changed. A saved pick
+sticks even after a different model is loaded elsewhere: the desk does not
+quietly re-point a decision an editor made. If that model later disappears from
+the server's list, the desk falls back to the current default and the picker
+says so in one line, rather than failing. If it is still listed but not in
+memory, the run stops and says so (above) rather than loading it.
 
 **Every AI call site has the picker.** This is a standing rule, not new to
 local models: Command Center's composer, every Queue row, the Story page,
