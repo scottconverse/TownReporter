@@ -119,6 +119,57 @@ export const LOCAL_MODEL_UNCONFIGURED =
   "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh under Local model. For a server at a different address, set LLM_BASE_URL. See docs/local-models.md. Nothing was spent.";
 
 /**
+ * What the desk calls each local server it knows how to probe.
+ *
+ * Lives here, next to the sentences below, because `ai.ts` (which refuses a
+ * hand-picked model that is not loaded) and `model-choice.ts` (which explains
+ * the same thing under the picker, client-side) both need to name the server
+ * the same way the operator does. `preflight.ts` imports nothing, so both can
+ * use it without dragging `local-models.ts`'s server-only `.server.ts` code
+ * into the browser bundle.
+ */
+export function localServerName(kind: string): string {
+  if (kind === "lmstudio") return "LM Studio";
+  if (kind === "ollama") return "Ollama";
+  if (kind === "llamacpp") return "llama.cpp";
+  return "the local server";
+}
+
+/**
+ * Unit BB item 2's refusal: the editor picked "Use whatever is loaded" and
+ * neither LM Studio nor Ollama has a model in memory.
+ *
+ * Scott asked for these exact words (2026-09-26), and they are the whole
+ * answer to "never load a model": the desk cannot pull a model in, so the run
+ * stops here rather than asking a server for something it would have to page
+ * in from disk. The "or pick a model" half is not filler -- the picker lists
+ * every model on disk and an editor may load one themselves.
+ */
+export const LOCAL_MODEL_NOTHING_LOADED =
+  "Local model: nothing is loaded in LM Studio or Ollama. Load a model there, or pick a model.";
+
+/**
+ * Unit BB item 4's refusal for a hand-picked, on-device model that the server
+ * says is not in memory. Same rule: refuse before the call, never load.
+ */
+export function localModelNotLoadedMessage(id: string, serverKind: string): string {
+  return `${id} is not loaded in ${localServerName(serverKind)}. Load it there, or pick Use whatever is loaded.`;
+}
+
+/**
+ * Is this refusal one of the desk's own two sentences?
+ *
+ * `scanPreflight` below has to recognise them by text because that is all the
+ * probe returns, and getting this wrong is how the item-2 message would reach
+ * the editor as the generic "sign in to Claude Code or Codex" guidance
+ * instead. Kept as one predicate so the two sentences can never drift apart.
+ */
+export function isLocalModelNotReady(message: string): boolean {
+  if (!message) return false;
+  return message === LOCAL_MODEL_NOTHING_LOADED || / is not loaded in .*\. Load it there, or pick Use whatever is loaded\.$/.test(message);
+}
+
+/**
  * Classify by the provider's message.
  *
  * Matching on text is not lovely, but the probe returns opaque strings from
@@ -137,6 +188,16 @@ export function scanPreflight(probe: ProbeResult, modelChoice?: string): Preflig
   if (probe.ok) return { ok: true };
 
   const detail = probe.error ?? "";
+
+  // The desk's own local-model refusals are complete sentences already: they
+  // name the model, the server and the fix, and the operator reads them
+  // verbatim. They must reach the editor as the guidance, not be re-labelled
+  // "unavailable" and shown alongside sign-in advice for a CLI this choice has
+  // nothing to do with.
+  if (isLocalModelNotReady(detail)) {
+    return { ok: false, kind: "unconfigured", guidance: detail, detail: "", retryable: false };
+  }
+
   const kind: PreflightKind = looksLikeTimeoutText(detail)
     ? "timeout"
     : /Codex is not installed|Codex CLI.*not found/i.test(detail)
