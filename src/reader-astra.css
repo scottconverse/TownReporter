@@ -177,7 +177,8 @@
   gap: 25px;
 }
 .reader .brand {
-  font-family: var(--serif);
+  font-family: var(--fd);
+  font-weight: 800;
   font-size: 33px;
   letter-spacing: -1.65px;
   white-space: nowrap;
@@ -193,7 +194,7 @@
   color: var(--muted);
 }
 .reader .locality strong {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--ink);
   display: block;
 }
@@ -281,7 +282,7 @@
 }
 .reader .sections a.active {
   color: var(--sel);
-  font-weight: 650;
+  font-weight: 700;
 }
 .reader .sections a.active:after {
   content: "";
@@ -313,7 +314,7 @@
   gap: 6px;
   color: var(--teal);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   min-height: 35px;
 }
 .reader .textlink:hover {
@@ -331,7 +332,7 @@
 }
 .reader .eyebrow {
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--teal);
@@ -374,7 +375,7 @@
 .reader .tag {
   display: inline-block;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--teal);
@@ -388,13 +389,14 @@
   color: #111;
 }
 .reader .lead h2 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 42px;
   line-height: 1.16;
   letter-spacing: -1.1px;
   max-width: 650px;
 }
 .reader .lead .dek {
+  font-family: var(--serif);
   font-size: 16px;
   line-height: 1.65;
   color: var(--muted);
@@ -456,12 +458,12 @@
   gap: 9px;
   color: var(--teal);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 .reader .record h3 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 29px;
   line-height: 1.2;
   letter-spacing: -0.6px;
@@ -483,7 +485,7 @@
   padding: 16px 0;
 }
 .reader .record-list .num {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 24px;
   color: var(--muted);
   line-height: 1.2;
@@ -491,7 +493,7 @@
 .reader .record-list strong {
   display: block;
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 700;
   margin-bottom: 4px;
 }
 .reader .record-list p {
@@ -527,7 +529,7 @@
 .reader .sectionhead h2 {
   font-size: 23px;
   letter-spacing: -0.6px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .reader .content-grid {
   display: grid;
@@ -554,7 +556,7 @@
   margin-bottom: 9px;
 }
 .reader .newsrow h3 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 23px;
   line-height: 1.3;
   letter-spacing: -0.35px;
@@ -582,7 +584,7 @@
 }
 .reader .sidebarcard h2 {
   font-size: 17px;
-  font-weight: 650;
+  font-weight: 700;
   margin-bottom: 7px;
 }
 .reader .sidebarcard > p {
@@ -623,7 +625,7 @@
   padding: 16px 0;
   border-top: 1px solid var(--line);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .reader .toolitem svg:last-child {
   margin-left: auto;
@@ -640,7 +642,7 @@
   gap: 30px;
 }
 .reader .aboutstrip h2 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 27px;
   letter-spacing: -0.5px;
 }
@@ -734,7 +736,7 @@
   padding: 40px 0 27px;
 }
 .reader .pagehead h1 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 43px;
   letter-spacing: -1px;
 }
@@ -822,12 +824,13 @@
   margin: 35px auto 28px;
 }
 .reader .articlehead h1 {
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 48px;
   line-height: 1.18;
   letter-spacing: -1.3px;
 }
 .reader .articlehead .dek {
+  font-family: var(--serif);
   font-size: 19px;
   color: var(--muted);
   line-height: 1.65;
@@ -847,7 +850,7 @@
 .reader .byline strong {
   display: block;
   margin-bottom: 5px;
-  font-weight: 650;
+  font-weight: 700;
 }
 .reader .avatar {
   display: flex;
@@ -862,7 +865,7 @@
   background: var(--soft);
   color: var(--teal);
   border-radius: 0;
-  font-family: var(--serif);
+  font-family: var(--fd);
   font-size: 14px;
 }
 .reader .readingtools {
@@ -909,7 +912,7 @@
   font-family: var(--fd);
   font-size: 24px;
   line-height: 1.4;
-  font-weight: 600;
+  font-weight: 700;
   margin: 35px 0 18px;
 }
 .reader .articlebody .notice {
@@ -958,7 +961,7 @@
 }
 .reader .sourcecard h3 {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 700;
 }
 .reader .sourcecard p {
   font-size: 14px;
@@ -1040,7 +1043,7 @@
 .reader .comparison h3 {
   font-size: 14px;
   margin-bottom: 15px;
-  font-weight: 650;
+  font-weight: 700;
 }
 /* "Changed" is yellow (README section 6); "removed" is the warn tone. Both are
    fills under ink, so both themes get the same two rules. */
@@ -1290,7 +1293,7 @@
     width: auto;
     padding: 13px 0;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     align-items: center;
     order: 1;
   }
@@ -1570,7 +1573,7 @@
 .reader .articlebody .textlink {
   font-family: var(--fd);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .reader .lead .dek {
   display: -webkit-box;
@@ -1627,13 +1630,13 @@
 .reader #correctionform label {
   display: block;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 20px 0 9px;
   color: var(--ink);
 }
 .reader #correctionform label span {
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 500;
   color: var(--muted);
 }
 .reader #correctionform .field {
