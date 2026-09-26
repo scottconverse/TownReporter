@@ -432,10 +432,10 @@ Two cases are deliberately not blocked:
 family, DeepSeek-R1, DeepSeek V4, gpt-oss, …) answers with the actual draft in a separate
 `reasoning`/`reasoning_content` field and can spend its whole token budget
 there, returning an empty draft with no error. TownReporter now sends
-`reasoning_effort: "none"` to any model it recognises as this kind, unless
+`reasoning_effort: "none"` to any model it recognizes as this kind, unless
 `LLM_REASONING_EFFORT` says otherwise — never to the real OpenAI cloud API,
 which rejects the field outright on a non-reasoning model. If a model still
-returns an empty draft with reasoning text (an unrecognised id, or an
+returns an empty draft with reasoning text (an unrecognized id, or an
 explicit override), the desk says exactly that instead of "Empty model
 response".
 

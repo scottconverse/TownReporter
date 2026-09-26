@@ -69,7 +69,7 @@ export named 'LOCAL_MODEL_NOTHING_LOADED'`, exit 1 each.
 ## Limits
 
 - The fake servers reproduce the discovery HTTP shapes, not LM Studio's or
-  Ollama's real behaviour. **A live LM Studio or Ollama was not exercised**, by
+  Ollama's real behavior. **A live LM Studio or Ollama was not exercised**, by
   design: this unit is forbidden from loading or unloading a model, so a live
   check would have had to move someone's loaded model.
 - The default in item 3 is only as good as the load-state report at the moment
@@ -78,6 +78,6 @@ export named 'LOCAL_MODEL_NOTHING_LOADED'`, exit 1 each.
   window produces the item-4 refusal rather than a silent substitution.
 - Only the local picker path is covered. The Automatic ladder's own use of
   `pickLoadedLocalModel` is unchanged, and no cloud provider was re-tested.
-- No end-to-end run in a browser was performed; the picker's render behaviour is
+- No end-to-end run in a browser was performed; the picker's render behavior is
   pinned through pure helpers, this repo having no component-rendering harness
   that parses JSX.

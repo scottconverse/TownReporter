@@ -428,7 +428,7 @@ function explicitProvider(
     // A rung carries its own endpoint (see `rungGateway`), and a rung that
     // picks its model at call time can only be built around the model the
     // caller resolved (`rungModel`); the "Local model" entry keeps the
-    // resolved-override-or-LLM_BASE_URL behaviour it has always had. The two
+    // resolved-override-or-LLM_BASE_URL behavior it has always had. The two
     // coexist because the rung never reads LLM_BASE_URL.
     const llm =
       entry.ladderRank === undefined
@@ -681,7 +681,7 @@ type RungResolution =
  *  - `model.cloud`: an Ollama-hosted model is never in this machine's memory
  *    by design, so demanding one would make every cloud pick fail;
  *  - `loaded !== false`: `true` is fine, and `null` means the server never
- *    answered the question -- the pre-BB behaviour is kept rather than
+ *    answered the question -- the pre-BB behavior is kept rather than
  *    refusing on a server that is simply quiet.
  */
 function localPickNotLoadedMessage(
@@ -919,7 +919,7 @@ export async function probeProvider(
       the server itself says is not in memory would either fail the draft or
       make LM Studio page a 35B in from disk, so the run stops here with a
       sentence naming the model and the server. `loaded === null` (a server
-      that reports no load state) keeps exactly today's behaviour, and a
+      that reports no load state) keeps exactly today's behavior, and a
       hosted `cloud: true` model is never blocked -- it is not in memory
       anywhere by design.
     */
@@ -1583,7 +1583,7 @@ export function parseJsonBlock<T>(raw: string): T | null {
  * The sentence a run reports when a model's reply cannot be read at all.
  *
  * One wording, built here, so the classifier in ./automatic-failover.ts can
- * recognise it and move the unfinished call to the next rung. The word
+ * recognize it and move the unfinished call to the next rung. The word
  * "unreadable" is the token that classifier matches; keep the two together.
  */
 export function unreadableReplyError(label?: string): string {
@@ -1604,7 +1604,7 @@ export function unreadableReplyError(label?: string): string {
  * stream usually comes back whole on a second ask, and the caller's own
  * failover seam (./automatic-failover.ts) owns the hop to the next rung. The
  * failure it returns carries `unreadableReplyError`'s wording so that seam
- * recognises it.
+ * recognizes it.
  *
  * `attempt` is the caller's own transport (`chat`, `grokChat`, `runChat`),
  * and `read` is the caller's own parser, so this stays hermetic: the two

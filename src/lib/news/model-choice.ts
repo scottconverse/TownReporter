@@ -417,7 +417,7 @@ export function opinionProviderProblem(
  * model-picker.tsx so it can be unit-tested directly: this repo has no
  * component-rendering test harness (no jsdom/testing-library dependency,
  * and `node --test`'s type-stripping cannot parse JSX), so the picker's
- * render behaviour is pinned here instead of through a DOM assertion.
+ * render behavior is pinned here instead of through a DOM assertion.
  */
 export function localModelOptionLabel(model: {
   id: string;
@@ -456,7 +456,7 @@ export function localModelOptionLabel(model: {
  * `model_id` in `newsroom_local_model_choices` are plain `text not null` with
  * no value constraint, and `cleanLocalModelInput` (request-input.ts) stores
  * any two non-empty strings. So no migration, and `readProviderOverrides` /
- * `resolveLocalModelChoice` recognise it here and resolve it to a real model
+ * `resolveLocalModelChoice` recognize it here and resolve it to a real model
  * before it can reach a call. Nothing that talks to a server ever sees `*`.
  *
  * `*` also survives the picker's own `split(" ")` round trip as the option

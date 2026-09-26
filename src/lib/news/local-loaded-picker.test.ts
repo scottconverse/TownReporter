@@ -4,7 +4,7 @@
 
   Pure functions only, for the reason `localModelOptionLabel`'s own comment
   gives: this repo has no component-rendering harness that can parse JSX, so
-  the picker's render behaviour is pinned through these helpers instead.
+  the picker's render behavior is pinned through these helpers instead.
 */
 
 import { describe, it } from "node:test";
@@ -87,7 +87,7 @@ describe("the local-model list puts loaded models first", () => {
 });
 
 describe("the 'Use whatever is loaded' sentinel", () => {
-  it("is recognisable in the columns the database already has, and nothing else is", () => {
+  it("is recognizable in the columns the database already has, and nothing else is", () => {
     assert.equal(isUseLoadedLocalModelPick({ baseUrl: USE_LOADED_LOCAL_MODEL, id: USE_LOADED_LOCAL_MODEL }), true);
     assert.equal(isUseLoadedLocalModelPick({ baseUrl: "http://127.0.0.1:1234/v1", id: "*" }), false);
     assert.equal(isUseLoadedLocalModelPick({ baseUrl: "*", id: "gemma4:12b" }), false);
@@ -195,7 +195,7 @@ describe("the refusal the desk gives before any model call", () => {
     assert.equal(localServerName("openai-compatible"), "the local server");
   });
 
-  it("recognises both refusals, and not an unrelated provider message", () => {
+  it("recognizes both refusals, and not an unrelated provider message", () => {
     assert.equal(isLocalModelNotReady(LOCAL_MODEL_NOTHING_LOADED), true);
     assert.equal(isLocalModelNotReady(localModelNotLoadedMessage("gemma4:12b", "ollama")), true);
     assert.equal(isLocalModelNotReady("Codex is not installed on this machine."), false);

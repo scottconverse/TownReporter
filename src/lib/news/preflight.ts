@@ -49,7 +49,7 @@ const GUIDANCE: Record<PreflightKind, string> = {
   timeout:
     "The selected model was reachable but did not answer the readiness check in time. No model job was started, nothing was spent, and your saved work is unchanged. Choose another model, or try this one again if the machine was busy.",
   unknown:
-    "The model did not answer, and the reason is not one the desk recognises. The provider's own message is below; docs/setup.md covers how the desk picks a provider.",
+    "The model did not answer, and the reason is not one the desk recognizes. The provider's own message is below; docs/setup.md covers how the desk picks a provider.",
 };
 
 const PROVIDER_AUTH_GUIDANCE = {
@@ -159,7 +159,7 @@ export function localModelNotLoadedMessage(id: string, serverKind: string): stri
 /**
  * Is this refusal one of the desk's own two sentences?
  *
- * `scanPreflight` below has to recognise them by text because that is all the
+ * `scanPreflight` below has to recognize them by text because that is all the
  * probe returns, and getting this wrong is how the item-2 message would reach
  * the editor as the generic "sign in to Claude Code or Codex" guidance
  * instead. Kept as one predicate so the two sentences can never drift apart.
@@ -175,7 +175,7 @@ export function isLocalModelNotReady(message: string): boolean {
  * Matching on text is not lovely, but the probe returns opaque strings from
  * three different providers and the alternative is to give every one of them a
  * typed error first. That is the right refactor; this is the fix that stops a
- * new editor hitting a wall today. Anything unrecognised is `unknown` and is
+ * new editor hitting a wall today. Anything unrecognized is `unknown` and is
  * NOT assumed retryable — guessing "try again" is the bug being fixed.
  *
  * `modelChoice`, when passed, is the id the editor actually picked (not

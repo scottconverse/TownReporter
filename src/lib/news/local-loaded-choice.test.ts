@@ -257,7 +257,7 @@ describe("Unit BB: local model picker load state", () => {
       assert.deepEqual(choice.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
 
       const result = await probeProvider("local-model", NEWSROOM_ID, undefined, "story");
-      assert.equal(result.ok, true, "loaded === null is today's behaviour: not blocked");
+      assert.equal(result.ok, true, "loaded === null is today's behavior: not blocked");
       assert.deepEqual(result.localModel, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
     });
   });
