@@ -8,7 +8,14 @@ import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
-import { mergeFocusSelection, nearDuplicate, openLeads, suggestFocusLeads, workingQueueEmptyCopy } from "@/lib/news/desk-copy";
+import {
+  editorActionError,
+  mergeFocusSelection,
+  nearDuplicate,
+  openLeads,
+  suggestFocusLeads,
+  workingQueueEmptyCopy,
+} from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
 import { usePaper } from "@/lib/paper-context-state";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
@@ -234,7 +241,15 @@ function QueuePage() {
       await navigate({ to: "/desk/story/$leadId", params: { leadId: String(res.id) } });
     },
     onError: (err) => {
-      setFormError(err instanceof Error ? err.message : "Could not file that lead.");
+      /*
+        `fileLeadInput` caps the headline, the why-now, the section and the
+        URL, and none of those three inputs carries a `maxLength`: an editor
+        who types past a bound got the issues array in the form's error line.
+      */
+      setFormError(
+        editorActionError(err instanceof Error ? err.message : "", "file that lead") ??
+          "Could not file that lead.",
+      );
     },
   });
 

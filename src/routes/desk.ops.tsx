@@ -37,7 +37,7 @@ import {
   the browser bundle.
 */
 import { ProviderTimeField } from "@/components/provider-time-field";
-import { editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
+import { editorActionError, editorDraftError, inviteMessage } from "@/lib/news/desk-copy";
 import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
@@ -1103,7 +1103,11 @@ function DarkDeskCounty() {
       );
     },
     onError: (e) => {
-      const msg = e instanceof Error ? e.message : "That did not save.";
+      // The county box has no `maxLength`, and `darkCountyInput.county` is
+      // capped at `LIMITS.county` (80), so a longer paste is refused by the
+      // client validator and arrives here as an issues array.
+      const msg =
+        editorActionError(e instanceof Error ? e.message : "", "save the county") ?? "That did not save.";
       setErr(msg);
       announceToDesk("County did not save.");
     },

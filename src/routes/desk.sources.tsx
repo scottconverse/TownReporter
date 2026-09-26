@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { addSource, addSourcesBulk, listSources, setSourceStatus } from "@/lib/news/desk";
-import { editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
+import { editorActionError, editorFetchError, kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import type { SourceRow } from "@/lib/news/types";
@@ -124,10 +124,15 @@ function SourcesPage() {
       });
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : "Could not add that source.";
+      // The URL and Name boxes carry no `maxLength` and `addSourceInput` caps
+      // both, so a long paste reached the notice bar as the issues array.
+      const raw = err instanceof Error ? err.message : "";
       setNotice({
         kind: "err",
-        text: msg === "Unauthorized" ? "Session expired. Sign in again, then retry." : msg,
+        text:
+          raw === "Unauthorized"
+            ? "Session expired. Sign in again, then retry."
+            : editorActionError(raw, "add that source") ?? "Could not add that source.",
       });
     },
   });
@@ -148,10 +153,16 @@ function SourcesPage() {
       void qc.invalidateQueries({ queryKey: ["sources"] });
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : "Bulk add failed.";
+      // Same boundary on the registry box: `bulkSourceInput.text` caps at
+      // 200,000 and the textarea is unbounded (a chosen file is read whole
+      // into it), so a big paste or file dumped the schema.
+      const raw = err instanceof Error ? err.message : "";
       setNotice({
         kind: "err",
-        text: msg === "Unauthorized" ? "Session expired. Sign in again, then retry." : msg,
+        text:
+          raw === "Unauthorized"
+            ? "Session expired. Sign in again, then retry."
+            : editorActionError(raw, "read that registry") ?? "Bulk add failed.",
       });
     },
   });
