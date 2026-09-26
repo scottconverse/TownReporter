@@ -19,6 +19,7 @@ echo   3  Restart the tunnel When the site is down but the desk works
 echo   4  Start everything   After a reboot, or if nothing is running
 echo   5  Stop everything    Takes the paper offline until you start it again
 echo   6  Restart the Reddit reader  When Reddit threads read as headlines only
+echo   7  Open the Control page     Everything on one screen, with the buttons
 echo.
 echo   0  Close this window
 echo.
@@ -30,6 +31,7 @@ if "%choice%"=="3" goto tunnel
 if "%choice%"=="4" goto startall
 if "%choice%"=="5" goto stopall
 if "%choice%"=="6" goto redlib
+if "%choice%"=="7" goto control
 if "%choice%"=="0" exit
 goto menu
 
@@ -80,6 +82,15 @@ if /i not "%sure%"=="YES" goto menu
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%OPS%stop-townreporter.ps1"
 echo.
 echo   Stopped, and the Reddit reader with it. Choose 4 to start it again.
+goto done
+
+:control
+echo.
+echo   Opening the Control page. It starts a small local server on this machine
+echo   and opens your browser on it. Nothing on the paper is started or stopped
+echo   until you press one of the page's own buttons.
+echo.
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%OPS%control.ps1"
 goto done
 
 :done

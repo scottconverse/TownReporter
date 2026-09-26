@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.64**. See the [0.6.64 release guide](docs/releases/0.6.64.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
+Repository documentation version: **0.6.65**. See the [0.6.65 release guide](docs/releases/0.6.65.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -137,9 +137,45 @@ fault. The paper serves either way.
 
 ### Without a terminal
 
+`ops/control.ps1` opens the **Control page** at `http://127.0.0.1:3095` — a page
+served by this checkout, on this computer, that says whether the machine is
+healthy and puts the menu's actions behind buttons. One large line reads
+**Everything is up** or **N things need attention**; under it each check is one
+card with a plain verdict and, when it is down, the single button that fixes it.
+The rows are the database, the paper, the public site, the Redlib reader,
+Ollama, the last backup, the last scan and the test copy, and the rows that do
+not matter — Redlib and Ollama — are marked optional and never inflate the
+count.
+
+The six buttons carry the menu's own wording: check, restart the paper, restart
+the tunnel, start everything, stop everything, restart the Reddit reader.
+Pressing one streams its output into the page and refreshes the status when it
+finishes. **Stop everything** opens a dialog naming what it will stop and does
+nothing if you cancel. The page also links to the public paper, the desk and the
+test copy.
+
+Three things about it are deliberate and worth knowing before changing them:
+
+- **It answers on loopback only, and only to itself.** It binds `127.0.0.1` and
+  refuses any Host header that is not this server, so nothing on the LAN, the
+  tunnel or the internet reaches it. Every button press must also carry a token
+  the page holds plus a matching Origin, so another page in the same browser
+  cannot press one. It leaves by itself after an hour with no requests.
+- **It cannot publish, edit or delete anything.** The six actions are a fixed
+  list, each an absolute System32 executable with a fixed argument array and no
+  shell, so nothing typed anywhere becomes a command. Ollama is only asked
+  whether a model is ready — never loaded or unloaded.
+- **The status is one source of truth.** The page renders `ops/status.ps1
+  -Json`, so the console and the page cannot disagree about a row they both
+  show.
+
+The numbered menu is still there as the fallback, because the page needs the
+checkout and Node while the `.cmd` needs nothing but Windows:
+
 `ops/TownReporter Control.cmd`. Double-click, pick a number: check, restart the
 paper, restart the tunnel, start everything, stop everything, restart the
-Reddit reader. It cannot publish or delete anything.
+Reddit reader — and entry 7, which opens the Control page. It cannot publish or
+delete anything either.
 
 For a Desktop icon, run this once:
 
@@ -147,9 +183,12 @@ For a Desktop icon, run this once:
 powershell -ExecutionPolicy Bypass -File ops\install-shortcut.ps1
 ```
 
-It creates the shortcut as `cmd /k`, deliberately. A shortcut pointing straight
-at the `.cmd` lets the console close the instant the batch file ends, which is
-how the answer you asked for disappears before you can read it. `ops/status.ps1` is the read-only check on its own, and it works when
+By default the shortcut runs `ops/control.ps1` through `ops/run-hidden.vbs`, so
+the page opens with no console window behind it. `-Fallback` builds the older
+console shortcut instead, as `cmd /k` — deliberately, because a shortcut
+pointing straight at the `.cmd` lets the console close the instant the batch
+file ends, which is how the answer you asked for disappears before you can read
+it. `ops/status.ps1` is the read-only check on its own, and it works when
 the paper is down — which is exactly when `/desk/ops` cannot answer.
 
 Manual control:

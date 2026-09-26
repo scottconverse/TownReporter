@@ -1277,6 +1277,45 @@ jobs:
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/desk-dark-flash-walk.mjs
 
+  # AG: the Control page, walked the way the owner will use it (0.6.65). The
+  # terminal menu is replaced by a local page on 127.0.0.1:3095 -- one line
+  # saying whether the paper is up, the menu's own six buttons, and a status
+  # that refreshes itself. The security of that page has its own node:test file
+  # (scripts/control-page-server.test.mjs); this job is about the page as a
+  # thing a person reads at night, and every check is a measurement: the font
+  # floor and the button heights come from getComputedStyle on every element in
+  # the document, the theme toggle has to survive a real reload, Cancel on the
+  # stop-all dialog has to run NOTHING, and "Working..." is timed inside the
+  # page because the handler runs in the same task as the click.
+  #
+  # The action the walk presses is FAKE: the server's `runner` seam is injected,
+  # so the restart emits two lines and flips a flag in the walk's own process.
+  # Nothing is spawned and no scheduled task is touched -- which is the only
+  # reason a walk that presses "Restart the Reddit reader" may run in CI. The
+  # stub still asserts the argv vector it was handed, so the button labelled
+  # with the menu's words is proved to run `redlib.ps1 restart` as an absolute
+  # System32 PowerShell with an argument array.
+  #
+  # Port 3505, which no other integration file may bind. The page's real port is
+  # 3095 and is never bound here: a walk on that port would collide with a
+  # Control page the owner has open. Nothing is built -- the walk boots
+  # ops/control/control-server.mjs in-process -- so there is no `npm run build`
+  # step and no `npm start`.
+  control-page:
+    name: The Control page, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Open the page, check it reads, toggle the theme, and press one button
+        run: node scripts/control-page-walk.mjs
+
   # AB: one press reads a long scanned packet to the end (0.6.64). An editor
   # attached a 13-page scanned council packet and pressed Redraft. The desk
   # read the twelve pages one vision call may handle (OCR_BATCH_PAGE_LIMIT =
