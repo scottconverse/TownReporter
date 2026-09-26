@@ -559,11 +559,24 @@ async function main() {
   await pubRow.getByLabel("Also fix the story text").check();
   const fixBodyBox = pubRow.getByLabel(/The story text as it should read/);
   await fixBodyBox.waitFor({ timeout: 10_000 });
-  if ((await fixBodyBox.inputValue()) !== body) {
-    // The editor edits the words on the paper, not a blank page: the box opens
-    // on the printed text, and a value that did not match would mean the fix
-    // was about to overwrite the story with something nobody looked at.
-    throw new Error("the fix box did not open on the story's printed text");
+  const fixBodyShown = await fixBodyBox.inputValue();
+  if (fixBodyShown !== body) {
+    /*
+      The editor edits the words on the paper, not a blank page: the box opens
+      on the printed text, and a value that did not match would mean the fix
+      was about to overwrite the story with something nobody looked at.
+
+      Both sides are printed, with their lengths, because the first form of
+      this message ("did not open on the story's printed text") could not tell
+      a blank box from a truncated one from a re-wrapped one -- and those are
+      three different bugs. 80 characters is enough to name which text the box
+      actually held without dumping a whole story into the log.
+    */
+    throw new Error(
+      "the fix box did not open on the story's printed text: box held " +
+        `${fixBodyShown.length} chars ${JSON.stringify(fixBodyShown.slice(0, 80))}, ` +
+        `printed text is ${body.length} chars ${JSON.stringify(body.slice(0, 80))}`,
+    );
   }
   await fixBodyBox.fill(fixedBody);
   await pubRow.getByRole("button", { name: "Publish correction" }).click();
