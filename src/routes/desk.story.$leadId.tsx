@@ -10,9 +10,11 @@ import {
   mayInheritLeadSources,
   type EvidenceDecision,
 } from "@/lib/news/draft-evidence";
+import { auditDraft } from "@/lib/news/draft-audit";
+import { parseStyleRecord } from "@/lib/news/draft-audit-record";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
@@ -20,6 +22,7 @@ import {
   createFollowUp,
   dropFollowUp,
   draftLead,
+  fixDraftStyle,
   getLead,
   getDraftHistoryItem,
   listDraftHistory,
@@ -115,6 +118,18 @@ const NO_ANSWER = "The desk did not answer that click. It may have been restarti
 
 function answered<T>(res: T | undefined | null): res is T {
   return res !== undefined && res !== null && typeof res === "object";
+}
+
+/**
+ * Where a style finding is, in words the editor can find on the page.
+ *
+ * Paragraph 0 is the headline and the dek, which print together above the
+ * body (`draft-audit.ts`), so it is named rather than numbered.
+ */
+function styleLocation(finding: { paragraph: number; sentence: number }): string {
+  return finding.paragraph === 0
+    ? "Headline and dek"
+    : `Paragraph ${finding.paragraph}, sentence ${finding.sentence}`;
 }
 
 function StoryPage() {
@@ -598,6 +613,60 @@ function StoryPage() {
           "Evidence review could not be saved.",
       ),
   });
+
+  /*
+    "Fix these with the model": ONE round, on the text on this page, with the
+    model the picker is set to. The server saves what comes back as an ordinary
+    draft revision -- nothing publishes -- and a rewrite that would have
+    changed a quotation, a number, a name or a link is refused there, so the
+    text the editor gets back is either the repair or exactly what was sent.
+
+    No findings, no call: the button is only offered when the check above found
+    something to fix.
+  */
+  const fixStyle = useMutation({
+    mutationFn: () =>
+      fixDraftStyle({ data: { leadId: id, headline, dek, body, topic, modelChoice, modelEffort } }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setBody(res.body);
+      setMsg(res.note);
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "fix the style findings") ??
+          "The style repair did not run. Your draft is unchanged.",
+      );
+    },
+  });
+
+  /*
+    The style check, measured on the text on screen rather than read back from
+    the stored record: the editor's unsaved edits are exactly what they are
+    looking at, and this measurement is pure, so keeping it current costs
+    nothing and cannot go stale. The same measurement runs when the desk writes
+    a draft and when the editor saves; the stored copy is what the completion
+    receipt and the evidence record read.
+
+    Nothing here is a verdict and nothing here blocks: every finding is
+    advisory, and the editor may ignore all of it.
+  */
+  const styleCheck = useMemo(
+    () => auditDraft({ headline, dek, body, form: data?.draft?.form ?? "" }),
+    [headline, dek, body, data?.draft?.form],
+  );
+  const styleFixes = styleCheck.findings.filter((finding) => finding.severity === "fix");
+  const styleReviews = styleCheck.findings.filter((finding) => finding.severity === "review");
+  /* What the desk said last time it measured this draft, from the record saved
+     with it -- the plain sentence the repair or the save wrote. */
+  const styleNote = useMemo(() => {
+    try {
+      const research = JSON.parse(data?.draft?.research_json ?? "{}") as Record<string, unknown>;
+      return parseStyleRecord(research?.styleAudit)?.note ?? "";
+    } catch {
+      return "";
+    }
+  }, [data?.draft?.research_json]);
 
   const applyCheckedDraft = useCallback(async (
     draftId: number,
@@ -2127,6 +2196,73 @@ function StoryPage() {
               edit, then publish.
             </p>
           )}
+          {data.draft ? (
+            <section className="note-sec" aria-label="Style check">
+              <p className="side-label">Style check</p>
+              {styleFixes.length ? (
+                <>
+                  <p className="note-one">
+                    {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix:
+                  </p>
+                  <ul className="meeting-citations">
+                    {styleFixes.map((finding, index) => (
+                      <li key={`${finding.code}-${finding.paragraph}-${finding.sentence}-${index}`}>
+                        <p>
+                          <b>{styleLocation(finding)}</b> · {finding.message}
+                        </p>
+                        {finding.snippet ? <p className="note-one">{finding.snippet}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="note-one">Nothing to fix.</p>
+              )}
+              {styleReviews.length ? (
+                <details>
+                  <summary>
+                    {styleReviews.length} thing{styleReviews.length === 1 ? "" : "s"} to read, not
+                    to fix
+                  </summary>
+                  <ul className="meeting-citations">
+                    {styleReviews.map((finding, index) => (
+                      <li key={`${finding.code}-${finding.paragraph}-${finding.sentence}-${index}`}>
+                        <p>
+                          <b>{styleLocation(finding)}</b> · {finding.message}
+                        </p>
+                        {finding.snippet ? <p className="note-one">{finding.snippet}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+              <p className="note-one">
+                You do not have to act on any of this. Nothing here publishes anything.
+              </p>
+              <InkButton
+                disabled={
+                  !styleFixes.length ||
+                  locked ||
+                  onPaper ||
+                  waiting ||
+                  fixStyle.isPending ||
+                  save.isPending ||
+                  reviewEvidence.isPending ||
+                  reconcileActive
+                }
+                onClick={() => fixStyle.mutate()}
+              >
+                {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
+              </InkButton>
+              <p className="note-one">
+                One pass with the model the picker is set to. It is given the list above and the
+                draft, and returns the draft with those problems fixed. It may not change a
+                quotation, a number, a name or a link — a rewrite that does is refused and your text
+                is kept. The result is saved as a draft revision, never published.
+              </p>
+              {styleNote ? <p className="note-one">{styleNote}</p> : null}
+            </section>
+          ) : null}
           {data.draft ? (
             <FindingEvidenceReviewPanel
               leadId={id}

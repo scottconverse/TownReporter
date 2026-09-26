@@ -44,6 +44,7 @@ import {
   draftHistoryInput,
   draftLeadInput,
   draftMeetingReviewInput,
+  draftStyleFixInput,
   fileLeadInput,
   followUpCreateInput,
   followUpReplyInput,
@@ -2433,6 +2434,21 @@ export const saveDraft = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const { saveDraftForEditor } = await import("./draft-edit.server.ts");
     return saveDraftForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
+  });
+
+/**
+ * The editor's "Fix these with the model" press.
+ *
+ * One round, on demand, on the text the page is showing. It saves as a draft
+ * revision like any other save -- nothing publishes -- and the row is left
+ * exactly as it was when the call fails or the guard refuses the rewrite.
+ */
+export const fixDraftStyle = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => draftStyleFixInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { fixDraftStyleForEditor } = await import("./draft-audit.server.ts");
+    return fixDraftStyleForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 export const setLeadStatus = createServerFn({ method: "POST" })
