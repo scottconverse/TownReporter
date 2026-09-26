@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap">
+</helmet>
+<div style="{{ root }}">
+  <sc-if value="{{ showNav }}" hint-placeholder-val="{{ true }}"><div style="min-width:0;background:var(--panel);border-right:1px solid var(--line)"><dc-import name="Desk Nav" active="{{ active }}" theme="{{ theme }}" hint-size="100%,100%"></dc-import></div></sc-if>
+  <main style="display:flex;flex-direction:column;gap:22px;padding:24px 32px 48px;min-width:0">
+    <header style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;padding-bottom:16px;border-bottom:3px solid var(--ink)">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span style="font-size:15px;font-weight:700;color:var(--ink2)">{{ kicker }}</span>
+        <h1 style="margin:0;font-weight:800;font-size:40px;letter-spacing:-.03em;line-height:1">{{ title }}</h1>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <sc-for list="{{ headBtns }}" as="b" hint-placeholder-count="2"><a href="#" onClick="{{ b.go }}" style="{{ b.style }}">{{ b.label }}</a></sc-for>
+      </div>
+    </header>
+
+    <sc-if value="{{ isQueue }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:0">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding-bottom:14px">
+          <div style="display:flex;border:1px solid var(--line)">
+            <sc-for list="{{ qFilters }}" as="f" hint-placeholder-count="5"><a href="#" style="{{ f.style }}">{{ f.label }}</a></sc-for>
+          </div>
+          <div style="position:relative;z-index:1;display:flex;flex-wrap:nowrap;flex:none;gap:8px;align-items:center">
+            <span style="display:flex;align-items:center;min-width:260px;min-height:44px;padding:0 12px;border:1px solid var(--ink);font-size:15px;color:var(--ink2)">Search leads, places, records…</span>
+            <span style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--ink);font-weight:700;font-size:15px;white-space:nowrap">Sort: Best first ▾</span>
+            <span style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--ink);font-weight:700;font-size:15px;white-space:nowrap">Section: All ▾</span>
+          </div>
+        </div>
+        <div style="position:relative;z-index:0;display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px;margin-bottom:4px;padding:10px 14px;background:var(--yel);color:#111;font-weight:700;font-size:15px">
+          <span style="font-weight:800">2 selected</span>
+          <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;background:#111;color:#fff;font-weight:800">Start 2 stories</a>
+          <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid #111;color:#111">Hold</a>
+          <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid #111;color:#111">Kill</a>
+          <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;color:#111;text-decoration:underline">Clear</a>
+        </div>
+        <div style="display:grid;grid-template-columns:44px 52px minmax(0,1fr) 180px 150px auto;gap:0 14px;padding:10px 0;border-bottom:2px solid var(--ink);font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">
+          <span></span><span>Score</span><span>Lead</span><span>Evidence</span><span>Filed</span><span>Actions</span>
+        </div>
+        <sc-for list="{{ qRows }}" as="r" hint-placeholder-count="8">
+          <div style="{{ r.rowStyle }}">
+            <span style="{{ r.boxStyle }}">{{ r.box }}</span>
+            <span style="{{ r.scoreStyle }}">{{ r.score }}</span>
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+              <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><sc-for list="{{ r.chips }}" as="c" hint-placeholder-count="1"><span style="{{ c.style }}">{{ c.label }}</span></sc-for><span style="font-size:14px;color:var(--ink2)">{{ r.sec }}</span></div>
+              <span style="font-weight:700;font-size:17px;line-height:1.25">{{ r.title }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <span style="display:flex;gap:3px"><sc-for list="{{ r.meter }}" as="m" hint-placeholder-count="3"><span style="{{ m.style }}"></span></sc-for></span>
+              <span style="font-size:14px;color:var(--ink2)">{{ r.evidence }}</span>
+            </div>
+            <span style="font-size:15px;color:var(--ink2)">{{ r.age }}</span>
+            <div style="display:flex;gap:6px">
+              <a href="#" onClick="{{ r.go }}" style="{{ r.mainStyle }}">{{ r.main }}</a>
+              <a href="#" onClick="{{ moreLead }}" style="display:flex;align-items:center;min-height:44px;padding:0 10px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">{{ r.alt }}</a>
+            </div>
+          </div>
+        </sc-for>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;font-size:15px;color:var(--ink2)"><span>Showing 8 of 12 open leads</span><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 16px;border:2px solid var(--ink);color:var(--ink);font-weight:700">Load more</a></div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isFollow }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <p style="margin:0;font-size:16px;line-height:1.5;color:var(--ink2);max-width:900px">Questions the AI keeps working on for you: re-checking pages, searching public records, watching for the next agenda. When an agent finds something, it adds the finding to the story’s reporting notes and flags it here. It never publishes.</p>
+        <div style="display:flex;border:1px solid var(--line);align-self:flex-start"><sc-for list="{{ fFilters }}" as="f" hint-placeholder-count="4"><a href="#" style="{{ f.style }}">{{ f.label }}</a></sc-for></div>
+        <sc-for list="{{ fTasks }}" as="f" hint-placeholder-count="5">
+          <div style="{{ f.box }}">
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+              <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span style="{{ f.stStyle }}">{{ f.st }}</span><span style="font-size:14px;color:var(--ink2)">{{ f.method }}</span></div>
+              <span style="font-weight:800;font-size:18px;line-height:1.3">{{ f.q }}</span>
+              <span style="font-family:'Literata',serif;font-size:16px;line-height:1.45">{{ f.result }}</span>
+              <span style="font-size:14px;color:var(--ink2)">Story: <a href="#" style="color:var(--ink);text-decoration:underline;text-decoration-color:var(--yel);text-decoration-thickness:3px">{{ f.story }}</a> · {{ f.sched }}</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:flex-end">
+              <sc-for list="{{ f.btns }}" as="x" hint-placeholder-count="3"><a href="#" style="{{ x.style }}">{{ x.label }}</a></sc-for>
+            </div>
+            <sc-if value="{{ f.running }}" hint-placeholder-val="{{ false }}"><div style="grid-column:1 / -1"><dc-import name="Desk Job" job="{{ f.job }}" compact="{{ true }}" hint-size="100%,140px"></dc-import></div></sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isDrafts }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column">
+        <div style="display:flex;border:1px solid var(--line);align-self:flex-start;margin-bottom:12px"><sc-for list="{{ dFilters }}" as="f" hint-placeholder-count="5"><a href="#" style="{{ f.style }}">{{ f.label }}</a></sc-for></div>
+        <sc-for list="{{ dRows }}" as="d" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:200px minmax(0,1fr) 170px auto;gap:8px 16px;align-items:center;padding:14px 0;border-top:1px solid var(--line)">
+            <span style="{{ d.stStyle }}">{{ d.st }}</span>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ d.sec }} · {{ d.origin }}</span><span style="font-weight:700;font-size:17px;line-height:1.25">{{ d.title }}</span></div>
+            <span style="font-size:14px;color:var(--ink2)">{{ d.meta }}</span>
+            <div style="display:flex;gap:6px"><a href="#" onClick="{{ d.go }}" style="{{ d.mainStyle }}">{{ d.main }}</a><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 10px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">More ▾</a></div>
+            <sc-if value="{{ d.running }}" hint-placeholder-val="{{ false }}"><div style="grid-column:1 / -1"><dc-import name="Desk Job" job="{{ d.job }}" compact="{{ true }}" hint-size="100%,140px"></dc-import></div></sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isOpinion }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px">
+        <a href="#" onClick="{{ newOp }}" style="display:flex;flex-direction:column;gap:6px;padding:20px;background:var(--panel);border:2px solid var(--yel);color:var(--ink)"><span style="font-weight:800;font-size:20px">Have the AI write an editorial →</span><span style="font-size:15px;color:var(--ink2)">Give it documents and a position. It writes in the paper’s voice with a Claims and sources appendix.</span></a>
+        <a href="#" onClick="{{ newOp }}" style="display:flex;flex-direction:column;gap:6px;padding:20px;background:var(--panel);border:1px solid var(--line);color:var(--ink)"><span style="font-weight:800;font-size:20px">File one you wrote →</span><span style="font-size:15px;color:var(--ink2)">Paste or write it. Claims and sources are still required before it can print.</span></a>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <span style="font-weight:800;font-size:22px;padding-bottom:8px;border-bottom:2px solid var(--ink)">Requests & editorials</span>
+        <sc-for list="{{ oRows }}" as="d" hint-placeholder-count="4">
+          <div style="display:grid;grid-template-columns:200px minmax(0,1fr) 170px auto;gap:8px 16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)">
+            <span style="{{ d.stStyle }}">{{ d.st }}</span>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font-weight:700;font-size:17px;line-height:1.25">{{ d.title }}</span><span style="font-size:14px;color:var(--ink2)">{{ d.note }}</span></div>
+            <span style="font-size:14px;color:var(--ink2)">{{ d.meta }}</span>
+            <div style="display:flex;gap:6px"><a href="#" style="{{ d.mainStyle }}">{{ d.main }}</a></div>
+            <sc-if value="{{ d.running }}" hint-placeholder-val="{{ false }}"><div style="grid-column:1 / -1"><dc-import name="Desk Job" job="{{ d.job }}" compact="{{ true }}" hint-size="100%,140px"></dc-import></div></sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isDark }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:320px minmax(0,1fr);gap:0;border:1px solid var(--line)">
+        <div style="display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--line)">
+          <sc-for list="{{ piles }}" as="p" hint-placeholder-count="3">
+            <div style="display:flex;flex-direction:column;border-bottom:1px solid var(--line)">
+              <div style="display:flex;justify-content:space-between;padding:14px 16px 6px;font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)"><span>{{ p.name }}</span><span>{{ p.n }}</span></div>
+              <sc-for list="{{ p.files }}" as="f" hint-placeholder-count="2">
+                <a href="#" style="{{ f.style }}"><span style="font-weight:700;font-size:16px;line-height:1.3">{{ f.t }}</span><span style="font-size:14px;color:var(--ink2)">{{ f.m }}</span></a>
+              </sc-for>
+            </div>
+          </sc-for>
+          <a href="#" style="display:flex;align-items:center;min-height:44px;margin:14px 16px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Check r/longmont for signals</a>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:20px;padding:22px 26px 28px;min-width:0">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">The question</span>
+            <span style="font-weight:800;font-size:26px;line-height:1.15;letter-spacing:-.02em">Why is HOPE for Longmont’s website feed publishing defaced pages?</span>
+            <span style="font-family:'Literata',serif;font-size:16px;line-height:1.5;color:var(--ink2)">Ordinary explanation to rule out first: an expired plugin or hosting compromise unrelated to the organization.</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
+            <sc-for list="{{ bounds }}" as="b" hint-placeholder-count="3"><div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;background:var(--bg)"><span style="font-size:14px;font-weight:800;color:var(--ink2)">{{ b.k }}</span><span style="font-weight:700;font-size:16px">{{ b.v }}</span></div></sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px">
+            <div style="display:flex;flex-direction:column">
+              <span style="font-weight:800;font-size:19px;padding-bottom:8px;border-bottom:2px solid var(--ink)">Activity</span>
+              <sc-for list="{{ log }}" as="l" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:15px"><span style="color:var(--ink2);font-variant-numeric:tabular-nums">{{ l.t }}</span><span style="{{ l.style }}">{{ l.e }}</span></div>
+              </sc-for>
+            </div>
+            <div style="display:flex;flex-direction:column">
+              <span style="font-weight:800;font-size:19px;padding-bottom:8px;border-bottom:2px solid var(--ink)">Case file</span>
+              <sc-for list="{{ caseFile }}" as="c" hint-placeholder-count="4">
+                <div style="display:flex;flex-direction:column;gap:3px;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ c.k }}</span><span style="font-size:15px;line-height:1.4">{{ c.v }}</span></div>
+              </sc-for>
+              <a href="#" style="align-self:flex-start;display:flex;align-items:center;min-height:44px;margin-top:12px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Challenge the case</a>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--panel);border-top:3px solid var(--yel)">
+            <span style="font-weight:800;font-size:18px">Decide</span>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Keep investigating</a>
+              <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;background:var(--yel);color:#111;font-weight:800;font-size:15px">Start an AI follow-up</a>
+              <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Wait and watch</a>
+              <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Send to the queue</a>
+              <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:15px">Close: no finding</a>
+            </div>
+            <span style="font-size:14px;color:var(--ink2)">Nothing here prints. "Send to the queue" files a lead for you to review.</span>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isSources }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;align-items:start">
+        <div style="display:flex;flex-direction:column">
+          <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding-bottom:12px">
+            <div style="display:flex;border:1px solid var(--line)"><sc-for list="{{ sFilters }}" as="f" hint-placeholder-count="4"><a href="#" style="{{ f.style }}">{{ f.label }}</a></sc-for></div>
+            <span style="display:flex;align-items:center;min-width:240px;min-height:44px;padding:0 12px;border:1px solid var(--ink);font-size:15px;color:var(--ink2)">Search sources…</span>
+          </div>
+          <sc-for list="{{ srcRows }}" as="s" hint-placeholder-count="7">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:6px 18px;align-items:center;padding:14px 0;border-top:1px solid var(--line)">
+              <div style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font-weight:800;font-size:17px">{{ s.name }}</span><span style="font-size:14px;color:var(--ink2)">{{ s.url }} · {{ s.kind }}</span></div>
+              <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start"><span style="{{ s.style }}">{{ s.state }}</span><span style="font-size:14px;color:var(--ink2)">{{ s.note }}</span></div>
+              <div style="display:flex;gap:6px"><a href="#" style="{{ s.aStyle }}">{{ s.a }}</a><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 10px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">{{ s.b }}</a></div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:2px solid var(--yel)">
+            <span style="font-weight:800;font-size:20px">Daily scan</span>
+            <div style="display:flex;justify-content:space-between;font-size:15px"><span>Runs</span><b>Every day, 6:00 a.m.</b></div>
+            <div style="display:flex;justify-content:space-between;font-size:15px"><span>Files up to</span><b>12 leads</b></div>
+            <div style="display:flex;justify-content:space-between;font-size:15px"><span>Model</span><b>Automatic</b></div>
+            <span style="font-size:14px;color:var(--ink2)">Scans file leads only. They never draft or publish.</span>
+            <a href="#" style="display:flex;align-items:center;min-height:48px;padding:0 16px;background:var(--yel);color:#111;font-weight:800;font-size:15px">Run scan now</a>
+          </div>
+          <div style="display:flex;flex-direction:column;padding:18px;background:var(--panel);border:1px solid var(--line)">
+            <span style="font-weight:800;font-size:20px;padding-bottom:8px">Previous scans</span>
+            <sc-for list="{{ scans }}" as="x" hint-placeholder-count="4"><div style="display:flex;justify-content:space-between;gap:8px;padding:10px 0;border-top:1px solid var(--line);font-size:15px"><span>{{ x.when }}</span><span style="{{ x.style }}">{{ x.what }}</span></div></sc-for>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isPublished }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding-bottom:12px">
+          <div style="display:flex;border:1px solid var(--line)"><sc-for list="{{ pFilters }}" as="f" hint-placeholder-count="4"><a href="#" style="{{ f.style }}">{{ f.label }}</a></sc-for></div>
+          <span style="display:flex;align-items:center;min-width:260px;min-height:44px;padding:0 12px;border:1px solid var(--ink);font-size:15px;color:var(--ink2)">Search published stories…</span>
+        </div>
+        <div style="display:grid;grid-template-columns:110px minmax(0,1fr) 110px 170px 340px;gap:0 16px;padding:10px 0;border-bottom:2px solid var(--ink);font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)"><span>Printed</span><span>Story</span><span>Views</span><span>Corrections</span><span>Actions</span></div>
+        <sc-for list="{{ pubRows }}" as="p" hint-placeholder-count="7">
+          <div style="display:grid;grid-template-columns:110px minmax(0,1fr) 110px 170px 340px;gap:0 16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)">
+            <span style="font-size:15px;color:var(--ink2)">{{ p.date }}</span>
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ p.sec }}</span><span style="font-weight:700;font-size:17px;line-height:1.25">{{ p.title }}</span></div>
+            <span style="font-weight:800;font-size:17px;font-variant-numeric:tabular-nums">{{ p.views }}</span>
+            <span style="{{ p.corrStyle }}">{{ p.corr }}</span>
+            <div style="display:flex;gap:6px"><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:14px">View</a><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px" onClick="{{ goStory }}">Edit headline</a><a href="#" onClick="{{ morePub }}" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">More ▾</a></div>
+          </div>
+        </sc-for>
+        <span style="padding-top:14px;font-size:15px;color:var(--ink2)">Legal removal is under More ▾. It skips the trash and asks for a reason.</span>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isServer }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start">
+        <div style="display:flex;flex-direction:column;padding:20px;background:var(--panel);border:1px solid var(--line);grid-row:span 2">
+          <span style="font-weight:800;font-size:22px;padding-bottom:4px">Writing models</span>
+          <span style="font-size:15px;color:var(--ink2);padding-bottom:10px">Every place the desk writes uses this list. Automatic tries them in this order.</span>
+          <sc-for list="{{ models }}" as="m" hint-placeholder-count="5">
+            <div style="display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:12px 0;border-top:1px solid var(--line)">
+              <span style="font-weight:800;font-size:16px;color:var(--ink2)">{{ m.n }}</span>
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font-weight:800;font-size:17px">{{ m.name }}</span><span style="font-size:14px;color:var(--ink2)">{{ m.note }}</span></div>
+              <span style="{{ m.style }}">{{ m.state }}</span>
+            </div>
+          </sc-for>
+          <div style="display:flex;gap:8px;padding-top:12px"><a href="#" onClick="{{ goModels }}" style="display:flex;align-items:center;min-height:44px;padding:0 14px;background:var(--yel);color:#111;font-weight:800;font-size:15px">Assign models to jobs →</a><a href="#" onClick="{{ goModels }}" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">All connections</a></div>
+        </div>
+        <sc-for list="{{ panels }}" as="p" hint-placeholder-count="3">
+          <div style="display:flex;flex-direction:column;gap:8px;padding:20px;background:var(--panel);border:1px solid var(--line)">
+            <span style="font-weight:800;font-size:22px">{{ p.title }}</span>
+            <sc-for list="{{ p.rows }}" as="r" hint-placeholder-count="3"><div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:15px"><span>{{ r.k }}</span><span style="{{ r.style }}">{{ r.v }}</span></div></sc-for>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:6px"><sc-for list="{{ p.btns }}" as="b" hint-placeholder-count="2"><a href="#" onClick="{{ b.go }}" style="{{ b.style }}">{{ b.label }}</a></sc-for></div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;queue&quot;,&quot;drafts&quot;,&quot;opinion&quot;,&quot;follow&quot;,&quot;dark&quot;,&quot;sources&quot;,&quot;published&quot;,&quot;server&quot;],&quot;default&quot;:&quot;queue&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;bare&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;onAction&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(a: string) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const dark = (this.props.theme ?? "dark") === "dark";
+    const screen = this.props.screen ?? "queue";
+    const t = dark
+      ? { "--bg": "#1b1916", "--panel": "#27231f", "--line": "#3b3631", "--ink": "#e8e6e1", "--ink2": "#bdbab3", "--yel": "#e6c35c", "--danger": "#f0998c", "--warn": "#f0b27a", "--ok": "#9fd4a8", "--sel": "#e6c35c" }
+      : { "--bg": "#fffdf7", "--panel": "#f6f2e7", "--line": "#d8d3c4", "--ink": "#111", "--ink2": "#3a3a3a", "--yel": "#ffd23f", "--danger": "#b3261e", "--warn": "#8a4b00", "--ok": "#1e6b34", "--sel": "#111" };
+    const css = s => Object.fromEntries(s.split(";").filter(Boolean).map(p => { const i = p.indexOf(":"); return [p.slice(0, i).trim().replace(/-([a-z])/g, (_, c) => c.toUpperCase()), p.slice(i + 1)]; }));
+    const B = "display:flex;align-items:center;min-height:44px;padding:0 14px;font-size:15px;white-space:nowrap;";
+    const primary = css(B + "font-weight:800;background:var(--yel);color:#111"), outline = css(B + "font-weight:700;border:2px solid var(--ink);color:var(--ink)"), quiet = css(B + "font-weight:700;border:1px solid var(--line);color:var(--ink)");
+    const seg = (labels, on) => labels.map(l => ({ label: l, style: css(B + "font-weight:700;" + (l === on ? "background:var(--ink);color:var(--bg)" : "color:var(--ink)")) }));
+    const chip = (label, kind) => ({ label, style: css("font-size:14px;font-weight:800;padding:1px 8px;" + (kind === "new" ? "background:var(--yel);color:#111" : kind === "dup" ? "border:1px dashed var(--ink2);color:var(--ink2)" : kind === "held" ? "border:2px solid var(--warn);color:var(--warn)" : "border:1px solid var(--ink2);color:var(--ink2)")) });
+    const sc = n => css("width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;box-sizing:border-box;" + (n >= 14 ? "background:var(--yel);color:#111" : n >= 10 ? "border:2px solid var(--ink)" : "border:1px solid var(--line)"));
+    const meter = (o, f) => Array.from({ length: o + f }, (_, i) => ({ style: css("width:12px;height:12px;box-sizing:border-box;" + (i < o ? "background:var(--ink)" : "border:2px solid var(--danger)")) }));
+    const Q = [
+      [16, [chip("NEW", "new")], "Planning", "Dry Creek annexation returns Oct. 6 for public hearing and second reading", 3, 0, "2 hours ago", true],
+      [14, [chip("NEW", "new")], "Housing", "Housing board posts Oct. 8 funding packet and a cancellation notice for the same date", 3, 1, "5 hours ago", true],
+      [12, [chip("NEW", "new")], "Council", "Council study session adds broadband utility rate review to Oct. 13", 2, 0, "6 hours ago"],
+      [11, [chip("≈ PRINTED", "dup")], "Community", "OUR Center Community Market visit rules differ across its own pages", 2, 0, "yesterday"],
+      [10, [chip("HELD", "held")], "Schools", "St. Vrain board packet lists new bus contract vendor", 1, 1, "2 days ago"],
+      [9, [chip("Seen again")], "Schools", "St. Vrain posts updated open-house list for October", 1, 0, "6 hours ago"],
+      [8, [], "Parks", "Sandstone Ranch trail closure extended through Oct. 16", 1, 0, "8 hours ago"],
+      [7, [], "Utilities", "Hydrant flushing on the west side next week", 0, 1, "3 hours ago"]
+    ];
+    const qRows = Q.map(([score, chips, sec, title, o, f, age, selected]) => ({
+      score, chips, sec, title, age, meter: meter(o, f), evidence: o + " opened" + (f ? " · " + f + " could not" : ""),
+      box: selected ? "✓" : "", boxStyle: css("width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:800;box-sizing:border-box;" + (selected ? "background:var(--ink);color:var(--bg)" : "border:2px solid var(--ink2)")),
+      scoreStyle: sc(score), go: e => { e.preventDefault(); this.props.onAction && this.props.onAction("start-story"); }, main: chips[0] && chips[0].label === "HELD" ? "Release" : "Start story", mainStyle: chips[0] && chips[0].label === "HELD" ? outline : primary, alt: "More ▾",
+      rowStyle: css("display:grid;grid-template-columns:44px 52px minmax(0,1fr) 180px 150px auto;gap:0 14px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line);" + (selected ? "background:var(--panel)" : ""))
+    }));
+    const act = k => e => { e.preventDefault(); this.props.onAction && this.props.onAction(k); };
+    const sb = (label, k) => ({ label, style: css(B + "font-size:14px;" + (k === "p" ? "font-weight:800;background:var(--yel);color:#111" : k === "o" ? "font-weight:700;border:2px solid var(--ink);color:var(--ink)" : k === "d" ? "font-weight:700;border:2px solid var(--danger);color:var(--danger)" : "font-weight:700;border:1px solid var(--line);color:var(--ink)")) });
+    const tk = k => css("font-size:14px;font-weight:800;padding:1px 8px;white-space:nowrap;" + ({ found: "background:var(--yel);color:#111", run: "border:2px solid var(--ink);color:var(--ink)", wait: "border:1px solid var(--ink2);color:var(--ink2)", fail: "border:2px dashed var(--danger);color:var(--danger)", none: "border:1px solid var(--ok);color:var(--ok)" })[k]);
+    const J = (title, model, stages, stage, now, off, pct) => ({ title, model, stages, stage, now, state: "running", startOffset: off, quietFor: 4, pct: pct ?? null, log: [{ t: "8:10", msg: "Opened longmont.primegov.com portal" }, { t: "8:11", msg: "Found 2 new documents since last run" }, { t: "8:12", msg: now }] });
+    const T = [
+      ["found", "Found an answer", "Re-check pages · every 2 hours", "Which Oct. 8 meeting is cancelled: the funding hearing or a regular meeting?", "The HHS board page now lists the Oct. 8 funding hearing as “moved to Oct. 15.” Added to reporting notes 7:48 a.m.", "Housing board posts two Oct. 8 records", "last run 7:48 a.m.", [sb("Review finding", "p"), sb("Add to story", "o"), sb("Mark done")]],
+      ["run", "Running now", "Search public records · daily", "What is the size of the 2027 human services funding pool?", "Searching the city budget book and council packets.", "Housing board posts two Oct. 8 records", "started 8:10 a.m.", [sb("Pause"), sb("Edit"), sb("Stop", "d")], J("Searching public records", "Gemini Flash · medium", ["Search", "Open records", "Compare", "Report"], 1, "Reading 2027 budget book, page 214 of 612", 138, 35)],
+      ["wait", "Waiting", "Watch for next agenda · Tue & Fri", "Will council schedule the Dry Creek second reading on Oct. 6 as planned?", "Nothing posted yet. The council usually posts its agenda on the Wednesday before.", "Dry Creek annexation", "next check Wed 6:00 a.m.", [sb("Run now", "o"), sb("Edit"), sb("Stop", "d")]],
+      ["fail", "Could not check", "Re-check pages · daily", "Has HOPE for Longmont fixed its website feed?", "hopeforlongmont.org timed out 3 times in a row. The agent will try again at 2:00 p.m.", "HOPE for Longmont defaced feed", "last tried 8:00 a.m.", [sb("Retry now", "p"), sb("Edit"), sb("Stop", "d")]],
+      ["none", "Checked · no change", "Re-check pages · daily", "Has the Sandstone Ranch closure notice changed?", "Same page as yesterday. No new date.", "Lead: trail closure", "last run 6:05 a.m.", [sb("Run now", "o"), sb("Edit"), sb("Stop", "d")]]
+    ];
+    const fTasks = T.map(([k, st, method, q, result, story, sched, btns, job]) => ({ st, method, q, result, story, sched, btns, stStyle: tk(k), running: !!job, job, box: css("display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 20px;padding:16px;background:var(--panel);border:1px solid var(--line);border-left:4px solid " + ({ found: "var(--yel)", run: "var(--ink)", wait: "var(--line)", fail: "var(--danger)", none: "var(--ok)" })[k]) }));
+    const DS = [
+      ["run", "Writing · 2:18", "Planning", "AI", "Longmont Council Advances 8-Acre Dry Creek Annexation Near Airport Road", "Codex Sol · high", "Watch", J("Drafting story", "Codex Sol · high", ["Read records", "Draft", "Headline", "Save"], 1, "Writing paragraph 4 of about 8", 138)],
+      ["run", "Checking · 0:52", "Environment", "AI", "Longmont opens sign-up for 200 free trees in east-side neighborhoods", "Claude Sonnet · high", "Watch", J("Evidence check", "Claude Sonnet · high", ["Load captures", "Check claims", "Check names", "Compare"], 2, "Checking names against 2 opened records", 52, 60)],
+      ["warn", "! 1 name to review", "Seniors", "AI", "Longmont Senior Center to begin free meal pickups Oct. 2", "checked 8:02 a.m.", "Review"],
+      ["found", "Ready to publish", "Housing", "AI", "Longmont Board Posts Two Oct. 8, 2026 Records", "checked 8:14 a.m.", "Publish…"],
+      ["wait", "Your draft", "Opinion", "Written by you", "Why the council should post agendas a week out", "saved yesterday 9:40 p.m.", "Continue"],
+      ["wait", "Reprint · not checked", "Arts", "Reprint", "Longmont Symphony announces 60th season (from LSO)", "pasted Sep 25", "Check"],
+      ["fail", "Draft failed", "Schools", "AI", "St. Vrain bus contract vendor", "Codex quota reached · 7:30 a.m.", "Retry"]
+    ];
+    const pbtn = css(B + "font-size:14px;font-weight:800;background:var(--yel);color:#111"), obtn = css(B + "font-size:14px;font-weight:700;border:2px solid var(--ink);color:var(--ink)");
+    const dRows = DS.map(([k, st, sec, origin, title, meta, main, job]) => ({ st, sec, origin, title, meta, main, running: !!job, job, stStyle: tk(k === "warn" ? "fail" : k), mainStyle: k === "found" || k === "fail" ? pbtn : obtn, go: act(main === "Review" || main === "Publish…" ? "story" : "story") }));
+    dRows[2].stStyle = css("font-size:14px;font-weight:800;padding:1px 8px;border:2px solid var(--warn);color:var(--warn);justify-self:start");
+    dRows.forEach(d => { d.stStyle = Object.assign({ justifySelf: "start" }, d.stStyle); });
+    const OS = [
+      ["run", "Writing · 4:05", "Why the housing board’s calendar confusion matters", "Position: post corrections to public calendars within a day", "Codex Sol · high", "Watch", J("Writing editorial", "Codex Sol · high", ["Read", "Outline", "Write", "Claims & sources"], 3, "Building the Claims and sources appendix (3 of 5 claims)", 245)],
+      ["warn", "! Claims missing", "A Libertarian quit one day late, which is the only way it works", "Claims and sources appendix is incomplete; blocks publishing", "draft · Sep 25", "Repair claims"],
+      ["fail", "Failed · quota", "Ranked choice: what 3C and 3D actually change", "Your source and assignment are saved", "Sep 24 · Codex quota", "Restore saved material"],
+      ["none", "Published", "OPINION: A Libertarian quit one day late…", "Printed Sep 25 in Opinion", "1,210 views", "View"]
+    ];
+    const oRows = OS.map(([k, st, title, note, meta, main, job]) => ({ st, title, note, meta, main, running: !!job, job, stStyle: Object.assign({ justifySelf: "start" }, k === "warn" ? css("font-size:14px;font-weight:800;padding:1px 8px;border:2px solid var(--warn);color:var(--warn)") : tk(k)), mainStyle: k === "warn" || k === "fail" ? pbtn : obtn }));
+    const file = (tt, m, on) => ({ t: tt, m, style: css("display:flex;flex-direction:column;gap:2px;padding:10px 16px;color:var(--ink);" + (on ? "background:var(--bg);box-shadow:inset 4px 0 0 var(--sel)" : "")) });
+    const piles = [
+      { name: "Open files", n: "2", files: [file("HOPE for Longmont defaced feed", "Reading · 4 of 6 records", true), file("Bus contract vendor change", "Waiting on 1 record")] },
+      { name: "Signals to review", n: "5", files: [file("r/longmont: water bills doubled on east side", "3 posts · unverified"), file("Watched page changed: HHS board roster", "2 names removed")] },
+      { name: "Waiting on an AI follow-up", n: "1", files: [file("Sandstone Ranch closure", "AI watching for a public notice · since Sep 26")] }
+    ];
+    const lg = (tt, e, k) => ({ t: tt, e, style: css("line-height:1.4;" + (k === "fail" ? "color:var(--danger);font-weight:700" : k === "find" ? "font-weight:700" : "")) });
+    const st = k => css("font-size:14px;font-weight:800;padding:1px 8px;white-space:nowrap;" + ({ same: "border:1px solid var(--ok);color:var(--ok)", changed: "background:var(--yel);color:#111", fail: "border:2px dashed var(--danger);color:var(--danger)", paused: "border:1px solid var(--ink2);color:var(--ink2)", warn: "border:2px solid var(--warn);color:var(--warn)" })[k]);
+    const small = css("display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:14px"), smallP = css("display:flex;align-items:center;min-height:44px;padding:0 12px;background:var(--yel);color:#111;font-weight:800;font-size:14px");
+    const S = [
+      ["City Council agendas", "longmont.primegov.com", "Meeting portal", "Changed", "changed", "2 new items · 6:01 a.m.", "Check now", "Pause"],
+      ["Housing & Human Services board", "longmont.primegov.com", "Meeting portal", "Changed", "changed", "Cancellation posted · 6:01 a.m.", "Check now", "Pause"],
+      ["St. Vrain Valley Schools news", "svvsd.org", "News page", "✓ No change", "same", "Checked 6:02 a.m.", "Check now", "Pause"],
+      ["Longmont Leader", "longmontleader.com", "Local news", "Could not check", "fail", "403 blocked · 3 days running", "Retry", "Open ↗"],
+      ["HOPE for Longmont feed", "hopeforlongmont.org", "RSS", "Could not check", "fail", "Serving defaced pages", "Retry", "Pause"],
+      ["City news releases", "longmontcolorado.gov", "News page", "✓ No change", "same", "Checked 6:03 a.m.", "Check now", "Pause"],
+      ["Boulder County commissioners", "bouldercounty.gov", "Meeting portal", "Paused", "paused", "Paused by you Sep 10", "Resume", "Remove"]
+    ];
+    const srcRows = S.map(([name, url, kind, state, k, note, a, b]) => ({ name, url, kind, state, note, a, b, style: st(k), aStyle: k === "fail" ? smallP : small }));
+    const scans = [["Today 6:00 a.m.", "9 leads · 2 could not check", "warn"], ["Sep 25, 6:00 a.m.", "11 leads", "same"], ["Sep 24, 6:00 a.m.", "8 leads", "same"], ["Sep 23, 6:00 a.m.", "Failed: model quota", "fail"]].map(([when, what, k]) => ({ when, what, style: st(k) }));
+    const P = [
+      ["Sep 26", "Housing", "Longmont Board Posts Two Oct. 8, 2026 Records: A Funding Hearing Packet and a Cancellation Notice", "412", "None"],
+      ["Sep 25", "Planning", "Longmont Council Advances 8-Acre Dry Creek Annexation Near Airport Road", "1,086", "None"],
+      ["Sep 25", "Public safety", "Longmont police: juvenile stabbed at Loomiller Park; suspect in custody", "2,340", "1 posted"],
+      ["Sep 25", "Utilities", "Longmont Reboots Recycling and Composting Push as 2030 Waste Goal Looms", "655", "None"],
+      ["Sep 25", "Community", "OUR Center Marks 40 Years in Longmont With Sept. 26 Celebration", "498", "1 request to review"],
+      ["Sep 24", "Schools", "St. Vrain lists upcoming school open houses beginning Oct. 1", "731", "None"],
+      ["Sep 24", "Housing", "HomeAhead needs small dressers and flat-screen TVs at its Longmont donation site", "302", "None"]
+    ];
+    const pubRows = P.map(([date, sec, title, views, corr]) => ({ date, sec, title, views, corr, corrStyle: css("font-size:15px;font-weight:700;" + (corr === "None" ? "color:var(--ink2)" : corr.includes("review") ? "color:var(--warn)" : "color:var(--ink)")) }));
+    const models = [["1", "Codex Sol", "Subscription · first choice for Opinion", "● Ready", "same"], ["2", "Claude Sonnet", "Subscription · fallback", "● Ready", "same"], ["3", "Local: Qwen 32B", "Halo machine · 18 tok/s", "! Slow", "warn"], ["4", "Gemini Pro", "API key · last check failed", "Key rejected", "fail"], ["—", "Claude Opus", "Only when you choose it by name", "● Ready", "same"]].map(([n, name, note, state, k]) => ({ n, name, note, state, style: st(k) }));
+    const kv = (k, v, s) => ({ k, v, style: s ? st(s) : css("font-weight:700") });
+    const panels = [
+      { title: "Health", rows: [kv("Database", "✓ OK", "same"), kv("Disk", "61% used"), kv("Last backup", "Today 3:00 a.m."), kv("Errors in 24 h", "2", "warn")], btns: [{ label: "View logs", style: small }, { label: "Restart workers", style: css("display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px") }] },
+      { title: "Paper setup", rows: [kv("Name", "TownReporter"), kv("Town", "Longmont, Colorado"), kv("Editor email", "townreporter@gmail.com"), kv("Sections", "14 visible")], btns: [{ label: "Edit setup", style: small }, { label: "Invite an editor", style: css("display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px") }] },
+      { title: "Recently deleted", rows: [kv("Drafts", "1 · kept 30 days"), kv("Killed leads", "Stay on the desk under Killed")], btns: [{ label: "Open trash", style: small }] },
+      { title: "Sections", rows: [kv("Visible", "14"), kv("Hidden or retired", "3")], btns: [{ label: "Edit sections", style: small }] },
+      { title: "Daily scan", rows: [kv("Runs", "6:00 a.m. daily"), kv("Files up to", "12 leads")], btns: [{ label: "Scan settings", style: small }] },
+      { title: "Meeting capture", rows: [kv("Bodies watched", "9"), kv("Last capture", "Council · Sep 23", "same")], btns: [{ label: "Capture settings", style: small }] },
+      { title: "YouTube", rows: [kv("API key", "···· 3c1e"), kv("Transcripts", "✓ Working", "same")], btns: [{ label: "Replace key", style: small }] },
+      { title: "Routine notices", rows: [kv("Handled automatically", "6 kinds"), kv("Last run", "Today 6:04 a.m.")], btns: [{ label: "Notice rules", style: small }] },
+      { title: "Named outlets", rows: [kv("Outlets", "11"), kv("Overrides", "2")], btns: [{ label: "Edit outlets", style: small }] },
+      { title: "Editors & access", rows: [kv("Owner", "townreporter@gmail.com"), kv("Invites open", "0")], btns: [{ label: "Invite an editor", style: small }] },
+      { title: "Time budgets", rows: [kv("Local models", "10 min per call"), kv("Subscription CLIs", "150 s per call")], btns: [{ label: "Adjust times", style: small }] }
+    ];
+    const titles = { queue: ["Every open lead", "Queue"], follow: ["AI agents working on open questions", "Follow-ups"], dark: ["Investigations · nothing here prints on its own", "Dark Desk"], drafts: ["Everything not yet printed", "Drafts"], opinion: ["Editorials and requests", "Opinion"], sources: ["What the desk watches, and whether it could check", "Sources & scan"], published: ["The record of what printed", "Published"], server: ["Models, health and setup", "Server"] };
+    const btns = { queue: [["Run scan now", outline], ["+ New story", primary]], follow: [["+ New AI follow-up", primary]], drafts: [["+ New story", primary]], opinion: [["+ New editorial", primary]], dark: [["+ Start a file", primary]], sources: [["+ Add a source", primary]], published: [["View the paper ↗", outline]], server: [["Give up the desk", quiet]] };
+    const nav = { queue: "Queue", follow: "Follow-ups", dark: "Dark Desk", drafts: "Drafts", opinion: "Opinion", sources: "Sources & scan", published: "Published", server: "Server" };
+    return {
+      root: Object.assign({ display: "grid", gridTemplateColumns: this.props.bare ? "minmax(0,1fr)" : "230px minmax(0,1fr)", minHeight: "1100px", background: "var(--bg)", color: "var(--ink)", fontFamily: "'Bricolage Grotesque',sans-serif", width: "100%" }, t),
+      theme: dark ? "dark" : "light", active: nav[screen],
+      kicker: titles[screen][0], title: titles[screen][1],
+      headBtns: btns[screen].map(([label, style]) => ({ label, style, go: act(label) })), showNav: !this.props.bare, goModels: act("models"), moreLead: act("more-lead"), morePub: act("more-published"), goStory: act("story"), newOp: act("+ New story"),
+      isQueue: screen === "queue", isFollow: screen === "follow", isDrafts: screen === "drafts", isOpinion: screen === "opinion", fTasks, dRows, oRows, dFilters: seg(["All · 7", "Running · 2", "Needs you · 3", "Yours", "Failed · 1"], "All · 7"), isDark: screen === "dark", isSources: screen === "sources", isPublished: screen === "published", isServer: screen === "server",
+      sFilters: seg(["On watch · 42", "Suggested · 175", "Rejected", "Could not check · 2"], "On watch · 42"), srcRows, scans,
+      pFilters: seg(["All · 214", "This week", "With corrections", "Opinion"], "All · 214"), pubRows, models, panels,
+      qFilters: seg(["Open · 12", "Held · 3", "Killed", "≈ Printed", "All"], "Open · 12"), qRows,
+      fFilters: seg(["Active · 5", "Found something · 1", "Could not check · 1", "Stopped"], "Active · 5"),
+      piles,
+      bounds: [{ k: "Scope", v: "Public web pages, archive captures" }, { k: "Depth", v: "Standard · up to 20 records" }, { k: "Limit", v: "2 hours or $3 of model use" }],
+      log: [lg("7:02", "Opened hopeforlongmont.org/feed, captured"), lg("7:04", "Found: 14 feed items replaced with spam links since Sep 19", "find"), lg("7:09", "Opened Wayback capture from Sep 12: feed was normal"), lg("7:15", "Could not open hosting provider status page (timeout)", "fail"), lg("7:21", "Found: plugin version on site is 3 years old", "find")],
+      caseFile: [{ k: "Findings", v: "Defacement began between Sep 12 and Sep 19. Pages are spam, not a message." }, { k: "Contradictions", v: "None yet." }, { k: "Unanswered", v: "Is the organization aware? Is donor data exposed?" }, { k: "AI follow-ups running", v: "Watching HOPE for Longmont’s site and news releases for a public statement" }]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>@keyframes trSlide{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}@keyframes trPulse{0%,100%{opacity:1}50%{opacity:.25}}</style>
+</helmet>
+<div style="{{ box }}">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0">
+      {{ dot }}
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+        <span style="font-weight:800;font-size:16px;line-height:1.25">{{ title }}</span>
+        <span style="font-size:14px;color:var(--ink2)">{{ sub }}</span>
+      </div>
+    </div>
+    <span style="font-weight:800;font-size:16px;font-variant-numeric:tabular-nums;white-space:nowrap">{{ elapsed }}</span>
+  </div>
+  <sc-if value="{{ showStages }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-wrap:wrap;gap:4px 6px">
+      <sc-for list="{{ stages }}" as="s" hint-placeholder-count="4"><span style="{{ s.style }}">{{ s.label }}</span></sc-for>
+    </div>
+  </sc-if>
+  <div style="position:relative;height:8px;background:var(--line);overflow:hidden">{{ bar }}</div>
+  <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;font-size:14px">
+    <span style="{{ nowStyle }}">{{ now }}</span>
+    <span style="color:var(--ink2)">{{ beat }}</span>
+  </div>
+  <sc-if value="{{ showLog }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;border-top:1px solid var(--line);padding-top:6px">
+      <sc-for list="{{ log }}" as="l" hint-placeholder-count="3"><div style="display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;padding:3px 0;font-size:14px"><span style="color:var(--ink2);font-variant-numeric:tabular-nums">{{ l.t }}</span><span>{{ l.msg }}</span></div></sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ stalled }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:2px solid var(--warn)">
+      <span style="font-weight:800;font-size:15px;color:var(--warn)">No activity for {{ quiet }}. The model may be slow, or it may have stalled.</span>
+      <div style="display:flex;flex-wrap:wrap;gap:6px"><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:14px">Keep waiting</a><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;background:var(--yel);color:#111;font-weight:800;font-size:14px">Retry on next model</a></div>
+    </div>
+  </sc-if>
+  <div style="display:flex;flex-wrap:wrap;gap:6px">
+    <sc-if value="{{ running }}" hint-placeholder-val="{{ true }}">
+      <a href="#" onClick="{{ toggleLog }}" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">{{ logLabel }}</a>
+      <a href="#" onClick="{{ cancel }}" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--danger);color:var(--danger);font-weight:700;font-size:14px">Cancel</a>
+    </sc-if>
+    <sc-if value="{{ done }}" hint-placeholder-val="{{ false }}">
+      <a href="#" onClick="{{ open }}" style="display:flex;align-items:center;min-height:44px;padding:0 12px;background:var(--yel);color:#111;font-weight:800;font-size:14px">{{ openLabel }}</a>
+    </sc-if>
+    <sc-if value="{{ failed }}" hint-placeholder-val="{{ false }}">
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;background:var(--yel);color:#111;font-weight:800;font-size:14px">Retry</a>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:14px">Retry on another model</a>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:420},&quot;compact&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;job&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;object&quot;},&quot;onCancel&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;},&quot;onOpen&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;() =&gt; void&quot;}}">
+class Component extends DCLogic {
+  state = { log: false, t0: Date.now() };
+  componentDidMount() { this.iv = setInterval(() => this.forceUpdate(), 1000); }
+  componentWillUnmount() { clearInterval(this.iv); }
+  renderVals() {
+    const j = this.props.job || { title: "Drafting story", model: "Codex Sol · high", stages: ["Read records", "Draft", "Headline", "Save"], stage: 1, pct: null, now: "Reading packet 2 of 3 (41 pages)", state: "running", startOffset: 134, quietFor: 3, log: [] };
+    const compact = !!this.props.compact;
+    const secs = Math.floor((Date.now() - this.state.t0) / 1000);
+    const nowMs = Date.now();
+    const el = j.startedAt ? Math.floor(((j.endedAt || nowMs) - j.startedAt) / 1000) : (j.startOffset || 0) + (j.state === "running" ? secs : 0);
+    const quiet = j.beatAt ? Math.floor((nowMs - j.beatAt) / 1000) : (j.quietFor || 0) + (j.state === "running" && j.frozen ? secs : 0);
+    const fmt = s => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    const running = j.state === "running", stalled = running && quiet >= 60;
+    const col = { running: stalled ? "var(--warn)" : "var(--yel)", done: "var(--ok)", failed: "var(--danger)" }[j.state];
+    const h = React.createElement;
+    const dot = h("span", { style: { width: 12, height: 12, flex: "none", background: col, animation: running && !stalled ? "trPulse 1.2s ease-in-out infinite" : "none" } });
+    const bar = j.pct != null || !running
+      ? h("span", { style: { position: "absolute", left: 0, top: 0, bottom: 0, width: (j.state === "done" ? 100 : j.pct || 0) + "%", background: col, transition: "width .6s" } })
+      : h("span", { style: { position: "absolute", left: 0, top: 0, bottom: 0, width: "33%", background: col, animation: stalled ? "none" : "trSlide 1.4s linear infinite" } });
+    const stages = (j.stages || []).map((label, i) => ({ label: (i < j.stage || j.state === "done" ? "✓ " : "") + label, style: { fontSize: "14px", fontWeight: 700, padding: "1px 7px", ...(i === j.stage && running ? { background: "var(--yel)", color: "#111" } : i < j.stage || j.state === "done" ? { color: "var(--ok)", border: "1px solid var(--ok)" } : { color: "var(--ink2)", border: "1px dashed var(--line)" }) } }));
+    const logRows = (j.log || []).slice(-4);
+    return {
+      box: { display: "flex", flexDirection: "column", gap: compact ? "8px" : "10px", padding: compact ? "12px" : "16px", background: "var(--panel)", border: "1px solid var(--line)", borderLeft: "4px solid " + col, fontFamily: "'Bricolage Grotesque',sans-serif", color: "var(--ink)" },
+      dot, bar, title: j.title, sub: j.model + (j.pct != null && running ? " · " + j.pct + "%" : ""),
+      elapsed: j.state === "done" ? "Done " + fmt(el) : j.state === "failed" ? "Stopped " + fmt(el) : fmt(el),
+      showStages: !compact && stages.length > 0, stages,
+      now: j.state === "failed" ? j.error : j.state === "done" ? (j.result || "Finished") : "Now: " + j.now,
+      nowStyle: { fontWeight: 700, color: j.state === "failed" ? "var(--danger)" : "var(--ink)" },
+      beat: running ? (stalled ? "" : "Last activity " + fmt(quiet) + " ago") : "",
+      stalled, quiet: fmt(quiet), running, done: j.state === "done", failed: j.state === "failed",
+      showLog: this.state.log && logRows.length > 0, log: logRows,
+      logLabel: this.state.log ? "Hide activity" : "Show activity",
+      toggleLog: e => { e.preventDefault(); this.setState(s => ({ log: !s.log })); },
+      cancel: e => { e.preventDefault(); this.props.onCancel && this.props.onCancel(); },
+      open: e => { e.preventDefault(); this.props.onOpen && this.props.onOpen(); },
+      openLabel: j.openLabel || "Open result"
+    };
+  }
+}
+</script>
+</body>
+</html>

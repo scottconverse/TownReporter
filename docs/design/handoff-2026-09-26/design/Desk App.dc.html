@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:opsz,wght@7..72,400;7..72,500&display=swap">
+<style>body{margin:0}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:3px}</style>
+</helmet>
+<div style="{{ root }}" onMouseDown="{{ trackY }}">
+  <div style="min-width:0;background:var(--panel);border-right:1px solid var(--line)"><dc-import name="Desk Nav" active="{{ navActive }}" theme="{{ theme }}" jobs="{{ jobs }}" on-nav="{{ onNav }}" on-theme="{{ flipTheme }}" hint-size="100%,100%"></dc-import></div>
+  <div style="min-width:0;display:flex;flex-direction:column">
+    <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 32px;background:var(--yel);color:#111;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:15px"><span>{{ toast }}</span><a href="#" onClick="{{ clearToast }}" style="display:flex;align-items:center;min-height:36px;padding:0 10px;border:2px solid #111;color:#111">OK</a></div>
+    </sc-if>
+    <sc-if value="{{ sToday }}" hint-placeholder-val="{{ true }}"><dc-import name="Desk Command" bare="{{ true }}" theme="{{ theme }}" jobs="{{ jobs }}" lead-event="{{ leadEvent }}" on-action="{{ onAction }}" hint-size="100%,1500px"></dc-import></sc-if>
+    <sc-if value="{{ sStory }}" hint-placeholder-val="{{ false }}"><dc-import name="Desk Story" bare="{{ true }}" theme="{{ theme }}" checking="{{ checking }}" on-action="{{ onAction }}" hint-size="100%,1400px"></dc-import></sc-if>
+    <sc-if value="{{ sScreens }}" hint-placeholder-val="{{ false }}"><dc-import name="Desk Screens" bare="{{ true }}" screen="{{ screenKey }}" theme="{{ theme }}" on-action="{{ onAction }}" hint-size="100%,1100px"></dc-import></sc-if>
+    <sc-if value="{{ sModels }}" hint-placeholder-val="{{ false }}"><dc-import name="Desk Models" theme="{{ theme }}" on-action="{{ onAction }}" hint-size="100%,1100px"></dc-import></sc-if>
+    <sc-if value="{{ sStats }}" hint-placeholder-val="{{ false }}">
+      <dc-import name="Desk Stats" theme="{{ theme }}" hint-size="100%,2400px"></dc-import>
+    </sc-if>
+  </div>
+  <sc-if value="{{ hasDialog }}" hint-placeholder-val="{{ false }}"><dc-import name="Desk Dialogs" dialog="{{ dialog }}" top="{{ dialogTop }}" on-close="{{ closeDialog }}" on-start="{{ onStart }}" hint-size="100%,100%"></dc-import></sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { screen: "Today", dark: null, dialog: null, toast: "", checking: false, jobs: [] };
+  componentDidMount() {
+    const n = Date.now();
+    this.setState({ jobs: [this.mk("draft", "Longmont Council Advances 8-Acre Dry Creek Annexation", n - 138000, 38), this.mk("check", "200 free trees in east-side neighborhoods", n - 52000, 55)] });
+    this.iv = setInterval(() => this.tick(), 1000);
+  }
+  componentWillUnmount() { clearInterval(this.iv); }
+  mk(kind, subject, startedAt, pct) {
+    const K = {
+      draft: ["Drafting story", "Codex Sol · high", ["Read records", "Draft", "Headline", "Save"], ["Opening 3 records", "Reading packet 2 of 3 (41 pages)", "Writing paragraph 3 of about 8", "Writing paragraph 6 of about 8", "Writing 3 headline options", "Saving to Drafts"], "Draft saved to Drafts", "Open draft"],
+      check: ["Evidence check", "Claude Sonnet · high", ["Load captures", "Check claims", "Check names", "Compare"], ["Loading 2 captures", "Checking claim 2 of 6", "Checking claim 5 of 6", "Checking 4 names against records", "Building side-by-side comparison"], "Check finished: 1 name needs review", "See results"],
+      scan: ["Scan (run now)", "Codex Sol · medium", ["Check 42 sources", "Read changes", "Score leads", "File leads"], ["Checking source 6 of 42", "Checking source 19 of 42", "Checking source 37 of 42", "Reading 7 changed pages", "Scoring 11 possible leads", "Filing 9 leads"], "9 leads filed · 2 sources could not be checked", "Review leads"],
+      lead: ["Researching lead", "Codex Sol · medium", ["Open link", "Find records", "Score", "File"], ["Opening the link", "Searching city records for related items", "Found 2 related records", "Scoring", "Filing to the Queue"], "Lead filed · score 12", "Open lead"],
+      sources: ["First check of 5 new sources", "Gemini Flash · low", ["Fetch", "Read", "Save baseline"], ["Fetching 1 of 5", "Fetching 3 of 5", "Reading 4 of 5", "Saving baselines"], "4 readable · 1 could not be checked (403)", "Open sources"],
+      "find-sources": ["Finding sources", "Claude Sonnet · high", ["Search", "Verify", "Propose"], ["Searching government sites", "Searching nonprofits", "Checking each is readable", "Writing proposals"], "12 sources proposed", "Review proposals"],
+      redraft: ["Redrafting", "Codex Sol · high", ["Read notes", "Redraft", "Compare"], ["Reading your instructions and edits", "Rewriting lead paragraph", "Rewriting body", "Building comparison"], "New version ready to compare", "Compare versions"],
+      "add-to": ["Adding material", "Codex Sol · high", ["Read", "Weave in", "Show changes"], ["Reading new material", "Placing new paragraph", "Marking every change"], "Changes ready to review", "Review changes"],
+      dark: ["Dark Desk file", "Claude Opus · max", ["Question", "Gather", "Case file", "Challenge"], ["Restating the question", "Opening record 3 of up to 30", "Opening record 9 of up to 30", "Writing case file", "Looking for the ordinary explanation"], "Case file ready for your decision", "Open file"],
+      follow: ["AI follow-up", "Gemini Flash · medium", ["Search", "Read", "Report"], ["Searching council and board pages", "Reading 3 results", "Writing a note"], "Nothing found yet · next check tomorrow 6 a.m.", "Open follow-up"],
+      save: ["Saving your draft", "No AI", ["Save"], ["Saving"], "Saved to Drafts", "Open draft"],
+      "test-models": ["Testing 12 connections", "All models", ["Frontier", "Sign-ins", "Local"], ["Testing Anthropic", "Testing OpenAI", "Testing sign-ins", "Testing LM Studio", "Testing Ollama"], "10 ready · 1 slow · 2 failed", "See results"]
+    }[kind] || ["Working", "", ["Run"], ["Working"], "Done", "Open"];
+    return { id: Math.random(), kind, title: K[0] + (subject ? ": " + subject : ""), model: K[1], stages: K[2], msgs: K[3], result: K[4], openLabel: K[5], state: "running", startedAt: startedAt || Date.now(), beatAt: Date.now(), pct: pct || 0, stage: 0, now: K[3][0], log: [] };
+  }
+  tick() {
+    const n = Date.now();
+    this.setState(s => ({ jobs: s.jobs.map(j => {
+      if (j.state !== "running") return j;
+      const pct = Math.min(100, j.pct + (j.kind === "save" ? 50 : 2 + Math.random() * 3));
+      const now = j.msgs[Math.min(j.msgs.length - 1, Math.floor(pct / 100 * j.msgs.length))];
+      const log = now !== j.now ? j.log.concat({ t: new Date(n).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), msg: now }) : j.log;
+      if (pct >= 100) return Object.assign({}, j, { pct: 100, state: "done", endedAt: n, stage: j.stages.length, log });
+      return Object.assign({}, j, { pct: Math.round(pct), stage: Math.min(j.stages.length - 1, Math.floor(pct / 100 * j.stages.length)), now, beatAt: n, log });
+    }) }));
+  }
+  rootRef = React.createRef();
+  lastY = 0;
+  renderVals() {
+    const dark = this.state.dark ?? ((this.props.theme ?? "dark") === "dark");
+    const t = dark
+      ? { "--bg": "#1b1916", "--panel": "#27231f", "--line": "#3b3631", "--ink": "#e8e6e1", "--ink2": "#bdbab3", "--yel": "#e6c35c", "--danger": "#f0998c", "--warn": "#f0b27a", "--ok": "#9fd4a8", "--sel": "#e6c35c", "--dd": "#0f0e0c", "--ddInk": "#e8e6e1", "--ddInk2": "#bdbab3", "--ddLine": "#3b3631" }
+      : { "--bg": "#fffdf7", "--panel": "#f6f2e7", "--line": "#d8d3c4", "--ink": "#111", "--ink2": "#3a3a3a", "--yel": "#ffd23f", "--danger": "#b3261e", "--warn": "#8a4b00", "--ok": "#1e6b34", "--sel": "#111", "--dd": "#111", "--ddInk": "#fff", "--ddInk2": "#cfcfcf", "--ddLine": "#444" };
+    const S = this.state.screen;
+    const map = { Queue: "queue", Drafts: "drafts", Published: "published", Opinion: "opinion", "Follow-ups": "follow", "Dark Desk": "dark", "Sources & scan": "sources", Server: "server" };
+    const dialogs = { "new-story": "new-story", "+ New story": "new-story", "+ New editorial": "new-story", "add-lead": "add-lead", "+ Add a lead": "add-lead", "+ Add a source": "add-source", redraft: "redraft", "add-to": "add-to", "+ Start a file": "dark-file", "+ New AI follow-up": "follow-up", hold: "hold", kill: "kill", headlines: "headlines", compare: "compare", "more-published": "more-published", "more-lead": "more-lead", legal: "legal", correction: "correction", "add-connection": "add-connection", "More ▾": "more-published" };
+    const nav = { story: "story", queue: "Queue", drafts: "Drafts", models: "Models" };
+    const startJob = (kind, subject, msg) => this.setState(s => ({ jobs: [this.mk(kind, subject)].concat(s.jobs).slice(0, 6), toast: msg || ("Started. You can keep working; progress shows under Running now and in the side menu.") }));
+    const onAction = a => {
+      const m = /^(hold|kill):(\d+)$/.exec(a);
+      if (m) { this.pendingLead = +m[2]; return this.setState({ dialog: m[1] }); }
+      if (dialogs[a]) return this.setState({ dialog: dialogs[a] });
+      if (nav[a]) return this.setState({ screen: nav[a] });
+      if (a === "start-story") return startJob("draft", "from lead", "Drafting started from the lead. Watch it under Running now.");
+      if (a === "scan" || a === "Run scan now") return startJob("scan", "", "Scan started. It checks 42 sources; you’ll see each step.");
+      if (a === "check") { this.setState({ checking: true }); return startJob("check", "Housing board story", "Evidence check started. Progress shows below the story."); }
+      if (a === "test-models") return startJob("test-models", "");
+      this.setState({ toast: "“" + a + "” is not wired in this prototype." });
+    };
+    return {
+      root: Object.assign({ position: "relative", display: "grid", gridTemplateColumns: "230px minmax(0,1fr)", minHeight: "1500px", background: "var(--bg)", color: "var(--ink)", fontFamily: "'Bricolage Grotesque',sans-serif", width: "100%" }, t),
+      theme: dark ? "dark" : "light",
+      navActive: S === "story" ? "Drafts" : S,
+      jobs: this.state.jobs, leadEvent: this.state.leadEvent || null,
+      trackY: e => { const el = e.currentTarget; const b = el.getBoundingClientRect(); const s = b.height / el.offsetHeight || 1; this.lastY = Math.min((e.clientY - b.top) / s, el.offsetHeight - 700); this.appH = el.offsetHeight; },
+      dialogTop: Math.max(24, this.lastY - 220),
+      sToday: S === "Today", sStory: S === "story", sScreens: !!map[S], sModels: S === "Models", sStats: S === "Stats", screenKey: map[S] || "queue",
+      checking: this.state.checking,
+      hasDialog: !!this.state.dialog, dialog: this.state.dialog || "new-story",
+      hasToast: !!this.state.toast, toast: this.state.toast,
+      clearToast: e => { e.preventDefault(); this.setState({ toast: "" }); },
+      onNav: label => this.setState({ screen: label, dialog: null }),
+      flipTheme: () => this.setState({ dark: !dark }),
+      onAction,
+      closeDialog: () => this.setState({ dialog: null }),
+      onStart: kind => {
+        if (kind && kind.startsWith("go:")) return this.setState({ dialog: kind.slice(3) });
+        const quick = { held: "Lead held. It stays in Held until you release it.", killed: "Lead moved to Killed with its reason. Undo is on the row.", "use-headline": "Headline replaced. The old one is kept in the story’s history.", "keep-checked": "Checked version kept.", "restore-prev": "Previous version restored as unsaved text.", unpublish: "Story unpublished. It’s back in Drafts and can be republished.", "legal-done": "Legal removal recorded. See the removal record for what still needs cleanup.", corrected: "Correction posted on the story and in the public corrections log.", "suggest-wording": "Suggested wording is ready in the correction box. Nothing is posted until you press Post.", connected: "Connection added. Testing it now." };
+        this.setState({ dialog: null });
+        if (kind === "none") return;
+        if (kind === "headlines-more") return this.setState({ dialog: "headlines", toast: "3 more headlines suggested." });
+        if (kind === "story" || kind === "add-to") return onAction(kind);
+        if ((kind === "held" || kind === "killed") && this.pendingLead != null) this.setState(s => ({ leadEvent: { i: this.pendingLead, v: kind, n: (s.leadEvent ? s.leadEvent.n : 0) + 1 } }));
+        if (quick[kind]) return this.setState({ toast: quick[kind] });
+        startJob(kind, "", kind === "save" ? "Saved to Drafts." : null);
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

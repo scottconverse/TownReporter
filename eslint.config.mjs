@@ -32,6 +32,9 @@ export default tseslint.config(
       // somebody else’s scratch build turned the whole run red with hundreds of
       // errors in generated code, which is noise that hides the real ones.
       ".claude/**",
+      // Design handoff packages: the designer's reference prototypes and
+      // components, kept as delivered. They are ported into src/, not imported.
+      "docs/design/handoff-*/**",
     ],
   },
   js.configs.recommended,

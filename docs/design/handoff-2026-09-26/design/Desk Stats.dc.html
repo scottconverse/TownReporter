@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><style>@keyframes trPulse{0%,100%{opacity:1}50%{opacity:.25}}</style></helmet>
+<div style="{{ root }}">
+  <header style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;padding-bottom:16px;border-bottom:3px solid var(--ink)">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span style="font-size:15px;font-weight:700;color:var(--ink2)">What’s happening on the site · counted in aggregate, never per person</span>
+      <h1 style="margin:0;font-weight:800;font-size:40px;letter-spacing:-.03em;line-height:1">Stats</h1>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <div style="display:flex;border:1px solid var(--line)"><sc-for list="{{ ranges }}" as="r" hint-placeholder-count="4"><a href="#" onClick="{{ r.pick }}" style="{{ r.style }}">{{ r.label }}</a></sc-for></div>
+      <a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Export CSV</a>
+    </div>
+  </header>
+
+  <section style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px">
+    <div style="display:flex;flex-direction:column;gap:14px;padding:20px;background:var(--panel);border:2px solid var(--yel)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px">{{ pulse }}<span style="font-weight:800;font-size:20px">Reading right now</span></div>
+        <span style="font-size:14px;color:var(--ink2)">Updates every 15 seconds</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:14px"><span style="font-weight:800;font-size:72px;line-height:.9;letter-spacing:-.04em;font-variant-numeric:tabular-nums">{{ liveNow }}</span><span style="font-size:16px;color:var(--ink2)">readers on the site · {{ liveDelta }}</span></div>
+      <div style="display:flex;align-items:flex-end;gap:3px;height:56px">
+        <sc-for list="{{ liveBars }}" as="b" hint-placeholder-count="30"><span style="{{ b.style }}"></span></sc-for>
+      </div>
+      <span style="font-size:14px;color:var(--ink2)">Last 30 minutes</span>
+      <div style="display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 90px 130px;gap:12px;padding:8px 0;border-bottom:2px solid var(--ink);font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)"><span>Page</span><span>Readers</span><span>Avg time so far</span></div>
+        <sc-for list="{{ livePages }}" as="p" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 90px 130px;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)">
+            <span style="font-weight:700;font-size:16px;line-height:1.3;min-width:0">{{ p.t }}</span>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800;font-size:18px;font-variant-numeric:tabular-nums;width:26px">{{ p.n }}</span><span style="{{ p.bar }}"></span></div>
+            <span style="font-size:16px;font-variant-numeric:tabular-nums">{{ p.time }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+        <span style="font-weight:800;font-size:18px">Arriving from, right now</span>
+        <sc-for list="{{ liveRefs }}" as="r" hint-placeholder-count="5">
+          <div style="display:grid;grid-template-columns:150px minmax(0,1fr) 36px;gap:10px;align-items:center;font-size:15px"><span>{{ r.k }}</span><span style="height:14px;background:var(--line)"><span style="{{ r.bar }}"></span></span><span style="font-weight:800;text-align:right;font-variant-numeric:tabular-nums">{{ r.v }}</span></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+        <span style="font-weight:800;font-size:18px">Right now, readers are on</span>
+        <div style="display:flex;height:28px"><sc-for list="{{ liveDevices }}" as="d" hint-placeholder-count="3"><span style="{{ d.style }}">{{ d.label }}</span></sc-for></div>
+        <span style="font-size:14px;color:var(--ink2)">Phone · Computer · Tablet</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;padding:18px;border:1px dashed var(--ink2)">
+        <span style="font-weight:800;font-size:16px">What we never collect</span>
+        <span style="font-size:15px;line-height:1.5;color:var(--ink2)">No cookies, no accounts, no IP addresses stored, no fingerprinting, no cross-day identifiers. A reader can’t be followed from one visit to the next, so “returning readers” is not a number we can know. Location comes from a city-level lookup that is thrown away immediately.</span>
+        <span style="font-size:14px;line-height:1.5;color:var(--ink2)"><b style="color:var(--ink)">How it’s counted.</b> Page loads and per-story totals come from today’s counter (one count per page per day, no identity). Visits, reading time, scroll depth, live readers, sources and location need a new beacon: a ping every 15 seconds that carries only the page, the referrer site and a coarse location, with no identifier.</span>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)">
+    <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+      <div style="display:flex;flex-direction:column;gap:6px;padding:16px;background:var(--bg)">
+        <span style="font-size:14px;font-weight:800;color:var(--ink2)">{{ k.l }}</span>
+        <span style="font-weight:800;font-size:32px;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums">{{ k.v }}</span>
+        <span style="{{ k.dStyle }}">{{ k.d }}</span>
+        <span style="font-size:14px;color:var(--ink2);line-height:1.35">{{ k.note }}</span>
+      </div>
+    </sc-for>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:10px;padding:20px;background:var(--panel);border:1px solid var(--line)">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-weight:800;font-size:20px">Visits and reading time, last 30 days</span><span style="font-size:14px;color:var(--ink2)">Bars: visits · yellow marks: days a story drew over 1,000 visits</span></div>
+    <div style="display:flex;align-items:flex-end;gap:4px;height:180px;padding-top:10px">
+      <sc-for list="{{ days }}" as="d" hint-placeholder-count="30"><div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch;gap:3px;height:100%"><span style="{{ d.mark }}"></span><span style="{{ d.bar }}"></span></div></sc-for>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--ink2)"><span>Aug 28</span><span>Sep 11</span><span>Today</span></div>
+  </section>
+
+  <section style="display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding-bottom:8px;border-bottom:2px solid var(--ink)"><span style="font-weight:800;font-size:22px">Stories, by how much they were read</span><span style="font-size:14px;color:var(--ink2)">Last 7 days</span></div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 90px 110px 200px 110px;gap:14px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)"><span>Story</span><span>Visits</span><span>Avg read</span><span>Read to the end</span><span>Read another</span></div>
+    <sc-for list="{{ stories }}" as="s" hint-placeholder-count="7">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 90px 110px 200px 110px;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2)">{{ s.sec }} · {{ s.age }}</span><span style="font-weight:700;font-size:16px;line-height:1.3">{{ s.t }}</span></div>
+        <span style="font-weight:800;font-size:17px;font-variant-numeric:tabular-nums">{{ s.v }}</span>
+        <span style="font-size:16px;font-variant-numeric:tabular-nums">{{ s.read }}</span>
+        <div style="display:flex;gap:2px;align-items:flex-end;height:30px"><sc-for list="{{ s.depth }}" as="d" hint-placeholder-count="4"><span style="{{ d.style }}"></span></sc-for><span style="font-size:14px;font-weight:800;margin-left:8px;align-self:center">{{ s.end }}</span></div>
+        <span style="font-size:16px;font-variant-numeric:tabular-nums">{{ s.recirc }}</span>
+      </div>
+    </sc-for>
+    <span style="padding-top:8px;font-size:14px;color:var(--ink2)">Read to the end: share of visits that scrolled past 25%, 50%, 75% and 100% of the story. Read another: share that opened a second story.</span>
+  </section>
+
+  <section style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px">
+    <sc-for list="{{ panels }}" as="p" hint-placeholder-count="3">
+      <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+        <span style="font-weight:800;font-size:18px">{{ p.title }}</span>
+        <sc-for list="{{ p.rows }}" as="r" hint-placeholder-count="6">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 54px;gap:10px;align-items:center;font-size:15px"><span>{{ r.k }}</span><span style="height:14px;background:var(--line)"><span style="{{ r.bar }}"></span></span><span style="font-weight:800;text-align:right;font-variant-numeric:tabular-nums">{{ r.v }}</span></div>
+        </sc-for>
+        <span style="font-size:14px;color:var(--ink2);line-height:1.4">{{ p.note }}</span>
+      </div>
+    </sc-for>
+  </section>
+
+  <section style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px">
+    <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+      <span style="font-weight:800;font-size:18px">When people read · visits by hour and day</span>
+      <div style="display:grid;grid-template-columns:40px repeat(24,minmax(0,1fr));gap:2px">
+        <sc-for list="{{ heat }}" as="c" hint-placeholder-count="50"><span style="{{ c.style }}">{{ c.label }}</span></sc-for>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--ink2);padding-left:42px"><span>12 a.m.</span><span>6 a.m.</span><span>Noon</span><span>6 p.m.</span><span>11 p.m.</span></div>
+      <span style="font-size:14px;color:var(--ink2)">Busiest: weekdays 6–8 a.m. and 9–10 p.m. Your 6 a.m. scan lands just in time.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+      <span style="font-weight:800;font-size:18px">Trust signals · last 30 days</span>
+      <sc-for list="{{ trust }}" as="t" hint-placeholder-count="6">
+        <div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:15px"><span>{{ t.k }}</span><span style="font-weight:800;font-variant-numeric:tabular-nums">{{ t.v }}</span></div>
+      </sc-for>
+      <span style="font-size:14px;color:var(--ink2);line-height:1.4">Counts of clicks on the paper’s own controls. None is tied to a person.</span>
+    </div>
+  </section>
+
+  <section style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:20px">
+    <div style="display:flex;flex-direction:column;gap:8px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+      <span style="font-weight:800;font-size:18px">Section chosen by hand</span>
+      <span style="font-weight:800;font-size:40px;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums">7</span>
+      <span style="font-size:15px;line-height:1.45;color:var(--ink2)">Stories that printed under a section the scanner did not pick. Each is logged with the lead, the model’s section and yours.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;padding:18px;background:var(--panel);border:1px solid var(--line)">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px"><span style="font-weight:800;font-size:18px">Saved reports</span><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);color:var(--ink);font-weight:700;font-size:15px">Save latest reports</a></div>
+      <span style="font-size:14px;color:var(--ink2)">Snapshots for the last completed day, Monday–Sunday week and calendar month, kept on this installation.</span>
+      <sc-for list="{{ reports }}" as="r" hint-placeholder-count="3">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:15px"><span><b>{{ r.kind }}</b> · {{ r.period }}</span><a href="#" style="display:flex;align-items:center;min-height:44px;padding:0 12px;border:1px solid var(--line);color:var(--ink);font-weight:700;font-size:14px">Read report</a></div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1210},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { range: "7 days", live: 23, hist: [14, 15, 13, 16, 18, 17, 19, 21, 20, 22, 24, 23, 21, 22, 25, 27, 26, 24, 22, 23, 21, 20, 22, 24, 26, 25, 23, 22, 24, 23], t: 0 };
+  componentDidMount() { this.iv = setInterval(() => this.setState(s => { const live = Math.max(8, s.live + Math.round((Math.random() - .5) * 4)); return { live, hist: s.hist.slice(1).concat(live), t: s.t + 15 }; }), 3000); }
+  componentWillUnmount() { clearInterval(this.iv); }
+  renderVals() {
+    const dark = (this.props.theme ?? "dark") === "dark";
+    const t = dark
+      ? { "--bg": "#1b1916", "--panel": "#27231f", "--line": "#3b3631", "--ink": "#e8e6e1", "--ink2": "#bdbab3", "--yel": "#e6c35c", "--danger": "#f0998c", "--ok": "#9fd4a8" }
+      : { "--bg": "#fffdf7", "--panel": "#f6f2e7", "--line": "#d8d3c4", "--ink": "#111", "--ink2": "#3a3a3a", "--yel": "#ffd23f", "--danger": "#b3261e", "--ok": "#1e6b34" };
+    const { live, hist } = this.state;
+    const mx = Math.max(...hist);
+    const fmt = s => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    const bar = (pct, col) => ({ display: "block", height: "100%", width: pct + "%", background: col || "var(--ink)" });
+    const LP = [["Longmont police: juvenile stabbed at Loomiller Park", 7, 131], ["Front page", 5, 48], ["Longmont Board Posts Two Oct. 8, 2026 Records", 4, 162], ["Dry Creek annexation near Airport Road", 3, 204], ["Senior Center free meal pickups Oct. 2", 2, 88], ["Search the archive", 1, 35]];
+    const share = [7, 5, 4, 3, 2, 1].reduce((a, b) => a + b, 0);
+    const livePages = LP.map(([tt, n, s]) => { const k = Math.max(1, Math.round(n * live / share)); return { t: tt, n: String(k), time: fmt(s + (this.state.t % 60)), bar: { height: "10px", width: (k * 6) + "px", background: "var(--yel)" } }; });
+    const refs = [["Search", 9], ["Email, apps, texts", 6], ["Facebook", 4], ["Reddit (r/longmont)", 3], ["Direct", 1]];
+    const rs = refs.reduce((a, [, v]) => a + v, 0);
+    const k = (l, v, d, up, note) => ({ l, v, d, note, dStyle: { fontSize: "14px", fontWeight: 800, color: up === null ? "var(--ink2)" : up ? "var(--ok)" : "var(--danger)" } });
+    const kpis = [
+      k("Visits", "9,842", "▲ 18% vs prior 7 days", true, "Arrivals from outside the site; nothing stored in the browser"),
+      k("Page loads", "16,410", "▲ 12%", true, "Today’s counter: every load, refreshes included"),
+      k("Avg reading time", "1:48", "▲ 0:14", true, "Active time only: scrolling, tapping"),
+      k("Total reading", "295 hrs", "▲ 21%", true, "All visits combined"),
+      k("Read another story", "31%", "▼ 2 pts", false, "Visits that opened a 2nd story"),
+      k("Left without reading", "44%", "— same", null, "Under 10 seconds on the page")
+    ];
+    const V = [210, 240, 198, 1020, 860, 420, 310, 290, 305, 330, 280, 260, 1180, 740, 410, 380, 350, 400, 360, 330, 310, 290, 640, 1310, 980, 560, 480, 1420, 1650, 1240];
+    const vm = Math.max(...V);
+    const days = V.map(v => ({ bar: { display: "block", height: (v / vm * 88) + "%", background: "var(--ink)" }, mark: { display: "block", height: "6px", background: v > 1000 ? "var(--yel)" : "transparent" } }));
+    const depth = (a) => a.map((p, i) => ({ style: { display: "block", width: "22px", height: (p * .3) + "px", background: i === 3 ? "var(--yel)" : "var(--ink)" } }));
+    const stories = [
+      ["Public safety", "2 days", "Longmont police: juvenile stabbed at Loomiller Park; suspect in custody", "2,340", "1:12", [92, 80, 66, 51], "51%", "22%"],
+      ["Planning", "1 day", "Longmont Council Advances 8-Acre Dry Creek Annexation Near Airport Road", "1,086", "3:24", [95, 88, 79, 68], "68%", "41%"],
+      ["Schools", "2 days", "St. Vrain lists upcoming school open houses beginning Oct. 1", "731", "0:58", [84, 60, 41, 30], "30%", "35%"],
+      ["Utilities", "1 day", "Longmont Reboots Recycling and Composting Push as 2030 Waste Goal Looms", "655", "2:41", [90, 81, 70, 57], "57%", "38%"],
+      ["Community", "1 day", "OUR Center Marks 40 Years in Longmont With Sept. 26 Celebration", "498", "2:05", [88, 72, 58, 44], "44%", "29%"],
+      ["Housing", "today", "Longmont Board Posts Two Oct. 8, 2026 Records", "412", "2:42", [93, 85, 77, 70], "70%", "33%"],
+      ["Opinion", "1 day", "A Libertarian quit one day late, which is the only way it works", "1,210", "3:51", [97, 91, 84, 76], "76%", "46%"]
+    ].map(([sec, age, tt, v, read, d, end, recirc]) => ({ sec, age, t: tt, v, read, depth: depth(d), end, recirc }));
+    const P = (title, rows, note) => { const m = Math.max(...rows.map(r => r[1])); return { title, note, rows: rows.map(([kk, vv, lab]) => ({ k: kk, v: lab || vv + "%", bar: bar(vv / m * 100) })) }; };
+    const panels = [
+      P("Where visits come from", [["Search", 34], ["Email, apps, texts", 22], ["Facebook", 15], ["Direct", 12], ["Reddit", 9], ["Other local sites", 5], ["RSS readers", 3]], "“Email, apps, texts” is links shared privately. It usually means word of mouth."),
+      P("Where readers are", [["Longmont", 58], ["Rest of Boulder County", 17], ["Weld County", 8], ["Rest of Colorado", 9], ["Rest of U.S.", 6], ["Outside U.S.", 2]], "City-level only, from a lookup that isn’t stored."),
+      P("Sections, by reading time", [["Planning", 100, "71 h"], ["Public safety", 64, "46 h"], ["Opinion", 58, "41 h"], ["Housing", 41, "29 h"], ["Utilities", 38, "27 h"], ["Schools", 30, "21 h"]], "Total reading time over 7 days, not clicks.")
+    ];
+    const H = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].slice(0, 2).concat(["Wed", "Thu", "Fri", "Sat", "Sun"]);
+    const heat = [];
+    H.forEach((d, di) => { heat.push({ label: d, style: { fontSize: "14px", fontWeight: 700, color: "var(--ink2)" } }); for (let h = 0; h < 24; h++) { const base = (h >= 6 && h <= 8 ? .9 : h >= 21 && h <= 22 ? .8 : h >= 11 && h <= 13 ? .55 : h >= 1 && h <= 4 ? .05 : .3) * (di >= 5 ? .6 : 1); const v = Math.min(1, base + ((h * 7 + di * 3) % 5) * .03); heat.push({ label: "", style: { height: "18px", background: "var(--yel)", opacity: (0.08 + v * .92).toFixed(2) } }); } });
+    const ranges = ["Today", "7 days", "30 days", "12 months"].map(label => ({ label, pick: e => { e.preventDefault(); this.setState({ range: label }); }, style: { display: "flex", alignItems: "center", minHeight: "44px", padding: "0 14px", fontWeight: 700, fontSize: "15px", ...(label === this.state.range ? { background: "var(--ink)", color: "var(--bg)" } : { color: "var(--ink)" }) } }));
+    return {
+      root: Object.assign({ display: "flex", flexDirection: "column", gap: "22px", padding: "24px 32px 48px", boxSizing: "border-box", background: "var(--bg)", color: "var(--ink)", fontFamily: "'Bricolage Grotesque',sans-serif", width: "100%" }, t),
+      ranges, liveNow: String(live), liveDelta: (live >= hist[0] ? "up " : "down ") + Math.abs(live - hist[0]) + " from 30 minutes ago",
+      pulse: React.createElement("span", { style: { width: 12, height: 12, background: "var(--yel)", animation: "trPulse 1.2s ease-in-out infinite" } }),
+      liveBars: hist.map((v, i) => ({ style: { flex: 1, height: (v / mx * 100) + "%", background: i === hist.length - 1 ? "var(--yel)" : "var(--ink)", transition: "height .4s" } })),
+      livePages,
+      liveRefs: refs.map(([kk, v]) => ({ k: kk, v: String(Math.max(1, Math.round(v * live / rs))), bar: bar(v / 9 * 100, "var(--yel)") })),
+      liveDevices: [["71%", 71, "var(--ink)", "var(--bg)"], ["24%", 24, "var(--yel)", "#111"], ["5%", 5, "var(--line)", "var(--ink)"]].map(([label, w, bg, c]) => ({ label, style: { width: w + "%", background: bg, color: c, display: "flex", alignItems: "center", paddingLeft: "8px", fontSize: "14px", fontWeight: 800, overflow: "hidden" } })),
+      kpis, days, stories, panels, heat,
+      reports: [{ kind: "Daily", period: "Sep 25, 2026" }, { kind: "Weekly", period: "Sep 14 – Sep 20, 2026" }, { kind: "Monthly", period: "August 2026" }],
+      trust: [["“View captured version” opened", "1,284"], ["Source links followed", "2,019"], ["“How we reported this” reached", "3,410"], ["Corrections filed by readers", "3"], ["“Copy credit & link” used", "57"], ["RSS feed fetches per day", "212"], ["Dark mode chosen", "38% of visits"], ["Larger text chosen", "14% of visits"]].map(([kk, v]) => ({ k: kk, v }))
+    };
+  }
+}
+</script>
+</body>
+</html>

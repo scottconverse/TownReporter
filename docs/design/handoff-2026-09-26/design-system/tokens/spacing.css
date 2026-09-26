@@ -1,0 +1,26 @@
+:root {
+  --radius: 0;              /* square corners everywhere */
+  --rule-section: 3px;      /* between major paper sections */
+  --rule-inner: 1px;
+  --rule-emphasis: 2px;     /* pills, secondary buttons, emphasis panels */
+  --state-bar: 4px;         /* colored left/top edge on state cards, nav active inset */
+
+  --gutter-paper: 40px;     --gutter-paper-phone: 20px;
+  --gutter-desk: 32px;      --gutter-desk-phone: 16px;
+  --cell-pad: 26px 32px;
+  --panel-pad: 18px;
+
+  --tap: 44px;              /* minimum hit target */
+  --tap-primary: 48px;
+
+  --measure-article: 680px;
+  --desk-nav: 230px;
+  --desk-rail: 340px;
+
+  --shadow-dialog: 0 20px 50px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(10, 9, 8, 0.62);
+
+  --motion-fast: 0.2s;
+  --motion-bar: 0.6s;
+  --pulse: 1.2s;
+}
