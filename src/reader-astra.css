@@ -2238,7 +2238,7 @@
   margin-bottom: 16px;
 }
 .reader .sectiontag:hover {
-  /* A hover on a fill cannot be a second colour without a second token, and a
+  /* A hover on a fill cannot be a second color without a second token, and a
      tag is never the only path to the section (the nav is), so it underlines
      rather than restating the ground. */
   text-decoration: underline;

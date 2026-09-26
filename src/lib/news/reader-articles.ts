@@ -29,7 +29,7 @@ export const readerArticlesInput = z.object({
   /*
     The geography pill the reader pressed. Absent means the whole paper, which
     is what the front page shows before anyone presses one. `longmont` matches
-    a null or unrecognised stored value too -- see `readStoryArea` in
+    a null or unrecognized stored value too -- see `readStoryArea` in
     `story-area.ts` for why the home town is a bucket rather than a value.
   */
   area: z.enum([...STORY_AREAS]).optional(),
@@ -37,7 +37,7 @@ export const readerArticlesInput = z.object({
     The latest-stories river reads this same query, one batch at a time, BELOW
     A CURSOR rather than at a page offset: with 12-per-page offsets, a story
     published between two batches shifts every later page down by one, so the
-    reader sees a story twice and never sees its neighbour. The cursor is a
+    reader sees a story twice and never sees its neighbor. The cursor is a
     position in the fixed order `published_at desc, id desc`, so a new story
     lands above it and changes nothing below.
 

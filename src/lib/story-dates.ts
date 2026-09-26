@@ -107,7 +107,7 @@ export function addDays(iso: string, days: number): string {
  * `describeSourceUrl` returns `URL.hostname` with `www.` dropped, and
  * `isWeakOrg` treats that host as weak so an authored name wins over it. But an
  * authored provenance item can carry a whole URL, and what belongs under a date
- * is the domain a reader recognises rather than a path, a query and a GUID. So
+ * is the domain a reader recognizes rather than a path, a query and a GUID. So
  * a URL-shaped note is reduced to its host; a name ("Longmont City Council") is
  * printed exactly as it came. A host still longer than the panel's line breaks
  * inside the word -- `.datenote` keeps `overflow-wrap: anywhere` for it -- and

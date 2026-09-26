@@ -3,7 +3,7 @@
  * The paper's two ink panels, measured in a real browser.
  *
  * Unit BD shipped two panels that look right in a diff and are wrong on the
- * page: the front page's "This week" painted the reader's cream page colour
+ * page: the front page's "This week" painted the reader's cream page color
  * instead of the ink block, so white event text and white date numbers sat on
  * cream; and the article's "Dates in this story" let long link text run out
  * past the panel's right edge, clipping the host off the page.
@@ -17,7 +17,7 @@
  * two instruments aimed at the panels themselves:
  *
  *   1. CONTRAST. For every text-bearing element inside the panel, composite the
- *      text colour over the nearest ancestor whose background is not
+ *      text color over the nearest ancestor whose background is not
  *      transparent, and fail under 4.5:1. This is the check that was missing:
  *      "white text on the page's own background" is invisible to a font-size
  *      floor and to a token audit, and is exactly what a reader cannot read.
@@ -111,7 +111,7 @@ async function resolveArticlePath(baseUrl) {
 /**
  * Everything the check asserts, run inside the page.
  *
- * Colour maths is done in the page because `getComputedStyle` is the only thing
+ * Color maths is done in the page because `getComputedStyle` is the only thing
  * that knows what the cascade actually resolved to: the front page's panel was
  * cream because a three-class rule beat a two-class one, which no amount of
  * reading the source makes obvious.

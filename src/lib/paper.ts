@@ -223,7 +223,7 @@ function asDate(iso: string | Date | null | undefined): Date | null {
   paper-context.tsx), not in this module, so the caller -- which already has
   that context via usePaperIdentity() -- is the right place to supply it. A
   caller that passes nothing renders exactly what it renders today, which is
-  the "no settings row" no-behaviour-change requirement.
+  the "no settings row" no-behavior-change requirement.
 */
 export function formatDate(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);

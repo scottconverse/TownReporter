@@ -47,7 +47,7 @@ export const AREA_PILLS: readonly { key: StoryArea; label: string }[] = STORY_AR
  *
  * Null is the home town by the owner's rule (2026-09-26: "Stories with no area
  * count as the home town"), and every story printed before 0098 is null. An
- * unrecognised value reads as the home town too, rather than vanishing from
+ * unrecognized value reads as the home town too, rather than vanishing from
  * every pill: a story that is on the paper is always reachable from the front
  * page, which is the promise the pills make.
  */
@@ -61,7 +61,7 @@ export function readStoryArea(raw: string | null | undefined): StoryArea {
  * it is not one of the four.
  *
  * The desk's select only offers the four, and an import may carry anything, so
- * this refuses rather than coerces: storing an unrecognised string would put a
+ * this refuses rather than coerces: storing an unrecognized string would put a
  * row in a bucket no pill can reach.
  */
 export function cleanStoryArea(raw: unknown): StoryArea | null {

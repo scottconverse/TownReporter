@@ -47,10 +47,10 @@ export const Route = createFileRoute("/")({
       draws the home pill pressed and Unit BD did not follow it, on the grounds
       that a pressed pill over an unfiltered page would print a filtered state
       that was not true; the claim is what was wrong, so the read is what
-      changed. `HOME_AREA` matches a null or unrecognised stored area as well
+      changed. `HOME_AREA` matches a null or unrecognized stored area as well
       (`readStoryArea`), so a story printed before migration 0098 counts as
       home. A listing screen is a search across the whole paper and has no pills
-      to press, so it keeps the old behaviour and filters only on an explicit
+      to press, so it keeps the old behavior and filters only on an explicit
       `?area=`.
     */
     const area = listing ? deps.area : (deps.area ?? HOME_AREA);
