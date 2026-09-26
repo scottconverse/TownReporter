@@ -134,11 +134,14 @@ const TRIAGE_KEYS: [string, string][] = [
 ];
 
 /**
- * The three ways into the desk that used to be panels stacked on Today and are
+ * The two ways into the desk that used to be panels stacked on Today and are
  * now dialogs, each reached by its own hash (defect 2). The name is the hash,
  * so `PanelKey` and the ids the e2e walk looks for cannot drift apart.
+ *
+ * The third panel, the import drop zone, is not here: it has a screen of its
+ * own at /desk/import, linked from this page's composer footer and the nav.
  */
-type PanelKey = "story-composer" | "import-story" | "paste-one-story" | null;
+type PanelKey = "story-composer" | "paste-one-story" | null;
 
 function DeskHome() {
   const sectionQuery = useEditorSections();
@@ -786,12 +789,14 @@ function DeskHome() {
   /*
     WHICH PANEL IS OPEN (defect 2).
 
-    The composer and the two paste paths are dialogs now instead of panels
-    stacked on the page: the drawing of Today has none of them, and each one is
+    The composer and the paste path are dialogs now instead of panels stacked
+    on the page: the drawing of Today has none of them, and each one is
     something an editor does once rather than something to read at a glance.
     "+ New story" and the N key link to /desk#story-composer, and
-    #import-story and #paste-one-story reach the other two the same way, so any
-    of the three can be bookmarked.
+    #paste-one-story reaches the other the same way, so either can be
+    bookmarked. The import drop zone is not a hash here -- it has its own
+    screen at /desk/import, which is where the composer footer and the nav
+    point.
 
     The router's own location is what this reads, not a `hashchange` listener:
     the header link goes from /desk to /desk#story-composer, and a same-path
@@ -802,7 +807,7 @@ function DeskHome() {
   const { hash } = useLocation();
   useEffect(() => {
     setPanel(
-      hash === "story-composer" || hash === "import-story" || hash === "paste-one-story"
+      hash === "story-composer" || hash === "paste-one-story"
         ? hash
         : null,
     );
