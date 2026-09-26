@@ -361,23 +361,19 @@ const trimEdges = (text: string): string =>
 */
 
 /**
- * Blank the inside of every quoted span, keeping the string's LENGTH so the
- * remaining offsets still line up with the original.
- *
- * A quote is the source's words. The desk never rewrites those, so the audit
- * never reads them: "experts say" inside quotation marks is a thing somebody
- * said, not an unnamed attribution. A sentence break inside a quote stops
- * being a break, which is the honest reading -- the quote is one utterance.
+ * The offsets of every quoted span, opening mark first and closing mark last,
+ * as [from, to) pairs. One scanner, so "what counts as a quote" is answered in
+ * one place for both the audit and the repair guard.
  */
-export function maskQuotedText(text: string): string {
-  const chars = [...text];
-  const blank = (from: number, to: number) => {
-    for (let i = from; i < to; i += 1) if (chars[i] !== "\n") chars[i] = " ";
-  };
+function quoteSpans(text: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
   let open = -1;
   let closer: string | null = null;
-  for (let i = 0; i < chars.length; i += 1) {
-    const char = chars[i];
+  // Indexed by UTF-16 unit, like every other offset in this file: a string
+  // slice and a regex both count that way, and a quote mark is never half of
+  // a surrogate pair.
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
     if (open < 0) {
       if (char === "“" || char === "‘") {
         open = i;
@@ -390,13 +386,49 @@ export function maskQuotedText(text: string): string {
     }
     // A closing mark with nothing open is an apostrophe, not a quote.
     if (char === closer) {
-      blank(open, i + 1);
+      spans.push([open, i + 1]);
       open = -1;
       closer = null;
     }
   }
   // An unclosed quote is a typo, not a licence to skip the rest of the draft.
-  return chars.join("");
+  return spans;
+}
+
+/** The text inside quotation marks, marks included, in the order they appear. */
+export function quotedSpans(text: string): string[] {
+  return quoteSpans(text).map(([from, to]) => text.slice(from, to));
+}
+
+/** Every URL in the text. Used by the link check and by the repair guard. */
+export function urlsIn(text: string): string[] {
+  return text.match(URL_PATTERN) ?? [];
+}
+
+/**
+ * Blank the inside of every quoted span, keeping the string's LENGTH so the
+ * remaining offsets still line up with the original.
+ *
+ * A quote is the source's words. The desk never rewrites those, so the audit
+ * never reads them: "experts say" inside quotation marks is a thing somebody
+ * said, not an unnamed attribution. A sentence break inside a quote stops
+ * being a break, which is the honest reading -- the quote is one utterance.
+ */
+export function maskQuotedText(text: string): string {
+  const spans = quoteSpans(text);
+  if (spans.length === 0) return text;
+  let masked = "";
+  let cursor = 0;
+  for (const [from, to] of spans) {
+    /*
+      One space per UTF-16 unit, and the regex is deliberately un-flagged: with
+      the `u` flag a match would swallow a surrogate pair and hand back a
+      shorter string, which is the one thing this function must not do.
+    */
+    masked += text.slice(cursor, from) + text.slice(from, to).replace(/[^\n]/g, " ");
+    cursor = to;
+  }
+  return masked + text.slice(cursor);
 }
 
 /**
