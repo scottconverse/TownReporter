@@ -1,6 +1,6 @@
 # Direction A — build notes (2026-09-06)
 
-> **Implementation history, reconciled 2026-09-07.** The Command Center and story stages below were implemented in 0.6.21–0.6.22. These notes preserve the approved direction; they do not restart that work or authorize another redesign. Dark Desk's color rule means **black background and white text**. Prototype-package paths below are historical references; the repository retains [Main.dc.html](prototype/Main.dc.html). The [current handoff](../../HANDOFF-NEXT-AGENT.md) governs remote development and the separate Halo-local promotion boundary.
+> **Implementation history, reconciled 2026-09-07.** The Command Center and story stages below were implemented in 0.6.21–0.6.22. These notes preserve the approved direction; they do not restart that work or authorize another redesign. Dark Desk's color rule means **one warm near-black ground (`#1b1916`) with warm off-white text (`#e8e6e1`)** — pure black and white from 0.6.19 until the 2026-09-26 redesign replaced them. Prototype-package paths below are historical references; the repository retains [Main.dc.html](prototype/Main.dc.html). The [current handoff](../../HANDOFF-NEXT-AGENT.md) governs remote development and the separate Halo-local promotion boundary.
 
 The design is the clickable prototype (`prototype/editors-desk-redesign.html` in the audit package; artboard `Main.dc.html`). Build that. This note covers only what the prototype does not show.
 
@@ -40,7 +40,7 @@ Purpose: the people the editor has asked and what they owe. Today this lives onl
 
 ## Rules that bind every stage
 
-- WCAG AA in both themes (`node scripts/contrast-audit.mjs` passes). Black on white in dark mode.
+- WCAG AA in both themes (`node scripts/contrast-audit.mjs` passes). Warm off-white on warm near-black in dark mode (`#e8e6e1` on `#1b1916`); it was black on white until the 2026-09-26 redesign.
 - Nothing informational under 14px at Normal (`scripts/desk-min-font.test.mjs` passes). Large scales everything the editor reads.
 - One button family, one chip family, one notice. Reuse `.btn`, `.chip`, `Notice`, `.f`.
 - Quiet styling never carries meaning alone.
