@@ -73,7 +73,18 @@ try {
   await page.getByText("Saved.", { exact: true }).waitFor({ timeout: 20_000 });
   step("wrote and saved the story by hand");
 
-  const publishButton = page.getByRole("button", { name: "Publish to the paper" }).first();
+  const publishButton = page.getByRole("button", { name: /^Publish in / }).first();
+  /*
+    The desk has to say what it is waiting for, not merely grey a button out.
+    0.6.67 renamed the button -- it now carries the section it would print
+    under, and pressing it is what records that section -- so the sentence to
+    read here is the evidence one, in the desk's own words. It is asserted
+    BEFORE the review as well as after: the block this walk is about is the
+    evidence block, named by the desk, not a disabled attribute on its own.
+  */
+  await page
+    .getByText(/The story changed after its evidence was gathered/)
+    .waitFor({ timeout: 30_000 });
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
   const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
   await confirmEvidence.waitFor({ state: "visible" });
@@ -90,26 +101,28 @@ try {
   if (originalViewport) await page.setViewportSize(originalViewport);
   await confirmEvidence.click();
   /*
-    The review above rewrote the draft's research notes, and the desk still
-    refuses to print -- but now for the other reason. Waiting for the desk's
-    own sentence is what proves the evidence gate cleared: this walk used to
-    wait for the Publish button itself to come alive, and since 0.6.62 the
-    section gate holds it down after the evidence one lets go, so that wait
-    could never end (CI run 36042635212). The story-changed note pointing at
-    the sources has to be gone, and "Confirm the section first" is what is
-    left.
+    The review above rewrote the draft's research notes, and the desk has to
+    stop refusing to print. The desk's own sentence going away is that proof:
+    this walk used to wait for a SECOND sentence after it ("Confirm the
+    section first"), because until 0.6.67 the section was a separate press
+    that had not happened yet and held the button down after evidence let go.
+    0.6.67 made the press that names the section the confirmation itself, so
+    there is nothing left to wait for here and the sentence has left the
+    product (it is not in `src/` any more). The block that remains -- that the
+    story may not print until somebody has read the section -- is what the
+    helper below proves: the button comes alive under the section's name, and
+    that press is the confirmation.
   */
   await page
     .getByText(/The story changed after its evidence was gathered/)
     .waitFor({ state: "detached", timeout: 30_000 });
-  await page.getByText("Confirm the section first").waitFor({ timeout: 30_000 });
   step("confirmed retained evidence after body edit; publication was blocked until review");
   // The evidence decision is part of what a section confirmation is recorded
   // against, so the editor reads the section after it. See confirm-section-step.mjs.
   await confirmSectionAndWaitForPublishable(page);
-  await page.getByRole("button", { name: "Publish to the paper" }).first().click();
+  await page.getByRole("button", { name: /^Publish in / }).first().click();
   // Publishing confirms before it prints; see lifecycle-e2e.mjs for why.
-  await page.getByRole("button", { name: "Yes, print it" }).click();
+  await page.getByRole("button", { name: /^Yes, print it/ }).click();
   const readIt = page.getByRole("link", { name: /Read it on the paper/i });
   await readIt.waitFor({ timeout: 30_000 });
   step("published it");

@@ -1727,9 +1727,10 @@ function StoryPage() {
                 -- same slug, same link, with the headline it replaced written
                 down against the editor's name (see `savePublishedHeadline`).
               */}
-              <Field label="Headline">
+              <Field label="Headline" htmlFor="story-headline">
                 <div className="astra-headline-box">
                   <textarea
+                    id="story-headline"
                     rows={2}
                     className="astra-headline"
                     value={headline}

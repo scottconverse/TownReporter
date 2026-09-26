@@ -436,10 +436,12 @@ async function main() {
   await page.getByLabel("Body").fill(body);
   // The section is a claim a person confirms, like the sources above it; the
   // desk's Publish button stays disabled until an editor reads it and says so.
-  // See confirm-section-step.mjs.
+  // 0.6.67 puts the section on the button itself -- "Publish in <section>" --
+  // and that press is the confirmation, so there is no separate Confirm step
+  // to take first. See confirm-section-step.mjs.
   await confirmSectionAndWaitForPublishable(page);
-  await page.getByRole("button", { name: "Publish to the paper" }).click();
-  await page.getByRole("button", { name: "Yes, print it" }).click();
+  await page.getByRole("button", { name: /^Publish in / }).click();
+  await page.getByRole("button", { name: /^Yes, print it/ }).click();
   await page.getByText("On the paper").waitFor({ timeout: 30_000 });
   await page.getByRole("link", { name: "Read it on the paper" }).click();
   await page.waitForURL(/\/articles\//, { timeout: 20_000, waitUntil: "commit" });

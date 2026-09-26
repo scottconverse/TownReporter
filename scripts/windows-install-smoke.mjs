@@ -223,10 +223,11 @@ async function main() {
     await page.getByLabel("Dek").fill("Local fixture for persistence verification.");
     await page.getByLabel("Body").fill(body);
     // The editor confirms the section before printing; the install is accepted
-    // on the same path a person takes. See confirm-section-step.mjs.
+    // on the same path a person takes. 0.6.67 names the section on the button
+    // and the press is the confirmation. See confirm-section-step.mjs.
     await confirmSectionAndWaitForPublishable(page);
-    await page.getByRole("button", { name: "Publish to the paper" }).click();
-    await page.getByRole("button", { name: "Yes, print it" }).click();
+    await page.getByRole("button", { name: /^Publish in / }).click();
+    await page.getByRole("button", { name: /^Yes, print it/ }).click();
     await page.getByText("On the paper").waitFor();
     await page.getByRole("link", { name: "Read it on the paper" }).click();
     await page.waitForURL(/\/articles\//);

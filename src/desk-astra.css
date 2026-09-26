@@ -1227,8 +1227,13 @@
   The "Edit" hint is a <span>, not a button: it sits outside the field's
   <label> wrapper where no button may go (only inert elements do), and
   `pointer-events: none` means a click aimed at it reaches the text underneath
-  instead. It is decorative -- `aria-describedby` on the textarea is what the
-  screen reader reads, and it names the same short word.
+  instead. That "outside the label" is load-bearing, and was not true until
+  AH5: the field is built by `Field`, its label used to WRAP the box, and a
+  browser reads a label's whole text into the control's accessible name -- so
+  the box measured as "Headline Edit" and an exact-name locator missed it.
+  The field now passes `htmlFor`, so the label names the textarea without
+  containing it; `aria-describedby` on the textarea is then what the screen
+  reader reads, and it names the same short word.
 
   Contrast, measured on the pairs the desk actually paints: --a on --bg2 is
   6.8:1 in the light palette (#155b60 on #eef1f2) and 8.3:1 in the dark one
@@ -1816,6 +1821,19 @@
   display: block;
 }
 .desk-ltr.astra .f > span {
+  font: 600 calc(14px * var(--ts))/1.5 var(--fb);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--mut);
+  margin-bottom: 8px;
+}
+/* The second shape of a Field: a label that is a SIBLING of its control
+   rather than its wrapper, so the words painted beside the control (the
+   headline's "Edit" hint) cannot be read into the field's accessible name.
+   Same paint as `.f > span` above; the label element only has to be given
+   the `display: block` an inline label does not have by default. */
+.desk-ltr.astra .f > label {
+  display: block;
   font: 600 calc(14px * var(--ts))/1.5 var(--fb);
   letter-spacing: 0;
   text-transform: none;
