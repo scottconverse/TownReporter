@@ -1,6 +1,18 @@
 # Changelog
 
-Current software version: **0.6.70**. Publication state is recorded by GitHub.
+Current software version: **0.6.71**. Publication state is recorded by GitHub.
+
+## 0.6.71 — 2026-09-26
+
+- **The local model list says what is loaded.** Choosing **Local model** listed every model on disk with nothing to say which were in memory, and the word "loaded" appeared only in an option's hover title — the load state was already known, because discovery has always read LM Studio's `/api/v0/models` and Ollama's `/api/ps`, and it simply never reached the list. A model in memory now reads `<id> · loaded`, with the id still first because that is the part an editor is choosing between, and inside each server group the loaded models sort ahead of the rest, by id within each group.
+- **"Use whatever is loaded" is the first choice, and the new default.** It is the default when nothing has been stored and a local server reports a loaded non-embedding model; when nothing is loaded the default is unchanged — the preferred cloud model, else the catalog's own — and the help line says which model it is using and why. The help line under the select now answers the question in words for each of its states: loaded now, not loaded, no load state reported, a cloud model, which model **Use whatever is loaded** is pointing at, or which model a run would fall back to.
+- **No migration: it is stored as an ordinary pick.** The choice is written to the model-choice table the picker already writes, as a sentinel with `*` in both halves of `base_url` and `model_id`. Those columns are plain `text not null` with no value constraint, the save validator accepts any two non-empty strings, and a real pick always carries a server address, so the sentinel cannot collide with one. No column, table or index is added, and everything a newsroom has already stored still reads as it did.
+- **It resolves at call time, and the receipt names the model that ran.** The sentinel is resolved through the same function the Automatic rung already used — LM Studio before Ollama, in that order — so a model loaded after the picker rendered but before the run starts is picked up; the receipt then names the model that actually answered, `Local model (halo-brain-35b)`, as the rung does.
+- **The desk never loads a model, and never substitutes one silently.** A hand-picked, non-cloud model on a server that reports load state, when that report says not loaded, stops before the call with *"`<id>` is not loaded in LM Studio. Load it there, or pick Use whatever is loaded."*, and **Use whatever is loaded** with nothing loaded stops with *"Local model: nothing is loaded in LM Studio or Ollama. Load a model there, or pick a model."* Each is the desk's own complete sentence and reaches the operator as the guidance line. A server that reports **no** load state — llama.cpp — behaves exactly as before, and an Ollama Cloud pick is never blocked. Moving someone's loaded model is the operator's decision and not the desk's.
+- **What a reader sees.** Nothing. Every change here is on the Editor's Desk's model picker: the option text, which option is first, which is the default, the help line beneath it, and the sentence a run stops with. No reader-facing page, feed or published article changes, and no existing article's saved model setting is rewritten.
+- **No migration, no new scheduled task, service or program.** The newest migration remains `0097_suggested_source_origin.sql`, which shipped with 0.6.70; nothing newer was added. No new background job, port or installer step. **No model was loaded, unloaded or called to build or check this release**: every check ran against fake catalogs and fake servers.
+
+The packaged release note names `v0.6.71` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.70 — 2026-09-26
 

@@ -130,11 +130,14 @@ import {
   findOpenJob,
   kickJobs,
   latestJob,
+  progressReporterFor,
   runLooksStalled,
   setJobFailoverNote,
   setJobModelChoice,
   setJobModelRuntime,
   setJobStage,
+  throwIfJobCancelled,
+  waitForModel,
   type DeskJob,
 } from "./jobs";
 import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.server.ts";
@@ -826,7 +829,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const runChat = deps.grokChat ?? grokChat;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
-  const setStage = deps.setJobStage ?? setJobStage;
+  /*
+    The index-aware reporter, not the raw `setJobStage`: this worker's job row
+    carries the stage list written at claim, so each of its sentences -- the
+    document reader's, report.ts's, the failover notes -- arrives with the chip
+    it belongs to. See `progressReporterFor`.
+
+    The seam keeps its `(id, sentence)` shape because `desk-model-run.ts` and
+    `report.ts` pass this function down through their own deps, and every caller
+    passes THIS job's id. The reporter closes over that same row, so the id
+    argument is redundant here rather than ignored -- and it is the row, not the
+    id, that carries the stage list.
+  */
+  const reportStage = progressReporterFor(job);
+  const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
   const fetchUrl = deps.ingestUrl ?? ingestUrl;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
@@ -1128,6 +1144,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   let lastBatchError: string | null = null;
   for (const batch of batches) {
     await deps.scheduledGuard?.();
+    /*
+      Between batch boundaries is where a scan can be stopped: the batches
+      already read are committed, and stopping here leaves the job's real
+      reason ("Cancelled by the editor") on the row rather than a half-read
+      batch's parse error. `executeJob` maps the throw.
+    */
+    await throwIfJobCancelled(job.id);
     const userMsg = buildScanUserMessage({
       topics: topicChoices,
       section: sectionSnapshot,
@@ -1142,34 +1165,55 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       The same one-shot technical failover Draft uses (see `failOverAndRetry`),
       except the fetched source text is never re-fetched -- this batch's
       payload is reused verbatim for the retry by `runScanChatWithFailover`.
+
+      `liveLabel` tracks the rung the batch is actually on: the failover above
+      can hop mid-call, and the ticker below would otherwise keep naming a model
+      that has already failed for the rest of the batch's wait.
     */
-    const ai = await runScanChatWithFailover({
-      job,
-      newsroomId: job.newsroom_id,
-      localModel: scanOverrides["local-model"]?.localModel,
-      system: scanSystem({
-        name: paperConfig.name,
-        city: paperConfig.city,
-        state: paperConfig.state,
-      }),
-      user: userMsg,
-      /*
-        A reply this batch cannot read is not a success (Unit Y item 3): the
-        helper retries it once on the same rung and then fails over, so the
-        batch's parse below is the second half of the contract rather than the
-        only reader. Same parser as the line after the call, so the two cannot
-        disagree about what "readable" means.
-      */
-      read: (text) => !parseScanResult(parseJsonBlock<unknown>(text), allowedTopics, topicChoices).parseError,
-      maxTokens: 3500,
-      modelEffort: effortFromJob(job),
-      timeoutMs: batchTimeoutMs,
-      grokChat: runChat,
-      probe: (choice) => probe(choice, job.newsroom_id, undefined, "scan", choice === "local-model" ? scanLocalModel ?? undefined : undefined),
-      setModelChoice,
-      setStage,
-      setFailoverNote: setJobFailoverNote,
-      onSwitch: deps.onModelSwitch,
+    let liveLabel = modelChoiceLabel(effectiveStoryModelChoice(job.model_choice));
+    const ai = await waitForModel({
+      jobId: job.id,
+      label: () => liveLabel,
+      run: () =>
+        runScanChatWithFailover({
+          job,
+          newsroomId: job.newsroom_id,
+          localModel: scanOverrides["local-model"]?.localModel,
+          system: scanSystem({
+            name: paperConfig.name,
+            city: paperConfig.city,
+            state: paperConfig.state,
+          }),
+          user: userMsg,
+          /*
+            A reply this batch cannot read is not a success (Unit Y item 3): the
+            helper retries it once on the same rung and then fails over, so the
+            batch's parse below is the second half of the contract rather than the
+            only reader. Same parser as the line after the call, so the two cannot
+            disagree about what "readable" means.
+          */
+          read: (text) =>
+            !parseScanResult(parseJsonBlock<unknown>(text), allowedTopics, topicChoices).parseError,
+          maxTokens: 3500,
+          modelEffort: effortFromJob(job),
+          timeoutMs: batchTimeoutMs,
+          grokChat: runChat,
+          probe: (choice) =>
+            probe(
+              choice,
+              job.newsroom_id,
+              undefined,
+              "scan",
+              choice === "local-model" ? scanLocalModel ?? undefined : undefined,
+            ),
+          setModelChoice,
+          setStage,
+          setFailoverNote: setJobFailoverNote,
+          onSwitch: async (receipt) => {
+            liveLabel = receipt.nextLabel;
+            await deps.onModelSwitch?.(receipt);
+          },
+        }),
     });
     if (!ai.ok) {
       batchesFailed += 1;
@@ -1438,7 +1482,20 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const runReport = deps.reportAndDraft ?? reportAndDraft;
   const probe = deps.probe ?? probeProvider;
   const setModelRuntime = deps.setJobModelRuntime ?? setJobModelRuntime;
-  const setStage = deps.setJobStage ?? setJobStage;
+  /*
+    The index-aware reporter, not the raw `setJobStage`: this worker's job row
+    carries the stage list written at claim, so each of its sentences -- the
+    document reader's, report.ts's, the failover notes -- arrives with the chip
+    it belongs to. See `progressReporterFor`.
+
+    The seam keeps its `(id, sentence)` shape because `desk-model-run.ts` and
+    `report.ts` pass this function down through their own deps, and every caller
+    passes THIS job's id. The reporter closes over that same row, so the id
+    argument is redundant here rather than ignored -- and it is the row, not the
+    id, that carries the stage list.
+  */
+  const reportStage = progressReporterFor(job);
+  const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
   const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const leadId = job.subject_id;
@@ -1883,9 +1940,21 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   }
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);
-  const reported = await runReportWithCheckpoint({
-    ...draftInput,
-    modelChoice: effectiveStoryModelChoice(job.model_choice),
+  /*
+    The single longest await in the app: one call covering report.ts's plan,
+    write, verify and sourcing passes, four sequential model calls that
+    routinely run past the 60s stall window. Without the ticker the card would
+    call a working draft stalled and offer the editor a retry that spends the
+    model budget twice.
+  */
+  const reported = await waitForModel({
+    jobId: job.id,
+    label: modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
+    run: () =>
+      runReportWithCheckpoint({
+        ...draftInput,
+        modelChoice: effectiveStoryModelChoice(job.model_choice),
+      }),
   });
   if ("error" in reported) throw new Error(reported.error);
 
@@ -2132,7 +2201,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       );
       await sql`
       update desk_jobs
-      set result_json = (coalesce(nullif(result_json, ''), '{}')::jsonb || ${completion}::jsonb)::text
+      set result_json = (coalesce(nullif(result_json, ''), '{}')::jsonb || ${completion}::jsonb)::text,
+          -- Where the Done card's Open button goes (0099). Written in the same
+          -- statement as the receipt, rather than after the executor turns the
+          -- row complete: a Done card whose link arrives a moment later is a
+          -- card that says "your draft is ready" with nothing to press.
+          result_href = ${`/desk/story/${leadId}`}
       where id = ${job.id} and newsroom_id = ${job.newsroom_id}
         and status = 'running' and claim_token = ${job.claim_token ?? ""}
     `;
