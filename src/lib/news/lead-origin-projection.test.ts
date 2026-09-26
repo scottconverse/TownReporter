@@ -95,6 +95,18 @@ test("real queue and story projections carry persisted scanner provenance and im
     insert into leads(id,newsroom_id,scan_run_id,headline,why,topic,status,source_urls,newsworthiness,created_at,origin,provenance_json)
     values(2,1,null,'Imported story','Why','council','new','[]',0,now(),'import','{"tool":"Civic Source Scanner"}');
   `);
+  /*
+    Migration 0094 gives a lead its kill record and its duplicate kind. Both
+    projections below select `l.dup_kind` (and the Compare view's
+    `l.kill_reason` / `l.kill_reason_url` / `l.killed_at`), so a table built
+    without it reads as "column l.dup_kind does not exist" -- a missing
+    migration, not a missing column in desk.ts. The migration file is applied
+    here rather than its four columns hand-copied, the same way
+    entity-identity-migration.test.ts applies 0044.
+  */
+  await pg.exec(
+    await readFile(new URL("../../../migrations/0094_lead_kill_record.sql", import.meta.url), "utf8"),
+  );
   try {
     for (const name of ["listLeads", "getLead"] as const) {
       const result = await pg.query<{ scan_run_id: number | null }>(
