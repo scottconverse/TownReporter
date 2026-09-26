@@ -1345,6 +1345,83 @@ export function duplicateKillReason(headline: string): string {
   return `Duplicate of ${headline.trim()}`;
 }
 
+/** Unit AK item 4: what the row says after "Kill as duplicate" saves. The
+ * same sentence the Compare view shows after its "Same story" press, so the
+ * two places an editor can settle a duplicate cannot drift apart. */
+export function killedAsDuplicateNote(headline: string): string {
+  return `Killed as a duplicate of ${headline.trim()}.`;
+}
+
+/**
+ * Unit AK item 5: the Compare view. Three presses, one per thing an editor
+ * can decide after reading both leads side by side, and one sentence each for
+ * what the press did -- a press that reports nothing is what this unit was
+ * opened about, so each of the three has its own words and its own state.
+ */
+export const COMPARE_HEADING = "Compare these two leads";
+/** The two sides of the pair, in plain words rather than "lead A/lead B". */
+export const COMPARE_CURRENT_LABEL = "This lead";
+export const COMPARE_PRIOR_LABEL = "The lead it matched";
+export const MOVE_TO_NEW_LABEL = "Not a duplicate — move to New";
+export const KILL_THIS_ONE_LABEL = "Same story — kill this one";
+export const REOPEN_PRIOR_LABEL = "Newer facts — reopen the old one";
+
+/** Unit AK item 5: after "Not a duplicate — move to New". */
+export function movedToNewNote(headline: string): string {
+  return `Moved to New: ${headline.trim()} no longer claims a twin.`;
+}
+
+/** Unit AK item 5: after "Newer facts — reopen the old one". */
+export function reopenedPriorNote(headline: string): string {
+  return `Reopened ${headline.trim()} — it is back on the desk as New.`;
+}
+
+/** Unit AK item 5: what a Compare press says when the desk never answered --
+ * the request did not come back at all, which is not the same thing as the
+ * desk refusing it, and must not read as success. */
+export const COMPARE_NO_ANSWER =
+  "The desk did not answer that press. It may have been restarting — try again.";
+
+export type ComparePress = "not-a-duplicate" | "kill" | "reopen";
+
+/**
+ * Unit AK item 5: what each Compare press says after it comes back.
+ *
+ * It lives here, beside the sentences themselves, rather than in the panel:
+ * the component module must export only components (react-refresh), and more
+ * to the point this is copy, not markup. The panel renders this and nothing
+ * else, so what an editor reads after a press is decided by a tested function
+ * instead of by a branch inside JSX.
+ *
+ * The three outcome shapes are: landed (`ok`), refused (`ok: false` with the
+ * desk's own sentence), and never answered (no result at all).
+ */
+export function comparePressNote(
+  press: ComparePress,
+  res: { ok: boolean; error?: string | null } | undefined | null,
+  sides: { current: { headline: string }; prior: { headline: string } },
+): { kind: "ok" | "err"; text: string } {
+  if (res?.ok) {
+    const text =
+      press === "not-a-duplicate"
+        ? movedToNewNote(sides.current.headline)
+        : press === "kill"
+          ? killedAsDuplicateNote(sides.prior.headline)
+          : reopenedPriorNote(sides.prior.headline);
+    return { kind: "ok", text };
+  }
+  return { kind: "err", text: res?.error?.trim() || COMPARE_NO_ANSWER };
+}
+
+/**
+ * Unit AK item 6: the story page of a killed lead. "This lead was killed.
+ * Nothing to draft." told an editor the state and nothing else -- not what the
+ * story was, not when or why it was killed, and no way back. The heading below
+ * opens the record that replaces it.
+ */
+export const KILLED_LEAD_HEADING = "This lead was killed";
+export const REOPEN_LABEL = "Reopen";
+
 /** Unit AK item 2: the plain-words label on a finding filed HELD against a
  * killed lead because it carries facts the killed lead did not have. */
 export const DEVELOPING_LABEL = "Developing: new facts on a story you killed";

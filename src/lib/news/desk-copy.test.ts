@@ -5,10 +5,19 @@ import { z } from "zod";
 import {
   blockedDigBannerText,
   cameBackLabel,
+  COMPARE_CURRENT_LABEL,
+  COMPARE_HEADING,
+  COMPARE_PRIOR_LABEL,
   composeZeroLeadSummary,
   duplicateKillReason,
+  killedAsDuplicateNote,
   killRecordLine,
+  KILL_THIS_ONE_LABEL,
+  MOVE_TO_NEW_LABEL,
+  movedToNewNote,
   printedDuplicateLine,
+  REOPEN_PRIOR_LABEL,
+  reopenedPriorNote,
   DEVELOPING_LABEL,
   editorError,
   editorActionError,
@@ -1731,6 +1740,50 @@ describe("Unit AK: duplicate and kill wording", () => {
     assert.equal(
       killRecordLine({ reopened: true }),
       "Reopened — no record of when or why it was killed",
+    );
+  });
+
+  it("names the Compare view's three presses in plain words", () => {
+    // Item 5's labels are the brief's, verbatim -- pinned so a later copy edit
+    // has to be deliberate, and so the side-by-side view cannot grow a press
+    // an editor cannot read.
+    assert.equal(MOVE_TO_NEW_LABEL, "Not a duplicate — move to New");
+    assert.equal(KILL_THIS_ONE_LABEL, "Same story — kill this one");
+    assert.equal(REOPEN_PRIOR_LABEL, "Newer facts — reopen the old one");
+    // Both sides are named in words, not as "lead A" and "lead B".
+    assert.equal(COMPARE_CURRENT_LABEL, "This lead");
+    assert.equal(COMPARE_PRIOR_LABEL, "The lead it matched");
+    assert.equal(COMPARE_HEADING, "Compare these two leads");
+  });
+
+  it("reports what each Compare press did, in the row and on the page", () => {
+    assert.equal(
+      killedAsDuplicateNote("Bohn Farm rezoning heads to planning board with staff blessing"),
+      "Killed as a duplicate of Bohn Farm rezoning heads to planning board with staff blessing.",
+    );
+    // Whitespace off the scanned headline must not reach the sentence.
+    assert.equal(killedAsDuplicateNote("  Council OKs the budget "), "Killed as a duplicate of Council OKs the budget.");
+    assert.equal(
+      movedToNewNote("Loomiller stabbing"),
+      "Moved to New: Loomiller stabbing no longer claims a twin.",
+    );
+    assert.equal(
+      reopenedPriorNote("  Juvenile altercation  "),
+      "Reopened Juvenile altercation — it is back on the desk as New.",
+    );
+  });
+
+  it("keeps the two presses that settle a duplicate saying the same thing", () => {
+    // The reason recorded by the kill and the note shown after it name the same
+    // piece, with the same trimming of the scanned headline; if they ever
+    // disagree the page and the Queue would tell the editor two different
+    // stories about one press.
+    const scanned = "  Longmont Senior Center to begin free evening meal program Oct. 2 ";
+    const named = duplicateKillReason(scanned).slice("Duplicate of ".length);
+    assert.equal(named, "Longmont Senior Center to begin free evening meal program Oct. 2");
+    assert.ok(
+      killedAsDuplicateNote(scanned).includes(named),
+      "the note after the kill names the same piece, trimmed the same way",
     );
   });
 });

@@ -78,6 +78,20 @@ const paperStub = inlineModule(`
   export function formatAge() {
     return "2h ago";
   }
+  // Unit AK item 5: the Compare view lists each side's source URLs, and it
+  // reads them with the paper's own parseUrlList. Kept byte-for-byte in step
+  // with src/lib/paper.ts by the drift test below, because a stub that quietly
+  // disagreed with the real parser would make every source assertion here a
+  // statement about this file instead of about the desk.
+  export function parseUrlList(raw) {
+    if (!raw) return [];
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }
 `);
 
 const paperContextStub = inlineModule(`
@@ -661,5 +675,320 @@ test("set-aside, closed, and exhausted leads each render their own labelled, sty
       `expected ${s} to render class chip ${cls}`,
     );
     assert.match(html, new RegExp(`>${label}<`), `expected ${s} to render the label "${label}"`);
+  }
+});
+
+/*
+ * Unit AK items 5 and 6 (2026-09-26): the Compare view and the killed lead's
+ * record (src/components/desk-lead-compare.tsx).
+ *
+ * The owner's complaint was a link labelled COMPARE that opened a page holding
+ * neither half of the comparison and reading "This lead was killed. Nothing to
+ * draft." So the two things pinned here are: the six facts of each side reach
+ * the page in plain words, and each of the three presses exists, is named, and
+ * has words for what it did -- success and failure both.
+ */
+const { LeadComparePanel, KilledLeadRecord } = await import(
+  moduleUrl(
+    await readFile(new URL("../src/components/desk-lead-compare.tsx", import.meta.url), "utf8"),
+    "desk-lead-compare.tsx",
+    {
+      "@tanstack/react-router": reactRouterStub,
+      "@/components/desk-chrome": deskChromeStub,
+      "@/components/states": statesStub,
+      "@/lib/paper": paperStub,
+      "@/lib/news/desk-copy": deskCopy,
+      react: import.meta.resolve("react"),
+      "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+    },
+  )
+);
+
+const fixedDate = () => "Sep 22";
+
+// The press-to-words mapping lives in desk-copy.ts (a component module may
+// only export components), so it is read from the real copy module loaded
+// above, not from the panel.
+const { comparePressNote } = await import(deskCopy);
+
+function compareSides(overrides = {}) {
+  return {
+    current: {
+      id: 218,
+      headline: "Police investigate a stabbing on Loomiller Court",
+      why: "A person was taken to the hospital.",
+      status: "held",
+      source_urls: JSON.stringify(["https://www.dailycamera.com/2026/09/25/loomiller-stabbing/"]),
+      created_at: "2026-09-25T12:00:00.000Z",
+      ...overrides.current,
+    },
+    prior: {
+      id: 209,
+      headline: "Police investigate a fight reported in northwest Longmont",
+      why: "Officers were called to the block.",
+      status: "killed",
+      source_urls: JSON.stringify(["https://www.dailycamera.com/crime/"]),
+      created_at: "2026-09-22T09:00:00.000Z",
+      killed_at: "2026-09-22T18:00:00.000Z",
+      kill_reason: "Duplicate of Council OKs the budget",
+      ...overrides.prior,
+    },
+  };
+}
+
+test("the Compare view shows both leads' six facts side by side, in plain words", () => {
+  const { current, prior } = compareSides();
+  const html = renderToStaticMarkup(
+    createElement(LeadComparePanel, { current, prior, formatDate: fixedDate }),
+  );
+  assert.match(html, /Compare these two leads/);
+  // The two sides are labelled by what they are, not "lead A / lead B".
+  assert.match(html, />This lead</);
+  assert.match(html, />The lead it matched</);
+  // Headline, why, sources, when it was filed and its status -- both sides.
+  assert.match(html, /Police investigate a stabbing on Loomiller Court/);
+  assert.match(html, /Police investigate a fight reported in northwest Longmont/);
+  assert.match(html, /A person was taken to the hospital\./);
+  assert.match(html, /Officers were called to the block\./);
+  assert.match(html, /https:\/\/www\.dailycamera\.com\/2026\/09\/25\/loomiller-stabbing\//);
+  assert.match(html, /https:\/\/www\.dailycamera\.com\/crime\//);
+  assert.match(html, /filed Sep 22/);
+  assert.match(html, /class="chip st-held"/);
+  assert.match(html, /class="chip st-killed"/);
+  // The kill record of the matched side, so "same story?" is answered by
+  // reading rather than by remembering.
+  assert.match(html, /Killed Sep 22, 2026 — Duplicate of Council OKs the budget/);
+  // Both sides link to their own lead page, so an editor can open either.
+  assert.match(html, /data-params="\{&quot;leadId&quot;:&quot;218&quot;\}"/);
+  assert.match(html, /data-params="\{&quot;leadId&quot;:&quot;209&quot;\}"/);
+});
+
+test("the Compare view offers the three presses an editor can reach, each named and each with an accessible name", () => {
+  const { current, prior } = compareSides();
+  const html = renderToStaticMarkup(
+    createElement(LeadComparePanel, {
+      current,
+      prior,
+      formatDate: fixedDate,
+      onNotADuplicate: async () => ({ ok: true }),
+      onKillThis: async () => ({ ok: true }),
+      onReopenPrior: async () => ({ ok: true }),
+    }),
+  );
+  assert.match(html, />Not a duplicate — move to New</);
+  assert.match(html, />Same story — kill this one</);
+  assert.match(html, />Newer facts — reopen the old one</);
+  assert.match(
+    html,
+    /aria-label="Not a duplicate — move to New: Police investigate a stabbing on Loomiller Court"/,
+  );
+  assert.match(
+    html,
+    /aria-label="Same story — kill this one: Police investigate a stabbing on Loomiller Court"/,
+  );
+  assert.match(
+    html,
+    /aria-label="Newer facts — reopen the old one: Police investigate a fight reported in northwest Longmont"/,
+  );
+  // Nothing is claimed before a press: no status line, no saved note.
+  assert.doesNotMatch(html, /role="status"/);
+  assert.doesNotMatch(html, /no longer claims a twin|Killed as a duplicate of|Reopened /);
+});
+
+test("the Compare view explains a disabled reopen instead of offering it mutely", () => {
+  const { current, prior } = compareSides({
+    prior: { status: "held", killed_at: null, kill_reason: null },
+  });
+  const html = renderToStaticMarkup(
+    createElement(LeadComparePanel, {
+      current,
+      prior,
+      formatDate: fixedDate,
+      onReopenPrior: async () => ({ ok: true }),
+    }),
+  );
+  assert.match(html, /Reopening is for a killed lead; this one is held\./);
+  const labelIdx = html.indexOf(">Newer facts — reopen the old one<");
+  assert.ok(labelIdx >= 0, "the reopen press is still offered, just disabled");
+  const tagStart = html.lastIndexOf("<button", labelIdx);
+  const tag = html.slice(tagStart, html.indexOf(">", tagStart) + 1);
+  assert.match(tag, /disabled/, "a live lead's reopen press must be disabled");
+});
+
+test("the Compare view hides the kill press for a lead that is already killed or published", () => {
+  for (const status of ["killed", "published"]) {
+    const { current, prior } = compareSides({ current: { status } });
+    const html = renderToStaticMarkup(
+      createElement(LeadComparePanel, {
+        current,
+        prior,
+        formatDate: fixedDate,
+        onKillThis: async () => ({ ok: true }),
+      }),
+    );
+    assert.doesNotMatch(html, /Same story — kill this one/);
+    assert.doesNotMatch(html, /aria-label="Same story/);
+  }
+});
+
+// The feedback half of items 5 and 6 cannot be rendered here -- there is no
+// jsdom, react-dom/client or act() in this repo's test tooling (only
+// renderToStaticMarkup), so no press can be fired in a test. The mapping from
+// a press's result to the words the editor reads is therefore a pure exported
+// function, and it is tested directly: every press reports, and a press that
+// failed reports in the editor's words rather than going quiet.
+test("every Compare press reports what it did, and which lead it did it to", () => {
+  const { current, prior } = compareSides();
+  const sides = { current, prior };
+  const ok = (press) => comparePressNote(press, { ok: true }, sides);
+
+  const notADupe = ok("not-a-duplicate");
+  assert.equal(notADupe.kind, "ok");
+  assert.equal(
+    notADupe.text,
+    "Moved to New: Police investigate a stabbing on Loomiller Court no longer claims a twin.",
+  );
+  const kill = ok("kill");
+  assert.equal(kill.kind, "ok");
+  assert.equal(
+    kill.text,
+    "Killed as a duplicate of Police investigate a fight reported in northwest Longmont.",
+  );
+  const reopen = ok("reopen");
+  assert.equal(reopen.kind, "ok");
+  assert.equal(
+    reopen.text,
+    "Reopened Police investigate a fight reported in northwest Longmont — it is back on the desk as New.",
+  );
+  // Three presses, three different sentences: a press that reported the same
+  // thing as another would leave the editor unable to tell what changed.
+  assert.equal(new Set([notADupe.text, kill.text, reopen.text]).size, 3);
+});
+
+test("a Compare press that did not land says so, and a press the desk never answered does not read as success", () => {
+  const sides = compareSides();
+  const refused = comparePressNote("kill", { ok: false, error: "Only a held lead can be reopened." }, sides);
+  assert.equal(refused.kind, "err");
+  assert.equal(refused.text, "Only a held lead can be reopened.");
+  const blank = comparePressNote("kill", { ok: false, error: "   " }, sides);
+  assert.equal(blank.kind, "err");
+  assert.match(blank.text, /did not answer that press/);
+  const thrown = comparePressNote("kill", null, sides);
+  assert.equal(thrown.kind, "err");
+  assert.match(thrown.text, /did not answer that press/);
+  // None of the three failure shapes may read as the success sentence.
+  for (const res of [refused, blank, thrown]) {
+    assert.doesNotMatch(res.text, /Killed as a duplicate of/);
+  }
+});
+
+test("a killed lead's page shows what the lead was and how to reopen it, not an empty page", () => {
+  const { prior } = compareSides();
+  const html = renderToStaticMarkup(
+    createElement(KilledLeadRecord, {
+      lead: prior,
+      onReopen: async () => ({ ok: true }),
+      formatDate: fixedDate,
+    }),
+  );
+  assert.match(html, /This lead was killed/);
+  assert.match(html, /Police investigate a fight reported in northwest Longmont/);
+  assert.match(html, /Officers were called to the block\./);
+  assert.match(html, /https:\/\/www\.dailycamera\.com\/crime\//);
+  assert.match(html, /filed Sep 22/);
+  assert.match(html, /class="chip st-killed"/);
+  assert.match(html, /Killed Sep 22, 2026 — Duplicate of Council OKs the budget/);
+  assert.match(html, />Reopen</);
+  assert.match(
+    html,
+    /aria-label="Reopen Police investigate a fight reported in northwest Longmont"/,
+  );
+  // The page this unit was opened about said only that the lead was killed.
+  assert.doesNotMatch(html, /Nothing to draft/);
+});
+
+test("a killed lead's page without a reopen press still keeps the record, and says when the desk kept none", () => {
+  const html = renderToStaticMarkup(
+    createElement(KilledLeadRecord, {
+      lead: compareSides().prior,
+      formatDate: fixedDate,
+    }),
+  );
+  assert.match(html, /This lead was killed/);
+  assert.doesNotMatch(html, />Reopen</);
+  const old = renderToStaticMarkup(
+    createElement(KilledLeadRecord, {
+      lead: { ...compareSides().prior, killed_at: null, kill_reason: null },
+      formatDate: fixedDate,
+    }),
+  );
+  assert.match(old, /Killed before the desk started recording why — no reason was kept/);
+});
+
+test("a reopened lead's record says the kill was undone instead of forgetting it", () => {
+  const html = renderToStaticMarkup(
+    createElement(KilledLeadRecord, {
+      lead: { ...compareSides().prior, status: "new" },
+      reopened: true,
+      formatDate: fixedDate,
+    }),
+  );
+  assert.match(html, /Reopened — it was killed Sep 22, 2026 — Duplicate of Council OKs the budget/);
+  assert.match(html, /role="note">Reopened — it was killed/);
+  // A lead that is back on the desk is not offered a second reopen.
+  assert.doesNotMatch(html, />Reopen</);
+});
+
+// The story page itself cannot be rendered here (it is a route with a router,
+// a query client and a paper context), so the one thing this test can check
+// about it is its source: the page that used to say "This lead was killed.
+// Nothing to draft." now mounts the record above, and the dead sentence is
+// gone from the file rather than merely hidden behind the new component.
+test("the story page renders the killed lead's record and no longer says there is nothing to draft", async () => {
+  const story = await readFile(
+    new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(story, /<KilledLeadRecord/);
+  assert.match(story, /<LeadComparePanel/);
+  // The removed sentence is still quoted in the comment that records why it
+  // went, so this checks the two places it could actually still reach an
+  // editor -- as JSX text, or as a string literal -- rather than banning the
+  // words from the file.
+  assert.doesNotMatch(story, /Nothing to draft\.\s*</);
+  assert.doesNotMatch(story, /["'`]Nothing to draft/);
+});
+
+// A stub that disagrees with the real parser would make every source
+// assertion above a statement about the stub. The real function is lifted out
+// of src/lib/paper.ts here and run against both the examples the desk actually
+// stores and the stub, so the two can only drift by failing this test.
+test("the Compare view's URL parser stub matches the real parseUrlList in src/lib/paper.ts", async () => {
+  const paperSource = await readFile(new URL("../src/lib/paper.ts", import.meta.url), "utf8");
+  const start = paperSource.indexOf("export function parseUrlList");
+  assert.ok(start >= 0, "parseUrlList should still be exported by src/lib/paper.ts");
+  const end = paperSource.indexOf("\n}", start);
+  assert.ok(end > start, "could not find the end of parseUrlList");
+  const real = await import(moduleUrl(paperSource.slice(start, end + 2), "parseUrlList-slice.ts"));
+  const { parseUrlList: stub } = await import(paperStub);
+  const samples = [
+    null,
+    undefined,
+    "",
+    "[]",
+    '["https://www.dailycamera.com/crime/"]',
+    '["https://a.test/1","https://b.test/2"]',
+    "not json at all",
+    '{"url":"https://a.test/1"}',
+    "[1,\"https://a.test/1\"]",
+    '[["https://a.test/1"]]',
+    "[\"https://www.longmontcolorado.gov/\"]",
+  ];
+  for (const raw of samples) {
+    assert.deepEqual(
+      stub(raw),
+      real.parseUrlList(raw),
+      `the stub and src/lib/paper.ts disagreed on ${JSON.stringify(raw)}`,
+    );
   }
 });

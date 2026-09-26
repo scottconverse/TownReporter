@@ -7,6 +7,7 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   cameBackLabel,
   DEVELOPING_LABEL,
+  killedAsDuplicateNote,
   killRecordLine,
   printedDuplicateLine,
   type PrintedDup,
@@ -206,7 +207,7 @@ export function LeadRowView({
           {dup && lead.status !== "killed" && lead.status !== "published" && onKillAsDuplicate ? (
             dupKill === "saved" ? (
               <span className="meta dup-kill-note" role="status">
-                Killed as a duplicate of {dup.headline}.
+                {killedAsDuplicateNote(dup.headline)}
               </span>
             ) : dupKill === "failed" ? (
               <>

@@ -545,7 +545,7 @@
   border-radius: 99px;
   background: var(--accent-soft);
   color: var(--a);
-  font: 600 calc(12px * var(--ts))/1.4 var(--fb);
+  font: 600 calc(14px * var(--ts))/1.4 var(--fb);
   letter-spacing: 0;
   text-align: center;
   font-variant-numeric: tabular-nums;
