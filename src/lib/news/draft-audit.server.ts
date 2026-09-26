@@ -22,8 +22,9 @@
 
 import { getSql } from "../db.ts";
 import { grokChat, probeProvider } from "./ai.ts";
+import type { ReportChat } from "./report.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
-import { modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { buildDraftRepairPrompt, repairDraftStyle, type DraftRepairCall } from "./draft-audit-repair.ts";
 import { styleRecordFromRepair, type DraftStyleRecord } from "./draft-audit-record.ts";
@@ -43,14 +44,15 @@ export const DRAFT_STYLE_TIMEOUT_MS = 120_000;
  */
 const REPAIR_MAX_TOKENS = 8000;
 
-/** The chat seam this module calls, matching `ReportChat` and `grokChat`. */
-export type DraftStyleChat = (
-  system: string,
-  user: string,
-  maxTokens?: number,
-  modelChoice?: unknown,
-  options?: { timeoutMs: number },
-) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+/**
+ * The chat the repair loop calls, in the form `reportDeps.chat` already has.
+ *
+ * It IS `ReportChat`, named rather than copied: when the desk repairs the
+ * draft it has just written, the repair rides the same chat the draft came
+ * through -- which already carries the picker, the preflight and the fail-over.
+ * A second copy of that signature here would be a second thing to keep in step.
+ */
+export type DraftStyleChat = ReportChat;
 
 /* ------------------------------------------------------------------ *
  * The reply, read as a draft.
@@ -131,12 +133,16 @@ export type DraftStyleFixResult = {
  * the refusal is recorded with the draft so the editor can read why.
  *
  * `chat` and `probe` are injectable so a test can drive this without a real
- * provider; everything else about the path is the real one.
+ * provider; everything else about the path is the real one. The seam is
+ * `typeof grokChat`, the same one the desk's other one-off calls take
+ * (`import-stories.server.ts`): this path has no draft-writing chat to borrow,
+ * so it brings its own picker and fail-over, and that call shape is the one
+ * they are written for.
  */
 export async function fixDraftStyleForEditor(
   context: { userId: string; newsroomId: number },
   data: DraftStyleFixInput,
-  deps: { chat?: DraftStyleChat; probe?: typeof probeProvider } = {},
+  deps: { chat?: typeof grokChat; probe?: typeof probeProvider } = {},
 ): Promise<DraftStyleFixResult> {
   const sql = await getSql();
   const [row] = await sql<{ form: string | null; research_json: string | null }>`
@@ -155,8 +161,8 @@ export async function fixDraftStyleForEditor(
   const call = styleRepairCall({
     chat: async (system, user, maxTokens) => {
       const attempt = await runPinnedCallWithFailover<
-        { modelChoice: typeof choice; modelEffort: ModelEffort | null },
-        Awaited<ReturnType<DraftStyleChat>>
+        { modelChoice: StoryModelChoice; modelEffort: ModelEffort | null },
+        Awaited<ReturnType<typeof grokChat>>
       >({
         snapshot: { modelChoice: choice, modelEffort: effort },
         source: choice === "auto" ? "auto" : "editor",

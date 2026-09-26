@@ -134,6 +134,9 @@ import {
   type PerformDraftWorkDeps,
 } from "./desk-model-run.ts";
 import { buildDraftCompletionReceipt } from "./draft-completion.ts";
+import { repairDraftStyle } from "./draft-audit-repair.ts";
+import { styleRepairCall } from "./draft-audit.server.ts";
+import { styleAuditSummary, styleRecordFromRepair } from "./draft-audit-record.ts";
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
@@ -1831,6 +1834,42 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   });
   if ("error" in reported) throw new Error(reported.error);
 
+  /*
+    THE STYLE AUDIT, BEFORE ANYTHING IS WRITTEN.
+
+    The model's draft is measured in code, and a finding the code calls a fix
+    gets one bounded repair pass through the same chat the draft itself came
+    through -- the newsroom's picker, the preflight probe, the fail-over ladder.
+    The repair may rewrite wording and nothing else: a rewrite that changes a
+    quoted word, a number, a name or a link is refused and the model's own text
+    is kept. That refusal is what makes the rest of this function safe, because
+    every check that ran against the draft -- the name check, the document
+    claims, the citation derivation -- still describes the text being stored:
+    the body below is the repaired one, and the guard has already proved the
+    facts in it are the facts that were checked.
+
+    Nothing here publishes and nothing here is a verdict. What is left over
+    becomes a review reason and a list the editor can read and ignore.
+  */
+  const style = await repairDraftStyle({
+    headline: reported.headline,
+    dek: reported.dek,
+    body: reported.body,
+    form: String(reported.form ?? ""),
+    repair: styleRepairCall({
+      /*
+        Both paths above wire this. The fallback keeps the type honest and turns
+        an unwired chat into a plain refusal -- the audit still runs, the draft
+        is untouched, and the note says so -- rather than a crash mid-draft.
+      */
+      chat:
+        reportDeps.chat ??
+        (async () => ({ ok: false, error: "The writing provider is not available." })),
+    }),
+  });
+  const draftBody = style.body;
+  const styleRecord = styleRecordFromRepair(style, { checkedAt: new Date().toISOString() });
+
   // Discovery exclusions are not citation rules: a watched page or a root
   // dashboard can be the substantive primary record. Preserve the reporter's
   // explicit citations, including an empty list, without adding lead seeds.
@@ -1849,9 +1888,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     reportedClaims: { version: 1, rows: reported.claims },
     reportedDocumentClaims: {
       version: 1,
-      checkedText: [reported.headline, reported.dek, reported.body].join("\n\n"),
+      checkedText: [reported.headline, reported.dek, draftBody].join("\n\n"),
       rows: reported.documentClaims ?? [],
     },
+    // The findings and the before/after measurements, stored with the draft they
+    // describe rather than recomputed into the page on every render.
+    styleAudit: styleRecord,
   });
   const yours = keepHumanTodos(prevNotes);
   /*
@@ -1950,7 +1992,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       model_headline, model_topic, headline_source
     )
     values (
-      ${context.userId}, ${owned(context)}, ${leadId}, ${headline.headline}, ${reported.dek}, ${reported.body},
+      ${context.userId}, ${owned(context)}, ${leadId}, ${headline.headline}, ${reported.dek}, ${draftBody},
       ${reported.topic}, ${sourceUrls}, ${notes},
       ${provenanceJson}, ${reported.form}, ${reported.found_note}, ${unansweredJson},
       ${researchJson},
@@ -1983,7 +2025,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         const draftText = {
           headline: reported.headline,
           dek: reported.dek,
-          body: reported.body,
+          // The text this draft actually stores: the citation derivation has to
+          // describe the story on the page, not the one the model first wrote.
+          body: draftBody,
         };
         // A new meeting draft can only cite transcript segments the reporter
         // actually saw. Older drafts with saved transcript notes retain their
@@ -2028,6 +2072,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             "Evidence reconciliation not completed within the available edit pass.",
           ),
           nameCheck: reported.research_memo.nameCheck,
+          styleAudit: styleAuditSummary(styleRecord),
         }),
       );
       await sql`
