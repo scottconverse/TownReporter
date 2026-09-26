@@ -90,17 +90,27 @@ export type ScanAiLead = {
  * AI-returned leads that are the same story within one scan don't both get
  * inserted.
  *
- * Unit AK item 1 (2026-09-26) -- that promise used to hold only for the
- * "strong" tier. A pair the matcher flagged as "possible" fell through to the
- * insert below, so one story found twice in one scan run was filed twice:
- * leads 207 and 212, same city page, same second, one of them later published
- * while the other sat on the Queue under a "≈ PRINTED" badge. Any candidate
- * that `sameStoryForMerge` says is the same story as a lead THIS RUN already
- * inserted is now merged into it instead: the later sighting's source URLs are
- * unioned onto the row that already exists, `mergedSameScan` is counted so the
- * scan summary can say it happened, and no second row is created. The merge
- * only ever looks at leads this call inserted -- never at a row an editor has
- * already seen, killed or held.
+ * Unit AK items 1 and AK2 item 2 (2026-09-26) -- that promise used to hold
+ * only for the "strong" tier. A pair the matcher flagged as "possible" fell
+ * through to the insert below, so one story found twice in one scan run was
+ * filed twice: leads 207 and 212, same city page, same second, one of them
+ * later published while the other sat on the Queue under a "≈ PRINTED" badge.
+ * Any candidate that `sameStoryForMerge` says is the same story as a lead THIS
+ * RUN already inserted is now merged into it instead: the later sighting's
+ * source URLs are unioned onto the row that already exists, `mergedSameScan`
+ * is counted so the scan summary can say it happened, and no second row is
+ * created.
+ *
+ * AK item 1 merged only "strong" pairs, which did NOT cover 207/212: with the
+ * real 212 headline ("...to offer free evening meals beginning Oct. 2") the
+ * pair scores 0.43 content-token Jaccard and is merely "possible". AK2 item 2
+ * adds the evidence that actually decides it -- a shared page addressing ONE
+ * story (`sharesStoryPageUrl`) -- and `sameStoryForMerge` states the rule and
+ * the exclusions in full. A shared section front or a shared agenda/packet/
+ * minutes document is deliberately NOT that evidence.
+ *
+ * The merge only ever looks at leads this call inserted -- never at a row an
+ * editor has already seen, killed or held.
  */
 export async function fileScanLeads(
   sql: SqlTag,

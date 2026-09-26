@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { fileScanLeads, type SqlTag } from "./lead-filing.ts";
+import { isIndexPageUrl, isMultiItemDocumentUrl } from "./lead-match.ts";
 
 /*
- * Unit AK item 1 (2026-09-26): one story found twice in one scan run becomes
- * ONE lead.
+ * Unit AK item 1 and AK2 item 2 (2026-09-26): one story found twice in one
+ * scan run becomes ONE lead.
  *
- * The real case: on 2026-09-25 leads 207 and 212 ("Longmont Senior Center to
- * begin free evening meal program Oct. 2") were both filed -- same city page,
- * created in the same second -- and 212 went on to be published as article
- * 73 while 207 sat on the Queue with a "≈ PRINTED" badge, unfixable and
- * unexplained. WHY, from the code:
+ * The real case: on 2026-09-25 leads 207 and 212 were both filed -- same city
+ * page, created in the same second -- and 212 went on to be published as
+ * article 73 while 207 sat on the Queue with a "≈ PRINTED" badge, unfixable
+ * and unexplained. WHY, from the code:
  *
  *   - The scan's own batch merge (scan-batches.ts:109) de-duplicates leads by
  *     `lead.headline.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()` --
@@ -22,19 +22,31 @@ import { fileScanLeads, type SqlTag } from "./lead-filing.ts";
  *     array is "mutated in place with each newly-inserted lead so two
  *     AI-returned leads that are the same story within one scan don't both
  *     get inserted".
- *   - But the only branch that honours that promise is the STRONG one
+ *   - But the only branch that honoured that promise was the STRONG one
  *     (lead-filing.ts:111-123, `continue`). A pair the matcher flags at the
- *     "possible" tier falls through to the INSERT at :133, so both leads are
- *     filed: the doc comment is true today only for strong matches.
+ *     "possible" tier fell through to the INSERT at :133, so both leads were
+ *     filed.
  *
- * (The exact 207 and 212 headline strings are not available to me -- the
- * live database is not mine to read -- so the pair below is reconstructed
- * from the wording the brief quotes, which is the shape the code fails on.)
+ * AK item 1 fixed that for "strong" pairs only -- and the REAL 207/212 pair is
+ * NOT strong. The coordinator measured the production rows on 2026-09-26:
  *
- * The merge bar is matchStrength === "strong" and nothing looser -- see
- * sameStoryForMerge's doc comment in ./lead-match.ts for why every lexical bar
- * below it merges pairs QA-1 proved are different stories. Tests 3 and 4 below
- * pin that with the QA-1 fixtures themselves.
+ *   207 "Longmont Senior Center to begin free evening meal program Oct. 2"
+ *   212 "Longmont Senior Center to offer free evening meals beginning Oct. 2"
+ *       both https://longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/
+ *
+ * Those two headlines share only free/evening/meal as content tokens -- 0.43
+ * Jaccard, far under the 0.85 "strong" bar -- so AK's merge never fired for
+ * them. Test 1 below uses the REAL 212 headline; on HEAD e296cebc it fails
+ * with `2 !== 1`. AK2 item 2 adds the missing evidence: both cite one article
+ * page, and a shared article page addresses one story (see
+ * sameStoryForMerge and isMultiItemDocumentUrl in ./lead-match.ts).
+ *
+ * The exception matters as much as the rule: a shared AGENDA, PACKET or
+ * MINUTES document -- a PDF, a PrimeGov/Legistar/CivicClerk meeting page --
+ * holds every item on a meeting, so it is not evidence of one story and a
+ * "possible" pair citing one still files two linked leads. Tests 3 and 4 below
+ * pin that with the QA-1 fixtures themselves (which cite exactly such a URL),
+ * and the tests after them pin the URL classifier on real shapes.
  */
 
 function makeSql(db: PGlite): SqlTag {
@@ -58,7 +70,8 @@ test("the 207/212 case: the same story twice in one scan run is filed once, with
   const db = new PGlite();
   try {
     await db.exec(CREATE_LEADS);
-    const cityPage = "https://longmontcolorado.gov/news/2026-senior-center-evening-meals";
+    // The exact article URL both production rows 207 and 212 carried.
+    const cityPage = "https://longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/";
     const recPage = "https://longmontcolorado.gov/recreation/senior-center";
     const sql = makeSql(db);
     const result = await fileScanLeads(
@@ -75,8 +88,11 @@ test("the 207/212 case: the same story twice in one scan run is filed once, with
           source_urls: [cityPage],
         },
         {
-          // The wording the scan's second batch produced for the same story.
-          headline: "Longmont Senior Center to begin a free evening meal program on Oct. 2",
+          // The REAL wording of lead 212, from the production rows the
+          // coordinator measured on 2026-09-26 -- not a reconstruction. It
+          // shares the article URL with lead 207 above and is a "possible",
+          // not a "strong", match by matchStrength's rule.
+          headline: "Longmont Senior Center to offer free evening meals beginning Oct. 2",
           why: "The city is starting a free evening meal program for older residents.",
           evidence: "Meals will be served five nights a week from Oct. 2, the city said.",
           topic: "council",
@@ -148,6 +164,109 @@ test("two different stories that only share a section-page URL are still filed a
   }
 });
 
+/*
+ * Unit AK2 item 2 (2026-09-26): the decision is the URL, not the wording.
+ *
+ * The two tests below use the REAL 207/212 headline pair -- the same pair
+ * test 1 proves merges -- and change only the URL they cite. On an article
+ * page they are one story; on an agenda/packet/minutes document they are not,
+ * because such a document holds every item on a meeting.
+ */
+
+test("the real 207/212 pair citing a shared MEETING document instead of the article stays two leads", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    // A real PrimeGov meeting page, the same one QA-1's negatives cite: it
+    // holds every item on that night's agenda, so two sightings of it are not
+    // two sightings of one story.
+    const meetingDoc = "https://longmont.primegov.com/portal/meeting/12345";
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      958,
+      [
+        {
+          headline: "Longmont Senior Center to begin free evening meal program Oct. 2",
+          why: "A new city service.",
+          topic: "council",
+          source_urls: [meetingDoc],
+        },
+        {
+          headline: "Longmont Senior Center to offer free evening meals beginning Oct. 2",
+          why: "A new city service for older residents.",
+          topic: "council",
+          source_urls: [meetingDoc],
+        },
+      ],
+      [],
+    );
+    assert.equal(result.leadsCreated, 2, "a meeting document is not evidence of one story");
+    assert.equal(result.mergedSameScan, 0);
+    assert.equal(result.possibleMatched, 1, "the pair is still linked for the editor, as today");
+    const rows = (
+      await db.query<{ id: number; possible_duplicate_of: number | null }>(
+        "select id, possible_duplicate_of from leads order by id",
+      )
+    ).rows;
+    assert.deepEqual(rows, [
+      { id: 1, possible_duplicate_of: null },
+      { id: 2, possible_duplicate_of: 1 },
+    ]);
+  } finally {
+    await db.close();
+  }
+});
+
+test("isMultiItemDocumentUrl: real document shapes are documents, real story shapes are not", () => {
+  // Every positive below is a URL that exists in this repo's code or tests
+  // (src/lib/news/primegov.ts, render-fetch.test.ts, ingest.test.ts,
+  // __fixtures__/civic-scanner-v26-report-2026-09-25.json) or is the shared
+  // source of the QA-1 negatives this rule must keep apart.
+  for (const url of [
+    // any PDF
+    "https://assets.bouldercounty.gov/wp-content/uploads/2025/02/2022-048-rst-td3-transportation-extension-o.100pct.pdf",
+    "https://civicclerk.example/agenda.pdf",
+    "https://example.gov/packet.pdf",
+    "https://archive.theboringparts.com/agenda/longmont/67966478.pdf",
+    // PrimeGov documents and meetings
+    "https://longmont.primegov.com/portal/meeting/12345",
+    "https://longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=16823&compileOutputType=1",
+    "https://longmont.primegov.com/Portal/Meeting?meetingTemplateId=16373",
+    "https://primegov.example.com/longmont/agenda/2026-09-10",
+    "https://primegov.example.com/longmont/meeting/executive-sessions",
+    // Legistar
+    "https://longmont.legistar.com/Calendar.aspx",
+    // a path segment naming the container
+    "https://longmontcolorado.gov/agendas/ordinance-o-2026-63/",
+    "https://longmontcitycouncil.org/meetings/2026-09-15/",
+    // This one is a real story page as far as isIndexPageUrl is concerned --
+    // it is not a SECTION front -- but it is one council meeting's agenda,
+    // which holds every item on it, so the MERGE rule treats it as a document.
+    // Two different classifications for two different questions; see
+    // isMultiItemDocumentUrl's doc comment.
+    "https://longmontleader.com/agenda/sept-council",
+    "https://bouldercounty.gov/agenda/sept-5",
+    "https://civic.example/DocumentCenter/View/1234/agenda",
+    "https://www.longmontcolorado.gov/minutes.html",
+  ]) {
+    assert.equal(isMultiItemDocumentUrl(url), true, `${url} holds many items`);
+  }
+
+  // The real 207/212 article page, and story-page shapes from the same
+  // sources: a headline slug that merely CONTAINS a document word is a story.
+  for (const url of [
+    "https://longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/",
+    "https://www.timescall.com/2026/08/12/longmont-council-ranked-choice-voting/",
+    "https://www.dailycamera.com/2026/09/25/longmont-council-minutes-released/",
+    "https://www.longmontleader.com/local-news/why-longmont-cant-simply-ban-noisy-airplanes-at-vance-brand-airport-123",
+  ]) {
+    assert.equal(isMultiItemDocumentUrl(url), false, `${url} addresses one story`);
+  }
+});
+
 test("QA-1 NEG-7 (east county vs west county): a 'possible' pair inside one run stays two leads, linked", async () => {
   const db = new PGlite();
   try {
@@ -158,12 +277,16 @@ test("QA-1 NEG-7 (east county vs west county): a 'possible' pair inside one run 
     // content word, cite the same meeting page, and score 0.71 content-token
     // Jaccard -- above the 0.6 bar for the matcher's shared-URL prose path, and
     // below 0.85, so 'possible'. Merging on the prose path would swallow a real
-    // second story, so the merge bar is the 'strong' tier instead (see
-    // sameStoryForMerge). Both rows are kept, and the second is linked to the
-    // first so the editor resolves it in one press.
+    // second story, which is why AK2's extra evidence is a shared page that
+    // addresses ONE story, never prose (see sameStoryForMerge). The URL they
+    // share is a MEETING page, the many-item shape, so the pair is kept as two
+    // rows and the second is linked to the first.
     const source_urls = ["https://longmont.primegov.com/portal/meeting/12345"];
     const east = "SVVSD approves $850,000 broadband expansion for rural east county schools";
     const west = "SVVSD approves $850,000 broadband expansion for rural west county schools";
+    // Why this pair cannot merge: the only URL they share is not an article.
+    assert.equal(isMultiItemDocumentUrl(source_urls[0]!), true);
+    assert.equal(isIndexPageUrl(source_urls[0]!), false, "it is not an index page either");
     const sql = makeSql(db);
     const result = await fileScanLeads(
       sql,
@@ -199,8 +322,10 @@ test("QA-1 NEG-8 (ambulance vs brush truck): an anchor-shaped 'possible' pair in
     await db.exec(CREATE_LEADS);
     // The anchor path's shape: same portal URL, same date and dollar figure,
     // and a shared content word ("reviews"/"replacement") -- the loosest thing
-    // the matcher accepts. Also 'possible', also not merged.
+    // the matcher accepts. Also 'possible', also not merged: the shared URL is
+    // a meeting page, a many-item document, not an article.
     const source_urls = ["https://longmont.primegov.com/portal/meeting/12345"];
+    assert.equal(isMultiItemDocumentUrl(source_urls[0]!), true);
     const sql = makeSql(db);
     const result = await fileScanLeads(
       sql,
@@ -235,7 +360,7 @@ test("a merged pair inside one run does not bump the resurfaced stamp of anythin
   const db = new PGlite();
   try {
     await db.exec(CREATE_LEADS);
-    const url = "https://longmontcolorado.gov/news/2026-senior-center-evening-meals";
+    const url = "https://longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/";
     await db.query(
       "insert into leads(id,newsroom_id,headline,status,source_urls,resurfaced_count) values(5,1,$1,'new','[]',0)",
       ["An unrelated lead on the desk"],
@@ -262,7 +387,9 @@ test("a merged pair inside one run does not bump the resurfaced stamp of anythin
           source_urls: [url],
         },
         {
-          headline: "Longmont Senior Center to begin a free evening meal program on Oct. 2",
+          // The REAL 212 headline (see the file header): this test only proves
+          // anything about the live case if the merge fires for the real pair.
+          headline: "Longmont Senior Center to offer free evening meals beginning Oct. 2",
           why: "A new city service for older residents.",
           topic: "council",
           source_urls: [url],

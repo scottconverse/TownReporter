@@ -439,15 +439,114 @@ function storyUrls(urls: string[]): string[] {
   return urls.filter((u) => !isIndexPageUrl(u));
 }
 
-function sharesUrl(a: string[], b: string[]): boolean {
-  const realA = storyUrls(a);
-  const realB = storyUrls(b);
+/** Hosts that publish meeting records -- agendas, packets, minutes -- and
+ * nothing that is a single story. A PrimeGov `/portal/meeting/12345` or a
+ * Legistar `/Calendar.aspx` is a container of items, not one item, so two
+ * leads citing it are not citing the same story. The list is the
+ * meeting-record vendor family from src/lib/news/render-detect.ts's JS_HOST
+ * (which exists for the opposite question: does this host need rendering
+ * before extraction), restricted to the vendors that serve AGENDAS -- the
+ * municipal-code hosts on that list are left out, no source in this
+ * newsroom's sources table uses one. The leading `(^|\.)` and the trailing
+ * `.` are both deliberate: they match `longmont.primegov.com` and the repo's
+ * own `primegov.example.com` test fixture, but not a host that merely ends
+ * in the vendor's domain without being it. */
+const CIVIC_MEETING_HOST = /(^|\.)(primegov|legistar|civicclerk|granicus|granicusondemand|granicusideas|boarddocs|civicplus)\./i;
+
+/** Path segments that name a document holding many items rather than one
+ * story -- `/agendas/`, `/packets/`, `/minutes/`, `/meetings/`,
+ * `/DocumentCenter/`. Compared as a WHOLE segment, never as a substring:
+ * `/2026/09/25/longmont-council-minutes-released/` is a headline slug about
+ * minutes, not a minutes document. */
+const MULTI_ITEM_PATH_SEGMENTS = new Set([
+  "agenda", "agendas", "packet", "packets", "minutes", "minute",
+  "meeting", "meetings", "compileddocument", "documentcenter", "calendar",
+]);
+
+/**
+ * Unit AK2 item 2 (2026-09-26): is this URL a document that holds MANY items
+ * rather than one story?
+ *
+ * This is the exception to AK2's same-run merge rule. The real 207/212 pair
+ * shares an ARTICLE page -- one city news release -- and a shared article
+ * page is as good as it gets for "these two sightings are one story". An
+ * agenda, packet or minutes document is the opposite: it carries every item
+ * on a meeting, so two leads citing it tell you nothing about whether they
+ * are about the same item. QA-1's negatives are exactly that shape: NEG-4
+ * (jail expansion vs staff pay raises) and NEG-7 (rural east vs west county
+ * schools) both cite `longmont.primegov.com/portal/meeting/12345` --
+ * different items at one meeting -- and both are "possible", so without this
+ * exception a same-run merge would swallow the second story.
+ *
+ * Recognised (real shapes, all from this repo's code and tests):
+ *   - any `.pdf` -- `assets.bouldercounty.gov/.../2022-048-...-o.100pct.pdf`,
+ *     `civicclerk.example/agenda.pdf`, `example.gov/packet.pdf`;
+ *   - a meeting-record host -- `longmont.primegov.com/portal/meeting/12345`,
+ *     `longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=16823`,
+ *     `longmont.legistar.com/Calendar.aspx`;
+ *   - a path segment naming the container --
+ *     `longmontcolorado.gov/agendas/ordinance-o-2026-63/`,
+ *     `longmontcitycouncil.org/meetings/2026-09-15/`,
+ *     `longmontleader.com/agenda/sept-council`,
+ *     `civic.example/DocumentCenter/View/1234/agenda`.
+ *
+ * NOT a multi-item document, and therefore still full evidence of one story:
+ * `longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/` (the
+ * real 207/212 page), `timescall.com/2026/08/12/longmont-council-ranked-choice-voting/`.
+ *
+ * The bias is one-directional on purpose. Calling a URL a multi-item document
+ * that turns out to be a story page leaves two linked leads for an editor to
+ * resolve in one press -- today's behaviour. Missing one that really is a
+ * document merges two different stories with no way back, which is the
+ * failure QA-1 spent three rounds closing. So a shape this function cannot
+ * classify stays a story page.
+ */
+export function isMultiItemDocumentUrl(raw: string): boolean {
+  const normalized = normalizeSourceUrl(raw);
+  if (!normalized) return false;
+  const slash = normalized.indexOf("/");
+  const host = slash < 0 ? normalized : normalized.slice(0, slash);
+  const path = slash < 0 ? "" : normalized.slice(slash);
+  // A bare host is isIndexPageUrl's business, not this function's.
+  if (!path) return false;
+  if (/\.pdf(\/|$)/i.test(path)) return true;
+  const segments = path
+    .replace(/\/+$/, "")
+    .split("/")
+    .filter(Boolean)
+    // "minutes.html" and "calendar.aspx" name the same container as
+    // "minutes" and "calendar" -- the extension is a format, not a subject.
+    .map((s) => s.replace(/\.(html?|aspx|asp|php|jsp)$/i, ""));
+  if (segments.some((s) => MULTI_ITEM_PATH_SEGMENTS.has(s))) return true;
+  return CIVIC_MEETING_HOST.test(host);
+}
+
+/** A URL that addresses ONE story: not a list (isIndexPageUrl) and not a
+ * document holding many items (isMultiItemDocumentUrl). */
+function isStoryPageUrl(url: string): boolean {
+  return !isIndexPageUrl(url) && !isMultiItemDocumentUrl(url);
+}
+
+function sharesUrlWith(a: string[], b: string[], keep: (url: string) => boolean): boolean {
+  const realA = a.filter(keep);
+  const realB = b.filter(keep);
   if (realA.length === 0 || realB.length === 0) return false;
   const setA = new Set(realA.map(normalizeSourceUrl).filter(Boolean));
   for (const u of realB) {
     if (setA.has(normalizeSourceUrl(u))) return true;
   }
   return false;
+}
+
+function sharesUrl(a: string[], b: string[]): boolean {
+  return sharesUrlWith(a, b, (u) => !isIndexPageUrl(u));
+}
+
+/** Unit AK2 item 2: do both leads cite the same page that addresses ONE
+ * story? This is the extra evidence that promotes a same-run "possible" pair
+ * to a merge -- see sameStoryForMerge. */
+export function sharesStoryPageUrl(a: string[], b: string[]): boolean {
+  return sharesUrlWith(a, b, isStoryPageUrl);
 }
 
 /**
@@ -604,48 +703,60 @@ function pairMatches(
 }
 
 /**
- * Unit AK item 1 (2026-09-26): is this candidate the same story as a lead
- * THIS SAME SCAN RUN just filed? If so the two become one lead (their source
- * URLs merged) rather than two rows for one story.
+ * Unit AK items 1 and AK2 item 2 (2026-09-26): is this candidate the same
+ * story as a lead THIS SAME SCAN RUN just filed? If so the two become one
+ * lead (their source URLs merged) rather than two rows for one story.
  *
  * The real case: leads 207 and 212, same city page, same second, one of them
  * later published while the other sat on the Queue with a "≈ PRINTED" badge.
  * The scan batches de-duplicate leads by byte-identical headline only
- * (scan-batches.ts:109), and fileScanLeads discards a repeat only at the
+ * (scan-batches.ts:109), and fileScanLeads discarded a repeat only at the
  * "strong" tier (lead-filing.ts:111), so a pair the matcher flagged as
  * "possible" -- and it does flag them, findMatchingLead has already returned
  * the match id -- fell through to the insert and both were filed.
  *
- * THE BAR IS matchStrength === "strong", and nothing looser. That is
- * deliberate, and it is the only bar that does not contradict the matcher's
- * own tested guarantees:
+ * Two ways to be the same story, in order of how much they prove:
  *
- *   - "strong" is the tier this codebase already trusts to DISCARD a finding
- *     outright (lead-filing.ts:111, `continue`, only a counter moves). Saying
- *     "these two are one lead, keep both source URLs" is strictly less
- *     destructive than what that tier already does today, so the merge adds no
- *     new risk of losing a story.
- *   - Every lexical bar below "strong" merges pairs QA-1 (2026-09-02) proved
- *     are different stories, and those pairs are locked in by tests in
- *     ./lead-match.test.ts. Two real ones, both flagged "possible" and both
- *     clearing content-token overlap: NEG-7 ("...broadband expansion for rural
- *     EAST county schools" vs "WEST county schools") scores 0.71 Jaccard, and
- *     NEG-4 (closed-door session on "jail expansion" vs "staff pay raises")
- *     clears it too. A prose-only merge bar therefore silently swallows the
- *     second story -- exactly what the owner asked about ("Do I miss the real
- *     2nd story?").
+ *  1. matchStrength says "strong". That tier is already trusted to DISCARD a
+ *     finding outright (lead-filing.ts:111, `continue`, only a counter moves),
+ *     so saying "these two are one lead, keep both source URLs" is strictly
+ *     less destructive than what that tier already does. Nothing here changes
+ *     that.
  *
- * So the bar cannot be softened; what is left for those pairs is to keep both
- * rows and make the link unmissable and one-press resolvable, which is what
- * the Queue's "Looks already printed" chip, "Kill as duplicate" and the Compare
- * view do (unit AK items 4, 5 and 7).
+ *  2. matchStrength says "possible" AND the two share a page that addresses
+ *     ONE story (`sharesStoryPageUrl` -- not a section front, not a
+ *     multi-item document; see isMultiItemDocumentUrl). Unit AK2 item 2: the
+ *     real 207/212 pair is exactly this. Their content-token Jaccard is 0.43
+ *     ("begin free evening meal program" vs "offer free evening meals
+ *     beginning"), far below the 0.85 strong bar, so AK item 1 left them as
+ *     two rows -- but both cite
+ *     longmontcolorado.gov/news/free-evening-meals-at-the-senior-center/,
+ *     one news release about one story, and that shared article page is
+ *     decisive in a way prose overlap is not.
+ *
+ * Why the "possible" tier could not simply be merged on prose, and why the URL
+ * gate is the whole point: every lexical bar below "strong" merges pairs QA-1
+ * (2026-09-02) proved are different stories, and those pairs are locked in by
+ * tests in ./lead-match.test.ts. Two real ones, both flagged "possible" and
+ * both clearing content-token overlap: NEG-7 ("...broadband expansion for
+ * rural EAST county schools" vs "WEST county schools") scores 0.71 Jaccard,
+ * and NEG-4 (closed-door session on "jail expansion" vs "staff pay raises")
+ * clears it too. Both cite the SAME meeting page --
+ * longmont.primegov.com/portal/meeting/12345 -- which is precisely the
+ * multi-item document isMultiItemDocumentUrl excludes, so both still file two
+ * leads, linked, exactly as before. A shared ARTICLE page does not have that
+ * problem: one article URL addresses one story, so two sightings of it are
+ * two sightings of that story. What is left for the excluded pairs is to keep
+ * both rows and make the link unmissable and one-press resolvable, which is
+ * what the Queue's "Looks already printed" chip, "Kill as duplicate" and the
+ * Compare view do (unit AK items 4, 5 and 7).
  *
  * CONSEQUENCE, stated plainly so it is not mistaken for a complete fix: a
- * same-run pair that is merely "possible" still files two rows. A same-run
- * "strong" pair previously also produced one row, but by stamping resurfaced
- * on a row that was seconds old; it now merges the source URLs into that row
- * instead, and is counted. So the pairs still filing two rows are exactly the
- * ones no available rule can distinguish from two different stories.
+ * same-run "possible" pair with NO shared story page -- prose-only overlap
+ * (path 3 of findMatchingLead), or a shared section front or shared meeting
+ * document -- still files two rows. That is the deliberate trade: a false
+ * "same story" here silently swallows the second story, which is the failure
+ * the owner asked about ("Do I miss the real 2nd story?").
  */
 export function sameStoryForMerge(
   candidate: { headline: string; source_urls?: string[] },
@@ -654,12 +765,15 @@ export function sameStoryForMerge(
   const candidateHeadline = candidate.headline ?? "";
   const existingHeadline = existing.headline ?? "";
   if (!candidateHeadline.trim() || !existingHeadline.trim()) return false;
-  return (
-    matchStrength(
-      { headline: candidateHeadline, source_urls: candidate.source_urls ?? [] },
-      { headline: existingHeadline, source_urls: existing.source_urls ?? [] },
-    ) === "strong"
+  const candidateUrls = candidate.source_urls ?? [];
+  const existingUrls = existing.source_urls ?? [];
+  const strength = matchStrength(
+    { headline: candidateHeadline, source_urls: candidateUrls },
+    { headline: existingHeadline, source_urls: existingUrls },
   );
+  if (strength === "strong") return true;
+  if (strength !== "possible") return false;
+  return sharesStoryPageUrl(candidateUrls, existingUrls);
 }
 
 /**
