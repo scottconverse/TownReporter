@@ -10,8 +10,11 @@ import {
   describeLastScan,
   formatLocalRange,
   formatLocalTime,
+  probeAlerts,
+  probeOffsiteCopy,
   ACTIONS,
   CONFIRM_WORD,
+  OPS_DIR,
   renderPage,
 } from "../ops/control/control-server.mjs";
 
@@ -444,6 +447,28 @@ function probeSet(overrides = {}) {
     qwen: async () => ({ ok: true, qwen: [], detail: "LM Studio is not running" }),
     lastScan: async () => ({ ok: false, reason: "unreachable", detail: "Could not read the last scan" }),
     backup: () => ({ ok: false, found: false, dir: "nowhere" }),
+    // A healthy machine: three copies verified on the other drive, nothing
+    // firing. The tests that are about the failing states replace these.
+    offsite: () => ({
+      ok: true,
+      known: true,
+      dir: "D:\\TownReporter-backups",
+      verified: 3,
+      freeGb: 4300,
+      at: "2026-09-25T20:04:00.000Z",
+      failing: false,
+      reason: null,
+      localCount: 3,
+      detail: null,
+    }),
+    alerts: () => ({
+      ok: true,
+      known: true,
+      firing: [],
+      problem: null,
+      updatedAt: "2026-09-26T01:05:00.000Z",
+      detail: null,
+    }),
     ...overrides,
   };
 }
@@ -454,12 +479,14 @@ test("no card is green when its probe did not answer", async () => {
     a claim that the question was answered, so every card below is a Note --
     including the version card, whose public site could not be read.
   */
-  const data = await collectStatus({
-    appRoot: "C:\\no\\such\\install",
-    now: NOW,
-    probes: probeSet({ publicVersion: async () => ({ ok: false, version: null, error: "no answer" }) }),
-  });
-  assert.equal(data.extras.length, 5, "the fixture is expected to be the whole card set");
+  const probes = probeSet({ publicVersion: async () => ({ ok: false, version: null, error: "no answer" }) });
+  // The two report-reading cards are left REAL here: the app root below does not
+  // exist, so both probes really do fail to read anything, which is the state
+  // this test is about. Faking them would be this test marking its own paper.
+  delete probes.offsite;
+  delete probes.alerts;
+  const data = await collectStatus({ appRoot: "C:\\no\\such\\install", now: NOW, probes });
+  assert.equal(data.extras.length, 7, "the fixture is expected to be the whole card set");
   for (const row of data.extras) {
     assert.equal(row.state, "note", `${row.id} reads green over a soft failure: "${row.detail}"`);
     assert.equal(row.ok, false, `${row.id} still says ok: true`);
@@ -697,6 +724,233 @@ test("the status endpoint is read-only: asking for it starts nothing and stops n
     }
     assert.equal(spawns, 0, "reading the page must never run an action");
     assert.equal(server.state.run, null);
+  } finally {
+    await server.close();
+  }
+});
+
+/* ───────────── the copy on D:, the alerts and the button (0.6.68) ───────────── */
+
+test("the real offsite probe reads the run's own report, and says nothing it cannot read", () => {
+  /*
+    The unit of truth is the row, not the file's existence: this writes the
+    exact keys lib-backup.ps1's Save-TownReporterBackupState writes and reads
+    them back, because a probe that quietly returned defaults for a real report
+    would print "0 copies" over three verified ones.
+  */
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-aj-offsite-"));
+  try {
+    fs.mkdirSync(path.join(root, "logs"), { recursive: true });
+    const report = {
+      updatedAt: "2026-09-25T20:05:00.000Z",
+      lastSuccessAt: "2026-09-25T20:04:00.000Z",
+      localCount: 3,
+      offsiteDir: "D:\\TownReporter-backups",
+      offsiteOk: true,
+      offsiteReason: null,
+      offsiteVerified: 61,
+      offsiteFreeGb: 4300.5,
+      offsiteAt: "2026-09-25T20:04:00.000Z",
+      prunedAt: "2026-09-25T20:04:00.000Z",
+      prunedCount: 58,
+    };
+    fs.writeFileSync(path.join(root, "logs", "backup-state.json"), JSON.stringify(report), "utf8");
+    const healthy = probeOffsiteCopy({ appRoot: root });
+    assert.equal(healthy.known, true);
+    assert.equal(healthy.failing, false);
+    assert.equal(healthy.verified, 61, "the number verified is read, not defaulted");
+    assert.equal(healthy.dir, "D:\\TownReporter-backups");
+    assert.equal(healthy.freeGb, 4300.5);
+    assert.equal(healthy.at, "2026-09-25T20:04:00.000Z");
+
+    // The failing copy, which is the state the alert exists for.
+    fs.writeFileSync(
+      path.join(root, "logs", "backup-state.json"),
+      JSON.stringify({ ...report, offsiteOk: false, offsiteReason: "there is no D: on this machine" }),
+      "utf8",
+    );
+    const failing = probeOffsiteCopy({ appRoot: root });
+    assert.equal(failing.known, true);
+    assert.equal(failing.failing, true);
+    assert.equal(failing.reason, "there is no D: on this machine");
+
+    // A report from a run that only dumped: nothing has looked at D: yet, and
+    // that is "not known", never a green light.
+    fs.writeFileSync(path.join(root, "logs", "backup-state.json"), JSON.stringify({ ...report, offsiteOk: null }), "utf8");
+    assert.equal(probeOffsiteCopy({ appRoot: root }).known, false);
+
+    // A corrupt report is not a throw and not a yes.
+    fs.writeFileSync(path.join(root, "logs", "backup-state.json"), "{ this is not json", "utf8");
+    const broken = probeOffsiteCopy({ appRoot: root });
+    assert.equal(broken.ok, false);
+    assert.equal(broken.known, false);
+    assert.match(broken.detail, /could not be read/);
+
+    // No file at all, and no app root at all: both answer with a sentence.
+    fs.rmSync(path.join(root, "logs", "backup-state.json"));
+    assert.equal(probeOffsiteCopy({ appRoot: root }).known, false);
+    assert.equal(probeOffsiteCopy({}).ok, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the real alerts probe reads firing, and calls an unchecked machine unknown", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-aj-alerts-"));
+  try {
+    fs.mkdirSync(path.join(root, "logs"), { recursive: true });
+    // lib-alert.ps1's own shape, written by Save-TownReporterAlertState.
+    const state = {
+      updatedAt: "2026-09-26T01:05:00.000Z",
+      problem: null,
+      watching: { "site-down": { since: "2026-09-26T00:55:00.000Z", detail: "nothing answered" } },
+      firing: {
+        "backup-stale": {
+          since: "2026-09-25T23:00:00.000Z",
+          firedAt: "2026-09-25T23:00:00.000Z",
+          message: "No backup has been taken in over a day",
+          detail: "the newest backup is 31 hours old",
+        },
+      },
+    };
+    fs.writeFileSync(path.join(root, "logs", "alerts.json"), JSON.stringify(state), "utf8");
+    const firing = probeAlerts({ appRoot: root });
+    assert.equal(firing.known, true);
+    assert.equal(firing.firing.length, 1, "one condition is firing, and `watching` is not firing");
+    assert.equal(firing.firing[0].id, "backup-stale");
+    assert.equal(firing.firing[0].message, "No backup has been taken in over a day");
+    assert.equal(firing.updatedAt, "2026-09-26T01:05:00.000Z");
+
+    // Nothing firing is a readable answer, and it is the green one.
+    fs.writeFileSync(path.join(root, "logs", "alerts.json"), JSON.stringify({ ...state, firing: {} }), "utf8");
+    const quiet = probeAlerts({ appRoot: root });
+    assert.equal(quiet.known, true);
+    assert.deepEqual(quiet.firing, []);
+
+    // Never written: nobody has checked, which is not the same as all clear.
+    fs.rmSync(path.join(root, "logs", "alerts.json"));
+    const never = probeAlerts({ appRoot: root });
+    assert.equal(never.ok, false);
+    assert.equal(never.known, false);
+    assert.match(never.detail, /nothing has been checked for alerts/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the two new cards say what the reports say, in the owner's words", async () => {
+  const healthy = await collectStatus({ appRoot: ".", now: NOW, timeZone: DENVER, probes: probeSet() });
+  assert.equal(healthy.extras.length, 7, "the card set is the whole set");
+  assert.equal(cardFor(healthy, "offsite").state, "ok");
+  assert.equal(
+    cardFor(healthy, "offsite").detail,
+    "3 copies on D:\\TownReporter-backups; checked today at 2:04 PM; 4.3 TB free",
+  );
+  assert.equal(cardFor(healthy, "alerts").state, "ok");
+  assert.equal(cardFor(healthy, "alerts").detail, "Nothing needs attention (last checked today at 7:05 PM)");
+
+  // A copy that failed is DOWN -- it is a fault, not a note -- and it says why.
+  const failing = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    timeZone: DENVER,
+    probes: probeSet({
+      offsite: () => ({
+        ok: true,
+        known: true,
+        dir: "D:\\TownReporter-backups",
+        verified: 0,
+        freeGb: 90,
+        at: null,
+        failing: true,
+        reason: "there is no D: on this machine",
+        detail: null,
+      }),
+    }),
+  });
+  assert.equal(cardFor(failing, "offsite").state, "down");
+  assert.match(cardFor(failing, "offsite").detail, /there is no D: on this machine/);
+
+  // A report nobody has written is a Note with the reason, never a green light.
+  const unknown = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    probes: probeSet({ offsite: () => ({ ok: false, known: false, dir: "D:\\TownReporter-backups", detail: "no backup run has reported on the copy to D:\\TownReporter-backups yet" }) }),
+  });
+  assert.equal(cardFor(unknown, "offsite").state, "note");
+  assert.equal(cardFor(unknown, "offsite").ok, false);
+
+  // Alerts that are firing are DOWN and each one's own sentence is on the page.
+  const firing = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    timeZone: DENVER,
+    probes: probeSet({
+      alerts: () => ({
+        ok: true,
+        known: true,
+        updatedAt: "2026-09-26T01:05:00.000Z",
+        problem: null,
+        firing: [
+          { id: "paper-down", message: "The paper is not answering on this machine", detail: "nothing answered on port 3000" },
+          { id: "backup-stale", message: "No backup has been taken in over a day", detail: "the newest backup is 31 hours old" },
+        ],
+        detail: null,
+      }),
+    }),
+  });
+  const attention = cardFor(firing, "alerts");
+  assert.equal(attention.state, "down");
+  assert.match(attention.detail, /The paper is not answering on this machine -- nothing answered on port 3000/);
+  assert.match(attention.detail, /No backup has been taken in over a day -- the newest backup is 31 hours old/);
+
+  // An unreadable alert file is the page admitting it does not know.
+  const unreadable = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    probes: probeSet({ alerts: () => ({ ok: false, known: false, firing: [], problem: null, detail: "the alerts have not been checked on this machine yet" }) }),
+  });
+  assert.equal(cardFor(unreadable, "alerts").state, "note");
+  assert.equal(cardFor(unreadable, "alerts").ok, false);
+});
+
+test("Back up now runs the one backup script, with a fixed argv and no confirm", async () => {
+  /*
+    The button the owner asked for. It must run the SAME script the nightly run
+    and promote.ps1 use -- a second backup path is how the two would come to
+    disagree about pruning on the day it mattered.
+  */
+  const spec = ACTIONS["back-up-now"];
+  assert.ok(spec, "there is no back-up-now action");
+  assert.equal(spec.label, "Back up now");
+  assert.equal(spec.confirm, undefined, "a backup does not need a confirm word: it takes nothing offline");
+  assert.equal(spec.danger, undefined);
+  assert.equal(spec.spawns.length, 1);
+  const [step] = spec.spawns;
+  assert.match(step.exe, /System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/i);
+  assert.deepEqual(step.args, [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    path.join(OPS_DIR, "backup.ps1"),
+    "-Force",
+  ]);
+  assert.equal(step.settleMs, 0, "it must not hold the page waiting on a dump of a live database");
+  const script = fs.readFileSync(path.join(OPS_DIR, "backup.ps1"), "utf8");
+  assert.match(script, /Invoke-TownReporterBackupRun/, "the button must run the one shared backup run");
+
+  // And it is on the page, with the menu's own wording, like every other button.
+  const { server, port } = await boot();
+  try {
+    const res = await raw(port, { path: "/api/actions", headers: hostFor(port) });
+    const actions = JSON.parse(res.text).actions;
+    const ids = actions.map((a) => a.id);
+    assert.deepEqual(ids, ["check", "restart-paper", "restart-tunnel", "start-all", "stop-all", "restart-reddit", "back-up-now"]);
+    const button = actions.find((a) => a.id === "back-up-now");
+    assert.equal(button.label, "Back up now");
+    assert.match(button.explain, /copies it to the other drive/);
   } finally {
     await server.close();
   }

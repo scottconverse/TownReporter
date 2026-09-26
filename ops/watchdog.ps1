@@ -28,6 +28,11 @@
     ran less than three minutes ago and failed, this run is inside the BOOT
     GRACE: it logs the failure and leaves the start alone, because the logon
     task may still be in Postgres recovery and three migrate attempts.
+  * 267009 (SCHED_S_TASK_RUNNING) is not a failure -- it is the task still
+    being in progress, which is exactly what the reboot test of 2026-09-25 did
+    not account for: it read the start task's result mid-run, called it failed,
+    and the run reported a fault that had not happened. It is treated as
+    running, and the log says the start is still waiting for the database.
   * Outside the grace, with the task's last result non-zero, it runs the TASK
     itself -- Assert-TownReporterTaskOwnership, then Start-ScheduledTask --
     never a second copy of the start script, and never a second copy of the app.
@@ -51,6 +56,29 @@
   inside their own try/catch, both are skipped in test mode, and neither is
   added to `repaired` -- their starts are detached and a run cannot yet say
   they worked. Both are described in ops\lib-redlib.ps1 and ops\lib-ollama.ps1.
+
+  It is also the clock for the nightly backup and the alert check, and for one
+  reason: the owner is shrinking programs, not adding them. This file already
+  runs every five minutes, so "is a backup due" and "has anything been wrong
+  for ten minutes" are two more questions it asks rather than two more
+  scheduled tasks on the machine.
+
+  * Nightly backup (ops\lib-backup.ps1). After 2 AM, with the newest backup
+    older than 20 hours, and only when no editor job is running, it takes one
+    and copies it to the other drive. The rule lives in the library, the same
+    function promote.ps1 and ops\backup.ps1 call, so there is one backup path
+    and not three. A night whose dump FAILED is not retried every five
+    minutes: thirty minutes of quiet follows a failure, which is the one case
+    where a retry loop would write real gigabytes over and over.
+  * Alerts (ops\lib-alert.ps1). The paper, the public site, the daily scan and
+    the three backup conditions, evaluated against the same facts this run
+    already gathered, plus logs\alerts.json for the Control page's Attention
+    card, a toast, and -- only if the owner sets ALERT_NTFY_TOPIC in .env -- a
+    phone push. Off by default; with no topic set nothing here opens a socket.
+
+  Both sections are skipped in test mode ($env:WATCHDOG_TEST_MODE = '1', which
+  the CI recovery job sets): a runner has no real Postgres to dump and no
+  business writing alerts from a disposable instance.
 
   ASCII only, on purpose. The first version used em-dashes in its log messages;
   Windows PowerShell 5.1 reads a BOM-less UTF-8 script as ANSI, so those lines
@@ -252,7 +280,16 @@ if (-not $appHealthy) {
     # run yet is 0x41303 (267009), which would otherwise read as a fault and put
     # a machine whose paper was started by hand into the grace branch forever.
     $startHasRun = [bool]($startInfo -and $startInfo.LastRunTime -and $startInfo.LastRunTime.Year -gt 1900)
-    $startFailed = [bool]($startHasRun -and $startInfo.LastTaskResult -ne 0)
+    # 267009 is SCHED_S_TASK_RUNNING, not a fault: the task is STILL RUNNING.
+    # The reboot test of 2026-09-25 caught the watchdog asking about a start
+    # that was in the middle of Postgres recovery, reading 267009, calling it
+    # failed and logging a repair it had not needed. Both 267009 cases -- a task
+    # that has never run, and a task running right now -- mean "the start is
+    # somewhere else"; neither is this run's to repair. Kept as a separate
+    # variable rather than folded into the check below so the log can say which
+    # of the two it saw.
+    $startRunning = [bool]($startHasRun -and $startInfo.LastTaskResult -eq 267009)
+    $startFailed = [bool]($startHasRun -and $startInfo.LastTaskResult -ne 0 -and -not $startRunning)
     $startAge = -1
     if ($startHasRun) { $startAge = [int]((Get-Date) - $startInfo.LastRunTime).TotalSeconds }
     $runTheTask = ($startFailed -and $startAge -ge 180 -and $env:WATCHDOG_TEST_MODE -ne '1')
@@ -265,14 +302,27 @@ if (-not $appHealthy) {
     # stacking one on top of it.
     $verifySeconds = if ($runTheTask) { 300 } else { 45 }
 
+    # Did this run actually try to start anything? The two repair paths below
+    # do; the two wait-only paths (267009 still running, and the boot grace)
+    # deliberately do not. It decides the failure line further down, which on
+    # 2026-09-25 said "FAILED to come up healthy ... within 45s of starting it"
+    # about a run that had started nothing at all.
+    $startAttempted = $false
+
     if ($runTheTask) {
       Write-Log "app: the $startTaskName task last exited $($startInfo.LastTaskResult) $startAge second(s) ago; running the task itself"
+      $startAttempted = $true
       try {
         Assert-TownReporterTaskOwnership $startTaskName 'start-townreporter.ps1'
         Start-ScheduledTask -TaskName $startTaskName
       } catch {
         Write-Log "app: running the $startTaskName task failed: $($_.Exception.Message)"
       }
+    } elseif ($startRunning) {
+      # 267009. The task is in progress right now -- a cold boot spends a minute
+      # or more in Postgres recovery and three migrate attempts. Nothing to
+      # repair and nothing to report as broken; the next run will ask again.
+      Write-Log "app: the $startTaskName task has been running for $startAge second(s); start still running (waiting for the database)"
     } elseif ($startFailed) {
       Write-Log "app: the $startTaskName task failed $startAge second(s) ago; inside the three-minute boot grace, leaving its start alone"
     } else {
@@ -287,6 +337,7 @@ if (-not $appHealthy) {
 
         Detached, the watchdog only polls the port and exits.
       #>
+      $startAttempted = $true
       try {
         $shell = (Get-Command pwsh -ErrorAction SilentlyContinue)
         $exe = if ($shell) { $shell.Source } else { "powershell.exe" }
@@ -319,12 +370,26 @@ if (-not $appHealthy) {
     }
     if ($repairedOk) {
       $repaired += "app"
-    } else {
+    } elseif ($startAttempted) {
       Write-Log "app: FAILED to come up healthy on 127.0.0.1:$port within ${verifySeconds}s of starting it"
       if ($runTheTask) { Write-Log "app: the $startTaskName task is what was run; its own log is townreporter.log and its result is $((Get-ScheduledTaskInfo -TaskName $startTaskName -ErrorAction SilentlyContinue).LastTaskResult)" }
+    } else {
+      # Nothing was started, on purpose, so there is no repair to call failed.
+      # Say which of the two waits this was: the wording is the whole point of
+      # the fix, because "FAILED" here was a lie on the 2026-09-25 reboot test.
+      $whyWait = if ($startRunning) { 'start still running (waiting for the database)' }
+        else { "the $startTaskName task failed $startAge second(s) ago and this run is inside the three-minute boot grace" }
+      Write-Log "app: not answering yet, and no repair was attempted -- $whyWait"
     }
   }
 }
+
+# A repair that just answered 200 is a paper that is up. $appHealthy was
+# measured BEFORE the repair, so without this line the alert section further
+# down would report a paper that this very run had already brought back -- and
+# would be the only part of the log that disagreed with the "repaired: app"
+# line. The verify loop above is the evidence: it is a real HTTP 200.
+if ($repaired -contains 'app') { $appHealthy = $true }
 
 # --- Reddit reader (Redlib) -----------------------------------------------
 <#
@@ -426,13 +491,169 @@ if ($tunnelProcs.Count -eq 0 -and $env:WATCHDOG_TEST_MODE -ne '1') {
 # --- Public reachability --------------------------------------------------
 # The end a reader actually uses. A healthy app behind a tunnel that is up but
 # not routing still means the paper is offline.
+#
+# Its own $siteCode/$siteError, not the repair loop's $code: that variable is
+# reused inside the app section, and a probe that reads someone else's answer is
+# how the site alert would fire on a repair's status code.
 $site = $env:PUBLIC_SITE_URL
 if (-not $site) { $site = "https://townreporter.org" }
+$siteCode = 0
+$siteError = ""
 try {
-  $code = (Invoke-WebRequest $site -UseBasicParsing -TimeoutSec 30).StatusCode
-  if ($code -ne 200) { Write-Log "public: $site answered $code" }
+  $siteCode = (Invoke-WebRequest $site -UseBasicParsing -TimeoutSec 30).StatusCode
+  if ($siteCode -ne 200) { Write-Log "public: $site answered $siteCode" }
 } catch {
-  Write-Log "public: $site unreachable: $($_.Exception.Message)"
+  $siteError = $_.Exception.Message
+  Write-Log "public: $site unreachable: $siteError"
+}
+$siteHealthy = ($siteCode -eq 200)
+
+# --- Nightly backup -------------------------------------------------------
+<#
+  One backup a night, and this file is the clock because the owner is shrinking
+  programs rather than adding them: the paper's own watchdog already runs every
+  five minutes, so "is a backup due" is one more question it asks instead of one
+  more scheduled task on the machine.
+
+  The rule and the work are the library's, not this file's. Test-TownReporterBackupDue
+  is the 2 AM / 20 hour window; Invoke-TownReporterBackupRun is the SAME function
+  promote.ps1 and the Control page's button call, in the same order, under the
+  same lock -- so the nightly run cannot prune differently from the one a person
+  presses, which is the bug that would never be found until the day it mattered.
+
+  Two ways this run declines, both in plain words in the log:
+
+    * an editor job is running -- the one moment a few hundred MB of pg_dump
+      write against the same disk the desk is writing to is worth deferring, and
+      the paper is minutes from a promotion that takes its own backup anyway.
+      'unknown' (no psql, or Postgres not answering) is NOT a reason to skip:
+      skipping on a question that could not be asked would mean one wrong psql
+      path silently stops every backup on this machine for good.
+    * the last attempt FAILED less than thirty minutes ago. The due rule reads
+      the newest file, and a failed dump leaves no file, so without this a
+      failure would be retried every five minutes all day long -- 288 attempts
+      at real gigabytes each. lastError + lastAttemptAt are the library's own
+      record of exactly that, written before it returned the failure.
+
+  A successful backup needs no such guard: it makes the newest file fresh and
+  the due rule goes quiet on its own.
+
+  Skipped entirely in test mode: a CI runner has no real Postgres to dump, and
+  5433 on this machine never means a runner's database.
+#>
+if ($env:WATCHDOG_TEST_MODE -ne '1') {
+  try {
+    . (Join-Path $PSScriptRoot "lib-backup.ps1")
+    $backupDir = Get-TownReporterBackupDir -App $app
+    $due = Test-TownReporterBackupDue -BackupDir $backupDir
+    if (-not $due.Due) {
+      # Not due is the ordinary answer five minutes at a time; saying so every
+      # run would bury the runs that matter.
+    } else {
+      $stateNow = Get-TownReporterBackupState -App $app
+      $lastAttemptFailed = [bool]($stateNow.lastError -and $stateNow.lastAttemptAt)
+      $minutesSinceAttempt = -1
+      if ($lastAttemptFailed) {
+        try {
+          $attemptedAt = [datetime]::Parse(
+            $stateNow.lastAttemptAt,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal)
+          $minutesSinceAttempt = [int]((Get-Date).ToUniversalTime() - $attemptedAt.ToUniversalTime()).TotalMinutes
+        } catch {
+          # An unreadable timestamp is not a reason to skip: attempt it, and the
+          # attempt writes a fresh one either way.
+          $minutesSinceAttempt = -1
+        }
+      }
+      if ($lastAttemptFailed -and $minutesSinceAttempt -ge 0 -and $minutesSinceAttempt -lt 30) {
+        Write-Log "backup: a backup is due, but the last attempt failed $minutesSinceAttempt minute(s) ago; waiting half an hour before trying again"
+      } else {
+        $desk = Test-TownReporterDeskBusy -App $app
+        if ($desk -eq 'busy') {
+          Write-Log "backup: a backup is due, but an editor job is running; leaving it for the next run"
+        } else {
+          Write-Log "backup: taking the nightly backup ($($due.Reason))"
+          $run = Invoke-TownReporterBackupRun -App $app -LogFile (Join-Path $logDir "backup.log")
+          foreach ($line in $run.Lines) { Write-Log "backup: $line" }
+          if (-not $run.Ok) { Write-Log "backup: NOT good -- $($run.Reason)" }
+        }
+      }
+    }
+  } catch {
+    # A backup that cannot run must not stop the paper being watched, and any
+    # part of it that did run has already written its own state and log.
+    Write-Log "backup: check failed: $($_.Exception.Message) -- the paper is unaffected"
+  }
+}
+
+# --- Alerts ---------------------------------------------------------------
+<#
+  The owner's list, evaluated here because this is the only thing on the
+  machine that runs often enough to notice "down for more than ten minutes":
+  the paper, the public site, the daily scan, and the three backup conditions.
+
+  Facts already measured above, not measured again: $appHealthy (and $appCode /
+  $appError) from the app section, $siteHealthy / $siteError from the public
+  probe, $pgUp from the Postgres section. The scan is one read-only SELECT
+  through psql, the same query ops\control\last-scan.cjs asks, because an alert
+  that only works when the thing that is broken is working is not an alert.
+
+  Active = $null means "not evaluated this run" and it is load-bearing: the
+  library leaves a condition it was not told about exactly as it found it, so a
+  run that cannot read the database never CLEARS a scan alert it could not
+  check. That is why Postgres being down sets scan-missing to $null rather than
+  false.
+
+  The channels are lib-alert.ps1's: logs\alerts.json for the Control page's
+  Attention card, a toast, and ntfy only when ALERT_NTFY_TOPIC is set in .env.
+  Each fires once when it starts and once when it clears; the state file is
+  what remembers which, so a condition that stays broken does not re-alert every
+  five minutes.
+#>
+if ($env:WATCHDOG_TEST_MODE -ne '1') {
+  try {
+    # Both libraries, not just the alert one: the backup conditions below read
+    # the folder and the state with lib-backup.ps1's own functions, and this
+    # section must not depend on the backup section above having run first --
+    # that section is skipped in test mode and can throw on a bad folder.
+    . (Join-Path $PSScriptRoot "lib-backup.ps1")
+    . (Join-Path $PSScriptRoot "lib-alert.ps1")
+    $envFile = Join-Path $app ".env"
+
+    $conditions = @(
+      @{ Id = 'paper-down'; Active = (-not $appHealthy); Detail = $(if ($appHealthy) { "the paper answered 200 on 127.0.0.1:$port" } else { "nothing answered 200 on 127.0.0.1:$port (status=$appCode error='$appError')" }) }
+      @{ Id = 'site-down'; Active = (-not $siteHealthy); Detail = $(if ($siteHealthy) { "$site answered 200" } else { "$site did not answer 200 (status=$siteCode error='$siteError')" }) }
+    )
+
+    if ($pgUp) {
+      $scan = Get-TownReporterScanState -App $app -PgPort ([int]$pgPort)
+      $verdict = Test-TownReporterScanAlert -State $scan -Now (Get-Date)
+      $conditions += @{ Id = 'scan-missing'; Active = $verdict.Active; Detail = $verdict.Detail }
+    } else {
+      $conditions += @{ Id = 'scan-missing'; Active = $null; Detail = 'Postgres is down, so the daily scan could not be read' }
+    }
+
+    # The three backup conditions, built by the library so this run, the manual
+    # run and the Control page's button cannot disagree about whether the
+    # backups are fine. Built from the folder, the state file and the drive
+    # itself -- not from the backup section above, which is skipped in test mode
+    # and can throw; a backup folder that cannot be listed must not take the
+    # paper's own alerts down with it.
+    #
+    # Appended without @() on purpose: that function hands back an array, and
+    # @() around it would append ONE item that IS the array of conditions. See
+    # the note on it in lib-backup.ps1.
+    $conditions += Get-TownReporterBackupAlertConditions -App $app -EnvFile $envFile -MinFreeGb 100 -Now (Get-Date)
+
+    $alerts = Invoke-TownReporterAlertCheck -App $app -EnvFile $envFile -Conditions $conditions -Now (Get-Date)
+    foreach ($e in $alerts.Events) {
+      if ($e.Event -eq 'started') { Write-Log "alert: $($e.Alert.Message) -- $($e.Alert.Detail)" }
+      else { Write-Log "alert cleared: $($e.Alert.Message)" }
+    }
+  } catch {
+    Write-Log "alerts: check failed: $($_.Exception.Message) -- the paper is unaffected"
+  }
 }
 
 if ($repaired.Count -gt 0) { Write-Log "repaired: $($repaired -join ', ')" }

@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.67**. See the [0.6.67 release guide](docs/releases/0.6.67.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
+Repository documentation version: **0.6.68**. See the [0.6.68 release guide](docs/releases/0.6.68.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -176,12 +176,15 @@ healthy and puts the menu's actions behind buttons. One large line reads
 **Everything is up** or **N things need attention**; under it each check is one
 card with a plain verdict and, when it is down, the single button that fixes it.
 The rows are the database, the paper, the public site, the Redlib reader,
-Ollama, the last backup, the last scan and the test copy, and the rows that do
-not matter — Redlib and Ollama — are marked optional and never inflate the
-count.
+Ollama, the last backup, the copy of the backups on D:, the last scan, the
+**Attention** card and the test copy, and the rows that do not matter — Redlib
+and Ollama — are marked optional and never inflate the count. **Attention** says
+in the owner's words what is currently wrong, or that nothing is.
 
-The six buttons carry the menu's own wording: check, restart the paper, restart
-the tunnel, start everything, stop everything, restart the Reddit reader.
+The buttons carry the menu's own wording: check, restart the paper, restart the
+tunnel, start everything, stop everything, restart the Reddit reader — plus
+**Back up now**, which takes a backup and copies it to D: without waiting for
+the night.
 Pressing one streams its output into the page and refreshes the status when it
 finishes. **Stop everything** opens a dialog naming what it will stop and does
 nothing if you cancel. The page also links to the public paper, the desk and the
@@ -382,6 +385,98 @@ Authorization: Bearer <CRON_SECRET>
 Runs every 5 minutes via `ops/cron-tick.ps1`, which reads the secret from
 `.env`. Without the header: 403. With `CRON_SECRET` unset: 503 and does
 nothing — deliberate, so an unconfigured box cannot be poked into working.
+
+---
+
+## Backups
+
+### Where they live, and how many
+
+| Where | What is kept | Set by |
+| --- | --- | --- |
+| `..\townreporter-backups` — the folder beside this checkout | the newest **3** | `ops\lib-backup.ps1` |
+| `D:\TownReporter-backups` | **everything**, while there is room | `BACKUP_OFFSITE_DIR` in `.env` |
+
+Each file is `<database>_YYYY-MM-DD_HHmm.sql` — a plain-SQL `pg_dump` of the
+whole database, about 700 MB for the working edition. The local folder is a
+sibling of the app directory on purpose: it is outside every build, promotion
+and rollback path, so none of those can take a backup with it.
+
+The local folder is pruned to the newest three **only after every local file has
+been proved to be on D:** — same size, same SHA-256, checked on every run. If D:
+is missing, will not take a write, has less than 100 GB free, or a copy fails
+its check, **nothing local is deleted** and the Control page's **Attention** card
+says why. Nothing ever deletes from D:; a full D: stops the copies and alerts,
+and the drive is emptied by a person.
+
+A backup is taken **once a night** by the five-minute watchdog: after 2:00 AM
+local, when the newest backup is older than 20 hours, and not while an editor
+job is running. A lock file means two never run at once. There is no separate
+backup task to register.
+
+To take one by hand at any time — safe while the paper is running — use the
+Control page's **Back up now** button, or:
+
+```powershell
+pwsh -NoProfile -File ops\backup.ps1            # dump, copy to D:, prune, alert
+pwsh -NoProfile -File ops\backup.ps1 -Offsite   # copy what is already here; no dump
+pwsh -NoProfile -File ops\backup.ps1 -Keep 5    # keep more than 3 locally
+```
+
+The log is `logs\backup.log`, and the report the Control page reads is
+`logs\backup-state.json`. Moving the sixty-odd backups an older installation
+already has is one run of `-Offsite`; it is a person's one-time step, not
+anything the machine does by itself.
+
+### Restoring
+
+Stop the paper first (`Stop everything` on the Control page, or
+`ops\stop-townreporter.ps1`), so nothing writes while the database is replaced.
+Take the newest file from either folder and load it into a **new, empty**
+database — do not restore over the live one, and do not let a restore be the
+thing that loses the data you were trying to save:
+
+```powershell
+$pg = "$env:USERPROFILE\scoop\apps\postgresql\current\bin"
+& "$pg\createdb.exe" -p 5433 -U postgres townreporter_restored
+& "$pg\psql.exe" -p 5433 -U postgres -d townreporter_restored -v ON_ERROR_STOP=1 `
+    -f "D:\TownReporter-backups\townreporter_2026-09-26_0215.sql"
+```
+
+Point `DATABASE_URL` in `.env` at `townreporter_restored`, start the paper, and
+check it. If the restore is good, either keep serving from it or rename the two
+databases; the old one is still on disk either way. The dumps are plain SQL, so
+a partial or hand-edited restore is possible with the same `psql` — but a
+truncated dump is a failed backup here, not a short one, so if the file was cut
+short, use the previous night's.
+
+### Turning on phone alerts
+
+Alerts reach the Control page and a Windows notification with no setup. The
+phone push is opt-in and **off by default** — nothing leaves this machine until
+you set it:
+
+1. Install the [ntfy](https://ntfy.sh) app, or open `https://ntfy.sh/` in a
+   browser, and subscribe to a topic whose name nobody can guess — the topic
+   name is the whole secret, and anyone who knows it can read the alerts and
+   send to them.
+2. Put that topic in `.env` on the machine that runs the paper:
+
+   ```
+   ALERT_NTFY_TOPIC=your-long-unguessable-topic
+   ```
+
+3. That is all — the watchdog picks it up on its next run. To stop the push,
+   remove the line or leave it empty.
+
+What is sent is the alert's own sentence — "The paper is not answering on this
+machine", or "No backup has been taken in over a day" — and, when it clears,
+that same sentence with "-- this has cleared" after it. Nothing else goes: no
+story text, no database contents, no editor's work. It goes to
+`https://ntfy.sh`, which is a public service; a self-hosted ntfy is a one-line
+change to `Send-TownReporterAlertPush` in `ops\lib-alert.ps1` if that matters to
+you. Each alert pushes once when it starts and once when it clears, so a phone
+does not buzz every five minutes.
 
 ---
 
