@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.78](docs/releases/0.6.78.md).** The front page's designer round 1: "This week" now reads dates a document itself bears and, failing that, a date a story's own headline and dek name in their own words; "Around the region" and the Opinion block each hide rather than leave a blank half when there's nothing to show; no story anywhere on the reader's side prints the catch-all section tag "misc"; and the lead story's text now spans the full row when "This week" is absent. No migration. GitHub remains the authority for publication state. [0.6.77 release guide](docs/releases/0.6.77.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.79](docs/releases/0.6.79.md).** The Queue's picked row is tinted, as the design drawing tints it. The drawing appends `background:var(--panel)` to a Queue row only when the row is selected, so the list reads as bare paper with rules and the one picked row is its only panel block; the desk drew no picked state at all, leaving the tick in the first column as the row's only sign it was in the bulk bar's set. The ticked row now carries that fill — and, because the desk's rows already painted the same color as `--panel`, the tint is bought by stepping the unticked Queue row back to the page rather than by painting the ticked one, scoped to the Queue's own list so Published, Scan, Drafts and Dark Desk rows keep the fill they had. Every text color on a tinted row passes WCAG AA in both themes. No migration. GitHub remains the authority for publication state. [0.6.78 release guide](docs/releases/0.6.78.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.78 release guide](docs/releases/0.6.78.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.79 release guide](docs/releases/0.6.79.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 

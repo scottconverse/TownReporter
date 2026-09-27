@@ -1,9 +1,11 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.78](0.6.78.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.79](0.6.79.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
+
+- **0.6.79** — The Queue's picked row is tinted, as the design drawing tints it. The drawing builds its Queue row's whole style and appends `background:var(--panel)` only when the row is selected (`docs/design/handoff-2026-09-26/design/Desk Screens.dc.html:284`); the desk drew no picked state at all, so the tick in the first column was the row's only sign it was in the bulk bar's set. The ticked row now carries that fill, and — because the desk's rows already painted the same color as `--panel` — the tint is bought by stepping the **unticked** Queue row back to the page rather than by painting the ticked one. Scoped to the Queue's own list, so Published, Scan, Drafts and Dark Desk rows keep the fill they had, and a killed row still dims. Every text color on a tinted row passes WCAG AA in both themes (weakest on the panel: 10.17:1 light, 8.05:1 dark); nothing under 14px was added and no unpicked row moved. No migration. See [the release guide](0.6.79.md); it does not assert GitHub publication, production deployment, or live-model proof.
 
 - **0.6.78** — The front page, designer round 1 (units BX, BX2, BX3). **"This week"** now reads dates a document itself bears in the forms an agenda, notice or filing actually carries, and, failing that, the one date a story's own headline and dek name in their own words — never the story body. A date range or list is read whole instead of cutting mid-expression, and a line naming only a place or a person is refused in favor of the story's own headline. **"Around the region"** and the Opinion block each hide, rather than leave a blank half, when there's nothing to show; no story anywhere on the reader's side prints the catch-all section tag "misc"; and the lead story's text now spans the full row when "This week" is absent. Small corrections: "1 min read" wording, no repeated "OPINION" label, **Latest stories**' "All stories →" link, one date per row, a configured county printing as configured, three promotional strips removed, **"Useful around town"**'s links moved to the footer, and a tighter phone top bar. No migration. See [the release guide](0.6.78.md); it does not assert GitHub publication, production deployment, or live-model proof.
 

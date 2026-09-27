@@ -3510,6 +3510,37 @@
 .desk-ltr.astra .lead-list.roomy .lead-cell {
   min-width: 0;
 }
+/*
+  Unit BY: the picked row is tinted, as the drawing tints it, and by the same
+  mechanism -- an unpicked row has no fill of its own.
+
+  `Desk Screens.dc.html:284` builds the Queue row's whole style as
+  `display:grid;...;padding:14px 0;border-bottom:1px solid var(--line)` and
+  appends `background:var(--panel)` only when `selected`. So in the drawing the
+  list reads as bare paper with rules and the ONE picked row is the only
+  --panel block in it.
+
+  The desk is the other way round: `.lead-row` above paints every row
+  `background: var(--surface)`, and `--surface` IS the prototype's `--panel`
+  here -- the shell's own mapping (the phase-2a block further down) is
+  `--panel->--surface`, and the values are the same on both sides, #f6f2e7 in
+  light and #27231f in dark. Painting `.picked` with `--surface` alone would
+  therefore change nothing at all. Stepping the UNPICKED row back to the page
+  is what buys the tint: `.lead-list.roomy` (the Queue's own table) is the list
+  this is scoped to, so Published, Scan and Dark Desk rows keep the fill they
+  had.
+
+  The tint is a fill, not a press: it changes no box, so no unpicked row moves
+  -- `padding` below is the drawing's own row padding and is untouched. The
+  killed row keeps working: `.dead` is opacity, which multiplies whatever fill
+  is underneath it.
+*/
+.desk-ltr.astra .lead-list.roomy .lead-row {
+  background: var(--bg);
+}
+.desk-ltr.astra .lead-list.roomy .lead-row.picked {
+  background: var(--surface);
+}
 .desk-ltr.astra .lead-list.roomy .lead-chips {
   display: flex;
   align-items: center;

@@ -338,7 +338,21 @@ export function LeadRowView({
   }
   return (
     <div
-      className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}
+      /*
+        Unit BY: the drawing tints the row that is picked for the bulk bar --
+        `Desk Screens.dc.html:284` builds `rowStyle` with
+        `+ (selected ? "background:var(--panel)" : "")`. The desk drew no
+        picked state at all, so the tick in the first column was the row's only
+        sign it was in the bulk bar's set (BF4 parked this). The state is the
+        one selection box's own `deleteSelected`; `.lead-row.picked` is
+        desk-astra.css.
+      */
+      className={
+        "lead-row" +
+        (lead.status === "killed" ? " dead" : "") +
+        (roomy ? " roomy" : "") +
+        (deleteSelected ? " picked" : "")
+      }
     >
       {/*
         The row's one selection box (defect 1): the design's checkbox in the
