@@ -269,20 +269,33 @@ export function LeadRowView({
       className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}
     >
       {/*
-        The row's one selection box (defect 1): the design's 44px checkbox in
-        the first column. The old "Select for deletion" and "Include in batch
+        The row's one selection box (defect 1): the design's checkbox in the
+        first column. The old "Select for deletion" and "Include in batch
         draft" boxes were a second and third way to select the same row; the
         bulk bar above the table is what they feed, and both of its presses
         take this box's state.
+
+        BF4, defect 2: the drawing draws the box SMALL inside the column -- a
+        24px square with a 2px edge, filled ink with a background-coloured tick
+        when the lead is picked (`Desk Screens.dc.html`). The desk drew a 44px
+        native box that filled the whole track, which read as a button, not a
+        tick. The 44px *press area* is kept by making this element the label
+        around the input, so a press anywhere in the box toggles it; the drawn
+        square is `.queue-box` inside it. See `.queue-check` in desk-astra.css.
       */}
       {onDeleteSelect ? (
-        <input
-          type="checkbox"
-          className="queue-check queue-pick"
-          checked={deleteSelected}
-          aria-label={`Select ${lead.headline} for deletion`}
-          onChange={(event) => onDeleteSelect(event.target.checked)}
-        />
+        <label className="queue-check">
+          <input
+            type="checkbox"
+            className="queue-pick"
+            checked={deleteSelected}
+            aria-label={`Select ${lead.headline} for deletion`}
+            onChange={(event) => onDeleteSelect(event.target.checked)}
+          />
+          <span className="queue-box" aria-hidden="true">
+            {deleteSelected ? "✓" : null}
+          </span>
+        </label>
       ) : (
         <span className="queue-pick" aria-hidden="true" />
       )}
@@ -301,7 +314,17 @@ export function LeadRowView({
         <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
           {lead.headline}
         </Link>
-        <p className="lead-why">{lead.why}</p>
+        {/*
+          BF4, defect 1: the Queue row is chips + headline, as drawn. The "why"
+          summary line the desk printed under the headline is not in the
+          drawing's row, and it is what made every row ~113px against the
+          drawing's ~75. It stays reachable -- the lead page prints it as
+          `.side-why` (desk.story.$leadId.tsx), which is where the row's own
+          "More ▾ → Open" goes -- so the reason the lead was filed is one press
+          away rather than gone. A row that is not `roomy` still draws it: the
+          prop is opt-in and only the Queue's table passes it.
+        */}
+        {roomy ? null : <p className="lead-why">{lead.why}</p>}
         {onBatchSelect ? (
           <label className="meta">
             <input

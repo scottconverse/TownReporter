@@ -305,8 +305,20 @@ async function main() {
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
   const writeStoryRow = page.locator(".lead-row", { hasText: writeStoryHeadline }).first();
   await writeStoryRow.waitFor({ timeout: 20_000 });
-  await writeStoryRow.getByText("Filed from the Write a story box.").waitFor({ timeout: 10_000 });
-  step("the Write a story lead is filed and listed in the Queue");
+  // Unit BF4: the row is chips + headline, as drawn -- the "why" summary it
+  // used to print under the headline left the row (that line is what made every
+  // row ~113px against the drawing's ~75). The same sentence is one press away
+  // on the lead page, which is where the row's own "More ▾ → Open" goes, so the
+  // walk follows that door and asserts the why is still reachable.
+  await openRowMenu(writeStoryRow);
+  await writeStoryRow.getByRole("link", { name: "Open", exact: true }).click();
+  await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
+  // The inspector opens on Checks, where `.side-why` is in the page but
+  // `hidden` -- a hidden element has no text to read (same door
+  // import-any-format-e2e.mjs:483 opens).
+  await page.locator("#inspector-tab-reporting").click();
+  await page.locator(".side-why").getByText("Filed from the Write a story box.").waitFor({ timeout: 10_000 });
+  step("the Write a story lead is filed and listed in the Queue, with its why on the lead page");
 
   // ── Queue: file a lead, then delete it, then undo ─────────────────────────
   // Unit BF3: the "File a lead yourself" button is off the controls row (the

@@ -718,9 +718,20 @@
     The design's ScoreBadge: a 44px square, 20/800, tabular. It is a square
     rather than a fixed 44px box so the Large text step grows the badge
     instead of clipping the number.
+
+    BF4, defect 3: `min-width` alone was not a square. The badge is a grid item
+    in a 52px track and its default `justify-self` is `stretch`, so it filled
+    the whole track -- measured at 1280 that is 52px wide by 44px tall, a
+    rectangle. The drawing sets an explicit `width:44px;height:44px` in the same
+    52px track (`Desk Screens.dc.html`, the `sc()` helper), so the width is now
+    explicit too and the badge is 44x44 with the track's remaining 8px empty.
   */
+  width: calc(44px * var(--ts));
+  height: calc(44px * var(--ts));
   min-width: calc(44px * var(--ts));
   min-height: calc(44px * var(--ts));
+  justify-self: start;
+  flex: none;
   padding: 0 4px;
   border: 1px solid var(--line);
   border-radius: 0;
@@ -3272,10 +3283,67 @@
 .desk-ltr.astra .queue-bulk .btn.solid:hover:not(:disabled) {
   background: color-mix(in srgb, #111 84%, var(--a));
 }
+/* BF4, defect 2: the row's selection box, drawn as the drawing draws it.
+
+   The drawing puts a 24px square with a 2px edge in the row's 44px first
+   track, and fills it ink with a background-coloured tick when the lead is
+   picked (`Desk Screens.dc.html`: `width:24px;height:24px;...border:2px solid
+   var(--ink2)` / `background:var(--ink);color:var(--bg)`). Measured before this
+   rule existed, the desk drew a 44px native box that filled the whole track --
+   it read as a button, not a tick.
+
+   The 44px PRESS AREA is kept: this element is the `<label>` around the input,
+   so a press anywhere in the 44px box toggles it, and that is also the desk's
+   minimum target size. The input itself is stretched over the whole label
+   rather than left at its 17px default, because a native control's own box
+   would otherwise draw on top of the drawn square.
+
+   The tick is a character rather than a mask: the drawing draws "✓" as text
+   (`box: selected ? "✓" : ""`), and a text glyph needs no data URI to keep its
+   colour. It is `--fg` on `--bg` when picked -- ink on cream in light, light on
+   warm black in dark -- which is a stronger pair than the `--sel` this box used
+   to paint itself with through `accent-color` (contrast-audit.mjs checks
+   `--sel` on `--bg` as a 3:1 non-text indicator; see styles.css:587). */
 .desk-ltr.astra .queue-check {
+  position: relative;
+  display: grid;
+  place-items: center;
   width: 44px;
   height: 44px;
   min-height: 44px;
+}
+.desk-ltr.astra .queue-check > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.desk-ltr.astra .queue-check > .queue-box {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 2px solid var(--fg2);
+  background: transparent;
+  color: var(--bg);
+  font: 800 calc(14px * var(--ts))/1 var(--fd);
+  /* The glyph sits on the drawn square's centre, not on the box's baseline. */
+  line-height: 1;
+  user-select: none;
+}
+.desk-ltr.astra .queue-check > input:checked + .queue-box {
+  background: var(--fg);
+  border-color: var(--fg);
+}
+/* The native ring would draw on the invisible input, so focus paints the drawn
+   square instead. `:has` is already the desk's tool for this (styles.css:333). */
+.desk-ltr.astra .queue-check:has(> input:focus-visible) > .queue-box {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 /* The evidence cell: the drawn EvidenceMeter's squares plus the count. The
    drawing prints "3 opened · 1 could not"; the desk has no per-lead failure
@@ -3331,7 +3399,12 @@
 .desk-ltr.astra .lead-list.roomy .lead-row {
   grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px var(--queue-acts-w);
   column-gap: 16px;
-  align-items: start;
+  /* BF4: the drawing centers the row's cells (`align-items:center`) so the 44px
+     boxes -- the selection square and the score -- sit on the middle of the
+     headline rather than on its top edge. BF3 left this at `start` when a row
+     was a 113px card whose cells all began at the same line; a row this short
+     makes the difference visible. */
+  align-items: center;
   padding: 10px 24px;
 }
 /* The lead cell: chips on the first line (NEW / HELD / ≈ PRINTED / Seen again
@@ -3373,26 +3446,31 @@
   gap: 6px;
   max-width: none;
 }
+/* BF4, defect 1: the drawn headline is 16/700 and AT MOST TWO LINES -- a third
+   line is a row taller than the drawing's, which is the whole of this unit.
+   `-webkit-box` + `line-clamp` is the desk's existing clamp idiom (the `why`
+   line used it, and `.lead-why` on the story page still does).
+
+   The clamp that used to sit here for the row's `why` line is gone with the
+   line itself: `desk-leads.tsx` renders it only when the row is not `roomy`,
+   and the Queue's table is the only caller that passes `roomy`. */
 .desk-ltr.astra .lead-list.roomy .hl-link {
-  display: block;
-  margin-top: 4px;
-  font-size: calc(16px * var(--ts));
-}
-.desk-ltr.astra .lead-list.roomy .lead-why {
   display: -webkit-box;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin: 2px 0 0;
+  margin-top: 4px;
+  font-size: calc(16px * var(--ts));
 }
 .desk-ltr.astra .lead-list.roomy .row-acts {
   margin-top: 0;
   flex-wrap: nowrap;
   align-items: center;
 }
-.desk-ltr.astra .lead-list.roomy .queue-filed {
-  padding-top: 4px;
-}
+/* BF4: no `padding-top` nudge on the age any more. It existed to push a
+   top-aligned cell down onto the headline's line; with the row's cells centered
+   (`align-items: center`, as the drawing sets) that nudge would push the age
+   2px BELOW the line it is meant to sit on. */
 /* The drawn table header (README "3. Queue"): one line of column labels over
    the rows, with the select-all box in the checkbox column -- the same track
    list, gap and 24px inset the rows use. The inset matters: the rows sit in

@@ -789,17 +789,25 @@ function QueuePage() {
             leads the table is showing, which is what the strip's label said.
           */}
           <div className="queue-head">
-            <input
-              type="checkbox"
-              className="queue-check queue-pick"
-              checked={allShownSelected}
-              aria-label={`Select all${bulkSelectLabel(filter) ? ` ${bulkSelectLabel(filter)}` : ""} leads shown (${shown.length})`}
-              onChange={(event) => {
-                setConfirmingBulkDelete(false);
-                setBulkDeleteNotice("");
-                setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
-              }}
-            />
+            {/* BF4, defect 2: same box as every row's own -- the drawn 24px
+                square inside the 44px press area (see `.queue-check` in
+                desk-astra.css). */}
+            <label className="queue-check">
+              <input
+                type="checkbox"
+                className="queue-pick"
+                checked={allShownSelected}
+                aria-label={`Select all${bulkSelectLabel(filter) ? ` ${bulkSelectLabel(filter)}` : ""} leads shown (${shown.length})`}
+                onChange={(event) => {
+                  setConfirmingBulkDelete(false);
+                  setBulkDeleteNotice("");
+                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+                }}
+              />
+              <span className="queue-box" aria-hidden="true">
+                {allShownSelected ? "✓" : null}
+              </span>
+            </label>
             <span>Score</span>
             <span>Lead</span>
             <span>Evidence</span>
