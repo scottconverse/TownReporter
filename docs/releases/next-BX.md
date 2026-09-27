@@ -110,9 +110,10 @@ machine.
 Every number below is from a command run in this working copy.
 
 - `node --test scripts/ops-scripts.test.mjs` — exit 0, 59 tests, 59 pass, 0 fail.
-- `node scripts/with-app-env.mjs node --test` over the front-page, story-dates,
-  story-area, section-types, editorial and paper-context test files — exit 0,
-  147 tests, 141 pass, 6 skipped, 0 fail.
+- `node scripts/with-app-env.mjs node --test` over `story-dates`, `story-area`,
+  `section-types` and `editorial` — exit 0, 77 tests, 77 pass, 0 fail; and over
+  the two paper-identity files, which item 6 reaches — exit 0, 12 tests, 6 pass,
+  6 skipped (the end-to-end half skips without a database), 0 fail.
 - `scripts/front-page-river-e2e.mjs` — exit 0.
 - `scripts/paper-panels.mjs` — exit 0.
 - A Playwright walk over the built server — exit 0, 113 expectations, 0 failed.
