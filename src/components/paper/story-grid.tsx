@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { isMiscTopic } from "@/lib/news/section-types";
 
 /**
  * A front-page story cell, and the ruled grid the cells sit in.
@@ -14,6 +15,12 @@ import { Link } from "@tanstack/react-router";
  * from `newsroom_sections` (`0045_configurable_sections.sql`) and a paper can
  * rename one at any time. Callers resolve with `usePublicSections`, which is
  * what `index.tsx` already does for every other section label.
+ *
+ * A story in the "misc" catch-all prints no kicker at all (unit BX): its
+ * section is a filing instruction, not a part of the paper, and the reader's
+ * side never shows it. `read` is the bare number of minutes -- the label
+ * ("2 min read") belongs to the caller, which is what the lead prints and what
+ * the design's own cell prints.
  */
 export function StoryCell({
   section,
@@ -30,9 +37,10 @@ export function StoryCell({
   slug: string;
   topic?: string;
 }) {
+  const misc = isMiscTopic(topic);
   return (
     <article className="storycell">
-      {topic ? (
+      {misc ? null : topic ? (
         <Link className="storysec" to="/" search={{ topic }}>
           {section}
         </Link>
@@ -45,7 +53,7 @@ export function StoryCell({
         </Link>
       </h3>
       <span className="storymeta">
-        {date} · {read} read
+        {date} · {read} min read
       </span>
     </article>
   );

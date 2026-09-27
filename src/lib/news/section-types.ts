@@ -1,3 +1,33 @@
+/**
+ * The catch-all bucket, as it is stored.
+ *
+ * "misc" is a stored topic value, not a section anyone configured: it is what
+ * a story carries when the scanner could not place it, and its name reads as a
+ * filing instruction rather than as news. It appears nowhere in this codebase
+ * as a constant -- the rows are data -- so the reader side needs one predicate
+ * to recognize it, and this is it.
+ *
+ * Unit BX: readers never see it. The desk keeps its labels, so this is
+ * deliberately NOT applied to `useEditorSections()`: an editor looking at the
+ * desk's counts needs to see every bucket a story can be filed under.
+ */
+const MISC_TOPICS = new Set(["misc", "miscellaneous"]);
+
+/**
+ * Is this stored topic (or section key) the catch-all bucket?
+ *
+ * Case-insensitive, and tolerant of a trailing period, because the value is
+ * data: a section row the owner renamed to "Misc." is still the same bucket.
+ */
+export function isMiscTopic(topic?: string | null): boolean {
+  return MISC_TOPICS.has(
+    (topic ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\.$/, ""),
+  );
+}
+
 export type Section = {
   key: string;
   name: string;

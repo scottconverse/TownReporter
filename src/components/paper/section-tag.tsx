@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
+import { isMiscTopic } from "@/lib/news/section-types";
 
 /**
  * The yellow section label that sits over a lead or article headline.
@@ -29,6 +30,12 @@ import { Link } from "@tanstack/react-router";
  * `scripts/paste-one-story-e2e.mjs:523`). It is a hook, not a style: `sectiontag`
  * already sets every declaration this element needs and still wins the `tag`
  * rules it does not set here.
+ *
+ * A "misc" topic renders NOTHING (unit BX): the catch-all is a filing
+ * instruction rather than a part of the paper, and the reader side never shows
+ * it. Every caller here is reader-facing (the lead, the article's breadcrumb),
+ * so the suppression belongs in this one place. A caller that prints a
+ * separator beside the tag must check `isMiscTopic` itself.
  */
 export function SectionTag({
   children,
@@ -40,6 +47,7 @@ export function SectionTag({
   /** Extra classes for the element, e.g. the article head's `tag` hook. */
   className?: string;
 }) {
+  if (isMiscTopic(topic)) return null;
   const cls = className ? `sectiontag ${className}` : "sectiontag";
   if (topic) {
     return (

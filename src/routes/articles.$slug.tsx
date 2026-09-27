@@ -13,6 +13,7 @@ import { parseUrlList, siteUrl } from "@/lib/paper";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import { usePublicSections } from "@/lib/use-sections";
+import { isMiscTopic } from "@/lib/news/section-types";
 import { ProvenanceBlock } from "@/components/provenance";
 import { DatesPanel } from "@/components/paper/dates-panel";
 import { SectionTag } from "@/components/paper/section-tag";
@@ -368,11 +369,20 @@ function ArticlePage() {
             <Link to="/" search={{}}>
               Front page
             </Link>
-            <span>/</span>
-            <SectionTag topic={article.topic} className="tag">
-              {sectionName}
-              {isOpinion ? " · Perspective" : ""}
-            </SectionTag>
+            {/*
+              A "misc" story prints no tag anywhere on the reader side, so it
+              also prints no separator: the crumb would otherwise read
+              "Front page /" and trail off (unit BX). The desk keeps its labels.
+            */}
+            {isMiscTopic(article.topic) ? null : (
+              <>
+                <span>/</span>
+                <SectionTag topic={article.topic} className="tag">
+                  {sectionName}
+                  {isOpinion ? " · Perspective" : ""}
+                </SectionTag>
+              </>
+            )}
           </div>
           <h1>{article.headline}</h1>
           {article.dek ? <p className="dek">{article.dek}</p> : null}

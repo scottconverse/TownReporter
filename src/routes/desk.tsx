@@ -60,7 +60,15 @@ function editorPaperIdentity(config: PaperConfig): PaperIdentity {
     namedOutlets: _namedOutlets,
     ...identity
   } = config;
-  return identity;
+  /*
+    The county is a `dark_settings` setting and `PaperConfig` does not carry it,
+    so the desk's own context says null (unit BX added the field to the
+    identity for the PUBLIC pill row, whose value comes from
+    `getPaperIdentityFn`). The desk's geography select keeps printing the
+    generic word "County", exactly as it did before -- naming the county there
+    is a desk change this unit was not asked to make.
+  */
+  return { ...identity, county: null };
 }
 
 /*
