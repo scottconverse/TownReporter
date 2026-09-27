@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AI_DISCLOSURE } from "@/components/ai-disclosure";
+import { ReadBeacon } from "@/components/read-beacon";
 import { PaperShell } from "@/components/paper-chrome";
 import { usePaper } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
@@ -20,6 +21,8 @@ function How() {
   const PAPER = usePaper();
   return (
     <PaperShell compact>
+      {/* Reaching this page is the trust signal "How we reported this" reached. */}
+      <ReadBeacon />
       <div className="infopage">
         <h1 className="enter-fade font-display text-4xl font-semibold">How we report</h1>
         <div className="stagger-in mt-6 max-w-2xl space-y-4 text-lg leading-7 text-ink-2">

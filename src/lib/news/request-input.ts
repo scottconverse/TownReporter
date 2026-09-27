@@ -14,6 +14,8 @@ import type { ModelEffort } from "./provider-registry.ts";
   only `schema.ts` and `desk-copy.ts`, so the graph stays acyclic.
 */
 import { TODO_DETAIL_MAX, TODO_TEXT_MAX, clipTodoText } from "./notes.ts";
+/* The four geography keys, owned by the paper's pills; this file only asks. */
+import { cleanStoryArea } from "../story-area.ts";
 
 /*
   Bounded input for the server functions this unit was scoped to: publish,
@@ -147,6 +149,10 @@ export const LIMITS = {
   followUpWho: 200,
   followUpWhat: 400,
   followUpReply: 2000,
+  /** `follow-ups.ts:395` cuts one target at 500 characters. */
+  aiFollowUpTarget: 500,
+  /** `follow-ups.ts:400` cuts the saved model choice at 120. */
+  aiFollowUpModel: 120,
   /**
    * A correction body. The form caps it at 2000 (`correction-form.tsx:71`)
    * and the server checked only a minimum, so there was no upper bound at all.
@@ -197,6 +203,28 @@ export const LIMITS = {
   /** A Reddit post's title and body. */
   redditTitle: 300,
   redditExcerpt: 4000,
+
+  /*
+    Unit BK, the editor's new dialogs. Two ceilings with no existing twin: the
+    Hold dialog's note (a sentence or two for a person reading it back under
+    Held) and the "new material" box on Add to story, which is a paste of its
+    own and so is bounded like one rather than like the story it joins.
+  */
+  /** `kill-reasons.ts` HOLD_CHOICES; a hold note is a line, not a memo. */
+  holdNote: 1000,
+  /** The Add to story material box. A pasted record, not a whole story. */
+  addToMaterial: 20_000,
+  /**
+   * The "Add a lead" box -- "Paste a URL, or describe what you heard".
+   *
+   * Not `storyText` (20 MB): this is one field on one dialog, and a ceiling
+   * that big is a ceiling that only ever admits an abusive body. Not
+   * `addToMaterial` either, even though the number is the same -- the two are
+   * different fields on different dialogs, and sharing a constant would make
+   * tightening one silently tighten the other.
+   * `editor-dialog-actions.server.ts` trims to the same number before filing.
+   */
+  leadPaste: 20_000,
   /** `story-documents.server.ts:123` refuses more than 22 ids. */
   documentIds: 22,
   /** `sections.server.ts:154/170/173/175` and the key regex at :162 (40). */
@@ -329,13 +357,28 @@ export function cleanPublishId(raw: unknown): number | null {
  * above: a request is not the place to discover that the section name is long.
  * A clipped section that does not match the draft's own is refused by the gate
  * with a plain sentence, which is the honest outcome.
+ *
+ * 0.6.71 adds `area`: the geography the publish step chose, for the paper's
+ * pills. It is dropped rather than refused when it is not one of the four keys
+ * -- absent means the home town, so a caller from before this release and a
+ * select the editor never touched land in the same place, and neither is an
+ * error. `cleanStoryArea` is the one place that decides what a key is.
  */
-export function cleanPublishRequest(raw: unknown): { leadId: number | null; topic?: string } {
+export function cleanPublishRequest(raw: unknown): {
+  leadId: number | null;
+  topic?: string;
+  area?: string;
+} {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-    const o = raw as { leadId?: unknown; topic?: unknown };
+    const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown };
     const leadId = cleanPublishId(o.leadId);
     const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, LIMITS.topic) : "";
-    return topic ? { leadId, topic } : { leadId };
+    const area = cleanStoryArea(o.area);
+    return {
+      leadId,
+      ...(topic ? { topic } : {}),
+      ...(area ? { area } : {}),
+    };
   }
   return { leadId: cleanPublishId(raw) };
 }
@@ -355,17 +398,6 @@ export const updateArticleHeadlineInput = z.object({
       typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
     z.string(),
   ),
-});
-
-/** "Suggest headlines": the lead, and the headline the editor is looking at. */
-export const suggestHeadlinesInput = z.object({
-  leadId: publishId,
-  headline: z
-    .preprocess(
-      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
-      z.string(),
-    )
-    .optional(),
 });
 
 /*
@@ -687,6 +719,34 @@ export const modelEffortOrNull = modelEffortValue.nullable();
  * 4 MB string travelling to the registry to be ignored there.
  */
 export const modelEffortLoose = modelEffortValue.nullable().catch(null);
+
+/**
+ * "Suggest headlines": the lead, and the headline the editor is looking at.
+ *
+ * It sits HERE, below `modelChoiceText` and `modelEffortLoose`, and not up with
+ * the other publish-era schemas where it was first written. `z.object({...})`
+ * runs the moment this module loads, so a field list that names a `const`
+ * declared further down the file is not a style question -- it throws
+ * `Cannot access 'modelChoiceText' before initialization` at import, before any
+ * dialog is drawn.
+ *
+ * Unit BK: the Headline dialog draws the model row the reference draws, so this
+ * call takes the same optional pair as every other AI press in the desk
+ * (`addLeadInput`, `findSourcesInput`, `weaveIntoStoryInput`). Both absent is
+ * the old call exactly -- `performSuggestHeadlines` passes "auto" and the
+ * desk's own resolution decides, which is what it did before the row existed.
+ */
+export const suggestHeadlinesInput = z.object({
+  leadId: publishId,
+  headline: z
+    .preprocess(
+      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
+      z.string(),
+    )
+    .optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.optional(),
+});
 export const researchScopeValue = z.enum(["public", "supplied"]);
 export const EVIDENCE_DECISIONS = ["keep", "remove"] as const;
 
@@ -936,6 +996,44 @@ export const followUpReplyInput = z.object({
   repliedOn: z.string().max(40).nullable().optional(),
 });
 
+/*
+  Redesign phase 6: AI follow-ups (`follow-ups.ts:358-402`, migrations/0101).
+
+  The two enums are written out rather than imported from the vocabulary in
+  `follow-up-copy.ts`, which is the file's convention everywhere else and is
+  what puts the legal values next to the columns they land in. They mirror
+  `AGENT_KINDS` and `FOLLOW_UP_SCHEDULES` there, and the 0101 check constraints
+  behind them; a value added in one place without the others is what
+  `follow-up-migration.test.ts` fails on.
+*/
+
+/** `desk.ts:2791` createAiFollowUp and `desk.ts:2796` updateAiFollowUp. */
+export const aiFollowUpInput = z.object({
+  leadId: nullableId.optional(),
+  articleId: nullableId.optional(),
+  what: z.string().trim().min(1).max(LIMITS.followUpWhat),
+  agentKind: z.enum(["recheck", "search", "agenda"]),
+  schedule: z.enum(["2h", "6h", "12h", "daily", "weekly", "posting-days"]),
+  /** `follow-ups.ts:389` takes at most 8, each cut at 500. */
+  targets: z.array(z.string().max(LIMITS.aiFollowUpTarget)).max(8).optional(),
+  modelChoice: z.string().max(LIMITS.aiFollowUpModel).optional(),
+});
+
+/** `desk.ts:2796` updateAiFollowUp. */
+export const aiFollowUpUpdateInput = aiFollowUpInput.extend({ id: rowId });
+
+/** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
+export const followUpActionInput = z.object({
+  id: rowId,
+  action: z.enum(["pause", "resume", "stop", "done", "run-now"]),
+});
+
+/** `desk.ts:2860` listFollowUpFindings (`input ?? {}`). */
+export const followUpFindingsInput = z.preprocess(
+  (v) => (v === undefined || v === null ? {} : v),
+  z.object({ limit: z.number().int().positive().max(50).optional() }),
+);
+
 /** `desk.ts:2510` overrideNamedOutlet. */
 export const outletInput = z.object({ leadId: rowId, outlet: z.string().max(LIMITS.outlet) });
 
@@ -1023,6 +1121,12 @@ export const darkRunInput = z.object({
 export const darkOpenInput = z.object({
   paste: z.string().max(LIMITS.darkPaste),
   title: z.string().max(LIMITS.leadHeadline).optional(),
+  /*
+    Unit BK: the dark-file dialog draws three Limits, and the dial is stored as
+    `investigations.budget` in hops. Absent = the 5 the open path has always
+    used, so every existing caller is unchanged.
+  */
+  budget: z.number().int().min(1).max(20).optional(),
 });
 
 /** `dark.ts:2217` / `dark.ts:3617`: a bare id, or the step's dials. */
@@ -1363,3 +1467,104 @@ export const modelAssignmentRowsInput = z
     }),
   )
   .max(LIMITS.modelAssignments);
+
+/* --- editor-dialog-actions.ts (Unit BK, the editor's new dialogs) --------- */
+
+/*
+  Six schemas for the dialogs the redesign adds. Four of them reach a model
+  (`findSources`, `weaveIntoStory`, `addLead` and `chooseHeadline`'s
+  suggestions) or an existing desk action; the Hold dialog stores a reason and
+  nothing else, and the kill pattern reads and never writes.
+
+  The `choice` on Hold is an enum of the keys `kill-reasons.ts` defines, not the
+  labels the design draws. A label is copy and copy changes; the stored value
+  has to survive that. `"none"` is "Hold, no reason" -- a real press that stores
+  that the editor chose not to say why, so a later reader can tell it from a
+  dialog that was never opened.
+*/
+
+/** `editor-dialog-actions.ts` holdLead. */
+export const holdLeadInput = z.object({
+  id: publishId,
+  choice: z.enum(["record-or-date", "follow-up", "not-now", "none"]),
+  note: z.string().max(LIMITS.holdNote).optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` sourceKillPattern and findSources.
+ *
+ * The pattern's input is one source row id: it reads leads, it never writes.
+ * The find-sources scope is an enum because it selects one of three prompts,
+ * and a free-text scope would reach a template that has no branch for it.
+ */
+export const sourceKillPatternInput = z.object({ sourceId: publishId });
+
+export const findSourcesInput = z.object({
+  topic: z.string().max(LIMITS.leadWhy),
+  scope: z.enum(["records", "organizations", "everything"]),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` weaveIntoStory (`story-documents.server.ts:123`
+ * caps 22).
+ *
+ * `saveText` is the dialog's second press. The design's own foot line is
+ * "You'll see exactly what changed before saving", so the first press computes
+ * the new body and saves nothing; the editor reads the two versions and the
+ * confirm sends back the exact bytes it was shown. Re-running the model on the
+ * confirm would rewrite the prose after the editor approved it.
+ *
+ * `mode` is required rather than defaulted. Two of the three modes never reach a
+ * model (`ADD_TO_MODES`' `ai: false`), and a default would silently turn a
+ * request that forgot to say "paste in as-is" into a model call -- exactly the
+ * thing an editor picking "No AI" was avoiding.
+ */
+export const weaveIntoStoryInput = z.object({
+  leadId: publishId,
+  mode: z.enum(["weave", "update", "as-is"]),
+  material: z.string().max(LIMITS.addToMaterial),
+  documentIds: z.array(idText).max(22).optional(),
+  /** The reviewed body. Present only on the confirm press. */
+  saveText: z.string().max(LIMITS.storyBody).optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` addLead: the whole "Add a lead" dialog in one call.
+ *
+ * ONE SCHEMA, THREE ENDINGS. The design's "Then" is a choice on one dialog, not
+ * three dialogs, so the branch is a field rather than three entry points -- and
+ * it is required, because two of the three endings spend money and a default
+ * would decide that for an editor who did not.
+ *
+ * `paste` carries the ceiling a pasted story carries (`LIMITS.storyText`): the
+ * field is drawn as "Paste a URL, or describe what you heard", and a tip that
+ * arrives as a whole forwarded article is the ordinary case, not an abuse.
+ * `why` is optional in the design ("Optional note for the AI"), so it is
+ * optional here -- a required field would be a form the owner did not draw.
+ *
+ * There is no `headline` and no `topic`. The design draws neither, so the
+ * headline is derived from the paste by the same rule the Dark Desk open path
+ * uses, and the section is the `council` default `fileLead` already applies.
+ */
+export const addLeadInput = z.object({
+  paste: z.string().max(LIMITS.leadPaste),
+  why: z.string().max(LIMITS.leadWhy).optional(),
+  then: z.enum(["score", "draft", "as-is"]),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` chooseHeadline: the "Use this headline" press.
+ *
+ * The three suggestions come from the desk's existing `suggestHeadlines`, which
+ * already takes `{leadId, headline}`; this is only the press that keeps one.
+ */
+export const chooseHeadlineInput = z.object({
+  id: publishId,
+  headline: z.string().max(LIMITS.leadHeadline),
+});

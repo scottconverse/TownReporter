@@ -2150,9 +2150,428 @@
   font-size: calc(0.875rem * var(--ts));
   color: var(--fg2);
 }
+/*
+  Form fields inside a dialog. They live here rather than in desk-astra.css
+  because the dialog is portalled to a wrapper that carries only
+  `.desk-ltr.astra-modal-layer` -- every rule in desk-astra.css is scoped to
+  `.desk-ltr.astra`, which that wrapper does not have, so a field class put
+  there would render unstyled rather than wrong-looking.
+  The geometry is the reference's: a 44px box with a 1px ink border and the
+  serif face, because a field the editor types a question into is reading
+  matter, not chrome.
+*/
+.desk-ltr.astra-modal-layer .fu-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.desk-ltr.astra-modal-layer .fu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .fu-field-hint {
+  font-weight: 500;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .fu-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 0;
+  font-family: var(--fb);
+  font-size: calc(1rem * var(--ts));
+  font-weight: 400;
+  line-height: 1.5;
+  resize: vertical;
+}
+.desk-ltr.astra-modal-layer select.fu-input {
+  resize: none;
+}
+.desk-ltr.astra-modal-layer .fu-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.desk-ltr.astra-modal-layer .fu-choices-label {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+}
+/* A refusal the editor can fix by typing -- the re-check method needs a link,
+   and the dialog says so under the field instead of only disabling the button. */
+.desk-ltr.astra-modal-layer .fu-err {
+  margin: 0;
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(0.9375rem * var(--ts));
+  color: var(--danger);
+}
 @media (max-width: 700px) {
   .desk-ltr.astra-modal-layer {
     padding: 24px 12px;
   }
 }
 
+
+/*
+  ---------------------------------------------------------------- dialogs ---
+  The desk's dialog *contents*, from the redesign's Desk Dialogs.dc.html
+  (docs/design/handoff-2026-09-26). Phase 0 built the shell -- .astra-modal,
+  the head, the foot, .astra-choice-card -- and this is everything that goes
+  *inside* one: tabs, labelled fields, the drop zone, the source preview table,
+  the More list, the model row, and the note preview.
+
+  The reference draws all of it with inline styles. Those are converted here,
+  one class at a time, with the token names this file actually defines: the
+  reference's --ink / --ink2 / --panel / --yel are --fg / --fg2 / --bg2 / --a.
+  Type sizes carry var(--ts) like every other dialog rule so the paper's Large
+  setting scales them too.
+
+  Everything is scoped .desk-ltr.astra-modal-layer, the same scope phase 0
+  uses, because the dialog renders in a portal outside the desk shell.
+*/
+.desk-ltr.astra-modal-layer .astra-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-tab {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+  cursor: pointer;
+}
+.desk-ltr.astra-modal-layer .astra-tab + .astra-tab {
+  border-left: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-tab.on {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.desk-ltr.astra-modal-layer .astra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.desk-ltr.astra-modal-layer .astra-field-label {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+  color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-field-hint {
+  font-weight: 500;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 0;
+  font-family: var(--fl, "Literata", serif);
+  font-size: calc(1rem * var(--ts));
+  line-height: 1.5;
+  resize: vertical;
+}
+.desk-ltr.astra-modal-layer .astra-input::placeholder {
+  color: var(--fg2);
+}
+/* The reference draws each text area at its own height; these are its numbers. */
+.desk-ltr.astra-modal-layer .astra-input.h60 { min-height: 60px; }
+.desk-ltr.astra-modal-layer .astra-input.h70 { min-height: 70px; }
+.desk-ltr.astra-modal-layer .astra-input.h80 { min-height: 80px; }
+.desk-ltr.astra-modal-layer .astra-input.h90 { min-height: 90px; }
+.desk-ltr.astra-modal-layer .astra-input.h100 { min-height: 100px; }
+.desk-ltr.astra-modal-layer .astra-input.h110 { min-height: 110px; }
+.desk-ltr.astra-modal-layer .astra-input.h120 { min-height: 120px; }
+.desk-ltr.astra-modal-layer .astra-input.h180 { min-height: 180px; }
+
+.desk-ltr.astra-modal-layer .astra-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.desk-ltr.astra-modal-layer .astra-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.desk-ltr.astra-modal-layer .astra-choices-label {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+}
+
+/* The drop zone: a dashed 2px ground the editor can drop files on, or open
+   with the button inside it. */
+.desk-ltr.astra-modal-layer .astra-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 22px;
+  border: 2px dashed var(--fg2);
+  background: var(--bg2);
+}
+.desk-ltr.astra-modal-layer .astra-drop.on {
+  border-color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-drop-title {
+  font-weight: 800;
+  font-size: calc(1.125rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-drop-note {
+  font-size: calc(0.9375rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-drop-file {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--fg);
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(0.9375rem * var(--ts));
+  cursor: pointer;
+}
+
+/* The More list: one full-width row per action, its sentence under the label
+   and the verb out at the right edge. */
+.desk-ltr.astra-modal-layer .astra-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.desk-ltr.astra-modal-layer .astra-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 10px 14px;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  font-family: var(--fd);
+  cursor: pointer;
+}
+.desk-ltr.astra-modal-layer .astra-item.danger {
+  border: 2px solid var(--danger);
+}
+.desk-ltr.astra-modal-layer .astra-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.desk-ltr.astra-modal-layer .astra-item-label {
+  font-weight: 800;
+  font-size: calc(1rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-item.danger .astra-item-label {
+  color: var(--danger);
+}
+.desk-ltr.astra-modal-layer .astra-item-note {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.desk-ltr.astra-modal-layer .astra-item-cta {
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+  white-space: nowrap;
+}
+
+/* The source preview table. The head line carries the count and the split;
+   every row is a URL and whether the desk already watches it. */
+.desk-ltr.astra-modal-layer .astra-preview {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg2);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-preview-count {
+  color: var(--fg2);
+  font-weight: 600;
+}
+.desk-ltr.astra-modal-layer .astra-preview-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-preview-mark {
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  border: 2px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-preview-mark.on {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-preview-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.desk-ltr.astra-modal-layer .astra-preview-kind {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 700;
+  color: var(--warn);
+}
+.desk-ltr.astra-modal-layer .astra-preview-kind.on {
+  color: var(--fg2);
+}
+
+/* The note preview: the correction note as readers will see it. */
+.desk-ltr.astra-modal-layer .astra-note-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--fg);
+  background: var(--bg2);
+}
+.desk-ltr.astra-modal-layer .astra-note-label {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-note-text {
+  font-family: var(--fl, "Literata", serif);
+  font-size: calc(1rem * var(--ts));
+  line-height: 1.5;
+}
+.desk-ltr.astra-modal-layer .astra-note-foot {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+
+/* The compare grid: two columns, the saved version and the checked one. */
+.desk-ltr.astra-modal-layer .astra-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-compare-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--bg);
+}
+.desk-ltr.astra-modal-layer .astra-compare-head {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-compare-para {
+  font-family: var(--fl, "Literata", serif);
+  font-size: calc(0.9375rem * var(--ts));
+  line-height: 1.55;
+}
+.desk-ltr.astra-modal-layer .astra-compare-para.add {
+  background: color-mix(in srgb, var(--a) 35%, transparent);
+}
+.desk-ltr.astra-modal-layer .astra-compare-para.del {
+  text-decoration: line-through;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-compare-foot {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+
+/* The model row. The picker brings its own markup, so this is the frame
+   around it -- one bordered line, the same one the reference draws. */
+.desk-ltr.astra-modal-layer .astra-model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  font-size: calc(0.9375rem * var(--ts));
+}
+/*
+  ONE LINE, which is what the reference draws: its two selects carry no width,
+  so they shrink to their content and the note sits beside them --
+  "Model [Automatic] Effort [high] Set per job in Server → Models".
+
+  `.astra-input` is width:100% because a text field in the fields column is
+  meant to fill it, and that is what pushed each select in this row onto a line
+  of its own: a full-width select is the whole flex line, so the wrap landed
+  between every control instead of between rows. Scoped to this row, since a
+  select outside it is the fields column's and still wants the full width.
+*/
+.desk-ltr.astra-modal-layer .astra-model-row .astra-input {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.desk-ltr.astra-modal-layer .astra-model-row-label {
+  font-weight: 800;
+}
+.desk-ltr.astra-modal-layer .astra-model-row-note {
+  color: var(--fg2);
+}
+
+/* Inline messages: validation, and the result of an action. The desk's one
+   error/warn vocabulary, so a dialog never invents a fourth red. */
+.desk-ltr.astra-modal-layer .astra-msg {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 600;
+}
+.desk-ltr.astra-modal-layer .astra-msg.warn { color: var(--warn); }
+.desk-ltr.astra-modal-layer .astra-msg.ok { color: var(--ok); }
+.desk-ltr.astra-modal-layer .astra-msg.danger { color: var(--danger); }

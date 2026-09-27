@@ -88,7 +88,7 @@ test("real queue and story projections carry persisted scanner provenance and im
       origin text, provenance_json text,
       topic_unchosen boolean not null default false
     );
-    create table articles (id integer primary key, lead_id integer, status text, slug text, headline text);
+    create table articles (id integer primary key, lead_id integer, status text, slug text, headline text, area text);
     create table drafts (id integer primary key, lead_id integer, newsroom_id integer, headline text, updated_at timestamptz);
     insert into leads(id,newsroom_id,scan_run_id,headline,why,topic,status,source_urls,newsworthiness,created_at)
     values(1,1,20,'Scanner lead','Why','council','new','[]',0,now());
