@@ -208,6 +208,17 @@ export const LIMITS = {
   holdNote: 1000,
   /** The Add to story material box. A pasted record, not a whole story. */
   addToMaterial: 20_000,
+  /**
+   * The "Add a lead" box -- "Paste a URL, or describe what you heard".
+   *
+   * Not `storyText` (20 MB): this is one field on one dialog, and a ceiling
+   * that big is a ceiling that only ever admits an abusive body. Not
+   * `addToMaterial` either, even though the number is the same -- the two are
+   * different fields on different dialogs, and sharing a constant would make
+   * tightening one silently tighten the other.
+   * `editor-dialog-actions.server.ts` trims to the same number before filing.
+   */
+  leadPaste: 20_000,
   /** `story-documents.server.ts:123` refuses more than 22 ids. */
   documentIds: 22,
   /** `sections.server.ts:154/170/173/175` and the key regex at :162 (40). */
@@ -366,17 +377,6 @@ export const updateArticleHeadlineInput = z.object({
       typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
     z.string(),
   ),
-});
-
-/** "Suggest headlines": the lead, and the headline the editor is looking at. */
-export const suggestHeadlinesInput = z.object({
-  leadId: publishId,
-  headline: z
-    .preprocess(
-      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
-      z.string(),
-    )
-    .optional(),
 });
 
 /*
@@ -698,6 +698,34 @@ export const modelEffortOrNull = modelEffortValue.nullable();
  * 4 MB string travelling to the registry to be ignored there.
  */
 export const modelEffortLoose = modelEffortValue.nullable().catch(null);
+
+/**
+ * "Suggest headlines": the lead, and the headline the editor is looking at.
+ *
+ * It sits HERE, below `modelChoiceText` and `modelEffortLoose`, and not up with
+ * the other publish-era schemas where it was first written. `z.object({...})`
+ * runs the moment this module loads, so a field list that names a `const`
+ * declared further down the file is not a style question -- it throws
+ * `Cannot access 'modelChoiceText' before initialization` at import, before any
+ * dialog is drawn.
+ *
+ * Unit BK: the Headline dialog draws the model row the reference draws, so this
+ * call takes the same optional pair as every other AI press in the desk
+ * (`addLeadInput`, `findSourcesInput`, `weaveIntoStoryInput`). Both absent is
+ * the old call exactly -- `performSuggestHeadlines` passes "auto" and the
+ * desk's own resolution decides, which is what it did before the row existed.
+ */
+export const suggestHeadlinesInput = z.object({
+  leadId: publishId,
+  headline: z
+    .preprocess(
+      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
+      z.string(),
+    )
+    .optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.optional(),
+});
 export const researchScopeValue = z.enum(["public", "supplied"]);
 export const EVIDENCE_DECISIONS = ["keep", "remove"] as const;
 
@@ -1025,6 +1053,12 @@ export const darkRunInput = z.object({
 export const darkOpenInput = z.object({
   paste: z.string().max(LIMITS.darkPaste),
   title: z.string().max(LIMITS.leadHeadline).optional(),
+  /*
+    Unit BK: the dark-file dialog draws three Limits, and the dial is stored as
+    `investigations.budget` in hops. Absent = the 5 the open path has always
+    used, so every existing caller is unchanged.
+  */
+  budget: z.number().int().min(1).max(20).optional(),
 });
 
 /** `dark.ts:2217` / `dark.ts:3617`: a bare id, or the step's dials. */
@@ -1369,9 +1403,10 @@ export const modelAssignmentRowsInput = z
 /* --- editor-dialog-actions.ts (Unit BK, the editor's new dialogs) --------- */
 
 /*
-  Five schemas for the dialogs the redesign adds. Four of them reach a model
-  (`findSources`, `weaveIntoStory`, `researchLead`) or an existing desk action;
-  the fifth is the Hold dialog, which stores a reason and nothing else.
+  Six schemas for the dialogs the redesign adds. Four of them reach a model
+  (`findSources`, `weaveIntoStory`, `addLead` and `chooseHeadline`'s
+  suggestions) or an existing desk action; the Hold dialog stores a reason and
+  nothing else, and the kill pattern reads and never writes.
 
   The `choice` on Hold is an enum of the keys `kill-reasons.ts` defines, not the
   labels the design draws. A label is copy and copy changes; the stored value
@@ -1403,25 +1438,65 @@ export const findSourcesInput = z.object({
   modelEffort: modelEffortLoose.nullable().optional(),
 });
 
-/** `editor-dialog-actions.ts` weaveIntoStory (`story-documents.server.ts:123` caps 22). */
+/**
+ * `editor-dialog-actions.ts` weaveIntoStory (`story-documents.server.ts:123`
+ * caps 22).
+ *
+ * `saveText` is the dialog's second press. The design's own foot line is
+ * "You'll see exactly what changed before saving", so the first press computes
+ * the new body and saves nothing; the editor reads the two versions and the
+ * confirm sends back the exact bytes it was shown. Re-running the model on the
+ * confirm would rewrite the prose after the editor approved it.
+ *
+ * `mode` is required rather than defaulted. Two of the three modes never reach a
+ * model (`ADD_TO_MODES`' `ai: false`), and a default would silently turn a
+ * request that forgot to say "paste in as-is" into a model call -- exactly the
+ * thing an editor picking "No AI" was avoiding.
+ */
 export const weaveIntoStoryInput = z.object({
   leadId: publishId,
+  mode: z.enum(["weave", "update", "as-is"]),
   material: z.string().max(LIMITS.addToMaterial),
   documentIds: z.array(idText).max(22).optional(),
+  /** The reviewed body. Present only on the confirm press. */
+  saveText: z.string().max(LIMITS.storyBody).optional(),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
 });
 
 /**
- * `editor-dialog-actions.ts` researchLead: the two model modes of "Then".
+ * `editor-dialog-actions.ts` addLead: the whole "Add a lead" dialog in one call.
  *
- * "Just file it as-is" is deliberately absent -- it is `fileLead`, which already
- * exists, and giving it a second name here would be a second path to the same
- * insert. The mode is an enum for the same reason the scope above is.
+ * ONE SCHEMA, THREE ENDINGS. The design's "Then" is a choice on one dialog, not
+ * three dialogs, so the branch is a field rather than three entry points -- and
+ * it is required, because two of the three endings spend money and a default
+ * would decide that for an editor who did not.
+ *
+ * `paste` carries the ceiling a pasted story carries (`LIMITS.storyText`): the
+ * field is drawn as "Paste a URL, or describe what you heard", and a tip that
+ * arrives as a whole forwarded article is the ordinary case, not an abuse.
+ * `why` is optional in the design ("Optional note for the AI"), so it is
+ * optional here -- a required field would be a form the owner did not draw.
+ *
+ * There is no `headline` and no `topic`. The design draws neither, so the
+ * headline is derived from the paste by the same rule the Dark Desk open path
+ * uses, and the section is the `council` default `fileLead` already applies.
  */
-export const researchLeadInput = z.object({
-  id: publishId,
-  mode: z.enum(["score", "draft"]),
+export const addLeadInput = z.object({
+  paste: z.string().max(LIMITS.leadPaste),
+  why: z.string().max(LIMITS.leadWhy).optional(),
+  then: z.enum(["score", "draft", "as-is"]),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/**
+ * `editor-dialog-actions.ts` chooseHeadline: the "Use this headline" press.
+ *
+ * The three suggestions come from the desk's existing `suggestHeadlines`, which
+ * already takes `{leadId, headline}`; this is only the press that keeps one.
+ */
+export const chooseHeadlineInput = z.object({
+  id: publishId,
+  headline: z.string().max(LIMITS.leadHeadline),
 });

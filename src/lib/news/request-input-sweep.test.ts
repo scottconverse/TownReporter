@@ -4,9 +4,11 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   LIMITS,
+  addLeadInput,
   addSourceInput,
   artifactIdInput,
   bulkSourceInput,
+  chooseHeadlineInput,
   claimEmail,
   claimToken,
   cleanOrRaw,
@@ -28,9 +30,11 @@ import {
   evidenceCompareInput,
   evidenceUrl,
   fileLeadInput,
+  findSourcesInput,
   followUpCreateInput,
   followUpReplyInput,
   followUpsInput,
+  holdLeadInput,
   idOnlyInput,
   jobIdInput,
   leadIdInput,
@@ -59,11 +63,13 @@ import {
   runScanInput,
   sectionConfigInput,
   slugInput,
+  sourceKillPatternInput,
   sourceStatusInput,
   suggestedSourceReviewInput,
   storyDocumentDownloadInput,
   storyDocumentListInput,
   trashId,
+  weaveIntoStoryInput,
   writeStoryInput,
 } from "./request-input.ts";
 
@@ -842,6 +848,72 @@ const rows: Row[] = [
     valid: "rebuild-search-index",
     bad: [{ why: "oversize action", value: x(LIMITS.opsActionId + 1) }],
   },
+
+  /* editor-dialog-actions.ts -- Unit BK's six new dialogs */
+  {
+    fn: "editor-dialog-actions.ts:56 addLead",
+    run: addLeadInput.parse.bind(addLeadInput),
+    valid: { paste: "https://records.example/minutes", why: "The clerk mentioned it", then: "score" },
+    bad: [
+      { why: "oversize paste", value: { paste: x(LIMITS.leadPaste + 1), then: "as-is" } },
+      { why: "oversize why", value: { paste: "https://a.test/", why: x(LIMITS.leadWhy + 1), then: "as-is" } },
+      // Two of the three endings spend money, so the branch cannot be defaulted.
+      { why: "no Then at all", value: { paste: "https://a.test/" } },
+      { why: "unknown Then", value: { paste: "https://a.test/", then: "draft-it" } },
+    ],
+  },
+  {
+    fn: "editor-dialog-actions.ts:73 holdLead",
+    run: holdLeadInput.parse.bind(holdLeadInput),
+    valid: { id: 5, choice: "record-or-date", note: "Waiting on the minutes" },
+    bad: [
+      { why: "oversize note", value: { id: 5, choice: "none", note: x(LIMITS.holdNote + 1) } },
+      // A label is copy; the stored value has to survive copy changing.
+      { why: "a drawn label instead of a key", value: { id: 5, choice: "Waiting on a record or date" } },
+      { why: "id as text", value: { id: "5", choice: "none" } },
+    ],
+  },
+  {
+    fn: "editor-dialog-actions.ts:84 sourceKillPattern",
+    run: sourceKillPatternInput.parse.bind(sourceKillPatternInput),
+    valid: { sourceId: 7 },
+    bad: [
+      { why: "zero source id", value: { sourceId: 0 } },
+      { why: "negative source id", value: { sourceId: -7 } },
+    ],
+  },
+  {
+    fn: "editor-dialog-actions.ts:95 findSources",
+    run: findSourcesInput.parse.bind(findSourcesInput),
+    valid: { topic: "Longmont water", scope: "records" },
+    bad: [
+      { why: "oversize topic", value: { topic: x(LIMITS.leadWhy + 1), scope: "records" } },
+      // A free-text scope would reach a prompt template with no branch for it.
+      { why: "unknown scope", value: { topic: "water", scope: "the-whole-internet" } },
+      { why: "no scope", value: { topic: "water" } },
+    ],
+  },
+  {
+    fn: "editor-dialog-actions.ts:111 weaveIntoStory",
+    run: weaveIntoStoryInput.parse.bind(weaveIntoStoryInput),
+    valid: { leadId: 5, mode: "as-is", material: "It voted 4-3." },
+    bad: [
+      { why: "oversize material", value: { leadId: 5, mode: "as-is", material: x(LIMITS.addToMaterial + 1) } },
+      { why: "oversize reviewed body", value: { leadId: 5, mode: "weave", material: "x", saveText: x(LIMITS.storyBody + 1) } },
+      // A default here would silently turn "paste in as-is" into a model call.
+      { why: "no mode", value: { leadId: 5, material: "It voted 4-3." } },
+      { why: "unknown mode", value: { leadId: 5, mode: "summarise", material: "x" } },
+    ],
+  },
+  {
+    fn: "editor-dialog-actions.ts:130 chooseHeadline",
+    run: chooseHeadlineInput.parse.bind(chooseHeadlineInput),
+    valid: { id: 5, headline: "Council votes 4-3 to delay the budget" },
+    bad: [
+      { why: "oversize headline", value: { id: 5, headline: x(LIMITS.leadHeadline + 1) } },
+      { why: "no headline", value: { id: 5 } },
+    ],
+  },
 ];
 
 describe("the 0.6.63 sweep bounds every validator it replaced", () => {
@@ -957,6 +1029,9 @@ describe("every swept .validator() calls the schema, not a cast", () => {
     "routine-notice-checks.ts",
     "routine-notice-automation.ts",
     "routine-notice-policy.ts",
+    // Unit BK's six editor dialogs: every one of them parses with a schema in
+    // `request-input.ts` and hands the work to a `perform*` beside it.
+    "editor-dialog-actions.ts",
     // A different directory, same sweep.
     "../ops/dashboard.ts",
   ];
@@ -1008,9 +1083,17 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * `z.object` in `request-input.ts`, called from `desk.ts` in the shape every
    * name beside it uses. The list, not the call, lagged again; a bare cast
    * still fails below.
+   *
+   * Unit BK adds six more, all from the new `editor-dialog-actions.ts`: the
+   * Add-a-lead, Hold, Source-kill-pattern, Find-sources, Add-to-story and
+   * Choose-headline dialogs. Each is a strict `z.object` in `request-input.ts`
+   * with a real ceiling, and one of them is why this sweep is worth having here:
+   * `weaveIntoStoryInput`'s `mode` is REQUIRED, so a request that forgot to say
+   * "paste in as-is" cannot default into a model call. A cast would have made
+   * that a surprise on the editor's bill rather than a refusal.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|opsAction)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to
