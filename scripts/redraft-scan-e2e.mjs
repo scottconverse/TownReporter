@@ -553,8 +553,18 @@ async function main() {
     trafficBeforeRedraft,
     `the fake never answered GET ${FAKE_CONTROL}/__log before the Redraft press`,
   );
+  /*
+    Unit BH5: unit BH2's decision 6 put the direction in front of the redraft --
+    pressing Redraft on the pane now opens RedraftDialog, and the dialog's own
+    "Start redraft" is what starts the run (the dialog arrives holding the
+    direction already on the page, so the same draft is asked for). Two presses
+    where there used to be one; every assertion below is unchanged.
+  */
   await page.getByRole("button", { name: "Redraft", exact: true }).click();
-  step("pressed Redraft once on the story the packet and second document are attached to");
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  await startRedraft.waitFor({ timeout: 30_000 });
+  await startRedraft.click();
+  step("pressed Redraft once on the story the packet and second document are attached to, then started it from the dialog");
 
   const redraftDeadline = Date.now() + Number(process.env.REDRAFT_SCAN_DEADLINE_MS || 300_000);
   while (Date.now() < redraftDeadline) {
