@@ -12,6 +12,12 @@ import {
   HoldLeadDialog,
   NewStoryButton,
 } from "@/components/dialogs";
+/*
+  Unit BW, item 2: the drawn Kill dialog, imported from its own module rather
+  than through the `@/components/dialogs` barrel, which re-exports
+  `editor-dialogs` only. `/desk/story/$leadId` and Today import it the same way.
+*/
+import { KillDialog } from "@/components/dialogs/KillDialog";
 import { AddFollowUpButton } from "@/components/add-follow-up-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
@@ -253,6 +259,13 @@ function QueuePage() {
   */
   const [holdFor, setHoldFor] = useState<LeadRow | null>(null);
   const [darkFor, setDarkFor] = useState<LeadRow | null>(null);
+  /*
+    Unit BW, item 2: the third of those dialogs. The row's "Kill with a reason"
+    press pointed at an immediate `setLeadStatus` while phase 2b's drawn Kill
+    dialog was still on its own branch; that branch is on main now (0.6.76), so
+    the press opens the dialog and the reason it writes reaches the lead.
+  */
+  const [killFor, setKillFor] = useState<LeadRow | null>(null);
   const fileFormRef = useRef<HTMLFormElement>(null);
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
@@ -975,15 +988,14 @@ function QueuePage() {
                   */
                   followUp={<AddFollowUpButton leadId={l.id} headline={l.headline} />}
                   /*
-                    TODO(BN2): the drawn "Kill with a reason" dialog lives on the
-                    phase 2b branch (PR #124), which is not merged here, so this
-                    press keeps the behavior every kill on this screen has today:
-                    an immediate `setLeadStatus`. Nothing an editor can do
-                    changes. The marker is written once, on Today's Kill press
-                    (`desk.index.tsx`), which is the same situation; the report
-                    lists that one place.
+                    Unit BW, item 2: the drawn "Kill with a reason" dialog (phase
+                    2b, PR #124) is on main now, so this press opens it and the
+                    reason is written with the kill. The dialog is mounted once
+                    below and re-pointed by `killFor`, the way this row's Hold
+                    and Dark Desk presses are -- and `onKilled` refreshes
+                    `["leads"]` because the write lands inside the dialog.
                   */
-                  onKillWithReason={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                  onKillWithReason={() => setKillFor(l)}
                   onKillAsDuplicate={
                     /* Unit AK item 4: the reason names the piece the desk matched,
                    so the kill record on the story page means something to
@@ -1364,6 +1376,23 @@ function QueuePage() {
           prefill={darkPrefill(darkFor)}
           onClose={() => setDarkFor(null)}
           onOpened={() => void navigate({ to: "/desk/dark" })}
+        />
+      ) : null}
+      {/*
+        Unit BW, item 2: the drawn Kill dialog, the third one a row's menu opens
+        and mounted the same way -- once for the table, re-pointed by `killFor`.
+        `KillDialog` takes `onOpenChange` rather than this screen's `onClose`
+        convention; closing is the only transition it reports, and a re-pointed
+        `killFor` is what opens it, so nothing is lost in the mapping.
+      */}
+      {killFor ? (
+        <KillDialog
+          leadId={killFor.id}
+          open
+          onOpenChange={(open) => {
+            if (!open) setKillFor(null);
+          }}
+          onKilled={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
         />
       ) : null}
     </DeskShell>

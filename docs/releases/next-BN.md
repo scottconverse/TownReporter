@@ -79,10 +79,13 @@ exact hash.
 
 ## Limits
 
-**Kill does not open a dialog yet.** The drawn **Kill this lead** — quick fills, a reason in your own
-words, a link — is phase 2b's, and the brief for this unit defers it. The **Kill X** button and the X
-key keep today's immediate write, and the single marker
-`// TODO(BN2): mount KillDialog from phase 2b` sits inside `killLead`, where the press lands.
+**Kill opened a status write, not a dialog, in this unit.** The drawn **Kill this lead** — quick fills,
+a reason in your own words, a link — is phase 2b's, and the brief for this unit defers it. The **Kill
+X** button and the X key wrote the status outright and the single marker
+`// TODO(BN2): mount KillDialog from phase 2b` sat inside `killLead`, where the press lands.
+
+Unit **BW** has since spent that marker: phase 2b is on main (0.6.76), so both presses open the drawn
+dialog on Today and on the Queue, and the reason reaches the lead. See `next-BW.md`.
 
 **Edit the lead** is the sixth drawn lead-menu row and is not drawn: nothing in this app edits a lead,
 so a row that only said so is left out rather than half-wired.

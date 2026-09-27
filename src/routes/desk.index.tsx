@@ -36,6 +36,13 @@ import {
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
 import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
+/*
+  Unit BW, item 2: the drawn Kill dialog (phase 2b, `dialog-09-kill.png`) is
+  imported from its own module rather than through the `@/components/dialogs`
+  barrel, which re-exports `editor-dialogs` only. `/desk/story/$leadId` does the
+  same, and that is where this dialog has been mounted since phase 2b.
+*/
+import { KillDialog } from "@/components/dialogs/KillDialog";
 import { cardResultLine, parseFinding } from "@/lib/news/follow-up-copy";
 import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
@@ -794,8 +801,10 @@ function DeskHome() {
           if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
           break;
         case "x":
-          // `killLead` carries the unit's one TODO(BN2) marker.
-          if (lead) killLead(lead.id);
+          // Unit BW, item 2: X and the row's Kill button are the same press, so
+          // both open the drawn dialog. The reason the desk learns from is what
+          // this key was missing when it wrote the status outright.
+          if (lead) setKillLead({ id: lead.id, headline: lead.headline });
           break;
         case "u":
           if (lead) setStatus.mutate({ id: lead.id, status: "new" });
@@ -887,18 +896,21 @@ function DeskHome() {
   const [holdLead, setHoldLead] = useState<{ id: number; headline: string } | null>(null);
 
   /*
-    KILL, IN ONE PLACE. The row's Kill X and the X key are the same press, so
-    the write they make is written once.
+    KILL, IN ONE PLACE (Unit BW, item 2). The row's Kill X and the X key are the
+    same press, so the dialog they open lives in one slot. This is where unit
+    BN2 left its one `TODO(BN2)` marker -- the drawn Kill dialog was still on
+    phase 2b's branch then, so Today kept writing the status outright. That
+    branch is on main now (0.6.76), so the marker is spent: the press opens the
+    drawn dialog, which asks for the reason and keeps it on the lead.
+    `KillDialog` is the same component `/desk/story/$leadId` and the Queue
+    mount, and its `onKilled` refetch is what the bare `setStatus.mutate` gave
+    the row for free -- without it the killed row would sit in the open list
+    until the page was reloaded.
 
-    TODO(BN2): mount KillDialog from phase 2b.
-    The drawn Kill dialog (a reason, "Kill as duplicate" when the lead matches
-    a printed piece) lives on the phase 2b branch, which is not merged into
-    phase 4's suite, so there is nothing to import here yet. Until it lands
-    this keeps today's behaviour -- an immediate status write, with Undo on the
-    row -- and this one marker is where the mount goes. It is the only
-    `TODO(BN2)` in the unit; the Queue's kill press points at it.
+    Undo stays on the row (the dialog's own doc puts it there): a killed lead is
+    dimmed with its way back, which is what the drawing of Today asks for.
   */
-  const killLead = (id: number) => setStatus.mutate({ id, status: "killed" });
+  const [killLead, setKillLead] = useState<{ id: number; headline: string } | null>(null);
 
   const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
   // The two queries the front page cannot render anything useful without.
@@ -1771,7 +1783,7 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet-danger"
-                                  onClick={() => killLead(l.id)}
+                                  onClick={() => setKillLead({ id: l.id, headline: l.headline })}
                                 >
                                   Kill <kbd>X</kbd>
                                 </InkButton>
@@ -2208,6 +2220,24 @@ function DeskHome() {
           open
           onClose={() => setHoldLead(null)}
           onDone={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+        />
+      ) : null}
+
+      {/*
+        Unit BW, item 2: the drawn Kill dialog, mounted once for the list and
+        re-pointed by `killLead` -- the same shape as the Hold dialog above, so
+        a page of eight rows does not carry eight shut dialogs. `onKilled`
+        refreshes `["leads"]` for the reason the Hold mount does: the write
+        lands inside the dialog and nothing in it reaches the query cache.
+      */}
+      {killLead ? (
+        <KillDialog
+          leadId={killLead.id}
+          open
+          onOpenChange={(open) => {
+            if (!open) setKillLead(null);
+          }}
+          onKilled={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
         />
       ) : null}
     </DeskShell>
