@@ -1098,10 +1098,12 @@
   flex-wrap: wrap;
   margin-top: 14px;
 }
-.desk-ltr.astra .pub-dek {
-  font: 400 calc(14px * var(--ts))/1.7 var(--fb);
-  color: var(--mut);
-}
+/*
+  `.pub-dek` was styled here until BV: the drawing's published row carries a
+  section label and a headline, no deck, so the element left desk.published.tsx
+  and this rule had nothing left to match. Removed rather than left as a rule a
+  future grep would read as "the row still has a dek".
+*/
 .desk-ltr.astra .pub-acts {
   gap: 8px;
   flex-wrap: wrap;
@@ -4771,7 +4773,86 @@
   min-width: 0;
 }
 .desk-ltr.astra .astra-row.opinion { grid-template-columns: 200px minmax(0, 1fr) 170px auto; }
-.desk-ltr.astra .astra-row.pub { grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px; }
+/*
+  Published. The story track takes every pixel the other four do not need, which
+  is what the drawing asks for: in desk-19-published-dark.png the headline is the
+  only thing on the row that runs to three lines and the story column is the
+  widest of the five. The four fixed tracks used to be 110/80/150/340 = 680px of
+  a ~742px content box at a 1000px desk, which left the headline about 130px --
+  one or two words a line, and a row 800px tall. They are `clamp()`s now so the
+  one rule covers 981px up to the 1560px `.deskmain` ceiling: the actions track
+  is wide enough for the three acts at the narrow end and no wider, and every
+  pixel the others give up goes to the story.
+*/
+.desk-ltr.astra .astra-row.pub {
+  grid-template-columns: 96px minmax(0, 1fr) 56px 110px clamp(224px, 21vw, 330px);
+}
+/* The section label above the headline -- HOUSING, PLANNING -- as the drawing
+   sets it: small, uppercase, spaced, in the page's own color. It replaces a
+   line that also carried the filing score, so it reads as a kicker now rather
+   than as a second line of metadata.
+
+   0.875rem, not the 0.75rem a kicker usually gets: the desk's own 14px
+   informational floor (scripts/desk-min-font.test.mjs) is a hard rule and this
+   label is information. It also lines this label up with the column headers
+   above it and with every other 14/800 caps label in Astra. */
+.desk-ltr.astra .astra-row.pub .pub-kick {
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  font-weight: 700;
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg);
+  line-height: 1.4;
+}
+/*
+  The three acts on one line, as the drawing sets them. The track above is sized
+  for them, so this only has to stop "Edit headline" wrapping inside itself; the
+  strip still wraps -- which is what lets Delete's confirm pair, two more buttons
+  on the same strip, stack under the row rather than overflow it.
+*/
+@media (min-width: 981px) {
+  .desk-ltr.astra .astra-row.pub .astra-row-acts > .btn,
+  .desk-ltr.astra .astra-row.pub .astra-row-acts > details > summary {
+    padding: 10px 10px;
+    white-space: nowrap;
+  }
+}
+/* A 1000px desk leaves the content box ~742px wide, and five columns have to
+   fit inside it. Two things give way there, and neither of them is the story
+   column's pixels:
+
+   - The three acts lose their side padding (the shared .btn is 8px 14px; this
+     is 10px 6px), which is 24px back for the story. Their type does NOT step
+     down: 13px would be under the desk's own 14px informational floor
+     (scripts/desk-min-font.test.mjs), and at 14px with this padding the three
+     acts measure ~219px inside their 224px track.
+   - The corrections cell's chip wraps. "Review needed" is a ~123px chip in a
+     110px track, so at a 10px column gap it ran out of its column and landed on
+     the View button. Wrapping it costs the row no height -- the story column is
+     what makes the row tall -- and costs the story column nothing. */
+@media (min-width: 981px) and (max-width: 1200px) {
+  /* The content box is 742px here, and five columns have to fit inside it. The
+     acts track is a flat 248px rather than the clamp's 224px floor because the
+     three acts cannot be drawn in 224: at the desk's 14px floor, with the 6px
+     side padding below, they measure 241px. 248 is 241 plus the slack for a
+     different label. The 24px that buys comes off the story track, which is
+     still 190px -- three or four words a line, against the one or two the row
+     had before -- and it is the price of the drawing's own row shape: three
+     acts on ONE line. A wrapped act cell at a 1000px desk is the defect this
+     unit exists to undo. */
+  .desk-ltr.astra .astra-row.pub,
+  .desk-ltr.astra .astra-row.pubhead {
+    grid-template-columns: 96px minmax(0, 1fr) 56px 110px 248px;
+    column-gap: 10px;
+  }
+  .desk-ltr.astra .astra-row.pub .astra-row-acts > .btn,
+  .desk-ltr.astra .astra-row.pub .astra-row-acts > details > summary {
+    padding: 10px 6px;
+  }
+  .desk-ltr.astra .astra-row.pub .astra-chip {
+    white-space: normal;
+  }
+}
 .desk-ltr.astra .astra-row.src {
   grid-template-columns: minmax(0, 1fr) 190px auto;
   gap: 6px 12px;
@@ -4884,7 +4965,9 @@
   line-height: 1.4;
 }
 .desk-ltr.astra .astra-row.pubhead {
-  grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px;
+  /* The same five tracks as `.astra-row.pub` above, or the headers stop
+     naming the columns they sit over. */
+  grid-template-columns: 96px minmax(0, 1fr) 56px 110px clamp(224px, 21vw, 330px);
   padding: 10px 0;
   border-bottom: 2px solid var(--fg);
   align-items: baseline;

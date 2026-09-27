@@ -66,10 +66,28 @@ const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:80
  * correction box closed and the next fill timed out -- the same line CI failed
  * on. The same press with force removed opened the box. Do not put it back.
  */
+/**
+ * Open the row's More panel and press one of the items under it.
+ *
+ * BV moved "Post correction" and "Delete" in behind More ▾, which is where the
+ * design draws them (docs/design/handoff-2026-09-26, desk-19-published-dark.png
+ * and desk-20-published-light.png): the row keeps three acts -- View, Edit
+ * headline, More -- and everything else sits one press in. The panel is a native
+ * `<details>`, so the press is what puts it away again; what the calling step
+ * waits for afterwards is the same thing it has always waited for.
+ */
+async function pressInMore(row, name) {
+  const more = row.locator("details.row-more");
+  const summary = more.locator("> summary");
+  await summary.scrollIntoViewIfNeeded();
+  await summary.click();
+  const item = more.locator(".row-more-panel").getByRole("button", { name, exact: true });
+  await item.waitFor({ timeout: 15_000 });
+  await item.click();
+}
+
 async function openCorrectionForm(row) {
-  const button = row.getByRole("button", { name: "Post correction" });
-  await button.scrollIntoViewIfNeeded();
-  await button.click();
+  await pressInMore(row, "Post correction");
   await row.getByLabel("The correction").waitFor({ timeout: 15_000 });
 }
 
@@ -1287,7 +1305,7 @@ async function main() {
   // the correction survived the story it belonged to.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
   const pubRow2 = page.locator(".astra-row.pub", { hasText: leadHeadline }).first();
-  await pubRow2.getByRole("button", { name: "Delete", exact: true }).click();
+  await pressInMore(pubRow2, "Delete");
   await pubRow2.getByRole("button", { name: /Yes, take it off/ }).click();
   await page.getByText(/Taken off the paper, and kept for 30 days/).waitFor({ timeout: 20_000 });
   step("deleting a story asks once and says the copy is kept");
