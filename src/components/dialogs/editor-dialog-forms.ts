@@ -374,8 +374,47 @@ export function sourcesProblem(state: AddSourcesState): Problem {
   return state.topic.trim().length >= 4 ? null : "Say what the paper should cover.";
 }
 
+/**
+ * What the primary press calls, and with what.
+ *
+ * Every member names the other tabs' keys as absent, so a test can read
+ * `req.input.modelChoice` once it has checked `req.call` without a narrowing
+ * dance -- and so that a test which does NOT check `call` first is reading a
+ * declared absence rather than a key the type happened to allow. The keys are
+ * optional-undefined and never set, so the object the server receives is the
+ * three-key object it was before; `assert.deepEqual` sees no difference.
+ */
+export type SourcesRequest =
+  | {
+      call: "findSources";
+      input: { topic: string; scope: string; modelChoice?: string; modelEffort?: string | null };
+    }
+  | {
+      call: "addSource";
+      input: {
+        url: string;
+        title: string;
+        kind: string;
+        tier: string;
+        topic?: undefined;
+        scope?: undefined;
+        modelChoice?: undefined;
+        modelEffort?: undefined;
+      };
+    }
+  | {
+      call: "addSourcesBulk";
+      input: {
+        text: string;
+        topic?: undefined;
+        scope?: undefined;
+        modelChoice?: undefined;
+        modelEffort?: undefined;
+      };
+    };
+
 /** Which server function the primary press calls, so a test can assert it. */
-export function sourcesRequest(state: AddSourcesState) {
+export function sourcesRequest(state: AddSourcesState): SourcesRequest {
   if (state.tab === "ai") {
     return {
       call: "findSources" as const,

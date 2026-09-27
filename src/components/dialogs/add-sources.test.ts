@@ -169,7 +169,7 @@ describe("Add sources dialog", () => {
       state({ tab: "ai", url: "https://a.example", name: "n", watchFor: "w", text: "t", fileName: "f.csv", topic: "water", model: named?.value ?? "auto", effort: "high" }),
     ) as AddSourcesState;
     const snapshot = structuredClone(held);
-    for (const tab of SOURCE_TABS) {
+    for (const { key: tab } of SOURCE_TABS) {
       sourcesRequest({ ...held, tab });
       renderToStaticMarkup(createElement(AddSourcesBody, { ...base, state: Object.freeze({ ...held, tab }), preview: watched }));
     }

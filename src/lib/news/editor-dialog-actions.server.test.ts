@@ -32,8 +32,14 @@ type Plan = {
   killed?: unknown[];
   chat?: { ok: true; text: string } | { ok: false; error: string };
   insertLead?: EditorDialogDeps["insertLead"];
-  commitDraft?: EditorDialogDeps["commitDraft"];
-  proposeSource?: EditorDialogDeps["proposeSource"];
+  /**
+   * Either half of the answer, and nothing beyond `ok`/`error`: those are the
+   * only two fields `performAddLead` reads (a real commit also answers
+   * `pending`/`jobId`).
+   */
+  commitDraft?: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** A predicate over the source the desk was handed, not over the SQL. */
+  proposeSource?: (input: unknown) => boolean;
 };
 
 const DRAFT = { id: 3, headline: "Council delays the budget", dek: "Because the numbers moved", body: "The council met on Tuesday.", topic: "council" };
@@ -85,14 +91,14 @@ function makeDeps(plan: Plan) {
     }) as unknown as EditorDialogDeps["saveDraft"],
     proposeSource: (async (_sql: unknown, input: unknown) => {
       proposed.push(input);
-      return (plan.proposeSource as unknown as (i: unknown) => boolean)?.(input) ?? true;
+      return plan.proposeSource?.(input) ?? true;
     }) as unknown as EditorDialogDeps["proposeSource"],
     linkDocuments: (async (_sql: unknown, _newsroomId: number, _userId: string, _leadId: number, ids: string[]) => {
       linked.push(ids);
       return { ok: true as const };
     }) as unknown as EditorDialogDeps["linkDocuments"],
     insertLead: plan.insertLead ?? (async () => ({ ok: true as const, id: 42 })),
-    commitDraft: plan.commitDraft ?? (async () => ({ ok: true as const })),
+    commitDraft: (plan.commitDraft ?? (async () => ({ ok: true as const }))) as unknown as EditorDialogDeps["commitDraft"],
     now: () => new Date("2026-09-26T14:05:00Z"),
   };
   const writes = () => queries.filter((q) => q.write);
@@ -251,7 +257,7 @@ describe("add a lead", () => {
 
   it("answers ok with a notice when the draft does not start after the lead is filed", async () => {
     const { deps, chatCalls } = makeDeps({
-      commitDraft: (async () => ({ ok: false as const, error: "No provider is set up." })) as unknown as EditorDialogDeps["commitDraft"],
+      commitDraft: async () => ({ ok: false as const, error: "No provider is set up." }),
     });
     const result = await performAddLead(context, { paste: "A neighbor says the vote was 4-3", then: "draft" }, deps);
     assert.equal(result.ok, true);
@@ -277,7 +283,9 @@ describe("add a lead", () => {
     });
 
     const empty = makeDeps({});
-    assert.match(String((await performAddLead(context, { paste: "short", then: "as-is" }, empty.deps)).error), /Give the desk a link or a tip\./);
+    const blank = await performAddLead(context, { paste: "short", then: "as-is" }, empty.deps);
+    assert.equal(blank.ok, false);
+    assert.match(blank.ok ? "" : blank.error, /Give the desk a link or a tip\./);
     assert.deepEqual(empty.queries, []);
   });
 });
