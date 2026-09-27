@@ -335,9 +335,15 @@ async function ownTheDesk() {
 
 /** File a lead whose own source URL is the page the claim will cite. */
 async function fileTheLead() {
-  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself").waitFor({ timeout: 45_000 });
-  await page.getByText("File a lead yourself").click();
+  /*
+    Filing a lead is a dialog in redesign phase 2a (unit BF3): the Queue's
+    inline "<details> File a lead yourself" form is gone, and
+    `/desk/queue#file-lead` opens the dialog that replaced it -- the same
+    anchor the desk's other walks file through (scripts/lifecycle-e2e.mjs,
+    scripts/delete-corrections-e2e.mjs). The fields and the "File lead" press
+    keep their names, so this step still files the same lead.
+  */
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(LEAD_HEADLINE);
   await page.getByLabel("Why now").fill("A claim in the packet needs its own source read.");
   await page.getByLabel(/source|link|url/i).first().fill(CLAIM_URL);

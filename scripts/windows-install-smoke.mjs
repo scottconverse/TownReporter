@@ -209,10 +209,9 @@ async function main() {
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
     await page.getByRole("button", { name: "Create editor account" }).click();
-    await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+    await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
     await completeFirstRunSetup(page, base);
-    await page.getByRole("link", { name: "Queue", exact: true }).click();
-    await page.getByText("File a lead yourself").click();
+    await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
     await page.getByLabel("Headline").fill(headline);
     await page
       .getByLabel("Why now")
@@ -267,7 +266,7 @@ async function main() {
     await lifecycle("Start");
     await assertListening(config);
     await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
-    await page.getByRole("heading", { level: 1, name: "A clear desk. A good story.", exact: true }).waitFor();
+    await page.getByRole("heading", { level: 1, name: "Good morning. Here’s today’s paper.", exact: true }).waitFor();
     assert.ok(!page.url().includes("/login"), "Persistent session was lost on restart");
     await page.goto(articleUrl, { waitUntil: "networkidle" });
     await page.getByRole("heading", { level: 1, name: headline, exact: true }).waitFor();
@@ -280,7 +279,7 @@ async function main() {
     await fresh.getByLabel("Email").fill(email);
     await fresh.getByLabel("Password", { exact: true }).fill(password);
     await fresh.getByRole("button", { name: "Sign in with email", exact: true }).click();
-    await fresh.getByRole("heading", { level: 1, name: "A clear desk. A good story.", exact: true }).waitFor();
+    await fresh.getByRole("heading", { level: 1, name: "Good morning. Here’s today’s paper.", exact: true }).waitFor();
     assert.deepEqual(clientErrors, [], "Browser raised an uncaught application error");
     receipt.checks.push(
       "Idempotent stop/start, existing session, fresh owner sign-in and article persisted",

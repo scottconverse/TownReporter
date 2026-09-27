@@ -61,7 +61,7 @@
  * starts a fake one (scripts/fakes/fake-deepseek-endpoint.mjs) and points the
  * product at it with TOWNREPORTER_DEEPSEEK_BASE_URL. Rung 2's stand-in
  * (scripts/fakes/fake-lmstudio-endpoint.mjs) listens on 1234, because local
- * discovery only recognises an LM Studio server by that port, and LLM_BASE_URL
+ * discovery only recognizes an LM Studio server by that port, and LLM_BASE_URL
  * (the only way to move it) would make Automatic skip its ladder entirely.
  * Rung 3 is scripts/fakes/fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1.
  * Nothing here spends money, needs a subscription, or touches a credential.
@@ -448,15 +448,17 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk");
 
   // --- file a lead by hand, with no source URL ---------------------------
   // No URL means reportAndDraft's `take()` has nothing to fetch over the
   // network, so this walk never depends on a real page being reachable.
-  await page.getByRole("link", { name: "Queue", exact: true }).click();
-  await page.getByText("File a lead yourself").click();
+  // Unit BF3: the "File a lead yourself" button is off the Queue controls row
+  // (the drawing files a lead from Today's "+ Add a lead"); /desk/queue#file-lead
+  // still opens the same dialog.
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();

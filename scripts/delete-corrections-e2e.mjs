@@ -454,13 +454,12 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk with no setup token");
 
   // ── File, write, publish ───────────────────────────────────────────────────
-  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "networkidle" });
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with the revised fee schedule.");
   await page.getByRole("button", { name: "File lead" }).click();
@@ -1012,8 +1011,22 @@ async function main() {
   await page
     .locator("#finding-evidence-review")
     .screenshot({ path: join(evidenceArtifactDir, "finding-evidence-review-desktop.png") });
+  /*
+    BF5 (redesign p2a) -- the text-size control moved and changed shape. The
+    old shell put a `<select aria-label="Text size">` beside the account; the
+    design draws it in the nav footer as "Aa Large"/"Aa Normal", whose
+    accessible name is "Switch to large text"/"Switch to normal text"
+    (src/components/desk-chrome.tsx:340-346, and
+    scripts/desk-text-size-render.test.mjs asserts both). The footer lives in
+    the nav, which at phone width is the closed drawer, so both controls are
+    unreachable once the viewport is 390 -- the mode is therefore set at the
+    desk's own width, where the footer is on screen, and taken back off after
+    the viewport is restored. Nothing the steps assert changes: the panel is
+    shot and measured at 390 in dark large-text mode, and the desk ends the
+    section in light normal text.
+  */
   await page.getByRole("button", { name: "Switch to dark appearance", exact: true }).click();
-  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
+  await page.getByRole("button", { name: "Switch to large text", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)))
     throw new Error("finding evidence review overflows at 390px dark large text");
@@ -1022,9 +1035,9 @@ async function main() {
     .screenshot({
       path: join(evidenceArtifactDir, "finding-evidence-review-mobile-dark-large.png"),
     });
-  await page.getByRole("button", { name: "Switch to light appearance", exact: true }).click();
   if (originalViewport) await page.setViewportSize(originalViewport);
-  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("normal");
+  await page.getByRole("button", { name: "Switch to light appearance", exact: true }).click();
+  await page.getByRole("button", { name: "Switch to normal text", exact: true }).click();
   const queuedDraftJob = await pool.query(
     `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at)
      values($1,$2,'draft',$3,'running','drafting',$4,now(),now()) returning id`,

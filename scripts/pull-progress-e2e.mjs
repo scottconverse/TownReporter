@@ -24,7 +24,7 @@ try {
   await page.getByLabel("Password", { exact: true }).fill("pull-proof-e2e-pass");
   await page.getByLabel("Confirm password").fill("pull-proof-e2e-pass");
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base, {
     name: "Longmont Pull Proof",
     city: "Longmont",
@@ -43,7 +43,10 @@ try {
       await page.waitForTimeout(800);
     }
   }
-  await page.getByText("File a lead yourself").click();
+  // Unit BF3: the "File a lead yourself" button is off the Queue controls row
+  // (the drawing files a lead from Today's "+ Add a lead"); /desk/queue#file-lead
+  // still opens the same dialog.
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(`Longmont council packet proof ${stamp}`);
   await page.getByLabel("Why now").fill("Verify that Pull finds and saves official council records.");
   await page.getByRole("button", { name: "File lead" }).click();

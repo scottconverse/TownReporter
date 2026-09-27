@@ -133,8 +133,7 @@ async function signUpAndEnter(page: Page, name: string, email: string) {
 
 /** File a lead through the owner's queue UI; return its story URL. */
 async function fileLead(page: Page, headline: string): Promise<string> {
-  await page.goto(`${BASE_URL}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${BASE_URL}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel(/Why now/i).fill("Two editors are about to fight over it.");
   await page.getByRole("button", { name: "File lead" }).click();
@@ -235,6 +234,19 @@ describe("two editors on one story", () => {
       // the exact two-click pattern desk-flows-e2e already proves.
       await editorPage.goto(`${BASE_URL}/desk/queue`, { waitUntil: "domcontentloaded" });
       const row = editorPage.locator(".lead-row", { hasText: "Race story one" }).first();
+      /*
+        Unit BF5 (redesign phase 2a): the row's own actions are the drawing's
+        two -- "Start story" and "More ▾" -- so Delete moved inside the row's
+        More menu (the same door desk-flows-e2e's openRowMenu presses, and the
+        same one this row still offers: LeadRowView pushes "Delete" into the
+        menu's items, desk-leads.tsx). The press is what changed, not the
+        property: the editor still deletes the lead from their own queue.
+      */
+      const rowMenu = row.locator("details.more");
+      await row.locator("summary.more-sum").click();
+      if (!(await rowMenu.evaluate((el) => (el as HTMLDetailsElement).open))) {
+        throw new Error("the row's More menu did not open");
+      }
       await row.getByRole("button", { name: "Delete", exact: true }).click();
       await row.getByRole("button", { name: /Yes, delete/ }).click();
       await editorPage.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });

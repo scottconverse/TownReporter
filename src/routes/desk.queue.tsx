@@ -1,12 +1,22 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
 import { ModelPicker } from "@/components/model-picker";
+import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { deleteLead, draftLead, fileLead, listLeads, listPublishedDesk, listScans, setLeadStatus } from "@/lib/news/desk";
+import {
+  deleteLead,
+  draftLead,
+  fileLead,
+  listLeads,
+  listPublishedDesk,
+  listScans,
+  runScan,
+  setLeadStatus,
+} from "@/lib/news/desk";
 import { restoreTrashItem } from "@/lib/news/trash";
 import {
   duplicateKillReason,
@@ -18,6 +28,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
+import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -32,21 +43,60 @@ import {
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
+/** The drawn tab set (README "3. Queue"). */
+type QueueFilter = "open" | "held" | "killed" | "printed" | "all";
+
+/** Sort: Best first is the score the scanner gave; the other two are the age
+ *  of the lead, for an editor who came back after a day away. */
+type QueueSort = "best" | "newest" | "oldest";
+
+/**
+ * What "Select all ... leads shown" calls the tab it is selecting. "all" says
+ * nothing extra, so it is left out rather than printed as "all leads shown".
+ */
+function bulkSelectLabel(filter: QueueFilter): string {
+  if (filter === "open") return "open";
+  if (filter === "printed") return "matching printed";
+  if (filter === "all") return "";
+  return filter;
+}
+
 function QueuePage() {
   const { sections } = useEditorSections();
-  const TOPICS = sections.map(s=>s.key);
+  const TOPICS = sections.map((s) => s.key);
   const PAPER = usePaper();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const desk = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const newsroomId = desk.data?.ok ? desk.data.newsroomId : null;
-  const { data: leads = [], isPending, isError, error, refetch, isRefetching } = useQuery({
+  const {
+    data: leads = [],
+    isPending,
+    isError,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery({
     queryKey: ["leads"],
     queryFn: () => listLeads(),
     placeholderData: keepPreviousData,
   });
   const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
+  /*
+    The drawn Queue header's own "Run scan now" (README "3. Queue", handoff
+    Desk Screens.dc.html line 21). It is the same scan Today's button runs --
+    the same server function and the same three invalidations -- so the two
+    screens cannot disagree about what a scan updates.
+  */
+  const scan = useMutation({
+    mutationFn: () => runScan(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
   const setStatus = useMutation({
     mutationFn: (input: {
       id: number;
@@ -130,16 +180,44 @@ function QueuePage() {
     },
     onError: (e) => setDeleteError(e instanceof Error ? e.message : "That would not go back."),
   });
-  const [filter, setFilter] = useState<"all" | "new" | "drafted" | "held" | "killed">("all");
+  /*
+    Redesign phase 2a (README "3. Queue"): the tabs are Open, Held, Killed,
+    ≈ Printed and All -- the working set first, then the three ways a lead
+    leaves it, then everything including what has printed. Two filters the old
+    strip carried are gone as TABS (New and Drafted) because both are the Open
+    set; every row still chips its own status, and the search and section
+    controls cover narrowing within Open.
+  */
+  const [filter, setFilter] = useState<QueueFilter>("open");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<QueueSort>("best");
+  const [sectionFilter, setSectionFilter] = useState("all");
   const [focusTarget, setFocusTarget] = useState<3 | 4 | 5>(3);
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
   const [topic, setTopic] = useState("council");
   const [url, setUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const [draftNotices, setDraftNotices] = useState<Record<number, { kind: "ok" | "err"; text: string }>>({});
+  const [draftNotices, setDraftNotices] = useState<
+    Record<number, { kind: "ok" | "err"; text: string }>
+  >({});
   const [draftingIds, setDraftingIds] = useState<number[]>([]);
-  const [selectedBatchLeadIds, setSelectedBatchLeadIds] = useState<number[]>([]);
+  /*
+    Unit BF2, defect 8: the Queue's two standing panels -- "File a lead
+    yourself" and "Draft selected leads" -- are dialogs now. Nothing sits
+    between the header and the table any more; each is opened by a press on
+    the page (the filter row's file button, the bulk bar's Start N stories)
+    or by a hash, so Today's "+ Add a lead" still lands on the form it names.
+  */
+  const [panel, setPanel] = useState<"file-lead" | "batch" | null>(null);
+  const [batchLeadIds, setBatchLeadIds] = useState<number[]>([]);
+  /*
+    The ids the dialog has already queued, so the same five leads cannot be
+    queued twice from one press. Cleared when the dialog opens again or when
+    the batch list changes.
+  */
+  const [batchQueued, setBatchQueued] = useState<number[] | null>(null);
+  const fileFormRef = useRef<HTMLFormElement>(null);
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
@@ -153,7 +231,9 @@ function QueuePage() {
     refetchInterval: (query) => {
       const result = query.state.data;
       if (!result?.ok || !result.batch) return false;
-      return result.batch.items.some((item) => item.status === "queued" || item.status === "running")
+      return result.batch.items.some(
+        (item) => item.status === "queued" || item.status === "running",
+      )
         ? 1_500
         : false;
     },
@@ -168,15 +248,25 @@ function QueuePage() {
   useEffect(() => {
     const current = batch.data?.ok ? batch.data.batch : null;
     if (!current) return;
-    const open = current.items.some((item) => item.status === "queued" || item.status === "running");
+    const open = current.items.some(
+      (item) => item.status === "queued" || item.status === "running",
+    );
     if (open || leadRefreshAfterTerminalBatch.current === current.id) return;
     leadRefreshAfterTerminalBatch.current = current.id;
     void qc.invalidateQueries({ queryKey: ["leads"] });
   }, [batch.data, qc]);
   const startBatch = useMutation({
-    mutationFn: (input: { leadIds: number[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null }) =>
+    mutationFn: (input: {
+      leadIds: number[];
+      runtime: DraftBatchRuntime;
+      modelEffort: ModelEffort | null;
+    }) =>
       startDraftBatch({
-        data: { items: input.leadIds.map((leadId) => ({ leadId })), runtime: input.runtime, modelEffort: input.modelEffort },
+        data: {
+          items: input.leadIds.map((leadId) => ({ leadId })),
+          runtime: input.runtime,
+          modelEffort: input.modelEffort,
+        },
       }),
     onSuccess: (result) => {
       if (!result.ok) {
@@ -186,7 +276,6 @@ function QueuePage() {
         });
         return;
       }
-      setSelectedBatchLeadIds([]);
       setActiveBatchId(result.batch.id);
       leadRefreshAfterTerminalBatch.current = null;
       setBatchNotice({
@@ -224,15 +313,28 @@ function QueuePage() {
       }),
   });
   const queueDraft = useMutation({
-    mutationFn: (input: { leadId: number; modelChoice: StoryModelChoice; modelEffort?: ModelEffort | null; fromBatch?: boolean }) =>
-      draftLead({ data: { leadId: input.leadId, modelChoice: input.modelChoice, modelEffort: input.modelEffort } }),
-    onMutate: ({ leadId }) => setDraftingIds((ids) => [...ids.filter((id) => id !== leadId), leadId]),
+    mutationFn: (input: {
+      leadId: number;
+      modelChoice: StoryModelChoice;
+      modelEffort?: ModelEffort | null;
+      fromBatch?: boolean;
+    }) =>
+      draftLead({
+        data: {
+          leadId: input.leadId,
+          modelChoice: input.modelChoice,
+          modelEffort: input.modelEffort,
+        },
+      }),
+    onMutate: ({ leadId }) =>
+      setDraftingIds((ids) => [...ids.filter((id) => id !== leadId), leadId]),
     onSuccess: (res, { leadId, modelChoice, fromBatch }) => {
       if (res?.ok) {
-        if (fromBatch) setBatchNotice({
-          kind: "ok",
-          text: `Redraft queued with ${modelChoiceLabel(modelChoice)}. Open the story workbench to watch it arrive; if a technical fallback is needed, the workbench records the model used.`,
-        });
+        if (fromBatch)
+          setBatchNotice({
+            kind: "ok",
+            text: `Redraft queued with ${modelChoiceLabel(modelChoice)}. Open the story workbench to watch it arrive; if a technical fallback is needed, the workbench records the model used.`,
+          });
         setDraftNotices((notices) => ({
           ...notices,
           [leadId]: {
@@ -241,10 +343,11 @@ function QueuePage() {
           },
         }));
       } else {
-        if (fromBatch) setBatchNotice({
-          kind: "err",
-          text: res?.error ?? "That redraft did not queue.",
-        });
+        if (fromBatch)
+          setBatchNotice({
+            kind: "err",
+            text: res?.error ?? "That redraft did not queue.",
+          });
         setDraftNotices((notices) => ({
           ...notices,
           [leadId]: {
@@ -262,7 +365,8 @@ function QueuePage() {
       if (fromBatch) setBatchNotice({ kind: "err", text });
       setDraftNotices((notices) => ({ ...notices, [leadId]: { kind: "err", text } }));
     },
-    onSettled: (_data, _error, { leadId }) => setDraftingIds((ids) => ids.filter((id) => id !== leadId)),
+    onSettled: (_data, _error, { leadId }) =>
+      setDraftingIds((ids) => ids.filter((id) => id !== leadId)),
   });
   const file = useMutation({
     mutationFn: () => fileLead({ data: { headline, why, topic, url } }),
@@ -295,9 +399,29 @@ function QueuePage() {
   const batchEligible = leads.filter(
     (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
   );
-  const selectedBatchLeads = selectedBatchLeadIds.filter((leadId) =>
+  /*
+    The list the batch dialog is about to queue: the bulk bar's selection,
+    held still while the dialog is open so that adding suggested focus to it
+    cannot change what the press behind it would have done. Every entry is a
+    lead the backend will accept -- a held, killed or printed lead cannot be
+    drafted, which is the backend's rule, so it is filtered here rather than
+    failing at the press.
+  */
+  const selectedBatchLeads = batchLeadIds.filter((leadId) =>
     batchEligible.some((lead) => lead.id === leadId),
   );
+  /*
+    The same selection as rows, so the dialog can name what it is about to
+    queue instead of only counting it: "3 of 5 selected" tells an editor how
+    much model work the press costs, and this tells them what it is spent on.
+  */
+  const selectedBatchLeadRows = batchEligible.filter((lead) =>
+    selectedBatchLeads.includes(lead.id),
+  );
+  const batchQueuedNow =
+    batchQueued !== null &&
+    batchQueued.length === selectedBatchLeads.length &&
+    batchQueued.every((leadId) => selectedBatchLeads.includes(leadId));
   const suggestedFocus = suggestFocusLeads(batchEligible, sections, focusTarget);
   const focusAddable = suggestedFocus.filter((lead) => !selectedBatchLeads.includes(lead.id));
   const publishedCount = leads.filter((l) => l.status === "published").length;
@@ -310,22 +434,55 @@ function QueuePage() {
     killed: leads.filter((l) => l.status === "killed").length,
   };
   const printed = published.data ?? [];
-  const shown =
+  /*
+    "≈ Printed": the leads the desk already matches to a piece that ran
+    (the same `nearDuplicate` the row's chip and "Kill as duplicate" use).
+    It is a real, checkable set on this screen, not a count of nothing.
+  */
+  const printedMatches = leads.filter((l) => nearDuplicate(l, printed) !== null);
+  const queueFilters: { key: QueueFilter; label: string; count: number }[] = [
+    { key: "open", label: "Open", count: working.length },
+    { key: "held", label: "Held", count: counts.held },
+    { key: "killed", label: "Killed", count: counts.killed },
+    { key: "printed", label: "≈ Printed", count: printedMatches.length },
+    { key: "all", label: "All", count: leads.length },
+  ];
+  const byFilter =
     filter === "killed"
+      ? leads.filter((l) => l.status === "killed")
+      : filter === "held"
+        ? leads.filter((l) => l.status === "held")
+        : filter === "printed"
+          ? printedMatches
+          : filter === "open"
+            ? working
+            : leads;
+  const needle = search.trim().toLowerCase();
+  const bySearch = needle
+    ? byFilter.filter((l) =>
+        `${l.headline} ${l.why ?? ""} ${l.topic ?? ""}`.toLowerCase().includes(needle),
+      )
+    : byFilter;
+  const filtered =
+    sectionFilter === "all" ? bySearch : bySearch.filter((l) => l.topic === sectionFilter);
+  const byAge = (a: LeadRow, b: LeadRow) =>
+    sort === "newest"
+      ? Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id
+      : Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id;
+  const shown =
+    sort === "best" && filter === "killed"
       ? // What keeps coming back belongs on top of the Killed tab -- that is
         // the whole point of stamping a resurfaced lead instead of quietly
         // hiding it. Leads never resurfaced (last_resurfaced_at null) sort
         // after ones that have, oldest kill first within that group.
-        leads
-          .filter((l) => l.status === "killed")
-          .sort((a, b) => {
-            const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
-            const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
-            if (at !== bt) return bt - at;
-            return b.id - a.id;
-          })
-      : (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
-          (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
+        [...filtered].sort((a, b) => {
+          const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
+          const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
+          if (at !== bt) return bt - at;
+          return b.id - a.id;
+        })
+      : [...filtered].sort(
+          sort === "best" ? (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0) : byAge,
         );
   /*
    * Unit BS. What the batch panel may show, decided once, here:
@@ -348,273 +505,270 @@ function QueuePage() {
 
   const shownIds = shown.map((lead) => lead.id);
   const selectedDeleteLeads = selectedDeleteLeadIds.filter((leadId) => shownIds.includes(leadId));
-  const allShownSelected = shownIds.length > 0 && shownIds.every((leadId) => selectedDeleteLeadIds.includes(leadId));
+  const allShownSelected =
+    shownIds.length > 0 && shownIds.every((leadId) => selectedDeleteLeadIds.includes(leadId));
+  /*
+    The bulk strip acts on the rows the checkbox column has selected -- the
+    same selection bulk Delete uses, so there is one checkbox per row and one
+    bar, and every press in the bar is a press the row itself already offers.
+  */
+  const selectedLeads = leads.filter((lead) => selectedDeleteLeads.includes(lead.id));
+  const bulkDraftable = selectedLeads.filter(
+    (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
+  );
+  const bulkBusy = setStatus.isPending || startBatch.isPending || bulkRemove.isPending;
+  const bulkSetStatus = (status: "held" | "killed") => {
+    for (const lead of selectedLeads) setStatus.mutate({ id: lead.id, status });
+  };
+  /*
+    Open the dialog a hash names.
+
+    Today's "+ Add a lead" links to /desk/queue#file-lead, and phase 0's
+    dialogs are unmounted while shut, so there is nothing for a hash to scroll
+    to -- the hash has to open the dialog instead. That is the whole
+    behavior, and it keeps the link landing on the form it names.
+
+    Read from the router's location rather than a `hashchange` listener: a
+    same-path hash change is a `pushState` the router owns, and no
+    `hashchange` fires for it (the same reason Today reads `useLocation`).
+  */
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash === "file-lead") setPanel("file-lead");
+  }, [hash]);
+  /*
+    Shutting one leaves the address tidy, the way Today's composer does: a
+    stale #file-lead would re-open the form on the next reload.
+  */
+  const closePanel = () => {
+    setPanel(null);
+    if (window.location.hash) void navigate({ to: "/desk/queue", replace: true });
+  };
 
   return (
-    <DeskShell title="The queue" kicker="Leads">
-      <p className="lede">
-        Everything that might be news, scored and sorted. The scanner and Dark Desk file leads
-        here; so do you. Printed stories move to Published. Nothing prints until you open a lead
-        and publish it.
-      </p>
-
-      <details className="file-form">
-        <summary>File a lead yourself</summary>
-        <p>Have a transcript, packet or documents? <Link to="/desk">Write a story from text or uploaded documents on the Desk.</Link></p>
-        <p>
-          Already written somewhere else? <Link to="/desk/import">Import finished stories</Link> — paste
-          one story or a whole report and check each one before it lands here.
-        </p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            setFormError(null);
-            file.mutate();
-          }}
-        >
-          <div className="form-grid">
-            <Field label="Headline">
-              <input
-                value={headline}
-                onChange={(e) => setHeadline(e.target.value)}
-                required
-                minLength={8}
-                placeholder="What happened"
-              />
-            </Field>
-            <Field label="Why now">
-              <input
-                value={why}
-                onChange={(e) => setWhy(e.target.value)}
-                required
-                minLength={8}
-                placeholder={`Why this is news in ${PAPER.city} today`}
-              />
-            </Field>
-            <Field label="Topic">
-              <select value={topic} onChange={(e) => setTopic(e.target.value)}>
-                {TOPICS.filter((t) => t !== "about").map((t) => (
-                  <option key={t} value={t}>
-                    {sections.find(s=>s.key===t)?.name??t}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Source URL (optional)">
-              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
-            </Field>
-          </div>
-          {formError ? <Notice kind="err">{formError}</Notice> : null}
-          <InkButton disabled={file.isPending} type="submit">
-            {file.isPending ? "Filing…" : "File lead"}
+    <DeskShell
+      title="Queue"
+      kicker="Every open lead"
+      actions={
+        <>
+          <InkButton tone="ghost" disabled={scan.isPending} onClick={() => scan.mutate()}>
+            {scan.isPending ? "Scanning…" : "Run scan now"}
           </InkButton>
-        </form>
-      </details>
+          <Link to="/desk" hash="story-composer" className="btn solid">
+            + New story
+          </Link>
+        </>
+      }
+    >
+      {/*
+        BF3, defect 2: one controls row, drawn order -- the tabs at the left,
+        then search, Sort and Section at the right -- with the words inside
+        the controls ("Sort: Best first", "Section: All") rather than as
+        labels sitting above them. The drawn controls are a single line at
+        1280 (measured: all six share one top y), so nothing here wraps until
+        the phone width, where the strip and the three filters stack.
 
-      <section id="draft-batch" aria-labelledby="draft-batch-heading">
-        <h2 id="draft-batch-heading">Draft selected leads</h2>
-        <p className="wire-sum">
-          Choose up to five eligible queue leads and one writing runtime. Each lead keeps its own
-          stored research scope. This queues drafts for editor review; it does not publish anything.
-        </p>
-        <div className="wire-sum">
-          <Field label="Suggested focus size">
-            <select
-              value={focusTarget}
-              onChange={(event) => setFocusTarget(Number(event.target.value) as 3 | 4 | 5)}
-              disabled={startBatch.isPending}
+        "File a lead yourself" is not on this row any more: the drawing has
+        it behind Today's "+ Add a lead", and /desk/queue#file-lead still
+        opens the same dialog on load for anything that links here.
+      */}
+      <div className="queue-controls">
+        <div className="seg-strip queue-tabs" role="group" aria-label="Filter leads">
+          {queueFilters.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className={filter === f.key ? "on" : ""}
+              aria-pressed={filter === f.key}
+              title={
+                f.key === "held" && f.count > 0
+                  ? `${f.count} lead${f.count === 1 ? "" : "s"} waiting on you under Held`
+                  : undefined
+              }
+              onClick={() => {
+                setFilter(f.key);
+                setSelectedDeleteLeadIds([]);
+                setConfirmingBulkDelete(false);
+                setBulkDeleteNotice("");
+              }}
             >
-              {[3, 4, 5].map((size) => (
-                <option key={size} value={size}>
-                  {size} leads
-                </option>
-              ))}
-            </select>
-          </Field>
-          <p className="meta">
-            Suggestions balance existing lead scores and sections. Review the evidence before drafting.
-          </p>
-          <InkButton
-            small
-            disabled={startBatch.isPending || focusAddable.length === 0 || selectedBatchLeads.length >= 5}
-            onClick={() => {
-              setSelectedBatchLeadIds((ids) =>
-                mergeFocusSelection(
-                  ids,
-                  batchEligible.map((lead) => lead.id),
-                  suggestedFocus.map((lead) => lead.id),
-                  5,
-                ),
-              );
-            }}
-          >
-            Add suggested focus ({Math.min(focusAddable.length, 5 - selectedBatchLeads.length)})
-          </InkButton>
+              {f.label} ·{" "}
+              {/*
+                Unit AK item 7: the Held count is a badge, not one more number
+                in a row of numbers -- a lead sitting in Held is waiting on the
+                editor, which is the state the owner could not see. The visible
+                text is still "held <n>", so anything that finds the tab by its
+                words is unchanged.
+              */}
+              <span
+                className={"filter-badge" + (f.key === "held" && f.count > 0 ? " waiting" : "")}
+              >
+                {f.count}
+              </span>
+            </button>
+          ))}
         </div>
-        <ModelPicker
-          scope="forced"
-          value={batchRuntime}
-          onChange={(choice) => {
-            const runtime = choice as DraftBatchRuntime;
-            setBatchRuntime(runtime);
-            setBatchEffort(defaultModelEffort(runtime));
-          }}
-          effort={batchEffort}
-          onEffortChange={setBatchEffort}
-          disabled={startBatch.isPending}
-          compact
-          excludeAutomatic
-        />
-        <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
-        <InkButton
-          disabled={newsroomId === null || selectedBatchLeads.length === 0 || startBatch.isPending}
-          onClick={() => {
-            setBatchNotice(null);
-            startBatch.mutate({ leadIds: selectedBatchLeads, runtime: batchRuntime, modelEffort: batchEffort });
-          }}
-        >
-          {startBatch.isPending ? "Starting batch…" : "Draft selected"}
-        </InkButton>
-        {batchNotice ? <Notice kind={batchNotice.kind}>{batchNotice.text}</Notice> : null}
-        {desk.isPending || batch.isPending ? (
-          <p className="meta">Loading the latest draft batch…</p>
-        ) : batch.isError ? (
-          <Notice kind="err">Could not load the latest draft batch.</Notice>
-        ) : batch.data && !batch.data.ok ? (
-          <Notice kind="err">{batch.data.error}</Notice>
-        ) : currentBatch && !batchPanelVisible ? (
-          /*
-           * Unit BS: the editor put this batch away, or every story in it has
-           * since been printed or killed. Either way there is no work left to
-           * list, so there is no panel -- not an empty one under a heading
-           * that still says "Batch #3".
-           */
-          null
-        ) : currentBatch ? (
-          <div className="lead-list roomy" aria-label="Draft batch results">
-            <p className="meta">
-              Batch #{currentBatch.id} · {currentBatch.runtime.label}
-            </p>
-            {currentBatch.runtime.runtime === "local" ? (
-              <p className="meta">
-                This batch keeps the saved local model shown above.{" "}
-                <Link to="/desk/ops" className="inline-link">
-                  Review local models on Server
-                </Link>{" "}
-                before starting another batch.
-              </p>
-            ) : null}
-            {batchItems.map((item) => {
-              const lead = leads.find((candidate) => candidate.id === item.leadId);
-               return <DraftBatchResult
-                 key={item.jobId}
-                 item={item}
-                 headline={lead?.headline ?? `lead #${item.leadId}`}
-                 redraftLabel={modelChoiceLabel(batchRuntime)}
-                 redrafting={draftingIds.includes(item.leadId)}
-                 onRedraft={() => {
-                   setBatchNotice(null);
-                   queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, fromBatch: true });
-                 }}
-               />;
-            })}
-            {!batchRunning ? (
-              <div className="wire-sum">
-                <InkButton
-                  small
-                  type="button"
-                  disabled={dismissBatch.isPending}
-                  onClick={() => {
-                    setBatchNotice(null);
-                    dismissBatch.mutate(currentBatch.id);
-                  }}
-                >
-                  {dismissBatch.isPending ? "Dismissing…" : "Dismiss"}
-                </InkButton>
-                <p className="meta">
-                  Puts this batch away for good. The next batch you start shows normally.
-                </p>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="meta">No draft batch has been started in this newsroom.</p>
-        )}
-      </section>
-
-      <div className="filters">
-        {(["all", "new", "drafted", "held", "killed"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            className={"filter" + (filter === k ? " on" : "")}
-            aria-pressed={filter === k}
-            onClick={() => {
-              setFilter(k);
+        <div className="queue-filters">
+          <input
+            type="search"
+            className="queue-search"
+            aria-label="Search leads"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
               setSelectedDeleteLeadIds([]);
               setConfirmingBulkDelete(false);
               setBulkDeleteNotice("");
             }}
-          >
-            {k}{" "}
-            {/*
-              Unit AK item 7: the Held tab's count is a badge, not one more
-              number in a row of numbers -- a lead sitting in Held is waiting
-              on the editor, which is the state the owner could not see. The
-              visible text is still "held <n>", so anything that finds the tab
-              by its words is unchanged.
-            */}
-            <span
-              className={"filter-badge" + (k === "held" && counts.held > 0 ? " waiting" : "")}
-              title={
-                k === "held" && counts.held > 0
-                  ? `${counts.held} lead${counts.held === 1 ? "" : "s"} waiting on you under Held`
-                  : undefined
-              }
-            >
-              {counts[k]}
+            placeholder="Search leads, places, records…"
+          />
+          <div className="queue-sel">
+            <span className="queue-lab" aria-hidden="true">
+              Sort:
             </span>
-          </button>
-        ))}
+            <select
+              aria-label="Sort"
+              value={sort}
+              onChange={(event) => setSort(event.target.value as QueueSort)}
+            >
+              <option value="best">Best first</option>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </div>
+          <div className="queue-sel">
+            <span className="queue-lab" aria-hidden="true">
+              Section:
+            </span>
+            <select
+              aria-label="Section"
+              value={sectionFilter}
+              onChange={(event) => setSectionFilter(event.target.value)}
+            >
+              <option value="all">All</option>
+              {sections.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {shown.length > 0 ? (
-        <section className="queue-bulk-delete" aria-label="Bulk delete leads">
-          <label>
-            <input
-              type="checkbox"
-              checked={allShownSelected}
-              onChange={(event) => {
-                setConfirmingBulkDelete(false);
-                setBulkDeleteNotice("");
-                setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
-              }}
-            />{" "}
-            Select all {filter === "all" ? "open" : filter} leads shown ({shown.length})
-          </label>
+        <section
+          className="queue-bulk-delete queue-bulk"
+          aria-label="Bulk actions for the leads shown"
+        >
+          {/*
+            BF3: the "Select all …" label that sat here is the header row's
+            checkbox now (the drawing has no yellow strip where nothing is
+            selected). What is left of the strip is what it always was
+            underneath -- the count, Start N stories, Hold, Kill, Delete
+            selected and Clear -- so it renders only once something is
+            selected. The section itself stays mounted whenever the table has
+            rows, and `:empty` in desk-astra.css keeps the empty amber band
+            off the screen: mounting it costs nothing and the desk's walks
+            still find the bar's presses in the same place after a selection.
+          */}
           {selectedDeleteLeads.length > 0 ? (
-            confirmingBulkDelete ? (
-              <div className="queue-bulk-delete-confirm">
-                <span>
-                  Delete {selectedDeleteLeads.length} selected lead{selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published articles stay on the paper.
-                </span>
+            <>
+              <span className="queue-bulk-count">{selectedDeleteLeads.length} selected</span>
+              <div className="queue-bulk-acts">
+                {/*
+                  Start N stories is the same batch the desk has always run
+                  (startDraftBatch, one job per lead, five at a time); the bar
+                  is a second way to reach it, not a new mechanism. A held,
+                  killed or printed lead cannot be drafted -- that is the
+                  backend's rule, so the press says so instead of failing.
+
+                  Since unit BF2 (defect 8) the press opens the batch dialog
+                  and the QUEUEING happens there, in the same press as the
+                  writing model the old "Draft selected leads" panel asked
+                  for. The selection is copied into the dialog as it opens, so
+                  what the dialog is about to queue cannot drift from what the
+                  bar said it would.
+                */}
                 <InkButton
-                  tone="danger"
-                  small
-                  disabled={bulkRemove.isPending}
-                  onClick={() => bulkRemove.mutate(selectedDeleteLeads)}
+                  disabled={
+                    startBatch.isPending || bulkDraftable.length === 0 || bulkDraftable.length > 5
+                  }
+                  ariaLabel={`Start ${bulkDraftable.length} ${
+                    bulkDraftable.length === 1 ? "story" : "stories"
+                  } from the selected leads`}
+                  onClick={() => {
+                    setBatchNotice(null);
+                    setBatchLeadIds(bulkDraftable.map((l) => l.id));
+                    setPanel("batch");
+                  }}
                 >
-                  {bulkRemove.isPending ? "Deleting…" : `Yes, delete ${selectedDeleteLeads.length}`}
+                  {startBatch.isPending
+                    ? "Starting…"
+                    : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
-                <InkButton tone="quiet" small disabled={bulkRemove.isPending} onClick={() => setConfirmingBulkDelete(false)}>
-                  Keep
+                <InkButton
+                  tone="quiet"
+                  disabled={setStatus.isPending}
+                  onClick={() => bulkSetStatus("held")}
+                >
+                  Hold
+                </InkButton>
+                <InkButton
+                  tone="quiet-danger"
+                  disabled={setStatus.isPending}
+                  onClick={() => bulkSetStatus("killed")}
+                >
+                  Kill
+                </InkButton>
+                {confirmingBulkDelete ? (
+                  <div className="queue-bulk-delete-confirm">
+                    <span>
+                      Delete {selectedDeleteLeads.length} selected lead
+                      {selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published
+                      articles stay on the paper.
+                    </span>
+                    <InkButton
+                      tone="danger"
+                      disabled={bulkRemove.isPending}
+                      onClick={() => bulkRemove.mutate(selectedDeleteLeads)}
+                    >
+                      {bulkRemove.isPending
+                        ? "Deleting…"
+                        : `Yes, delete ${selectedDeleteLeads.length}`}
+                    </InkButton>
+                    <InkButton
+                      tone="quiet"
+                      disabled={bulkRemove.isPending}
+                      onClick={() => setConfirmingBulkDelete(false)}
+                    >
+                      Keep
+                    </InkButton>
+                  </div>
+                ) : (
+                  <InkButton tone="quiet-danger" onClick={() => setConfirmingBulkDelete(true)}>
+                    Delete selected ({selectedDeleteLeads.length})
+                  </InkButton>
+                )}
+                <InkButton
+                  tone="quiet"
+                  disabled={bulkBusy}
+                  onClick={() => {
+                    setSelectedDeleteLeadIds([]);
+                    setConfirmingBulkDelete(false);
+                    setBulkDeleteNotice("");
+                  }}
+                >
+                  Clear
                 </InkButton>
               </div>
-            ) : (
-              <InkButton tone="quiet-danger" small onClick={() => setConfirmingBulkDelete(true)}>
-                Delete selected ({selectedDeleteLeads.length})
-              </InkButton>
-            )
+              {bulkDraftable.length !== selectedDeleteLeads.length ? (
+                <span className="queue-bulk-what">
+                  {selectedDeleteLeads.length - bulkDraftable.length} of these cannot be drafted
+                  (held, killed or already printed).
+                </span>
+              ) : null}
+            </>
           ) : null}
         </section>
       ) : null}
@@ -679,72 +833,394 @@ function QueuePage() {
           )}
         </p>
       ) : (
-        <div className="lead-list roomy">
-          {shown.map((l) => {
-            const dupMatch = nearDuplicate(l, printed);
-            return (
-            <LeadRowView
-              key={l.id}
-              lead={l}
-              dup={dupMatch}
-              roomy
-              onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
-              onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
-              onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
-              onKillAsDuplicate={
-                /* Unit AK item 4: the reason names the piece the desk matched,
+        <>
+          {/*
+            The header row, as drawn: one line of column labels above the rows
+            and the select-all box in the checkbox column. "Select all" used to
+            be a yellow strip below the controls; the drawing puts it here, in
+            the same 44px box every row's own checkbox sits in, so the two read
+            as the same control at two heights. It still selects exactly the
+            leads the table is showing, which is what the strip's label said.
+          */}
+          <div className="queue-head">
+            {/* BF4, defect 2: same box as every row's own -- the drawn 24px
+                square inside the 44px press area (see `.queue-check` in
+                desk-astra.css). */}
+            <label className="queue-check">
+              <input
+                type="checkbox"
+                className="queue-pick"
+                checked={allShownSelected}
+                aria-label={`Select all${bulkSelectLabel(filter) ? ` ${bulkSelectLabel(filter)}` : ""} leads shown (${shown.length})`}
+                onChange={(event) => {
+                  setConfirmingBulkDelete(false);
+                  setBulkDeleteNotice("");
+                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+                }}
+              />
+              <span className="queue-box" aria-hidden="true">
+                {allShownSelected ? "✓" : null}
+              </span>
+            </label>
+            <span>Score</span>
+            <span>Lead</span>
+            <span>Evidence</span>
+            <span>Filed</span>
+            <span className="queue-head-acts">Actions</span>
+          </div>
+          <div className="lead-list roomy">
+            {shown.map((l) => {
+              const dupMatch = nearDuplicate(l, printed);
+              return (
+                <LeadRowView
+                  key={l.id}
+                  lead={l}
+                  dup={dupMatch}
+                  roomy
+                  /*
+                    BF3: the `more` array that used to sit here (Open the story
+                    workbench / Hold this lead / Kill this lead / Put it back /
+                    Delete this lead) is gone -- every one of those calls the
+                    handler this row's own menu already calls, so the row was
+                    printing each action twice under two sets of words. The
+                    menu the brief asks for is the one LeadRowView builds.
+                  */
+                  onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
+                  onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
+                  onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                  onKillAsDuplicate={
+                    /* Unit AK item 4: the reason names the piece the desk matched,
                    so the kill record on the story page means something to
                    whoever reads it next. */
-                dupMatch
-                  ? async () => {
-                      await killAsDuplicate.mutateAsync({
-                        id: l.id,
-                        killReason: duplicateKillReason(dupMatch.headline),
-                      });
-                    }
-                  : undefined
-              }
-              onDelete={() => remove.mutate(l.id)}
-              deleteSelected={selectedDeleteLeads.includes(l.id)}
-              onDeleteSelect={(selected) => {
-                setConfirmingBulkDelete(false);
-                setBulkDeleteNotice("");
-                setSelectedDeleteLeadIds((ids) =>
-                  selected
-                    ? [...ids.filter((id) => id !== l.id), l.id]
-                    : ids.filter((id) => id !== l.id),
-                );
-              }}
-              onDraft={(modelChoice, modelEffort) => {
-                setDraftNotices((notices) => {
-                  const next = { ...notices };
-                  delete next[l.id];
-                  return next;
-                });
-                queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort });
-              }}
-              drafting={draftingIds.includes(l.id)}
-              draftNotice={draftNotices[l.id] ?? null}
-              batchSelected={selectedBatchLeads.includes(l.id)}
-              batchDisabled={
-                startBatch.isPending ||
-                (!selectedBatchLeads.includes(l.id) && selectedBatchLeads.length >= 5)
-              }
-              onBatchSelect={
-                l.status !== "held" && l.status !== "killed" && l.status !== "published"
-                  ? (selected) => {
-                      setSelectedBatchLeadIds((ids) => {
-                        if (selected) return [...ids.filter((id) => id !== l.id), l.id];
-                        return ids.filter((id) => id !== l.id);
-                      });
-                    }
-                  : undefined
-              }
-            />
-            );
-          })}
-        </div>
+                    dupMatch
+                      ? async () => {
+                          await killAsDuplicate.mutateAsync({
+                            id: l.id,
+                            killReason: duplicateKillReason(dupMatch.headline),
+                          });
+                        }
+                      : undefined
+                  }
+                  onDelete={() => remove.mutate(l.id)}
+                  deleteSelected={selectedDeleteLeads.includes(l.id)}
+                  onDeleteSelect={(selected) => {
+                    setConfirmingBulkDelete(false);
+                    setBulkDeleteNotice("");
+                    setSelectedDeleteLeadIds((ids) =>
+                      selected
+                        ? [...ids.filter((id) => id !== l.id), l.id]
+                        : ids.filter((id) => id !== l.id),
+                    );
+                  }}
+                  onDraft={(modelChoice, modelEffort) => {
+                    setDraftNotices((notices) => {
+                      const next = { ...notices };
+                      delete next[l.id];
+                      return next;
+                    });
+                    queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort });
+                  }}
+                  drafting={draftingIds.includes(l.id)}
+                  draftNotice={draftNotices[l.id] ?? null}
+                  /*
+                The row's own "Include in batch draft" box went with the panel
+                that consumed it (unit BF2, defect 8): one selection mechanism
+                now, the drawn bulk strip above the table, which is also what
+                Hold, Kill and Delete act on.
+              */
+                />
+              );
+            })}
+          </div>
+        </>
       )}
+
+      {/*
+        Filing a lead by hand, in the one dialog the redesign has (phase 0's
+        `Dialog`, Radix underneath). The form keeps its field labels and its
+        native validation: the dialog's primary presses the form's own submit
+        through `requestSubmit`, so `required`/`minLength` still run and the
+        browser still says which field is short.
+      */}
+      <Dialog
+        open={panel === "file-lead"}
+        onClose={closePanel}
+        title="File a lead"
+        subtitle={
+          <>
+            Have a transcript, packet or documents?{" "}
+            <Link to="/desk" className="inline-link">
+              Write a story from text or uploaded documents on the Desk
+            </Link>
+            . Already written somewhere else?{" "}
+            <Link to="/desk/import" className="inline-link">
+              Import finished stories
+            </Link>{" "}
+            — paste one story or a whole report and check each one before it lands here.
+          </>
+        }
+        primaryLabel="File lead"
+        primaryDisabled={file.isPending}
+        onPrimary={() => fileFormRef.current?.requestSubmit()}
+        footNote="A filed lead lands at the top of the Open queue, scored like any other."
+      >
+        <form
+          id="file-lead"
+          ref={fileFormRef}
+          className="form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setFormError(null);
+            file.mutate();
+          }}
+        >
+          <Field label="Headline">
+            <input
+              value={headline}
+              onChange={(e) => setHeadline(e.target.value)}
+              required
+              minLength={8}
+              placeholder="What happened"
+            />
+          </Field>
+          <Field label="Why now">
+            <input
+              value={why}
+              onChange={(e) => setWhy(e.target.value)}
+              required
+              minLength={8}
+              placeholder={`Why this is news in ${PAPER.city} today`}
+            />
+          </Field>
+          <Field label="Topic">
+            <select value={topic} onChange={(e) => setTopic(e.target.value)}>
+              {TOPICS.filter((t) => t !== "about").map((t) => (
+                <option key={t} value={t}>
+                  {sections.find((s) => s.key === t)?.name ?? t}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Source URL (optional)">
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://"
+            />
+          </Field>
+        </form>
+        {formError ? <Notice kind="err">{formError}</Notice> : null}
+      </Dialog>
+
+      {/*
+        The old "Draft selected leads" panel (unit BF2, defect 8). Its picker
+        is the same `ModelPicker` with the same 0.6.71 behavior -- scope
+        "forced", no Automatic, the lead's own stored research scope kept --
+        and the press beneath it queues the same batch of jobs the bulk bar's
+        Start N stories named. What the dialog is about to queue was copied
+        out of that selection when it opened.
+      */}
+      <Dialog
+        open={panel === "batch"}
+        onClose={closePanel}
+        title="Draft the selected leads"
+        subtitle="Choose up to five eligible queue leads and one writing runtime. Each lead keeps its own stored research scope. This queues drafts for editor review; it does not publish anything."
+        primaryLabel={
+          batchQueuedNow
+            ? "Batch started"
+            : startBatch.isPending
+              ? "Starting…"
+              : `Start ${selectedBatchLeads.length} ${selectedBatchLeads.length === 1 ? "story" : "stories"}`
+        }
+        primaryDisabled={
+          newsroomId === null ||
+          selectedBatchLeads.length === 0 ||
+          selectedBatchLeads.length > 5 ||
+          startBatch.isPending ||
+          batchQueuedNow
+        }
+        onPrimary={() => {
+          const leadIds = selectedBatchLeads;
+          setBatchNotice(null);
+          startBatch.mutate(
+            { leadIds, runtime: batchRuntime, modelEffort: batchEffort },
+            {
+              onSuccess: (result) => {
+                if (!result.ok) return;
+                setBatchQueued(leadIds);
+                // The batch is queued: the strip behind the dialog is no
+                // longer "about to do" anything, so it stands down rather
+                // than staying armed for a second press.
+                setSelectedDeleteLeadIds([]);
+                setConfirmingBulkDelete(false);
+              },
+            },
+          );
+        }}
+      >
+        <div className="draft-batch-panel" id="draft-batch">
+          <div className="wire-sum">
+            <Field label="Suggested focus size">
+              <select
+                value={focusTarget}
+                onChange={(event) => setFocusTarget(Number(event.target.value) as 3 | 4 | 5)}
+                disabled={startBatch.isPending}
+              >
+                {[3, 4, 5].map((size) => (
+                  <option key={size} value={size}>
+                    {size} leads
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <p className="meta">
+              Suggestions balance existing lead scores and sections. Review the evidence before
+              drafting.
+            </p>
+            <InkButton
+              small
+              disabled={
+                startBatch.isPending ||
+                focusAddable.length === 0 ||
+                selectedBatchLeads.length >= 5 ||
+                batchQueuedNow
+              }
+              onClick={() =>
+                setBatchLeadIds((ids) =>
+                  mergeFocusSelection(
+                    ids,
+                    batchEligible.map((lead) => lead.id),
+                    suggestedFocus.map((lead) => lead.id),
+                    5,
+                  ),
+                )
+              }
+            >
+              Add suggested focus ({Math.min(focusAddable.length, 5 - selectedBatchLeads.length)})
+            </InkButton>
+          </div>
+          <ModelPicker
+            scope="forced"
+            value={batchRuntime}
+            onChange={(choice) => {
+              const runtime = choice as DraftBatchRuntime;
+              setBatchRuntime(runtime);
+              setBatchEffort(defaultModelEffort(runtime));
+            }}
+            effort={batchEffort}
+            onEffortChange={setBatchEffort}
+            disabled={startBatch.isPending}
+            compact
+            excludeAutomatic
+          />
+          <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
+          {/*
+            BF5: name the leads the press below will draft. Until the batch
+            moved into this dialog the panel's own checkboxes showed which
+            leads were queued -- including the ones "Add suggested focus"
+            picked -- so the count alone left an editor unable to see what the
+            model calls were about to be spent on. Each lead keeps its stored
+            research scope, so the list is the whole of what Start queues.
+          */}
+          {selectedBatchLeadRows.length > 0 ? (
+            <ul className="meta" aria-label="Leads in this batch">
+              {selectedBatchLeadRows.map((lead) => (
+                <li key={lead.id}>{lead.headline}</li>
+              ))}
+            </ul>
+          ) : null}
+          {batchNotice ? <Notice kind={batchNotice.kind}>{batchNotice.text}</Notice> : null}
+          {desk.isPending || batch.isPending ? (
+            <p className="meta">Loading the latest draft batch…</p>
+          ) : batch.isError ? (
+            <Notice kind="err">Could not load the latest draft batch.</Notice>
+          ) : batch.data && !batch.data.ok ? (
+            <Notice kind="err">{batch.data.error}</Notice>
+          ) : currentBatch && !batchPanelVisible ? (
+            /*
+             * Unit BS: the editor put this batch away, or every story in it
+             * has since been printed or killed. Either way there is no work
+             * left to list, so there is no panel -- not an empty one under a
+             * heading that still says "Batch #3". In phase 2a this block is
+             * the body of the "Draft the selected leads" dialog, so what the
+             * editor gets is the picker and the press, with the batch's own
+             * list gone.
+             */
+            null
+          ) : currentBatch ? (
+            <div className="lead-list roomy" aria-label="Draft batch results">
+              <p className="meta">
+                Batch #{currentBatch.id} · {currentBatch.runtime.label}
+              </p>
+              {currentBatch.runtime.runtime === "local" ? (
+                <p className="meta">
+                  This batch keeps the saved local model shown above.{" "}
+                  <Link to="/desk/ops" className="inline-link">
+                    Review local models on Server
+                  </Link>{" "}
+                  before starting another batch.
+                </p>
+              ) : null}
+              {/*
+                Unit BS: the panel is a list of work, not a log. A job whose
+                lead has since been printed or killed drops out here, so an
+                editor is never offered "Redraft" for a story the paper is
+                already carrying.
+              */}
+              {batchItems.map((item) => {
+                const lead = leads.find((candidate) => candidate.id === item.leadId);
+                return (
+                  <DraftBatchResult
+                    key={item.jobId}
+                    item={item}
+                    headline={lead?.headline ?? `lead #${item.leadId}`}
+                    redraftLabel={modelChoiceLabel(batchRuntime)}
+                    redrafting={draftingIds.includes(item.leadId)}
+                    onRedraft={() => {
+                      setBatchNotice(null);
+                      /*
+                        Kept on one line: `scripts/draft-batch-result-render.test.mjs`
+                        pins this exact call, trailing comma and all, as the proof
+                        that a redraft sends the runtime the picker is showing.
+                      */
+                      queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, fromBatch: true });
+                    }}
+                  />
+                );
+              })}
+              {!batchRunning ? (
+                /*
+                 * Unit BS: putting a finished batch away. `tone="quiet"` is
+                 * the audit's BS-001 -- Dismiss drawn as the yellow primary
+                 * read louder than the "Redraft with …" presses that are the
+                 * real work on this screen. Quiet is the same plain 1px
+                 * outlined style as the dialog's own Cancel.
+                 */
+                <div className="wire-sum">
+                  <InkButton
+                    small
+                    tone="quiet"
+                    type="button"
+                    disabled={dismissBatch.isPending}
+                    onClick={() => {
+                      setBatchNotice(null);
+                      dismissBatch.mutate(currentBatch.id);
+                    }}
+                  >
+                    {dismissBatch.isPending ? "Dismissing…" : "Dismiss"}
+                  </InkButton>
+                  <p className="meta">
+                    Puts this batch away for good. The next batch you start shows normally.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="meta">No draft batch has been started in this newsroom.</p>
+          )}
+        </div>
+      </Dialog>
     </DeskShell>
   );
 }

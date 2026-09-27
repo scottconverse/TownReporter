@@ -112,6 +112,8 @@ const deskCopyStub = inlineModule(`
     return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
   }
   export function kindFromSourceUrl() { return "official"; }
+  /* Redesign phase 2a: the shell counts Queue from openLeads(). */
+  export function openLeads(leads) { return leads ?? []; }
   export function tierFromKind() { return "A"; }
   /*
     The add box's catch runs this on a failure (0.6.67). No click can happen in
@@ -129,6 +131,11 @@ const deskCopyStub = inlineModule(`
 // like the real one.
 const deskServerStub = inlineModule(`
   export async function listLeads() { return []; }
+  /*
+    Redesign phase 2a: the shell's Running box reads the same
+    ["recent-story-work"] query the desk already polls for its job cards.
+  */
+  export async function listRecentStoryWork() { return []; }
   export async function addSource() {
     return { ok: false, error: "not called in a static render" };
   }
@@ -155,6 +162,18 @@ const deskChromeUtilsUrl = moduleUrl(
   "desk-chrome-utils.ts",
 );
 
+/*
+  Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
+  desk-chrome.tsx into src/components/desk-jobs.ts (react-refresh wants a file
+  that exports components to export components only). Its only bare import is
+  react, so the REAL module compiles here.
+*/
+const deskJobsUrl = moduleUrl(
+  await readFile(new URL("../src/components/desk-jobs.ts", import.meta.url), "utf8"),
+  "desk-jobs.ts",
+  { react: import.meta.resolve("react") },
+);
+
 // The real copy module: its sentences are half of what this file checks.
 const copyUrl = moduleUrl(
   await readFile(new URL("../src/components/sections-setup-copy.ts", import.meta.url), "utf8"),
@@ -173,7 +192,16 @@ const DESK_CHROME_IMPORTS = {
   "@/lib/news/desk": deskServerStub,
   "@/lib/news/opinion": opinionStub,
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+  "@/components/desk-jobs": deskJobsUrl,
   "@/lib/appearance-context": appearanceContextStub,
+  /*
+    Redesign phase 2a: the shell's shortcut sheet ("?") is the phase 0 Dialog
+    (src/components/dialog.tsx). Nothing rendered here opens it, but
+    desk-chrome.tsx cannot load without the specifier resolving.
+  */
+  "@/components/dialog": inlineModule(
+    "export function Dialog() { return null; } export function ChoiceCard() { return null; }",
+  ),
   "lucide-react": import.meta.resolve("lucide-react"),
   react: import.meta.resolve("react"),
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

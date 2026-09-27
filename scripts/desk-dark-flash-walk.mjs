@@ -325,15 +325,14 @@ async function ownTheDesk(pass) {
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();
   }
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   if (create) await completeFirstRunSetup(page, base);
   step(create ? "the desk exists" : "the same desk is signed in again");
 }
 
 /** A real lead, filed the way an editor files one, so /desk/story/<id> is real. */
 async function fileTheLead() {
-  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself", { exact: true }).click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(HEADLINE);
   await page.getByLabel("Why now").fill(WHY);
   await page.getByRole("button", { name: "File lead" }).click();
@@ -402,12 +401,21 @@ async function proveTheProbeCanSee(label, breakIt, expected) {
 }
 
 /** The desk's own nav links, in the owner's order. */
+/*
+  The redesign's own nav (docs/design/handoff-2026-09-26/README.md) is Today,
+  Queue, Drafts, Published, Opinion, Follow-ups, Dark Desk, Sources & scan,
+  Models, Server, Stats: the screen this walk calls "Desk" is drawn as
+  "Today", and /desk/scan is not a nav item any more -- the design reaches the
+  screens outside the nav through the Ctrl K palette ("find anything"). The
+  routes and the assertions are unchanged; only the two words and the one way
+  in follow the design.
+*/
 const DESK_ROUTES = [
-  { label: "Desk", path: "/desk", link: "Desk" },
+  { label: "Today", path: "/desk", link: "Today" },
   { label: "Queue", path: "/desk/queue", link: "Queue" },
   { label: "Published", path: "/desk/published", link: "Published" },
   { label: "Server", path: "/desk/ops", link: "Server" },
-  { label: "Scan", path: "/desk/scan", link: "Scan" },
+  { label: "Scan", path: "/desk/scan", palette: "Scan the wire" },
 ];
 
 /** One full pass, dark or light. Returns when every frame has been checked. */
@@ -440,21 +448,20 @@ async function theWalk(pass) {
   const leadId = dark ? await fileTheLead() : await openTheFiledLead();
   if (dark) await chooseDark();
 
-  const story = { label: "Story", path: `/desk/story/${leadId}`, link: null };
+  const story = { label: "Story", path: `/desk/story/${leadId}` };
 
   // 1. Out of a hard reload into the desk, then straight through the owner's
   //    order, every step a real client-side navigation.
   await hardLoad("Desk", "/desk", deskSurface, deskAttr);
   for (const route of [DESK_ROUTES[1], story, ...DESK_ROUTES.slice(2), DESK_ROUTES[0]]) {
     const path = route.path;
-    const link = route.link;
-    await clickThrough(
-      route.label,
-      () => (link ? deskLink(link) : storyLink(leadId)),
-      path,
-      deskSurface,
-      deskAttr,
-    );
+    const click =
+      route.link !== undefined
+        ? () => deskLink(route.link)
+        : route.palette !== undefined
+          ? () => paletteTo(route.palette)
+          : () => storyLink(leadId);
+    await clickThrough(route.label, click, path, deskSurface, deskAttr);
   }
 
   // 2. Out to the public paper -- the reader's own dark, a different color --
@@ -462,7 +469,9 @@ async function theWalk(pass) {
   //    navigation too.
   await clickThrough(
     "Public paper",
-    () => page.getByRole("link", { name: "Public news page" }).first().click(),
+    // The link to the reader's paper says "View the paper ↗" now; the design
+    // rewrote its words, and the step is still the same trip out to the paper.
+    () => page.getByRole("link", { name: /^View the paper/ }).first().click(),
     "/",
     paperSurface,
     paperAttr,
@@ -522,9 +531,28 @@ async function theWalk(pass) {
   await context.close();
 }
 
-/** Click a desk nav link by its visible name. */
+/**
+ * Click a desk nav link by its visible name. The design's nav badges some
+ * links with a count (the Queue's outstanding leads), and a badge joins the
+ * link's accessible name -- so match the label at the start of the name rather
+ * than the whole of it, and the click still lands on the same nav link.
+ */
 async function deskLink(name) {
-  await page.getByRole("link", { name, exact: true }).first().click();
+  await page.getByRole("link", { name: new RegExp(`^${name}\\b`) }).first().click();
+}
+
+/**
+ * Reach a screen the nav does not carry, the way the design says to: the
+ * shell's Ctrl K palette ("Find a story or screen"), whose result link is a
+ * real client-side navigation to that route. /desk/scan moved out of the nav
+ * in the redesign -- it is "Scan the wire" in the palette now.
+ */
+async function paletteTo(label) {
+  await page.keyboard.press("Control+k");
+  const palette = page.locator("dialog.astra-dialog[open]");
+  await palette.getByRole("heading", { name: "Find a story or screen" }).waitFor();
+  await palette.getByLabel("Search your newsroom").fill(label);
+  await palette.getByRole("link", { name: label, exact: true }).click();
 }
 
 async function storyLink() {

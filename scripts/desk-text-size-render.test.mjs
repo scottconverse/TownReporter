@@ -6,10 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 
 // Renders the real DeskShell header (src/components/desk-chrome.tsx) to
-// prove the "Text: Normal / Large" control the readability pass added is
-// actually in the header, next to Light/Dark, with real button semantics
-// (aria-pressed, not decoration). Follows the same stub-everything-but-React
-// pattern lead-badge-render.test.mjs uses for desk-leads.tsx.
+// prove the Large/Normal control the readability pass added is actually in the
+// header, next to Light/Dark, with real button semantics (aria-pressed, not
+// decoration). Since unit BF2 it is drawn as the design's "Aa Large" button
+// rather than a <select>; the behavior it toggles is unchanged. Follows the
+// same stub-everything-but-React pattern lead-badge-render.test.mjs uses for
+// desk-leads.tsx.
 //
 // DeskShell reads its Large/Normal choice from localStorage inside a
 // useEffect, which renderToStaticMarkup (server rendering, no hydration)
@@ -95,7 +97,31 @@ const claimStub = inlineModule(`
   }
 `);
 
+const dialogStub = inlineModule(`
+  import { createElement } from "react";
+  export function Dialog({ open, title, children, primaryLabel, cancelLabel, onPrimary, onClose }) {
+    if (!open) return null;
+    return createElement(
+      "div",
+      { className: "dialog-stub", "data-title": String(title ?? "") },
+      createElement("div", null, children),
+      createElement("button", { type: "button", onClick: onPrimary }, primaryLabel ?? "OK"),
+      createElement("button", { type: "button", onClick: onClose }, cancelLabel ?? "Cancel"),
+    );
+  }
+  export function ChoiceCard({ label, note }) {
+    return createElement("span", { className: "choice-stub" }, label ?? note ?? "");
+  }
+`);
+
 const deskCopyStub = inlineModule(`
+  /*
+    openLeads is what the shell counts Queue from. The render test does not care
+    about the arithmetic, only that the import resolves.
+  */
+  export function openLeads(leads) {
+    return (leads ?? []).filter((l) => l.status !== "killed" && l.status !== "published");
+  }
   export function createEditorCopy() {
     return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
   }
@@ -127,6 +153,20 @@ const deskChromeUtilsUrl = moduleUrl(
   "desk-chrome-utils.ts",
 );
 
+/*
+  Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
+  desk-chrome.tsx into src/components/desk-jobs.ts (react-refresh wants a file
+  that exports components to export components only -- desk-chrome.tsx had been
+  exporting useNowMs and elapsedLabel besides). Its only bare import is react,
+  so the REAL module compiles here and the elapsed format stays single-sourced
+  rather than being re-implemented in this stub.
+*/
+const deskJobsUrl = moduleUrl(
+  await readFile(new URL("../src/components/desk-jobs.ts", import.meta.url), "utf8"),
+  "desk-jobs.ts",
+  { react: import.meta.resolve("react") },
+);
+
 const { DeskShell } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
@@ -141,10 +181,14 @@ const { DeskShell } = await import(
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
       "lucide-react": import.meta.resolve("lucide-react"),
-      "@/lib/news/desk": inlineModule("export async function listLeads() { return []; }"),
+      "@/lib/news/desk": inlineModule(
+        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; }",
+      ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+      "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,
+      "@/components/dialog": dialogStub,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
@@ -158,9 +202,17 @@ test("the desk exposes accessible appearance and text size controls alongside ev
     createElement(DeskShell, { title: "Queue" }, createElement("p", null, "body")),
   );
   assert.match(html, /aria-label="Switch to dark appearance"/);
-  assert.match(html, /<select aria-label="Text size"/);
-  assert.match(html, /<option value="normal" selected="">Normal/);
-  assert.match(html, /<option value="large">Large/);
+  /*
+    Unit BF2, defect 9: the footer is drawn as buttons -- "Dark" and "Aa Large"
+    side by side -- not a text-size <select>. The Large/Normal behavior is the
+    same one the select had; only the control changed.
+  */
+  assert.match(html, /class="astra-foot-row"/);
+  assert.match(html, />Dark</);
+  assert.match(html, /aria-label="Switch to large text"/);
+  assert.match(html, /aria-pressed="false"[^>]*>Aa Large</);
+  assert.match(html, /Press \? for keyboard shortcuts/);
+  assert.doesNotMatch(html, /<select aria-label="Text size"/);
   for (const route of [
     "/desk",
     "/desk/sources",
@@ -177,12 +229,13 @@ test("the desk exposes accessible appearance and text size controls alongside ev
   assert.match(html, /id="desk-announcer"[^>]*aria-live="polite"/);
 });
 
-test("the Text size control still renders on a forced-night page (Dark Desk), which hides Light/Dark", () => {
+test("the Aa control still renders on a forced-night page (Dark Desk), which hides Light/Dark", () => {
   const html = renderToStaticMarkup(
     createElement(DeskShell, { title: "Dark Desk", night: true }, createElement("p", null, "body")),
   );
   assert.doesNotMatch(html, /aria-label="Light or dark"/);
-  assert.match(html, /aria-label="Text size"/);
+  assert.doesNotMatch(html, /aria-label="Switch to dark appearance"/);
+  assert.match(html, /aria-label="Switch to large text"/);
 });
 
 test("deskShellClassName adds .large only when size is large, independent of theme", () => {

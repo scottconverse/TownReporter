@@ -313,7 +313,7 @@ try {
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();
   }
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   console.log(`  ok    ${fresh ? "the first account owns the desk" : "signed in to the desk"}`);
 
   // The desk may or may not be set up: on a fresh server it is not, and

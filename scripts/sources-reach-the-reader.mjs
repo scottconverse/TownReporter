@@ -43,7 +43,7 @@ try {
   await page.getByLabel("Password", { exact: true }).fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
   await page.getByLabel("Confirm password").fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("owns the desk");
 
@@ -53,9 +53,7 @@ try {
   // moment, so wait for the DOM plus a concrete element instead of
   // "networkidle" (which also risks an aborted navigation if the SPA is
   // still mid-transition).
-  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself").waitFor({ timeout: 30_000 });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill("The packet posted with a hearing date.");
   // The field is optional in the form; this whole test is about what happens

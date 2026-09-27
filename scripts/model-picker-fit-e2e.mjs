@@ -108,7 +108,7 @@ try {
   await page.getByLabel("Password", { exact: true }).fill("picker-fit-e2e-pass");
   await page.getByLabel("Confirm password").fill("picker-fit-e2e-pass");
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);
 
   for (const viewport of VIEWPORTS) {

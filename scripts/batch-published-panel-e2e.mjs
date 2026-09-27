@@ -17,7 +17,7 @@
  *   1. an owner claims a desk and saves one Custom AI connection at the fake;
  *   2. two leads are filed and drafted as one batch;
  *   3. one of the two stories is written and PRINTED from its workbench;
- *   4. back on the Queue the printed story's row must be gone from the panel,
+ *   4. back on the Queue, the printed story's row must be gone from the panel,
  *      and the other must still be there -- the panel is a list of work, not
  *      a log, so an empty panel would also be wrong here;
  *   5. Dismiss must put the batch away, and it must stay away after a reload.
@@ -25,6 +25,13 @@
  * Step 4 is the bug: on 0.6.74 the printed story's row was still listed, and
  * there was no Dismiss button to get rid of the panel at all. Run this walk
  * against that build and it fails on step 4 with the row still present.
+ *
+ * Redesign phase 2a (unit BF2, defect 8) moved the panel off the Queue and
+ * into the "Draft the selected leads" dialog, which the bulk strip's "Start N
+ * stories" press opens with the strip's selection copied into it. So the panel
+ * is now opened again wherever this walk wants to read it -- the nodes
+ * asserted on (`#draft-batch`, its `Draft batch results` list, the rows and
+ * the Dismiss press inside it) are unchanged.
  *
  *   PORT=3532 HOST=127.0.0.1 BETTER_AUTH_SECRET=... \
  *   TOWNREPORTER_CLAUDE_CODE=0 npm start &
@@ -133,10 +140,46 @@ function startFake(script, env) {
   });
 }
 
-/** The panel's rows, as the editor sees them. */
+/**
+ * The panel's rows, as the editor sees them.
+ *
+ * Redesign phase 2a (BF2, defect 8) moved this panel off the Queue and into
+ * the "Draft the selected leads" dialog, which the bulk strip's "Start N
+ * stories" press opens with the strip's own selection copied into it. The
+ * nodes below are the ones this walk has always driven -- `#draft-batch`,
+ * its `Draft batch results` list, the `.lead-row`s inside it -- so every
+ * assertion keeps its meaning. Only the way the panel is reached changed.
+ */
 const panel = () => page.locator("#draft-batch");
 const results = () => page.locator('#draft-batch [aria-label="Draft batch results"]');
 const rowFor = (headline) => results().locator(".lead-row", { hasText: headline });
+
+/**
+ * The one selection box a Queue row has since BF2 defect 1: the old "Include
+ * <headline> in the batch draft" box is gone, this one feeds the bulk strip,
+ * and the strip's Start press is what opens the batch dialog.
+ */
+const rowChoice = (headline) =>
+  page.getByRole("checkbox", { name: `Select ${headline} for deletion`, exact: true });
+const bulkStrip = () => page.getByRole("region", { name: "Bulk actions for the leads shown" });
+const startPress = (count) =>
+  bulkStrip().getByRole("button", {
+    name: `Start ${count} ${count === 1 ? "story" : "stories"} from the selected leads`,
+    exact: true,
+  });
+
+/**
+ * Open the batch panel the way an editor does: pick the leads the strip is
+ * about to send, then press the strip's Start N stories. That press is the
+ * one the old panel's own "Draft selected" button used to be, and it opens
+ * the dialog with the strip's selection already copied in.
+ */
+async function openBatchPanel(count) {
+  await startPress(count).click();
+  const dialog = page.getByRole("dialog", { name: "Draft the selected leads" });
+  await dialog.locator("#draft-batch").waitFor({ timeout: 45_000 });
+  return dialog;
+}
 
 async function dump(err) {
   const message = err instanceof Error ? err.message : String(err);
@@ -205,12 +248,16 @@ async function saveTheFakeConnection() {
 
 async function fileTwoLeads() {
   for (const headline of [printedHeadline, openHeadline]) {
-    await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-    const form = page.locator("details.file-form");
-    await form.locator("summary").click();
-    await form.getByLabel("Headline").fill(headline);
-    await form.getByLabel("Why now").fill("Filed by the batch-panel walk.");
-    await form.getByRole("button", { name: "File lead" }).click();
+    /*
+      Filing a lead is a dialog in phase 2a (unit BF3): the Queue's inline
+      "<details> File a lead" form is gone, and `/desk/queue#file-lead` opens
+      the dialog -- the same anchor the desk's other walks file through. The
+      fields and the "File lead" press keep their names.
+    */
+    await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
+    await page.getByLabel("Headline").fill(headline);
+    await page.getByLabel("Why now").fill("Filed by the batch-panel walk.");
+    await page.getByRole("button", { name: "File lead" }).click();
     // Filing lands on the story workbench; the Queue is where the batch is run.
     await page.getByLabel("Body").waitFor({ timeout: 45_000 });
   }
@@ -221,18 +268,16 @@ async function fileTwoLeads() {
 async function draftBothAsOneBatch() {
   await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
   for (const headline of [printedHeadline, openHeadline]) {
-    const row = page.locator(".lead-row", { hasText: headline }).first();
-    await row
-      .getByRole("checkbox", { name: `Include ${headline} in the batch draft`, exact: true })
-      .check();
+    await rowChoice(headline).check();
   }
-  const batch = panel();
+  const batch = await openBatchPanel(2);
   const picker = batch.getByLabel("Writing model");
   const option = picker.locator("option", { hasText: connectionName });
   const choice = await option.getAttribute("value");
   assert.match(choice ?? "", /^custom:/, "the saved connection must appear in the batch picker");
   await picker.selectOption(choice);
-  await batch.getByRole("button", { name: "Draft selected", exact: true }).click();
+  // The dialog's own press is the queueing one, and its label names the leads.
+  await batch.getByRole("button", { name: "Start 2 stories", exact: true }).click();
   await batch.getByText(new RegExp(`Batch #\\d+ · ${connectionName}`)).waitFor({ timeout: 45_000 });
   // Both items have to be finished before the panel offers Dismiss, and a
   // finished item is the one that reports the draft it saved -- so the second
@@ -295,6 +340,14 @@ async function main() {
       panel that had simply vanished would pass this too.
     */
     await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
+    /*
+      The panel lives in the batch dialog in phase 2a. The story still being
+      worked is the one draftable lead left, so picking it and pressing the
+      strip's Start is how an editor reopens the panel to read the batch.
+    */
+    await rowChoice(openHeadline).waitFor({ timeout: 45_000 });
+    await rowChoice(openHeadline).check();
+    await openBatchPanel(1);
     await results().getByText(/Batch saved draft #\d+/).first().waitFor({ timeout: 45_000 });
     assert.equal(
       await rowFor(openHeadline).count(),
@@ -318,7 +371,15 @@ async function main() {
     await results().waitFor({ state: "detached", timeout: 45_000 });
     await shot("queue-after-dismiss");
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.locator("#draft-batch-heading").waitFor({ timeout: 45_000 });
+    /*
+      Phase 2a: `#draft-batch` exists only while the batch dialog is open, so a
+      reload that proves anything has to reopen it -- the same way as above.
+      The dismissed batch must still be gone from it. Waiting on the still-open
+      lead first also confirms the Queue itself came back.
+    */
+    await rowChoice(openHeadline).waitFor({ timeout: 45_000 });
+    await rowChoice(openHeadline).check();
+    await openBatchPanel(1);
     await page.waitForTimeout(1_500);
     assert.equal(
       await results().count(),

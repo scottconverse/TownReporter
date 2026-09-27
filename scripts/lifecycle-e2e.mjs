@@ -87,11 +87,13 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
 
-  await page.getByRole("link", { name: "Queue", exact: true }).click();
-  await page.getByText("File a lead yourself").click();
+  // Unit BF3: the "File a lead yourself" button is off the Queue controls row
+  // (the drawing files a lead from Today's "+ Add a lead"); /desk/queue#file-lead
+  // still opens the same dialog.
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
@@ -117,7 +119,7 @@ async function main() {
     website -- while Delete, which keeps a copy for thirty days, asked
     twice. If someone removes the confirmation, the second click here finds
     no "Yes, print it in <section>" and this walk fails, which is the
-    behaviour we want. The section is named on BOTH buttons (0.6.67), so the
+    behavior we want. The section is named on BOTH buttons (0.6.67), so the
     second one is matched by its own wording and not by the first's.
   */
   await page.getByRole("button", { name: /^Publish in / }).click();
@@ -134,8 +136,8 @@ async function main() {
   // Was "Leave as editor", which sat in the header of every desk page. It moved
   // to the Server page and asks you to type your address; see claim.ts. The desk
   // is still proven to be rendering by the nav link on the next line.
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
-  await page.getByRole("link", { name: "Published", exact: true }).first().click();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
+  await page.getByRole("link", { name: /^Published\b/ }).first().click();
   await page.waitForURL(/\/desk\/published/);
   // Click until the form actually opens. A force-click that lands before
   // React has hydrated the handler silently does nothing, and this walk

@@ -54,10 +54,45 @@ function step(name) {
   console.log(`  ok    ${name}`);
 }
 
+/*
+  The desk in dark, large-text mode at phone width.
+
+  BF5 (redesign p2a) -- these two controls moved. The design draws the theme
+  toggle and the text-size control in the nav footer as "Dark"/"Light" and
+  "Aa Large"/"Aa Normal" (src/components/desk-chrome.tsx:315-347, and
+  scripts/desk-text-size-render.test.mjs asserts the labels), where the old
+  shell had the toggle in the top bar and a `<select aria-label="Text size">`
+  beside the account. At phone width the whole nav is the drawer, so an editor
+  reaches both by opening it -- which is what this does. Every assertion the
+  callers make is unchanged: the desk is in dark, large-text mode afterwards.
+*/
+async function chooseDeskAppearance(who) {
+  await who.getByRole("button", { name: "Open navigation", exact: true }).click();
+  const drawer = who.getByRole("dialog", { name: "Newsroom navigation" });
+  const dark = drawer.getByRole("button", { name: "Switch to dark appearance", exact: true });
+  if (await dark.count()) await dark.click();
+  const large = drawer.getByRole("button", { name: "Switch to large text", exact: true });
+  if (await large.count()) await large.click();
+  await drawer.getByRole("button", { name: "Close navigation", exact: true }).click();
+}
+
 async function dump(err) {
   const message = err instanceof Error ? err.message : String(err);
   let url = "";
   let text = "";
+  /*
+    The batch's own rows are the one thing the body text cannot show: the
+    dialog scrolls, so a full-page screenshot of a failure captures the
+    dialog's top and the panel that the assertions are about falls outside it.
+    The batch-panel walk dumps the same panel for the same reason. Read before
+    the screenshot below, since scrolling for it can move the page.
+  */
+  let batchStatuses = [];
+  try {
+    batchStatuses = (await page?.locator("[data-draft-batch-status]").allTextContents()) ?? [];
+  } catch {
+    /* no batch dialog open at the failure */
+  }
   try {
     url = page?.url() ?? "";
     text = ((await page?.locator("body").innerText()) ?? "").slice(0, 1500);
@@ -73,7 +108,13 @@ async function dump(err) {
       /* Preserve the original test failure even if evidence capture fails. */
     }
   }
-  console.error(JSON.stringify({ ok: false, error: message, url, text, completed: done }, null, 2));
+  console.error(
+    JSON.stringify(
+      { ok: false, error: message, url, text, batchStatuses, completed: done },
+      null,
+      2,
+    ),
+  );
   process.exit(1);
 }
 
@@ -85,7 +126,7 @@ async function ownTheDesk() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk");
 }
@@ -232,8 +273,11 @@ async function dailySettingsJourney(context, observePage) {
     await linked.goto(`${base}${href}`, { waitUntil: "domcontentloaded" });
     const originalPage = page;
     page = linked;
+    // The redesign titles the Queue screen "Queue" (kicker "Every open lead"),
+    // where it used to read "The queue"; the assertion is the same one -- the
+    // link opens the real desk route and that route's own heading is there.
     await linked
-      .getByRole("heading", { level: 1, name: name === "history" ? "Scan" : "The queue", exact: true })
+      .getByRole("heading", { level: 1, name: name === "history" ? "Scan" : "Queue", exact: true })
       .waitFor();
     page = originalPage;
     await linked.close();
@@ -307,11 +351,7 @@ async function dailySettingsJourney(context, observePage) {
     throw new Error("daily scan panel has horizontal overflow at 390px");
   }
   await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-mobile.png") });
-  const darkToggleother = other.getByRole("button", { name: "Switch to dark appearance", exact: true });
-  if (await darkToggleother.count()) await darkToggleother.click();
-  await other.getByRole("button", { name: "Open navigation", exact: true }).click();
-  await other.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
-  await other.getByRole("dialog", { name: "Newsroom navigation" }).getByRole("button", { name: "Close navigation", exact: true }).click();
+  await chooseDeskAppearance(other);
   if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("daily scan panel has horizontal overflow at 390px in dark large-text mode");
   }
@@ -330,12 +370,22 @@ async function dailySettingsJourney(context, observePage) {
 }
 
 async function fileQueueLead(headline, why) {
-  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  const form = page.locator("details.file-form");
-  await form.locator("summary").click();
+  /*
+    Filing a lead by hand moved with the redesign: the page-level
+    `details.file-form` accordion on the Queue is gone and the same four fields
+    live in the redesign's one "File a lead" dialog (desk.queue.tsx:884-912).
+    The walk opens it the way an editor does -- Today's "+ Add a lead", which
+    the Queue answers by opening that dialog (desk.queue.tsx:472-484) -- and
+    the dialog's own "File lead" primary submits the form, so `required` and
+    `minLength` still run. Every assertion below is unchanged.
+  */
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("link", { name: /^\+ Add a lead/ }).click();
+  const form = page.getByRole("dialog", { name: "File a lead" });
+  await form.waitFor({ timeout: 45_000 });
   await form.getByLabel("Headline").fill(headline);
   await form.getByLabel("Why now").fill(why);
-  await form.getByRole("button", { name: "File lead" }).click();
+  await form.getByRole("button", { name: "File lead", exact: true }).click();
   await expect(page).toHaveURL(/\/desk\/story\/\d+$/);
   await expect(page.getByRole("textbox", { name: "Headline", exact: true })).toHaveValue(headline);
 }
@@ -383,6 +433,18 @@ async function persistSuppliedScope(headline, why) {
  * are persisted through real notes requests while the model calls are held,
  * so the actual batch worker can complete against the signed-in fake Claude
  * CLI without source search or network traffic.
+ *
+ * BF5 (redesign p2a) -- choosing the leads moved. The old panel's per-lead
+ * "Include <headline> in the batch draft" checkboxes are gone; the one
+ * checkbox a queue row has is the table's own "Select <headline> for
+ * deletion", it feeds the bulk strip above the table, and that strip's
+ * "Start N stories" press is what opens the "Draft the selected leads"
+ * dialog. The dialog copies the strip's selection as it opens, so what it
+ * queues cannot drift from what the strip said it would. Every assertion
+ * keeps its meaning: the desk's suggestion still preserves the editor's own
+ * picks (now named in the dialog's "Leads in this batch" list), the batch
+ * still never exceeds five leads, and the two chosen leads still reach Claude
+ * Sonnet and come back as reviewable drafts across a reload.
  */
 async function draftBatchJourney() {
   const first = `Library storytime registration ${stamp}`;
@@ -400,36 +462,80 @@ async function draftBatchJourney() {
   }
 
   await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  const batch = page.locator("#draft-batch");
-  await batch.getByRole("heading", { name: "Draft selected leads", exact: true }).waitFor();
 
-  const batchChoice = (headline) => page.getByRole("checkbox", {
-    name: `Include ${headline} in the batch draft`, exact: true,
-  });
-  await batchChoice(first).check();
-  await batchChoice(second).check();
+  const rowChoice = (headline) =>
+    page.getByRole("checkbox", { name: `Select ${headline} for deletion`, exact: true });
+  const bulkStrip = page.getByRole("region", { name: "Bulk actions for the leads shown" });
+  const startPress = (count) =>
+    bulkStrip.getByRole("button", {
+      name: `Start ${count} ${count === 1 ? "story" : "stories"} from the selected leads`,
+      exact: true,
+    });
+  const openBatchDialog = async (count) => {
+    await startPress(count).click();
+    const dialog = page.getByRole("dialog", { name: "Draft the selected leads" });
+    await dialog.locator("#draft-batch").waitFor({ timeout: 45_000 });
+    return dialog;
+  };
+  // The dialog is modal, so the table behind it is aria-hidden while it is
+  // open: the row checkboxes can only be driven with it shut.
+  const closeBatchDialog = async (dialog) => {
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await dialog.waitFor({ state: "detached" });
+  };
+  const batchList = (dialog) => dialog.getByRole("list", { name: "Leads in this batch" });
+
+  await rowChoice(first).waitFor({ timeout: 45_000 });
+  await rowChoice(first).check();
+  await rowChoice(second).check();
+  let batch = await openBatchDialog(2);
+  await batch.getByText("2 of 5 selected").waitFor();
+
+  // "Suggested focus size" only decides what the desk proposes: choosing it
+  // must leave the editor's own picks alone, and the dialog names them.
   await batch.getByLabel("Suggested focus size").selectOption("5");
-  await expect(batchChoice(first)).toBeChecked();
-  await expect(batchChoice(second)).toBeChecked();
-  await batch.getByRole("button", { name: /Add suggested focus/ }).click();
-  await expect(batchChoice(first)).toBeChecked();
-  await expect(batchChoice(second)).toBeChecked();
-  await expect(batchChoice(extras[3])).toBeChecked();
-  await batch.getByText("3 of 5 selected").waitFor();
-  await batchChoice(extras[3]).uncheck();
   await batch.getByText("2 of 5 selected").waitFor();
+  await expect(batchList(batch).getByRole("listitem")).toHaveCount(2);
+  await expect(batchList(batch).getByText(first, { exact: true })).toHaveCount(1);
+  await expect(batchList(batch).getByText(second, { exact: true })).toHaveCount(1);
+  const addSuggested = batch.getByRole("button", { name: /^Add suggested focus/ });
+  const offered = Number(/\((\d+)\)/.exec(await addSuggested.innerText())?.[1] ?? "0");
+  if (offered < 1) throw new Error("the desk offered no suggested focus to add");
+  await addSuggested.click();
+  await batch.getByText(`${2 + offered} of 5 selected`).waitFor();
+  await expect(batchList(batch).getByRole("listitem")).toHaveCount(2 + offered);
+  await expect(batchList(batch).getByText(first, { exact: true })).toHaveCount(1);
+  await expect(batchList(batch).getByText(second, { exact: true })).toHaveCount(1);
+  // desk-copy.ts ranks the suggestion by score, then newest, then id, and
+  // always keeps the first of that order. extras[3] was filed last, so it is
+  // the lead the desk proposes first.
+  await expect(batchList(batch).getByText(extras[3], { exact: true })).toHaveCount(1);
   step("suggested focus adds the newest eligible lead while preserving manual selections");
+
+  // Five is the cap: at five the desk offers nothing more to add...
+  await closeBatchDialog(batch);
   for (const headline of extras.slice(0, 3)) {
-    await batchChoice(headline).check();
+    await rowChoice(headline).check();
   }
+  await bulkStrip.getByText("5 selected", { exact: true }).waitFor();
+  batch = await openBatchDialog(5);
   await batch.getByText("5 of 5 selected").waitFor();
-  await expect(
-    batchChoice(extras[3]),
-  ).toBeDisabled();
-  for (const headline of extras.slice(0, 3)) {
-    await batchChoice(headline).uncheck();
+  await expect(batch.getByRole("button", { name: /^Add suggested focus/ })).toBeDisabled();
+  // ...and a sixth selected lead disables the press that opens the batch at
+  // all, so no batch can queue more than five leads.
+  await closeBatchDialog(batch);
+  await rowChoice(extras[3]).check();
+  await bulkStrip.getByText("6 selected", { exact: true }).waitFor();
+  await expect(startPress(6)).toBeDisabled();
+  for (const headline of extras) {
+    await rowChoice(headline).uncheck();
   }
+  // Back to the editor's own two: the strip and a freshly opened dialog both
+  // say two again, which is the old "2 of 5 selected" assertion.
+  await bulkStrip.getByText("2 selected", { exact: true }).waitFor();
+  batch = await openBatchDialog(2);
   await batch.getByText("2 of 5 selected").waitFor();
+  await expect(batchList(batch).getByRole("listitem")).toHaveCount(2);
 
   const runtime = batch.getByLabel("Writing model");
   const labels = (await runtime.locator("option").allInnerTexts()).map((line) =>
@@ -450,9 +556,17 @@ async function draftBatchJourney() {
     throw new Error(`batch writing-model labels differ: ${JSON.stringify(labels)}`);
   }
   await runtime.selectOption("claude-sonnet");
-  await batch.getByRole("button", { name: "Draft selected" }).click();
+  await batch.getByRole("button", { name: "Start 2 stories", exact: true }).click();
   await batch.getByText("Draft batch started with Claude Sonnet.").waitFor();
+
+  // The batch's own results render inside the dialog too, so the walk reloads
+  // and opens it again -- on one lead that is still New, since starting the
+  // batch stood the strip's selection down and a reload cannot carry one.
+  await closeBatchDialog(batch);
   await page.reload({ waitUntil: "domcontentloaded" });
+  await rowChoice(extras[0]).waitFor({ timeout: 45_000 });
+  await rowChoice(extras[0]).check();
+  batch = await openBatchDialog(1);
   await batch.getByText(/Batch #\d+ · Claude Sonnet/).waitFor();
   await batch.getByRole("link", { name: `Open current story workbench: ${first}`, exact: true }).waitFor();
   await batch.getByRole("link", { name: `Open current story workbench: ${second}`, exact: true }).waitFor();
@@ -460,7 +574,8 @@ async function draftBatchJourney() {
   // The offline fake returns valid draft JSON without verified evidence.
   // Polling must stop only after both durable drafts render with the required
   // editor-review warning, then the queue count must refresh from New to
-  // Drafted instead of retaining stale pre-batch rows.
+  // Drafted instead of retaining stale pre-batch rows. The count lives behind
+  // the modal, so the dialog is shut before it is read.
   await expect
     .poll(
       async () => {
@@ -470,13 +585,25 @@ async function draftBatchJourney() {
       { timeout: 45_000 },
     )
     .toBe(true);
+  await closeBatchDialog(batch);
+  /*
+    BF5 (redesign p2a) -- this count moved. The old Queue drew its own filter
+    row with a "drafted 2" button; the redesign's filters are the handoff's own
+    list -- "Open · n / Held · n / Killed / ≈ Printed / All"
+    (docs/design/handoff-2026-09-26 README §3), which carries no drafted
+    filter, and the nav items are where a count lives now ("Nav items ... count
+    at the right", same README §"Shell for all desk screens";
+    desk-chrome.tsx:230 counts the drafted leads). The assertion keeps its
+    meaning: after the batch the desk reports two drafted leads instead of
+    retaining its stale pre-batch count of none.
+  */
   await expect
     .poll(
-      () => page.getByRole("button", { name: "drafted 2", exact: true }).count(),
+      () => page.getByRole("link", { name: /^Drafts\b/ }).innerText(),
       { timeout: 10_000 },
     )
-    .toBe(1);
-  step("the expanded Batch picker sends two selected leads to exact Claude Sonnet, saves review warnings, and refreshes the Drafted queue count");
+    .toMatch(/^Drafts\s*2$/);
+  step("the Batch dialog sends two selected leads to exact Claude Sonnet, saves review warnings, and refreshes the Drafted queue count");
 }
 
 async function routineNoticePermissionsJourney(context, observePage) {
@@ -571,11 +698,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("manual notice checks have horizontal overflow at 390px");
   }
-  const darkTogglepage = page.getByRole("button", { name: "Switch to dark appearance", exact: true });
-  if (await darkTogglepage.count()) await darkTogglepage.click();
-  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
-  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
-  await page.getByRole("dialog", { name: "Newsroom navigation" }).getByRole("button", { name: "Close navigation", exact: true }).click();
+  await chooseDeskAppearance(page);
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error("manual notice checks have horizontal overflow at 390px in dark large-text mode");
   }
@@ -699,11 +822,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
     throw new Error("routine notice permissions have horizontal overflow at 390px");
   }
   await otherPanel.screenshot({ path: join(evidenceDir, "routine-notice-permissions-mobile.png") });
-  const darkToggleother = other.getByRole("button", { name: "Switch to dark appearance", exact: true });
-  if (await darkToggleother.count()) await darkToggleother.click();
-  await other.getByRole("button", { name: "Open navigation", exact: true }).click();
-  await other.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
-  await other.getByRole("dialog", { name: "Newsroom navigation" }).getByRole("button", { name: "Close navigation", exact: true }).click();
+  await chooseDeskAppearance(other);
   if (!(await other.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))) {
     throw new Error(
       "routine notice permissions have horizontal overflow at 390px in dark large-text mode",

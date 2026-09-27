@@ -147,7 +147,7 @@ try {
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();
   }
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   step("signed in");
 
   // (the Scan desk is opened below, after the open run exists)

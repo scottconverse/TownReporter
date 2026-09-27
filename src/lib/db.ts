@@ -278,6 +278,38 @@ export async function withTransaction<T>(fn: (sql: Sql) => Promise<T>): Promise<
 }
 
 /**
+ * Create the marker table the fingerprint check reads, tolerating a caller
+ * that creates it at the same moment.
+ *
+ * `create table if not exists` is NOT atomic against a concurrent creator:
+ * both sessions pass the existence check, both try to register the row type,
+ * and the loser gets `duplicate key value violates unique constraint
+ * "pg_type_typname_nsp_index"` (SQLSTATE 23505) instead of a no-op. Two
+ * schedulers converging on a database that has never been bootstrapped is
+ * exactly the shape of `routine-notice-automation.postgres.test.ts`, and a
+ * fresh production database gets the same two arrivals on its first requests.
+ * Once the winner commits, the table is there, so the loser only has to ask
+ * again -- the retry is the fix, not a workaround: nothing else in this file
+ * is attempted until the marker table exists.
+ */
+async function createEnsureStateTable(sql: Sql, attemptsLeft = 4): Promise<void> {
+  try {
+    await sql.query(`
+      create table if not exists _schema_ensure_state (
+        name text primary key,
+        fingerprint text not null,
+        ensured_at timestamptz not null default now()
+      )
+    `);
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code !== "23505" || attemptsLeft <= 1) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await createEnsureStateTable(sql, attemptsLeft - 1);
+  }
+}
+
+/**
  * Run a batch of idempotent DDL statements (`create table if not exists`,
  * `alter table ... add column if not exists`, etc.) at most once per
  * *database*, not once per process.
@@ -316,13 +348,7 @@ export async function ensureSchemaOnce(
   name: string,
   statements: readonly string[],
 ): Promise<void> {
-  await sql.query(`
-    create table if not exists _schema_ensure_state (
-      name text primary key,
-      fingerprint text not null,
-      ensured_at timestamptz not null default now()
-    )
-  `);
+  await createEnsureStateTable(sql);
   const fingerprint = await fingerprintOf(statements);
   const [row] = await sql.query<{ fingerprint: string }>(
     `select fingerprint from _schema_ensure_state where name = $1`,

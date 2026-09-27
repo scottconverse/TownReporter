@@ -1112,8 +1112,8 @@
 .desk-ltr .chip.maybe-same {border-style:dotted;border-color:var(--fg2);color:var(--fg2);text-decoration:none;display:inline-block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .desk-ltr .chip.maybe-same:hover {color:var(--adeep)}
 .desk-ltr .lead-flags .chip.maybe-same {margin:0}
-.desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;border:1px solid var(--line);font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--mut)}
-.desk-ltr .score.warm {border-color:var(--fg);color:var(--fg)}
+.desk-ltr .score {display:inline-flex;align-items:center;justify-content:center;min-width:calc(44px * var(--ts));min-height:calc(44px * var(--ts));padding:0 4px;border:1px solid var(--line);font-family:var(--fd);font-weight:800;font-size:calc(1.25rem * var(--ts));font-variant-numeric:tabular-nums;color:var(--fg2)}
+.desk-ltr .score.warm {border:2px solid var(--fg);color:var(--fg)}
 .desk-ltr .score.hot {background:var(--a);border-color:var(--a);color:#111}
 /* The hot score is a yellow fill in both themes, and text on yellow is #111 in
    both -- the old rule put white on it in light mode and the dark cream on it
@@ -1894,7 +1894,7 @@
 .desk-ltr .composer-pasted {display:flex;flex-direction:column;min-width:0}
 .desk-ltr .composer-pasted label,.desk-ltr .composer-instructions label {display:block;font-size:18px;font-weight:700;margin-bottom:8px}
 .desk-ltr .composer-pasted p,.desk-ltr .composer-instructions>span {display:block;font-size:15px;line-height:1.5;color:var(--fg2);margin:0 0 12px}
-.desk-ltr .story-composer textarea {width:100%;min-width:0;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:14px;font:inherit;line-height:1.5;resize:vertical;border-radius: 0}
+.desk-ltr :is(.story-composer, .composer-fields) textarea {width:100%;min-width:0;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:14px;font:inherit;line-height:1.5;resize:vertical;border-radius: 0}
 .desk-ltr .composer-pasted textarea {flex:1;min-height:160px}
 .desk-ltr .composer-source-note {font-size:calc(0.875rem * var(--ts));line-height:1.5;margin-top:12px;color:var(--fg2)}
 .desk-ltr .composer-instructions {margin-top:24px}
@@ -1911,6 +1911,10 @@
 .desk-ltr .composer-submit {text-align:right;flex-shrink:0}
 .desk-ltr .composer-submit .btn {min-height:48px;min-width:180px;font-size:17px;border-radius: 0}
 .desk-ltr .composer-submit p {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:8px 0 0}
+/* The two ways into a story that are not this dialog -- the report import and
+   the one-story paste -- stacked under the drawn submit button rather than run
+   together into one line. */
+.desk-ltr .composer-submit .composer-other-ways {display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-top:8px}
 .desk-ltr .composer-error:empty {display:none}
 .desk-ltr .composer-error:not(:empty) {padding:16px;border:1px solid var(--danger);margin-top:16px}
 @media (max-width:800px) {
@@ -1922,6 +1926,7 @@
   .desk-ltr .composer-footer .model-picker,.desk-ltr .composer-submit {width:100%;max-width:100%}
   .desk-ltr .composer-submit .btn {width:100%}
   .desk-ltr .composer-submit {text-align:left}
+  .desk-ltr .composer-submit .composer-other-ways {align-items:flex-start}
   .desk-ltr .composer-options summary>span {display:block;margin:8px 0 0}
   .desk-ltr .desk-home .desk-cc-grid>section {padding:16px}
 }
@@ -2231,6 +2236,13 @@
   }
 }
 
+/* The Queue's batch dialog (unit BF2, defect 8): the stack the old "Draft
+   selected leads" panel held, now inside the one dialog. The portal is
+   `.desk-ltr` WITHOUT `astra`, so these are the plain rules, not the astra
+   ones -- an astra-scoped rule cannot reach into the dialog. */
+.desk-ltr .draft-batch-panel {display:flex;flex-direction:column;align-items:stretch;gap:14px}
+.desk-ltr .draft-batch-panel .wire-sum {display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-style:normal}
+.desk-ltr .draft-batch-panel .wire-sum > .meta {margin:0;max-width:640px}
 /*
   ---------------------------------------------------------------------------
   Unit BH2: the new dialog bodies, and the one flow a page shares with them.

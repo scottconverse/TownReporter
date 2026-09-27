@@ -401,9 +401,20 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  /*
+    "Write a story" is a dialog now, not the panel that used to sit open on
+    Today (src/routes/desk.index.tsx: the composer is a `Dialog` with
+    `panel === "story-composer"`). Every control this press uses -- the attach
+    input, the story box, the scope and model selects, the "Write draft"
+    button -- lives inside it, so the walk opens it the way the desk chrome
+    draws the way in: the header's "+ New story" press. Nothing below moved;
+    the composer just has to be on screen for its controls to exist.
+  */
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  await page.getByRole("dialog", { name: "Write a story" }).waitFor({ timeout: 45_000 });
   step("created an isolated editor and opened Write a story");
 
   // ---- The press under test: the 13-page scan, plus a document AFTER it,

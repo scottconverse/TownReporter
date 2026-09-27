@@ -88,7 +88,7 @@ async function main() {
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Sign in with email" }).click();
   }
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   step("owns the desk");
 
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
