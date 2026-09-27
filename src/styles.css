@@ -2060,7 +2060,7 @@
   color: var(--fg2);
 }
 /* The close control is a quiet InkButton -- a 1px `--line` outline -- but it
-   is a square glyph button, not a labelled one, so it is width-constrained
+   is a square glyph button, not a labeled one, so it is width-constrained
    here rather than given a second button style. */
 .desk-ltr.astra-modal-layer .astra-modal-head .btn {
   min-width: 44px;
@@ -2354,24 +2354,29 @@
   gap: 12px;
 }
 /*
-  The impact list. One bordered block, one row per thing that will change, each
-  row divided from the next by a hairline rather than given its own box -- the
-  drawing reads as a table and a table has one frame.
+  The impact list. Unit BH3: one bordered block per thing that will change, laid
+  out as a column with a gap -- that is how `dialog-15-legal.png` draws the four
+  consequence rows (four separate boxes, the last one wearing the danger rule),
+  and this list is the only place the family is used. Only the legal flow's rows
+  are drawn here; `.astra-impact-what b` no longer capitalizes, because the
+  drawing's row titles are sentence case ("Public story page").
 */
 .desk-ltr .astra-impacts {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
+  gap: 14px;
 }
 .desk-ltr .astra-impact {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 10px 14px;
+  border: 1px solid var(--line);
 }
-.desk-ltr .astra-impact + .astra-impact {
-  border-top: 1px solid var(--line);
+.desk-ltr .astra-impact.danger {
+  border-width: 2px;
+  border-color: var(--danger);
 }
 .desk-ltr .astra-impact-what {
   display: flex;
@@ -2382,7 +2387,9 @@
 .desk-ltr .astra-impact-what b {
   font-family: var(--fd);
   font-size: calc(0.9375rem * var(--ts));
-  text-transform: capitalize;
+}
+.desk-ltr .astra-impact.danger .astra-impact-what b {
+  color: var(--danger);
 }
 .desk-ltr .astra-impact-note {
   font-size: calc(0.875rem * var(--ts));
@@ -2394,6 +2401,30 @@
   font-weight: 700;
   font-size: calc(0.875rem * var(--ts));
   color: var(--fg);
+}
+/* The drawn "Keep ▾" is the one act that opens something: the copies the
+   preview really found. It is drawn as a plain act, so the button carries no
+   chrome of its own. */
+.desk-ltr .astra-impact-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.desk-ltr .astra-impact-toggle:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+/* What "Keep ▾" opens: the same box the rows wear, one step in. */
+.desk-ltr .astra-impact-more {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr .astra-impact-more p {
+  margin: 0;
 }
 /* ---------- dialogs only ---------- */
 /* The model/effort row: labels and controls on one line inside a bordered box. */

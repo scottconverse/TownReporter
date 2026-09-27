@@ -12,7 +12,14 @@ import type { LegalPreview, LegalSelection } from "@/lib/news/legal-removal-type
  * `src/routes/desk.legal-removals.tsx` and nowhere else, so a link was the only
  * way in and the drawn `dialog-15-legal.png` could not exist. It is extracted
  * here once and rendered by both: the route (links keep working, same
- * behaviour) and `LegalRemovalDialog` (the design's dialog, opened from a story).
+ * behavior) and `LegalRemovalDialog` (the design's dialog, opened from a story).
+ *
+ * Unit BH3. The body now follows the drawing's order. `dialog-15-legal.png` is
+ * ONE screen, top to bottom: the rule for the removed text, the reason, `Type
+ * REMOVE to confirm`, then the four consequence rows, then the foot. Both
+ * surfaces draw that same body -- the route keeps its step one above it (pick
+ * the stories, `Review connected copies`), the dialog opens on one story and
+ * loads the preview for it on open, because the drawing shows no picker.
  *
  * The gate is the dangerous part and it is NOT re-derived anywhere: the flow
  * computes one `disabled` expression -- busy, a stale preview, REMOVE not typed,
@@ -50,6 +57,14 @@ export type LegalRemovalFlowProps = {
    * Without it the flow draws them itself, exactly as the route always has.
    */
   onPressChange?: (press: LegalRemovalPress) => void;
+  /**
+   * Unit BH3: the drawn dialog opens on ONE story and shows no picker, so step
+   * one is skipped and the preview is loaded on the spot -- the same
+   * `legalPreview` call the route's `Review connected copies` press makes, with
+   * the same selection object, so the gate and the fingerprint below are the
+   * same gate and the same fingerprint.
+   */
+  autoPreview?: boolean;
 };
 
 export function LegalRemovalFlow({
@@ -59,6 +74,7 @@ export function LegalRemovalFlow({
   initialArticleIds,
   onConfirmed,
   onPressChange,
+  autoPreview,
 }: LegalRemovalFlowProps) {
   const [selection, setSelection] = useState<LegalSelection>({
     articleIds: initialArticleIds ?? [],
@@ -75,6 +91,7 @@ export function LegalRemovalFlow({
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [copiesOpen, setCopiesOpen] = useState(false);
 
   const currentPreview = preview && JSON.stringify(preview.selection) === JSON.stringify(selection);
 
@@ -117,6 +134,22 @@ export function LegalRemovalFlow({
     }
   }
 
+  /*
+   * The dialog's step one, done for the editor. `autoPreview` fires once, at
+   * mount, which is the moment the dialog opens -- `Dialog` draws its children
+   * only while `open`, so this component is not even mounted while the dialog
+   * is shut and a shut dialog never calls the server. The ref is what keeps it
+   * to one call: without it every later render of this effect would re-ask.
+   */
+  const reviewRef = useRef(review);
+  reviewRef.current = review;
+  const autoLoaded = useRef(false);
+  useEffect(() => {
+    if (!autoPreview || autoLoaded.current || !selection.articleIds.length) return;
+    autoLoaded.current = true;
+    void reviewRef.current();
+  }, [autoPreview, selection.articleIds.length]);
+
   const pressDisabled =
     busy ||
     !currentPreview ||
@@ -143,85 +176,216 @@ export function LegalRemovalFlow({
     });
   }, [publish, pressDisabled, busy]);
 
+  const storyCount = selection.articleIds.length;
+  const captures = preview?.capturedCopies ?? [];
+
   return (
     <>
-      <p>
-        This is separate from ordinary 30-day trash. There is no Undo. Retained copies are protected
-        by owner access, <strong>not encryption</strong>. Existing backups, provider records and
-        reader caches cannot be recalled by this application.
-      </p>
-      <fieldset className="astra-fieldset">
-        <legend>Articles to remove</legend>
-        {articlesPending ? (
-          <p>Loading published articles…</p>
-        ) : articlesError ? (
-          <p role="alert">Could not load articles. Reload this page.</p>
-        ) : !articles?.length ? (
-          <p>
-            No published stories to remove.{" "}
-            <a className="underline" href="/desk/published">
-              Back to Published
-            </a>
-            .
-          </p>
-        ) : (
-          articles.map((a) => (
-            <label className="astra-check" key={a.id}>
-              <input
-                type="checkbox"
-                checked={selection.articleIds.includes(a.id)}
-                onChange={(e) =>
-                  change({
-                    ...selection,
-                    articleIds: e.target.checked
-                      ? [...selection.articleIds, a.id]
-                      : selection.articleIds.filter((id) => id !== a.id),
-                  })
-                }
-              />
-              <span>{a.headline}</span>
-            </label>
-          ))
-        )}
-      </fieldset>
-      <InkButton disabled={busy || !selection.articleIds.length} onClick={() => void review()}>
-        Review connected copies
-      </InkButton>
-      {preview && (
+      {autoPreview ? null : (
         <>
-          <h2 className="astra-flow-title">Impact before removal</h2>
+          <p>
+            This is separate from ordinary 30-day trash. There is no Undo. Retained copies are
+            protected by owner access, <strong>not encryption</strong>. Existing backups, provider
+            records and reader caches cannot be recalled by this application.
+          </p>
+          <fieldset className="astra-fieldset">
+            <legend>Articles to remove</legend>
+            {articlesPending ? (
+              <p>Loading published articles…</p>
+            ) : articlesError ? (
+              <p role="alert">Could not load articles. Reload this page.</p>
+            ) : !articles?.length ? (
+              <p>
+                No published stories to remove.{" "}
+                <a className="underline" href="/desk/published">
+                  Back to Published
+                </a>
+                .
+              </p>
+            ) : (
+              articles.map((a) => (
+                <label className="astra-check" key={a.id}>
+                  <input
+                    type="checkbox"
+                    checked={selection.articleIds.includes(a.id)}
+                    onChange={(e) =>
+                      change({
+                        ...selection,
+                        articleIds: e.target.checked
+                          ? [...selection.articleIds, a.id]
+                          : selection.articleIds.filter((id) => id !== a.id),
+                      })
+                    }
+                  />
+                  <span>{a.headline}</span>
+                </label>
+              ))
+            )}
+          </fieldset>
+          <InkButton disabled={busy || !selection.articleIds.length} onClick={() => void review()}>
+            Review connected copies
+          </InkButton>
+        </>
+      )}
+      {preview ? (
+        <>
+          {/*
+            `dialog-15-legal.png`, in the drawing's order: the rule for the text,
+            the reason, REMOVE, then the four consequence rows. The rows are
+            drawn as drawn -- "Will remove" on three of them and the danger
+            border on the backups -- because the coordinator read BH2's
+            objection to them and asked for the drawing anyway. Two of the four
+            carry a claim this preview did not measure, and the report says
+            which: the drawing's "the URL returns 410 Gone" (this application
+            answers 404 -- `articles.$slug.tsx` throws `notFound()` for a story
+            that is no longer published) and its search-index/RSS line (the
+            feed and sitemap are built from the published rows at request time).
+            The captured-records row is the one the preview really counts, and
+            the count drawn there is the real number.
+          */}
+          <div className="astra-field">
+            <span className="astra-field-label" id="legal-policy">
+              What happens to the removed text
+            </span>
+            <div className="astra-choice-set" role="radiogroup" aria-labelledby="legal-policy">
+              <ChoiceCard
+                label="Keep a sealed copy for 12 months (default)"
+                note="Owner-only, never public. Deleted automatically after 12 months."
+                selected={policy === "retain"}
+                onSelect={() => {
+                  setPolicy("retain");
+                  setConfirm("");
+                }}
+              />
+              <ChoiceCard
+                label="Keep nothing: a court order requires destruction"
+                note="No copy of the text is kept anywhere the desk controls."
+                selected={policy === "destroy"}
+                onSelect={() => {
+                  setPolicy("destroy");
+                  setConfirm("");
+                }}
+              />
+            </div>
+          </div>
+          <label className="astra-field">
+            <span className="astra-field-label">Reason (required)</span>
+            <input
+              className={FIELD}
+              value={caseRef}
+              onChange={(e) => setCaseRef(e.target.value)}
+              maxLength={120}
+              placeholder="e.g. Court order, case no. …"
+            />
+          </label>
+          <label className="astra-field">
+            <span className="astra-field-label">Type REMOVE to confirm</span>
+            <input
+              className={FIELD}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="off"
+              placeholder="REMOVE"
+            />
+          </label>
+          <div className="astra-impacts">
+            <div className="astra-impact">
+              <span className="astra-impact-what">
+                <b>{storyCount === 1 ? "Public story page" : `${storyCount} public story pages`}</b>
+                <span className="astra-impact-note">
+                  {storyCount === 1
+                    ? "Removed now; the URL returns 410 Gone"
+                    : "Removed now; each URL returns 410 Gone"}
+                </span>
+              </span>
+              <span className="astra-impact-act">Will remove</span>
+            </div>
+            <div className="astra-impact">
+              <span className="astra-impact-what">
+                <b>
+                  {storyCount === 1
+                    ? "Captured records for this story"
+                    : "Captured records for these stories"}
+                </b>
+                <span className="astra-impact-note">
+                  {captures.length
+                    ? `${captures.length} capture${captures.length === 1 ? "" : "s"} · kept unless you also remove them`
+                    : "No captured records found"}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="astra-impact-act astra-impact-toggle"
+                aria-expanded={copiesOpen}
+                aria-controls="legal-captured-copies"
+                onClick={() => setCopiesOpen((open) => !open)}
+              >
+                Keep <span aria-hidden="true">▾</span>
+              </button>
+            </div>
+            <div className="astra-impact">
+              <span className="astra-impact-what">
+                <b>Search index and RSS</b>
+                <span className="astra-impact-note">Removed now</span>
+              </span>
+              <span className="astra-impact-act">Will remove</span>
+            </div>
+            <div className="astra-impact danger">
+              <span className="astra-impact-what">
+                <b>Nightly backups</b>
+                <span className="astra-impact-note">
+                  Up to 30 days of backups still hold the story. Needs operator review.
+                </span>
+              </span>
+              <span className="astra-impact-act">Review</span>
+            </div>
+          </div>
+          {/*
+            What the drawing's "Keep ▾" opens. The list is the preview's real
+            `capturedCopies`; the sentence around it is what this application
+            does to them, which is the same thing the flow has always said and
+            the same thing `removeLegally` does: the captures are never deleted,
+            the watches aimed at the story are paused and matching sources stop
+            being scanned, and a court destruction stays blocked until an
+            operator resolves them.
+          */}
+          {copiesOpen && (
+            <div className="astra-impact-more" id="legal-captured-copies">
+              {captures.length ? (
+                <>
+                  <p>
+                    Known captured copies need separate local-operator review:{" "}
+                    {captures.map((c) => `${c.table} #${c.id}`).join(", ")}. They are independently
+                    held evidence and are not deleted here; this removal pauses the watches aimed at
+                    the story and excludes matching sources from scans instead. Court destruction
+                    stays blocked until an operator resolves them — the review checkbox below does
+                    not override that.
+                  </p>
+                </>
+              ) : (
+                <p>
+                  The preview found no captured copies of this story. Removal still cannot reach
+                  backups, provider records or reader caches that this application cannot see.
+                </p>
+              )}
+            </div>
+          )}
           {!currentPreview && (
             <p role="status">
               Selection changed. Use Review connected copies again to refresh counts before
               confirming.
             </p>
           )}
-          {/*
-            The drawn dialog-15 pairs four consequence rows with an action each.
-            Only what the preview actually returns is drawn: the counts are real
-            tables and rows, and none of "the URL returns 410 Gone", the search
-            index or the nightly backups is a thing this preview measured. A row
-            that promises what the desk cannot see is the one kind of row that
-            must not be here.
-          */}
-          <div className="astra-impacts">
-            {Object.entries(preview.counts).map(([kind, count]) => (
-              <div className="astra-impact" key={kind}>
-                <span className="astra-impact-what">
-                  <b>{kind.replaceAll("_", " ")}</b>
-                  <span className="astra-impact-note">
-                    {count === 1 ? "1 record" : `${count} records`} in scope
-                  </span>
-                </span>
-                <span className="astra-impact-act">Will remove</span>
-              </div>
-            ))}
-          </div>
           {preview.blockers.map((message) => (
             <p role="alert" key={message}>
               {message}
             </p>
           ))}
+          <p>
+            {policy === "retain"
+              ? "The retained copy expires automatically. Evidence review and external cleanup may remain pending."
+              : "No removed text will enter the retained-copy table. Resolve the historical and shared-evidence review first. External erasure still needs operator verification."}
+          </p>
           <p>
             Historical records do not always carry an article ID. Select only the drafts, memory
             entries, audit labels and trash copies that belong to these stories. Shared source
@@ -271,14 +435,6 @@ export function LegalRemovalFlow({
               </label>
             ))}
           </details>
-          {preview.capturedCopies.length > 0 && (
-            <p role="alert">
-              Known captured copies require separate local-operator review:{" "}
-              {preview.capturedCopies.map((c) => `${c.table} #${c.id}`).join(", ")}. Retained
-              application removal may proceed with review pending. Court destruction is blocked
-              until these copies are resolved; the review checkbox does not override this.
-            </p>
-          )}
           {preview.sharedInvestigationIds.length > 0 && (
             <p>
               Related investigation files:{" "}
@@ -311,56 +467,6 @@ export function LegalRemovalFlow({
               removal scope.
             </span>
           </label>
-          <div className="astra-field">
-            <span className="astra-field-label" id="legal-policy">
-              What happens to the removed text
-            </span>
-            <div className="astra-choice-set" role="radiogroup" aria-labelledby="legal-policy">
-              <ChoiceCard
-                label="Keep a sealed copy for 12 months"
-                note="Owner-only, never public. Deleted automatically after 12 months."
-                selected={policy === "retain"}
-                onSelect={() => {
-                  setPolicy("retain");
-                  setConfirm("");
-                }}
-              />
-              <ChoiceCard
-                label="Keep nothing: a court order requires destruction"
-                note="No copy of the text is kept anywhere the desk controls."
-                selected={policy === "destroy"}
-                onSelect={() => {
-                  setPolicy("destroy");
-                  setConfirm("");
-                }}
-              />
-            </div>
-          </div>
-          <p>
-            {policy === "retain"
-              ? "The retained copy expires automatically. Evidence review and external cleanup may remain pending."
-              : "No removed text will enter the retained-copy table. Resolve the historical and shared-evidence review first. External erasure still needs operator verification."}
-          </p>
-          <label className="astra-field">
-            <span className="astra-field-label">Reason (required)</span>
-            <input
-              className={FIELD}
-              value={caseRef}
-              onChange={(e) => setCaseRef(e.target.value)}
-              maxLength={120}
-              placeholder="e.g. Court order, case no. …"
-            />
-          </label>
-          <label className="astra-field">
-            <span className="astra-field-label">Type REMOVE to confirm</span>
-            <input
-              className={FIELD}
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              autoComplete="off"
-              placeholder="REMOVE"
-            />
-          </label>
           {onPressChange ? null : (
             <div className="astra-flow-press">
               <InkButton tone="danger" disabled={pressDisabled} onClick={() => void remove()}>
@@ -372,7 +478,22 @@ export function LegalRemovalFlow({
             </div>
           )}
         </>
-      )}
+      ) : autoPreview ? (
+        /*
+          Step one is not drawn here, so this is the only state that can stand
+          in its place: the preview is on its way, or it failed. `review()` is
+          fired once at mount, so a failure needs its own press -- there is no
+          `Review connected copies` button on this surface to press again.
+        */
+        <div className="astra-flow-press">
+          {error ? null : <p role="status">Loading the impact preview for this story…</p>}
+          {error ? (
+            <InkButton tone="ghost" disabled={busy} onClick={() => void review()}>
+              Try the preview again
+            </InkButton>
+          ) : null}
+        </div>
+      ) : null}
       {error && <p role="alert">{error}</p>}
     </>
   );
@@ -396,6 +517,12 @@ export type LegalRemovalDialogProps = {
  * The drawn `dialog-15-legal.png`. The dialog owns nothing but the footer: every
  * field, count, blocker and the gate itself come from `LegalRemovalFlow`, so the
  * route and this dialog cannot drift into two different legal removals.
+ *
+ * Unit BH3: it opens straight onto the drawn one-screen body -- no article
+ * picker, the preview for `articleId` loaded on open. The drawing names no
+ * story anywhere on it, so the dialog relies on the Published row it was opened
+ * from; the story count and the captured-records count below are the two things
+ * on screen that still say how much is in scope.
  */
 export function LegalRemovalDialog({
   open,
@@ -428,6 +555,7 @@ export function LegalRemovalDialog({
         articlesError={articlesError}
         initialArticleIds={articleId ? [articleId] : []}
         onPressChange={setPress}
+        autoPreview
         onConfirmed={async (caseId) => {
           await onConfirmed?.(caseId);
           onDone?.();
