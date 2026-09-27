@@ -32,7 +32,16 @@ describe("meeting source block wiring", () => {
     assert.doesNotMatch(block, /currentBySegment\s*=\s*new Map\(candidates/,
       "lead candidate excerpts must never be shown as the newer transcript");
     assert.match(block, /Redraft from current transcript/);
-    assert.match(route, /onMeetingRedraft=.*draft\.mutate\(\)/);
+    /*
+      Unit BH5: the same wiring, read from where the page keeps it now. Unit BH2
+      made the direction a variable of the draft mutation (the Redraft dialog
+      types one and saves it before the draft starts), so the press on this pane
+      -- which types nothing and means "the direction already on the page" --
+      passes `undefined` where it used to call `mutate()` with no argument at
+      all. The assertion is the one it always was: this press is wired to the
+      existing draft mutation and to nothing else.
+    */
+    assert.match(route, /onMeetingRedraft=.*draft\.mutate\(undefined\)/);
     assert.match(route, /onRedraft=\{onMeetingRedraft\}/);
   });
 

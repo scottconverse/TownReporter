@@ -254,7 +254,7 @@ export function DeskJobCard({
     Retry is offered only where the server says the row describes its own
     request (`canRetry`), which is every row this query can return today -- the
     gate is here so that a kind added to the query later gets a Retry it can
-    actually honour, instead of one that re-runs something else.
+    actually honor, instead of one that re-runs something else.
   */
   const canRetry = job.canRetry && !busy;
   return (
@@ -312,6 +312,35 @@ export function StoryJobProgress({
     <section className="story-running-banner" aria-label="Draft progress">
       <DeskJobCard job={job} />
       {note}
+    </section>
+  );
+}
+
+/**
+ * The story page's evidence-check card: the RECONCILE job for this lead, full
+ * size, directly under the draft card.
+ *
+ * Phase 2b ("a full JobCard under the actions while a check or redraft runs").
+ * It is deliberately the same card as `StoryJobProgress` with one field
+ * changed -- the kind it filters on, and the label its section carries -- so
+ * the two jobs this page can run at once look like the same kind of thing,
+ * because they are.
+ *
+ * No `initial`: this page's own `data.job` row is the draft job, and the
+ * reconcile row arrives from the same 2 s poll `useDeskJobs` already runs for
+ * `DraftReconcileControl`. Queueing a second fetch here to shave one poll off
+ * the first paint would be two requests for the same row.
+ */
+export function StoryCheckJobProgress({ leadId }: { leadId: number }) {
+  const jobs = useDeskJobs();
+  const job = useMemo(() => {
+    const mine = jobs.data?.filter((row) => row.leadId === leadId && row.kind === "reconcile") ?? [];
+    return mine.find((row) => row.status === "queued" || row.status === "running") ?? null;
+  }, [jobs.data, leadId]);
+  if (!job) return null;
+  return (
+    <section className="story-running-banner" aria-label="Evidence check progress">
+      <DeskJobCard job={job} />
     </section>
   );
 }

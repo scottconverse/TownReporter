@@ -1100,8 +1100,32 @@ async function main() {
   };
   await page.route("**/*", holdActualDraft);
   const acknowledgementRecoveryBody = `TEST FIXTURE acknowledgement recovery replacement ${stamp}.`;
+  /*
+    Unit BH8: unit BH2's decision 6 put the direction in front of the redraft --
+    pressing Redraft on the story page now opens RedraftDialog, and the dialog's
+    own "Start redraft" is what starts the run (the dialog arrives holding the
+    direction already on the page, so the same draft is asked for). Two presses
+    where there used to be one; the held request, the seeded replacement and
+    every assertion below are unchanged.
+
+    The two presses are what `holdActualDraft` is waiting to see, so the wait
+    for the held request is bounded. A press that starts nothing used to leave
+    this walk waiting on a promise nothing would ever settle -- the job's last
+    line printed, then silence until CI's 20-minute timeout, with no sentence
+    naming what it was waiting for. It now fails in 30 s with the press named.
+  */
   await page.getByRole("button", { name: "Redraft", exact: true }).click({ noWaitAfter: true });
-  await draftHeld;
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  await startRedraft.waitFor({ timeout: 30_000 });
+  await startRedraft.click({ noWaitAfter: true });
+  const heldDraftArrived = await Promise.race([
+    draftHeld.then(() => true),
+    new Promise((settle) => setTimeout(() => settle(false), 30_000)),
+  ]);
+  if (!heldDraftArrived)
+    throw new Error(
+      'pressing "Redraft" then "Start redraft" did not start a draft request within 30 s',
+    );
   if (!heldDraftRoute)
     throw new Error("the acknowledgement recovery fixture did not hold the actual draft request");
   const acknowledgementRecoveryJob = await pool.query(
@@ -1170,7 +1194,18 @@ async function main() {
   holdPostAbortRefresh = true;
   expectedAcknowledgementTimeoutErrors = 1;
   await heldDraftRoute.abort("timedout");
-  await postAbortLeadRefreshHeld;
+  // The same bound as the held draft above, and for the same reason: this is
+  // the other promise nothing outside the walk ever settles, so a replacement
+  // the page does not re-fetch must fail here, naming the request, rather than
+  // hang until the job's timeout.
+  const postAbortLeadRefreshArrived = await Promise.race([
+    postAbortLeadRefreshHeld.then(() => true),
+    new Promise((settle) => setTimeout(() => settle(false), 30_000)),
+  ]);
+  if (!postAbortLeadRefreshArrived)
+    throw new Error(
+      "the page did not re-fetch the lead within 30 s of the aborted acknowledgement",
+    );
   await page.waitForFunction(
     (replacement) =>
       [...document.querySelectorAll("textarea")].some(

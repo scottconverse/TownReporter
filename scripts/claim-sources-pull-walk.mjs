@@ -518,7 +518,27 @@ async function theExistingNoteBoxAlsoReachesTheRedraft() {
  */
 async function theRedraftCarriesTheLines(body) {
   const baseline = (await writeCalls()).length;
-  await page.getByRole("button", { name: "Redraft", exact: true }).click();
+  /*
+    Unit BH2 decision 6 put the direction in front of the redraft: pressing
+    Redraft on the story page opens RedraftDialog, and the dialog's own "Start
+    redraft" is what starts the run -- the same two presses
+    `scripts/delete-corrections-e2e.mjs` makes on this same button since BH8.
+    The dialog arrives holding the direction already on the page, so the same
+    draft is asked for and every measurement below is unchanged.
+
+    The dialog's press is waited for with a bound, as BH8 bounded its own: a
+    press that opens nothing used to leave this walk waiting on a 240 s timeout
+    whose sentence named the wrong thing.
+  */
+  await page.getByRole("button", { name: "Redraft", exact: true }).click({ noWaitAfter: true });
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  const dialogOpened = await Promise.race([
+    startRedraft.waitFor({ timeout: 30_000 }).then(() => true),
+    new Promise((settle) => setTimeout(() => settle(false), 30_000)),
+  ]);
+  if (!dialogOpened)
+    throw new Error('pressing "Redraft" did not open the redraft dialog within 30 s');
+  await startRedraft.click({ noWaitAfter: true });
   const redrafted = await waitForTruth(
     "the redraft to carry the editor's lines",
     async () => {

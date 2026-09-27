@@ -60,6 +60,20 @@ export type DialogProps = {
   altDisabled?: boolean;
   cancelLabel?: string;
   closeLabel?: string;
+  /**
+   * Unit BH2, added for Legal removal: the design draws "Remove permanently" as
+   * a red button, and the footer's primary was hard-coded `solid`. This is
+   * additive -- every existing caller keeps the tone it had -- because the
+   * alternative was to render the danger press inside the body, which puts the
+   * one irreversible control somewhere other than where the design puts it.
+   *
+   * The two danger tones are InkButton's own: `danger` is the solid fill a
+   * confirm step gets, `quiet-danger` is the outline a real action heading
+   * toward removal gets. The drawing of dialog-15 is the outline -- a 2px red
+   * rule and red text, no fill -- which is also what keeps it legible beside
+   * the Cancel button instead of turning the footer into two blocks of color.
+   */
+  primaryTone?: "solid" | "danger" | "quiet-danger";
 };
 
 export function Dialog({
@@ -77,6 +91,7 @@ export function Dialog({
   altDisabled,
   cancelLabel = "Cancel",
   closeLabel = "Close",
+  primaryTone = "solid",
 }: DialogProps) {
   // Radix hands focus back through `DialogPrimitive.Trigger`: its close handler
   // focuses `context.triggerRef`, which only a rendered Trigger ever sets. This
@@ -113,6 +128,21 @@ export function Dialog({
         if (!next) onClose();
       }}
     >
+      {/*
+        Unit BH2: the Portal is rendered only while the dialog can be open.
+
+        Radix's own DialogPortal already gates its children on `open` through
+        Presence, but that is an internal detail of the installed Radix version,
+        and this subtree is now reached by server code that has no DOM
+        (`renderToStaticMarkup`) and by tests that pin the markup it produces.
+        Gating here makes the whole subtree a pure function of `open` -- and it
+        is the whole subtree that matters, because the
+        `.desk-ltr.astra-modal-layer` wrapper below is a fixed, full-viewport
+        layer: outside the Portal's own gating, a closed dialog would still have
+        painted one. No exit animation is defined for `.astra-modal`, so nothing
+        that used to be visible on the way out is lost.
+      */}
+      {open ? (
       <DialogPrimitive.Portal>
         <div className="desk-ltr astra-modal-layer">
           {/* The scrim: one scrim, painted here, and the click-outside target
@@ -161,7 +191,7 @@ export function Dialog({
                     {altLabel}
                   </InkButton>
                 ) : null}
-                <InkButton tone="solid" onClick={onPrimary} disabled={primaryDisabled}>
+                <InkButton tone={primaryTone} onClick={onPrimary} disabled={primaryDisabled}>
                   {primaryLabel}
                 </InkButton>
               </div>
@@ -169,6 +199,7 @@ export function Dialog({
           </DialogPrimitive.Content>
         </div>
       </DialogPrimitive.Portal>
+      ) : null}
     </DialogPrimitive.Root>
   );
 }
