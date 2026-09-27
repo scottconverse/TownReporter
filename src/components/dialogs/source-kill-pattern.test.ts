@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SourceKillPatternBody, type SourceKillPatternBodyProps } from "./editor-dialog-bodies.ts";
-import { KILL_PATTERN_EMPTY, killPatternLine } from "./editor-dialog-forms.ts";
+import { killPatternLine } from "./editor-dialog-forms.ts";
 
 const result = {
   source: { id: 7, url: "https://records.example/minutes", name: "Records" },
@@ -50,11 +50,18 @@ describe("Source kill pattern", () => {
     assert.equal((html.match(/astra-item-note/g) ?? []).length, 1);
   });
 
-  it("draws the line and nothing else when there is nothing to show", () => {
+  it("draws nothing at all when there is no kill to show", () => {
+    /*
+      BJ4: the brief asked for the sentence only where it has a count, so a
+      source nothing has been killed from draws no line -- see the note on the
+      gate in `SourceKillPatternBody`. The measured sentence is unchanged
+      (`killPatternLine` still answers it, pinned below); what changed is that
+      nothing prints it at zero, which is what the desk asked for after seeing
+      it repeated under every row of the watch list.
+    */
     const none = { ...result, badSource: 0, killedFromSource: 0, examples: [] };
     const html = render({ result: none, line: killPatternLine(none) });
-    assert.match(html, new RegExp(KILL_PATTERN_EMPTY.replace(/\./g, "\\.")));
-    assert.ok(!html.includes("astra-item"));
+    assert.equal(html, "");
     assert.equal(render({ result: null, loading: false, error: null }), "");
   });
 

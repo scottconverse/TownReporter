@@ -83,15 +83,20 @@ async function ownTheDesk() {
  * The picker on the Dark Desk page, without starting a round.
  *
  * Deliberately never presses Start digging: a round is a real, paid,
- * multi-minute dig that would make live outbound requests. The picker beside
- * Start digging is the same component, bound to the same state, as the one
- * beside Keep digging on an open file -- see `modelChoice` in
- * src/routes/desk.dark.tsx -- so what an editor chooses here is what the
- * first round runs on.
+ * multi-minute dig that would make live outbound requests. The picker is one
+ * component bound to the page's one `modelChoice`, which is what the first
+ * round runs on -- so what an editor chooses here is what the first dig uses.
+ *
+ * BJ3 item 2: it moved out of the Decide row (the drawing fills Decide with
+ * the five buttons and "Nothing here prints.") and into the "How hard to dig"
+ * panel, under the "Model for this dig" disclosure.
  */
 async function thePickerIsThere() {
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
-  const actions = page.locator("#dark-start-actions");
+  const disclosure = page.locator("#dark-model-dig");
+  await disclosure.waitFor({ timeout: 30_000 });
+  await disclosure.locator("summary").first().click();
+  const actions = page.locator("#dark-model-dig-actions");
   await actions.waitFor({ timeout: 30_000 });
   const picker = actions.getByLabel("Digging model");
   await picker.waitFor({ timeout: 30_000 });

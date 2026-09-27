@@ -1487,31 +1487,36 @@
 .desk-ltr.astra .astra-checks-jump {
   display: none;
 }
+/* Server: the drawing puts every panel on the page at once, two columns wide
+   (design/Desk Screens.dc.html, `isServer`). The nav that used to switch panels
+   becomes a jump strip above the grid; the grid itself carries no box of its
+   own -- each card is the panel. */
 .desk-ltr.astra .astra-settings {
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  gap: 28px;
-  align-items: start;
+  display: block;
 }
 .desk-ltr.astra .astra-settings-nav {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  position: sticky;
-  top: 92px;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: static;
+  margin-bottom: 20px;
 }
 .desk-ltr.astra .astra-settings-nav button {
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 0;
-  padding: 12px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
   text-align: left;
-  background: none;
-  color: var(--mut);
+  background: var(--surface);
+  color: var(--fg2);
   font-size: calc(14px * var(--ts));
-  min-height: 42px;
+  white-space: nowrap;
+  min-height: 44px;
 }
 .desk-ltr.astra .astra-settings-nav button:hover {
   background: var(--hover);
+  color: var(--fg);
 }
 .desk-ltr.astra .astra-settings-nav button[aria-current="page"] {
   background: var(--surface);
@@ -1520,14 +1525,23 @@
   border-left: var(--state-bar) solid var(--sel);
 }
 .desk-ltr.astra .astra-settings-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: start;
   min-width: 0;
-  max-width: 960px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 0;
-  padding: 26px;
 }
-.desk-ltr.astra .astra-settings-body > div > :first-child {
+.desk-ltr.astra .astra-ops-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+/* Owner-only panels (Writing models) return null; don't leave their box behind. */
+.desk-ltr.astra .astra-ops-card:empty {
+  display: none;
+}
+.desk-ltr.astra .astra-ops-card > :first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
@@ -1674,8 +1688,8 @@
   .desk-ltr.astra .work-form {
     padding: 26px;
   }
-  .desk-ltr.astra .astra-settings {
-    grid-template-columns: 160px minmax(0, 1fr);
+  .desk-ltr.astra .astra-settings-body,
+  .desk-ltr.astra .astra-ops-col {
     gap: 18px;
   }
 }
@@ -1713,11 +1727,10 @@
   .desk-ltr.astra .astra-breadcrumb > a:first-child {
     display: none;
   }
-  .desk-ltr.astra .astra-settings {
-    grid-template-columns: 1fr;
+  .desk-ltr.astra .astra-settings-body {
+    grid-template-columns: minmax(0, 1fr);
   }
   .desk-ltr.astra .astra-settings-nav {
-    flex-direction: row;
     overflow: auto;
     position: static;
   }
@@ -1814,8 +1827,8 @@
   .desk-ltr.astra .astra-save-state {
     flex-basis: 100%;
   }
-  .desk-ltr.astra .astra-settings-body {
-    padding: 20px;
+  .desk-ltr.astra .astra-settings-nav {
+    margin-bottom: 14px;
   }
   .desk-ltr.astra .astra-dialog-body {
     padding: 20px;
@@ -2115,10 +2128,14 @@
 .desk-ltr.astra .src-sec > .sechead {
   padding: 0 24px;
 }
-.desk-ltr.astra[data-desk-page="sources"] main > .file-form:not([open]) {
-  display: inline-block;
-  padding: 10px 16px;
-  margin-right: 12px;
+/* BJ2 item 4: the add form lives behind the header's "+ Add a source", so the
+   closed panel must not draw a control of its own above the list. It used to
+   render as a small "+ Add a source" pill here -- the first of the two top
+   disclosures the brief removes. The panel keeps its id and its `<details>`, so
+   the header button still opens it by id and the form is one press away; only
+   the resting state is gone. */
+.desk-ltr.astra[data-desk-page="sources"] main > details.astra-source-add:not([open]) {
+  display: none;
 }
 .desk-ltr.astra .astra-source-document {
   padding: 16px 0;
@@ -3049,6 +3066,743 @@
   from { transform: translateX(-100%); }
   to { transform: translateX(300%); }
 }
+
+/* ===========================================================================
+   Unit BJ -- redesign phase 2c: the five desk screens.
+
+   Opinion, Dark Desk, Sources & scan and Published are restyled to
+   docs/design/handoff-2026-09-26 (README sections 5, 7, 8, 9 and the drawing
+   design/Desk Screens.dc.html), and Server keeps all twelve of its panels.
+
+   Three rules hold everything below together:
+
+   1. Every selector is scoped `.desk-ltr.astra`, and every class name is new
+      (`astra-*`) or a `row-more` name lane 3 does not use. The shared `.btn`,
+      `.chip`, `.seg`, `.ltable` and `.sechead` families are NOT redefined --
+      this pass reuses the existing button family (`.btn` is already 2px solid
+      ink at 44px = the drawing's `outline`, `.btn.solid` is the yellow fill =
+      `primary`, `.btn.quiet` is the 1px rule = `quiet`) and draws only the
+      things the desk did not have: panels, the screens' row grids, the
+      title-case state chips and the More menu.
+   2. The drawing's prototype tokens map onto phase 0's shipped ones:
+      --ink->--fg, --ink2->--fg2, --panel->--surface, --yel->--a,
+      --bg->--bg, --line->--line, --sel->--sel, --warn/--ok/--danger the same.
+      No new color is introduced.
+   3. Every size is `calc(Nrem * var(--ts))` so Text: Large still scales it and
+      nothing falls under 14px (scripts/desk-min-font.test.mjs).
+
+   The drawing's chips are title-case ("Could not check", "No change"), which
+   is why these are `astra-chip` and not `.chip`: the desk's `.chip`
+   uppercases on purpose for the lead rows and story chips, and re-casing those
+   would re-wrap every one of them.
+   =========================================================================== */
+
+/* --- headings and labels (drawing: 22/800 + 2px rule, 19/800, 14/800 caps) - */
+.desk-ltr.astra .astra-block-h {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(1.375rem * var(--ts));
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--fg);
+  margin: 0;
+}
+.desk-ltr.astra .astra-sub-h {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(1.1875rem * var(--ts));
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--fg);
+  margin: 0;
+}
+.desk-ltr.astra .astra-label {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+  margin: 0;
+}
+.desk-ltr.astra .astra-note {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+  margin: 0;
+}
+.desk-ltr.astra .astra-question {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(1.625rem * var(--ts));
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.desk-ltr.astra .astra-serif {
+  font-family: var(--fb);
+  font-size: calc(1rem * var(--ts));
+  line-height: 1.5;
+  color: var(--fg2);
+  margin: 0;
+}
+
+/* --- panels (drawing: --panel fill, 1px rule; .hot 2px yellow; .decide 3px) - */
+.desk-ltr.astra .astra-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.desk-ltr.astra .astra-panel.hot { border: 2px solid var(--a); }
+.desk-ltr.astra .astra-panel.plain { gap: 0; }
+.desk-ltr.astra .astra-panel.decide {
+  gap: 10px;
+  padding: 16px;
+  border-top: 3px solid var(--a);
+}
+.desk-ltr.astra .astra-panel-h {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(1.25rem * var(--ts));
+  margin: 0;
+}
+.desk-ltr.astra .astra-panel-h.lg { font-size: calc(1.375rem * var(--ts)); }
+.desk-ltr.astra .astra-panel-sub {
+  font-size: calc(0.9375rem * var(--ts));
+  color: var(--fg2);
+  margin: 0;
+}
+.desk-ltr.astra .astra-panel-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+/* --- key/value rows inside a panel (drawing: flex, space-between, 15px) ----- */
+.desk-ltr.astra .astra-kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra .astra-kv.ruled {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-kv dt { margin: 0; }
+.desk-ltr.astra .astra-kv dd { margin: 0; font-weight: 700; text-align: right; }
+
+/* --- grids ----------------------------------------------------------------- */
+.desk-ltr.astra .astra-2col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.desk-ltr.astra .astra-2col.wide { gap: 20px; align-items: start; }
+.desk-ltr.astra .astra-2col.span2 > :first-child { grid-row: span 2; }
+.desk-ltr.astra .astra-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 28px;
+  align-items: start;
+}
+/* Dark Desk: piles rail | the open file. */
+.desk-ltr.astra .astra-split-deep {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 0;
+  border: 1px solid var(--line);
+  align-items: stretch;
+}
+.desk-ltr.astra .astra-bounds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-bound {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--bg);
+  min-width: 0;
+}
+.desk-ltr.astra .astra-bound-k {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-bound-v { font-weight: 700; font-size: calc(1rem * var(--ts)); }
+
+/* --- rows ------------------------------------------------------------------
+   One grid per screen, exactly as the drawing's `rowStyle` sets it, with a
+   `.ruled` bottom edge. At 980px and below every one of them collapses to a
+   single column, which is what keeps a 390px viewport free of horizontal
+   scroll: the cells stack and keep their own labels. */
+.desk-ltr.astra .astra-row {
+  display: grid;
+  gap: 0 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.desk-ltr.astra .astra-row.opinion { grid-template-columns: 200px minmax(0, 1fr) 170px auto; }
+.desk-ltr.astra .astra-row.pub { grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px; }
+.desk-ltr.astra .astra-row.src {
+  grid-template-columns: minmax(0, 1fr) 190px auto;
+  gap: 6px 12px;
+  /*
+    12px, not the shared 14px: the row's tallest child is a 44px button, so the
+    box is 44 + 24 + 1px rule = 69px, inside the 50-70px the brief asks the
+    drawn row to measure at 1280. At the shared 14px it is 73px, which is over.
+  */
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+/*
+  BJ3 item 1: one line each, ellipsis past the column.
+
+  The row was already `minmax(0, 1fr) 190px auto`; what broke it was the third
+  track. `auto` is max-content, and three 44px buttons plus their gaps measured
+  292.4px of the 598px the column has at 1280 -- so the `1fr` came out at
+  79.6px, the name wrapped to one word per line, and `longmontcolorado.gov`
+  painted out of its cell and across the state chip (BJ2 finding 1).
+
+  Three changes, all of them about refusing to grow rather than about a new
+  ratio: the text cells clip instead of overflowing, the action strip is the
+  two buttons the drawing draws plus one small disclosure (Remove moved into a
+  `row-more`, the pattern the other three desks already use), and every control
+  on the row is at the drawn width. `overflow: hidden` is what makes
+  `text-overflow: ellipsis` possible at all: a flex item that is not a scroll
+  container has no finite width for the ellipsis to elide against.
+*/
+.desk-ltr.astra .astra-row.src > .astra-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+.desk-ltr.astra .astra-row.src .astra-row-t,
+.desk-ltr.astra .astra-row.src .astra-row-meta {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The drawn name is 15/700 (README 332-334), not the 17px `.astra-row-t` gives
+   the other desks -- and at 598px of column the two sizes are the difference
+   between "City of Longmont" and "City of Lo…". */
+.desk-ltr.astra .astra-row.src .astra-row-t { font-size: calc(0.9375rem * var(--ts)); }
+/* Line heights are pinned so the row's height is the 44px button and nothing
+   else: chip 20.8 + 3 + note 18.2 = 42, name 18.75 + 3 + 18.2 = 40, both under
+   the button, so the box is 69px whether a row is failed, changed or paused. */
+.desk-ltr.astra .astra-row.src .astra-row-meta { line-height: 1.3; }
+.desk-ltr.astra .astra-row.src .astra-chip { line-height: 1.2; }
+/* The state cell is the fixed 190px track: its chip is the drawn chip and its
+   note is the drawn one-liner, so neither may push the track wider. */
+.desk-ltr.astra .astra-row.src > .astra-cell.src-state { max-width: 190px; }
+@media (min-width: 981px) {
+  /* One line of actions, at the drawn buttons' own width. Every px the actions
+     claim is a px off the name, and at 1280 the name has none to spare. */
+  .desk-ltr.astra .astra-row.src .astra-row-acts { flex-wrap: nowrap; }
+  .desk-ltr.astra .astra-row.src .astra-row-acts .btn { padding: 10px 10px; }
+  .desk-ltr.astra .astra-row.src .astra-row-acts > .row-more > summary {
+    padding: 10px 6px;
+    font-size: calc(0.875rem * var(--ts));
+    white-space: nowrap;
+  }
+}
+/*
+  BJ3 item 3: the kill pattern, under the watch row it belongs to.
+
+  `SourceKillPatternBody` (editor-dialog-bodies.ts) renders out of the modal's
+  own classes -- `.astra-msg`, `.astra-items`, `.astra-item-*` -- and every rule
+  for those is scoped to `.desk-ltr.astra-modal-layer` in `styles.css`, because
+  until now the panel was only ever mounted inside a dialog. On a page they
+  match nothing: the count would draw as a plain paragraph and the examples as
+  bare divs with no spacing at all. These rules are the page's half of the same
+  vocabulary, under the row rather than in a portal.
+
+  The examples are deliberately NOT the modal's 56px action rows: nothing here
+  is a control (the panel is read-only by design), so they are a quiet list of
+  headline-over-reason lines. Nothing draws a rule of its own -- the next row's
+  `border-top` still closes the block, which is why the panel only needs bottom
+  padding.
+*/
+.desk-ltr.astra .astra-kill { padding: 0 0 12px 2px; }
+.desk-ltr.astra .astra-kill .astra-msg {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 600;
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-kill .astra-msg.danger { color: var(--danger); }
+.desk-ltr.astra .astra-kill .astra-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.desk-ltr.astra .astra-kill .astra-item,
+.desk-ltr.astra .astra-kill .astra-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-kill .astra-item-label {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 700;
+}
+.desk-ltr.astra .astra-kill .astra-item-note {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+  line-height: 1.4;
+}
+.desk-ltr.astra .astra-row.pubhead {
+  grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px;
+  padding: 10px 0;
+  border-bottom: 2px solid var(--fg);
+  align-items: baseline;
+}
+/* The just-added tint, for rows that are a `div` rather than a table row
+   (`styles.css` styles it through `td`, which a `.astra-row` has none of). */
+.desk-ltr.astra .astra-row.just-added {
+  background: color-mix(in srgb, var(--a) 12%, transparent);
+}
+.desk-ltr.astra .astra-row.pubhead > * {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-cell { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.desk-ltr.astra .astra-row-t {
+  font-weight: 700;
+  font-size: calc(1.0625rem * var(--ts));
+  line-height: 1.25;
+}
+.desk-ltr.astra .astra-row-t.sm { font-weight: 800; font-size: calc(1rem * var(--ts)); }
+.desk-ltr.astra .astra-row-meta {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-row-num {
+  font-weight: 800;
+  font-size: calc(1.0625rem * var(--ts));
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .astra-row-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* A child that has to own the whole row: the inline headline editor, the
+   correction form, a running job card, a transcript review. */
+.desk-ltr.astra .astra-span { grid-column: 1 / -1; min-width: 0; }
+
+/* --- state chips ----------------------------------------------------------- */
+.desk-ltr.astra .astra-chip {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  padding: 1px 8px;
+  white-space: nowrap;
+  justify-self: start;
+  align-self: start;
+  border: 1px solid var(--fg2);
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-chip.new,
+.desk-ltr.astra .astra-chip.changed,
+.desk-ltr.astra .astra-chip.found { background: var(--a); border-color: var(--a); color: #111; }
+.desk-ltr.astra .astra-chip.dup { border: 1px dashed var(--fg2); color: var(--fg2); }
+.desk-ltr.astra .astra-chip.run { border: 2px solid var(--fg); color: var(--fg); }
+.desk-ltr.astra .astra-chip.held,
+.desk-ltr.astra .astra-chip.warn { border: 2px solid var(--warn); color: var(--warn); }
+.desk-ltr.astra .astra-chip.wait,
+.desk-ltr.astra .astra-chip.paused { border: 1px solid var(--fg2); color: var(--fg2); }
+.desk-ltr.astra .astra-chip.fail { border: 2px dashed var(--danger); color: var(--danger); }
+.desk-ltr.astra .astra-chip.none,
+.desk-ltr.astra .astra-chip.same { border: 1px solid var(--ok); color: var(--ok); }
+
+/* --- segmented filter (the drawing's seg(), 44px and title-case) ----------- */
+.desk-ltr.astra .astra-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.desk-ltr.astra .astra-seg-opt {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: calc(0.9375rem * var(--ts));
+  font-weight: 700;
+  color: var(--fg);
+  background: transparent;
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-seg-opt + .astra-seg-opt { border-left: 1px solid var(--line); }
+.desk-ltr.astra .astra-seg-opt:hover { background: var(--bg2); }
+.desk-ltr.astra .astra-seg-opt.on { background: var(--fg); color: var(--bg); }
+
+/* --- toolbar: filters left, search right (drawing: flex-wrap, space-between) */
+.desk-ltr.astra .astra-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+.desk-ltr.astra .astra-search {
+  display: flex;
+  align-items: center;
+  min-width: 240px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--fg);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra .astra-search::placeholder { color: var(--fg2); }
+.desk-ltr.astra .astra-search:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+/* --- "+ Add a source" ------------------------------------------------------
+   The drawing puts a plus before the label, the way it does on every other
+   add-control. It is a ::before rather than a character in the markup because
+   the walks match this summary by its exact text ("Add a source"), and a "+ "
+   inside the element would change what they match. */
+.desk-ltr.astra details.astra-source-add > summary::before { content: "+ "; }
+
+/* --- the More menu ---------------------------------------------------------
+   A `<details>` disclosure rather than a portal: every control stays in the
+   document, so a keyboard or a screen reader reaches it the same way, and the
+   row keeps its own tab order. The summary is a 44px `.btn.quiet` so the More
+   press measures the same as every other button on the screen. */
+.desk-ltr.astra .row-more { position: relative; display: inline-flex; }
+.desk-ltr.astra .row-more > summary { list-style: none; cursor: pointer; }
+.desk-ltr.astra .row-more > summary::-webkit-details-marker { display: none; }
+.desk-ltr.astra .row-more > summary::marker { content: ""; }
+.desk-ltr.astra .row-more-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 250px;
+  max-width: min(340px, 88vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 2px solid var(--fg);
+  box-shadow: 0 6px 0 rgb(0 0 0 / 0.08);
+}
+/* A closed `<details>` must not paint its panel. The author `display: flex`
+   above outranks the UA's `details:not([open]) > *:not(summary)` rule, so
+   without this line the shut panel still lays out and paints: a 250x48px
+   bordered box floating over the rows underneath it (BJ3 measured it at
+   250x48 at top 602 on the Sources list, and it is the same rule the Dark
+   Desk piles and Published desk use). */
+.desk-ltr.astra .row-more:not([open]) > .row-more-panel { display: none; }
+.desk-ltr.astra .row-more-panel > .btn,
+.desk-ltr.astra .row-more-panel > a,
+.desk-ltr.astra .row-more-panel > button {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 700;
+  text-align: left;
+  white-space: normal;
+}
+.desk-ltr.astra .row-more-panel > :last-child { border-bottom: 0; }
+.desk-ltr.astra .row-more-panel .row-more-h {
+  padding: 10px 14px 2px;
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+}
+
+/* --- Dark Desk: the piles rail -------------------------------------------- */
+.desk-ltr.astra .astra-piles {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+.desk-ltr.astra .astra-pile {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-pile-h {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px 6px;
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  color: var(--fg);
+  text-align: left;
+  border: 0;
+  background: transparent;
+}
+.desk-ltr.astra .astra-file-t { font-weight: 700; font-size: calc(1rem * var(--ts)); line-height: 1.3; }
+.desk-ltr.astra .astra-file-m { font-size: calc(0.875rem * var(--ts)); color: var(--fg2); }
+.desk-ltr.astra .astra-file.on { background: var(--bg); box-shadow: inset 4px 0 0 var(--sel); }
+.desk-ltr.astra .astra-file:hover { background: var(--bg2); }
+.desk-ltr.astra .astra-piles-foot { padding: 14px 16px; }
+
+/* --- Dark Desk: the activity log and the case file ------------------------ */
+.desk-ltr.astra .astra-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+}
+.desk-ltr.astra .astra-log {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra .astra-log-t {
+  color: var(--fg2);
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .astra-log-e { line-height: 1.4; min-width: 0; }
+.desk-ltr.astra .astra-log-e.find { font-weight: 700; }
+.desk-ltr.astra .astra-log-e.fail { color: var(--danger); font-weight: 700; }
+.desk-ltr.astra .astra-case {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; }
+
+/* --- the right-hand column of a split, and a plain list inside a panel ---- */
+.desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.desk-ltr.astra .astra-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.desk-ltr.astra .astra-plain > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-plain > li:last-child { border-bottom: 0; }
+
+/* --- Dark Desk: rail rows, pile chrome, and the open file ------------------
+   The drawing's rail is an index: one bold line, one line of metadata, one
+   action, and a rule between rows. The row itself is the control, so
+   .astra-file-open is a reset button that fills the row and inherits its
+   type; .astra-file keeps the padding and the selected bar. */
+.desk-ltr.astra .astra-file-open {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-file-open:focus-visible { outline-offset: 2px; }
+.desk-ltr.astra .astra-file-t,
+.desk-ltr.astra .astra-file-m { display: block; }
+.desk-ltr.astra .astra-file-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+}
+.desk-ltr.astra .astra-file.dim { opacity: 0.75; }
+.desk-ltr.astra .astra-pile-pad { padding: 10px 16px; }
+.desk-ltr.astra .astra-pile > .astra-pile-h { border-bottom: 1px solid var(--line); }
+.desk-ltr.astra .astra-pile > .astra-note,
+.desk-ltr.astra .astra-pile > .meta,
+.desk-ltr.astra .astra-pile > .note { padding: 10px 16px; }
+.desk-ltr.astra .astra-pile-acts {
+  display: grid;
+  gap: 8px;
+}
+.desk-ltr.astra .astra-pile-acts .btn { width: 100%; }
+
+/*
+  The rail's own paste box is the desk's top-of-rail start action, not a
+  callout: inside the 320px rail the framed .tipbox reads as a second panel
+  stacked above the piles, so it keeps the padding and loses the box.
+*/
+.desk-ltr.astra .astra-piles .tipbox.top {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+/*
+  More panels opened inside the rail must push the rail's rows down rather
+  than float over them: the rail is a column of piles, and a floating panel
+  over a 320px column would cover the file the editor is trying to reach.
+*/
+.desk-ltr.astra .astra-piles .row-more-panel {
+  position: static;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 4px;
+}
+.desk-ltr.astra .astra-piles .row-more-panel > p {
+  margin: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: calc(0.875rem * var(--ts));
+  white-space: normal;
+}
+.desk-ltr.astra .astra-piles .row-more-panel > p:first-child { border-top: 0; }
+
+/* The section head inside Activity / Case file / Decide: label over one line
+   of explanation, with a rule under the pair. */
+.desk-ltr.astra .astra-case-h {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Status banners stacked above the file's own body, in the order they matter. */
+.desk-ltr.astra .astra-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-notices > * { margin: 0; }
+
+/* The open file sits on the page background, not on the rail's panel fill. */
+.desk-ltr.astra .astra-deep-file {
+  padding: 24px;
+  background: var(--bg);
+}
+
+/* A card inside a panel body (Server settings) sits on the page background so
+   the rule between it and the sheet it is drawn on stays visible. */
+.desk-ltr.astra .astra-ops-card .astra-panel { background: var(--bg); }
+
+/* One tap height for the button family, not two.
+   `.btn.small` was declared at 36px on this surface (see line 537, and 40px in
+   styles.css below 700px), which measured 36-37.6px on the rendered Dark Desk
+   and Server screens -- under the 44px floor every other astra button already
+   meets. The small variant is still the quieter one where it is used; it is no
+   longer the shorter one. */
+.desk-ltr.astra .btn.small {
+  min-height: 44px;
+  padding: 10px 15px;
+}
+
+/* The two remaining controls under that floor, both in the desk's pinned
+   chrome: the search trigger measured 43px at 1280 and 37px at 390, and the
+   topbar icon buttons 40x40 (`.astra-paper-link` is 40px too, but it is an
+   anchor, not a button, so the brief's floor does not name it).
+   Height only, on purpose. These sit in one flex row at the top of every
+   screen; widening them would put the row over 390px and reintroduce the
+   sideways scroll these rules exist to avoid. */
+.desk-ltr.astra .astra-search-trigger,
+.desk-ltr.astra .astra-icon {
+  min-height: 44px;
+}
+
+/* --- the page header, as every drawing has it -------------------------------
+   Kicker and title on the left, the page's own action on the right, and a
+   heavy rule under the pair. DeskShell's own header (`.ov-head`) has a slot for
+   a sentence, not for a control, so the five screens this unit owns draw the
+   row themselves -- the same thing the story workbench already does with
+   `.astra-story-heading` -- and keep the shell's `title` for the breadcrumb.
+   `wrap` on purpose: at 390px the action drops under the title instead of
+   pushing the row sideways. The rule is `--fg` -- the drawing's `--ink` is the
+   prototype's name for it, and this surface's token is `--fg` (desk-astra
+   tokens, line 2342). */
+.desk-ltr.astra .astra-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin: 0 0 22px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--fg);
+}
+.desk-ltr.astra .astra-head .kick {
+  margin: 0 0 10px;
+}
+.desk-ltr.astra .astra-head .h1 {
+  margin: 0;
+}
+.desk-ltr.astra .astra-head-acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Where a drawn header action has no dialog in this build (the dialogs are
+   another lane's work and are not in the tree yet), it takes the editor to the
+   panel that does that job today. `.astra-jump` is the target: the desk's
+   topbar is pinned, so the box needs to clear it. */
+.desk-ltr.astra .astra-jump {
+  scroll-margin-top: 92px;
+}
+
+/* --- one column below 980px: nothing scrolls sideways at 390px ------------- */
+@media (max-width: 980px) {
+  .desk-ltr.astra .astra-2col,
+  .desk-ltr.astra .astra-split,
+  .desk-ltr.astra .astra-split-deep,
+  .desk-ltr.astra .astra-pair { grid-template-columns: minmax(0, 1fr); }
+  .desk-ltr.astra .astra-2col.span2 > :first-child { grid-row: auto; }
+  .desk-ltr.astra .astra-bounds { grid-template-columns: minmax(0, 1fr); }
+  .desk-ltr.astra .astra-piles { border-right: 0; border-bottom: 1px solid var(--line); }
+  .desk-ltr.astra .astra-row.opinion,
+  .desk-ltr.astra .astra-row.pub,
+  .desk-ltr.astra .astra-row.src {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px 0;
+  }
+  .desk-ltr.astra .astra-row.pubhead { display: none; }
+  .desk-ltr.astra .astra-row.opinion > .astra-chip,
+  .desk-ltr.astra .astra-row.pub > .astra-chip { margin-bottom: 2px; }
+  .desk-ltr.astra .astra-search { min-width: 0; width: 100%; }
+  .desk-ltr.astra .astra-spread { flex-direction: column; align-items: flex-start; }
+}
+
 
 /*
   ---------------------------------------------------------------------------
