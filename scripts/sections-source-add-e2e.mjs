@@ -323,7 +323,7 @@ async function theSourcesPageCanAssignWithoutASecondTrip() {
   // the tick and the Accept are one step -- accept first, then file it.
   const row = page.locator("tr.lead-tr", { hasText: secondUrl });
   await row.getByRole("button", { name: "Drop" }).click();
-  await page.getByRole("button", { name: /^Dropped / }).click();
+  await page.getByRole("button", { name: /^Rejected / }).click();
   const rejected = page.locator("tr.lead-tr", { hasText: secondUrl });
   await rejected.getByText("Assign to sections", { exact: true }).click();
   await rejected

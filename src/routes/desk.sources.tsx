@@ -6,14 +6,17 @@ import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   addSource,
   addSourcesBulk,
+  listScans,
   listSources,
   reviewSuggestedSources,
+  runScan,
   setSourceStatus,
 } from "@/lib/news/desk";
 import {
   editorActionError,
   editorFetchError,
   kindFromSourceUrl,
+  scanCountsLine,
   suggestedOriginLine,
   tierFromKind,
 } from "@/lib/news/desk-copy";
@@ -82,6 +85,47 @@ function SourcesPage() {
   );
   const [assignKeys, setAssignKeys] = useState<string[]>([]);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
+  // The search box the design draws beside the group filters. Client-side over
+  // the rows already loaded: the watch list is a few hundred rows at most and
+  // filtering it server-side would put a round trip on every keystroke.
+  const [sourceQuery, setSourceQuery] = useState("");
+  const { formatDateTime } = usePaperDateFormatters();
+  /*
+    The right column: what the scan last did, and "Run scan now".
+
+    This is the same `runScan` the Scan screen calls, with the same defaults --
+    no scope, no pack, the desk's own model choice. It is not a second runner.
+    The Scan screen is still where a run is scoped, paged and diagnosed; this
+    panel is the one-press version for an editor who is already looking at the
+    watch list and has just added a source.
+  */
+  const scans = useQuery({
+    queryKey: ["scans", 1],
+    queryFn: () => listScans({ data: { limit: 6, offset: 0 } }),
+    refetchInterval: (q) => {
+      const row = q.state.data?.rows?.[0];
+      if (row && !row.finished_at && !row.error) return 2000;
+      return false;
+    },
+  });
+  /** The newest run, which is what "Last run" and the pager both read. */
+  const last = scans.data?.rows?.[0];
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const runScanNow = useMutation({
+    mutationFn: () => runScan({ data: { modelChoice: "auto", modelEffort: null } }),
+    onSuccess: (res) => {
+      if (res && "ok" in res && res.ok === false) {
+        setScanNotice(res.error);
+        return;
+      }
+      setScanNotice(null);
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+    onError: (err) =>
+      setScanNotice(err instanceof Error ? err.message : "Could not start that scan."),
+  });
   const sectionNames = (keys: string[]) =>
     keys.map((key) => reportingSections.find((s) => s.key === key)?.name ?? key).join(", ");
   /** Write the section assignments for one source; a no-op for a non-owner. */
@@ -263,6 +307,13 @@ function SourcesPage() {
     },
   ];
 
+  /*
+    How many pages the scanner is allowed to read. This is the "files up to"
+    the design puts in the Daily scan panel, and it is the same number the Scan
+    screen computes for its own run.
+  */
+  const watch = sources.filter((s) => s.status === "accepted").length;
+
   async function onPickFile(file: File | undefined) {
     if (!file) return;
     const text = await file.text();
@@ -272,12 +323,61 @@ function SourcesPage() {
   }
 
   return (
-    <DeskShell title="Sources" kicker="Watch list">
+    <DeskShell
+      title="Sources"
+      kicker="What the desk watches, and whether it could check"
+      hideTitle
+    >
+      {/*
+        The drawn header: kicker, title, the page's own action, rule. The
+        drawing puts "+ Add a source" on the title line; this build has no
+        add-source dialog yet (the dialogs are lane 1's, and Desk Dialogs is not
+        in the tree), so the button opens the panel that adds one today -- the
+        same form the walks press, reached from the header instead. The plus is
+        a literal character here: the walks match the panel's own summary by its
+        exact text "Add a source", and the ::before that draws the panel's plus
+        is CSS, so only this button reads "+ Add a source" to a text match.
+
+        The title stays "Sources", not the drawing's "Sources & scan": two walks
+        (sources-desk-e2e.mjs, scan-desk-e2e.mjs) wait on a level-1 heading named
+        exactly "Sources", and the brief moves a selector only where the design
+        moved a control. The kicker carries the drawing's wording.
+      */}
+      <div className="astra-head">
+        <div>
+          <p className="kick">What the desk watches, and whether it could check</p>
+          <h1 className="h1">Sources</h1>
+        </div>
+        <div className="astra-head-acts">
+          <button
+            type="button"
+            className="btn solid"
+            onClick={() => {
+              const panel = document.getElementById("astra-add-source");
+              if (panel instanceof HTMLDetailsElement) {
+                panel.open = true;
+                panel.scrollIntoView({ block: "start" });
+                panel.querySelector("summary")?.focus();
+              }
+            }}
+          >
+            + Add a source
+          </button>
+        </div>
+      </div>
       <p className="lede">
         The pages the scanner reads on every pass. Add one, paste a whole registry, or review what
         the machine proposes.
       </p>
-      <details className="file-form astra-source-add">
+      {/*
+        The design draws this screen as two columns: the watch list, and the
+        scanner that reads it. The right column is the same information the Scan
+        screen shows, condensed to the one thing an editor wants while they are
+        already looking at the list -- did it run, and run it now.
+      */}
+      <div className="astra-split">
+        <div>
+      <details className="file-form astra-source-add astra-panel astra-jump" id="astra-add-source">
         <summary>Add a source</summary>
         <form
           className="src-add"
@@ -307,7 +407,7 @@ function SourcesPage() {
               placeholder="City Council packets"
             />
           </Field>
-          <InkButton type="submit" small disabled={add.isPending || !url.trim()}>
+          <InkButton type="submit" disabled={add.isPending || !url.trim()}>
             {add.isPending ? "Adding…" : "Add source"}
           </InkButton>
           {/* The form is a three-column grid, so this spans it rather than
@@ -335,7 +435,7 @@ function SourcesPage() {
           </div>
         </form>
       </details>
-      <details className="file-form">
+      <details className="file-form astra-panel">
         <summary>Import a source registry</summary>
         <p className="meta">
           Paste a registry or choose a .txt, .md or .csv file. TIER A/B/C headers are preserved.
@@ -353,7 +453,6 @@ function SourcesPage() {
         />
         <div className="row-acts static">
           <InkButton
-            small
             disabled={addBulk.isPending || !bulk.trim()}
             onClick={() => addBulk.mutate(bulk)}
           >
@@ -361,7 +460,6 @@ function SourcesPage() {
           </InkButton>
           <InkButton
             tone="ghost"
-            small
             disabled={addBulk.isPending}
             onClick={() => fileRef.current?.click()}
           >
@@ -385,22 +483,49 @@ function SourcesPage() {
         <p className={"note" + (notice.kind === "err" ? " err" : "")}>{notice.text}</p>
       ) : null}
 
-      <div className="filters" aria-label="Source groups">
-        {groups.map((g) => (
+      <div className="astra-toolbar">
+        <div className="astra-seg" role="group" aria-label="Source groups">
+          {groups.map((g) => (
+            <button
+              key={g.k}
+              type="button"
+              className={"astra-seg-opt" + (sourceTab === g.k ? " on" : "")}
+              aria-pressed={sourceTab === g.k}
+              onClick={() => setSourceTab(g.k)}
+            >
+              {g.k === "accepted"
+                ? "On watch"
+                : g.k === "proposed"
+                  ? "Suggested"
+                  : "Rejected"}{" · "}
+              {sources.filter((s) => s.status === g.k).length}
+            </button>
+          ))}
+          {/*
+            The design's fourth filter. It is not a fourth status -- a source
+            cannot be "could not check" -- it is the on-watch rows the last
+            pass failed to fetch, which is the list an editor has to work
+            through before the scan can be trusted to have covered the town.
+            Rejected rows are excluded: nobody is waiting on those.
+          */}
           <button
-            key={g.k}
-            className={"filter" + (sourceTab === g.k ? " on" : "")}
-            aria-pressed={sourceTab === g.k}
-            onClick={() => setSourceTab(g.k)}
+            type="button"
+            className={"astra-seg-opt" + (sourceTab === "unchecked" ? " on" : "")}
+            aria-pressed={sourceTab === "unchecked"}
+            onClick={() => setSourceTab("unchecked")}
           >
-            {g.k === "accepted"
-              ? "On watch"
-              : g.k === "proposed"
-                ? "Suggested sources:"
-                : "Dropped"}{" "}
-            {sources.filter((s) => s.status === g.k).length}
+            Could not check{" · "}
+            {sources.filter((s) => s.status === "accepted" && s.last_error != null).length}
           </button>
-        ))}
+        </div>
+        <input
+          type="search"
+          className="astra-search"
+          aria-label="Search sources"
+          placeholder="Search the watch list"
+          value={sourceQuery}
+          onChange={(e) => setSourceQuery(e.target.value)}
+        />
       </div>
       {listIsError && sources.length === 0 ? (
         <ScreenError
@@ -412,13 +537,43 @@ function SourcesPage() {
         <ListSkeleton rows={5} />
       ) : (
         groups.map((g) => {
-          const rows = sources.filter((s) => s.status === g.k);
-          if (sourceTab !== g.k) return null;
+          /*
+            "Could not check" shows the accepted group, narrowed to the rows
+            that carry a fetch error, so it is the same table with the same
+            actions -- Accept and Drop stay where they are, because a source
+            that cannot be read may still be worth dropping.
+          */
+          const forTab = sourceTab === "unchecked" ? "accepted" : sourceTab;
+          if (g.k !== forTab) return null;
+          const rows = sources
+            .filter((s) => s.status === g.k)
+            .filter((s) => (sourceTab === "unchecked" ? s.last_error != null : true))
+            .filter((s) => {
+              const q = sourceQuery.trim().toLowerCase();
+              if (!q) return true;
+              return [s.title, s.url, s.kind, s.tier].some((value) =>
+                (value ?? "").toLowerCase().includes(q),
+              );
+            });
           return (
             <section key={g.k} id={g.k === "accepted" ? "on-watch" : "suggested"} className="src-sec">
-              <SecHead title={g.title} count={rows.length} sub={g.sub ?? undefined} />
+              <SecHead
+                title={sourceTab === "unchecked" ? "Could not check" : g.title}
+                count={rows.length}
+                sub={
+                  sourceTab === "unchecked"
+                    ? "On the watch list, and the last pass could not read them. A source the scanner cannot fetch is not yet a source."
+                    : (g.sub ?? undefined)
+                }
+              />
               {g.k === "accepted" && !rows.length ? (
-                <p className="wire-sum">Nothing on watch yet — add a URL above.</p>
+                <p className="wire-sum">
+                  {sourceTab === "unchecked"
+                    ? "Every source on the watch list was readable on the last pass."
+                    : sourceQuery.trim()
+                      ? "No source on this list matches that search."
+                      : "Nothing on watch yet — add a URL above."}
+                </p>
               ) : g.k === "proposed" ? (
                 /* The one list built for volume: 175 rows were waiting when
                    this was written, so it carries a select-all, a per-press
@@ -447,6 +602,93 @@ function SourcesPage() {
           );
         })
       )}
+        </div>
+        <aside className="astra-col">
+          {/*
+            The Daily scan panel, drawn with a 2px yellow border because on this
+            screen it is the one thing that acts on everything else. Its three
+            rows answer "is the scanner working": how many runs, how many files
+            it can reach, and when it last went out. The design also draws a
+            Model row here; this build records no model on a scan run (ScanRow
+            carries no such column), so the row is absent rather than guessed --
+            the model each job uses lives on Models.
+          */}
+          <div className="astra-panel hot">
+            <h2 className="astra-panel-h">Daily scan</h2>
+            <dl className="astra-kv ruled">
+              <dt>Runs</dt>
+              <dd>{scans.data?.total ?? 0}</dd>
+            </dl>
+            <dl className="astra-kv ruled">
+              <dt>Files up to</dt>
+              <dd>{watch}</dd>
+            </dl>
+            <dl className="astra-kv ruled">
+              <dt>Last run</dt>
+              <dd>
+                {last
+                  ? last.stalled
+                    ? "Stalled"
+                    : last.finished_at
+                      ? formatDateTime(last.finished_at)
+                      : "Running now"
+                  : "Never"}
+              </dd>
+            </dl>
+            <p className="astra-note">Scans file leads only. They never draft or publish.</p>
+            {scanNotice ? (
+              <p className="note err" role="alert">
+                {scanNotice}
+              </p>
+            ) : null}
+            <div className="astra-panel-acts">
+              <InkButton disabled={runScanNow.isPending} onClick={() => runScanNow.mutate()}>
+                {runScanNow.isPending ? "Starting…" : "Run scan now"}
+              </InkButton>
+              <Link to="/desk/scan" className="btn quiet">
+                Open the scan screen
+              </Link>
+            </div>
+          </div>
+          {/*
+            Previous scans. Five, and a link rather than a pager: the Scan
+            screen owns the full history, its paging and its diagnostics, and a
+            second copy of that here would be a second thing to keep right.
+          */}
+          <div className="astra-panel">
+            <h2 className="astra-panel-h">Previous scans</h2>
+            {scans.isPending && !scans.data ? (
+              <p className="astra-note">Loading…</p>
+            ) : (scans.data?.rows ?? []).length === 0 ? (
+              <p className="astra-note">No scan has run yet.</p>
+            ) : (
+              <ul className="astra-plain">
+                {(scans.data?.rows ?? []).slice(0, 5).map((run) => (
+                  <li key={run.id}>
+                    <span className="astra-log-t">
+                      {run.started_at ? formatDateTime(run.started_at) : "—"}
+                    </span>
+                    <span className="astra-row-meta">
+                      {run.error
+                        ? "Failed"
+                        : run.stalled
+                          ? "Stalled with no result"
+                          : run.finished_at
+                            ? scanCountsLine(run)
+                            : "Running now"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="astra-panel-acts">
+              <Link to="/desk/scan" className="btn quiet">
+                All previous scans
+              </Link>
+            </div>
+          </div>
+        </aside>
+      </div>
     </DeskShell>
   );
 }
@@ -642,7 +884,6 @@ function SuggestedSources({
     <>
       <div className="row-acts static" aria-label="Decide several suggestions at once">
         <InkButton
-          small
           disabled={!selected.length || review.isPending}
           onClick={() =>
             decide(selected, "accepted", canAssign ? batchSection || undefined : undefined)
@@ -652,7 +893,6 @@ function SuggestedSources({
         </InkButton>
         <InkButton
           tone="ghost"
-          small
           disabled={!selected.length || review.isPending}
           onClick={() => decide(selected, "rejected")}
         >
@@ -660,7 +900,6 @@ function SuggestedSources({
         </InkButton>
         <InkButton
           tone="ghost"
-          small
           disabled={!visible.length || review.isPending}
           onClick={() => setSelected(allPicked ? [] : visible.map((r) => r.id))}
         >
@@ -807,7 +1046,6 @@ function SuggestedSources({
                     <span className="row-acts">
                       <InkButton
                         tone="quiet"
-                        small
                         disabled={review.isPending}
                         onClick={() => decide([s.id], "accepted", canAssign ? picked || undefined : undefined, noteFor(s))}
                       >
@@ -815,7 +1053,6 @@ function SuggestedSources({
                       </InkButton>
                       <InkButton
                         tone="quiet"
-                        small
                         disabled={review.isPending}
                         onClick={() => decide([s.id], "rejected", undefined, noteFor(s))}
                       >
@@ -916,12 +1153,12 @@ function SourceTable({
               ) : null}
               <span className="row-acts">
                 {acts.includes("accepted") ? (
-                  <InkButton tone="quiet" small onClick={() => onStatus(s.id, "accepted")}>
+                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
                     Accept
                   </InkButton>
                 ) : null}
                 {acts.includes("rejected") ? (
-                  <InkButton tone="quiet" small onClick={() => onStatus(s.id, "rejected")}>
+                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
                     Drop
                   </InkButton>
                 ) : null}

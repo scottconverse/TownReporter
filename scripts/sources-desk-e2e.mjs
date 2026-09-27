@@ -73,8 +73,9 @@ async function ownTheDesk() {
 
 /**
  * The row for a given source URL, wherever it currently sits (On watch/
- * Suggested sources/Dropped). The middle tab was renamed in 0.6.70; this walk
- * only ever opens On watch and Dropped, so the row lookup is unchanged.
+ * Suggested/Rejected). The middle tab was renamed in 0.6.70 and the last tab
+ * again in the redesign (Redesign p2c); this walk only ever opens On watch and
+ * Rejected, so the row lookup is unchanged.
  */
 function rowFor(url) {
   return page.locator("tr.lead-tr", { hasText: url });
@@ -120,14 +121,14 @@ async function droppingThenRestoringUpdatesTheList() {
   await row.getByRole("button", { name: "Drop" }).click();
 
   // Dropped moves the row out of On watch and into Rejected.
-  await page.getByRole("button", { name: /^Dropped / }).click();
+  await page.getByRole("button", { name: /^Rejected / }).click();
   await page.getByRole("heading", { name: "Rejected", exact: true }).waitFor({ timeout: 30_000 });
   const rejectedSection = page.locator("section.src-sec", { hasText: "Rejected" });
   await rejectedSection.locator("tr.lead-tr", { hasText: sourceUrl }).waitFor({ timeout: 30_000 });
   step("Drop removes the source from On watch and files it under Rejected");
 
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("button", { name: /^Dropped / }).click();
+  await page.getByRole("button", { name: /^Rejected / }).click();
   const stillRejected = page
     .locator("section.src-sec", { hasText: "Rejected" })
     .locator("tr.lead-tr", { hasText: sourceUrl });

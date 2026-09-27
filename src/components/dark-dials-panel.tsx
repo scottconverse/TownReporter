@@ -67,7 +67,7 @@ export function DarkDialsPanel() {
 
   if (q.isError)
     return (
-      <section className="mt-8 border border-rule p-4">
+      <section className="astra-panel">
         <p role="alert">
           Could not read the saved investigative settings. No default settings were substituted.
         </p>
@@ -83,11 +83,11 @@ export function DarkDialsPanel() {
   };
 
   return (
-    <section className="mt-8 border border-rule p-4">
+    <section className="astra-panel">
       <SecHead
         title="How hard to dig"
         aside={
-          <InkButton tone="quiet" small onClick={() => setOpen((v) => !v)}>
+          <InkButton tone="quiet" onClick={() => setOpen((v) => !v)}>
             {open ? "Hide" : "Change"}
           </InkButton>
         }
@@ -145,7 +145,7 @@ export function DarkDialsPanel() {
           </div>
           <div>
             <label
-              className="block text-[11px] tracking-[0.14em] text-muted uppercase"
+              className="astra-label block"
               htmlFor="dig"
             >
               Dig — how far it chases · {d.dig}/10
@@ -167,7 +167,7 @@ export function DarkDialsPanel() {
 
           <div>
             <label
-              className="block text-[11px] tracking-[0.14em] text-muted uppercase"
+              className="astra-label block"
               htmlFor="nerve"
             >
               Nerve — how speculative · {d.nerve}/10
@@ -192,13 +192,12 @@ export function DarkDialsPanel() {
           </div>
 
           <div>
-            <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Map</p>
+            <p className="astra-label">Map</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {SCOPES.map((s) => (
                 <InkButton
                   key={s}
                   tone={d.scope === s ? "solid" : "quiet"}
-                  small
                   onClick={() => set({ scope: s })}
                 >
                   {s}
@@ -276,10 +275,10 @@ export function DarkDialsPanel() {
           </div>
 
           <div>
-            <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Presets</p>
+            <p className="astra-label">Presets</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {PRESETS.map((p) => (
-                <InkButton key={p.id} tone="quiet" small onClick={() => setDraft(p.dials)}>
+                <InkButton key={p.id} tone="quiet" onClick={() => setDraft(p.dials)}>
                   {p.name}
                 </InkButton>
               ))}
@@ -308,7 +307,6 @@ export function DarkDialsPanel() {
             <div className="mt-3 flex items-center gap-3">
               <InkButton
                 tone="solid"
-                small
                 disabled={!dirty || save.isPending}
                 onClick={() => save.mutate(d)}
               >
@@ -317,7 +315,6 @@ export function DarkDialsPanel() {
               {dirty ? (
                 <InkButton
                   tone="quiet"
-                  small
                   onClick={() => {
                     setDraft(q.data?.dials ?? null);
                     setPreferences(q.data?.preferences ?? null);

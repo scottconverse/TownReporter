@@ -587,7 +587,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
   await other.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
   const sourceRow = other.locator("tr", { hasText: "Daily settings source" });
   await sourceRow.getByRole("button", { name: "Drop", exact: true }).click();
-  await other.getByRole("button", { name: /^Dropped / }).click();
+  await other.getByRole("button", { name: /^Rejected / }).click();
   await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
   await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
