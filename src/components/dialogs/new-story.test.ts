@@ -327,8 +327,83 @@ The council voted to delay it until November ([minutes](https://records.example/
       the same way (`import-stories.server.ts:432`).
     */
     assert.equal(file.importedText, true);
+    /*
+      Unit BW5: and it is filed as the import path filed it. The Queue draws its
+      Imported chip off `leads.origin === "import"` (`desk-leads.tsx:516`), and
+      the one-story paste panel this tab replaces wrote that word through
+      `importFinishedStories` (`import-stories.server.ts:402`). Without it,
+      every paste that panel marked Imported arrives unmarked.
+    */
+    assert.equal(file.origin, "import");
     assert.equal(save.dek, "Reprinted with permission");
     assert.match(press.done, /evidence check is running/);
+  });
+
+  it("marks only the paste tab's lead with the import origin", () => {
+    /*
+      The other half of the assertion above, and the reason it is not simply a
+      default on `fileLead`: "Write it myself" is the desk's own story, typed
+      here, and the Imported chip says "read out of a report you pasted, not
+      written by the desk". A default would put that sentence on the editor's
+      own work.
+    */
+    const self = newStoryRequest(
+      state({ tab: "self", headline: "Council delays the budget", summary: "Why", story: "The council voted." }),
+    );
+    const ai = newStoryRequest(state({ tab: "ai", assignment: "A whole assignment" }));
+    assert.ok(!("origin" in inputOf(self.steps[0]!)), "the write-it-myself tab files an origin");
+    assert.equal(ai.steps[0]!.call, "writeStory");
+    assert.ok(!("origin" in inputOf(ai.steps[0]!)), "the AI tab files an origin");
+  });
+
+  it("draws the duplicate warning with the old panel's words and link, after the save", () => {
+    /*
+      Unit BW5. The one-story paste panel warned, once the story was added,
+      that it looked like one the paper already had: `duplicateNote`'s sentence
+      and a link to the story it means (`desk.index.tsx:1532-1551` before the
+      redesign). The drawn tab saved the story and said nothing, so the warning
+      went with the panel. Both halves are asserted here -- the words, and that
+      they arrive WITH the save rather than instead of it.
+    */
+    const printed = render({
+      tab: "paste",
+      pastedStory: "Council delays the budget\n\nThe council voted.",
+    });
+    // Nothing was asked, so nothing is drawn: the warning is the server's
+    // answer about one particular paste, never a guess the body makes.
+    assert.ok(!printed.includes("already published as"), "a warning is drawn with no answer to draw");
+
+    const withWarning = renderToStaticMarkup(
+      createElement(NewStoryBody, {
+        ...base,
+        state: { ...base.state, tab: "paste", pastedStory: "Council delays the budget\n\nThe council voted." },
+        note: "Saved as your draft. The credit line and link stay on the published page.",
+        duplicate: { headline: "Council delays the budget", slug: "council-delays-the-budget" },
+      }),
+    );
+    assert.match(withWarning, /already published as/);
+    assert.match(withWarning, /This looks like a story already published as/);
+    assert.match(withWarning, /Council delays the budget/);
+    assert.match(withWarning, /Saved as your draft/, "the warning replaced the confirmation");
+    assert.match(withWarning, /href="\/articles\/council-delays-the-budget"/);
+    assert.match(withWarning, /Read the printed one/);
+    // Role status, the same live region the confirmation speaks through: the
+    // old panel drew both in one such paragraph, and a screen reader reads the
+    // warning where the editor reads it.
+    assert.match(withWarning, /role="status"/);
+
+    // A match that is a lead and not a printed story: the panel's other link.
+    const onTheDesk = renderToStaticMarkup(
+      createElement(NewStoryBody, {
+        ...base,
+        state: { ...base.state, tab: "paste", pastedStory: "Council delays the budget\n\nThe council voted." },
+        note: "Saved as your draft.",
+        duplicate: { headline: "Council delays the budget", leadId: 42 },
+      }),
+    );
+    assert.match(onTheDesk, /already on the desk as/);
+    assert.match(onTheDesk, /href="\/desk\/story\/42"/);
+    assert.match(onTheDesk, /Open the one on the desk/);
   });
 
   it("maps the paste tab's mode onto the desk's own suggestions and check", () => {

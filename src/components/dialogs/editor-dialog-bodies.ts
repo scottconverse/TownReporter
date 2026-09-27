@@ -31,7 +31,11 @@ import {
   type SourcePreview,
 } from "../../lib/news/editor-dialog-logic.ts";
 import { HOLD_CHOICES } from "../../lib/news/kill-reasons.ts";
-import { SECTION_REQUIRED } from "../../lib/news/import-review.ts";
+import {
+  SECTION_REQUIRED,
+  duplicateNote,
+  type DuplicateWarning,
+} from "../../lib/news/import-review.ts";
 import {
   ADD_LEAD_THENS,
   MORE_LEAD_ITEMS,
@@ -367,6 +371,21 @@ export type NewStoryBodyProps = {
   sections?: readonly { key: string; name: string }[];
   /** The drop zone on tab (a): documents the drafter reads. */
   onFiles?: (files: File[]) => void;
+  /**
+   * The paste tab's duplicate warning, once the story has been filed.
+   *
+   * Unit BW5. The one-story paste panel warned that the story it had just
+   * added looked like one the paper already had, and linked to that one
+   * (`desk.index.tsx:1532-1551` before the redesign). The drawn dialog's paste
+   * tab filed the story and said nothing, so the warning went with the panel.
+   * The shell asks the server for it (`findPasteDuplicate`, `desk.ts`) and
+   * hands the answer here; this file only draws it.
+   *
+   * Set only on the paste tab, and only after a paste has been saved. Absent
+   * or null draws nothing at all, which is every other tab and every paste the
+   * paper has not printed before.
+   */
+  duplicate?: DuplicateWarning | null;
   Choice: ChoiceRender;
 };
 
@@ -525,8 +544,52 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
     );
   }
 
-  parts.push(message(p.problem, "warn"), message(p.note, "ok"));
+  parts.push(
+    message(p.problem, "warn"),
+    p.duplicate ? savedWithDuplicate(p.note, p.duplicate) : message(p.note, "ok"),
+  );
   return createElement(Fragment, null, ...parts);
+}
+
+/**
+ * The paste tab's confirmation and its duplicate warning, in ONE live region.
+ *
+ * Unit BW5. The old panel drew these as a single `role="status"` paragraph --
+ * the sentence that the story was added, then `duplicateNote`'s warning, then
+ * the link to the story it means ("Read the printed one" to `/articles/$slug`,
+ * or "Open the one on the desk" to `/desk/story/$leadId` when the match is a
+ * lead, `desk.index.tsx:1532-1551`). One paragraph and not two because that is
+ * what the panel did and what the walk reads: the warning arrives with the
+ * confirmation, as part of the sentence the editor is already reading, and
+ * never in place of it -- the story IS filed, and saying so comes first.
+ *
+ * The link is a plain anchor and not a router `Link` for the reason this file
+ * is a `.ts` (see the note above `NewStoryBody`): every other dialog link to
+ * another screen here is one too.
+ */
+function savedWithDuplicate(note: string | null, warning: DuplicateWarning): ReactNode {
+  const where = warning.slug
+    ? { href: `/articles/${warning.slug}`, words: "Read the printed one" }
+    : warning.leadId
+      ? { href: `/desk/story/${warning.leadId}`, words: "Open the one on the desk" }
+      : null;
+  return createElement(
+    "p",
+    { className: "astra-msg ok", role: "status" },
+    note ?? "",
+    note ? " " : null,
+    duplicateNote(warning),
+    where
+      ? [
+          " ",
+          createElement(
+            "a",
+            { key: "dup", className: "inline-link", href: where.href },
+            where.words,
+          ),
+        ]
+      : null,
+  );
 }
 
 /* ----------------------------------------------------------------- add lead -- */

@@ -51,6 +51,24 @@ export const PASTE_ONE_DISCLOSURE: DisclosureKey = "person";
 /** The card key for the one card this screen ever has. */
 export const PASTE_ONE_KEY = "pasted-story";
 
+/**
+ * How a pasted story is marked on its lead, until the editor says otherwise.
+ *
+ * Unit BW5. The one-story paste is the import path (see the note at the top):
+ * `importFinishedStories` files its lead with `origin = 'import'`
+ * (`import-stories.server.ts:402`, `IMPORT_ORIGIN`), and that one word is what
+ * draws the Queue row's Imported chip (`desk-leads.tsx:516`) -- "read out of a
+ * report you pasted, not written by the desk". The drawn New story dialog's
+ * paste tab files the same act through `fileLead` instead, so it has to send
+ * the same word or the mark the old panel put on the row goes with the panel.
+ *
+ * A copy of `IMPORT_ORIGIN` and not an import of it: that constant lives in a
+ * `.server.ts` (`import-stories.server.ts:57`) and this module is read by
+ * dialogs in the browser. `paste-one-story.server.test.ts` asserts the two are
+ * the same string, so the copy cannot drift.
+ */
+export const PASTE_ONE_ORIGIN = "import";
+
 export type PasteOneInput = {
   /** The story, exactly as pasted. */
   text: string;

@@ -50,11 +50,13 @@ import {
   addSource,
   addSourcesBulk,
   fileLead,
+  findPasteDuplicate,
   listSources,
   saveDraft,
   suggestHeadlines,
   writeStoryFromInput,
 } from "@/lib/news/desk";
+import type { DuplicateWarning } from "@/lib/news/import-review";
 import { requestDraftReconciliationFn } from "@/lib/news/draft-reconcile-actions";
 import {
   addLead,
@@ -312,6 +314,13 @@ type FileLeadStepIn = {
   disclosureOther?: string;
   /** Unit BW3: the body is an editor's paste (`draft-evidence.ts:36`). */
   importedText?: boolean;
+  /**
+   * Unit BW5: how the lead entered the desk, when the screen that filed it
+   * knows -- the one-story paste is the import path, so its lead carries the
+   * import path's own word (`PASTE_ONE_ORIGIN`, `paste-one-story.ts`), which is
+   * what draws the Queue row's Imported chip (`desk-leads.tsx:516`).
+   */
+  origin?: "import";
 };
 type SaveDraftStepIn = {
   headline: string;
@@ -338,6 +347,18 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<NewStoryState>(newStoryInitial, open, press.clear);
   const [documents, setDocuments] = React.useState<string[]>([]);
+  /*
+    Unit BW5: the paste tab's duplicate warning.
+
+    The old one-story paste panel warned, after adding the story, that it looked
+    like one the paper already had, and linked to that one. The drawn dialog's
+    paste tab filed the story and said nothing. This holds the server's answer
+    for the paste that was just saved; the body draws it beside the
+    confirmation, and the next press clears it (a warning about the last paste
+    over the current one would be a sentence about a story the editor is not
+    looking at).
+  */
+  const [duplicate, setDuplicate] = React.useState<DuplicateWarning | null>(null);
   /*
     Unit BW3: the row carries the editor's own saved connections as well.
 
@@ -370,7 +391,10 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   );
 
   React.useEffect(() => {
-    if (open) setDocuments([]);
+    if (open) {
+      setDocuments([]);
+      setDuplicate(null);
+    }
   }, [open]);
 
   const done = (text: string): PressAnswer => {
@@ -385,6 +409,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
 
   const start = (which: "primary" | "alt") => () =>
     press.run(async () => {
+      setDuplicate(null);
       const plan = newStoryRequest(state, which, documents);
       let leadId: number | null = null;
       for (const raw of plan.steps) {
@@ -421,6 +446,27 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
             instead of a check that can never be true.
           */
           await saveDraft({ data: step.input as SaveDraftStepIn });
+          /*
+            Unit BW5: and then the warning the old paste panel drew.
+
+            Asked AFTER the save, from the headline that was just saved, and the
+            lead this press just filed is named and left out (`excludeLeadId`) --
+            the old panel looked the duplicate up before the add, from lists
+            loaded before the click, so its paste could not find itself; here the
+            lead is already on the desk, and its own headline is the one row it
+            would always match.
+
+            Only the paste tab: this save writes the editor's own words, and the
+            paper already tells them what is in its own Queue.
+          */
+          if (state.tab === "paste" && leadId !== null) {
+            const saved = step.input as SaveDraftStepIn;
+            setDuplicate(
+              (await findPasteDuplicate({
+                data: { headline: saved.headline, excludeLeadId: leadId },
+              })) ?? null,
+            );
+          }
           continue;
         }
         if (step.call === "checkEvidence") {
@@ -498,6 +544,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
         models={models}
         sections={sectionQuery.sections}
         onFiles={onFiles}
+        duplicate={duplicate}
         Choice={Choice}
       />
     </Dialog>

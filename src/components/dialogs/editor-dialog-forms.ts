@@ -20,7 +20,11 @@ import { modelChoiceLabel, modelChoicesFor } from "../../lib/news/model-choice.t
 import { ADD_TO_MODES, DARK_LIMITS, FIND_SOURCE_SCOPES, hopsForLimit } from "../../lib/news/editor-dialog-logic.ts";
 import { HOLD_CHOICES } from "../../lib/news/kill-reasons.ts";
 import { SECTION_REQUIRED } from "../../lib/news/import-review.ts";
-import { PASTE_ONE_DISCLOSURE, bodyFromPaste } from "../../lib/news/paste-one-story.ts";
+import {
+  PASTE_ONE_DISCLOSURE,
+  PASTE_ONE_ORIGIN,
+  bodyFromPaste,
+} from "../../lib/news/paste-one-story.ts";
 import { extractLinks } from "../../lib/news/import-stories.ts";
 import { LIMITS } from "../../lib/news/request-input.ts";
 
@@ -394,6 +398,18 @@ export function newStoryRequest(
           mark the import path writes (`import-stories.server.ts:432`).
         */
         importedText: true,
+        /*
+          Unit BW5: and it is the import path's story, not the desk's own.
+
+          The Queue draws its Imported chip off this one word
+          (`desk-leads.tsx:516`), and the one-story paste panel this tab
+          replaces filed through `importFinishedStories`, which wrote
+          `origin = 'import'` (`import-stories.server.ts:402`). Filed through
+          `fileLead` with no origin, every paste that panel marked Imported
+          would arrive unmarked -- the row would still be there and the mark
+          the editor reads it by would not. See `PASTE_ONE_ORIGIN`.
+        */
+        origin: PASTE_ONE_ORIGIN,
       },
     },
     {

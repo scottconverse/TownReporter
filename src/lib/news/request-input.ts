@@ -871,6 +871,30 @@ export const fileLeadInput = z.object({
    * editor fixing a typo in it. Absent -- every other caller -- writes nothing.
    */
   importedText: z.boolean().optional(),
+  /**
+   * How the lead entered the desk, when the screen that filed it knows.
+   *
+   * Unit BW5: the one-story paste panel filed through the import path, which
+   * wrote `origin = 'import'` (`import-stories.server.ts:402`), and the Queue
+   * draws its Imported mark off that one word (`desk-leads.tsx:516`). The drawn
+   * New story dialog's paste tab files the same act through `fileLead`, so it
+   * sends the same word. `'import'` is the only value the column's own comment
+   * defines (`0091_import_provenance.sql`), so it is the only one accepted here
+   * -- not a free string that could put a word on the row the desk cannot mean.
+   * Absent -- every other caller -- records no origin, which is the scanner
+   * lead's own answer (null = not recorded).
+   */
+  origin: z.literal("import").optional(),
+});
+
+/**
+ * `desk.ts` findPasteDuplicate: the headline about to be filed, and the lead
+ * the press just filed (left out of the comparison, so a paste is never its own
+ * duplicate).
+ */
+export const pasteDuplicateInput = z.object({
+  headline: z.string().max(LIMITS.leadHeadline),
+  excludeLeadId: rowId.optional(),
 });
 
 /** `desk.ts:586` saveScanSourcePackFn (`sections.server.ts:177` refuses > 200). */

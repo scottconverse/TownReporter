@@ -22,6 +22,8 @@
  *   - a section left unchosen is asked for again, in the review screen's own
  *     words, and nothing is filed -- a draft has no "no section" state;
  *   - one paste and one press files a draft, and the paper does not carry it;
+ *   - the Queue row is marked Imported: it is the same import path, not a
+ *     second one;
  *   - the draft holds the paste word for word with the first line as its
  *     headline and not repeated as the body's first line (step G), and the
  *     sentence the editor edits is the sentence the reader gets;
@@ -33,17 +35,17 @@
  *     THE EVIDENCE; a pasted story with none prints no such heading and says in
  *     words that there are no source records (coordinator review of the Unit X
  *     screenshots, 2026-09-24: an empty heading under a published story);
- *   - the second paste is asked for a section too, and then saves.
+ *   - the second paste is asked for a section too, and then saves, and the
+ *     desk warns that it looks like the story already printed -- as a link on
+ *     the confirmation, after the add.
  *
- * Unit BW3 moved this walk off the old composer. Two things the old one-story
- * paste panel had are NOT in the drawn dialog, and are named here rather than
- * faked (see the report): the Imported mark on the Queue row and the disclosure
- * line a reprint prints -- both came from the import path
- * (`src/lib/news/import-stories.server.ts:402` writes the only
- * `origin = 'import'`; `src/lib/news/import-stories.ts:407` the only
- * PERSON_LINE), and the duplicate warning the old panel drew from the Queue's
- * own lists (`src/routes/desk.index.tsx:358-361`) inside a dialog that holds no
- * such query.
+ * Unit BW3 moved this walk off the old composer, and named two things the old
+ * one-story paste panel had that the drawn dialog did not: the Imported mark on
+ * the Queue row and the duplicate warning. Unit BW5 put both back on the drawn
+ * paste tab and restored the assertions below -- the paste tab's plan now
+ * carries `origin` (`PASTE_ONE_ORIGIN`, `src/lib/news/paste-one-story.ts`) and
+ * the dialog asks the server for the warning (`findPasteDuplicate`,
+ * `src/lib/news/desk.ts`).
  *
  *   node scripts/paste-one-story-e2e.mjs
  */
@@ -305,21 +307,23 @@ async function nothingPrinted() {
   step("nothing is published: the paper does not carry the pasted story");
 }
 
-/**
- * The draft holds the paste word for word, headline line off.
- *
- * The Queue's Imported mark is NOT asserted here any more: it is drawn from the
- * lead's `origin` (`src/components/desk-leads.tsx:516-518`) and the drawn dialog
- * files its story through `fileLead` -> `saveDraft`, which writes no origin --
- * the only writer of `origin = 'import'` is the import screen
- * (`src/lib/news/import-stories.server.ts:402`). A paste is the same draft
- * either way; the mark is a fact about which screen filed it, and the report
- * names the gap.
- */
+/** The Queue marks it Imported, and the draft holds the paste word for word (headline line off). */
 async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = FIRST_LINE) {
   await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
   const row = page.locator(".lead-row", { hasText: expectedTitle });
   await row.waitFor({ timeout: 45_000 });
+  /*
+    Unit BW5. The mark is drawn from the lead's `origin`
+    (`src/components/desk-leads.tsx:516-518`), and the drawn paste tab files
+    through `fileLead` -- so this asserts the plan carries `PASTE_ONE_ORIGIN`
+    all the way to the row. It was the one-story paste panel's own claim about
+    itself: "it is the import path, not a second one", and the mark is how an
+    editor told a paste from the desk's own work.
+  */
+  must(
+    (await row.locator(".chip.imported").count()) === 1,
+    "the pasted story is on the Queue without the Imported mark, so it is not the import path",
+  );
   await row.getByRole("link", { name: expectedTitle, exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
 
@@ -575,18 +579,14 @@ async function theReaderGetsTheStory(printed, sectionChoice) {
 
 /**
  * The second paste: a plain story with no links. Its section is left unchosen
- * first, which the desk asks for again, and then chosen -- and the paste saves.
+ * first, which the desk asks for again, and then chosen -- and the desk warns
+ * that it looks like the story already printed.
  *
  * The section question is here because the database refuses a draft with no
  * section at all, so the desk asks before the press rather than letting the
  * draft fail underneath it: the drawn dialog's row carries the review screen's
  * own words as its unchosen option, and the press stays shut until one is
  * picked.
- *
- * The duplicate warning the old panel drew ("already published as ...", with a
- * link to the printed story) is NOT asserted: it was computed from the Queue's
- * own lists in the desk route (`src/routes/desk.index.tsx:358-361`), and the
- * drawn dialog holds no such query. The report names the gap.
  */
 async function theSecondPasteAsksForASectionThenSavesIt(sectionChoice) {
   const panel = await openThePastePanel();
@@ -623,6 +623,46 @@ async function theSecondPasteAsksForASectionThenSavesIt(sectionChoice) {
     text.includes("Saved as your draft"),
     `the confirmation does not say the second paste was saved: "${text}"`,
   );
+  /*
+    Unit BW5, restored: the desk warns that this paste looks like the story it
+    already printed, in the old panel's own words and with its own link
+    (`duplicateNote` -> "already published as ...", then "Read the printed one"
+    to /articles/$slug; `src/routes/desk.index.tsx:1532-1551` before the
+    redesign). The headline it names is the printed story's, not this paste's --
+    that is what makes it a warning instead of a restatement.
+  */
+  must(
+    text.includes("already published as") && text.includes(FIRST_LINE),
+    `the confirmation does not warn that it looks like the printed story: "${text}"`,
+  );
+  const printedLink = panel.getByRole("link", { name: "Read the printed one", exact: true });
+  must(
+    (await printedLink.count()) === 1,
+    "the duplicate warning carries no link to the story it says this looks like",
+  );
+  must(
+    /^\/articles\//.test((await printedLink.getAttribute("href")) ?? ""),
+    "the duplicate warning's link does not go to the printed story",
+  );
+  /*
+    The warning is after the add, never instead of it. The old panel proved this
+    with the "Open it" link the confirmation carried beside the warning; the
+    drawn dialog's confirmation carries no link, so the same thing is asserted
+    by the sentence itself: the saved-draft confirmation is still in the live
+    region the warning was read out of.
+  */
+  must(
+    text.includes("Saved as your draft"),
+    "the duplicate warning replaced the confirmation that the story was saved",
+  );
+  /*
+    It warns; it does not block. The old panel drew the warning in the same live
+    region as the sentence that the story had been added -- never instead of it
+    -- and the drawn dialog does the same: the confirmation and the warning are
+    one `role="status"` paragraph, so the reading above is a paragraph that says
+    both. The add itself is proved on the Queue below (`main`), which is the
+    half that would be lost if the warning ever became a refusal.
+  */
   facts.push(
     await screenshot(
       "paste-one-added-1280-light.png",
@@ -631,7 +671,7 @@ async function theSecondPasteAsksForASectionThenSavesIt(sectionChoice) {
       'div[role="dialog"] [role="status"]',
     ),
   );
-  step("the second paste is saved once its section is chosen");
+  step("the second paste is saved, and the warning about the printed story follows it");
 }
 
 /** A story with no source records prints no heading over an empty section. */
@@ -875,7 +915,7 @@ async function main() {
     await page.locator(".lead-row", { hasText: SECOND_LINE }).first().waitFor({ timeout: 45_000 });
     must(
       (await page.locator(".lead-row", { hasText: SECOND_LINE }).count()) === 1,
-      "the refused paste was filed after all, so the Queue holds it twice",
+      "the unchosen-section paste was filed after all, so the Queue holds it twice",
     );
     const { body: secondBody } = await theDraftHoldsThePasteWordForWord(sectionTwo, SECOND_LINE);
     await page.locator(".astra-headline").fill(SECOND_TITLE);
