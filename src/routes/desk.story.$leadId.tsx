@@ -269,7 +269,7 @@ function StoryPage() {
     Unit BH2 decision 5 and 6, the three dialogs. Each is opened by a press and
     owns nothing else: the record, the two calls and the saved text all stay
     where they were, which is what makes these dialogs a new surface rather than
-    a new behaviour.
+    a new behavior.
   */
   const [killOpen, setKillOpen] = useState(false);
   const [redraftOpen, setRedraftOpen] = useState(false);
@@ -1350,7 +1350,7 @@ function StoryPage() {
         The phase 3 progress card used to sit here, above the title. Phase 2b
         moves it down into the writing surface, under the action row, which is
         where the drawing puts it -- see the "under the actions" block below the
-        form. The condition and the reassurance line travelled with it.
+        form. The condition and the reassurance line traveled with it.
       */}
       {completedDraftNeedsReview ? (
         <Notice kind="err">

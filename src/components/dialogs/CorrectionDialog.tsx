@@ -14,7 +14,7 @@ import { formatShortDate } from "@/lib/paper";
  * exactly as `corrReviewFor` sends it there. "Leave the story text as is" is
  * the default, as it is today.
  *
- * TWO THINGS THIS ADDS TO THE DRAWING, both to keep behaviour the drawing did
+ * TWO THINGS THIS ADDS TO THE DRAWING, both to keep behavior the drawing did
  * not know about:
  *
  *   - a "The correction" box. The drawing builds the note from the two lines

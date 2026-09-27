@@ -300,7 +300,7 @@ async function ownTheDesk() {
  * A drafted lead carrying the reported 227-character to-do.
  *
  * Seeded straight into the in-memory database rather than driven through the
- * scan: what this walk is about is the desk's behaviour on a lead that ALREADY
+ * scan: what this walk is about is the desk's behavior on a lead that ALREADY
  * carries the line, and the scan cannot be made to write one at a chosen
  * length. The lead's own section resolves through the real
  * `resolve_story_section` trigger, so "Council" on the Publish button is the

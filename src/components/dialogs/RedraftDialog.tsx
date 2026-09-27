@@ -7,7 +7,7 @@ import type { ModelEffort } from "@/lib/news/provider-registry";
 /**
  * The Redraft dialog, drawn as `dialog-04-redraft.png`.
  *
- * Unit BH2 decision 6. Same behaviour as the press it replaces: the box is the
+ * Unit BH2 decision 6. Same behavior as the press it replaces: the box is the
  * lead's story direction, and the start is `saveReportingNotes` followed by
  * `draftLead` -- the two calls the story page's own Redraft button already
  * makes, in the same order, with the same arguments. Nothing here writes

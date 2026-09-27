@@ -254,7 +254,7 @@ export function DeskJobCard({
     Retry is offered only where the server says the row describes its own
     request (`canRetry`), which is every row this query can return today -- the
     gate is here so that a kind added to the query later gets a Retry it can
-    actually honour, instead of one that re-runs something else.
+    actually honor, instead of one that re-runs something else.
   */
   const canRetry = job.canRetry && !busy;
   return (

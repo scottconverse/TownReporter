@@ -342,7 +342,7 @@ async function mount(element) {
         propsOf(node).onChange({ target: { value } });
       });
     },
-    /** Blind spot 1, for a checkbox: linkedom has no activation behaviour. */
+    /** Blind spot 1, for a checkbox: linkedom has no activation behavior. */
     async setChecked(node, checked) {
       assert.ok(node, "expected a checkbox");
       await React.act(async () => {

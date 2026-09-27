@@ -40,7 +40,7 @@ The bar keeps 0.6.67's rule — the section is confirmed in the same press that 
 - Kill on the story page is only `killAsDuplicateOfPrior` (`setLeadStatus({status:"killed", killReason, killReasonUrl})`); there is no plain kill control.
 - More ▾ is `DeskMoreMenu`, which is not on `4325c4fa`.
 
-Turning an inline form into a dialog where it stands is a restyle; turning a **whole route** into a dialog, or **adding** a kill control that does not exist, is new behaviour — and the brief puts behaviour that does not exist yet in phases 4 and 6. That is an owner decision, not something to guess at, so it is written up in `questions/BH.md` and item 2 is not built here.
+Turning an inline form into a dialog where it stands is a restyle; turning a **whole route** into a dialog, or **adding** a kill control that does not exist, is new behavior — and the brief puts behavior that does not exist yet in phases 4 and 6. That is an owner decision, not something to guess at, so it is written up in `questions/BH.md` and item 2 is not built here.
 
 ## Targeted evidence
 

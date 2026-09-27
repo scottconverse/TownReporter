@@ -5,7 +5,7 @@ import { setLeadStatus } from "@/lib/news/desk";
 /**
  * The Kill dialog, drawn as `dialog-09-kill.png`.
  *
- * Unit BH2 decision 5. This one is new behaviour rather than a restyle: the
+ * Unit BH2 decision 5. This one is new behavior rather than a restyle: the
  * only kill on the story page before this was `killAsDuplicateOfPrior`, which
  * names the earlier lead and nothing else. The record it writes is the one
  * `setLeadStatus` already keeps -- `leads.kill_reason` (500) and
