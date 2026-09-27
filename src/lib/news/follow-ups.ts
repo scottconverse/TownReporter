@@ -1,12 +1,59 @@
 import { getSql, withTransaction } from "../db.ts";
 import { parseNotes, packNotes } from "./notes.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
-import type {
-  FollowUpAgentKind,
-  FollowUpRow,
-  FollowUpState,
-  FollowUpStatus,
-} from "./types.ts";
+import {
+  AGENT_METHOD_LABELS,
+  EMPTY_FINDING,
+  findingNoteLine,
+  isAgentKind,
+  isFollowUpSchedule,
+  nextRunAt,
+  packFinding,
+  parseFinding,
+  type CreateAiFollowUpInput,
+  type FollowUpAction,
+  type FollowUpFinding,
+} from "./follow-up-copy.ts";
+import type { FollowUpRow, FollowUpState, FollowUpStatus } from "./types.ts";
+
+/*
+  The vocabulary -- the agent kinds, the schedules, the finding, the card state
+  and the four filters -- lives in ./follow-up-copy.ts, with no runtime import
+  a browser cannot resolve, so the redesigned screen can use it. Re-exported
+  here so every existing `from "./follow-ups.ts"` import kept working when it
+  moved; that is why the list below repeats names this file also imports.
+*/
+export {
+  AGENT_KINDS,
+  AGENT_METHOD_LABELS,
+  CARD_STATE_CHIP,
+  EMPTY_FINDING,
+  FOLLOW_UP_FILTERS,
+  FOLLOW_UP_FILTER_LABELS,
+  FOLLOW_UP_SCHEDULES,
+  POSTING_DAYS,
+  POSTING_HOUR,
+  SCHEDULE_LABELS,
+  findingNoteLine,
+  followUpCardState,
+  followUpTargets,
+  isAgentKind,
+  isFollowUpSchedule,
+  matchesFollowUpFilter,
+  methodLine,
+  nextRunAt,
+  packFinding,
+  parseFinding,
+  scheduleForAgent,
+} from "./follow-up-copy.ts";
+export type {
+  CreateAiFollowUpInput,
+  FollowUpAction,
+  FollowUpCardState,
+  FollowUpFilter,
+  FollowUpFinding,
+  FollowUpSchedule,
+} from "./follow-up-copy.ts";
 
 /**
  * The Follow-ups object (Direction A, stage 1: docs/design/DIRECTION-A-BUILD-NOTES-2026-09-06.md).
@@ -133,6 +180,49 @@ export async function performListFollowUps(
         limit ${limit}
       `;
   return rows;
+}
+
+/**
+ * The findings an editor should see on Today: agent follow-ups that have found
+ * something and are still being worked, newest finding first.
+ *
+ * This is the "surface it on Today" half of the brief's item 4, exported so
+ * the Today screen (lane 3) can mount it without knowing anything about
+ * `follow_ups`. The other half -- appending the finding to the story's
+ * reporting notes -- happens once, in `performRecordFollowUpRun` above, at the
+ * moment the agent records the run; this query reads `last_state = 'found'`
+ * rather than searching the notes, so a finding the editor deleted from the
+ * notes does not come back every time the rail loads.
+ *
+ * Stopped and done rows are excluded: the rail is a work list, and an agent
+ * the editor has ended is not work. The finding itself is on the card in
+ * `/desk/follow-ups` for as long as the row exists.
+ *
+ * Nothing here publishes, and nothing here can: the query reads one table.
+ */
+export async function performListFollowUpFindings(
+  context: { userId: string; newsroomId?: number },
+  input: { limit?: number } = {},
+): Promise<FollowUpRow[]> {
+  await ensureFollowUpsSchema();
+  const sql = await getSql();
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
+  return sql<FollowUpRow>`
+    select f.id, f.newsroom_id, f.user_id, f.lead_id, f.article_id, f.who, f.what, f.due_on,
+           f.status, f.nudged_at, f.answered_at, f.reply_text, f.created_at, f.updated_at,
+           f.agent_kind, f.targets_json, f.schedule, f.model_choice,
+           f.last_run_at, f.next_run_at, f.last_state, f.finding_json,
+           l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline
+    from follow_ups f
+    left join leads l on l.id = f.lead_id
+    left join articles a on a.id = f.article_id
+    where f.newsroom_id = ${owned(context)}
+      and f.agent_kind is not null
+      and f.status in ('active', 'paused')
+      and f.last_state = 'found'
+    order by f.last_run_at desc nulls last, f.id desc
+    limit ${limit}
+  `;
 }
 
 export async function performCreateFollowUp(
@@ -264,179 +354,6 @@ export async function performDropFollowUp(
    asserts an article's status and published_at are untouched by a run.
    ========================================================================== */
 
-/** What an agent can be told to do. Mirrors the 0101 check constraint. */
-export const AGENT_KINDS = ["recheck", "search", "agenda"] as const;
-
-export function isAgentKind(value: unknown): value is FollowUpAgentKind {
-  return typeof value === "string" && (AGENT_KINDS as readonly string[]).includes(value);
-}
-
-/** The method half of the card's method line, per the drawn screen. */
-export const AGENT_METHOD_LABELS: Record<FollowUpAgentKind, string> = {
-  recheck: "Re-check pages",
-  search: "Search public records",
-  agenda: "Watch for next agenda",
-};
-
-/** How often an agent runs. Mirrors what `nextRunAt` understands. */
-export const FOLLOW_UP_SCHEDULES = ["2h", "6h", "12h", "daily", "weekly", "posting-days"] as const;
-export type FollowUpSchedule = (typeof FOLLOW_UP_SCHEDULES)[number];
-
-export function isFollowUpSchedule(value: unknown): value is FollowUpSchedule {
-  return typeof value === "string" && (FOLLOW_UP_SCHEDULES as readonly string[]).includes(value);
-}
-
-const SCHEDULE_HOURS: Record<string, number> = {
-  "2h": 2,
-  "6h": 6,
-  "12h": 12,
-  daily: 24,
-  weekly: 24 * 7,
-};
-
-/** The schedule half of the card's method line, per the drawn screen. */
-export const SCHEDULE_LABELS: Record<FollowUpSchedule, string> = {
-  "2h": "every 2 hours",
-  "6h": "every 6 hours",
-  "12h": "every 12 hours",
-  daily: "daily",
-  weekly: "weekly",
-  "posting-days": "Tue & Fri",
-};
-
-/**
- * The bodies a newsroom actually watches post on Tuesdays and Fridays, which
- * is the vocabulary the design chose for the agenda agent ("Watch for next
- * agenda · Tue & Fri"). These are the LOCAL server days, not the body's own
- * timezone, and the hour is a fixed 06:00 local -- a real portal schedule
- * would be read per body, and this build does not. Named as a limitation in
- * the phase 6 report rather than hidden behind a plausible-looking default.
- */
-export const POSTING_DAYS = [2, 5] as const; // 0 = Sunday; 2 = Tuesday, 5 = Friday
-export const POSTING_HOUR = 6;
-
-export function methodLine(agentKind: FollowUpAgentKind, schedule: string): string {
-  const when = isFollowUpSchedule(schedule) ? SCHEDULE_LABELS[schedule] : schedule || "no schedule";
-  return `${AGENT_METHOD_LABELS[agentKind]} · ${when}`;
-}
-
-/**
- * When this schedule next comes due, from `from` (default: now).
- *
- * Null means "never": an unrecognised schedule has no next run rather than
- * running on every tick. That is the safer failure -- an agent that stops is
- * visible on the screen as a follow-up whose schedule line says something the
- * build does not know, where a run-every-5-minutes agent would look busy while
- * burning the model budget.
- *
- * `posting-days` is the only one that is not a fixed interval, so it is the
- * only one that reads a calendar: the next Tue or Fri at 06:00 local, strictly
- * after `from`.
- */
-export function nextRunAt(schedule: string, from: Date = new Date()): Date | null {
-  const hours = SCHEDULE_HOURS[schedule];
-  if (hours) return new Date(from.getTime() + hours * 3_600_000);
-  if (schedule !== "posting-days") return null;
-  for (let ahead = 0; ahead <= 7; ahead++) {
-    const day = new Date(from.getTime());
-    day.setDate(day.getDate() + ahead);
-    if (!(POSTING_DAYS as readonly number[]).includes(day.getDay())) continue;
-    day.setHours(POSTING_HOUR, 0, 0, 0);
-    if (day.getTime() > from.getTime()) return day;
-  }
-  return null;
-}
-
-/**
- * The last run's result, as the card's "latest result" line and as the note
- * appended to the story. Every field is written by the agent that ran; none of
- * it is inferred here.
- *
- * `reason` is why a `could-not-check` could not check -- the real one, from
- * the page-watch lease's error or the search transport's, not a generic
- * "failed". `summary` is what a `found` found. `changed` says whether a
- * re-check saw the page move rather than only that it ran.
- */
-export type FollowUpFinding = {
-  title: string;
-  summary: string;
-  url: string;
-  reason: string;
-  checkedAt: string;
-  changed: boolean;
-};
-
-const EMPTY_FINDING: FollowUpFinding = {
-  title: "",
-  summary: "",
-  url: "",
-  reason: "",
-  checkedAt: "",
-  changed: false,
-};
-
-/** Tolerant by design: a `{}` default, a legacy row, or hand-written JSON all read. */
-export function parseFinding(raw: string | null | undefined): FollowUpFinding {
-  if (!raw) return { ...EMPTY_FINDING };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { ...EMPTY_FINDING };
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ...EMPTY_FINDING };
-  const row = parsed as Record<string, unknown>;
-  const str = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
-  return {
-    title: str(row.title, 200),
-    summary: str(row.summary, 600),
-    url: str(row.url, 500),
-    reason: str(row.reason, 300),
-    checkedAt: str(row.checkedAt, 40),
-    changed: row.changed === true,
-  };
-}
-
-export function packFinding(finding: Partial<FollowUpFinding> | null | undefined): string {
-  return JSON.stringify({ ...EMPTY_FINDING, ...(finding ?? {}) });
-}
-
-/** `targets_json` as the array of URLs it is. Tolerant for the same reason. */
-export function followUpTargets(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * The line a finding adds to the story's reporting notes. Built here, once, so
- * the card's latest-result line and the note in the story cannot describe the
- * same finding differently.
- *
- * `src: "machine"` is what makes the notes block mark it as found by the desk
- * rather than by the editor -- see ReportingNotes in ./notes.ts.
- */
-export function findingNoteLine(finding: FollowUpFinding): string {
-  const parts = [finding.title || "AI follow-up", finding.summary].filter(Boolean);
-  const head = parts.join(" — ").slice(0, 500);
-  return finding.url ? `${head} (${finding.url})` : head;
-}
-
-export type CreateAiFollowUpInput = {
-  leadId?: number | null;
-  articleId?: number | null;
-  what: string;
-  agentKind: FollowUpAgentKind;
-  schedule: FollowUpSchedule;
-  targets?: string[];
-  modelChoice?: string;
-};
-
 const MAX_TARGETS = 8;
 
 /**
@@ -451,11 +368,16 @@ const MAX_TARGETS = 8;
  * to canonicalise into a 404. A caller that sends one gets a refusal, not a
  * silently dead follow-up.
  */
-export async function performCreateAiFollowUp(
-  context: { userId: string; newsroomId?: number },
-  input: CreateAiFollowUpInput,
-): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
-  await ensureFollowUpsSchema();
+type NormalizedAiFollowUp =
+  | { ok: true; what: string; targets: string[]; modelChoice: string }
+  | { ok: false; error: string };
+
+/**
+ * The validation both the create and the edit path perform, in one place: two
+ * copies of a rule about what a follow-up may say is two chances for the dialog
+ * to accept something the row cannot run.
+ */
+function normalizeAiFollowUp(input: CreateAiFollowUpInput): NormalizedAiFollowUp {
   const what = (input.what ?? "").trim().slice(0, 800);
   if (!what) return { ok: false as const, error: "Say what the follow-up should find out." };
   if (!isAgentKind(input.agentKind)) return { ok: false as const, error: "Unknown follow-up method." };
@@ -475,6 +397,17 @@ export async function performCreateAiFollowUp(
     return { ok: false as const, error: "Add at least one link to check." };
   }
   const modelChoice = (input.modelChoice ?? "auto").trim().slice(0, 120) || "auto";
+  return { ok: true as const, what, targets, modelChoice };
+}
+
+export async function performCreateAiFollowUp(
+  context: { userId: string; newsroomId?: number },
+  input: CreateAiFollowUpInput,
+): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+  await ensureFollowUpsSchema();
+  const checked = normalizeAiFollowUp(input);
+  if (!checked.ok) return checked;
+  const { what, targets, modelChoice } = checked;
   const sql = await getSql();
   const rows = await sql<{ id: number }>`
     insert into follow_ups
@@ -489,6 +422,105 @@ export async function performCreateAiFollowUp(
     returning id
   `;
   return { ok: true as const, id: rows[0]!.id };
+}
+
+/**
+ * Edit an agent: the question, the method, where to look, how often.
+ *
+ * The drawn card offers Edit on four of its five states, so this is not an
+ * optional path -- and it is the same validation as create, because an edit
+ * that could turn a runnable follow-up into an unrunnable one would be a way
+ * to kill an agent from a dialog that looks like it is fixing a typo.
+ *
+ * `next_run_at` is re-baselined ONLY when the schedule actually changed. An
+ * editor who fixes a typo in the question must not push the next run out by
+ * another interval -- that would make editing a way to postpone an agent
+ * indefinitely -- and an editor who changes "every 2 hours" to "daily" must
+ * not have two hours of the old cadence left on the clock.
+ *
+ * The `agent_kind is not null` predicate is what keeps this off manual asks:
+ * they have their own dialog, and a follow-up with no method has no schedule
+ * for the line above to mean anything about.
+ *
+ * THE STORY IS THE ONE FIELD THIS CAN ADD LATE, and only ever add. An agent
+ * made from the Follow-ups screen starts unlinked (that dialog has no story
+ * picker), so its finding lands on the card and nowhere else; the card's "Add
+ * to story" and the dialog's Story field are how it gets a story afterwards.
+ * The update therefore coalesces rather than assigns -- an edit that does not
+ * mention a story must not unlink the one a previous edit set -- and, when a
+ * story is attached to a row whose last run already FOUND something, that
+ * finding is written into the new story's notes here. Without that second half
+ * the button would attach a story to a finding and leave the finding behind.
+ * It fires only on the transition from unlinked to linked, so editing a linked
+ * follow-up cannot append the same finding twice.
+ */
+export async function performUpdateAiFollowUp(
+  context: { userId: string; newsroomId?: number },
+  input: CreateAiFollowUpInput & { id: number },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await ensureFollowUpsSchema();
+  const checked = normalizeAiFollowUp(input);
+  if (!checked.ok) return checked;
+  const { what, targets, modelChoice } = checked;
+  const sql = await getSql();
+  const next = nextRunAt(input.schedule)?.toISOString() ?? null;
+  const [before] = await sql<{ lead_id: number | null; last_state: FollowUpState | null; finding_json: string | null }>`
+    select lead_id, last_state, finding_json from follow_ups
+    where id = ${input.id} and newsroom_id = ${owned(context)} and agent_kind is not null
+  `;
+  const rows = await sql`
+    update follow_ups
+    set what = ${what}, agent_kind = ${input.agentKind}, targets_json = ${JSON.stringify(targets)},
+        schedule = ${input.schedule}, model_choice = ${modelChoice},
+        lead_id = coalesce(${input.leadId ?? null}, lead_id),
+        article_id = coalesce(${input.articleId ?? null}, article_id),
+        next_run_at = case when schedule <> ${input.schedule} then ${next} else next_run_at end,
+        updated_at = now()
+    where id = ${input.id} and newsroom_id = ${owned(context)} and agent_kind is not null
+    returning id
+  `;
+  if (!rows.length) return { ok: false as const, error: "That follow-up is gone." };
+  if (before && !before.lead_id && input.leadId && before.last_state === "found") {
+    const finding = parseFinding(before.finding_json);
+    await appendFindingNote(context, input.leadId, findingNoteLine(finding));
+  }
+  return { ok: true as const };
+}
+
+/**
+ * One line appended to a story's reporting notes, through the editor's own
+ * column: `notes_json`, parsed and packed by the same helpers, inside a
+ * transaction that locks the lead row `for update` exactly as
+ * `saveReportingNotes` does. An agent that wrote notes from a copy it read
+ * before an editor saved would erase the editor's edit.
+ *
+ * `src: "machine"` is what the notes block reads to mark a line as found by
+ * the desk rather than typed by the editor. Two callers use this: a run that
+ * ends `found`, and an edit that attaches a story to a follow-up that had
+ * already found something.
+ */
+async function appendFindingNote(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+  text: string,
+): Promise<boolean> {
+  const noteText = text.trim().slice(0, 600);
+  if (!noteText) return false;
+  return withTransaction(async (tx) => {
+    const leadRows = await tx<{ notes_json: string | null }>`
+      select notes_json from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)}
+      for update
+    `;
+    if (!leadRows[0]) return false;
+    const notes = parseNotes(leadRows[0].notes_json);
+    notes.found.push({ t: noteText, src: "machine" });
+    await tx`
+      update leads set notes_json = ${packNotes(notes)}
+      where id = ${leadId} and newsroom_id = ${owned(context)}
+    `;
+    return true;
+  });
 }
 
 /**
@@ -534,8 +566,6 @@ export async function performRecordFollowUpRun(
   if (!row) return { ok: false as const, error: "That follow-up is gone." };
   if (input.state !== "found") return { ok: true as const, noteWritten: false };
 
-  const noteText = (input.note ?? findingNoteLine(finding)).trim().slice(0, 600);
-  if (!noteText) return { ok: true as const, noteWritten: false };
   // An article row knows its lead; a follow-up started from the story page has
   // only the article. Resolve to the lead, then write through the notes column.
   let leadId = row.lead_id;
@@ -547,27 +577,11 @@ export async function performRecordFollowUpRun(
   }
   if (!leadId) return { ok: true as const, noteWritten: false };
 
-  const written = await withTransaction(async (tx) => {
-    const leadRows = await tx<{ notes_json: string | null }>`
-      select notes_json from leads
-      where id = ${leadId} and newsroom_id = ${owned(context)}
-      for update
-    `;
-    if (!leadRows[0]) return false;
-    const notes = parseNotes(leadRows[0].notes_json);
-    notes.found.push({ t: noteText, src: "machine" });
-    await tx`
-      update leads set notes_json = ${packNotes(notes)}
-      where id = ${leadId} and newsroom_id = ${owned(context)}
-    `;
-    return true;
-  });
+  const written = await appendFindingNote(context, leadId, input.note ?? findingNoteLine(finding));
   return { ok: true as const, noteWritten: written };
 }
 
 /** The status transitions the screen's action buttons perform. */
-export type FollowUpAction = "pause" | "resume" | "stop" | "done" | "run-now";
-
 const ACTION_STATUS: Record<Exclude<FollowUpAction, "run-now">, FollowUpStatus> = {
   pause: "paused",
   resume: "active",
@@ -600,40 +614,6 @@ export async function performFollowUpAction(
     returning id
   `;
   return rows.length ? { ok: true as const } : { ok: false as const, error: "That follow-up is gone." };
-}
-
-/**
- * Which of the screen's four filters a row belongs to.
- *
- * They overlap on purpose, because that is what the drawn screen's segment
- * counts say: "Active · 5" is every agent still being worked (whatever its
- * last outcome), and "Found something · 1" / "Could not check · 1" are the
- * same rows seen by outcome. A stopped or done agent is in none of the first
- * three, so the four filters together account for every agent row.
- */
-export type FollowUpFilter = "active" | "found" | "could-not-check" | "stopped";
-
-export const FOLLOW_UP_FILTERS: FollowUpFilter[] = ["active", "found", "could-not-check", "stopped"];
-
-export const FOLLOW_UP_FILTER_LABELS: Record<FollowUpFilter, string> = {
-  active: "Active",
-  found: "Found something",
-  "could-not-check": "Could not check",
-  stopped: "Stopped",
-};
-
-export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter): boolean {
-  const live = row.status === "active" || row.status === "paused";
-  switch (filter) {
-    case "active":
-      return live;
-    case "found":
-      return live && row.last_state === "found";
-    case "could-not-check":
-      return live && row.last_state === "could-not-check";
-    case "stopped":
-      return row.status === "stopped" || row.status === "done";
-  }
 }
 
 /**

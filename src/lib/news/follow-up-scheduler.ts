@@ -1,5 +1,5 @@
 import { getSql } from "../db.ts";
-import { ensureFollowUpsSchema, performDueFollowUps, performReleaseFollowUpRun } from "./follow-ups.ts";
+import { ensureFollowUpsSchema, performDueFollowUps, performFollowUpAction, performReadFollowUp, performReleaseFollowUpRun } from "./follow-ups.ts";
 import { enqueueJob, kickJobs } from "./jobs.ts";
 import { FOLLOW_UP_HARD_CAP_MS } from "./follow-up-agents.ts";
 
@@ -149,6 +149,67 @@ export async function tickFollowUpsFor(
   });
   if (deps.kick !== false) kickJobs();
   return { started: 1, reconciled, skipped: null };
+}
+
+/**
+ * "Run now" / "Retry now": start one named follow-up, through the same fences
+ * and the same queue as the clock.
+ *
+ * This is deliberately not a second way to run an agent. It reconciles, checks
+ * the same two fences, moves the row to due with the same
+ * `performFollowUpAction` the card's other buttons use, and enqueues the same
+ * `follow-up` job the tick enqueues -- so a run started by a press is
+ * indistinguishable, in the queue and in the row, from one the clock started.
+ * What it does NOT do is wait: it returns as soon as the job is queued, and the
+ * card's inline progress takes over from there.
+ *
+ * Why the fences apply to a press at all: the brief's rule is that follow-ups
+ * run one at a time and never alongside a running draft, and an editor pressing
+ * Run now twice on two cards is exactly how that rule would be broken. The
+ * refusal is REPORTED rather than silent (`skipped`), because a button that
+ * appears to do nothing is worse than one that says why.
+ *
+ * A row that is `stopped` or `done` is refused rather than resurrected -- that
+ * is what the card's Resume is for, and Stop has to mean stop. A manual ask has
+ * no method and is refused too.
+ */
+export type FollowUpRunStart = {
+  started: boolean;
+  skipped: "draft-running" | "follow-up-running" | "not-found" | "not-active" | null;
+};
+
+export async function startFollowUpRun(
+  context: { userId: string; newsroomId: number },
+  id: number,
+  now: Date = new Date(),
+  deps: { kick?: boolean } = {},
+): Promise<FollowUpRunStart> {
+  // Same repair the tick does first: a `running` row whose worker died would
+  // otherwise be left saying running forever when nobody presses Run now.
+  await performReconcileFollowUpRuns(context.newsroomId, now);
+  const row = await performReadFollowUp(context, id);
+  if (!row || !row.agent_kind) return { started: false, skipped: "not-found" };
+  if (row.status !== "active" && row.status !== "paused") {
+    return { started: false, skipped: "not-active" };
+  }
+  if (await jobOpen(context.newsroomId, "draft")) {
+    return { started: false, skipped: "draft-running" };
+  }
+  if (await jobOpen(context.newsroomId, "follow-up")) {
+    return { started: false, skipped: "follow-up-running" };
+  }
+  const moved = await performFollowUpAction(context, id, "run-now");
+  if (!moved.ok) return { started: false, skipped: "not-found" };
+  await enqueueJob({
+    userId: row.user_id,
+    newsroomId: context.newsroomId,
+    kind: "follow-up",
+    subjectId: id,
+    modelChoice: row.model_choice,
+    modelChoiceSource: "auto",
+  });
+  if (deps.kick !== false) kickJobs();
+  return { started: true, skipped: null };
 }
 
 /**

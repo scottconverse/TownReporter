@@ -286,7 +286,7 @@ async function realWork(job: DeskJob): Promise<void> {
     const { performAudioTranscribeWork } = await import("./textflowkit-transcribe.server.ts");
     await performAudioTranscribeWork(job);
   } else if (job.kind === "follow-up") {
-    const { performFollowUpRun } = await import("./follow-up-agents.ts");
+    const { performFollowUpRun } = await import("./follow-up-run.server.ts");
     await performFollowUpRun(job);
   }
 }
