@@ -109,6 +109,17 @@ const publicStub = inlineModule(`
   export async function getPublishedArticle() { return null; }
   export async function listPublishedArticles() { return []; }
 `);
+/*
+  This route gained a legality check of its own -- a slug that was removed on
+  legal advice answers 410 Gone before the page renders. The check runs in the
+  loader, and it is not what the disclosure line is made of, so it is stubbed
+  the way every other non-page import here is: "not legally removed", which is
+  the answer an ordinary article gets. The assertions below are untouched.
+*/
+const legalGoneStub = inlineModule(`
+  export async function isLegallyRemovedSlug() { return false; }
+  export function legalGoneResponse() { return new Response(null, { status: 410 }); }
+`);
 const paperStub = inlineModule(`
   export function parseUrlList(value) { try { const p = JSON.parse(value || "[]"); return Array.isArray(p) ? p : []; } catch { return []; } }
   export function siteUrl(path) { return String(path); }
@@ -156,6 +167,7 @@ const routeImports = {
   "@/components/paper/dates-panel": datesPanelStub,
   "@/components/paper/section-tag": sectionTagStub,
   "@/lib/news/public": publicStub,
+  "@/lib/news/legal-gone": legalGoneStub,
   "@/lib/news/story-dates-public": storyDatesPublicStub,
   "@/lib/story-dates": storyDatesStub,
   "@/lib/paper": paperStub,
