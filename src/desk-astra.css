@@ -2526,9 +2526,68 @@
 .desk-ltr.astra .astra-row.pub { grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px; }
 .desk-ltr.astra .astra-row.src {
   grid-template-columns: minmax(0, 1fr) 190px auto;
-  gap: 6px 18px;
+  gap: 6px 12px;
+  /*
+    12px, not the shared 14px: the row's tallest child is a 44px button, so the
+    box is 44 + 24 + 1px rule = 69px, inside the 50-70px the brief asks the
+    drawn row to measure at 1280. At the shared 14px it is 73px, which is over.
+  */
+  padding: 12px 0;
   border-top: 1px solid var(--line);
   border-bottom: 0;
+}
+/*
+  BJ3 item 1: one line each, ellipsis past the column.
+
+  The row was already `minmax(0, 1fr) 190px auto`; what broke it was the third
+  track. `auto` is max-content, and three 44px buttons plus their gaps measured
+  292.4px of the 598px the column has at 1280 -- so the `1fr` came out at
+  79.6px, the name wrapped to one word per line, and `longmontcolorado.gov`
+  painted out of its cell and across the state chip (BJ2 finding 1).
+
+  Three changes, all of them about refusing to grow rather than about a new
+  ratio: the text cells clip instead of overflowing, the action strip is the
+  two buttons the drawing draws plus one small disclosure (Remove moved into a
+  `row-more`, the pattern the other three desks already use), and every control
+  on the row is at the drawn width. `overflow: hidden` is what makes
+  `text-overflow: ellipsis` possible at all: a flex item that is not a scroll
+  container has no finite width for the ellipsis to elide against.
+*/
+.desk-ltr.astra .astra-row.src > .astra-cell {
+  min-width: 0;
+  overflow: hidden;
+}
+.desk-ltr.astra .astra-row.src .astra-row-t,
+.desk-ltr.astra .astra-row.src .astra-row-meta {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The drawn name is 15/700 (README 332-334), not the 17px `.astra-row-t` gives
+   the other desks -- and at 598px of column the two sizes are the difference
+   between "City of Longmont" and "City of Lo…". */
+.desk-ltr.astra .astra-row.src .astra-row-t { font-size: calc(0.9375rem * var(--ts)); }
+/* Line heights are pinned so the row's height is the 44px button and nothing
+   else: chip 20.8 + 3 + note 18.2 = 42, name 18.75 + 3 + 18.2 = 40, both under
+   the button, so the box is 69px whether a row is failed, changed or paused. */
+.desk-ltr.astra .astra-row.src .astra-row-meta { line-height: 1.3; }
+.desk-ltr.astra .astra-row.src .astra-chip { line-height: 1.2; }
+/* The state cell is the fixed 190px track: its chip is the drawn chip and its
+   note is the drawn one-liner, so neither may push the track wider. */
+.desk-ltr.astra .astra-row.src > .astra-cell.src-state { max-width: 190px; }
+@media (min-width: 981px) {
+  /* One line of actions, at the drawn buttons' own width. Every px the actions
+     claim is a px off the name, and at 1280 the name has none to spare. */
+  .desk-ltr.astra .astra-row.src .astra-row-acts { flex-wrap: nowrap; }
+  .desk-ltr.astra .astra-row.src .astra-row-acts .btn { padding: 10px 10px; }
+  .desk-ltr.astra .astra-row.src .astra-row-acts > .row-more > summary {
+    padding: 10px 6px;
+    font-size: calc(0.875rem * var(--ts));
+    white-space: nowrap;
+  }
 }
 .desk-ltr.astra .astra-row.pubhead {
   grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px;
@@ -2667,6 +2726,13 @@
   border: 2px solid var(--fg);
   box-shadow: 0 6px 0 rgb(0 0 0 / 0.08);
 }
+/* A closed `<details>` must not paint its panel. The author `display: flex`
+   above outranks the UA's `details:not([open]) > *:not(summary)` rule, so
+   without this line the shut panel still lays out and paints: a 250x48px
+   bordered box floating over the rows underneath it (BJ3 measured it at
+   250x48 at top 602 on the Sources list, and it is the same rule the Dark
+   Desk piles and Published desk use). */
+.desk-ltr.astra .row-more:not([open]) > .row-more-panel { display: none; }
 .desk-ltr.astra .row-more-panel > .btn,
 .desk-ltr.astra .row-more-panel > a,
 .desk-ltr.astra .row-more-panel > button {

@@ -1243,7 +1243,7 @@ function WatchRows({
             key={s.id}
             className={"astra-row src" + (addedId === s.id ? " just-added" : "")}
           >
-            <div className="astra-cell">
+            <div className="astra-cell src-name">
               <span className="astra-row-t">{s.title}</span>
               <span className="astra-row-meta">
                 <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
@@ -1252,15 +1252,20 @@ function WatchRows({
                 {s.kind ? ` · ${s.kind}` : ""}
               </span>
             </div>
-            <div className="astra-cell">
+            <div className="astra-cell src-state">
               <span className={"astra-chip " + chip.cls}>{chip.label}</span>
               <span className="astra-row-meta">{note}</span>
             </div>
             <div className="astra-row-acts">
               {paused ? (
-                <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
-                  Resume
-                </InkButton>
+                <>
+                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
+                    Resume
+                  </InkButton>
+                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
+                    Remove
+                  </InkButton>
+                </>
               ) : (
                 <>
                   <InkButton
@@ -1273,11 +1278,33 @@ function WatchRows({
                   <InkButton tone="quiet" onClick={() => onStatus(s.id, "paused")}>
                     Pause
                   </InkButton>
+                  {/*
+                    Remove, one click deeper.
+
+                    BJ3 item 1: three 44px buttons at their natural width came
+                    to 292px of the 598px the column has at 1280. The grid's
+                    third track is `auto`, so it sized to that 292px max-content
+                    and the `1fr` name track starved to 79px -- the BJ2 finding
+                    (every name one word per line, the url printed over the
+                    chip). The drawing puts two buttons on an active row, so
+                    Remove is drawn here as the same `row-more` disclosure the
+                    other desks use: still one tab stop, still one click away,
+                    and the row keeps the width for its name.
+                  */}
+                  <details className="row-more">
+                    <summary className="btn quiet">More ▾</summary>
+                    <div className="row-more-panel">
+                      <button
+                        type="button"
+                        className="btn quiet"
+                        onClick={() => onStatus(s.id, "rejected")}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </details>
                 </>
               )}
-              <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
-                Remove
-              </InkButton>
             </div>
           </div>
         );
