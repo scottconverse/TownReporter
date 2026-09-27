@@ -126,8 +126,8 @@ if ($run.Skipped) {
 }
 if ($run.DumpOk -eq $false) {
   Write-Host "  The backup FAILED: $($run.Reason)" -ForegroundColor Yellow
-  Write-Host "  Nothing was deleted. Any part of the dump that pg_dump did write was kept" -ForegroundColor Yellow
-  Write-Host "  beside the others with .incomplete on the end, so it cannot be mistaken for a backup." -ForegroundColor Yellow
+  Write-Host "  No backup was deleted. The part of a dump pg_dump did write was not a backup:" -ForegroundColor Yellow
+  Write-Host "  its size and last 2 KB are in the log, and the file itself was deleted." -ForegroundColor Yellow
   Write-Host ""
   exit 1
 }

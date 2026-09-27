@@ -1,4 +1,4 @@
-import { getSql, withTransaction } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import { parseNotes, packNotes } from "./notes.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
@@ -83,7 +83,19 @@ export type {
  */
 export async function ensureFollowUpsSchema() {
   const sql = await getSql();
-  await sql.query(`
+  // migrations/0101_ai_follow_ups.sql, statement for statement. One statement
+  // per entry: `getSql().query()` goes through the extended protocol, which
+  // refuses a batch ("cannot insert multiple commands into a prepared
+  // statement"), so the file's statements are listed here rather than pasted
+  // whole. `scripts/migrate.mjs` sends the file itself over the simple
+  // protocol, so the migration path is unaffected.
+  //
+  // The whole list goes through `ensureSchemaOnce`, so the `alter table ...
+  // add constraint` statements in 0101 -- ACCESS EXCLUSIVE, and so queued
+  // behind the nightly `pg_dump` -- run once per database and not once per
+  // page load. See `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+  await ensureSchemaOnce(sql, "follow-ups", [
+    `
     create table if not exists follow_ups (
       id serial primary key,
       newsroom_id integer not null default 1,
@@ -100,17 +112,10 @@ export async function ensureFollowUpsSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
-  `);
-  await sql.query(
+  `,
     "create index if not exists follow_ups_newsroom_status_due on follow_ups (newsroom_id, status, due_on)",
-  );
-  // migrations/0101_ai_follow_ups.sql, statement for statement. One `sql.query`
-  // per statement: `getSql().query()` goes through the extended protocol,
-  // which refuses a batch ("cannot insert multiple commands into a prepared
-  // statement"), so the file's statements are listed here rather than pasted
-  // whole. `scripts/migrate.mjs` sends the file itself over the simple
-  // protocol, so the migration path is unaffected.
-  for (const statement of AI_FOLLOW_UP_STATEMENTS) await sql.query(statement);
+    ...AI_FOLLOW_UP_STATEMENTS,
+  ]);
 }
 
 /** 0101's statements, in the file's order. */

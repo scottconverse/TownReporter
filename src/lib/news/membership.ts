@@ -26,7 +26,7 @@
   person to reach /login owns the desk. Sign in first.
 */
 
-import { getSql, withTransaction } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import type { Sql } from "../db.ts";
 import { deskTakenLoginCopy } from "./desk-copy.ts";
 
@@ -92,15 +92,43 @@ let saidMissingIndex = false;
  * install: four concurrent check-then-insert claims on an unindexed desk
  * produced four owners (measured), so there is no safe fallback.
  */
-export async function ensureNewsroomSchema(): Promise<boolean> {
-  const sql = await getSql();
-  await sql.query(`
+const ONE_OWNER_INDEX_STATEMENT = `
+      create unique index if not exists ${ONE_OWNER_INDEX}
+      on newsroom_members (newsroom_id) where role = 'owner'
+    `;
+
+/**
+ * The DDL `ensureNewsroomSchema` used to run on every call, in the same order.
+ *
+ * The two `alter`s and the index are ACCESS EXCLUSIVE, and `requireEditor` runs
+ * on every desk request, so this whole batch used to queue behind the nightly
+ * `pg_dump`. `ensureSchemaOnce` runs it once per database instead -- see
+ * `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+ */
+const NEWSROOM_SCHEMA_NAME = "newsrooms";
+const NEWSROOM_SCHEMA = [
+  `
     create table if not exists newsrooms (
       id serial primary key,
       name text not null,
       created_at timestamptz not null default now()
     )
-  `);
+  `,
+  `
+    create table if not exists newsroom_members (
+      user_id text primary key,
+      role text not null,
+      newsroom_id integer not null default 1,
+      created_at timestamptz not null default now()
+    )
+  `,
+  `alter table newsroom_members add column if not exists newsroom_id integer not null default 1`,
+  ONE_OWNER_INDEX_STATEMENT,
+];
+
+export async function ensureNewsroomSchema(): Promise<boolean> {
+  const sql = await getSql();
+  await ensureSchemaOnce(sql, NEWSROOM_SCHEMA_NAME, NEWSROOM_SCHEMA);
   await sql
     .query(
       `
@@ -115,32 +143,31 @@ export async function ensureNewsroomSchema(): Promise<boolean> {
         await sql`insert into newsrooms (name) values (${"TownReporter Longmont"})`;
       }
     });
-  await sql.query(`
-    create table if not exists newsroom_members (
-      user_id text primary key,
-      role text not null,
-      newsroom_id integer not null default 1,
-      created_at timestamptz not null default now()
-    )
-  `);
-  await sql.query(
-    `alter table newsroom_members add column if not exists newsroom_id integer not null default 1`,
-  );
-  try {
-    await sql.query(`
-      create unique index if not exists ${ONE_OWNER_INDEX}
-      on newsroom_members (newsroom_id) where role = 'owner'
-    `);
-  } catch (err) {
-    // Not swallowed and not papered over: this is the difference between one
-    // owner and four. Say what failed, then verify below whether the index is
-    // there anyway (an install can carry it from migrations/0012 while this
-    // statement fails for an unrelated reason).
-    console.error(
-      `[membership] creating ${ONE_OWNER_INDEX} failed (it may still exist from migrations/0012): ${errText(err)}`,
-    );
+  let present = await ownerIndexPresent(sql);
+  if (!present) {
+    /*
+      `ensureSchemaOnce` swallows a failing statement on purpose (older PGLite,
+      an already-applied line) and records the fingerprint anyway -- but the
+      one-owner index is the one statement here whose failure must not be
+      silent, because a desk without it hands the desk to four requests at once.
+      So when the catalog says it is gone, forget the marker and put it back by
+      hand. That is also what makes a dropped index come back: the marker would
+      otherwise call the batch already-done and leave the desk unguarded.
+    */
+    await sql.query(`delete from _schema_ensure_state where name = $1`, [NEWSROOM_SCHEMA_NAME]);
+    try {
+      await sql.query(ONE_OWNER_INDEX_STATEMENT);
+    } catch (err) {
+      // Not swallowed and not papered over: this is the difference between one
+      // owner and four. Say what failed, then verify below whether the index is
+      // there anyway (an install can carry it from migrations/0012 while this
+      // statement fails for an unrelated reason).
+      console.error(
+        `[membership] creating ${ONE_OWNER_INDEX} failed (it may still exist from migrations/0012): ${errText(err)}`,
+      );
+    }
+    present = await ownerIndexPresent(sql);
   }
-  const present = await ownerIndexPresent(sql);
   if (!present && !saidMissingIndex) {
     saidMissingIndex = true;
     console.error(
@@ -264,7 +291,8 @@ export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export async function ensureInviteSchema() {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  await sql.query(`
+  await ensureSchemaOnce(sql, "editor-invites", [
+    `
     create table if not exists editor_invites (
       id serial primary key,
       newsroom_id integer not null default 1,
@@ -274,7 +302,8 @@ export async function ensureInviteSchema() {
       expires_at timestamptz not null,
       used_at timestamptz
     )
-  `);
+  `,
+  ]);
 }
 
 async function sha256Hex(text: string): Promise<string> {

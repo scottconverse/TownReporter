@@ -9,7 +9,7 @@ import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 import { buildScanBatches, mergeScanBatchResults } from "./scan-batches.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { getSql, withTransaction, type Sql } from "@/lib/db";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig } from "./paper-settings";
@@ -91,6 +91,7 @@ import { absenceClaims } from "./absence-gate";
 import {
   applyTodoPatch,
   clipTodoText,
+  editorNoteLines,
   keepHumanTodos,
   machineTodosFrom,
   packNotes,
@@ -185,14 +186,19 @@ function effortFromJob(job: Pick<DeskJob, "model_choice" | "result_json">): Mode
   }
 }
 
+/**
+ * Both statements are `alter table ... add column if not exists`, so both take
+ * ACCESS EXCLUSIVE on `drafts` and `leads` -- and this runs on `getLead`, a GET
+ * handler, among others. While the nightly `pg_dump` held ACCESS SHARE, every
+ * lead page waited here. `ensureSchemaOnce` runs them once per database
+ * instead; see `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+ */
 async function ensureDraftMemoColumn() {
   const sql = await getSql();
-  await sql.query(
+  await ensureSchemaOnce(sql, "desk-draft-memo-columns", [
     "alter table drafts add column if not exists research_json text not null default '{}'",
-  );
-  await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
-  );
+  ]);
 }
 
 export const bootstrapDesk = createServerFn({ method: "POST" })
@@ -1684,7 +1690,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     retainedSources: await retainedWatchSources(sql, owned(context), leadId, sourceInput.urls),
     memory,
     extraEvidence: meetingMaterial?.evidence ?? prevNotes.scratch,
-    editorNotes: meetingMaterial ? prevNotes.scratch : undefined,
+    /*
+      0.6.74: the editor's own reporting lines reach the prompt. Both the
+      "Add a reporting note" box and the per-claim "Add to notes" button write
+      a `src: "you"` to-do, and before this the researcher and the writer never
+      saw them -- an editor could add a line, press Redraft, and watch the
+      draft come back without it. They travel in `editorNotes`, whose block
+      says what they are: leads to verify, not independent evidence. A meeting
+      story keeps its transcript in that slot instead.
+    */
+    editorNotes: meetingMaterial ? prevNotes.scratch : editorNoteLines(prevNotes),
     extraEvidenceLimitChars: meetingMaterial ? 200_000 : undefined,
     extraEvidenceMode: meetingMaterial ? "meeting-transcript" : undefined,
     editorialAssignment: prevNotes.editorialAssignment,
@@ -2464,6 +2479,14 @@ export const pullTodo = createServerFn({ method: "POST" })
       const query = data.query.trim().slice(0, 240);
       if (query.length < 4)
         return { ok: false as const, error: "That line is too thin to search." };
+      /*
+        0.6.74: a claim's Pull reads the claim's own source page rather than
+        searching for it. Only an http(s) URL is honoured; anything else falls
+        back to the search an ordinary Pull runs, and the page is checked by
+        the desk's URL guard at fetch time (`ingestDocument`), never here.
+      */
+      const rawUrl = data.url?.trim() ?? "";
+      const sourceUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl.slice(0, 2_000) : null;
       const open = await findOpenJob({
         newsroomId: owned(context),
         kind: "pull",
@@ -2476,7 +2499,13 @@ export const pullTodo = createServerFn({ method: "POST" })
             "This story already has a Pull running. Its live progress is shown beside the reporting line.",
         };
       }
-      const receipt = newPullReceipt({ leadId: data.leadId, todoIndex: data.index, query });
+      const receipt = newPullReceipt({
+        leadId: data.leadId,
+        // A claim Pull has no reporting line to strike, so it carries no index.
+        todoIndex: sourceUrl ? undefined : data.index,
+        sourceUrl,
+        query,
+      });
       const job = await enqueueJob({
         userId: context.userId,
         newsroomId: owned(context),
@@ -2536,6 +2565,7 @@ export const listPullJobs = createServerFn({ method: "GET" })
           jobId: job.id,
           leadId: receipt.leadId,
           todoIndex: receipt.todoIndex,
+          sourceUrl: receipt.sourceUrl ?? null,
           query: receipt.query,
           jobStatus: job.status,
           status,
