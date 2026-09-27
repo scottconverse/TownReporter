@@ -2479,6 +2479,22 @@
   border: 1px solid var(--line);
   font-size: calc(0.9375rem * var(--ts));
 }
+/*
+  ONE LINE, which is what the reference draws: its two selects carry no width,
+  so they shrink to their content and the note sits beside them --
+  "Model [Automatic] Effort [high] Set per job in Server → Models".
+
+  `.astra-input` is width:100% because a text field in the fields column is
+  meant to fill it, and that is what pushed each select in this row onto a line
+  of its own: a full-width select is the whole flex line, so the wrap landed
+  between every control instead of between rows. Scoped to this row, since a
+  select outside it is the fields column's and still wants the full width.
+*/
+.desk-ltr.astra-modal-layer .astra-model-row .astra-input {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .desk-ltr.astra-modal-layer .astra-model-row-label {
   font-weight: 800;
 }
