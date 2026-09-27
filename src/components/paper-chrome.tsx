@@ -8,6 +8,7 @@ import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { deskClaimState } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { usePublicSections } from "@/lib/use-sections";
 import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
 import {
@@ -18,109 +19,174 @@ import {
 } from "./reader-controls";
 import { useReader } from "./reader-context";
 
-export function Masthead() {
+/**
+ * The paper's three rows, in the order the handoff sets them
+ * (`docs/design/handoff-2026-09-26/README.md`, "Front page"): the yellow
+ * dateline bar, the masthead, the section nav.
+ *
+ * `geography` is a slot rather than a prop because the front page's pill row
+ * (`GeoPills`) is the only thing that fills it, and it belongs to the front
+ * page's search -- the article page's masthead carries no pills, per its own
+ * prototype. A masthead that imported the pills would have to import the
+ * front page's search shape with them.
+ *
+ * `compact` is the article page's header (`Article Daily.dc.html`): the same
+ * dateline bar, then ONE row -- wordmark and town chip on the left, the section
+ * links on the right -- with no pill row and no second nav row. Unit BD had the
+ * article repeat the front page's two-row header; this is the prototype's
+ * single row.
+ */
+export function Masthead({
+  geography,
+  compact = false,
+}: {
+  geography?: ReactNode;
+  compact?: boolean;
+}) {
   const paper = usePaper();
   const { sections } = usePublicSections();
   const [open, setOpen] = useState(false);
   const r = useReader();
+  const { formatDayStamp } = usePaperDateFormatters();
   const location = useRouterState({ select: (s) => s.location });
   const current = location.search as { topic?: string; q?: string; view?: string };
   useEffect(() => setOpen(false), [location.href]);
+  /*
+    The section links. On the front page this is the nav row's own list and it
+    starts with "Front page"; the article prototype's header carries the
+    sections only, so in compact mode the wordmark and the story's breadcrumb
+    are the two ways home and the list is the sections alone.
+  */
+  const sectionLinks = (
+    <>
+      {!compact && (
+        <Link
+          to="/"
+          search={{}}
+          className={
+            location.pathname === "/" && !current.topic && !current.q && !current.view
+              ? "active"
+              : ""
+          }
+        >
+          Front page
+        </Link>
+      )}
+      {sections
+        .filter((s) => s.visible)
+        .map((s) => (
+          <Link
+            key={s.key}
+            to="/"
+            search={{ topic: s.key }}
+            className={current.topic === s.key ? "active" : ""}
+          >
+            {s.name}
+          </Link>
+        ))}
+    </>
+  );
+  const mobileMenu = (
+    <button
+      className="mobilemenu"
+      type="button"
+      aria-expanded={open}
+      aria-controls="reader-sections"
+      onClick={() => setOpen(!open)}
+    >
+      Explore the publication
+      <Menu aria-hidden />
+    </button>
+  );
   return (
     <header>
       <a className="skip" href="#paper">
         Skip to stories
       </a>
+      {/*
+        The dateline bar. It carries the paper's own day and the four
+        utilities that used to sit in the masthead; they moved up here because
+        the masthead is now the wordmark and the geography, which is what a
+        reader is looking at when they land.
+      */}
+      <div className="topbar">
+        <div className="wrap topbarin">
+          <span className="dateline" suppressHydrationWarning>
+            Today in {paper.city} · {formatDayStamp(new Date())}
+          </span>
+          <div className="topactions">
+            <Link to="/" search={{ view: "archive" }} className="toplink">
+              <Search aria-hidden />
+              <span>Search</span>
+            </Link>
+            <Link to="/" search={{ view: "saved" }} className="toplink">
+              <Bookmark aria-hidden />
+              <span>Saved{r.saved.length ? ` · ${r.saved.length}` : ""}</span>
+            </Link>
+            <ReadingButton label />
+            {/*
+              The desk entry deliberately performs a document navigation. An
+              in-app transition can change the URL to /desk while the public
+              home remains mounted, which is the reported regression this path
+              must prevent. A fresh document load lets the /desk route gate
+              decide from the server-rendered route.
+            */}
+            <a href="/desk" className="toplink">
+              Editor’s desk
+            </a>
+          </div>
+        </div>
+      </div>
       <div className="wrap">
-        <div className="mast">
+        <div className={`mast ${compact ? "mast-compact" : ""}`}>
           <div className="identity">
             <Link to="/" search={{}} className="brand" aria-label={`${paper.name} home`}>
               {paper.name}
             </Link>
-            <div className="locality">
-              <strong>{paper.location}</strong>Independent. Local. Accountable.
+            {/*
+              The town tag. It replaces the old three-line "Independent. Local.
+              Accountable." standfirst, which no longer fits the masthead's
+              one-line rule and is printed in the footer either way.
+            */}
+            <span className="locality">{paper.city}</span>
+          </div>
+          {compact ? (
+            <>
+              {mobileMenu}
+              <nav
+                className={`sections ${open ? "open" : ""}`}
+                id="reader-sections"
+                aria-label="News sections"
+              >
+                {sectionLinks}
+              </nav>
+            </>
+          ) : (
+            geography
+          )}
+        </div>
+        {compact ? null : (
+          <div className="navrow">
+            {mobileMenu}
+            <nav
+              className={`sections ${open ? "open" : ""}`}
+              id="reader-sections"
+              aria-label="News sections"
+            >
+              {sectionLinks}
+            </nav>
+            <div className="reader-nav-actions">
+              {/*
+                The nav row's one action. The desk entry used to sit beside it
+                and now sits in the dateline bar, which is where the handoff puts
+                it; printing it twice on one screen is noise, not reach.
+              */}
+              <Link to="/about" className="textlink about-newsroom">
+                About the newsroom <ArrowRight aria-hidden />
+              </Link>
             </div>
           </div>
-          <div className="utilities">
-            <Link
-              to="/"
-              search={{ view: "archive" }}
-              className="btn subtle"
-              aria-label="Search stories"
-            >
-              <Search aria-hidden />
-              <span className="searchlabel">Search stories</span>
-            </Link>
-            <Link
-              to="/"
-              search={{ view: "saved" }}
-              className="btn subtle"
-              aria-label="Saved stories"
-            >
-              <Bookmark aria-hidden />
-              <span className="savedlabel">
-                Saved{r.saved.length ? ` · ${r.saved.length}` : ""}
-              </span>
-            </Link>
-            <ReadingButton />
-          </div>
-        </div>
-        <div className="navrow">
-          <button
-            className="mobilemenu"
-            type="button"
-            aria-expanded={open}
-            aria-controls="reader-sections"
-            onClick={() => setOpen(!open)}
-          >
-            Explore the publication
-            <Menu aria-hidden />
-          </button>
-          <nav
-            className={`sections ${open ? "open" : ""}`}
-            id="reader-sections"
-            aria-label="News sections"
-          >
-            <Link
-              to="/"
-              search={{}}
-              className={
-                location.pathname === "/" && !current.topic && !current.q && !current.view
-                  ? "active"
-                  : ""
-              }
-            >
-              Front page
-            </Link>
-            {sections
-              .filter((s) => s.visible)
-              .map((s) => (
-                <Link
-                  key={s.key}
-                  to="/"
-                  search={{ topic: s.key }}
-                  className={current.topic === s.key ? "active" : ""}
-                >
-                  {s.name}
-                </Link>
-              ))}
-          </nav>
-          <div className="reader-nav-actions">
-            <Link to="/about" className="textlink about-newsroom">
-              About the newsroom <ArrowRight aria-hidden />
-            </Link>
-            {/*
-              The public-home desk entry deliberately performs a document
-              navigation. An in-app transition can change the URL to /desk
-              while the public home remains mounted, which is the reported
-              regression this path must prevent. A fresh document load lets
-              the /desk route gate decide from the server-rendered route.
-            */}
-            <a href="/desk" className="btn desk-entry">
-              Editor’s desk <ArrowRight aria-hidden />
-            </a>
-          </div>
-        </div>
+        )}
       </div>
     </header>
   );
@@ -179,14 +245,17 @@ export function ReaderResources() {
 export function PaperShell({
   children,
   compact = false,
+  geography,
 }: {
   children: ReactNode;
   compact?: boolean;
+  /** The masthead's geography slot; only the front page fills it. */
+  geography?: ReactNode;
 }) {
   const paper = usePaper();
   return (
     <ReaderProvider>
-      <Masthead />
+      <Masthead geography={geography} compact={compact} />
       <main
         id="paper"
         tabIndex={-1}

@@ -109,6 +109,24 @@ export type ReportingNotes = {
    * editor's confirmation would silently stop counting.
    */
   topicConfirmation?: TopicConfirmation;
+  /**
+   * Why the editor held this lead, when they told the desk.
+   *
+   * Unit BK. There is no `hold_reason` column and this field is why there does
+   * not need to be one: `notes_json` already carries structured desk notes
+   * (`researchScope`, `suppliedUrls`, `editorialAssignment`), a hold reason is
+   * one more of them, and it is read back by a person looking at the held lead
+   * -- not filtered or joined anywhere. A column would have meant changing
+   * every hand-built `leads` table in the test suite for a value nothing
+   * queries.
+   *
+   * Named explicitly in parseNotes below, like the two fields above it: the
+   * parser builds its object field by field, so a field it does not name is
+   * dropped on the next read and the reason the editor gave would silently stop
+   * counting -- and "the desk forgot why I held this" is indistinguishable from
+   * "I never said".
+   */
+  hold?: { key: string; reason: string; note: string; at: string };
   transcriptCitations?: {
     item: string;
     segmentIndex: number;
@@ -218,6 +236,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
       ...topicConfirmationFromRaw(o),
+      ...holdFromRaw(o),
       ...meetingFromRaw(o),
     };
   } catch {
@@ -316,6 +335,30 @@ function topicConfirmationFromRaw(o: Record<string, unknown>): Pick<ReportingNot
       topic: topic.slice(0, 60),
       token: token.slice(0, 64),
       at: String(r.at ?? "").slice(0, 40),
+    },
+  };
+}
+
+/**
+ * The hold record, read defensively.
+ *
+ * `at` is the required field, not the reason: "Hold, no reason" is a real press
+ * in the design and it has to be distinguishable from "never held". A record
+ * with a reason but no timestamp is a half-write, so it is dropped -- the note
+ * would otherwise look like it was always there.
+ */
+function holdFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "hold"> {
+  const raw = o.hold;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const at = String(r.at ?? "").trim();
+  if (!at) return {};
+  return {
+    hold: {
+      key: String(r.key ?? "").slice(0, 40),
+      reason: String(r.reason ?? "").slice(0, 200),
+      note: String(r.note ?? "").slice(0, 1000),
+      at: at.slice(0, 40),
     },
   };
 }
@@ -710,6 +753,9 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     // Kept, not shed: it is a gate on publishing, and losing it silently would
     // look to the editor exactly like a confirmation that never took.
     topicConfirmation: work.topicConfirmation,
+    // Kept for the same reason as the confirmation above: it is the only record
+    // of why an editor parked a lead, and a shed reason reads as "never given".
+    hold: work.hold,
     news: work.news,
     why: work.why,
     angle: work.angle,

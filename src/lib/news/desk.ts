@@ -27,6 +27,7 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
+import { cleanStoryArea } from "../story-area.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
@@ -48,7 +49,11 @@ import {
   draftMeetingReviewInput,
   draftStyleFixInput,
   fileLeadInput,
+  aiFollowUpInput,
+  aiFollowUpUpdateInput,
+  followUpActionInput,
   followUpCreateInput,
+  followUpFindingsInput,
   followUpReplyInput,
   followUpsInput,
   idOnlyInput,
@@ -408,8 +413,14 @@ export const listLeads = createServerFn({ method: "GET" })
  * Insert a lead exactly the way `fileLead` always has, plus the draft row
  * `publishLead` reads its source_urls from (see the note below) — pulled out
  * so `writeStoryFromInput` can file the same shape without duplicating it.
+ *
+ * Exported for Unit BK's "Add a lead" dialog. That dialog files a lead and then
+ * branches (score it, draft it, or leave it), so it needs the filing without
+ * the rest of `fileLead`; the alternative was a second insert of the same two
+ * rows in a new file, which is how the draft's `source_urls` would eventually
+ * be forgotten again and a hand-added lead would publish with no sources.
  */
-async function insertLeadWithDraft(
+export async function insertLeadWithDraft(
   context: { userId: string; newsroomId?: number },
   input: { headline: string; why: string; topic: string; urls: string[]; notesJson?: string },
 ): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
@@ -2855,6 +2866,10 @@ export {
   performRecordFollowUpReply,
   performNudgeFollowUp,
   performDropFollowUp,
+  performCreateAiFollowUp,
+  performUpdateAiFollowUp,
+  performFollowUpAction,
+  performListFollowUpFindings,
 } from "./follow-ups.ts";
 import {
   performListFollowUps as _performListFollowUps,
@@ -2862,7 +2877,15 @@ import {
   performRecordFollowUpReply as _performRecordFollowUpReply,
   performNudgeFollowUp as _performNudgeFollowUp,
   performDropFollowUp as _performDropFollowUp,
+  performCreateAiFollowUp as _performCreateAiFollowUp,
+  performUpdateAiFollowUp as _performUpdateAiFollowUp,
+  performFollowUpAction as _performFollowUpAction,
+  performListFollowUpFindings as _performListFollowUpFindings,
 } from "./follow-ups.ts";
+// Type-only, so `follow-up-scheduler.ts` (and the agents behind it) is not
+// pulled into any bundle that imports `desk.ts`. The runtime import is inside
+// the `run-now` handler above, which is the only place it is needed.
+import type { FollowUpRunStart } from "./follow-up-scheduler.ts";
 
 export const listFollowUps = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
@@ -2900,6 +2923,122 @@ export const dropFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => idOnlyInput.parse(input))
   .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
+
+/* ==========================================================================
+   Redesign phase 6 (lane 2): the AI follow-ups.
+
+   The screen lists rows through the EXISTING `listFollowUps` and splits them
+   itself: an agent row carries an `agent_kind`, a manual ask does not, and the
+   one query already orders both the way the two sections want. What is new
+   here is what only an agent row needs -- being made, being edited, being moved
+   through the states its cards offer, and the findings query the Today rail
+   mounts.
+   ========================================================================== */
+
+export const createAiFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => aiFollowUpInput.parse(input))
+  .handler(async ({ context, data }) => _performCreateAiFollowUp(context, data));
+
+export const updateAiFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => aiFollowUpUpdateInput.parse(input))
+  .handler(async ({ context, data }) => _performUpdateAiFollowUp(context, data));
+
+/**
+ * Why a "Run now" press did not start: one sentence per fence, and no silent
+ * no-op. The two fences are the brief's rule ("one at a time, never beside a
+ * running draft") and the third is a card that has been ended -- Stop has to
+ * mean stop, and Resume is the way back.
+ */
+const RUN_START_REFUSALS: Record<NonNullable<FollowUpRunStart["skipped"]>, string> = {
+  "draft-running":
+    "A draft is being written right now. Follow-ups run one at a time and never alongside a draft — try again once it finishes.",
+  "follow-up-running":
+    "Another follow-up is already running. They run one at a time — try again once it finishes.",
+  "not-found": "That follow-up is gone.",
+  "not-active": "That follow-up has been stopped or finished. Resume it first if you want it to run again.",
+};
+
+/**
+ * The card's action buttons, and the one that press-starts a run.
+ *
+ * Pause, Resume, Stop and Done are status writes and nothing else -- they move
+ * the row, and the scheduler picks it up from there. "Run now" / "Retry now" is
+ * different: it goes through `startFollowUpRun` (./follow-up-scheduler.ts),
+ * which is the same path the clock uses, including both fences and the same
+ * queued `follow-up` job. A run started by a press is therefore indistinguishable
+ * from one the clock started, in the queue and in the row, and the card's inline
+ * progress takes over as soon as this returns.
+ *
+ * The refusals above are thrown rather than returned so the press that could not
+ * do anything says why on the card. A returned `{ ok: false }` here would be a
+ * button that appears to work.
+ */
+export const followUpAction = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => followUpActionInput.parse(input))
+  .handler(async ({ context, data }): Promise<{ ok: true }> => {
+    if (data.action !== "run-now") {
+      const result = await _performFollowUpAction(context, data.id, data.action);
+      if (!result.ok) throw new Error(result.error);
+      return { ok: true };
+    }
+    const { startFollowUpRun } = await import("./follow-up-scheduler.ts");
+    const started = await startFollowUpRun(
+      { userId: context.userId, newsroomId: context.newsroomId ?? 1 },
+      data.id,
+    );
+    if (!started.started) throw new Error(RUN_START_REFUSALS[started.skipped ?? "not-found"]);
+    return { ok: true };
+  });
+
+/**
+ * The findings an editor should see on Today: agent follow-ups that have found
+ * something and are still being worked.
+ *
+ * This is the "surface it on Today" half of the brief's item 4. The other half
+ * -- the note in the story's reporting notes -- was written once, by the agent
+ * that found it, in `performRecordFollowUpRun`; this reads the state, not the
+ * notes, so a finding the editor removed from the notes does not come back.
+ * Nothing here publishes, and nothing behind it can: a finding is a note and a
+ * `last_state`, and there is no publish path in either.
+ */
+export const listFollowUpFindings = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => followUpFindingsInput.parse(input))
+  .handler(async ({ context, data }) => _performListFollowUpFindings(context, data));
+
+/**
+ * What the follow-up dialog's Story picker offers: two columns over the recent
+ * leads, newest first.
+ *
+ * Deliberately NOT `listLeads`. That one returns every lead in the newsroom
+ * with twenty columns and a correlated duplicate-lookup per row, because the
+ * Queue renders all of it; a `<select>` needs an id and a line of text, and
+ * pulling the Queue's payload into a dialog to build it would fetch a screen's
+ * worth of data to draw a dropdown. The window is the 200 most recent leads,
+ * which is a limit the picker names rather than hides -- an agent linked to an
+ * older story keeps that story in its list because the dialog keeps the row's
+ * own headline (see `FollowUpDialog`).
+ */
+export const listFollowUpStoryOptions = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }): Promise<{ id: number; headline: string }[]> => {
+    const sql = await getSql();
+    const room = context.newsroomId ?? 1;
+    return sql<{ id: number; headline: string }>`
+      select l.id,
+             coalesce(a.headline, (select nullif(d.headline, '') from drafts d
+               where d.lead_id = l.id and d.newsroom_id = l.newsroom_id
+               order by d.updated_at desc, d.id desc limit 1), l.headline) as headline
+      from leads l
+      left join articles a on a.lead_id = l.id and a.newsroom_id = l.newsroom_id
+      where l.newsroom_id = ${room} and l.status <> 'killed'
+      order by l.created_at desc, l.id desc
+      limit 200
+    `;
+  });
 
 /**
  * The section the story files under, confirmed by a person for this draft.
@@ -3169,6 +3308,20 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     not file under, and printing either one on their behalf would be a guess.
   */
   sectionFromEditor?: string,
+  /*
+    The ground this story stands on, as the editor chose it on the publish step
+    (0.6.71). One of the four keys the paper's geography pills read, or absent.
+
+    Absent is not an error and is not a second decision to make: it means no
+    area was shown to the editor, and a story with no recorded area reads as the
+    home town -- the owner's rule (2026-09-26) and the same fallback every story
+    printed before 0098 gets. So a scripted call, an older client and "the
+    editor left the select alone" all land on the home town rather than refusing
+    the print. A value that is not one of the four keys is dropped for the same
+    reason the clean-up helper drops it: the column is not the place to discover
+    a typo.
+  */
+  areaFromEditor?: string,
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
   const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
   const already = await getSql().then(
@@ -3258,6 +3411,8 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   */
   const confirmedTopic = parseNotes(notesRows[0]?.notes_json).topicConfirmation;
   const draftTopic = String(row.topic ?? "").trim();
+  /* `null` for anything that is not one of the four keys, including absent. */
+  const area = cleanStoryArea(areaFromEditor);
   const editorTopic = String(sectionFromEditor ?? "").trim();
   if (editorTopic && editorTopic !== draftTopic) {
     return {
@@ -3416,7 +3571,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
-        provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text
+        provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text, area
       )
       values (
         ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
@@ -3425,7 +3580,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         /* The line the editor chose on the import screen, carried on the draft.
            Empty for every story the desk wrote, which prints the standard AI
            line exactly as before. */
-        ${row.disclosure_text || ""}
+        ${row.disclosure_text || ""},
+        /* The geography pill this story answers to. NULL is the home town on the
+           paper, which is the rule for the whole pre-0098 archive too -- see
+           story-area.ts, which owns the four keys. */
+        ${area}
       ) returning id
     `;
       await recordPublishedMeetingEvidence(sql, {
@@ -3489,12 +3648,16 @@ export const publishLead = createServerFn({ method: "POST" })
     0.6.67: the request may also carry `topic`, the section the desk's Publish
     button showed. The bare id every older caller sends is still accepted, and
     an absent topic means "unconfirmed", never "confirmed blank".
+
+    0.6.71: it may also carry `area`, the geography the publish step chose.
+    Absent means the home town, which is where every story printed before 0098
+    already sits -- so an older client is not a client that prints wrong.
   */
   .validator((raw: unknown) => cleanPublishRequest(raw))
   .handler(async ({ context, data }) =>
     data.leadId === null
       ? { ok: false as const, error: "There is no such story." }
-      : performPublish(context, data.leadId, data.topic),
+      : performPublish(context, data.leadId, data.topic, data.area),
   );
 
 /**
@@ -3603,6 +3766,7 @@ export async function performSuggestHeadlines(
   context: { userId: string; newsroomId?: number },
   leadId: number,
   currentHeadline?: string,
+  model?: { choice?: string | null; effort?: string | null },
 ): Promise<{ ok: true; options: string[] } | { ok: false; error: string }> {
   const sql = await getSql();
   const leads = await sql<LeadRow>`
@@ -3624,9 +3788,16 @@ export async function performSuggestHeadlines(
     dek: row?.dek,
     body: row?.body,
   });
+  /*
+    Unit BK's Headline dialog draws the model row the reference draws, so a pick
+    arrives here; absent, this is "auto" and the desk's resolution decides, which
+    is what this call has always done. The pick is the dialog's own row, and
+    `grokChat` is still the thing that resolves an "auto".
+  */
   const got = await grokChat(prompt.system, prompt.user, 700, {
-    choice: "auto",
+    choice: (model?.choice || "auto") as EffectiveProviderChoice,
     newsroomId: owned(context),
+    reasoningEffort: (model?.effort ?? null) as ModelEffort | null,
   });
   if (!got.ok) {
     return {
@@ -3649,7 +3820,12 @@ export async function performSuggestHeadlines(
 export const suggestHeadlines = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => suggestHeadlinesInput.parse(raw))
-  .handler(async ({ context, data }) => performSuggestHeadlines(context, data.leadId, data.headline));
+  .handler(async ({ context, data }) =>
+    performSuggestHeadlines(context, data.leadId, data.headline, {
+      choice: data.modelChoice,
+      effort: data.modelEffort as ModelEffort | null | undefined,
+    }),
+  );
 
 /**
  * A correction note the story model would write, from the editor's two lines.
