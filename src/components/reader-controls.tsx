@@ -11,6 +11,7 @@ import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { sendTrustEvent } from "@/components/read-beacon-send";
 import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
+import { isMiscTopic } from "@/lib/news/section-types";
 import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
 import { readReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
@@ -292,22 +293,40 @@ export function SaveStory({
     </button>
   );
 }
+/**
+ * One story in a list.
+ *
+ * `datebox` is the archive's own left gutter -- the date, once, beside a row of
+ * stories read in order. The front page's "Latest stories" passes `false`
+ * (unit BX): its rows carried the date twice, once in that box and once in the
+ * meta line under the headline, and the brief keeps the meta line. The box is
+ * already hidden below 760px, so the two are the same row on a phone.
+ *
+ * A story in the "misc" catch-all prints no section tag (unit BX): the reader
+ * side never shows that bucket. The desk's lists do not come through here.
+ */
 export function ReaderRow({
   story,
   description = true,
+  datebox = true,
 }: {
   story: ReaderStory;
   description?: boolean;
+  /** The date gutter at the head of the row; false on the front page. */
+  datebox?: boolean;
 }) {
   const { sections } = usePublicSections();
   const { formatShortDate } = usePaperDateFormatters();
+  const label = sections.find((s) => s.key === story.topic)?.name ?? story.topic;
   return (
-    <article className="newsrow">
-      <div className="datebox">{formatShortDate(story.published_at)}</div>
+    <article className={`newsrow${datebox ? "" : " nodate"}`}>
+      {datebox ? <div className="datebox">{formatShortDate(story.published_at)}</div> : null}
       <div>
-        <Link className={`tag ${story.topic}`} to="/" search={{ topic: story.topic }}>
-          {sections.find((s) => s.key === story.topic)?.name ?? story.topic}
-        </Link>
+        {isMiscTopic(story.topic) ? null : (
+          <Link className={`tag ${story.topic}`} to="/" search={{ topic: story.topic }}>
+            {label}
+          </Link>
+        )}
         <Link to="/articles/$slug" params={{ slug: story.slug }}>
           <h3>{story.headline}</h3>
         </Link>

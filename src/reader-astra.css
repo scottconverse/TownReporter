@@ -2272,6 +2272,21 @@
   color: var(--blockInk);
   padding: 32px 32px 36px;
 }
+/* One column when a band has lost a half (unit BX).
+   Two rows are built as two columns: the lead beside "This week", "Around the
+   region" beside Opinion. Either half can now be absent rather than empty --
+   the dates panel prints nothing at all when no published story names a date
+   in the next seven days, and the region column prints nothing when no story
+   is filed outside the home town -- and when one goes the other runs the full
+   width, which is what `solo` says. Below 900px the media query further down
+   already collapses both rows to one column, so this states it for the wide
+   layout only; the two together cover every width. */
+@media (min-width: 901px) {
+  .reader .ledgerow.solo,
+  .reader .regionband.solo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .reader .lead h2.leadhead {
   font-family: var(--fd);
   font-size: 50px;
@@ -2632,6 +2647,16 @@
 }
 .reader .river .newsrow {
   border-top: 1px solid var(--grid);
+}
+/* The front page's rows have no date gutter (unit BX): the date is printed once,
+   in the meta line under the headline, so the row's first track goes with the
+   box. Below 760px the box is hidden for every row anyway and the media query
+   there sets the two-track row this rule is spelling out, which is why this is
+   stated for the widths above it. */
+@media (min-width: 761px) {
+  .reader .river .newsrow.nodate {
+    grid-template-columns: minmax(0, 1fr) 35px;
+  }
 }
 .reader .river .newsrow h3 {
   font-family: var(--fd);
@@ -3264,8 +3289,54 @@
   .reader .topbar .btn {
     font-size: 14px;
   }
+  /* Two rows, never three (unit BX). The bar is one `space-between` row that
+     wraps when it runs out of room, and at 390px the four utilities are wider
+     than the screen on their own: measured on the live page, the dateline sat
+     on the first row and the utilities broke across two more. The two `flex: 1
+     1 100%` children make the split a decision instead of a consequence --
+     dateline on its own line, utilities sharing the next one -- which is the
+     "one or two rows" the brief asks for at every phone width. */
+  .reader .dateline {
+    flex: 1 1 100%;
+  }
   .reader .topactions {
+    flex: 1 1 100%;
+    margin-left: 0;
+    flex-wrap: nowrap;
     gap: 0;
+  }
+  /* The two appearance controls keep their icons and drop their words at this
+     width; both already carry an `aria-label` (the mode they will switch to,
+     and "Reading preferences"), so neither loses its name. Search and Saved are
+     words only and keep them, and "Editor's desk" is bare text. The tighter
+     inline padding is what buys the row its fit, not a dropped control: it is a
+     44px tall target either way. */
+  .reader .topbar .btn span {
+    display: none;
+  }
+  .reader .topbar .toplink,
+  .reader .topbar .btn {
+    padding-inline: 9px;
+  }
+  /* The pill row is ONE line that scrolls sideways (unit BX). The four pills
+     are wider than 390px, so the row used to wrap to two or three lines and
+     push the masthead down the page. The labels are unchanged and nothing is
+     dropped -- the row scrolls. `min-width: 0` is what lets a flex item scroll
+     at all instead of growing to its content. */
+  .reader .geopills {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    min-width: 0;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .reader .geopills::-webkit-scrollbar {
+    display: none;
+  }
+  .reader .geopill {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   /* The nav wraps to two rows: the menu button and "About the newsroom", then
      the sections two across while they are open. */
