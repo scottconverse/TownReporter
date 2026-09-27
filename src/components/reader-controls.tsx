@@ -8,6 +8,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { sendTrustEvent } from "@/components/read-beacon-send";
 import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
@@ -98,6 +99,14 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     // screen that renders from the attribute (a pending screen, say) comes
     // back on the old one.
     if (value.dark !== undefined) refreshReader();
+    // Two of the Stats page's trust signals are pressed right here. Outside the
+    // state updater on purpose: React calls an updater twice in development,
+    // and these are counts of presses, so a press must count once. Fire only on
+    // a real change -- re-pressing the button already selected is not a choice.
+    if (value.dark === true && prefs.dark !== true) sendTrustEvent("dark-mode-chosen");
+    if (typeof value.size === "number" && value.size > 21 && value.size !== prefs.size) {
+      sendTrustEvent("larger-text-chosen");
+    }
   }
   return (
     <ReaderContext.Provider value={{ ...prefs, ready, update, notify: setMessage }}>

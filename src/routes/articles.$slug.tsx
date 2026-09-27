@@ -18,6 +18,7 @@ import { DatesPanel } from "@/components/paper/dates-panel";
 import { SectionTag } from "@/components/paper/section-tag";
 import { ReaderRow, SaveStory, ShareStory, ReadingButton, CopyButton } from "@/components/reader-controls";
 import { readMinutes } from "@/lib/reader";
+import { ReadBeacon } from "@/components/read-beacon";
 import { ViewBeacon } from "@/components/view-beacon";
 
 /**
@@ -240,6 +241,7 @@ function ArticlePage() {
   return (
     <PaperShell compact>
       <ViewBeacon targets={[`story:${slug}`, "site"]} />
+      <ReadBeacon />
 
       {/* The story proper. "Keep reading" below it is about other stories, so it sits outside. */}
       <article>
