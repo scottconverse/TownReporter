@@ -2120,10 +2120,14 @@
 .desk-ltr.astra .src-sec > .sechead {
   padding: 0 24px;
 }
-.desk-ltr.astra[data-desk-page="sources"] main > .file-form:not([open]) {
-  display: inline-block;
-  padding: 10px 16px;
-  margin-right: 12px;
+/* BJ2 item 4: the add form lives behind the header's "+ Add a source", so the
+   closed panel must not draw a control of its own above the list. It used to
+   render as a small "+ Add a source" pill here -- the first of the two top
+   disclosures the brief removes. The panel keeps its id and its `<details>`, so
+   the header button still opens it by id and the form is one press away; only
+   the resting state is gone. */
+.desk-ltr.astra[data-desk-page="sources"] main > details.astra-source-add:not([open]) {
+  display: none;
 }
 .desk-ltr.astra .astra-source-document {
   padding: 16px 0;
@@ -2531,6 +2535,11 @@
   padding: 10px 0;
   border-bottom: 2px solid var(--fg);
   align-items: baseline;
+}
+/* The just-added tint, for rows that are a `div` rather than a table row
+   (`styles.css` styles it through `td`, which a `.astra-row` has none of). */
+.desk-ltr.astra .astra-row.just-added {
+  background: color-mix(in srgb, var(--a) 12%, transparent);
 }
 .desk-ltr.astra .astra-row.pubhead > * {
   font-size: calc(0.875rem * var(--ts));

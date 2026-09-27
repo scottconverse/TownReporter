@@ -207,11 +207,29 @@ export const listSources = createServerFn({ method: "GET" })
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
-             proposed_section, reviewed_at, review_note
+             proposed_section, reviewed_at, review_note,
+             -- 0.6.72: snapshots this source produced since the newest run
+             -- started -- the drawn row's "2 new items". A source that was
+             -- fetched and had not changed wrote none, which is the drawing's
+             -- "No change"; last_error is its "Could not check". No new
+             -- column: a snapshot is already written only when the hash moved.
+             (select count(*) from snapshots sn
+                where sn.source_id = sources.id
+                  and sn.created_at >= coalesce(
+                    (select max(started_at) from scan_runs where newsroom_id = ${owned(context)}),
+                    '-infinity'::timestamptz))::int as new_since_last_pass
       from sources
       where newsroom_id = ${owned(context)}
       order by
-        case status when 'proposed' then 0 when 'accepted' then 1 else 2 end,
+        -- Paused sorts after accepted: it is still on the watch list, and the
+        -- editor put it there deliberately, so it belongs with the rows they
+        -- are reading rather than at the bottom with the rejected.
+        case status
+          when 'proposed' then 0
+          when 'accepted' then 1
+          when 'paused' then 2
+          else 3
+        end,
         -- Within the suggested rows, newest first: the list is a review queue,
         -- and the run that just finished is the one the editor is looking for.
         -- Every other status keeps the oldest-first order the watch list has

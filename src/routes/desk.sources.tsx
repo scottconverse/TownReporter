@@ -65,6 +65,14 @@ function SourcesPage() {
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [addedId, setAddedId] = useState<number | null>(null);
   /*
+    The add panel's two doors. The drawing puts a single "+ Add a source" in
+    the header and one dialog behind it, whose second tab is the bulk import
+    ("+ Add a source opens the add-source dialog, which includes bulk import",
+    README 337). Phase 4's AddSourcesDialog replaces this panel on merge; until
+    then the two tabs are the same two forms that used to sit open on the page.
+  */
+  const [addTab, setAddTab] = useState<"one" | "file">("one");
+  /*
     Which sections a source joins, chosen here at the moment the source is
     added or accepted.
 
@@ -125,6 +133,31 @@ function SourcesPage() {
     },
     onError: (err) =>
       setScanNotice(err instanceof Error ? err.message : "Could not start that scan."),
+  });
+  /*
+    "Check now" / "Retry" on one watch-list row.
+
+    Same runner, same defaults, one source: `runScan` has taken an explicit
+    source set since P0-1 (`customSourceIds`), and `selectCustomScanSources`
+    narrows it to the still-accepted rows, so this cannot reach a source the
+    editor has paused or dropped. It is not a second scanner -- it is the one
+    the Daily scan panel above already runs, scoped to the row you pressed.
+  */
+  const checkOne = useMutation({
+    mutationFn: (id: number) =>
+      runScan({ data: { modelChoice: "auto", modelEffort: null, customSourceIds: [id] } }),
+    onSuccess: (res) => {
+      if (res && "ok" in res && res.ok === false) {
+        setScanNotice(res.error);
+        return;
+      }
+      setScanNotice(null);
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+    onError: (err) =>
+      setScanNotice(err instanceof Error ? err.message : "Could not check that source."),
   });
   const sectionNames = (keys: string[]) =>
     keys.map((key) => reportingSections.find((s) => s.key === key)?.name ?? key).join(", ");
@@ -257,7 +290,7 @@ function SourcesPage() {
       return next;
     });
   const setStatus = useMutation({
-    mutationFn: (input: { id: number; status: "accepted" | "rejected" }) =>
+    mutationFn: (input: { id: number; status: "accepted" | "rejected" | "paused" }) =>
       setSourceStatus({ data: input }),
     onSuccess: async (_res, input) => {
       await qc.invalidateQueries({ queryKey: ["sources"] });
@@ -308,9 +341,19 @@ function SourcesPage() {
   ];
 
   /*
+    "On watch" is two statuses, not one.
+
+    A paused source is still on the watch list -- it is the same row, held, and
+    the drawing's row carries Resume rather than Accept for exactly that reason.
+    So the tab counts both and shows both, while `watch` below counts only the
+    rows the scanner may actually read (`daily-scan.ts` and `runScan` both ask
+    for `status = 'accepted'`), which is what "Files up to" means.
+  */
+  const onWatch = (s: SourceRow) => s.status === "accepted" || s.status === "paused";
+  /*
     How many pages the scanner is allowed to read. This is the "files up to"
     the design puts in the Daily scan panel, and it is the same number the Scan
-    screen computes for its own run.
+    screen computes for its own run. Paused rows are deliberately not in it.
   */
   const watch = sources.filter((s) => s.status === "accepted").length;
 
@@ -338,15 +381,15 @@ function SourcesPage() {
         exact text "Add a source", and the ::before that draws the panel's plus
         is CSS, so only this button reads "+ Add a source" to a text match.
 
-        The title stays "Sources", not the drawing's "Sources & scan": two walks
-        (sources-desk-e2e.mjs, scan-desk-e2e.mjs) wait on a level-1 heading named
-        exactly "Sources", and the brief moves a selector only where the design
-        moved a control. The kicker carries the drawing's wording.
+        The title is the drawing's "Sources & scan" (BJ2 item 4). Two walks
+        moved with it -- sources-desk-e2e.mjs and scan-desk-e2e.mjs wait on a
+        level-1 heading by name, which is a selector naming the control the
+        design renamed, so it moved in the same commit.
       */}
       <div className="astra-head">
         <div>
           <p className="kick">What the desk watches, and whether it could check</p>
-          <h1 className="h1">Sources</h1>
+          <h1 className="h1">Sources &amp; scan</h1>
         </div>
         <div className="astra-head-acts">
           <button
@@ -370,15 +413,89 @@ function SourcesPage() {
         the machine proposes.
       </p>
       {/*
-        The design draws this screen as two columns: the watch list, and the
-        scanner that reads it. The right column is the same information the Scan
-        screen shows, condensed to the one thing an editor wants while they are
-        already looking at the list -- did it run, and run it now.
+        The add panel, behind the header's "+ Add a source" (BJ2 item 4).
+
+        The drawing draws one control there and one dialog behind it, not two
+        open panels above the list. Phase 4's AddSourcesDialog replaces this
+        panel on merge, and the registry import that used to be its own top
+        disclosure is now this panel's second tab -- which is where the README
+        says the bulk import lives ("includes bulk import", line 337).
+
+        Two things are deliberate. The panel keeps `.astra-source-add` and the
+        id `astra-add-source`, because that is what the header button above
+        reaches for. And it is closed on load and drawn only when open
+        (`desk-astra.css`: `main > details.astra-source-add:not([open])` is
+        `display: none`), so the resting page shows the list and nothing else --
+        the walks open it through the header button
+        (sources-desk-e2e, scan-desk-e2e, sections-source-add-e2e).
       */}
-      <div className="astra-split">
-        <div>
       <details className="file-form astra-source-add astra-panel astra-jump" id="astra-add-source">
         <summary>Add a source</summary>
+        <div className="astra-seg" role="group" aria-label="How to add sources">
+          <button
+            type="button"
+            className={"astra-seg-opt" + (addTab === "one" ? " on" : "")}
+            aria-pressed={addTab === "one"}
+            onClick={() => setAddTab("one")}
+          >
+            One source
+          </button>
+          <button
+            type="button"
+            className={"astra-seg-opt" + (addTab === "file" ? " on" : "")}
+            aria-pressed={addTab === "file"}
+            onClick={() => setAddTab("file")}
+          >
+            Upload a file
+          </button>
+        </div>
+        {addTab === "file" ? (
+          /* The registry import, as the dialog's second tab: paste it, or
+             choose a file, which is read into the same box and added. */
+          <div className="src-bulk">
+            <p className="meta">
+              Paste a registry or choose a .txt, .md or .csv file. TIER A/B/C headers are
+              preserved. Selecting a file adds its sources to the watch list.
+            </p>
+            <textarea
+              rows={5}
+              className="bulk"
+              aria-label="Paste source registry"
+              value={bulk}
+              onChange={(e) => setBulk(e.target.value)}
+              placeholder={
+                "TIER A — OFFICIAL RECORD\n* City Council: https://www.longmontcolorado.gov/…\nTIER B — JOURNALISM\n* Times-Call: https://www.timescall.com/"
+              }
+            />
+            <div className="row-acts static">
+              <InkButton
+                disabled={addBulk.isPending || !bulk.trim()}
+                onClick={() => addBulk.mutate(bulk)}
+              >
+                {addBulk.isPending ? "Adding list…" : "Add list"}
+              </InkButton>
+              <InkButton
+                tone="ghost"
+                disabled={addBulk.isPending}
+                onClick={() => fileRef.current?.click()}
+              >
+                Choose registry file
+              </InkButton>
+              <input
+                ref={fileRef}
+                type="file"
+                aria-label="Choose source registry file"
+                accept=".txt,.csv,.md,.tsv,text/plain,text/csv,text/markdown"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  void onPickFile(file);
+                }}
+              />
+            </div>
+          </div>
+        ) : (
         <form
           className="src-add"
           onSubmit={(e) => {
@@ -434,99 +551,72 @@ function SourcesPage() {
             ) : null}
           </div>
         </form>
-      </details>
-      <details className="file-form astra-panel">
-        <summary>Import a source registry</summary>
-        <p className="meta">
-          Paste a registry or choose a .txt, .md or .csv file. TIER A/B/C headers are preserved.
-          Selecting a file adds its sources to the watch list.
-        </p>
-        <textarea
-          rows={5}
-          className="bulk"
-          aria-label="Paste source registry"
-          value={bulk}
-          onChange={(e) => setBulk(e.target.value)}
-          placeholder={
-            "TIER A — OFFICIAL RECORD\n* City Council: https://www.longmontcolorado.gov/…\nTIER B — JOURNALISM\n* Times-Call: https://www.timescall.com/"
-          }
-        />
-        <div className="row-acts static">
-          <InkButton
-            disabled={addBulk.isPending || !bulk.trim()}
-            onClick={() => addBulk.mutate(bulk)}
-          >
-            {addBulk.isPending ? "Adding list…" : "Add list"}
-          </InkButton>
-          <InkButton
-            tone="ghost"
-            disabled={addBulk.isPending}
-            onClick={() => fileRef.current?.click()}
-          >
-            Choose registry file
-          </InkButton>
-          <input
-            ref={fileRef}
-            type="file"
-            aria-label="Choose source registry file"
-            accept=".txt,.csv,.md,.tsv,text/plain,text/csv,text/markdown"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              void onPickFile(file);
-            }}
-          />
-        </div>
+        )}
       </details>
       {notice ? (
         <p className={"note" + (notice.kind === "err" ? " err" : "")}>{notice.text}</p>
       ) : null}
-
-      <div className="astra-toolbar">
-        <div className="astra-seg" role="group" aria-label="Source groups">
-          {groups.map((g) => (
-            <button
-              key={g.k}
-              type="button"
-              className={"astra-seg-opt" + (sourceTab === g.k ? " on" : "")}
-              aria-pressed={sourceTab === g.k}
-              onClick={() => setSourceTab(g.k)}
-            >
-              {g.k === "accepted"
-                ? "On watch"
-                : g.k === "proposed"
-                  ? "Suggested"
-                  : "Rejected"}{" · "}
-              {sources.filter((s) => s.status === g.k).length}
-            </button>
-          ))}
+      {/*
+        The design draws this screen as two columns: the watch list, and the
+        scanner that reads it. The right column is the same information the Scan
+        screen shows, condensed to the one thing an editor wants while they are
+        already looking at the list -- did it run, and run it now.
+      */}
+      <div className="astra-split">
+        <div>
           {/*
-            The design's fourth filter. It is not a fourth status -- a source
-            cannot be "could not check" -- it is the on-watch rows the last
-            pass failed to fetch, which is the list an editor has to work
-            through before the scan can be trusted to have covered the town.
-            Rejected rows are excluded: nobody is waiting on those.
+            Filters, then the search box on its own line under them, at the top
+            of the left column -- the drawing's order (README 332-334). The
+            search box sits in a second `.astra-toolbar` so it keeps the
+            drawing's own width instead of filling the column: the list beneath
+            it is what wants the width.
           */}
-          <button
-            type="button"
-            className={"astra-seg-opt" + (sourceTab === "unchecked" ? " on" : "")}
-            aria-pressed={sourceTab === "unchecked"}
-            onClick={() => setSourceTab("unchecked")}
-          >
-            Could not check{" · "}
-            {sources.filter((s) => s.status === "accepted" && s.last_error != null).length}
-          </button>
-        </div>
-        <input
-          type="search"
-          className="astra-search"
-          aria-label="Search sources"
-          placeholder="Search the watch list"
-          value={sourceQuery}
-          onChange={(e) => setSourceQuery(e.target.value)}
-        />
-      </div>
+          <div className="astra-toolbar">
+            <div className="astra-seg" role="group" aria-label="Source groups">
+              {groups.map((g) => (
+                <button
+                  key={g.k}
+                  type="button"
+                  className={"astra-seg-opt" + (sourceTab === g.k ? " on" : "")}
+                  aria-pressed={sourceTab === g.k}
+                  onClick={() => setSourceTab(g.k)}
+                >
+                  {g.k === "accepted"
+                    ? "On watch"
+                    : g.k === "proposed"
+                      ? "Suggested"
+                      : "Rejected"}{" · "}
+                  {sources.filter((s) => (g.k === "accepted" ? onWatch(s) : s.status === g.k)).length}
+                </button>
+              ))}
+              {/*
+                The design's fourth filter. It is not a fourth status -- a source
+                cannot be "could not check" -- it is the on-watch rows the last
+                pass failed to fetch, which is the list an editor has to work
+                through before the scan can be trusted to have covered the town.
+                Rejected rows are excluded: nobody is waiting on those.
+              */}
+              <button
+                type="button"
+                className={"astra-seg-opt" + (sourceTab === "unchecked" ? " on" : "")}
+                aria-pressed={sourceTab === "unchecked"}
+                onClick={() => setSourceTab("unchecked")}
+              >
+                Could not check{" · "}
+                {sources.filter((s) => onWatch(s) && s.last_error != null).length}
+              </button>
+            </div>
+          </div>
+          <div className="astra-toolbar">
+            <input
+              type="search"
+              className="astra-search"
+              aria-label="Search sources"
+              placeholder="Search the watch list"
+              value={sourceQuery}
+              onChange={(e) => setSourceQuery(e.target.value)}
+            />
+          </div>
       {listIsError && sources.length === 0 ? (
         <ScreenError
           message={listError instanceof Error ? listError.message : "Could not load sources."}
@@ -546,7 +636,7 @@ function SourcesPage() {
           const forTab = sourceTab === "unchecked" ? "accepted" : sourceTab;
           if (g.k !== forTab) return null;
           const rows = sources
-            .filter((s) => s.status === g.k)
+            .filter((s) => (g.k === "accepted" ? onWatch(s) : s.status === g.k))
             .filter((s) => (sourceTab === "unchecked" ? s.last_error != null : true))
             .filter((s) => {
               const q = sourceQuery.trim().toLowerCase();
@@ -579,6 +669,14 @@ function SourcesPage() {
                    this was written, so it carries a select-all, a per-press
                    Saving/Saved/Failed line, and one transaction per press. */
                 <SuggestedSources rows={rows} canAssign={canAssignSections} options={reportingSections} />
+              ) : g.k === "accepted" ? (
+                <WatchRows
+                  rows={rows}
+                  addedId={addedId}
+                  checkingId={checkOne.isPending ? (checkOne.variables ?? null) : null}
+                  onCheck={(id) => checkOne.mutate(id)}
+                  onStatus={(id, status) => setStatus.mutate({ id, status })}
+                />
               ) : (
                 <SourceTable
                   rows={rows}
@@ -1067,6 +1165,124 @@ function SuggestedSources({
         </table>
       )}
     </>
+  );
+}
+
+/** The host of a source URL, without `www.`, for the drawn "url · kind" line.
+ *  The full URL is still the link's `href`, so shortening the label costs the
+ *  editor nothing -- and the `↗` after it is the drawing's Open ↗, which is why
+ *  a failed row does not carry a fourth button to the same place. */
+function hostLabel(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./i, "");
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The On watch list, as the drawing draws it (README 332-334, capture
+ * `desk-18-sources-light.png`).
+ *
+ * One row: the name, then "host ↗ · kind", then a state chip and the note that
+ * explains it, then the actions. The chip is derived from what the desk already
+ * recorded, never from a new column:
+ *
+ * - `last_error` is "Could not check", with the plain-English reason
+ *   `editorFetchError` gives it.
+ * - `new_since_last_pass` (0.6.72, `listSources`) is "Changed: 2 new items"
+ *   against a source that was fetched and had not moved, which is "No change".
+ * - a paused row is "Paused" with Resume in place of Pause.
+ *
+ * Retry is the primary button on a row that failed, because that is the one
+ * action the row is waiting for; Check now is quiet, because a source that
+ * reads fine does not need pressing. Drop is drawn as "Remove".
+ */
+function WatchRows({
+  rows,
+  addedId,
+  checkingId,
+  onCheck,
+  onStatus,
+}: {
+  rows: SourceRow[];
+  addedId?: number | null;
+  /** The row a check is in flight for, so only that row says "Checking…". */
+  checkingId: number | null;
+  onCheck: (id: number) => void;
+  onStatus: (id: number, status: "accepted" | "rejected" | "paused") => void;
+}) {
+  const { formatDateTime } = usePaperDateFormatters();
+  return (
+    <div className="astra-rows">
+      {rows.map((s) => {
+        const paused = s.status === "paused";
+        const failed = s.last_error != null;
+        const fresh = s.new_since_last_pass ?? 0;
+        const chip = paused
+          ? { cls: "paused", label: "Paused" }
+          : failed
+            ? { cls: "fail", label: "Could not check" }
+            : fresh > 0
+              ? { cls: "changed", label: "Changed" }
+              : s.last_fetched_at
+                ? { cls: "same", label: "✓ No change" }
+                : { cls: "wait", label: "Not checked yet" };
+        const note = paused
+          ? "Paused · the scanner will not fetch it"
+          : failed
+            ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
+            : fresh > 0
+              ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
+              : s.last_fetched_at
+                ? `Checked ${formatDateTime(s.last_fetched_at)}`
+                : "Added, not fetched yet";
+        const checking = checkingId === s.id;
+        return (
+          <div
+            key={s.id}
+            className={"astra-row src" + (addedId === s.id ? " just-added" : "")}
+          >
+            <div className="astra-cell">
+              <span className="astra-row-t">{s.title}</span>
+              <span className="astra-row-meta">
+                <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
+                  {hostLabel(s.url)} ↗
+                </a>
+                {s.kind ? ` · ${s.kind}` : ""}
+              </span>
+            </div>
+            <div className="astra-cell">
+              <span className={"astra-chip " + chip.cls}>{chip.label}</span>
+              <span className="astra-row-meta">{note}</span>
+            </div>
+            <div className="astra-row-acts">
+              {paused ? (
+                <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
+                  Resume
+                </InkButton>
+              ) : (
+                <>
+                  <InkButton
+                    tone={failed ? "solid" : "quiet"}
+                    disabled={checking}
+                    onClick={() => onCheck(s.id)}
+                  >
+                    {checking ? "Checking…" : failed ? "Retry" : "Check now"}
+                  </InkButton>
+                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "paused")}>
+                    Pause
+                  </InkButton>
+                </>
+              )}
+              <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
+                Remove
+              </InkButton>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

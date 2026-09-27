@@ -642,18 +642,23 @@ function DarkPage() {
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, allInv, claimedIds));
 
   return (
-    <DeskShell
-      night
-      title="Dark Desk"
-      kicker="Investigations · nothing here prints on its own"
-      hideTitle
-    >
+    /*
+      No `night` prop: Dark Desk is a page, not a theme. Before 0.6.72 this
+      route passed it, which forced `.night` on the shell whatever
+      `townreporter.desk.mode` said -- so the "light" capture of this screen
+      rendered dark, `data-appearance` disagreed with the page, and the shell
+      hid its own appearance toggle (desk-chrome.tsx shows it only when `night`
+      is false). The desk's appearance is the editor's, on every desk page.
+    */
+    <DeskShell title="Dark Desk" kicker="Investigations · nothing here prints on its own" hideTitle>
       {/*
         The drawn header: kicker, title, the page's own action, rule. The
         drawing's "+ Start a file" opens the Start-a-Dark-Desk-file dialog,
-        which is lane 1's work and not in this tree; the button takes the editor
-        to the desk's own way to start a file -- the paste box at the top of the
-        rail -- and puts the cursor in it.
+        which is lane 1's work and not in this tree; the button opens the desk's
+        own way to start a file -- the paste box, in the panel directly below
+        the header -- and puts the cursor in it. The drawing puts no form in
+        the rail: the rail is the index of files, and a form at the top of it
+        pushed the first file out of the first screenful.
       */}
       <div className="astra-head">
         <div>
@@ -668,6 +673,7 @@ function DarkPage() {
               const form = document.getElementById("astra-start-file");
               form?.scrollIntoView({ block: "start" });
               form?.querySelector("textarea")?.focus();
+              if (form instanceof HTMLDetailsElement) form.open = true;
             }}
           >
             + Start a file
@@ -681,74 +687,83 @@ function DarkPage() {
         files without leaving the one they are reading. Below 980px the two
         columns stack and the rail becomes the top of the page.
 
-        The rail then starts with the piles, as drawn; the paste box that starts
-        a file sits above them, which is where the drawing's header button sends
-        you.
+        The rail is the piles and nothing else, as drawn: the paste box that
+        starts a file is in the panel above the split, which is where the
+        header's button opens.
       */}
+      {/*
+        Start a file, behind the header's button as drawn. A `details` panel for
+        now -- phase 4's `DarkFileDialog` replaces it when phase 4 merges -- and
+        it keeps every control the rail version had: the paste box, the model
+        and effort pickers, the start press and their notices. `id` and
+        `#dark-start-actions` are unchanged, so anything that reaches this form
+        still finds it. The drawing puts no form in the rail: the rail is the
+        index of files, and a form at the top of it pushed the first file off
+        the first screenful.
+      */}
+      <details className="file-form astra-panel astra-jump" id="astra-start-file">
+        <summary>Start a file</summary>
+        <form
+          className="tipbox top"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!paste.trim() || busyStart || digging) return;
+            openPaste.mutate();
+          }}
+        >
+          <p className="meta">
+            Paste a URL, a subject, a person, an LLC, a contract number, a rumor, or a chunk of
+            text. It opens a new file on the desk.
+          </p>
+          <textarea
+            rows={3}
+            value={paste}
+            onChange={(e) => setPaste(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                if (paste.trim() && !busyStart && !digging) openPaste.mutate();
+              }
+            }}
+            placeholder="https://…  ·  Costco rebate cap  ·  Front Range Civic Partners LLC"
+            aria-label="Tip, URL, or subject to investigate"
+          />
+          <div className="row-acts static" id="dark-start-actions">
+            {/*
+              The same picker the open file has, and the same state behind it:
+              the first round of a new file is a round like any other, and an
+              editor who has decided which model digs should not have to open
+              the file first to say so.
+            */}
+            <ModelPicker
+              scope="dark"
+              value={modelChoice}
+              onChange={(choice) => {
+                setModelChoice(choice);
+                setModelEffort(defaultModelEffort(choice));
+              }}
+              effort={modelEffort}
+              onEffortChange={setModelEffort}
+              disabled={busyStart || digging}
+              compact
+            />
+            <InkButton type="submit" disabled={busyStart || digging || !paste.trim()}>
+              {openPaste.isPending ? "Starting…" : "Start digging"}
+            </InkButton>
+          </div>
+          {notice && noticeAt === "paste" ? (
+            <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+          ) : null}
+          {pendingCard === "paste" && cardPhase ? (
+            <p className="meta" aria-live="polite">
+              {cardPhase}
+            </p>
+          ) : null}
+        </form>
+      </details>
+
       <div className="astra-split-deep">
         <div className="astra-piles">
-          <div className="astra-pile">
-            <form
-              className="tipbox top astra-jump"
-              id="astra-start-file"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!paste.trim() || busyStart || digging) return;
-                openPaste.mutate();
-              }}
-            >
-              <p className="side-label">Start a file</p>
-              <p className="meta">
-                Paste a URL, a subject, a person, an LLC, a contract number, a rumor, or a chunk of
-                text. It opens a new file on the desk.
-              </p>
-              <textarea
-                rows={3}
-                value={paste}
-                onChange={(e) => setPaste(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    if (paste.trim() && !busyStart && !digging) openPaste.mutate();
-                  }
-                }}
-                placeholder="https://…  ·  Costco rebate cap  ·  Front Range Civic Partners LLC"
-                aria-label="Tip, URL, or subject to investigate"
-              />
-              <div className="row-acts static" id="dark-start-actions">
-                {/*
-                  The same picker the open file has, and the same state behind
-                  it: the first round of a new file is a round like any other,
-                  and an editor who has decided which model digs should not have
-                  to open the file first to say so.
-                */}
-                <ModelPicker
-                  scope="dark"
-                  value={modelChoice}
-                  onChange={(choice) => {
-                    setModelChoice(choice);
-                    setModelEffort(defaultModelEffort(choice));
-                  }}
-                  effort={modelEffort}
-                  onEffortChange={setModelEffort}
-                  disabled={busyStart || digging}
-                  compact
-                />
-                <InkButton type="submit" disabled={busyStart || digging || !paste.trim()}>
-                  {openPaste.isPending ? "Starting…" : "Start digging"}
-                </InkButton>
-              </div>
-              {notice && noticeAt === "paste" ? (
-                <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
-              ) : null}
-              {pendingCard === "paste" && cardPhase ? (
-                <p className="meta" aria-live="polite">
-                  {cardPhase}
-                </p>
-              ) : null}
-            </form>
-          </div>
-
           <div className="astra-pile">
             <div className="astra-pile-h">
               <span>Open files</span>
@@ -760,7 +775,6 @@ function DarkPage() {
             {investigations.isError && !investigations.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
-                  night
                   message={
                     investigations.error instanceof Error
                       ? investigations.error.message
@@ -772,7 +786,7 @@ function DarkPage() {
               </div>
             ) : investigations.isPending && !active.length ? (
               <div className="astra-pile-pad">
-                <ListSkeleton rows={3} night />
+                <ListSkeleton rows={3} />
               </div>
             ) : active.length === 0 ? (
               <p className="meta astra-pile-pad">
@@ -812,7 +826,6 @@ function DarkPage() {
             {worth.isError && !worth.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
-                  night
                   message={
                     worth.error instanceof Error
                       ? worth.error.message
@@ -824,7 +837,7 @@ function DarkPage() {
               </div>
             ) : worth.isPending && !inbox.length ? (
               <div className="astra-pile-pad">
-                <ListSkeleton rows={3} night />
+                <ListSkeleton rows={3} />
               </div>
             ) : inbox.length === 0 ? (
               <p className="meta astra-pile-pad">
@@ -986,6 +999,23 @@ function DarkPage() {
         <div className="astra-col">
           {notice && noticeAt === "work" && openId == null && !redditResult ? (
             <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+          ) : null}
+
+          {/*
+            No file open: the drawing's right side is a short empty state, not
+            the settings that used to fill it. Before 0.6.72 an empty desk
+            showed Watched pages and How hard to dig and nothing else, which
+            read as a settings page rather than as a desk with no file on it.
+            Both panels are still below, so nothing became unreachable.
+          */}
+          {openId == null ? (
+            <div className="astra-panel astra-empty">
+              <h2 className="astra-panel-h">No file open</h2>
+              <p className="astra-note">
+                Pick a file from Open files, open a signal nobody has read yet, or start one of
+                your own with <strong>+ Start a file</strong> above.
+              </p>
+            </div>
           ) : null}
 
           {openId != null ? (
@@ -1216,7 +1246,7 @@ function RedditResultPanel({
         {announce}
       </p>
       {result.incomplete ? (
-        <Notice kind="warn" night>
+        <Notice kind="warn">
           {result.reason || "The read stopped early."}
         </Notice>
       ) : null}
@@ -1629,11 +1659,11 @@ function InvestigationWorkspace({
             the editor's default Queue view (0.6.16).
           */
           queueError != null ? (
-            <Notice kind="err" night>
+            <Notice kind="err">
               Could not send to the queue: {queueError}
             </Notice>
           ) : queuedLead != null ? (
-            <Notice kind="ok" night>
+            <Notice kind="ok">
               {queuedAlready
                 ? "Already on the working queue as a story lead."
                 : "On the working queue as a story lead."}{" "}
