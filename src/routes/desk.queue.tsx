@@ -1218,6 +1218,11 @@ function QueuePage() {
         mounting screen does: open the file, then put the editor on the file
         page, where the round is started and the activity log and the stop live.
         The gap is named in the report and in `questions/BN.md`.
+
+        `onDone` is not decoration: `holdLead` writes the status and returns,
+        and nothing in the dialog reaches the query cache, so without this the
+        row would sit in the open list until the page was reloaded. It is the
+        same `["leads"]` invalidation the row's own `setStatus` path does.
       */}
       {holdFor ? (
         <HoldLeadDialog
@@ -1225,6 +1230,7 @@ function QueuePage() {
           headline={holdFor.headline}
           open
           onClose={() => setHoldFor(null)}
+          onDone={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
         />
       ) : null}
       {darkFor ? (
