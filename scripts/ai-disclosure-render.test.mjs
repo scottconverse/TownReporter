@@ -163,6 +163,11 @@ const datesPanelStub = inlineModule(`
   import { createElement } from "react";
   export function DatesPanel({ title }) { return createElement("aside", null, title); }
 `);
+/* 0.6.78 (BX item 4): the article page hides a "misc" tag from readers through
+   `isMiscTopic`; the disclosure line does not depend on it. */
+const sectionTypesStub = inlineModule(`
+  export function isMiscTopic(topic) { return /^misc(ellaneous)?\\.?$/i.test(String(topic ?? "").trim()); }
+`);
 const sectionTagStub = inlineModule(`
   import { createElement } from "react";
   export function SectionTag({ children }) { return createElement("span", null, children); }
@@ -186,6 +191,7 @@ const routeImports = {
   "@/lib/news/public": publicStub,
   "@/lib/news/legal-gone": legalGoneStub,
   "@/lib/news/story-dates-public": storyDatesPublicStub,
+  "@/lib/news/section-types": sectionTypesStub,
   "@/lib/story-dates": storyDatesStub,
   "@/lib/paper": paperStub,
   "@/lib/paper-context-state": paperContextStub,
