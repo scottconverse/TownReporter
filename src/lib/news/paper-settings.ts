@@ -338,6 +338,27 @@ export async function getPaperConfig(newsroomId: number = DEFAULT_NEWSROOM_ID): 
 }
 
 /**
+ * The county this paper covers, from the desk's place fields.
+ *
+ * `dark_settings.county` is the column the desk's own place read uses
+ * (`readDarkPlace`, dark.ts): the owner typed a county in Paper setup and the
+ * public geography pill row should say it rather than the generic word
+ * "County" (unit BX). It is read here because the public identity is fetched
+ * once per page load and the pills are a reader surface.
+ *
+ * Two things are deliberately not fatal. A database that has not created
+ * `dark_settings` yet, and an owner who has never typed a county, both mean the
+ * same thing to a reader: no county to name, so the pill keeps "County".
+ */
+async function readCounty(newsroomId: number): Promise<string | null> {
+  const sql = await getSql();
+  const rows = await sql<{ county: string | null }>`
+    select county from dark_settings where newsroom_id = ${newsroomId} limit 1
+  `.catch(() => [] as { county: string | null }[]);
+  return rows[0]?.county?.trim() || null;
+}
+
+/**
  * The paper's identity fields only, shaped for the client (`PaperIdentity`
  * in src/lib/paper-context.tsx) and fetched ONCE per page load: the root
  * route's `beforeLoad` is the only caller (see src/routes/__root.tsx), and
@@ -350,6 +371,14 @@ export const getPaperIdentityFn = createServerFn({ method: "GET" }).handler(
     // getPaperConfig(), so an install that has not completed first-run
     // setup never serves the shipped Longmont identity to the internet.
     const cfg = await getPublicPaperConfig();
+    /*
+      The county is public-facing too, so it is only read for an install that
+      has finished first-run setup: the neutral placeholder above names no
+      county, and neither does an install that never got that far.
+    */
+    const county = (await isOnboarded(DEFAULT_NEWSROOM_ID))
+      ? await readCounty(DEFAULT_NEWSROOM_ID)
+      : null;
     return {
       name: cfg.name,
       city: cfg.city,
@@ -361,6 +390,7 @@ export const getPaperIdentityFn = createServerFn({ method: "GET" }).handler(
       deck: cfg.deck,
       trust: cfg.trust,
       councilVotesUrl: cfg.councilVotesUrl,
+      county,
       editorEmail: cfg.editorEmail,
     };
   },

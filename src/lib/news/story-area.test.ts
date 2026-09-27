@@ -4,7 +4,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getPglite, getSql } from "../db.ts";
 import { listReaderArticles } from "./reader-articles.server.ts";
-import { AREA_LABELS, STORY_AREAS, cleanStoryArea, readStoryArea } from "../story-area.ts";
+import {
+  AREA_LABELS,
+  STORY_AREAS,
+  areaLabelsFor,
+  cleanStoryArea,
+  readStoryArea,
+} from "../story-area.ts";
 
 /**
  * Apply the real migrations, from disk, before the first read.
@@ -106,5 +112,40 @@ describe("the area tag on a printed story", () => {
   it("names every area it stores, in the order the paper prints them", () => {
     assert.deepEqual([...STORY_AREAS], ["longmont", "nearby", "county", "colorado"]);
     for (const key of STORY_AREAS) assert.ok(AREA_LABELS[key], `${key} has no label`);
+  });
+});
+
+/*
+  Unit BX, item 6: the county pill said "County" on the live paper, whose owner
+  configured "Boulder County" in Paper setup.
+
+  `areaLabelsFor` always took the county as an argument -- the defect was that
+  the reader's hook never passed the configured one, so the argument was always
+  absent. The first half below is the words; the second is the wiring, read off
+  the hook's own body, because the failure mode is a missing ARGUMENT and no
+  assertion on `areaLabelsFor` alone can see it.
+*/
+describe("the county ground in the paper's own words", () => {
+  const paper = { city: "Longmont", state: "Colorado" };
+
+  it("prints the configured county, and the ground's own word when none is set", () => {
+    assert.equal(areaLabelsFor(paper, "Boulder County").county, "Boulder County");
+    assert.equal(areaLabelsFor(paper, "  Boulder County  ").county, "Boulder County");
+    assert.equal(areaLabelsFor(paper, null).county, "County");
+    assert.equal(areaLabelsFor(paper, "").county, "County");
+    assert.equal(areaLabelsFor(paper).county, "County");
+  });
+
+  it("leaves the other three grounds to the paper's identity", () => {
+    const labels = areaLabelsFor(paper, "Boulder County");
+    assert.equal(labels.longmont, "Longmont");
+    assert.equal(labels.nearby, "Nearby");
+    assert.equal(labels.colorado, "Colorado");
+  });
+
+  it("hands the configured county to areaLabelsFor from the identity", () => {
+    const hook = readFileSync(new URL("../paper-context-state.ts", import.meta.url), "utf8");
+    assert.match(hook, /const \{ city, state, county \} = usePaper\(\)/);
+    assert.match(hook, /areaLabelsFor\(\{ city, state \}, county\)/);
   });
 });
