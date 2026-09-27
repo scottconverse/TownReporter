@@ -177,6 +177,11 @@ try {
 
   const documentMarker = `CUSTOM_DOCUMENT_MARKER_${Date.now()}`;
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
+  // "Write a story" is a dialog now (src/routes/desk.index.tsx), so the attach
+  // input and the story box only exist once it is open; open it the way the
+  // chrome draws the way in, the header's "+ New story".
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  await page.getByRole("dialog", { name: "Write a story" }).waitFor({ timeout: 45_000 });
   await page.getByLabel("Attach documents").setInputFiles({
     name: "custom-story-source.txt",
     mimeType: "text/plain",
@@ -186,7 +191,9 @@ try {
   await page.getByLabel("What story do you want?").fill("Write a brief from the attached source.");
   await page.getByText("Research & section", { exact: false }).click();
   await page.getByLabel("Drafting scope").selectOption("supplied");
-  const storyPicker = page.locator("#story-composer").getByLabel("Writing model");
+  const storyPicker = page
+    .getByRole("dialog", { name: "Write a story" })
+    .getByLabel("Writing model");
   const storyCustomChoice = await storyPicker
     .locator("option", { hasText: "Isolated API fixture" })
     .getAttribute("value");
@@ -278,19 +285,29 @@ try {
   const beforeBatchRequests = providerRequests.length;
 
   const batchHeadline = `Custom API batch selection ${Date.now()}`;
+  // Filing a lead by hand is the Queue's own "File a lead" dialog now: the
+  // redesign moved it off the inline `details.file-form` accordion, and the
+  // #file-lead anchor is how the desk's other walks open it too.
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
+  await page.getByLabel("Headline").fill(batchHeadline);
+  await page.getByLabel("Why now").fill("Proves the saved custom connection reaches Batch enqueue.");
+  await page.getByRole("button", { name: "File lead" }).click();
+  await page.waitForFunction(() => /^\/desk\/story\/\d+$/.test(location.pathname), undefined, {
+    timeout: 45_000,
+  });
   await page.goto(`${base}/desk/queue`);
-  const fileForm = page.locator("details.file-form");
-  await fileForm.locator("summary").click();
-  await fileForm.getByLabel("Headline").fill(batchHeadline);
-  await fileForm.getByLabel("Why now").fill("Proves the saved custom connection reaches Batch enqueue.");
-  await fileForm.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor();
-  await page.goto(`${base}/desk/queue`);
-  const batchRow = page.locator(".lead-row", { hasText: batchHeadline }).first();
-  await batchRow
-    .getByRole("checkbox", { name: `Include ${batchHeadline} in the batch draft`, exact: true })
+  await page
+    .getByRole("checkbox", { name: `Select ${batchHeadline} for deletion`, exact: true })
     .check();
-  const batch = page.locator("#draft-batch");
+  // One selection mechanism now: the drawn bulk strip above the table, which is
+  // also what Hold, Kill and Delete act on. Its press copies the selection into
+  // the dialog that holds the writing model, and the queueing happens there.
+  await page
+    .getByRole("region", { name: "Bulk actions for the leads shown" })
+    .getByRole("button", { name: "Start 1 story from the selected leads", exact: true })
+    .click();
+  const batch = page.getByRole("dialog", { name: "Draft the selected leads" });
+  await batch.locator("#draft-batch").waitFor({ timeout: 45_000 });
   const batchPicker = batch.getByLabel("Writing model");
   const batchNames = (await batchPicker.locator("option").allInnerTexts()).map((line) =>
     line.split("—")[0].trim(),
@@ -311,7 +328,7 @@ try {
   const customChoice = await customOption.getAttribute("value");
   assert.match(customChoice ?? "", /^custom:/);
   await batchPicker.selectOption(customChoice);
-  await batch.getByRole("button", { name: "Draft selected", exact: true }).click();
+  await batch.getByRole("button", { name: "Start 1 story", exact: true }).click();
   await batch.getByText("Draft batch started with Isolated API fixture: fixture-model-edited.").waitFor();
   await batch.getByText(/Batch #\d+ · Isolated API fixture: fixture-model-edited/).waitFor();
   assert(

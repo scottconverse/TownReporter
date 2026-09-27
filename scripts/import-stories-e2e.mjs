@@ -170,7 +170,7 @@ async function ownTheDesk() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk");
 }
@@ -231,43 +231,54 @@ async function cardFacts() {
 
 /**
  * The Desk's second choice: "Import finished stories", carrying the owner's
- * own promise, and handing the paste to the import screen untouched.
+ * own promise, and taking the paste to the import screen untouched.
+ *
+ * Phase 2a moved the report intake off Today's own page and onto its own
+ * screen, which is the screen the approved design keeps reachable for it --
+ * "Existing routes to keep reachable: `/desk/import` (New story intake)"
+ * (docs/design/handoff-2026-09-26/README.md:224), and the New story dialog's
+ * first tab "is the existing `/desk/import` intake" (README.md:446). So the
+ * second choice is now the composer's own footer link, offered beside the
+ * fields for writing it yourself -- the same place in the editor's path, one
+ * press further in. Every claim below is the same claim, checked at the screen
+ * that now carries it.
  */
 async function theDeskOffersTheSecondChoice() {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  const panel = page.locator("#import-story");
-  await panel.waitFor({ timeout: 45_000 });
-  await panel.getByRole("heading", { name: "Import finished stories", exact: true }).waitFor();
-  // textContent, not innerText: the eyebrow over the heading is uppercased by
-  // the stylesheet, and it is the source wording this walk is checking.
-  const said = (await panel.evaluate((el) => el.textContent)) ?? "";
+  // The composer is a dialog in phase 2a, opened by Today's own "+ New story".
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  const wayIn = page
+    .locator('a[href="/desk/import"]')
+    .filter({ hasText: /Import finished stories/i })
+    .first();
+  await wayIn.waitFor({ timeout: 45_000 });
+  // textContent, not innerText: the link's wording is what this walk reads.
+  const offered = ((await wayIn.textContent()) ?? "").replace(/\s+/g, " ").trim();
   must(
-    said.includes("Paste one story or a whole report. The text is kept exactly as written."),
-    "the Desk's second choice does not carry the owner's promise in the owner's words",
+    /already written somewhere else\?/i.test(offered),
+    `the import is not marked out as the other way in for a story already written (it says "${offered}")`,
   );
-  must(
-    /or bring one already written/i.test(said),
-    "the import box is not marked out as the other way in",
-  );
-
-  await panel.getByLabel("The story, or the whole report").fill(FIXTURE);
-  const read = panel.getByRole("button", { name: "Read the stories", exact: true });
-  await waitForEnabled(read);
-  await read.click();
+  await wayIn.click();
 
   await page.waitForURL(/\/desk\/import/, { timeout: 30_000 });
-  const carried = page.getByLabel("Paste the report or the story");
-  await carried.waitFor({ timeout: 30_000 });
-  await page.waitForFunction(
-    (want) => [...document.querySelectorAll("textarea")].some((t) => t.value.length === want),
-    FIXTURE.length,
-    { timeout: 30_000 },
+  await page
+    .getByRole("heading", { name: "Import finished stories", exact: true })
+    .waitFor({ timeout: 30_000 });
+  const screen = page.locator("main#desk");
+  // textContent, not innerText: the lede is the source wording this walk reads.
+  const said = (await screen.evaluate((el) => el.textContent)) ?? "";
+  must(
+    said.includes("Paste one story, or a whole report with many. The text is kept exactly as written"),
+    "the Desk's second choice does not carry the owner's promise in the owner's words",
   );
+
+  const carried = page.getByLabel("Paste the report or the story");
+  await carried.fill(FIXTURE);
   must(
     (await carried.inputValue()) === FIXTURE,
-    "the paste did not survive the hand-off from the Desk to the import screen",
+    "the paste did not reach the import screen character for character",
   );
-  step("the Desk hands the paste to the import screen, character for character");
+  step("the Desk's second choice takes the paste to the import screen, character for character");
 }
 
 /** The report read into cards: seven stories, three sections that are not. */

@@ -87,7 +87,7 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: /^Queue/ }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
 
   // Unit BF3: the "File a lead yourself" button is off the Queue controls row
@@ -136,8 +136,8 @@ async function main() {
   // Was "Leave as editor", which sat in the header of every desk page. It moved
   // to the Server page and asks you to type your address; see claim.ts. The desk
   // is still proven to be rendering by the nav link on the next line.
-  await page.getByRole("link", { name: /^Queue/ }).waitFor();
-  await page.getByRole("link", { name: /^Published/ }).first().click();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
+  await page.getByRole("link", { name: /^Published\b/ }).first().click();
   await page.waitForURL(/\/desk\/published/);
   // Click until the form actually opens. A force-click that lands before
   // React has hydrated the handler silently does nothing, and this walk
