@@ -18,6 +18,7 @@ import { DatesPanel } from "@/components/paper/dates-panel";
 import { SectionTag } from "@/components/paper/section-tag";
 import { ReaderRow, SaveStory, ShareStory, ReadingButton, CopyButton } from "@/components/reader-controls";
 import { readMinutes } from "@/lib/reader";
+import { isLegallyRemovedSlug, legalGoneResponse } from "@/lib/news/legal-gone";
 import { ViewBeacon } from "@/components/view-beacon";
 
 /**
@@ -119,6 +120,35 @@ export const Route = createFileRoute("/articles/$slug")({
       // local dev, and a relative canonical is not a canonical.
       links: url.startsWith("http") ? [{ rel: "canonical", href: url }] : [],
     };
+  },
+  /*
+    A legally removed story answers 410 Gone, not 404.
+
+    The two are not the same claim and the desk makes the difference
+    deliberately: `removeLegally` deletes the row, so without this the read
+    below finds nothing and the page answers 404 -- the answer a mistyped
+    address gets. But the removal dialog the owner confirms promises, on the
+    record, "Removed now; the URL returns 410 Gone" (README Dialogs table,
+    drawing `dialog-15-legal.png`), and a promise the UI makes about a URL has
+    to be true of the URL. 410 also tells a crawler something 404 cannot: it
+    was here, it is gone for good, stop asking.
+
+    This lives in the route's own handler because the status cannot be set any
+    other way here. SSR streams: the head leaves before the loader has
+    resolved, the router hardcodes 404 for `notFound()` and 500 for a thrown
+    error, and h3 keeps a returned `Response`'s own status -- which is why the
+    feed and the sitemap build their responses this way. A route WITH a
+    component is the one case where a handler may hand the request back:
+    `next()` falls through to the ordinary render, so a story that was not
+    legally removed is served exactly as before.
+  */
+  server: {
+    handlers: {
+      GET: async ({ params, next }) => {
+        if (await isLegallyRemovedSlug(params.slug)) return legalGoneResponse();
+        return next();
+      },
+    },
   },
   component: ArticlePage,
 });
