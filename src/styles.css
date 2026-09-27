@@ -2256,54 +2256,6 @@
 }
 /* ---------- shared by the dialogs and /desk/legal-removals ---------- */
 .desk-ltr .astra-field {
-/* ---- phase 4 draws the same sheet from the other side of the merge ---- */
-
-/*
-  ---------------------------------------------------------------- dialogs ---
-  The desk's dialog *contents*, from the redesign's Desk Dialogs.dc.html
-  (docs/design/handoff-2026-09-26). Phase 0 built the shell -- .astra-modal,
-  the head, the foot, .astra-choice-card -- and this is everything that goes
-  *inside* one: tabs, labelled fields, the drop zone, the source preview table,
-  the More list, the model row, and the note preview.
-
-  The reference draws all of it with inline styles. Those are converted here,
-  one class at a time, with the token names this file actually defines: the
-  reference's --ink / --ink2 / --panel / --yel are --fg / --fg2 / --bg2 / --a.
-  Type sizes carry var(--ts) like every other dialog rule so the paper's Large
-  setting scales them too.
-
-  Everything is scoped .desk-ltr.astra-modal-layer, the same scope phase 0
-  uses, because the dialog renders in a portal outside the desk shell.
-*/
-.desk-ltr.astra-modal-layer .astra-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  align-self: flex-start;
-  border: 1px solid var(--line);
-}
-.desk-ltr.astra-modal-layer .astra-tab {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fg);
-  font-family: var(--fd);
-  font-weight: 800;
-  font-size: calc(0.9375rem * var(--ts));
-  cursor: pointer;
-}
-.desk-ltr.astra-modal-layer .astra-tab + .astra-tab {
-  border-left: 1px solid var(--line);
-}
-.desk-ltr.astra-modal-layer .astra-tab.on {
-  background: var(--fg);
-  color: var(--bg);
-}
-
-.desk-ltr.astra-modal-layer .astra-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2654,7 +2606,57 @@
   }
 }
 
-/* ---- phase 4 draws the same sheet from the other side of the merge ---- */
+
+/*
+  ---------------------------------------------------------------- dialogs ---
+  The desk's dialog *contents*, from the redesign's Desk Dialogs.dc.html
+  (docs/design/handoff-2026-09-26). Phase 0 built the shell -- .astra-modal,
+  the head, the foot, .astra-choice-card -- and this is everything that goes
+  *inside* one: tabs, labelled fields, the drop zone, the source preview table,
+  the More list, the model row, and the note preview.
+
+  The reference draws all of it with inline styles. Those are converted here,
+  one class at a time, with the token names this file actually defines: the
+  reference's --ink / --ink2 / --panel / --yel are --fg / --fg2 / --bg2 / --a.
+  Type sizes carry var(--ts) like every other dialog rule so the paper's Large
+  setting scales them too.
+
+  Everything is scoped .desk-ltr.astra-modal-layer, the same scope phase 0
+  uses, because the dialog renders in a portal outside the desk shell.
+*/
+.desk-ltr.astra-modal-layer .astra-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-tab {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+  cursor: pointer;
+}
+.desk-ltr.astra-modal-layer .astra-tab + .astra-tab {
+  border-left: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-tab.on {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.desk-ltr.astra-modal-layer .astra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .desk-ltr.astra-modal-layer .astra-field-label {
   font-family: var(--fd);
   font-weight: 800;
