@@ -1317,6 +1317,14 @@ export const draftBatchStartInput = z.looseObject({
 /** `draft-batch.ts:140` getDraftBatch. */
 export const draftBatchGetInput = z.looseObject({ batchId: rowId.optional() });
 
+/**
+ * `draft-batch.ts` dismissDraftBatch (Unit BS). The batch id is required, and
+ * its refusal is the editor's own sentence -- `dismissDraftBatchForAuthenticatedEditor`
+ * checks `Number.isSafeInteger` itself and answers "Draft batch ID must be a
+ * positive integer.", so the boundary only has to stop the unbounded value.
+ */
+export const draftBatchDismissInput = z.looseObject({ batchId: rowId });
+
 /** `routine-notice-checks.ts:93` (`:191` refuses a sourceUrl over 4000). */
 export const routineCheckRunInput = z.looseObject({
   sourceId: rowId.optional(),
