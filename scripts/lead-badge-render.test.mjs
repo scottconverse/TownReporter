@@ -1068,3 +1068,79 @@ test("the Compare view's URL parser stub matches the real parseUrlList in src/li
     );
   }
 });
+
+/*
+ * Unit BY (2026-09-27): the Queue tints the row that is picked for the bulk
+ * bar, as the drawing does --
+ * `Desk Screens.dc.html:284` builds `rowStyle` with
+ * `+ (selected ? "background:var(--panel)" : "")`. The row's only picked state
+ * is the one selection box (`deleteSelected`), and this pins the markup half of
+ * the pair: the class goes on when the box is ticked and stays off when it is
+ * not. The CSS half is asserted against the real stylesheet right below, so a
+ * rename on either side fails here instead of quietly dropping the tint.
+ */
+test("a ticked Queue row carries the picked class and an unticked row does not", async () => {
+  const row = (deleteSelected) =>
+    renderToStaticMarkup(
+      createElement(LeadRowView, {
+        lead: baseLead({ status: "new" }),
+        roomy: true,
+        deleteSelected,
+        onDeleteSelect() {},
+      }),
+    );
+  const picked = row(true);
+  const plain = row(false);
+  assert.match(
+    picked,
+    /class="lead-row roomy picked"/,
+    "a ticked row should be marked as picked so the sheet can tint it",
+  );
+  assert.doesNotMatch(
+    plain,
+    /lead-row roomy picked/,
+    "an unticked row must not carry the picked class -- the tint means 'in the bulk bar's set'",
+  );
+  assert.match(
+    plain,
+    /class="lead-row roomy"/,
+    "the unticked row should still render as the Queue row it was",
+  );
+  // The killed row's own state is a different axis and must survive the tint:
+  // `.lead-row.dead` is `opacity:.5` (styles.css) and the row can carry both.
+  const killed = renderToStaticMarkup(
+    createElement(LeadRowView, {
+      lead: baseLead({ status: "killed" }),
+      roomy: true,
+      deleteSelected: true,
+      onDeleteSelect() {},
+    }),
+  );
+  assert.match(killed, /class="lead-row dead roomy picked"/);
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(
+    styles,
+    /\.desk-ltr \.lead-row\.dead \{opacity:\.5\}/,
+    "the killed row's own rule is opacity, which multiplies whatever fill is under it",
+  );
+});
+
+test("the picked class is what the desk's stylesheet tints, and only on the Queue's own list", async () => {
+  const css = await readFile(new URL("../src/desk-astra.css", import.meta.url), "utf8");
+  const tint = css.match(
+    /\.desk-ltr\.astra \.lead-list\.roomy \.lead-row\.picked \{[^}]*\}/,
+  );
+  assert.ok(tint, "desk-astra.css should tint .lead-list.roomy .lead-row.picked");
+  assert.match(
+    tint[0],
+    /background:\s*var\(--surface\)/,
+    "the tint is the drawing's --panel, which this shell maps to --surface",
+  );
+  // The desk's `--surface` must be the prototype's `--panel`, or the tint above
+  // would be a different color than the drawing asks for.
+  assert.match(
+    css,
+    /--panel->--surface/,
+    "desk-astra.css documents the prototype --panel -> --surface mapping this tint relies on",
+  );
+});
