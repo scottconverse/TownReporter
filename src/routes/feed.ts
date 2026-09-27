@@ -105,6 +105,17 @@ export const Route = createFileRoute("/feed")({
   ${items}
 </channel>
 </rss>`;
+        // One fetch of the paper's own feed. The Stats page's "RSS feed
+        // fetches" row is the daily count of these, and this is the only place
+        // it can be counted -- nothing identifies a feed reader to the public
+        // pages. Fire-and-forget inside a try: a subscriber waiting for
+        // headlines must never be held up, or broken, by our own arithmetic.
+        try {
+          const reading = await import("@/lib/news/reading.server.ts");
+          await reading.recordTrustCount("rss-fetch");
+        } catch (err) {
+          console.error("[paper] feed count failed", err);
+        }
         return new Response(xml, {
           headers: {
             "content-type": "application/rss+xml; charset=utf-8",

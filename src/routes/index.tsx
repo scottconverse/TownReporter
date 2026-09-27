@@ -9,6 +9,7 @@ import { GeoPills } from "@/components/paper/geo-pills";
 import { SectionTag } from "@/components/paper/section-tag";
 import { StoryCell, StoryGrid } from "@/components/paper/story-grid";
 import { useReader } from "@/components/reader-context";
+import { ReadBeacon } from "@/components/read-beacon";
 import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
 import { thisWeekDates } from "@/lib/news/story-dates-public";
@@ -297,6 +298,7 @@ function Home() {
   return (
     <>
       <ViewBeacon targets={["site"]} />
+      <ReadBeacon />
       {query.isError ? (
         <div className="reader-error" role="alert">
           The stories could not load.{" "}
