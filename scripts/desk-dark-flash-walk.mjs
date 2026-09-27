@@ -332,8 +332,7 @@ async function ownTheDesk(pass) {
 
 /** A real lead, filed the way an editor files one, so /desk/story/<id> is real. */
 async function fileTheLead() {
-  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself", { exact: true }).click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(HEADLINE);
   await page.getByLabel("Why now").fill(WHY);
   await page.getByRole("button", { name: "File lead" }).click();

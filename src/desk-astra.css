@@ -799,6 +799,18 @@
 .desk-ltr.astra .desk-cc-grid {
   display: contents;
 }
+/* BF3, Today (a): the drawn order is Tonight's edition, In progress, then New
+   leads, and the DOM is already in it (`.recent-story-work in-progress` sits
+   above `.desk-cc-grid` inside `.desk-work`). The desk's own `order: 1` on
+   `.recent-story-work` (styles.css:1922) is a leftover from the old card grid,
+   where the queue came first in the DOM -- it has no box of its own to sort
+   against anything except this one, and at 1280 it pulled In progress BELOW
+   the queue (measured: queue top 536, In progress top 1289). The astra reset
+   that neutralised it fired only below 960. Zeroed at every width, in this
+   scope, so both columns read in the drawn order. */
+.desk-ltr.astra .desk-home .recent-story-work {
+  order: 0;
+}
 .desk-ltr.astra :is(.story-composer, .recent-story-work, .gc-darkdesk, .gc-followups, .gc-wire) {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -2443,20 +2455,11 @@
   overflow-wrap: anywhere;
 }
 
-/* "Find anything" sits with the nav items but is a button, not a link. */
-.desk-ltr.astra .astra-nav.astra-find {
-  border: 1px solid var(--line);
-  color: var(--fg2);
-  font-size: calc(14px * var(--ts));
-  margin-bottom: 10px;
-}
-.desk-ltr.astra .astra-nav.astra-find:hover {
-  background: var(--hover);
-  color: var(--fg);
-}
+/* BF3: the "Find anything" box and the footer's extra route links are gone
+   from the nav -- the drawing has neither. Ctrl K still opens the palette. */
 
-/* Nav footer: paper link, appearance, text size, shortcuts, the routes the
-   eleven design items do not cover, and the account button. */
+/* Nav footer: paper link, appearance, text size, shortcuts, the account
+   button. */
 .desk-ltr.astra .astra-nav-foot {
   display: flex;
   flex-direction: column;
@@ -2523,24 +2526,6 @@
   color: var(--fg);
   text-decoration: underline;
 }
-.desk-ltr.astra .astra-foot-more {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 12px;
-}
-.desk-ltr.astra .astra-foot-more a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  font-size: calc(14px * var(--ts));
-  color: var(--fg2);
-  text-decoration: none;
-}
-.desk-ltr.astra .astra-foot-more a:hover {
-  color: var(--fg);
-  text-decoration: underline;
-}
-
 /* Phone top bar (the whole `.astra-topbar` rule is inside the ≤700 block,
    so nothing here needs to hide it on desktop). */
 .desk-ltr.astra .astra-brand-bar {
@@ -2665,6 +2650,29 @@
 }
 .desk-ltr.astra .more-menu .more-item.danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+/* BF3: two of the lead menu's items are not a button with a word on it. "Open"
+   and "The piece" are links -- `content` items holding `<Link
+   className="more-item">`, which is how the row reaches another page without
+   importing `useNavigate` (the render stub the tests load exports `Link` and
+   nothing else). They take the button's shape exactly, so the menu still reads
+   as one list; a link that inherited the page's underline would not.
+   "Kill as duplicate" and the draft control carry their own markup instead, so
+   they get the same inset and hairline in a `more-block`. */
+.desk-ltr.astra .more-menu a.more-item {
+  text-decoration: none;
+}
+.desk-ltr.astra .more-menu .more-block {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .more-menu .more-block:last-child {
+  border-bottom: 0;
+}
+.desk-ltr.astra .more-menu .more-block .del-warn,
+.desk-ltr.astra .more-menu .more-block .dup-kill-note,
+.desk-ltr.astra .more-menu .more-block .queue-draft-controls {
+  margin: 0;
 }
 
 /* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a
@@ -3005,12 +3013,23 @@
   margin: 6px 0 0;
   text-wrap: pretty;
 }
+/* BF3, Today (b): one horizontal group -- Start story S · Hold H · Kill X --
+   at the right of the row, the way evidence\BF2\cmp-today.png draws it. It was
+   a right-aligned COLUMN of stacked presses, which is where the row's height
+   went and what the side-by-side caught. `flex-wrap: wrap` keeps the three
+   inside the column when the row narrows; at 700 the whole group drops under
+   the lead instead (the @media block at the foot of this file). */
 .desk-ltr.astra .today-lead-side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
+/* The drawing marks each press with its key: "Start story S", "Hold H", "Kill
+   X" (cmp-today.png). The key is part of the button's own face in the copy, so
+   there is no second element for a screen reader to read out twice. */
 .desk-ltr.astra .today-lead-row2 {
   display: flex;
   flex-wrap: wrap;
@@ -3098,20 +3117,83 @@
 /* ---------------------------------------------------------------------------
    QUEUE
 --------------------------------------------------------------------------- */
+/* BF3, defect 2: ONE line at 1280, drawn order -- the tab strip at the left,
+   then search, Sort and Section at the right -- with the words inside the
+   controls ("Sort: Best first", "Section: All") rather than as labels above
+   them. Measured at 1280: all six share one top y. Nothing here wraps above
+   the phone width; the @media block at the foot of this file stacks them. */
 .desk-ltr.astra .queue-controls {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 18px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
   margin-top: 8px;
 }
-/* Filing a lead by hand lives at the right-hand end of the controls row (unit
-   BF2, defect 8): it is a control, not a panel, and nothing stands between the
-   drawn header and the table any more. `margin-left: auto` keeps it out of the
-   way of the filters and the tab strip it sits beside. */
-.desk-ltr.astra .queue-file {
+.desk-ltr.astra .queue-tabs {
+  flex: 0 0 auto;
+}
+.desk-ltr.astra .queue-filters {
   display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
   margin-left: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The drawn controls are 44px boxes with a 1px ink edge and their words
+   inside, not stacked labels: a search field, then "Sort: Best first ▾" and
+   "Section: All ▾". The base control rule above (line 567) is a 42px field
+   with a hairline -- two pixels and one ink step off the drawing, and those
+   are the two things the editor aims at.
+   46px, not 44: the tab strip beside them is 44 plus its own 1px border, so
+   the boxes are measured to the strip's outer height and the whole row shares
+   one top y instead of sitting 1px out of line. The search also has to shrink
+   past the drawing's `min-width:260px`: the desk's main column is 1050px at a
+   1280 window (the nav rail takes the rest) and the drawing's own 260 + two
+   nowrap boxes is 700 of the 531 the filters have left beside the tab strip.
+   A native <select> is as wide as its longest option, where the drawing draws
+   only the chosen value -- so the two selects take `max-width:100%` and an
+   ellipsis, and the row stays on one line at 1280 without wrapping. */
+.desk-ltr.astra .queue-search {
+  display: block;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--fg);
+  background: none;
+  color: var(--fg2);
+  font: 400 calc(15px * var(--ts)) var(--fb);
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.desk-ltr.astra .queue-sel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--fg);
+  background: none;
+  white-space: nowrap;
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.desk-ltr.astra .queue-sel .queue-lab {
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.desk-ltr.astra .queue-sel select {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
@@ -3186,12 +3268,20 @@
   height: 44px;
   min-height: 44px;
 }
-/* The controls row's search box. Inputs in this scope are 42px (desk-astra.css
-   `:where(input...)`), which is two pixels under the floor the design rules
-   set, so the control the editor is aiming at takes the full target. */
-.desk-ltr.astra .queue-search input {
-  min-height: 44px;
-  min-width: 240px;
+/* The evidence cell: the drawn EvidenceMeter's squares plus the count. The
+   drawing prints "3 opened · 1 could not"; the desk has no per-lead failure
+   figure anywhere (see the comment in desk-leads.tsx), so the failure clause
+   is dropped rather than invented. */
+.desk-ltr.astra .ev-squares {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 8px;
+}
+.desk-ltr.astra .ev-squares i {
+  width: 12px;
+  height: 12px;
+  background: var(--fg);
 }
 .desk-ltr.astra .queue-evidence,
 .desk-ltr.astra .queue-filed {
@@ -3207,27 +3297,100 @@
   align-items: center;
   gap: 8px;
 }
-/* The drawn table header (README "3. Queue"), sitting on the same three-column
-   grid the lead rows already use so the labels land over the cells they name:
-   score, then the lead, then the flags/actions column where the evidence and
-   filed ages print. The rows themselves are unchanged -- their internals are
-   pinned by scripts/lead-badge-render.test.mjs and by the desk's own flows --
-   so this line names the columns rather than re-laying-out the row. */
+/* BF3, defect 1: the drawn row is ONE line of a table -- 44px checkbox, 52px
+   score, the lead, 180px evidence, 150px filed, then the actions -- instead of
+   the tall card the desk printed (seven controls, each on its own line).
+   The columns are named on the drawing's own measure (README 282-289) and the
+   header below sits on the same track list with the same gap and inset, so
+   every label lands over the cell it names. `.lead-list.roomy` is the Queue's
+   list; the batch-results list inside the draft dialog carries the same class
+   and the same six children, so it lays out identically. */
+.desk-ltr.astra .lead-list.roomy .lead-row {
+  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px auto;
+  column-gap: 16px;
+  align-items: start;
+  padding: 10px 24px;
+}
+/* The lead cell: chips on the first line (NEW / HELD / ≈ PRINTED / Seen again
+   plus the section), the 16/700 headline under them, then the why -- clamped
+   to one line. The capture's own row pitch is ~85px at 1440, not the 44-56px
+   the brief quotes, and its lead cell is two lines; the desk's leads carry an
+   editor-written why as well, and that third line is the one difference the
+   row cannot drop without losing the reason the lead was filed. */
+.desk-ltr.astra .lead-list.roomy .lead-cell {
+  min-width: 0;
+}
+.desk-ltr.astra .lead-list.roomy .lead-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* The drawn chip line is status-first: NEW / HELD / ≈ PRINTED / Seen again,
+   then the section (README 282-289, and Today's rows read the same way). The
+   markup has the section span first, which is an order
+   `scripts/lead-badge-render.test.mjs` pins by name, so the drawing's order
+   goes on here -- `order` moves the pills without moving the node. */
+.desk-ltr.astra .lead-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.desk-ltr.astra .lead-chips > .lead-flags {
+  order: -1;
+}
+.desk-ltr.astra .lead-list.roomy .lead-chips .meta {
+  margin: 0;
+}
+.desk-ltr.astra .lead-list.roomy .lead-chips .lead-flags {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: none;
+}
+.desk-ltr.astra .lead-list.roomy .hl-link {
+  display: block;
+  margin-top: 4px;
+  font-size: calc(16px * var(--ts));
+}
+.desk-ltr.astra .lead-list.roomy .lead-why {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 2px 0 0;
+}
+.desk-ltr.astra .lead-list.roomy .row-acts {
+  margin-top: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.desk-ltr.astra .lead-list.roomy .queue-filed {
+  padding-top: 4px;
+}
+/* The drawn table header (README "3. Queue"): one line of column labels over
+   the rows, with the select-all box in the checkbox column -- the same track
+   list, gap and 24px inset the rows use. The inset matters: the rows sit in
+   `.lead-list` (borderless here), so a header without it would name columns a
+   column off from the cells below it. */
 .desk-ltr.astra .queue-head {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: end;
-  padding: 0 0 8px;
-  border-bottom: 3px solid var(--fg);
+  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px auto;
+  column-gap: 16px;
+  align-items: center;
+  padding: 0 24px 8px;
+  border-bottom: 2px solid var(--fg);
   font: 800 calc(14px * var(--ts)) var(--fd);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--fg2);
 }
-.desk-ltr.astra .queue-head > span:last-child {
-  text-align: right;
+.desk-ltr.astra .queue-head > .queue-check {
+  margin: 0;
 }
+
 .desk-ltr.astra .queue-bulk-count {
   font: 800 calc(15px * var(--ts)) var(--fd);
 }
@@ -3284,12 +3447,65 @@
     margin-top: 6px;
     min-width: 0;
   }
-  /* The header names columns that no longer stand in columns -- the row is one
-     column here, and its own chips say what each cell is. The bulk strip above
-     it keeps the select-all box, so nothing on this line is the only way to do
-     anything. */
+  /* BF3: the drawn table is six columns wide; a phone is not. The row keeps
+     the checkbox and the score, the lead takes the rest, and the evidence,
+     filed age and actions drop under it in the lead's own column -- the same
+     shape the row had at this width before, minus the repeated controls. The
+     header keeps its select-all box (it is a real control now, not a label)
+     and drops the words, which name columns that no longer stand in columns.
+     The 3px rule stays, so the box still reads as sitting on the table's top
+     edge. */
   .desk-ltr.astra .queue-head {
+    grid-template-columns: 44px minmax(0, 1fr);
+    padding: 0 12px 8px;
+  }
+  .desk-ltr.astra .queue-head > span {
     display: none;
+  }
+  .desk-ltr.astra .lead-list.roomy .lead-row {
+    grid-template-columns: 44px 52px minmax(0, 1fr);
+    column-gap: 10px;
+    padding: 14px 12px;
+  }
+  .desk-ltr.astra .lead-list.roomy .queue-evidence,
+  .desk-ltr.astra .lead-list.roomy .queue-filed {
+    grid-column: 3;
+  }
+  .desk-ltr.astra .lead-list.roomy .queue-acts {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+  /* The controls row stacks: the strip on its own line, then search over the
+     two selects. `nowrap` on the filters is what would push the page sideways
+     at 390 (the search box's 260px floor plus two selects is wider than the
+     screen), so it comes off here with the search box's floor. */
+  .desk-ltr.astra .queue-controls {
+    flex-wrap: wrap;
+  }
+  /* `flex: 0 0 auto` on the strip is the desktop rule (it keeps the five tabs
+     from being squeezed on the one-line row); here it would pin the strip at
+     its max-content 426px and push the page 53px wide, so it shrinks and the
+     strip's own `flex-wrap` puts the tabs on a second line. */
+  .desk-ltr.astra .queue-tabs {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .desk-ltr.astra .queue-filters {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-left: 0;
+    width: 100%;
+  }
+  .desk-ltr.astra .queue-search {
+    /* In a column container `flex-basis` is a HEIGHT -- the desktop
+       `flex: 1 1 200px` would draw a 200px-tall search box here. */
+    flex: 0 0 auto;
+    min-width: 0;
+    width: 100%;
+  }
+  .desk-ltr.astra .queue-sel {
+    justify-content: space-between;
   }
   /* The drawn phone header (Desk Command.dc.html line 215): the title drops to
      28px and the rule gets closer to it. `.ov-head .h1` is two classes deep, so

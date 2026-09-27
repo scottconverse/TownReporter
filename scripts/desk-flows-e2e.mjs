@@ -46,6 +46,24 @@ const expectedModelNames = [
   "Local model",
 ];
 
+/*
+  Unit BF3: the row's secondary actions moved into its "More ▾" menu (the
+  drawing's actions cell is Start story + More and nothing else). The menu is a
+  native <details>, so opening it twice closes it -- this opens it only when it
+  is shut, which is what makes the presses below find their buttons.
+*/
+async function openRowMenu(row) {
+  const menu = row.locator("details.more");
+  if (!(await menu.evaluate((el) => el.open))) {
+    await row.locator("summary.more-sum").click();
+    // A <details> opens synchronously; assert it so a closed menu reports as
+    // "the menu did not open" here rather than as a missing button later.
+    if (!(await menu.evaluate((el) => el.open))) {
+      throw new Error("the row's More menu did not open");
+    }
+  }
+}
+
 async function assertSharedModelPicker(picker, expectedValue, surface) {
   const names = (await picker.locator("option").allInnerTexts()).map((line) =>
     line.split("—")[0].trim(),
@@ -291,8 +309,10 @@ async function main() {
   step("the Write a story lead is filed and listed in the Queue");
 
   // ── Queue: file a lead, then delete it, then undo ─────────────────────────
-  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
-  await page.getByText("File a lead yourself").click();
+  // Unit BF3: the "File a lead yourself" button is off the controls row (the
+  // drawing files a lead from Today's "+ Add a lead"). /desk/queue#file-lead
+  // still opens the same dialog, so the walk presses the door the brief names.
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "networkidle" });
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with a hearing date.");
   await page.getByRole("button", { name: "File lead" }).click();
@@ -309,6 +329,10 @@ async function main() {
   await row.waitFor();
 
   const queueModel = row.getByLabel("Writing model");
+  // Unit BF3: the draft control moved into the row's "More" menu (the drawing's
+  // actions cell is Start story + More). The words are unchanged; the walk now
+  // opens the menu before pressing the model summary inside it.
+  await openRowMenu(row);
   await row
     .locator("summary")
     .filter({ hasText: /^Model:.*change$/ })
@@ -336,6 +360,9 @@ async function main() {
   if (opacity !== "1") throw new Error(`row actions are hidden (opacity ${opacity})`);
   step("row actions are visible without hovering");
 
+  await openRowMenu(row);
+  // Unit BF3: Delete now lives in the row's "More" menu, which stays open while
+  // it asks. Same two presses, one menu-open in front of them.
   await row.getByRole("button", { name: "Delete", exact: true }).click();
   await row.getByRole("button", { name: /Yes, delete/ }).click();
   await page.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });
@@ -347,6 +374,7 @@ async function main() {
 
   // ── Delete again, then restore from the trash on the Server page ──────────
   const row2 = page.locator(".lead-row", { hasText: leadHeadline }).first();
+  await openRowMenu(row2);
   await row2.getByRole("button", { name: "Delete", exact: true }).click();
   await row2.getByRole("button", { name: /Yes, delete/ }).click();
   await page.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });

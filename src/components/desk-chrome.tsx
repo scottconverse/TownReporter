@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
@@ -10,7 +10,7 @@ import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { useAppearance } from "@/lib/appearance-context";
 import { Dialog } from "@/components/dialog";
 
-import { Search, Plus, Menu, X, ArrowUpRight } from "lucide-react";
+import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
 import { listLeads, listRecentStoryWork } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
@@ -62,7 +62,13 @@ const DESK_NAV: readonly DeskNavItem[] = [
   { to: "/desk/stats", label: "Stats" },
 ] as const;
 
-/** Routes the shell no longer draws as nav items, kept reachable in the footer. */
+/**
+ * Routes the shell does not draw as nav items.
+ *
+ * They are still reachable: this list is what Ctrl K's palette can find and
+ * navigate to, which is the design's own "find anything" mechanism. Not drawn
+ * in the footer -- BF3 removed those links, and the capture has none.
+ */
 const DESK_MORE = [
   { to: "/desk/scan", label: "Scan the wire" },
   { to: "/desk/import", label: "Import" },
@@ -293,18 +299,13 @@ export function DeskShell({
           <span>Editor’s desk</span>
         </Link>
         <RunningBox jobs={running} nowMs={nowMs} onNavigate={() => setMenuOpen(false)} />
-        <button
-          type="button"
-          className="astra-nav astra-find"
-          onClick={() => {
-            setMenuOpen(false);
-            setSearchOpen(true);
-          }}
-        >
-          <Search size={18} aria-hidden />
-          <span>Find anything</span>
-          <kbd>Ctrl K</kbd>
-        </button>
+        {/*
+          BF3, defect 3: the drawing has no "Find anything" box in the nav, so
+          the drawn nav is brand, running work, the section list and the
+          footer. Ctrl K is unchanged and still opens the palette -- the box
+          was a second way to press a keyboard shortcut, and it was the only
+          thing on the page that looked like a search field.
+        */}
         <DeskNav
           onNavigate={() => setMenuOpen(false)}
           counts={counts}
@@ -347,13 +348,13 @@ export function DeskShell({
           <button type="button" className="astra-foot-keys" onClick={() => setKeysOpen(true)}>
             Press ? for keyboard shortcuts
           </button>
-          <div className="astra-foot-more">
-            {DESK_MORE.map((l) => (
-              <Link key={l.to} to={l.to} onClick={() => setMenuOpen(false)}>
-                {l.label}
-              </Link>
-            ))}
-          </div>
+          {/*
+            BF3, defect 3: no "Scan the wire / Import" links under the footer.
+            Those screens stay reachable -- the handoff (README "Existing
+            routes to keep reachable") names /desk/import, /desk/memory and
+            /desk/legal-removals -- so DESK_MORE is still the palette's page
+            list below, and the footer draws only what the capture draws.
+          */}
           <div className="astra-account">
             {isPending ? <span aria-hidden /> : user ? <UserButton /> : null}
           </div>
@@ -812,6 +813,22 @@ export type DeskMoreItem = {
   /** A remove-or-stop action. The word is already the warning; this only
    *  colors it, so a Kill in a menu reads the same as a Kill on a row. */
   danger?: boolean;
+  /**
+   * Phase 2a (BF3): the lead row's menu holds the row's whole control set,
+   * and two of those lines are not a word-and-a-handler -- "Kill as
+   * duplicate" has three states, Delete asks before it acts, and the draft
+   * line is a button beside its own model chooser. Those render here instead
+   * of a `<button>`, so moving a control into the menu does not mean
+   * rewriting the control. `label` is still required: it is the React key,
+   * and the item's name in this list.
+   */
+  content?: ReactNode;
+  /**
+   * Stay open when pressed. A line that reveals the rest of its own question
+   * ("Delete" -> "Yes, delete") is not a menu that has finished; closing on
+   * the press would take the question away with it.
+   */
+  keepOpen?: boolean;
 };
 
 /**
@@ -870,21 +887,27 @@ export function DeskMoreMenu({
         {label} <span aria-hidden>▾</span>
       </summary>
       <ul className="more-menu">
-        {items.map((item) => (
-          <li key={item.label}>
-            <button
-              type="button"
-              className={"more-item" + (item.danger ? " danger" : "")}
-              disabled={item.disabled}
-              onClick={() => {
-                if (ref.current) ref.current.open = false;
-                item.onSelect?.();
-              }}
-            >
-              {item.label}
-            </button>
-          </li>
-        ))}
+        {items.map((item) =>
+          item.content ? (
+            <li key={item.label} className="more-block">
+              {item.content}
+            </li>
+          ) : (
+            <li key={item.label}>
+              <button
+                type="button"
+                className={"more-item" + (item.danger ? " danger" : "")}
+                disabled={item.disabled}
+                onClick={() => {
+                  if (ref.current && !item.keepOpen) ref.current.open = false;
+                  item.onSelect?.();
+                }}
+              >
+                {item.label}
+              </button>
+            </li>
+          ),
+        )}
       </ul>
     </details>
   );

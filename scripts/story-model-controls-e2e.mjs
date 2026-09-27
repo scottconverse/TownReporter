@@ -24,8 +24,7 @@ try {
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
   await completeFirstRunSetup(page, base);
 
-  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "networkidle" });
   await page.getByLabel("Headline").fill(`Story model controls ${stamp}`);
   await page.getByLabel("Why now").fill("Browser regression fixture for Story settings.");
   await page.getByRole("button", { name: "File lead" }).click();

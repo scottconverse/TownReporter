@@ -506,37 +506,19 @@ function QueuePage() {
         </>
       }
     >
+      {/*
+        BF3, defect 2: one controls row, drawn order -- the tabs at the left,
+        then search, Sort and Section at the right -- with the words inside
+        the controls ("Sort: Best first", "Section: All") rather than as
+        labels sitting above them. The drawn controls are a single line at
+        1280 (measured: all six share one top y), so nothing here wraps until
+        the phone width, where the strip and the three filters stack.
+
+        "File a lead yourself" is not on this row any more: the drawing has
+        it behind Today's "+ Add a lead", and /desk/queue#file-lead still
+        opens the same dialog on load for anything that links here.
+      */}
       <div className="queue-controls">
-        <Field label="Search leads">
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setSelectedDeleteLeadIds([]);
-              setConfirmingBulkDelete(false);
-              setBulkDeleteNotice("");
-            }}
-            placeholder="Headline, why now or section"
-          />
-        </Field>
-        <Field label="Sort">
-          <select value={sort} onChange={(event) => setSort(event.target.value as QueueSort)}>
-            <option value="best">Best first</option>
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-          </select>
-        </Field>
-        <Field label="Section">
-          <select value={sectionFilter} onChange={(event) => setSectionFilter(event.target.value)}>
-            <option value="all">All sections</option>
-            {sections.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </Field>
         <div className="seg-strip queue-tabs" role="group" aria-label="Filter leads">
           {queueFilters.map((f) => (
             <button
@@ -572,18 +554,52 @@ function QueuePage() {
             </button>
           ))}
         </div>
-        {/*
-          Filing a lead by hand used to be a shut <details> above the table
-          (unit BF2, defect 8: nothing stands above the table now). Its form
-          moved into a dialog opened from here, Today's "+ Add a lead", or
-          /desk/queue#file-lead; the press keeps the words the desk's own
-          walks look for.
-        */}
-        <span className="queue-file">
-          <InkButton tone="quiet" onClick={() => setPanel("file-lead")}>
-            File a lead yourself
-          </InkButton>
-        </span>
+        <div className="queue-filters">
+          <input
+            type="search"
+            className="queue-search"
+            aria-label="Search leads"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setSelectedDeleteLeadIds([]);
+              setConfirmingBulkDelete(false);
+              setBulkDeleteNotice("");
+            }}
+            placeholder="Search leads, places, records…"
+          />
+          <div className="queue-sel">
+            <span className="queue-lab" aria-hidden="true">
+              Sort:
+            </span>
+            <select
+              aria-label="Sort"
+              value={sort}
+              onChange={(event) => setSort(event.target.value as QueueSort)}
+            >
+              <option value="best">Best first</option>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </div>
+          <div className="queue-sel">
+            <span className="queue-lab" aria-hidden="true">
+              Section:
+            </span>
+            <select
+              aria-label="Section"
+              value={sectionFilter}
+              onChange={(event) => setSectionFilter(event.target.value)}
+            >
+              <option value="all">All</option>
+              {sections.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {shown.length > 0 ? (
@@ -591,22 +607,15 @@ function QueuePage() {
           className="queue-bulk-delete queue-bulk"
           aria-label="Bulk actions for the leads shown"
         >
-          <span className="queue-bulk-what">
-            <label>
-              <input
-                type="checkbox"
-                className="queue-check"
-                checked={allShownSelected}
-                onChange={(event) => {
-                  setConfirmingBulkDelete(false);
-                  setBulkDeleteNotice("");
-                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
-                }}
-              />{" "}
-              Select all{bulkSelectLabel(filter) ? ` ${bulkSelectLabel(filter)}` : ""} leads shown (
-              {shown.length})
-            </label>
-          </span>
+          {/*
+            BF3: the "Select all …" label that sat here is the header row's
+            checkbox now (the drawing has no yellow strip). What is left of the
+            strip is what it always was underneath -- the count, Start N
+            stories, Hold, Kill, Delete selected and Clear -- so it renders
+            only once something is selected, except that the section itself
+            stays mounted whenever the table has rows, because the desk's own
+            walk waits for it.
+          */}
           {selectedDeleteLeads.length > 0 ? (
             <>
               <span className="queue-bulk-count">{selectedDeleteLeads.length} selected</span>
@@ -769,10 +778,31 @@ function QueuePage() {
         </p>
       ) : (
         <>
-          <div className="queue-head" aria-hidden="true">
+          {/*
+            The header row, as drawn: one line of column labels above the rows
+            and the select-all box in the checkbox column. "Select all" used to
+            be a yellow strip below the controls; the drawing puts it here, in
+            the same 44px box every row's own checkbox sits in, so the two read
+            as the same control at two heights. It still selects exactly the
+            leads the table is showing, which is what the strip's label said.
+          */}
+          <div className="queue-head">
+            <input
+              type="checkbox"
+              className="queue-check queue-pick"
+              checked={allShownSelected}
+              aria-label={`Select all${bulkSelectLabel(filter) ? ` ${bulkSelectLabel(filter)}` : ""} leads shown (${shown.length})`}
+              onChange={(event) => {
+                setConfirmingBulkDelete(false);
+                setBulkDeleteNotice("");
+                setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+              }}
+            />
             <span>Score</span>
             <span>Lead</span>
-            <span>Evidence · Filed · Actions</span>
+            <span>Evidence</span>
+            <span>Filed</span>
+            <span className="queue-head-acts">Actions</span>
           </div>
           <div className="lead-list roomy">
             {shown.map((l) => {
@@ -784,40 +814,13 @@ function QueuePage() {
                   dup={dupMatch}
                   roomy
                   /*
-                "More ▾ opens the lead menu" (README "3. Queue"). The labels
-                are deliberately different words from the visible buttons --
-                the desk's own flows find the row's Delete/Hold/Kill by name,
-                and a menu that repeated them exactly would make those queries
-                ambiguous. Every item calls the handler its visible twin calls.
-              */
-                  more={[
-                    {
-                      label: "Open the story workbench",
-                      onSelect: () =>
-                        void navigate({
-                          to: "/desk/story/$leadId",
-                          params: { leadId: String(l.id) },
-                        }),
-                    },
-                    ...(l.status !== "held" && l.status !== "killed" && l.status !== "published"
-                      ? [
-                          {
-                            label: "Hold this lead",
-                            onSelect: () => setStatus.mutate({ id: l.id, status: "held" }),
-                          },
-                          {
-                            label: "Kill this lead",
-                            onSelect: () => setStatus.mutate({ id: l.id, status: "killed" }),
-                          },
-                        ]
-                      : [
-                          {
-                            label: "Put it back in the new queue",
-                            onSelect: () => setStatus.mutate({ id: l.id, status: "new" }),
-                          },
-                        ]),
-                    { label: "Delete this lead", onSelect: () => remove.mutate(l.id) },
-                  ]}
+                    BF3: the `more` array that used to sit here (Open the story
+                    workbench / Hold this lead / Kill this lead / Put it back /
+                    Delete this lead) is gone -- every one of those calls the
+                    handler this row's own menu already calls, so the row was
+                    printing each action twice under two sets of words. The
+                    menu the brief asks for is the one LeadRowView builds.
+                  */
                   onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
                   onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
                   onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}

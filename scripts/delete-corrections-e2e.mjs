@@ -459,8 +459,7 @@ async function main() {
   step("first account owns the desk with no setup token");
 
   // ── File, write, publish ───────────────────────────────────────────────────
-  await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "networkidle" });
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with the revised fee schedule.");
   await page.getByRole("button", { name: "File lead" }).click();

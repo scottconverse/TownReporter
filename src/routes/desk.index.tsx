@@ -7,7 +7,7 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, Chip, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
+import { Busy, Chip, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
 import { LeadFlags } from "@/components/desk-leads";
@@ -1668,31 +1668,15 @@ function DeskHome() {
                                 </InkButton>
                               </>
                             )}
-                            <DeskMoreMenu
-                              ariaLabel={`More actions for ${l.headline}`}
-                              items={[
-                                {
-                                  label: "Open the lead",
-                                  onSelect: () =>
-                                    void navigate({
-                                      to: "/desk/story/$leadId",
-                                      params: { leadId: String(l.id) },
-                                    }),
-                                },
-                                ...(dup
-                                  ? [
-                                      {
-                                        label: "The piece it matches",
-                                        onSelect: () =>
-                                          void navigate({
-                                            to: "/articles/$slug",
-                                            params: { slug: dup.slug },
-                                          }),
-                                      },
-                                    ]
-                                  : []),
-                              ]}
-                            />
+                            {/*
+                              BF3, Today (b): no "More ▾" here. The drawing
+                              (cmp-today.png) gives each New leads row one
+                              horizontal group -- Start story S · Hold H ·
+                              Kill X -- and nothing else; the menu's two items
+                              are both already on the row (the headline opens
+                              the lead, the ≈ PRINTED chip opens the piece),
+                              so nothing left with it is unreachable.
+                            */}
                           </span>
                         </div>
                       );

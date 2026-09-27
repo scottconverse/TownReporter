@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Chip, DeskMoreMenu, InkButton, Score } from "@/components/desk-chrome";
-import { leadOrigin } from "@/components/desk-chrome-utils";
-import { formatAge } from "@/lib/paper";
+import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
+import { formatAge, parseUrlList } from "@/lib/paper";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   cameBackLabel,
@@ -104,32 +103,205 @@ export function LeadRowView({
    */
   const [dupKill, setDupKill] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const score = lead.newsworthiness ?? 0;
+  const held = lead.status === "held";
+  const closed = lead.status === "killed" || lead.status === "published";
+  /*
+    The evidence cell. The drawing prints the EvidenceMeter's squares and
+    "3 opened · 1 could not"; the desk has no per-lead "could not open" figure
+    anywhere -- capture_events.fetch_outcome is keyed by investigation and URL,
+    and scan_runs counts at run level -- so the failure clause is dropped
+    rather than invented. The design's own EvidenceMeter drops it too when
+    nothing failed.
+  */
+  const sources = parseUrlList(lead.source_urls).length;
+  /*
+    One "More ▾" per row, holding every action this row used to print inline:
+    Open, The piece, Hold, Back, Kill, Kill as duplicate, Delete and the draft
+    control. The drawing's actions cell is Start story + More ▾ and nothing
+    else (README 282-289), and the row's own checkbox is the one selection box.
+    The menu's words are the old buttons' words, so the desk's own walks still
+    find them by name; they now open the menu first.
+  */
+  const items: DeskMoreItem[] = [
+    {
+      label: "Open",
+      content: (
+        <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="more-item">
+          Open
+        </Link>
+      ),
+    },
+  ];
+  if (dup) {
+    items.push({
+      label: "The piece",
+      content: (
+        <Link to="/articles/$slug" params={{ slug: dup.slug }} className="more-item">
+          The piece
+        </Link>
+      ),
+    });
+  }
+  if (!closed && !held && onHold) items.push({ label: "Hold", onSelect: onHold });
+  if ((held || closed) && onBack) items.push({ label: "Back", onSelect: onBack });
+  if (!closed && onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
+  /*
+    Unit AK item 4: "Kill as duplicate" says what it is doing. The three states
+    are pinned here rather than left to the row vanishing on the next refetch.
+  */
+  if (dup && !closed && onKillAsDuplicate) {
+    items.push({
+      label: "Kill as duplicate",
+      content:
+        dupKill === "saved" ? (
+          <span className="meta dup-kill-note" role="status">
+            {killedAsDuplicateNote(dup.headline)}
+          </span>
+        ) : dupKill === "failed" ? (
+          <>
+            <span className="meta dup-kill-note" role="status">
+              That did not save.
+            </span>
+            <InkButton
+              tone="quiet-danger"
+              small
+              onClick={() => {
+                setDupKill("saving");
+                void Promise.resolve(onKillAsDuplicate()).then(
+                  () => setDupKill("saved"),
+                  () => setDupKill("failed"),
+                );
+              }}
+              ariaLabel={`Try killing ${lead.headline} as a duplicate again`}
+            >
+              Try again
+            </InkButton>
+          </>
+        ) : (
+          <InkButton
+            tone="quiet-danger"
+            small
+            disabled={dupKill === "saving"}
+            onClick={() => {
+              setDupKill("saving");
+              void Promise.resolve(onKillAsDuplicate()).then(
+                () => setDupKill("saved"),
+                () => setDupKill("failed"),
+              );
+            }}
+            ariaLabel={`Kill ${lead.headline} as a duplicate of ${dup.headline}`}
+          >
+            {dupKill === "saving" ? "Saving…" : "Kill as duplicate"}
+          </InkButton>
+        ),
+    });
+  }
+  /*
+    Delete is not Kill: a killed lead stays under Killed, which is right for
+    "not this one" and wrong for a lead filed against the wrong person. It
+    still asks once, in the menu, and still says the copy is kept for 30 days.
+  */
+  if (onDelete) {
+    if (confirming) {
+      items.push({
+        label: "delete-warning",
+        content: (
+          <p className="del-warn">
+            Deletes this lead and any draft on it.
+            {lead.status === "published"
+              ? " The printed story stays on the paper — remove that under Published."
+              : ""}
+          </p>
+        ),
+      });
+      items.push({
+        label: "Yes, delete",
+        danger: true,
+        onSelect: () => {
+          setConfirming(false);
+          onDelete();
+        },
+      });
+      items.push({ label: "Keep", keepOpen: true, onSelect: () => setConfirming(false) });
+    } else {
+      items.push({
+        label: "Delete",
+        danger: true,
+        keepOpen: true,
+        onSelect: () => setConfirming(true),
+      });
+    }
+  }
+  if (!closed && onDraft) {
+    items.push({
+      label: "Draft with a chosen model",
+      content: (
+        <div className="queue-draft-controls">
+          <InkButton
+            small
+            disabled={drafting}
+            onClick={() => onDraft(modelChoice, modelEffort)}
+            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
+          >
+            {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
+          </InkButton>
+          <details>
+            <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
+            <ModelPicker
+              value={modelChoice}
+              onChange={(choice) => {
+                setModelChoice(choice);
+                setModelEffort(defaultModelEffort(choice));
+              }}
+              effort={modelEffort}
+              onEffortChange={setModelEffort}
+              disabled={drafting}
+              compact
+            />
+          </details>
+        </div>
+      ),
+    });
+  }
+  if (more) items.push(...more);
   return (
     <div
-      className={
-        "lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")
-      }
+      className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}
     >
+      {/*
+        The row's one selection box (defect 1): the design's 44px checkbox in
+        the first column. The old "Select for deletion" and "Include in batch
+        draft" boxes were a second and third way to select the same row; the
+        bulk bar above the table is what they feed, and both of its presses
+        take this box's state.
+      */}
+      {onDeleteSelect ? (
+        <input
+          type="checkbox"
+          className="queue-check queue-pick"
+          checked={deleteSelected}
+          aria-label={`Select ${lead.headline} for deletion`}
+          onChange={(event) => onDeleteSelect(event.target.checked)}
+        />
+      ) : (
+        <span className="queue-pick" aria-hidden="true" />
+      )}
       <Score v={score} />
-      <div className="lead-main">
+      <div className="lead-cell">
+        <div className="lead-chips">
+          {/* Unit BF3: the chip line is DRAWN status-first (NEW / HELD /
+              ≈ PRINTED / Seen again, then the section). The markup keeps the
+              section span first, because `scripts/lead-badge-render.test.mjs`
+              pins that order ("meta line should render before the lead-flags
+              rail") -- the drawn order is put on with `order` in
+              `desk-astra.css` instead of by moving this node. */}
+          <span className="meta">{lead.topic}</span>
+          <LeadFlags lead={lead} dup={dup} />
+        </div>
         <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
           {lead.headline}
         </Link>
         <p className="lead-why">{lead.why}</p>
-        <p className="meta">
-          {lead.topic} · {formatAge(lead.created_at)} · {leadOrigin(lead)}
-        </p>
-        {onDeleteSelect ? (
-          <label className="meta queue-delete-select">
-            <input
-              type="checkbox"
-              checked={deleteSelected}
-              aria-label={`Select ${lead.headline} for deletion`}
-              onChange={(event) => onDeleteSelect(event.target.checked)}
-            />{" "}
-            Select for deletion
-          </label>
-        ) : null}
         {onBatchSelect ? (
           <label className="meta">
             <input
@@ -176,155 +348,6 @@ export function LeadRowView({
             ) : "the earlier lead is unavailable; compare it only if it is restored."}
           </p>
         ) : null}
-        <div className="lead-actions row-acts">
-          <Link
-            to="/desk/story/$leadId"
-            params={{ leadId: String(lead.id) }}
-            className="btn quiet small"
-          >
-            Open
-          </Link>
-          {dup ? (
-            <Link to="/articles/$slug" params={{ slug: dup.slug }} className="btn quiet small">
-              The piece
-            </Link>
-          ) : null}
-          {lead.status !== "held" &&
-          lead.status !== "published" &&
-          lead.status !== "killed" &&
-          onHold ? (
-            <InkButton tone="quiet" small onClick={onHold}>
-              Hold
-            </InkButton>
-          ) : null}
-          {lead.status === "held" && onBack ? (
-            <InkButton tone="quiet" small onClick={onBack}>
-              Back
-            </InkButton>
-          ) : null}
-          {lead.status === "killed" && onBack ? (
-            <InkButton tone="quiet" small onClick={onBack}>
-              Back
-            </InkButton>
-          ) : null}
-          {lead.status !== "killed" && lead.status !== "published" && onKill ? (
-            <InkButton tone="quiet-danger" small onClick={onKill}>
-              Kill
-            </InkButton>
-          ) : null}
-          {/*
-            Unit AK item 4: the badge used to be a dead end. If the desk thinks
-            this lead is already printed, the row offers the press that
-            settles it, and records why: the reason names the piece it matched.
-          */}
-          {dup && lead.status !== "killed" && lead.status !== "published" && onKillAsDuplicate ? (
-            dupKill === "saved" ? (
-              <span className="meta dup-kill-note" role="status">
-                {killedAsDuplicateNote(dup.headline)}
-              </span>
-            ) : dupKill === "failed" ? (
-              <>
-                <span className="meta dup-kill-note" role="status">
-                  That did not save.
-                </span>
-                <InkButton
-                  tone="quiet-danger"
-                  small
-                  onClick={() => {
-                    setDupKill("saving");
-                    void Promise.resolve(onKillAsDuplicate()).then(
-                      () => setDupKill("saved"),
-                      () => setDupKill("failed"),
-                    );
-                  }}
-                  ariaLabel={`Try killing ${lead.headline} as a duplicate again`}
-                >
-                  Try again
-                </InkButton>
-              </>
-            ) : (
-              <InkButton
-                tone="quiet-danger"
-                small
-                disabled={dupKill === "saving"}
-                onClick={() => {
-                  setDupKill("saving");
-                  void Promise.resolve(onKillAsDuplicate()).then(
-                    () => setDupKill("saved"),
-                    () => setDupKill("failed"),
-                  );
-                }}
-                ariaLabel={`Kill ${lead.headline} as a duplicate of ${dup.headline}`}
-              >
-                {dupKill === "saving" ? "Saving…" : "Kill as duplicate"}
-              </InkButton>
-            )
-          ) : null}
-          {onDelete ? (
-            confirming ? (
-              <>
-                <InkButton
-                  tone="danger"
-                  small
-                  onClick={() => {
-                    setConfirming(false);
-                    onDelete();
-                  }}
-                >
-                  Yes, delete
-                </InkButton>
-                <InkButton tone="quiet" small onClick={() => setConfirming(false)}>
-                  Keep
-                </InkButton>
-              </>
-            ) : (
-              <InkButton tone="quiet" small onClick={() => setConfirming(true)}>
-                Delete
-              </InkButton>
-            )
-          ) : null}
-        </div>
-        {more && more.length > 0 ? (
-          <DeskMoreMenu ariaLabel={`More actions for ${lead.headline}`} items={more} />
-        ) : null}
-        {confirming ? (
-          <p className="del-warn">
-            Deletes this lead and any draft on it.
-            {lead.status === "published"
-              ? " The printed story stays on the paper — remove that under Published."
-              : ""}
-          </p>
-        ) : null}
-        {lead.status !== "killed" && lead.status !== "published" && onDraft ? (
-          <div className="queue-draft-controls">
-            <InkButton
-              small
-              disabled={drafting}
-              onClick={() => onDraft(modelChoice, modelEffort)}
-              ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
-            >
-              {drafting
-                ? "Queuing…"
-                : lead.status === "drafted"
-                  ? "Redraft with AI"
-                  : "Draft with AI"}
-            </InkButton>
-            <details>
-              <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
-              <ModelPicker
-                value={modelChoice}
-                onChange={(choice) => {
-                  setModelChoice(choice);
-                  setModelEffort(defaultModelEffort(choice));
-                }}
-                effort={modelEffort}
-                onEffortChange={setModelEffort}
-                disabled={drafting}
-                compact
-              />
-            </details>
-          </div>
-        ) : null}
         {draftNotice ? <Notice kind={draftNotice.kind}>{draftNotice.text}</Notice> : null}
         {dup ? (
           <p className="meta dup-match">
@@ -336,7 +359,33 @@ export function LeadRowView({
           </p>
         ) : null}
       </div>
-      <LeadFlags lead={lead} dup={dup} />
+      <span className="queue-evidence">
+        <span className="ev-squares" aria-hidden="true">
+          {Array.from({ length: Math.min(sources, 10) }, (_, i) => (
+            <i key={i} />
+          ))}
+        </span>
+        <b>{sources} opened</b>
+      </span>
+      <span className="queue-filed">{formatAge(lead.created_at)}</span>
+      <div className="lead-actions row-acts queue-acts">
+        {closed ? null : held ? (
+          onBack ? (
+            <InkButton tone="quiet" small onClick={onBack}>
+              Release
+            </InkButton>
+          ) : null
+        ) : (
+          <Link
+            to="/desk/story/$leadId"
+            params={{ leadId: String(lead.id) }}
+            className="btn solid small"
+          >
+            Start story
+          </Link>
+        )}
+        <DeskMoreMenu ariaLabel={`More actions for ${lead.headline}`} items={items} />
+      </div>
     </div>
   );
 }

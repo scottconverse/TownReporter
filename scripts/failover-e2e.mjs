@@ -455,8 +455,10 @@ async function main() {
   // --- file a lead by hand, with no source URL ---------------------------
   // No URL means reportAndDraft's `take()` has nothing to fetch over the
   // network, so this walk never depends on a real page being reachable.
-  await page.getByRole("link", { name: "Queue", exact: true }).click();
-  await page.getByText("File a lead yourself").click();
+  // Unit BF3: the "File a lead yourself" button is off the Queue controls row
+  // (the drawing files a lead from Today's "+ Add a lead"); /desk/queue#file-lead
+  // still opens the same dialog.
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();

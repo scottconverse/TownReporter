@@ -90,6 +90,14 @@ const deskChromeStub = inlineModule(`
     so a render assertion about the row still describes the markup the desk
     ships. The outside-press and Escape behaviour needs a live DOM, and the desk
     e2e scripts are what exercise it; this test only pins the row's shape.
+
+    Unit BF3: an item may carry content instead of a label (the real
+    DeskMoreMenu renders it in a li.more-block). Two controls the drawing moved
+    into the menu are content items -- "Kill as duplicate", whose accessible
+    name names both headlines, and the draft control, which carries its own
+    model picker -- so the stub renders content when there is one. Without
+    that, the assertions below would be describing this stub rather than the
+    row.
   */
   export function DeskMoreMenu({ label = "More", items = [], ariaLabel }) {
     return createElement(
@@ -102,8 +110,10 @@ const deskChromeStub = inlineModule(`
         items.map((item) =>
           createElement(
             "li",
-            { key: item.label },
-            createElement("button", { type: "button", className: "more-item" }, item.label),
+            { key: item.label, className: item.content ? "more-block" : undefined },
+            item.content
+              ? item.content
+              : createElement("button", { type: "button", className: "more-item" }, item.label),
           ),
         ),
       ),

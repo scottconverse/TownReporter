@@ -134,8 +134,7 @@ async function ownTheDesk() {
  * state the removal preview is about. Nothing here writes to the database.
  */
 async function aStoryCreditingAnOutletIsOnThePaper() {
-  await queueLink().click();
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();

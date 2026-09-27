@@ -211,8 +211,7 @@ async function main() {
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
     await completeFirstRunSetup(page, base);
-    await page.getByRole("link", { name: "Queue", exact: true }).click();
-    await page.getByText("File a lead yourself").click();
+    await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
     await page.getByLabel("Headline").fill(headline);
     await page
       .getByLabel("Why now")

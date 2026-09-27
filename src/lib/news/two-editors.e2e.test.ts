@@ -133,8 +133,7 @@ async function signUpAndEnter(page: Page, name: string, email: string) {
 
 /** File a lead through the owner's queue UI; return its story URL. */
 async function fileLead(page: Page, headline: string): Promise<string> {
-  await page.goto(`${BASE_URL}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${BASE_URL}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel(/Why now/i).fill("Two editors are about to fight over it.");
   await page.getByRole("button", { name: "File lead" }).click();

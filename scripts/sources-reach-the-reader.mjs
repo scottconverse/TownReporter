@@ -53,9 +53,7 @@ try {
   // moment, so wait for the DOM plus a concrete element instead of
   // "networkidle" (which also risks an aborted navigation if the SPA is
   // still mid-transition).
-  await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
-  await page.getByText("File a lead yourself").waitFor({ timeout: 30_000 });
-  await page.getByText("File a lead yourself").click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill("The packet posted with a hearing date.");
   // The field is optional in the form; this whole test is about what happens
