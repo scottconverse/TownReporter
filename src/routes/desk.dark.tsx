@@ -55,15 +55,18 @@ import {
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
+import { estimateMinutes, scopeLabelsFor } from "@/lib/news/dark-dials";
+import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
+import { searchOutcomeWords } from "@/lib/news/search-trail-words";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { takeDarkSeed } from "@/lib/news/dark-seed";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
-import { ModelPicker } from "@/components/model-picker";
+import { DarkFileDialog } from "@/components/dialogs/editor-dialogs";
 import { PageWatchPanel } from "@/components/page-watch-panel";
 import {
   darkModelChoice,
@@ -86,10 +89,19 @@ const OPEN_KEY = "townreporter.dark.openId";
 function DarkPage() {
   const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
-  const [paste, setPaste] = useState("");
+  /*
+    A hand-over the editor asked for on another screen -- an import's review
+    screen, a lead's "Send to Dark Desk" -- carried in `sessionStorage` because
+    a couple of long paragraphs cannot ride in a URL. It waits here until the
+    Start-a-file dialog opens with it (see the mount effect below) and is
+    cleared the moment the dialog closes, so a second visit to the desk does
+    not offer the same file twice.
+  */
+  const [seedFromImport, setSeedFromImport] = useState("");
+  /** The header's "+ Start a file": the drawn dialog, open or shut. */
+  const [startOpen, setStartOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
-  const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
   const [fileFocusRequest, setFileFocusRequest] = useState<{ id: number } | null>(null);
   const [queued, setQueued] = useState<{
@@ -114,17 +126,21 @@ function DarkPage() {
     try {
       const raw = sessionStorage.getItem(OPEN_KEY);
       if (raw) setOpenId(Number(raw));
-      /*
-        A hypothesis the editor sent over from an import's review screen arrives
-        here in `sessionStorage`, for the same reason the import paste does
-        (`import-review.ts:38`): a couple of long paragraphs cannot ride in a
-        URL. `takeDarkSeed` reads it once and clears it, so this opens the start
-        box holding the lead and the next visit opens its own empty one -- the
-        file it describes has been started by then, and re-filling the box would
-        invite a second copy of it.
-      */
+      // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
+      // copy, so this holds the lead for the dialog and the next visit to the
+      // desk opens its own empty one.
+      //
+      // The dialog opens with it: a hand-over the editor asked for on another
+      // screen ("Send it to Dark Desk") is the drawn start box "opened with its
+      // text already in it" (`dark-seed.ts:10`), and the box lives in the
+      // dialog since phase 2c. A seed that only filled a shut dialog would
+      // leave the editor on the desk with nothing to see and no sign the
+      // hypothesis arrived.
       const seed = takeDarkSeed(sessionStorage);
-      if (seed) setPaste(seed);
+      if (seed) {
+        setSeedFromImport(seed);
+        setStartOpen(true);
+      }
     } catch {
       /* ignore */
     }
@@ -137,15 +153,16 @@ function DarkPage() {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }
 
-  function showPasteNotice(text: string | null, ok = false) {
+  /*
+    Where a notice shows. Before the Start-a-file dialog, this screen had two
+    boxes -- the paste panel above the split and the open file's workspace --
+    and a notice had to say which one it belonged to. Starting a file is the
+    dialog's own press now and reports its refusals inside itself, so the only
+    notices left are the file's, and there is one place to put them.
+  */
+  function showNotice(text: string | null, ok = false) {
     setNotice(text);
     setNoticeOk(ok);
-    setNoticeAt("paste");
-  }
-  function showWorkNotice(text: string | null, ok = false) {
-    setNotice(text);
-    setNoticeOk(ok);
-    setNoticeAt("work");
   }
 
   function rememberOpen(id: number | null) {
@@ -253,7 +270,7 @@ function DarkPage() {
     if (!briefWaiting || !bj) return;
     if (bj.status === "queued" || bj.status === "running") return;
     setBriefWaiting(false);
-    showWorkNotice(
+    showNotice(
       bj.status === "completed"
         ? "The brief is written."
         : `No brief: ${editorError(bj.error ?? "") || bj.error || "it did not finish."}`,
@@ -288,8 +305,27 @@ function DarkPage() {
     void qc.invalidateQueries({ queryKey: ["dark-runs"] });
   }, [openId, detailInvestigationId, currentDarkJob, qc]);
 
+  /*
+    The model the Start-a-file dialog was set to, for the first round only.
+
+    The dialog hands its pick back with the new id, and the round it starts is
+    issued in the same tick -- one render before `setModelChoice` could take
+    effect, so reading the state there would dig with the previous file's
+    model. Holding the pick in a ref and consuming it here is what makes the
+    dialog's pick the model that actually runs; later rounds ("Keep digging",
+    the picker under the file) read the state as before.
+  */
+  const firstRoundPick = useRef<StoryModelChoice | null>(null);
   const advance = useMutation({
-    mutationFn: (id: number) => continueInvestigation({ data: { id, modelChoice, modelEffort } }),
+    mutationFn: (id: number) => {
+      const picked = firstRoundPick.current;
+      firstRoundPick.current = null;
+      return continueInvestigation({
+        data: picked
+          ? { id, modelChoice: picked, modelEffort: defaultModelEffort(picked) }
+          : { id, modelChoice, modelEffort },
+      });
+    },
     onSuccess: (res) => {
       if (!res || res.ok !== true) {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
@@ -308,7 +344,7 @@ function DarkPage() {
         */
         const isPreflightRefusal = Boolean(res && typeof res === "object" && "kind" in res);
         const msg = isPreflightRefusal ? raw : editorError(raw) || raw || "Research failed";
-        showWorkNotice(msg, false);
+        showNotice(msg, false);
         setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
         clearPhase();
         invalidate();
@@ -320,7 +356,7 @@ function DarkPage() {
     onError: (err) => {
       const msg =
         editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
-      showWorkNotice(msg, false);
+      showNotice(msg, false);
       setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
       clearPhase();
       invalidate();
@@ -372,33 +408,6 @@ function DarkPage() {
     },
   });
 
-  const openPaste = useMutation({
-    mutationFn: () => openDarkInvestigation({ data: { paste, title: paste.split("\n")[0] } }),
-    onMutate: () => {
-      setPendingCard("paste");
-      setCardError(null);
-      setCardPhase("Starting…");
-    },
-    onSuccess: (res) => {
-      if (!res?.ok || !res.investigationId) {
-        showPasteNotice("Could not open an investigation.");
-        clearPhase();
-        return;
-      }
-      setPaste("");
-      afterOpen(res.investigationId, "paste");
-    },
-    onError: (err) => {
-      // This box is capped at 200,000 characters by `darkOpenInput`, so the
-      // one refusal that gets here is the paste: name it.
-      showPasteNotice(
-        editorError(err instanceof Error ? err.message : "Could not start", "start that file") ??
-          "Could not start",
-      );
-      clearPhase();
-    },
-  });
-
   const find = useMutation({
     mutationFn: () => findSomethingToDigInto(),
     onMutate: () => {
@@ -407,14 +416,14 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
-        showWorkNotice("Nothing to open yet. Paste a lead to start.");
+        showNotice("Nothing to open yet. Paste a lead to start.");
         clearPhase();
         return;
       }
       afterOpen(res.investigationId, "find");
     },
     onError: (err) => {
-      showWorkNotice(editorError(err instanceof Error ? err.message : "Find failed"));
+      showNotice(editorError(err instanceof Error ? err.message : "Find failed"));
       clearPhase();
     },
   });
@@ -451,14 +460,14 @@ function DarkPage() {
     },
     onSuccess: (res, seed) => {
       if (!res?.ok || !res.investigationId) {
-        showWorkNotice("Could not follow that lead.");
+        showNotice("Could not follow that lead.");
         clearPhase();
         return;
       }
       afterOpen(res.investigationId, seed.title);
     },
     onError: (err) => {
-      showWorkNotice(
+      showNotice(
         editorError(err instanceof Error ? err.message : "Could not follow that lead"),
       );
       clearPhase();
@@ -469,11 +478,11 @@ function DarkPage() {
     mutationFn: (id: number) => parkInvestigation({ data: id }),
     onSuccess: () => {
       rememberOpen(null);
-      showWorkNotice("Set aside. Pull it back from that pile anytime.", true);
+      showNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not set that aside.");
+      showNotice(err instanceof Error ? err.message : "Could not set that aside.");
     },
   });
 
@@ -484,12 +493,12 @@ function DarkPage() {
         rememberOpen(res.investigationId);
         setNotice(null);
       } else {
-        showWorkNotice("Could not pull that back.");
+        showNotice("Could not pull that back.");
       }
       invalidate();
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not pull that back.");
+      showNotice(err instanceof Error ? err.message : "Could not pull that back.");
     },
   });
 
@@ -508,7 +517,7 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok) {
-        showWorkNotice("Reddit did not answer. Try again in a few minutes.");
+        showNotice("Reddit did not answer. Try again in a few minutes.");
         setRedditAnnounce("Reddit did not answer.");
         return;
       }
@@ -524,14 +533,14 @@ function DarkPage() {
       if (res.incomplete && res.reason) parts.push(res.reason);
       // A quiet subreddit is a successful read, not a failure — style it as
       // one. Only an actual incomplete/failed read gets the err styling.
-      showWorkNotice(parts.join(" "), !res.incomplete);
+      showNotice(parts.join(" "), !res.incomplete);
       setRedditResult(res);
       setRedditAnnounce(`Finished reading r/${res.subreddit}. ${redditResultHeadline(res)}.`);
       invalidate();
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : "Reddit did not answer.";
-      showWorkNotice(msg);
+      showNotice(msg);
       setRedditAnnounce(msg);
     },
   });
@@ -557,7 +566,7 @@ function DarkPage() {
       }
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not file that tip.");
+      showNotice(err instanceof Error ? err.message : "Could not file that tip.");
     },
   });
 
@@ -582,21 +591,21 @@ function DarkPage() {
     mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
     onSuccess: (res) => {
       if (!res?.ok) {
-        showWorkNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+        showNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
         return;
       }
       // Queued, not written: the brief is a job now, and the file view below
       // polls until it lands. See `startBriefJob` in src/lib/news/dark.ts.
       setBriefWaiting(true);
-      showWorkNotice("Writing the brief…", true);
+      showNotice("Writing the brief…", true);
       invalidate();
     },
     onError: (err) =>
-      showWorkNotice(err instanceof Error ? err.message : "Could not write the brief."),
+      showNotice(err instanceof Error ? err.message : "Could not write the brief."),
   });
 
   const starting =
-    openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
+    openFromCard.isPending || find.isPending || followLead.isPending;
   const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
@@ -639,322 +648,383 @@ function DarkPage() {
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, allInv, claimedIds));
 
   return (
-    <DeskShell
-      night
-      title="Dark Desk"
-      kicker="Investigative desk"
-      lede={
-        <>
-          Three piles. <b>To look at</b> is new. <b>On the desk</b> is started. <b>Set aside</b> is
-          parked — nothing is deleted. It digs; it never prints.
-        </>
-      }
-    >
-      <form
-        className="tipbox top"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!paste.trim() || busyStart || digging) return;
-          openPaste.mutate();
+    /*
+      No `night` prop: Dark Desk is a page, not a theme. Before 0.6.72 this
+      route passed it, which forced `.night` on the shell whatever
+      `townreporter.desk.mode` said -- so the "light" capture of this screen
+      rendered dark, `data-appearance` disagreed with the page, and the shell
+      hid its own appearance toggle (desk-chrome.tsx shows it only when `night`
+      is false). The desk's appearance is the editor's, on every desk page.
+    */
+    <DeskShell title="Dark Desk" kicker="Investigations · nothing here prints on its own" hideTitle>
+      {/*
+        The drawn header: kicker, title, the page's own action, rule. The
+        drawing's "+ Start a file" opens the Start-a-Dark-Desk-file dialog, and
+        so does this: the dialog owns the question, the tip, the ordinary
+        explanation, the Limits dial and the model, and it opens the file. The
+        drawing puts no form in the rail: the rail is the index of files, and a
+        form at the top of it pushed the first file out of the first screenful.
+      */}
+      <div className="astra-head">
+        <div>
+          <p className="kick">Investigations · nothing here prints on its own</p>
+          <h1 className="h1">Dark Desk</h1>
+        </div>
+        <div className="astra-head-acts">
+          <button type="button" className="btn solid" onClick={() => setStartOpen(true)}>
+            + Start a file
+          </button>
+        </div>
+      </div>
+      {/*
+        Start a Dark Desk file, as drawn. The dialog opens the file and stops
+        there (`editor-dialogs.tsx`); this screen starts the first round from
+        `onOpened`, where the activity log and the stop are on screen.
+
+        `seed` is a hand-over from another screen -- an import's review screen,
+        a lead's "Send to Dark Desk" -- and is cleared on close so the same file
+        is not offered twice.
+      */}
+      <DarkFileDialog
+        open={startOpen}
+        seed={seedFromImport || undefined}
+        onClose={() => {
+          setStartOpen(false);
+          setSeedFromImport("");
         }}
-      >
-        <p className="side-label">Start a file</p>
-        <p className="meta">
-          Paste a URL, a subject, a person, an LLC, a contract number, a rumor, or a chunk of text.
-          It opens a new file on the desk.
-        </p>
-        <textarea
-          rows={3}
-          value={paste}
-          onChange={(e) => setPaste(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              if (paste.trim() && !busyStart && !digging) openPaste.mutate();
-            }
-          }}
-          placeholder="https://…  ·  Costco rebate cap  ·  Front Range Civic Partners LLC"
-          aria-label="Tip, URL, or subject to investigate"
-        />
-        <div className="row-acts static" id="dark-start-actions">
+        onOpened={(id, run) => {
+          // The editor's pick, for the first round: `afterOpen` issues the
+          // round in this same tick, before `setModelChoice` can be read.
+          const picked = run.modelChoice ? darkModelChoice(run.modelChoice) : null;
+          if (picked) {
+            firstRoundPick.current = picked;
+            setModelChoice(picked);
+            setModelEffort(defaultModelEffort(picked));
+          }
+          afterOpen(id);
+        }}
+      />
+      {/*
+        The drawing's grid: a 320px rail of piles on the left, the open file on
+        the right (desk-astra.css `.astra-split-deep`). The rail is the desk's
+        index -- every file, every unopened signal -- so an editor can switch
+        files without leaving the one they are reading. Below 980px the two
+        columns stack and the rail becomes the top of the page.
+      */}
+      <div className="astra-split-deep">
+        <div className="astra-piles">
+          <div className="astra-pile">
+            <div className="astra-pile-h">
+              <span>Open files</span>
+              <span>{active.length}</span>
+            </div>
+            <p className="astra-note astra-pile-pad">
+              Started. A stop mid-file is normal — it means more to read, not a failure.
+            </p>
+            {investigations.isError && !investigations.data ? (
+              <div className="astra-pile-pad">
+                <ScreenError
+                  message={
+                    investigations.error instanceof Error
+                      ? investigations.error.message
+                      : "Could not load the desk."
+                  }
+                  onRetry={() => void investigations.refetch()}
+                  retrying={investigations.isRefetching}
+                />
+              </div>
+            ) : investigations.isPending && !active.length ? (
+              <div className="astra-pile-pad">
+                <ListSkeleton rows={3} />
+              </div>
+            ) : active.length === 0 ? (
+              <p className="meta astra-pile-pad">
+                Empty. Paste a tip above, or start digging on a signal.
+              </p>
+            ) : (
+              active.map((row) => (
+                <DeskFileCard
+                  key={row.id}
+                  row={row}
+                  selected={row.id === openId}
+                  digging={digging && openId === row.id}
+                  locked={digging || busyStart}
+                  onOpen={() => rememberOpen(row.id)}
+                  onKeep={() => {
+                    if (digging || busyStart) return;
+                    setNotice(null);
+                    rememberOpen(row.id);
+                    beginDigPhase();
+                    advance.mutate(row.id);
+                  }}
+                  onPark={() => {
+                    if (digging) return;
+                    park.mutate(row.id);
+                  }}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="astra-pile">
+            <div className="astra-pile-h">
+              <span>Signals to review</span>
+              <span>{inbox.length}</span>
+            </div>
+            <p className="astra-note astra-pile-pad">New material. Nobody has opened it yet.</p>
+            {worth.isError && !worth.data ? (
+              <div className="astra-pile-pad">
+                <ScreenError
+                  message={
+                    worth.error instanceof Error
+                      ? worth.error.message
+                      : "Could not load new material."
+                  }
+                  onRetry={() => void worth.refetch()}
+                  retrying={worth.isRefetching}
+                />
+              </div>
+            ) : worth.isPending && !inbox.length ? (
+              <div className="astra-pile-pad">
+                <ListSkeleton rows={3} />
+              </div>
+            ) : inbox.length === 0 ? (
+              <p className="meta astra-pile-pad">
+                Nothing new tonight — everything interesting is already on the desk.
+              </p>
+            ) : (
+              inbox.map((item) => (
+                <WorthCard
+                  key={item.id}
+                  item={item}
+                  busy={busyStart || digging}
+                  phase={pendingCard === item.id ? cardPhase : ""}
+                  error={cardError?.id === item.id ? cardError.message : null}
+                  onStart={() => openFromCard.mutate(item)}
+                />
+              ))
+            )}
+            {reddit.isPending ? (
+              <div className="astra-pile-pad">
+                <div className="reddit-progress">
+                  <p className="worth-t">Reading {redditLabel}</p>
+                  <p className="reddit-sub">
+                    Four feeds, then up to three full-thread reads through Redlib. Every Reddit
+                    request stays 8 seconds apart. Usually about a minute.
+                  </p>
+                  <div className="busy-rule" aria-hidden />
+                  <p className="reddit-elapsed" aria-hidden>
+                    {elapsedLabel(redditElapsed)}
+                  </p>
+                  <p className="sr-only" role="status" aria-live="polite">
+                    {redditAnnounce}
+                  </p>
+                </div>
+              </div>
+            ) : redditResult ? (
+              <div className="astra-pile-pad">
+                <RedditResultPanel
+                  result={redditResult}
+                  announce={redditAnnounce}
+                  onDismiss={() => setRedditResult(null)}
+                  onFileTip={(post) => fileTip.mutate(post)}
+                  filingUrl={fileTip.isPending ? (fileTip.variables?.url ?? null) : null}
+                />
+              </div>
+            ) : (
+              <p className="astra-note astra-pile-pad">
+                Tips from the subreddit arrive here as unverified cards. They are a reason to go
+                looking for the record, never a source to cite.
+              </p>
+            )}
+          </div>
+
+          <div className="astra-pile">
+            <div className="astra-pile-h">
+              <span>Set aside</span>
+              <span>{parked.length}</span>
+            </div>
+            <p className="astra-note astra-pile-pad">Parked or finished. Pull anything back.</p>
+            {parked.length === 0 ? (
+              <p className="meta astra-pile-pad">Nothing set aside yet.</p>
+            ) : (
+              parked.map((row) => (
+                <div key={row.id} className="astra-file dim">
+                  <button type="button" className="astra-file-open" onClick={() => rememberOpen(row.id)}>
+                    <span className="astra-file-t">{row.title || `File ${row.id}`}</span>
+                    <span className="astra-file-m">
+                      {Number(row.records ?? 0)} records · last touched{" "}
+                      {formatShortDate(row.updated_at)}
+                    </span>
+                  </button>
+                  {!looksLikeInternalSummary(row.summary) && row.summary ? (
+                    <p className="astra-file-m">{plainEditorText(row.summary)}</p>
+                  ) : null}
+                  <div className="astra-file-acts">
+                    <InkButton
+                      disabled={pullBack.isPending}
+                      onClick={() => pullBack.mutate(row.id)}
+                    >
+                      {pullBack.isPending ? "Pulling back…" : "Pull back"}
+                    </InkButton>
+                    <InkButton tone="quiet" onClick={() => rememberOpen(row.id)}>
+                      Read
+                    </InkButton>
+                  </div>
+                </div>
+              ))
+            )}
+            {(runs.data ?? []).length > 0 ? (
+              <details className="of-trail runs astra-pile-pad">
+                <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
+                {(runs.data ?? []).map((r) => (
+                  <div key={r.id} className="run-row">
+                    <p className="meta">
+                      {formatDateTime(r.started_at)}
+                      {/*
+                        Which model dug this round. A round that dug badly and a
+                        round that dug on a different model are different facts
+                        about the same file, and the history could not tell them
+                        apart before 0.6.2. Rounds dug before the picker existed
+                        have no answer, and say nothing rather than guessing.
+                      */}
+                      {r.model_choice ? ` · ${modelChoiceLabel(r.model_choice)}` : ""}
+                    </p>
+                    {r.error ? (
+                      <p className="side-item">
+                        {editorError(r.error)}
+                        {looksLikeProviderAuthFailure(r.error) ? (
+                          <ProviderSignInButton detail={r.error} />
+                        ) : null}
+                      </p>
+                    ) : null}
+                    {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
+                    <DarkRunMeter run={r} />
+                  </div>
+                ))}
+              </details>
+            ) : null}
+          </div>
+
           {/*
-            The same picker the open file has, and the same state behind it:
-            the first round of a new file is a round like any other, and an
-            editor who has decided which model digs should not have to open
-            the file first to say so.
+            The rail's foot, as drawn: the two desks-wide actions that are not
+            about any one file. Pick one for me stays here rather than in the
+            signals pile so it is reachable with an empty rail.
           */}
-          <ModelPicker
-            scope="dark"
-            value={modelChoice}
-            onChange={(choice) => {
+          <div className="astra-piles-foot">
+            <div className="astra-pile-acts">
+              <InkButton
+                tone="quiet"
+                disabled={busyStart || digging}
+                onClick={() => find.mutate()}
+              >
+                {find.isPending ? "Starting…" : "Pick one for me"}
+              </InkButton>
+              <InkButton
+                tone="quiet"
+                disabled={busyStart || digging || reddit.isPending || !tipSubreddit.data?.subreddit}
+                onClick={() => reddit.mutate()}
+              >
+                {reddit.isPending
+                  ? `Reading ${redditLabel}…`
+                  : tipSubreddit.data?.subreddit
+                    ? `Check ${redditLabel} for signals`
+                    : "Reddit unavailable"}
+              </InkButton>
+            </div>
+            {!tipSubreddit.isPending && !tipSubreddit.data?.subreddit ? (
+              <p className="note">
+                {tipSubreddit.isError
+                  ? "Could not read the configured Reddit source."
+                  : "Reddit check needs one unambiguous subreddit URL in Sources; no subreddit is guessed from the town name."}{" "}
+                <Link to="/desk/sources" className="inline-link">
+                  Review Sources
+                </Link>
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="astra-col">
+          {notice && openId == null && !redditResult ? (
+            <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+          ) : null}
+
+          {/*
+            No file open: the drawing's right side is a short empty state, not
+            the settings that used to fill it. Before 0.6.72 an empty desk
+            showed Watched pages and How hard to dig and nothing else, which
+            read as a settings page rather than as a desk with no file on it.
+            Both panels are still below, so nothing became unreachable.
+          */}
+          {openId == null ? (
+            <div className="astra-panel astra-empty">
+              <h2 className="astra-panel-h">No file open</h2>
+              <p className="astra-note">
+                Pick a file from Open files, open a signal nobody has read yet, or start one of
+                your own with <strong>+ Start a file</strong> above.
+              </p>
+            </div>
+          ) : null}
+
+          {openId != null ? (
+            <InvestigationWorkspace
+              openId={openId}
+              detail={detail.data ?? undefined}
+              pending={detail.isPending && !detail.data}
+              digging={(digging || inv?.status === "investigating") && !stalled}
+              keepDisabled={(digging || inv?.status === "investigating") && !stalled}
+              stalled={stalled}
+              darkJobError={
+                detail.data?.darkJob?.status === "failed"
+                  ? editorError(detail.data.darkJob.error ?? "") ||
+                    detail.data.darkJob.error ||
+                    "This research run did not finish."
+                  : null
+              }
+              phase={liveJobStage || cardPhase || liveLine}
+              notice={notice}
+              noticeOk={noticeOk}
+              queuedLead={queued?.invId === openId ? queued.leadId : null}
+              queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
+              queuePending={toQueue.isPending}
+              queueError={queueError?.invId === openId ? queueError.message : null}
+              followPending={followLead.isPending}
+              parkPending={park.isPending}
+              onKeepDigging={() => {
+                setNotice(null);
+                beginDigPhase();
+                advance.mutate(openId);
+              }}
+              onQueue={() => toQueue.mutate(openId)}
+              onClose={() => rememberOpen(null)}
+              onPark={() => park.mutate(openId)}
+              onFollow={(seed) => followLead.mutate(seed)}
+              onWriteBrief={() => writeBrief.mutate(openId)}
+              briefPending={writeBrief.isPending || briefWaiting}
+              modelChoice={modelChoice}
+            />
+          ) : null}
+
+          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
+
+          {/*
+            How hard to dig stays on the page, below the file rather than in a
+            settings route: it is a dial an editor turns mid-file, and the
+            walk that checks "How hard to dig" is on this screen. It is not in
+            the rail -- the rail is 320px and this panel is a form.
+          */}
+          <DarkDialsPanel
+            modelChoice={modelChoice}
+            onModelChoice={(choice) => {
               setModelChoice(choice);
               setModelEffort(defaultModelEffort(choice));
             }}
-            effort={modelEffort}
-            onEffortChange={setModelEffort}
-            disabled={busyStart || digging}
-            compact
+            modelEffort={modelEffort}
+            onModelEffort={setModelEffort}
+            modelDisabled={digging || busyStart}
           />
-          <InkButton small type="submit" disabled={busyStart || digging || !paste.trim()}>
-            {openPaste.isPending ? "Starting…" : "Start digging"}
-          </InkButton>
         </div>
-        {notice && noticeAt === "paste" ? (
-          <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
-        ) : null}
-        {pendingCard === "paste" && cardPhase ? (
-          <p className="meta" aria-live="polite">
-            {cardPhase}
-          </p>
-        ) : null}
-      </form>
-      <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
-
-      {notice && noticeAt === "work" && openId == null && !redditResult ? (
-        <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
-      ) : null}
-
-      {openId != null ? (
-        <InvestigationWorkspace
-          openId={openId}
-          detail={detail.data ?? undefined}
-          pending={detail.isPending && !detail.data}
-          digging={(digging || inv?.status === "investigating") && !stalled}
-          keepDisabled={(digging || inv?.status === "investigating") && !stalled}
-          stalled={stalled}
-          darkJobError={
-            detail.data?.darkJob?.status === "failed"
-              ? editorError(detail.data.darkJob.error ?? "") ||
-                detail.data.darkJob.error ||
-                "This research run did not finish."
-              : null
-          }
-          phase={liveJobStage || cardPhase || liveLine}
-          notice={noticeAt === "work" ? notice : null}
-          noticeOk={noticeOk}
-          queuedLead={queued?.invId === openId ? queued.leadId : null}
-          queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
-          queuePending={toQueue.isPending}
-          queueError={queueError?.invId === openId ? queueError.message : null}
-          followPending={followLead.isPending}
-          parkPending={park.isPending}
-          onKeepDigging={() => {
-            setNotice(null);
-            beginDigPhase();
-            advance.mutate(openId);
-          }}
-          onQueue={() => toQueue.mutate(openId)}
-          onClose={() => rememberOpen(null)}
-          onPark={() => park.mutate(openId)}
-          onFollow={(seed) => followLead.mutate(seed)}
-          onWriteBrief={() => writeBrief.mutate(openId)}
-          briefPending={writeBrief.isPending || briefWaiting}
-          modelChoice={modelChoice}
-          onModelChoice={(choice) => {
-            setModelChoice(choice);
-            setModelEffort(defaultModelEffort(choice));
-          }}
-          modelEffort={modelEffort}
-          onModelEffort={setModelEffort}
-        />
-      ) : null}
-
-      <div className="piles">
-        <section>
-          <SecHead
-            title="To look at"
-            count={inbox.length}
-            sub="New material. Nobody has opened it yet."
-          />
-          {worth.isError && !worth.data ? (
-            <ScreenError
-              night
-              message={
-                worth.error instanceof Error ? worth.error.message : "Could not load new material."
-              }
-              onRetry={() => void worth.refetch()}
-              retrying={worth.isRefetching}
-            />
-          ) : worth.isPending && !inbox.length ? (
-            <ListSkeleton rows={3} night />
-          ) : inbox.length === 0 ? (
-            <p className="meta">
-              Nothing new tonight — everything interesting is already on the desk.
-            </p>
-          ) : (
-            inbox.map((item) => (
-              <WorthCard
-                key={item.id}
-                item={item}
-                busy={busyStart || digging}
-                phase={pendingCard === item.id ? cardPhase : ""}
-                error={cardError?.id === item.id ? cardError.message : null}
-                onStart={() => openFromCard.mutate(item)}
-              />
-            ))
-          )}
-          <DarkDialsPanel />
-          <div className="np-acts">
-            <InkButton
-              tone="quiet"
-              small
-              disabled={busyStart || digging}
-              onClick={() => find.mutate()}
-            >
-              {find.isPending ? "Starting…" : "Pick one for me"}
-            </InkButton>
-            <InkButton
-              tone="quiet"
-              small
-              disabled={busyStart || digging || reddit.isPending || !tipSubreddit.data?.subreddit}
-              onClick={() => reddit.mutate()}
-            >
-              {reddit.isPending ? `Reading ${redditLabel}…` : tipSubreddit.data?.subreddit ? `Check ${redditLabel}` : "Reddit unavailable"}
-            </InkButton>
-          </div>
-          {!tipSubreddit.isPending && !tipSubreddit.data?.subreddit ? <p className="note">{tipSubreddit.isError ? "Could not read the configured Reddit source." : "Reddit check needs one unambiguous subreddit URL in Sources; no subreddit is guessed from the town name."} <Link to="/desk/sources" className="inline-link">Review Sources</Link></p> : null}
-          {reddit.isPending ? (
-            <div className="reddit-progress">
-              <p className="worth-t">Reading {redditLabel}</p>
-              <p className="reddit-sub">
-                Four feeds, then up to three full-thread reads through Redlib. Every Reddit
-                request stays 8 seconds apart. Usually about a minute.
-              </p>
-              <div className="busy-rule" aria-hidden />
-              <p className="reddit-elapsed" aria-hidden>
-                {elapsedLabel(redditElapsed)}
-              </p>
-              <p className="sr-only" role="status" aria-live="polite">
-                {redditAnnounce}
-              </p>
-            </div>
-          ) : redditResult ? (
-            <RedditResultPanel
-              result={redditResult}
-              announce={redditAnnounce}
-              onDismiss={() => setRedditResult(null)}
-              onFileTip={(post) => fileTip.mutate(post)}
-              filingUrl={fileTip.isPending ? (fileTip.variables?.url ?? null) : null}
-            />
-          ) : (
-            <p className="mt-2 text-sm text-muted">
-              Tips from the subreddit arrive here as unverified cards. They are a reason to go
-              looking for the record, never a source to cite.
-            </p>
-          )}
-        </section>
-
-        <section>
-          <SecHead
-            title="On the desk"
-            count={active.length}
-            sub="Started. A stop mid-file is normal — it means more to read, not a failure."
-          />
-          {investigations.isError && !investigations.data ? (
-            <ScreenError
-              night
-              message={
-                investigations.error instanceof Error
-                  ? investigations.error.message
-                  : "Could not load the desk."
-              }
-              onRetry={() => void investigations.refetch()}
-              retrying={investigations.isRefetching}
-            />
-          ) : investigations.isPending && !active.length ? (
-            <ListSkeleton rows={3} night />
-          ) : active.length === 0 ? (
-            <p className="meta">Empty. Paste a tip above, or start digging on a card.</p>
-          ) : (
-            active.map((row) => (
-              <DeskFileCard
-                key={row.id}
-                row={row}
-                selected={row.id === openId}
-                digging={digging && openId === row.id}
-                locked={digging || busyStart}
-                onOpen={() => rememberOpen(row.id)}
-                onKeep={() => {
-                  if (digging || busyStart) return;
-                  setNotice(null);
-                  rememberOpen(row.id);
-                  beginDigPhase();
-                  advance.mutate(row.id);
-                }}
-                onPark={() => {
-                  if (digging) return;
-                  park.mutate(row.id);
-                }}
-              />
-            ))
-          )}
-        </section>
-
-        <section>
-          <SecHead
-            title="Set aside"
-            count={parked.length}
-            sub="Parked or finished. Pull anything back."
-          />
-          {parked.length === 0 ? (
-            <p className="meta">Nothing set aside yet.</p>
-          ) : (
-            parked.map((row) => (
-              <div key={row.id} className="deskfile dim">
-                <p className="worth-t">{row.title || `File ${row.id}`}</p>
-                <p className="np-meta">
-                  {Number(row.records ?? 0)} records · last touched{" "}
-                  {formatShortDate(row.updated_at)}
-                </p>
-                {!looksLikeInternalSummary(row.summary) && row.summary ? (
-                  <p className="np-meta">{plainEditorText(row.summary)}</p>
-                ) : null}
-                <div className="np-acts">
-                  <InkButton
-                    small
-                    disabled={pullBack.isPending}
-                    onClick={() => pullBack.mutate(row.id)}
-                  >
-                    {pullBack.isPending ? "Pulling back…" : "Pull back"}
-                  </InkButton>
-                  <InkButton tone="quiet" small onClick={() => rememberOpen(row.id)}>
-                    Read
-                  </InkButton>
-                </div>
-              </div>
-            ))
-          )}
-          {(runs.data ?? []).length > 0 ? (
-            <details className="of-trail runs">
-              <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
-              {(runs.data ?? []).map((r) => (
-                <div key={r.id} className="run-row">
-                  <p className="meta">
-                    {formatDateTime(r.started_at)}
-                    {/*
-                      Which model dug this round. A round that dug badly and a
-                      round that dug on a different model are different facts
-                      about the same file, and the history could not tell them
-                      apart before 0.6.2. Rounds dug before the picker existed
-                      have no answer, and say nothing rather than guessing.
-                    */}
-                    {r.model_choice ? ` · ${modelChoiceLabel(r.model_choice)}` : ""}
-                  </p>
-                  {r.error ? (
-                    <p className="side-item">
-                      {editorError(r.error)}
-                      {looksLikeProviderAuthFailure(r.error) ? (
-                        <ProviderSignInButton detail={r.error} />
-                      ) : null}
-                    </p>
-                  ) : null}
-                  {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
-                  <DarkRunMeter run={r} />
-                </div>
-              ))}
-            </details>
-          ) : null}
-        </section>
       </div>
     </DeskShell>
   );
@@ -981,24 +1051,57 @@ function DeskFileCard({
   const records = Number(row.records ?? 0);
   const still = Number(row.still_open ?? 0);
   return (
-    <div className={"deskfile" + (selected ? " sel" : "")}>
-      <p className="np-kind">{editorStatus(row.status)}</p>
-      <p className="worth-t">{row.title || `File ${row.id}`}</p>
-      <p className="np-meta">
-        {records} records on file
-        {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
-        {formatShortDate(row.updated_at)}
-      </p>
-      <div className="np-acts">
-        <InkButton small onClick={onOpen}>
-          {selected ? "Viewing above" : "Open file"}
-        </InkButton>
-        <InkButton small disabled={digging || locked} onClick={onKeep}>
-          {digging ? "Reading…" : "Keep digging"}
-        </InkButton>
-        <InkButton tone="quiet" small disabled={digging || locked} onClick={onPark}>
-          Set aside
-        </InkButton>
+    <div className={"astra-file" + (selected ? " on" : "")}>
+      {/*
+        The row is the control. The drawing's rail rows are selectors -- a bold
+        title and one line of metadata -- so "Open file" / "Viewing above" is no
+        longer a button: clicking anywhere on the row opens it, and
+        `aria-current` says which file the pane on the right is showing.
+      */}
+      <button
+        type="button"
+        className="astra-file-open"
+        onClick={onOpen}
+        aria-current={selected ? "true" : undefined}
+      >
+        <span className="astra-file-t">{row.title || `File ${row.id}`}</span>
+        <span className="astra-file-m">
+          {editorStatus(row.status)} · {records} record{records === 1 ? "" : "s"} on file
+          {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
+          {formatShortDate(row.updated_at)}
+        </span>
+      </button>
+      {/*
+        Keep digging and Set aside keep the behavior they had on the old card,
+        but move under More: the drawing's rail row carries one action, and the
+        rail is an index, not a workbench. Neither act is lost -- both are one
+        click away, and Keep digging is also on the open file's own Decide
+        strip.
+      */}
+      <div className="astra-file-acts">
+        <details className="row-more">
+          <summary className="btn quiet">
+            More ▾
+          </summary>
+          <div className="row-more-panel">
+            <button
+              type="button"
+              className="btn quiet"
+              disabled={digging || locked}
+              onClick={onKeep}
+            >
+              {digging ? "Reading…" : "Keep digging"}
+            </button>
+            <button
+              type="button"
+              className="btn quiet"
+              disabled={digging || locked}
+              onClick={onPark}
+            >
+              Set aside
+            </button>
+          </div>
+        </details>
       </div>
     </div>
   );
@@ -1042,7 +1145,6 @@ function RedditTipRows({
             {canFile ? (
               <InkButton
                 tone="quiet"
-                small
                 disabled={filing}
                 onClick={() => onFileTip({ url: p.url, title: p.title, excerpt: p.excerpt, updated: p.updated, author: p.author })}
               >
@@ -1096,7 +1198,7 @@ function RedditResultPanel({
         {announce}
       </p>
       {result.incomplete ? (
-        <Notice kind="warn" night>
+        <Notice kind="warn">
           {result.reason || "The read stopped early."}
         </Notice>
       ) : null}
@@ -1138,7 +1240,7 @@ function RedditResultPanel({
         })}
       </details>
       <div className="np-acts">
-        <InkButton tone="quiet" small onClick={onDismiss}>
+        <InkButton tone="quiet" onClick={onDismiss}>
           Dismiss
         </InkButton>
       </div>
@@ -1160,24 +1262,34 @@ function WorthCard({
   onStart: () => void;
 }) {
   return (
-    <div className="worth">
-      <p className="np-kind">{item.badge || editorKindLabel(item.kind)}</p>
-      <p className="worth-t">{item.title}</p>
-      <p className="worth-line">
-        <b>Why it matters</b> — {item.why}
+    <div className="astra-file">
+      <p className="astra-file-t">{item.title}</p>
+      <p className="astra-file-m">
+        {item.badge || editorKindLabel(item.kind)} · {item.why}
       </p>
-      <p className="worth-line">
-        <b>What changed</b> — {item.happened}
-      </p>
-      <p className="worth-q">First question: {item.question}</p>
-      {item.source_line ? <p className="meta">{item.source_line}</p> : null}
-      <div className="np-acts">
-        <InkButton small disabled={busy} onClick={onStart}>
+      <div className="astra-file-acts">
+        <InkButton disabled={busy} onClick={onStart}>
           {phase.startsWith("Starting") ? "Starting…" : phase ? "Digging…" : "Start digging"}
         </InkButton>
+        {/*
+          The two lines the card used to print in full -- what changed and the
+          first question -- are what makes a signal worth opening, so they stay
+          one click away rather than being cut. The rail's row shape is one
+          line of metadata; the why is the line that decides whether to look.
+        */}
+        <details className="row-more">
+          <summary className="btn quiet">More ▾</summary>
+          <div className="row-more-panel">
+            <p className="row-more-h">What changed</p>
+            <p>{item.happened}</p>
+            <p className="row-more-h">First question</p>
+            <p>{item.question}</p>
+            {item.source_line ? <p className="meta">{item.source_line}</p> : null}
+          </div>
+        </details>
       </div>
       {phase ? (
-        <p className="meta" aria-live="polite">
+        <p className="astra-file-m" aria-live="polite">
           {phase}
         </p>
       ) : null}
@@ -1259,9 +1371,6 @@ function InvestigationWorkspace({
   onWriteBrief,
   briefPending,
   modelChoice,
-  onModelChoice,
-  modelEffort,
-  onModelEffort,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -1286,10 +1395,12 @@ function InvestigationWorkspace({
   onFollow: (seed: { paste: string; title: string }) => void;
   onWriteBrief: () => void;
   briefPending: boolean;
+  /*
+    The chosen model, read-only here: this component prints it (the file's own
+    line, the PDF reader's "Uses …"), while the picker that sets it lives with
+    the dials in `DarkDialsPanel`. The effort is not read here at all.
+  */
   modelChoice: StoryModelChoice;
-  onModelChoice: (value: StoryModelChoice) => void;
-  modelEffort: ModelEffort | null;
-  onModelEffort: (value: ModelEffort | null) => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
@@ -1402,6 +1513,49 @@ function InvestigationWorkspace({
       : editorStatus(inv.status);
   const round = inv?.hops ?? 0;
   const budget = inv?.budget ?? 5;
+
+  /*
+    Activity, from the run's own call record. The drawing's left column is a
+    clock time; a call has a duration but no timestamp of its own, so the
+    column is the elapsed time into the round -- the same fact from the other
+    end, and it cannot be wrong. With no run record yet, this round's searches
+    carry the log instead.
+  */
+  const callLog = run?.usage.calls ?? [];
+  const activityAll: { when: string; what: string; tone: "find" | "fail" | "plain" }[] = [];
+  if (callLog.length) {
+    let ms = 0;
+    for (const call of callLog) {
+      ms += call.durationMs;
+      const failed = /fail|error|blocked|refus|timeout|unavailable/i.test(call.result);
+      const found = /found|new |result|captur/i.test(call.result);
+      activityAll.push({
+        when: elapsedLabel(Math.ceil(ms / 1000)),
+        what: `${call.stage} — ${call.result}`,
+        tone: failed ? "fail" : found ? "find" : "plain",
+      });
+    }
+  } else {
+    for (const s of searches.slice(-14)) {
+      const outcome = String(s.state ?? "");
+      activityAll.push({
+        when: `Round ${Math.max(1, Number(s.hop ?? 0) + 1)}`,
+        what: `Search — ${searchOutcomeWords(s)}`,
+        tone: /FAIL|BLOCKED|TIMEOUT/.test(outcome) ? "fail" : "plain",
+      });
+    }
+  }
+  const activityRows = activityAll.slice(-14);
+
+  /*
+    How hard the desk is set to dig, for the boundaries strip. Same query key as
+    the settings panel below, so this reads that panel's cache instead of asking
+    the server a second time.
+  */
+  const dialsQ = useQuery({ queryKey: ["dark-dials"], queryFn: () => getDarkDials() });
+  const dials = dialsQ.data?.dials;
+  const scopeLabel = dialsQ.data ? scopeLabelsFor(dialsQ.data.place)[dials?.scope ?? "city"] : null;
+  const roundMinutes = dials ? estimateMinutes(dials) : null;
   const statusLine = [
     statusBit,
     readableLabel,
@@ -1413,180 +1567,166 @@ function InvestigationWorkspace({
     .join(" · ");
 
   return (
-    <section id="investigation-workspace" className="openfile" tabIndex={-1} aria-label="Investigation workspace">
-      <div className="of-head">
-        <div>
-          <p className="kick">Open file</p>
-          <h2 className="of-title">{parentTitle}</h2>
-          <p className="meta">{statusLine}</p>
+    <section
+      id="investigation-workspace"
+      className="astra-col astra-deep-file"
+      tabIndex={-1}
+      aria-label="Investigation workspace"
+    >
+      {/*
+        The question the file is: the largest voice on the screen, and
+        everything below it is evidence about this one line.
+      */}
+      <div>
+        <p className="astra-label">The question</p>
+        <h2 className="astra-question">{parentTitle}</h2>
+        <p className="astra-note">{statusLine}</p>
+      </div>
+
+      {/*
+        The drawing puts "the ordinary explanation to rule out first" here. The
+        investigations table has no such column (migrations/0006_investigate.sql:
+        id, title, status, summary, hops, budget), so the honest line in that
+        slot is where the file actually started -- the pasted tip, or the file's
+        own saved summary. Nothing is invented to fill the drawn sentence.
+      */}
+      {started ? <p className="astra-serif">{started}</p> : null}
+
+      {/* Status, in the order it matters: stopped, failed, running, then the rest. */}
+      <div className="astra-notices">
+        {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
+        {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
+        {digging ? <Busy label={phase || "Searching records…"} /> : null}
+        {run ? <DarkRunMeter run={run} active={digging} /> : null}
+        {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
+        {
+          /*
+            Persistent, not a fleeting toast: this banner stays mounted for as
+            long as the queue state it describes is true, independent of the
+            transient `notice` line above (which other actions on this file
+            clear). An editor who queues a lead and then keeps digging must
+            still be able to answer "where did it go?" without hunting --
+            especially since a queued lead can later be drafted and drop out of
+            the editor's default Queue view (0.6.16).
+          */
+          queueError != null ? (
+            <Notice kind="err">
+              Could not send to the queue: {queueError}
+            </Notice>
+          ) : queuedLead != null ? (
+            <Notice kind="ok">
+              {queuedAlready
+                ? "Already on the working queue as a story lead."
+                : "On the working queue as a story lead."}{" "}
+              Dark Desk did not publish.{" "}
+              <Link
+                to="/desk/story/$leadId"
+                params={{ leadId: String(queuedLead) }}
+                className="inline-link"
+              >
+                Open the lead →
+              </Link>
+              {" · "}
+              <Link to="/desk/queue" className="inline-link">
+                Open the queue
+              </Link>
+            </Notice>
+          ) : null
+        }
+        {signals.length > 0 && queuedLead == null ? (
+          <p className="of-stop" role="status">
+            <b>Lead status:</b>{" "}
+            {`${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} completed the research protocol. Incomplete checks remain visible in the file and travel with the lead; they do not block sending it to the working queue.`}
+          </p>
+        ) : null}
+        {pending ? <p className="meta">Getting this ready…</p> : null}
+        {inv?.status === "paused" && pauseText && !digging ? (
+          <p className="of-stop">
+            <b>Why it stopped:</b> {pauseText}
+            {looksLikeProviderAuthFailure(inv?.pause_reason) ? (
+              <ProviderSignInButton detail={inv?.pause_reason} />
+            ) : null}
+          </p>
+        ) : null}
+        {showBlockedBanner ? (
+          <p className="of-stop err" role="status">
+            <b>Mostly blocked:</b> {blockedDigBannerText(captureStats)}
+          </p>
+        ) : null}
+      </div>
+
+      {/*
+        The boundaries strip, as drawn. Every cell is a real stored value:
+        Scope is the saved map scope, Depth is this file's round against its
+        budget, Limit is where a round stops at the saved dig settings. The
+        dials come from the same ["dark-dials"] query the settings panel below
+        reads, so the strip and the panel cannot disagree and nothing is
+        fetched twice.
+      */}
+      <div className="astra-bounds">
+        <div className="astra-bound">
+          <p className="astra-bound-k">Scope</p>
+          <p className="astra-bound-v">{scopeLabel ?? "Not recorded yet"}</p>
         </div>
-        <div className="row-acts static">
-          {/*
-            The picker sits next to the button that spends, not in a settings
-            page: the editor decides which model digs at the moment they press
-            Keep digging, the same way they do on a Story draft.
-          */}
-          <ModelPicker
-            scope="dark"
-            value={modelChoice}
-            onChange={onModelChoice}
-            effort={modelEffort}
-            onEffortChange={onModelEffort}
-            disabled={keepDisabled}
-            compact
-          />
-          <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
-            {digging ? "Reading…" : "Keep digging"}
-          </InkButton>
-          {queuedLead != null ? (
-            <Link
-              to="/desk/story/$leadId"
-              params={{ leadId: String(queuedLead) }}
-              className="btn queue-done"
-            >
-              {queuedAlready ? "✓ Already on the queue · Open →" : "✓ On the queue · Open →"}
-            </Link>
-          ) : (
-            <InkButton
-              tone="ghost"
-              disabled={keepDisabled || queuePending}
-              onClick={onQueue}
-            >
-              {queuePending ? "Sending…" : "Send to the queue"}
-            </InkButton>
-          )}
-          <InkButton tone="quiet" disabled={keepDisabled || parkPending} onClick={onPark}>
-            {parkPending ? "Setting aside…" : "Set aside"}
-          </InkButton>
-          <InkButton tone="quiet" onClick={onClose}>
-            Close file
-          </InkButton>
+        <div className="astra-bound">
+          <p className="astra-bound-k">Depth</p>
+          <p className="astra-bound-v">{investigationRoundLabel(round, budget)}</p>
+        </div>
+        <div className="astra-bound">
+          <p className="astra-bound-k">Limit</p>
+          <p className="astra-bound-v">
+            Stops at the time, search and model-call limits
+            {roundMinutes != null
+              ? ` · about ${roundMinutes} minute${roundMinutes === 1 ? "" : "s"} a round`
+              : ""}
+          </p>
         </div>
       </div>
-      {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
-      {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
-      {digging ? <Busy label={phase || "Searching records…"} /> : null}
-      {run ? <DarkRunMeter run={run} active={digging} /> : null}
-      {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
-      {
-        /*
-          Persistent, not a fleeting toast: this banner stays mounted for as
-          long as the queue state it describes is true, independent of the
-          transient `notice` line above (which other actions on this file
-          clear). An editor who queues a lead and then keeps digging must
-          still be able to answer "where did it go?" without hunting —
-          especially since a queued lead can later be drafted and drop out of
-          the editor's default Queue view (0.6.16).
-        */
-        queueError != null ? (
-          <Notice kind="err" night>
-            Could not send to the queue: {queueError}
-          </Notice>
-        ) : queuedLead != null ? (
-          <Notice kind="ok" night>
-            {queuedAlready
-              ? "Already on the working queue as a story lead."
-              : "On the working queue as a story lead."}{" "}
-            Dark Desk did not publish.{" "}
-            <Link
-              to="/desk/story/$leadId"
-              params={{ leadId: String(queuedLead) }}
-              className="inline-link"
-            >
-              Open the lead →
-            </Link>
-            {" · "}
-            <Link to="/desk/queue" className="inline-link">
-              Open the queue
-            </Link>
-          </Notice>
-        ) : null
-      }
-      {signals.length > 0 && queuedLead == null ? (
-        <p className="of-stop" role="status">
-          <b>Lead status:</b>{" "}
-          {`${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} completed the research protocol. Incomplete checks remain visible in the file and travel with the lead; they do not block sending it to the working queue.`}
-        </p>
-      ) : null}
-      {pending ? <p className="meta">Getting this ready…</p> : null}
-      {started ? <p className="of-started">{started}</p> : null}
-      {inv?.status === "paused" && pauseText && !digging ? (
-        <p className="of-stop">
-          <b>Why it stopped:</b> {pauseText}
-          {looksLikeProviderAuthFailure(inv?.pause_reason) ? (
-            <ProviderSignInButton detail={inv?.pause_reason} />
-          ) : null}
-        </p>
-      ) : null}
-      {showBlockedBanner ? (
-        <p className="of-stop err" role="status">
-          <b>Mostly blocked:</b> {blockedDigBannerText(captureStats)}
-        </p>
-      ) : null}
 
-      <div className="of-grid">
+      {/*
+        Activity beside the Case file. The log is built from the run's own call
+        record, so it is what the desk actually did and not a summary of it; it
+        never prints a raw search string (the wording is the same safe wording
+        the search trail uses), so the log cannot leak a query nobody meant to
+        publish.
+      */}
+      <div className="astra-pair">
         <div>
-          <SecHead
-            title="What to read"
-            count={readableCountBadge}
-            sub="Click a title. The captured page opens below — that is the file."
-          />
-          {artifacts.length > 0 ? (
-            <OpenedRecords artifacts={artifacts} modelChoice={modelChoice} />
-          ) : digging ? (
-            <p className="meta">Opening pages now. They land on the file as they are read…</p>
+          <div className="astra-case-h">
+            <p className="astra-label">Activity</p>
+            <p className="astra-note">
+              What the desk did, in order. Failures stay on the record.
+            </p>
+          </div>
+          {activityRows.length === 0 ? (
+            <p className="astra-note">
+              No activity recorded yet. Keep digging starts the first round.
+            </p>
           ) : (
-            <p className="meta">Nothing captured yet. Keep digging starts the first round.</p>
+            activityRows.map((a, i) => (
+              <div key={i} className="astra-log">
+                <span className="astra-log-t">{a.when}</span>
+                <span
+                  className={
+                    "astra-log-e" + (a.tone === "fail" ? " fail" : a.tone === "find" ? " find" : "")
+                  }
+                >
+                  {a.what}
+                </span>
+              </div>
+            ))
           )}
         </div>
         <div>
-          {nextDeduped.length > 0 ? (
-            <>
-              <SecHead
-                title="Still to pursue"
-                count={nextDeduped.length}
-                sub="Open and deferred trails stay visible here. Displayed duplicates are folded in."
-              />
-              <div className="of-frontier">
-                {nextDeduped.slice(0, frN).map((f) => (
-                  <div key={f.id} className="fr-item">
-                    <p className="fr-label">{humanFrontierLabel(f.label)}</p>
-                    {f.status === "deferred" ? (
-                      <p className="meta">Saved for a later run; this lead was not rejected.</p>
-                    ) : null}
-                    {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
-                    <InkButton
-                      tone="quiet"
-                      small
-                      disabled={keepDisabled || followPending}
-                      onClick={() =>
-                        onFollow({
-                          paste: `Followed from the “${parentTitle}” file: ${plainEditorText(f.why) || humanFrontierLabel(f.label)}.\n\n${f.label}\n${f.why}`,
-                          title: humanFrontierLabel(f.label),
-                        })
-                      }
-                    >
-                      {followPending ? "Following…" : "Follow this lead"}
-                    </InkButton>
-                  </div>
-                ))}
-              </div>
-              {nextDeduped.length > frN ? (
-                <InkButton tone="quiet" small onClick={() => setFrN((n) => n + 10)}>
-                  Next 10 — {nextDeduped.length - frN} more
-                </InkButton>
-              ) : null}
-              {totalOpen > nextDeduped.length ? (
-                <p className="meta">
-                  This view shows a limited, deduplicated subset of {totalOpen} open follow-up
-                  entries. Keep digging works from the full list.
-                </p>
-              ) : null}
-            </>
-          ) : null}
+          <div className="astra-case-h">
+            <p className="astra-label">Case file</p>
+            <p className="astra-note">
+              What is established, what is being tested, and what is still unanswered.
+            </p>
+          </div>
           {/*
             Above the four lists, because the question an editor opens a file
-            with — is there something here, is it worth an hour — is the one
+            with -- is there something here, is it worth an hour -- is the one
             thing the lists cannot answer.
           */}
           <InvestigationBriefCard
@@ -1649,53 +1789,182 @@ function InvestigationWorkspace({
               ))}
             </div>
           ) : null}
-          {signals.length > 0 ? (
-            <div className="of-block">
-              <SecHead
-                title="Signals"
-                count={signals.length}
-                sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Completing all four records protocol completion; the editor still verifies the underlying facts."
-              />
-              {signals.map((s) => (
-                <div key={s.id} className="side-item sig-card">
-                  <p>
-                    <b>{s.name}</b> <span className="chip">{s.stageChip}</span>
-                  </p>
-                  <p className="meta">{s.stageSentence}</p>
-                  {s.newsworthiness ? <p className="meta">{s.newsworthiness}</p> : null}
-                  {s.adversarial.length > 0 ? (
-                    <details className="of-trail">
-                      <summary>
-                        Searches this round — {s.adversarial.length} run against this signal
-                      </summary>
-                      {s.adversarial.map((a, i) => (
-                        <SearchTrailEntry key={i} record={a} />
-                      ))}
-                    </details>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+          {/*
+            The drawing ends this column with "Challenge the case". There is no
+            challenge action on this base -- the adversarial work is a round,
+            i.e. Keep digging, which already stands in the Decide strip below,
+            and the brief card's own refresh rewrites the brief rather than
+            challenging it. No button is drawn here that would only re-run
+            something under a name that means something else.
+          */}
+        </div>
+      </div>
+
+      {/*
+        Decide: the file's verbs, in the drawing's order. "Start an AI
+        follow-up" is the drawn primary. Follow-ups are lane 2's screen
+        (/desk/follow-ups); there is no add-follow-up component on this base,
+        so the drawn primary links there rather than pretending to start one
+        in place. Everything else is the same action it was before the
+        restyle, with the same label.
+      */}
+      <div className="astra-panel decide">
+        <div className="astra-case-h">
+          <p className="astra-label">Decide</p>
+          <p className="astra-note">It digs; it never prints.</p>
+        </div>
+        {/*
+          The drawing's Decide is the five verbs and the sentence under them.
+          Which model digs is a dial, not a verb, and it lives with the other
+          dials in "How hard to dig" below the file -- see the panel's own
+          comment. Nothing became unreachable: the state behind it is the same
+          one this route has always held, and the picker writes it from there.
+        */}
+        <div className="astra-panel-acts">
+          <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
+            {digging ? "Reading…" : "Keep digging"}
+          </InkButton>
+          <Link to="/desk/follow-ups" className="btn solid">
+            Start an AI follow-up
+          </Link>
+          <InkButton tone="quiet" disabled={keepDisabled || parkPending} onClick={onPark}>
+            {parkPending ? "Setting aside…" : "Set aside"}
+          </InkButton>
+          {queuedLead != null ? (
+            <Link
+              to="/desk/story/$leadId"
+              params={{ leadId: String(queuedLead) }}
+              className="btn queue-done"
+            >
+              {queuedAlready ? "✓ Already on the queue · Open →" : "✓ On the queue · Open →"}
+            </Link>
+          ) : (
+            <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
+              {queuePending ? "Sending…" : "Send to the queue"}
+            </InkButton>
+          )}
+          <InkButton tone="quiet" onClick={onClose}>
+            Close file
+          </InkButton>
+        </div>
+        <p className="astra-note">
+          Nothing here prints. “Send to the queue” files a lead for you to review.
+        </p>
+      </div>
+
+      {/*
+        The file's own captures and its unresolved trails. The drawing shows a
+        file that is already dug; these are the records it was dug from, and
+        they stay on the page -- clicking a title opens the captured page, and
+        that page is the file.
+      */}
+      <div>
+        <SecHead
+          title="What to read"
+          count={readableCountBadge}
+          sub="Click a title. The captured page opens below — that is the file."
+        />
+        {artifacts.length > 0 ? (
+          <OpenedRecords artifacts={artifacts} modelChoice={modelChoice} />
+        ) : digging ? (
+          <p className="meta">Opening pages now. They land on the file as they are read…</p>
+        ) : (
+          <p className="meta">Nothing captured yet. Keep digging starts the first round.</p>
+        )}
+      </div>
+
+      {nextDeduped.length > 0 ? (
+        <div>
+          <SecHead
+            title="Still to pursue"
+            count={nextDeduped.length}
+            sub="Open and deferred trails stay visible here. Displayed duplicates are folded in."
+          />
+          <div className="of-frontier">
+            {nextDeduped.slice(0, frN).map((f) => (
+              <div key={f.id} className="fr-item">
+                <p className="fr-label">{humanFrontierLabel(f.label)}</p>
+                {f.status === "deferred" ? (
+                  <p className="meta">Saved for a later run; this lead was not rejected.</p>
+                ) : null}
+                {f.why ? <p className="fr-why">{plainEditorText(f.why)}</p> : null}
+                <InkButton
+                  tone="quiet"
+                  disabled={keepDisabled || followPending}
+                  onClick={() =>
+                    onFollow({
+                      paste: `Followed from the “${parentTitle}” file: ${plainEditorText(f.why) || humanFrontierLabel(f.label)}.\n\n${f.label}\n${f.why}`,
+                      title: humanFrontierLabel(f.label),
+                    })
+                  }
+                >
+                  {followPending ? "Following…" : "Follow this lead"}
+                </InkButton>
+              </div>
+            ))}
+          </div>
+          {nextDeduped.length > frN ? (
+            <InkButton tone="quiet" onClick={() => setFrN((n) => n + 10)}>
+              Next 10 — {nextDeduped.length - frN} more
+            </InkButton>
           ) : null}
-          <details className="of-trail">
-            <summary>Searches this round — {searches.length}</summary>
-            {searches.length ? (
-              searches.map((s, i) => <SearchTrailEntry key={`${s.hop}-${i}`} record={s} />)
-            ) : (
-              <p className="side-item">No searches logged yet.</p>
-            )}
-          </details>
-          {deadEnds.length > 0 ? (
-            <details className="of-trail">
-              <summary>Dead ends — {deadEnds.length}</summary>
-              {deadEnds.map((d, i) => (
-                <p key={i} className="side-item">
-                  <b>{d.hypothesis}</b> — {plainEditorText(d.dismissed_because)}
-                </p>
-              ))}
-            </details>
+          {totalOpen > nextDeduped.length ? (
+            <p className="meta">
+              This view shows a limited, deduplicated subset of {totalOpen} open follow-up
+              entries. Keep digging works from the full list.
+            </p>
           ) : null}
         </div>
+      ) : null}
+
+      {signals.length > 0 ? (
+        <div>
+          <SecHead
+            title="Signals"
+            count={signals.length}
+            sub="Stage one asks the question. Stage two runs the adversarial searches and answers the four gates. Completing all four records protocol completion; the editor still verifies the underlying facts."
+          />
+          {signals.map((s) => (
+            <div key={s.id} className="side-item sig-card">
+              <p>
+                <b>{s.name}</b> <span className="chip">{s.stageChip}</span>
+              </p>
+              <p className="meta">{s.stageSentence}</p>
+              {s.newsworthiness ? <p className="meta">{s.newsworthiness}</p> : null}
+              {s.adversarial.length > 0 ? (
+                <details className="of-trail">
+                  <summary>
+                    Searches this round — {s.adversarial.length} run against this signal
+                  </summary>
+                  {s.adversarial.map((a, i) => (
+                    <SearchTrailEntry key={i} record={a} />
+                  ))}
+                </details>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div>
+        <details className="of-trail">
+          <summary>Searches this round — {searches.length}</summary>
+          {searches.length ? (
+            searches.map((s, i) => <SearchTrailEntry key={`${s.hop}-${i}`} record={s} />)
+          ) : (
+            <p className="side-item">No searches logged yet.</p>
+          )}
+        </details>
+        {deadEnds.length > 0 ? (
+          <details className="of-trail">
+            <summary>Dead ends — {deadEnds.length}</summary>
+            {deadEnds.map((d, i) => (
+              <p key={i} className="side-item">
+                <b>{d.hypothesis}</b> — {plainEditorText(d.dismissed_because)}
+              </p>
+            ))}
+          </details>
+        ) : null}
       </div>
     </section>
   );

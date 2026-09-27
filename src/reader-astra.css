@@ -3383,3 +3383,193 @@
 .reader .keepreading[id] {
   scroll-margin-top: 24px;
 }
+
+/* ---------------------------------------------------------------------------
+   The section nav on one line (unit BD5).
+
+   The owner's report, staged data beside the design capture: the paper
+   publishes 21 sections; the front page drew them over THREE lines at 1280 and
+   the article page over two, under the wordmark. Both prototypes
+   (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html` -- nav under the
+   masthead -- and `Article Daily.dc.html` -- nav on the masthead row) draw one
+   row.
+
+   A count cannot be right for a paper whose section list changes, so the row
+   is fitted: `SectionNav` measures the real links at the width it has and cuts
+   them where the "More sections" button still fits. The stylesheet's half of
+   that contract is this: above 900px the row must be ONE line -- `nowrap`, and
+   the nav allowed to be narrower than its links, so the nav's own box is the
+   space it has to fill and the measurement has something honest to compare
+   against. Below 900px the fitted row is not drawn at all; the sections are the
+   reader menu the paper already had.
+
+   900 is not a guess: it is the width at which nine sections and the button
+   still fit at 16px/700, and it matches `NAV_FIT_MIN_WIDTH` in
+   src/components/section-nav.tsx. The two have to agree -- a component that
+   measured a row the stylesheet still lets wrap would cut the wrong place.
+   --------------------------------------------------------------------------- */
+@media (min-width: 900px) {
+  /* One line. `.navrow` and the compact mast are the two rows this nav lives
+     on, and both are `wrap` today, which is what drew the three lines. */
+  .reader .navrow,
+  .reader .mast-compact {
+    flex-wrap: nowrap;
+  }
+  /* The cut is made here, so no gap and no wrap: exactly one row. */
+  .reader .sections {
+    flex-wrap: nowrap;
+    column-gap: 23px;
+    row-gap: 0;
+  }
+  /* `min-width: 0` is the whole measurement: it lets the nav be narrower than
+     its contents, so `getBoundingClientRect().width` reports the room the row
+     has rather than the width of the links. Without it a flex item refuses to
+     shrink below its content and the row overflows instead of fitting. The
+     links are not clipped -- `SectionNav` only ever shows the ones that fit --
+     so the current section's underline is not cut off. */
+  .reader .navrow > .sections,
+  .reader .mast-compact > .sections {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  /* Both rows anchor the "More sections" panel. */
+  .reader .navrow,
+  .reader .mast {
+    position: relative;
+  }
+}
+
+/* The "More sections" button: 44px, on the row, after the last link that fit. */
+.reader .moresections {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.reader .moresections:hover {
+  background: var(--soft);
+}
+.reader .moresections svg {
+  width: 16px;
+  height: 16px;
+}
+.reader .mast-compact .moresections {
+  font-size: 15px;
+  min-height: 40px;
+}
+
+/* The panel: the sections the row had no room for, in the paper's own order. */
+.reader .morepanel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 230px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--grid);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.2);
+}
+.reader .morepanel b {
+  padding: 10px 16px 6px;
+  font-family: var(--fd);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+.reader .morepanel a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.reader .morepanel a:hover {
+  background: var(--soft);
+}
+.reader .morepanel a.active {
+  color: var(--sel);
+}
+
+/* ---------------------------------------------------------------------------
+   Below the fitted row: the reader menu.
+   761-899px is the band this block exists for. Above 900 the row is fitted and
+   the menu is gone; at 760 and below the paper's own narrow-screen rules
+   already do all of this, and repeating it here keeps the band between the two
+   from being the one width where neither shape is drawn.
+   --------------------------------------------------------------------------- */
+@media (max-width: 899px) {
+  .reader .navrow {
+    position: relative;
+    flex-wrap: wrap;
+  }
+  .reader .mobilemenu {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    width: auto;
+    padding: 13px 0;
+    font-size: 14px;
+    font-weight: 700;
+    order: 1;
+  }
+  .reader .reader-nav-actions {
+    order: 2;
+    margin-left: 8px;
+  }
+  /* The menu's list: every section, stacked, closed until asked for. */
+  .reader .sections {
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 0;
+    padding-bottom: 12px;
+    order: 3;
+  }
+  .reader .sections.open {
+    display: flex;
+  }
+  .reader .sections a {
+    padding: 12px;
+    font-size: 15px;
+  }
+  .reader .sections a.active {
+    background: var(--soft);
+    border-radius: 0;
+  }
+  .reader .sections a.active:after {
+    display: none;
+  }
+  /* The article's masthead is a wrapping row of its own, so the menu takes the
+     line under the wordmark rather than sitting beside it. */
+  .reader .mast-compact > .sections {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-left: 0;
+    order: 4;
+  }
+  /* No fit to make, so no leftovers to offer. */
+  .reader .moresections,
+  .reader .morepanel {
+    display: none;
+  }
+}

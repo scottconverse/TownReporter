@@ -638,7 +638,11 @@ async function thePictures() {
     and only the record keeps it.
   */
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const printedRow = page.locator("li, .pub-row, article").filter({ hasText: REFILED }).first();
+  // Redesign p2c moved the Published list onto the astra grid, so the row that
+  // was `div.pub-row` is `div.astra-row.pub`. The other two names in the list
+  // stay: this locator has always said "whatever holds the story on this
+  // screen", and the drawn row holds the same "Read on the paper" link.
+  const printedRow = page.locator("li, .astra-row.pub, article").filter({ hasText: REFILED }).first();
   await printedRow.waitFor({ timeout: 45_000 });
   const readOnPaper = printedRow.getByRole("link", { name: "Read on the paper", exact: true });
   const printed = await readOnPaper.getAttribute("href");

@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+    # One PR per release: a docs-only pull request does not change what this job
+    # builds or installs, so it skips it. This filter is on pull_request only --
+    # push to main and workflow_dispatch still run unconditionally.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
     inputs:
       release_tag:

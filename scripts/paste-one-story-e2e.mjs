@@ -841,7 +841,11 @@ async function thePictures(sectionChoice) {
   // The published story, and the section under it: the cited page beneath the
   // heading that is there because there is something to follow.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const printedRow = page.locator("li, .pub-row, article").filter({ hasText: FIRST_LINE }).first();
+  // Redesign p2c moved the Published list onto the astra grid, so the row that
+  // was `div.pub-row` is `div.astra-row.pub`. The other two names in the list
+  // stay: the locator still means "whatever holds this story on this screen",
+  // and what it is read for -- the "Read on the paper" link -- is unchanged.
+  const printedRow = page.locator("li, .astra-row.pub, article").filter({ hasText: FIRST_LINE }).first();
   await printedRow.waitFor({ timeout: 45_000 });
   const readOnPaper = printedRow.getByRole("link", { name: "Read on the paper", exact: true });
   const printed = await readOnPaper.getAttribute("href");

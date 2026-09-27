@@ -57,14 +57,36 @@ test("the walk that measured all of this still exists", async () => {
 });
 
 test("both source registry import controls have accessible names", async () => {
-  const sources = await readFile(new URL("../src/routes/desk.sources.tsx", import.meta.url), "utf8");
+  /*
+    Phase 2c MOVED both controls off the page and into the "Add sources to
+    watch" dialog (`editor-dialog-bodies.ts`, `AddSourcesBody`): the watch list
+    keeps one "+ Add a source" press and the dialog holds the paste box and the
+    file chooser (`desk.sources.tsx` at the `AddSourcesDialog` mount says so).
+    The two controls are the same two the 2026-09-22 walk found -- the paste
+    textarea and the hidden file input -- so this pin follows them to the file
+    that now draws them rather than to the page that used to. What names each
+    one is different there, because the dialog's markup is the drawing's: the
+    paste box is wrapped in its own `<label>` (`field`, name "Links"), and the
+    hidden input carries the drop zone's hint as its `aria-label` (`dropZone`),
+    which is the only thing that names an input that is inside a label with
+    other text. Both names are still required -- the point of the pin is that a
+    screen reader can say what each control is, not which file they live in.
+  */
+  const bodies = await readFile(new URL("../src/components/dialogs/editor-dialog-bodies.ts", import.meta.url), "utf8");
   assert.match(
-    sources,
-    /<textarea[\s\S]{0,180}aria-label="Paste source registry"|aria-label="Paste source registry"[\s\S]{0,180}<textarea/,
+    bodies,
+    /field\(\s*"Links"[\s\S]{0,300}?textarea\(/,
+    "the paste box must sit in a field whose own label names it",
   );
   assert.match(
-    sources,
-    /type="file"[\s\S]{0,160}aria-label="Choose source registry file"|aria-label="Choose source registry file"[\s\S]{0,160}type="file"/,
+    bodies,
+    /dropZone\([\s\S]{0,400}?"Choose a file"/,
+    "the dialog's file tab must pass the hint that becomes the input's name",
+  );
+  assert.match(
+    bodies,
+    /type:\s*"file"[\s\S]{0,120}?"aria-label":\s*hint/,
+    "the hidden file input must carry that hint as its accessible name",
   );
 });
 

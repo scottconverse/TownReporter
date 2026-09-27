@@ -92,6 +92,7 @@ import {
   addToInitial,
   addToProblem,
   addToRequest,
+  darkFileFromSeed,
   darkFileInitial,
   darkProblem,
   darkRequest,
@@ -788,6 +789,13 @@ export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
   /**
+   * A hypothesis to open the dialog already holding, handed over from another
+   * screen (an import's review screen, a lead's More menu). The dialog reseeds
+   * from it every time it opens, so a caller that leaves it in place gets the
+   * same file offered again; the caller clears its own copy when it is spent.
+   */
+  seed?: string;
+  /**
    * The file is open. The screen owns what happens next: it can navigate to the
    * file, and it may start the first round with the material and the model the
    * editor chose in this dialog.
@@ -810,9 +818,15 @@ export type DarkFileDialogProps = {
  * Mounted by: `/desk/dark` (`desk.dark.tsx`, phase 2c) as the New file control,
  * and the More menu's "Send to Dark Desk". Props: `open`, `onClose`, `onOpened`.
  */
-export function DarkFileDialog({ open, onClose, onOpened }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, seed }: DarkFileDialogProps) {
   const press = usePress();
-  const [state, set] = useDialogState<DarkFileState>(darkFileInitial, open, press.clear);
+  // The factory must be stable -- `useDialogState` reseeds on every open -- so
+  // it is memoized on the seed rather than rebuilt on each render.
+  const factory = React.useCallback(
+    () => (seed ? darkFileFromSeed(seed) : darkFileInitial()),
+    [seed],
+  );
+  const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
   const models = React.useMemo(() => modelRowFor("dark"), []);
 
   const onPrimary = () =>

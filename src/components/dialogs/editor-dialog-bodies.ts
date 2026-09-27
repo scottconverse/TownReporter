@@ -814,9 +814,20 @@ export function SourceKillPatternBody(p: SourceKillPatternBodyProps): ReactNode 
   }
   if (p.error) return message(p.error, "danger");
   if (!p.result) return null;
-  const parts: ReactNode[] = [
-    createElement("p", { className: "astra-msg", role: "status" }, p.line),
-  ];
+  /*
+    BJ4: the sentence is drawn only where it has a count.
+
+    "No leads killed from this source yet." on a source nothing has been killed
+    from is a sentence the editor already knows -- the row is there, and the
+    panel is mounted under it -- and the desk measured it printed down the whole
+    watch list, one row after another saying the same nothing. The count still
+    comes from the panel's own fresh read, so a row the screen's gate let
+    through on a stale count prints no sentence rather than a wrong one.
+  */
+  const parts: ReactNode[] = [];
+  if (p.result.killedFromSource > 0) {
+    parts.push(createElement("p", { className: "astra-msg", role: "status" }, p.line));
+  }
   if (p.result.examples.length) {
     parts.push(
       createElement(

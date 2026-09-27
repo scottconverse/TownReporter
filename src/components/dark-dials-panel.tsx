@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton, SecHead } from "@/components/desk-chrome";
+import { ModelPicker } from "@/components/model-picker";
 import { getDarkDials, saveDarkDials } from "@/lib/news/dark";
 import { type ResearchPreferences } from "@/lib/news/dark-preferences";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
+import type { ModelEffort } from "@/lib/news/provider-registry";
 import {
   PRESETS,
   scopeLabelsFor,
@@ -21,10 +24,35 @@ import {
  * is enough to open a file, it will say what it thinks is happening" does. It
  * is computed from the same pure functions the server uses, so what the panel
  * promises and what the run does cannot drift apart.
+ *
+ * Which model digs and how hard it thinks are the same kind of dial, so they
+ * live here too, in "Model for this dig": the drawn Decide strip is the file's
+ * five verbs and the sentence under them, with no settings in it. The picker is
+ * in the disclosure rather than inside the expanded dials so it stays reachable
+ * while the dials are shut, and it writes the same state it always did -- this
+ * panel owns none of it.
  */
 const SCOPES: DarkScope[] = ["city", "county", "region", "adjacent"];
 
-export function DarkDialsPanel() {
+export type DarkDialsPanelProps = {
+  modelChoice: StoryModelChoice;
+  onModelChoice: (choice: StoryModelChoice) => void;
+  modelEffort: ModelEffort | null;
+  onModelEffort: (effort: ModelEffort | null) => void;
+  /** True while a round is in flight: the picker cannot be changed mid-round. */
+  modelDisabled?: boolean;
+  /** What the file's own model line reads, when the screen has one. */
+  modelNote?: string | null;
+};
+
+export function DarkDialsPanel({
+  modelChoice,
+  onModelChoice,
+  modelEffort,
+  onModelEffort,
+  modelDisabled,
+  modelNote,
+}: DarkDialsPanelProps) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DarkDials | null>(null);
@@ -65,13 +93,38 @@ export function DarkDialsPanel() {
         JSON.stringify(preferences) !== JSON.stringify(q.data.preferences)
       : false;
 
+  /*
+    The picker is drawn from the caller's state, not from the dials query, so a
+    desk whose saved dials could not be read still has a model to dig with.
+    Which models are ready is the picker's own question (`ModelPicker` reads the
+    provider registry); this panel only carries the choice.
+  */
+  const modelBlock = (
+    <details className="astra-panel astra-model-dig" id="dark-model-dig">
+      <summary>Model for this dig</summary>
+      <div className="row-acts static" id="dark-model-dig-actions">
+        <ModelPicker
+          scope="dark"
+          value={modelChoice}
+          onChange={onModelChoice}
+          effort={modelEffort}
+          onEffortChange={onModelEffort}
+          disabled={modelDisabled}
+          compact
+        />
+      </div>
+      {modelNote ? <p className="astra-note">{modelNote}</p> : null}
+    </details>
+  );
+
   if (q.isError)
     return (
-      <section className="mt-8 border border-rule p-4">
+      <section className="astra-panel">
         <p role="alert">
           Could not read the saved investigative settings. No default settings were substituted.
         </p>
         <InkButton onClick={() => void q.refetch()}>Retry settings</InkButton>
+        {modelBlock}
       </section>
     );
   if (!d || !preferences || !q.data) return null;
@@ -83,16 +136,17 @@ export function DarkDialsPanel() {
   };
 
   return (
-    <section className="mt-8 border border-rule p-4">
+    <section className="astra-panel">
       <SecHead
         title="How hard to dig"
         aside={
-          <InkButton tone="quiet" small onClick={() => setOpen((v) => !v)}>
+          <InkButton tone="quiet" onClick={() => setOpen((v) => !v)}>
             {open ? "Hide" : "Change"}
           </InkButton>
         }
         sub={describeDials(q.data?.dials ?? d, q.data?.place)}
       />
+      {modelBlock}
       <p className="mt-2 text-sm">
         Saved search preference:{" "}
         {q.data?.preferences.mode === "range"
@@ -145,7 +199,7 @@ export function DarkDialsPanel() {
           </div>
           <div>
             <label
-              className="block text-[11px] tracking-[0.14em] text-muted uppercase"
+              className="astra-label block"
               htmlFor="dig"
             >
               Dig — how far it chases · {d.dig}/10
@@ -167,7 +221,7 @@ export function DarkDialsPanel() {
 
           <div>
             <label
-              className="block text-[11px] tracking-[0.14em] text-muted uppercase"
+              className="astra-label block"
               htmlFor="nerve"
             >
               Nerve — how speculative · {d.nerve}/10
@@ -192,13 +246,12 @@ export function DarkDialsPanel() {
           </div>
 
           <div>
-            <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Map</p>
+            <p className="astra-label">Map</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {SCOPES.map((s) => (
                 <InkButton
                   key={s}
                   tone={d.scope === s ? "solid" : "quiet"}
-                  small
                   onClick={() => set({ scope: s })}
                 >
                   {s}
@@ -276,10 +329,10 @@ export function DarkDialsPanel() {
           </div>
 
           <div>
-            <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Presets</p>
+            <p className="astra-label">Presets</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {PRESETS.map((p) => (
-                <InkButton key={p.id} tone="quiet" small onClick={() => setDraft(p.dials)}>
+                <InkButton key={p.id} tone="quiet" onClick={() => setDraft(p.dials)}>
                   {p.name}
                 </InkButton>
               ))}
@@ -308,7 +361,6 @@ export function DarkDialsPanel() {
             <div className="mt-3 flex items-center gap-3">
               <InkButton
                 tone="solid"
-                small
                 disabled={!dirty || save.isPending}
                 onClick={() => save.mutate(d)}
               >
@@ -317,7 +369,6 @@ export function DarkDialsPanel() {
               {dirty ? (
                 <InkButton
                   tone="quiet"
-                  small
                   onClick={() => {
                     setDraft(q.data?.dials ?? null);
                     setPreferences(q.data?.preferences ?? null);

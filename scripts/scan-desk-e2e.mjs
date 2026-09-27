@@ -170,21 +170,39 @@ function futureDenverTime() {
 async function addAcceptedSource() {
   const sourceUrl = `https://daily-settings-${stamp}.example.test/agenda`;
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Add a source", { exact: true }).click();
-  await page.getByLabel("URL", { exact: true }).fill(sourceUrl);
+  // BJ3 item 3: the form is phase 4's `AddSourcesDialog`, behind the header's
+  // "+ Add a source".
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
+  await page.getByLabel("Link", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill("Daily settings source");
-  await page.getByRole("button", { name: "Add source" }).click();
-  await page.getByText("On watch: Daily settings source").waitFor();
+  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  // The dialog's sentence lands in two places: the desk's always-mounted
+  // sr-only `#desk-announcer` live region and this page's notice bar. A bare
+  // text match resolves to both and fails strict mode, so the walk reads the
+  // notice bar itself.
+  await page
+    .locator("p.note")
+    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .waitFor({ timeout: 45_000 });
   step("an accepted source is available without fetching it");
 }
 
 async function addRoutineNoticeFixtureSource() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Add a source", { exact: true }).click();
-  await page.getByLabel("URL", { exact: true }).fill(routineNoticeFixtureUrl);
+  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
+  // panel no longer draws a control of its own at the top of the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
+  await page.getByLabel("Link", { exact: true }).fill(routineNoticeFixtureUrl);
   await page.getByLabel("Name", { exact: true }).fill("Routine notice fixture source");
-  await page.getByRole("button", { name: "Add source" }).click();
-  await page.getByText("On watch: Routine notice fixture source").waitFor();
+  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  // The dialog's sentence lands in two places: the desk's always-mounted
+  // sr-only `#desk-announcer` live region and this page's notice bar. A bare
+  // text match resolves to both and fails strict mode, so the walk reads the
+  // notice bar itself.
+  await page
+    .locator("p.note")
+    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .waitFor({ timeout: 45_000 });
   step("a resolvable routine-check fixture source is accepted without fetching it");
 }
 
@@ -587,7 +605,9 @@ async function routineNoticePermissionsJourney(context, observePage) {
   const linked = await context.newPage();
   observePage(linked, "routine-sources-link");
   await linked.goto(`${base}${sourcesHref}`, { waitUntil: "domcontentloaded" });
-  await linked.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor();
+  await linked
+    .getByRole("heading", { level: 1, name: "Sources & scan", exact: true })
+    .waitFor();
   await linked.close();
   step("owner sees empty routine permissions, separate activation, and the source link");
 
@@ -689,9 +709,18 @@ async function routineNoticePermissionsJourney(context, observePage) {
   step("a stale routine-permissions tab gets an explicit conflict and reload path");
 
   await other.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  const sourceRow = other.locator("tr", { hasText: "Daily settings source" });
-  await sourceRow.getByRole("button", { name: "Drop", exact: true }).click();
-  await other.getByRole("button", { name: /^Dropped / }).click();
+  // On watch is drawn as `div.astra-row.src` rows since Redesign p2c, and its
+  // reject button reads "Remove" -- one click deeper, under "More ▾", because
+  // the drawn active row keeps two buttons on its single line (BJ3 item 1).
+  // The Suggested and Rejected tables still say "Drop", so both markup shapes
+  // are named here.
+  const sourceRow = other.locator("tr, .astra-row.src", { hasText: "Daily settings source" });
+  await sourceRow.locator("details.row-more > summary").click();
+  await sourceRow
+    .locator(".row-more-panel")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await other.getByRole("button", { name: /^Rejected / }).click();
   await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
   await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();

@@ -147,6 +147,7 @@ if (dbProbe.ok) {
     const followUps = await import("./follow-ups.ts");
     const ops = await import("./ops.ts");
     const views = await import("./views.ts");
+    const reading = await import("./reading.server.ts");
     const sections = await import("./sections.server.ts");
     const pageWatch = await import("./page-watch.ts");
     const routineNoticePolicy = await import("./routine-notice-policy.ts");
@@ -168,6 +169,12 @@ if (dbProbe.ok) {
     await dark.ensureDarkSchema(); // also calls ensureInvestigateSchema
     await investigate.ensureInvestigateSchema();
     await views.ensureViewsSchema();
+    // Unit BM: read_hourly + trust_signals_hourly, mirrored by
+    // migrations/0103_read_hourly.sql. Without this call the two tables would
+    // be created on the migrations side only, and this test skips a table that
+    // has no ensure* counterpart -- so the parity check would pass by looking
+    // at nothing.
+    await reading.ensureReadingSchema();
     await followUps.ensureFollowUpsSchema();
     // Sections depend on the actual migrations-owned newsroom tables, not a
     // sources(id) stand-in: verify the snapshot column and all filing triggers.

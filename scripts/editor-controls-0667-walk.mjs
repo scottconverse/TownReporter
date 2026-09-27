@@ -550,7 +550,14 @@ async function thePublishedPageEditsTheHeadline(article) {
     walk needs to look at it again. The story's slug is the one thing about this
     row that must not move.
   */
-  const row = page.locator(".pub-row").filter({
+  /*
+    The row is drawn as `div.astra-row.pub` since Redesign p2c, where it was
+    `div.pub-row` before: the Published list moved onto the astra grid the
+    drawing lays it out on, and the class moved with it. Everything the locator
+    does is unchanged -- still found by the link, so the headline can change
+    under it, and the acts it then presses are still on the row.
+  */
+  const row = page.locator(".astra-row.pub").filter({
     has: page.locator(`a[href="/articles/${article.slug}"]`),
   });
   await row.waitFor({ timeout: 45_000 });
