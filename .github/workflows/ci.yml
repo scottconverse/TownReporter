@@ -1500,3 +1500,44 @@ jobs:
           BETTER_AUTH_SECRET: ci-editor-controls-0667-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/editor-controls-0667-walk.mjs
+
+  # BH4 made a removed story answer 410 Gone at its URL. BH6 found that the
+  # OTHER door -- the reader already inside the paper, pressing Back to a story
+  # that was live when they opened it -- still drew the router's ordinary "not
+  # in this edition" panel, and, because a loader that throws leaves the previous
+  # match's `loaderData` in place, that panel still carried the removed story's
+  # own share card: og:title, og:description, article:*, twitter:* and the tab
+  # title. A removal the desk confirmed was, on that path, both the wrong answer
+  # and a partial republication of the thing that was removed.
+  #
+  # This is the guard for that path, and it is the only one that can see the
+  # ROUTE'S LOADER run in a real browser. The string-drift test asserts the 410
+  # page and the in-app panel print the same two strings; it cannot see which
+  # panel a client-side navigation actually renders. The walk boots its own copy
+  # of the built server on in-memory PGlite, so there is no `npm start` step
+  # here, and it stops it by exiting.
+  #
+  # `--experimental-strip-types`: the walk imports the desk's own
+  # src/lib/news/legal-removal-store.ts so that the story is removed the way the
+  # removal dialog removes it, not by deleting a row behind the desk's back.
+  #
+  # Port 3523, which no other integration file may bind
+  # (scripts/integration-ports-are-unique.test.mjs).
+  legal-gone-nav:
+    name: A legally removed story says so on in-app navigation, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Press Back to a story the desk removed while it was open
+        env:
+          BETTER_AUTH_SECRET: ci-legal-gone-nav-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node --experimental-strip-types scripts/legal-gone-nav-e2e.mjs
