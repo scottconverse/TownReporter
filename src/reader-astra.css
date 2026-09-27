@@ -2287,6 +2287,46 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* A sole lead reads as two columns rather than a wide one (unit BX2).
+   With the panel gone the lead's box is the whole row, but its text was not:
+   a 20ch headline and a 60ch dek inside a 1440px row left the right half of
+   the row blank (`evidence/audit-BX/front-desktop-light.png`). The tag and
+   headline take the left column, the dek and the line under it the right, so
+   the width the row actually has carries text instead of air. This is the wide
+   layout only -- below 901px the media query further down already stacks the
+   lead, and the row's own grid is untouched, so `.lead`'s box is still the
+   whole row and a check that measures the box measures the same thing.
+   The tag is placed explicitly and told `start`: as a grid item its
+   `inline-block` is blockified, and a stretched one would paint the yellow
+   label across the whole column instead of its own words. */
+@media (min-width: 901px) {
+  .reader .ledgerow.solo > .lead {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    column-gap: 56px;
+    align-items: start;
+  }
+  .reader .ledgerow.solo > .lead > .sectiontag {
+    grid-area: 1 / 1 / 2 / 2;
+    justify-self: start;
+  }
+  .reader .ledgerow.solo > .lead > .leadhead {
+    grid-area: 2 / 1 / 4 / 2;
+    max-width: none;
+  }
+  .reader .ledgerow.solo > .lead > .dek {
+    grid-area: 1 / 2 / 3 / 3;
+    margin-top: 0;
+    max-width: none;
+  }
+  .reader .ledgerow.solo > .lead > .meta {
+    grid-area: 3 / 2 / 4 / 3;
+  }
+  .reader .ledgerow.solo > .lead > .leadbottom {
+    grid-area: 4 / 1 / 5 / 3;
+  }
+}
 .reader .lead h2.leadhead {
   font-family: var(--fd);
   font-size: 50px;
