@@ -807,14 +807,18 @@ test("legal removal cannot be pressed until the reason and REMOVE are both given
   );
   const press = () => button("Remove permanently");
   assert.match(document.body.textContent, /Legal removal/);
-  assert.equal(press().disabled, true, "nothing has been previewed yet");
+  assert.equal(press().disabled, true, "the drawn gate: no reason and no REMOVE");
 
-  /* The dialog opens on one story already selected, but the counts are not
-     measured until the preview is asked for. */
-  await page.click(button("Review connected copies"));
+  /*
+    Unit BH3 decision 1: this surface opens on ONE story, so it has no step one
+    to press. It asks the desk for the counts itself, at mount, with the same
+    `legalPreview` call the route's "Review connected copies" press makes.
+  */
+  await settle();
   assert.equal(legal.calls[0].fn, "legalPreview");
   assert.deepEqual(legal.calls[0].data.articleIds, [1], "the opened story is the scope");
   assert.equal(press().disabled, true, "a measured scope alone is not enough");
+  assert.equal(button("Review connected copies"), undefined, "no picker press on this surface");
 
   const reason = field('input[placeholder="e.g. Court order, case no. …"]');
   const confirm = field('input[placeholder="REMOVE"]');
@@ -823,21 +827,37 @@ test("legal removal cannot be pressed until the reason and REMOVE are both given
   await page.typeInto(confirm, "REMOVE");
   assert.equal(press().disabled, false, "reason and REMOVE together are the gate");
 
-  /* A blocker the desk reported closes the gate again, even with both. */
+  /*
+    A blocker the desk reported closes the gate again, even with both. The
+    counts are re-asked by shutting the dialog and opening it again, which is
+    the only way this surface asks twice -- the auto-load fires once per mount.
+  */
   legal.__setPreview(previewResponse({ blockers: ["Court destruction is blocked until captured copies are resolved."] }));
-  await page.click(button("Review connected copies"));
+  await page.click(button("Cancel"));
+  await reopen(page);
+  await settle();
+  assert.equal(legal.calls.at(-1).fn, "legalPreview", "reopening asks the desk again");
   assert.match(document.body.textContent, /Court destruction is blocked/);
+  await page.typeInto(field('input[placeholder="e.g. Court order, case no. …"]'), "Court order, case no. 4-2026");
+  await page.typeInto(field('input[placeholder="REMOVE"]'), "REMOVE");
   assert.equal(press().disabled, true, "a blocker closes the press");
 
   /* Destruction while evidence review is pending closes it too. */
   legal.__setPreview(previewResponse({ reviewPending: true }));
-  await page.click(button("Review connected copies"));
+  await page.click(button("Cancel"));
+  await reopen(page);
+  await settle();
+  const reason2 = field('input[placeholder="e.g. Court order, case no. …"]');
+  const confirm2 = field('input[placeholder="REMOVE"]');
+  await page.typeInto(reason2, "Court order, case no. 4-2026");
+  await page.typeInto(confirm2, "REMOVE");
+  assert.equal(press().disabled, false, "a sealed copy may proceed with review pending");
   await page.click(radio("Keep nothing: a court order requires destruction"));
   assert.equal(press().disabled, true, "changing the rule clears the typed REMOVE");
-  await page.typeInto(confirm, "REMOVE");
+  await page.typeInto(confirm2, "REMOVE");
   assert.equal(press().disabled, true, "destruction cannot proceed with review pending");
   await page.click(radio("Keep a sealed copy for 12 months"));
-  await page.typeInto(confirm, "REMOVE");
+  await page.typeInto(confirm2, "REMOVE");
   assert.equal(press().disabled, false, "a sealed copy may proceed with review pending");
   await page.close();
 });
@@ -861,7 +881,9 @@ test("the confirmed removal sends the scope, the fingerprint, the rule and the r
       }),
     ),
   );
-  await page.click(button("Review connected copies"));
+  await settle();
+  assert.equal(legal.calls[0].fn, "legalPreview", "the drawn dialog asks the desk on its own");
+  assert.deepEqual(legal.calls[0].data.articleIds, [1], "the opened story is the scope");
   await page.typeInto(field('input[placeholder="e.g. Court order, case no. …"]'), "Court order, case no. 4-2026");
   await page.typeInto(field('input[placeholder="REMOVE"]'), "REMOVE");
   await page.click(button("Remove permanently"));
