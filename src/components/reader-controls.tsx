@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Bookmark, Check, ExternalLink, Sun, X } from "lucide-react";
+import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
@@ -43,6 +43,13 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
   );
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
+  /*
+    The current preferences, readable synchronously. `update` writes storage
+    BEFORE it queues any state change, and it cannot do that from inside a
+    `setPrefs` updater -- see the note on `update`.
+  */
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   useEffect(() => {
     try {
       const value = JSON.parse(localStorage.getItem(key) || "{}");
@@ -64,15 +71,28 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(id);
   }, [message]);
   function update(value: Partial<ReaderPrefs>) {
-    setPrefs((prev) => {
-      const next = { ...prev, ...value };
-      try {
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        setMessage("Your browser cannot keep these preferences after you leave.");
-      }
-      return next;
-    });
+    const next = { ...prefsRef.current, ...value };
+    prefsRef.current = next;
+    /*
+      Storage first, and in the handler rather than in a `setPrefs` updater.
+
+      `refreshReader()` below re-renders `AppearanceProvider`, which is this
+      component's ANCESTOR, and that render reads the stored dark bit for
+      itself (`appearance-provider.tsx`, "Read during render"). React renders
+      the ancestor first, so an updater queued by `setPrefs` has not run yet at
+      that point: the provider re-read the OLD value and stamped the old
+      surface, and nothing re-rendered it afterwards. The paper stayed dark
+      after pressing "Light mode" -- storage said `dark:false`, `.reader` had
+      no `mode-dark`, the button offered "Dark mode", and `data-appearance`
+      still said `reader-dark`. Writing here makes the value the provider reads
+      the value it just published.
+    */
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      setMessage("Your browser cannot keep these preferences after you leave.");
+    }
+    setPrefs(next);
     // The document's own surface has to follow. Without this the class flips
     // but `data-appearance` still says what it said at load, and the next
     // screen that renders from the attribute (a pending screen, say) comes
@@ -193,6 +213,42 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
         </ReaderDialog>
       )}
     </>
+  );
+}
+/**
+ * The paper's dark-mode switch, in the dateline bar (unit BD5).
+ *
+ * It is a one-press toggle rather than a dialog, because that is what the
+ * handoff draws in the bar's utility row and because it is the one appearance
+ * choice a reader makes repeatedly -- at night, from a dark room. The label
+ * names the mode the press will give you, so a dark paper offers "Light mode";
+ * the icon is the same promise (`Moon` on a light paper, `Sun` on a dark one).
+ *
+ * It writes the reader's own preference, through the same `update` the reading
+ * dialog's Light/Dark pair uses, so the choice follows the reader to the next
+ * story and survives a reload via the head script. `update` calls
+ * `refreshReader()` for `dark`, which moves `data-appearance` on <html> -- the
+ * attribute every dark rule in reader-astra.css keys on -- so the paper is
+ * dark on the press, not on the next navigation.
+ *
+ * `aria-pressed` says which state it is in, so a screen reader announces
+ * "Dark mode, pressed" rather than leaving the reader to infer it from the
+ * label they just heard the action of.
+ */
+export function DarkModeButton({ label = false }: { label?: boolean }) {
+  const r = useReader();
+  const next = r.dark ? "Light mode" : "Dark mode";
+  return (
+    <button
+      className="btn subtle"
+      type="button"
+      aria-pressed={r.dark}
+      aria-label={next}
+      onClick={() => r.update({ dark: !r.dark })}
+    >
+      {r.dark ? <Sun aria-hidden /> : <Moon aria-hidden />}
+      {label && <span>{next}</span>}
+    </button>
   );
 }
 export function SaveStory({
