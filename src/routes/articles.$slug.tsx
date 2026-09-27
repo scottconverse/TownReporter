@@ -355,7 +355,7 @@ function ArticlePage() {
   const more = related.filter((a) => a.slug !== slug).slice(0, 3);
   const sectionName = sections.find((s) => s.key === article.topic)?.name ?? article.topic;
   const isOpinion = article.topic === "opinion";
-  const storyDates = storyDateRows(dateItems);
+  const storyDates = storyDateRows(dateItems, slug);
 
   return (
     <PaperShell compact>

@@ -12,10 +12,10 @@ import type { ProvenanceItem } from "./findings.ts";
  * The two dated-item reads. See `story-dates.ts` for what a dated item is and
  * why only published stories are read; this file is the database side.
  *
- * Both panels read the same thing -- `articles.provenance_json` on printed
- * stories -- so there is one query and two windows over it: the front page
- * asks for the next seven days, the article page asks for everything the one
- * story carries.
+ * Both panels read the same thing -- a printed story's `provenance_json` and
+ * its own printed words (unit BX2) -- so there is one query and two windows
+ * over it: the front page asks for the next seven days, the article page asks
+ * for everything the one story carries.
  */
 
 /**
@@ -45,6 +45,16 @@ function localDay(timezone: string, now: Date): string {
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
+/** The columns both reads need: the story's records, and the words it printed. */
+type SourceRow = {
+  slug: string;
+  topic: string | null;
+  headline: string | null;
+  dek: string | null;
+  published_at: string;
+  provenance_json: string | null;
+};
+
 /**
  * The stored provenance array, or nothing.
  *
@@ -70,14 +80,23 @@ async function readSources(slug: string | null): Promise<{
   const config = await getPaperConfig(DEFAULT_NEWSROOM_ID);
   const today = localDay(config.timezone, new Date());
   const sql = await getSql();
+  /*
+    The story's own words are read as well as its records (unit BX2): on the
+    live paper every `document_date` is empty, and the dates the reader is
+    looking for are in the headline and the dek. `published_at` comes along
+    because it is what a worded date with no year of its own is resolved
+    against, and it is reduced to the paper's own calendar day here, in the
+    paper's timezone, so a story filed at 11 p.m. Denver time is read on the day
+    its readers were living in.
+  */
   const rows =
     slug === null
-      ? await sql<{ slug: string; topic: string | null; provenance_json: string | null }>`
-          select slug, topic, provenance_json from articles
+      ? await sql<SourceRow>`
+          select slug, topic, headline, dek, published_at, provenance_json from articles
           where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
           order by published_at desc, id desc limit ${SOURCE_LIMIT}`
-      : await sql<{ slug: string; topic: string | null; provenance_json: string | null }>`
-          select slug, topic, provenance_json from articles
+      : await sql<SourceRow>`
+          select slug, topic, headline, dek, published_at, provenance_json from articles
           where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published' and slug=${slug}
           limit 1`;
   return {
@@ -85,6 +104,9 @@ async function readSources(slug: string | null): Promise<{
     sources: rows.map((row) => ({
       slug: row.slug,
       section: row.topic ?? "",
+      headline: row.headline ?? "",
+      dek: row.dek ?? "",
+      published_on: localDay(config.timezone, new Date(row.published_at)),
       records: recordsOf(row.provenance_json).map((item) => ({
         title: String(item.title ?? ""),
         organization: String(item.organization ?? ""),
