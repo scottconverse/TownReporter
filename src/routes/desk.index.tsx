@@ -35,7 +35,7 @@ import {
   writeStoryFromInput,
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
-import { AddLeadButton, HoldLeadDialog } from "@/components/dialogs";
+import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
 import { cardResultLine, parseFinding } from "@/lib/news/follow-up-copy";
 import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
@@ -805,8 +805,14 @@ function DeskHome() {
             void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
           break;
         case "n":
-          setPanel("story-composer");
-          void navigate({ to: "/desk", hash: "story-composer" });
+          /*
+            Unit BN2, item 6: N is the same press as the header's "+ New story",
+            so it opens the same dialog. It no longer writes the hash: the hash
+            is the deep link to the composer, and setting it here would open
+            that dialog behind this one.
+          */
+          closePanel();
+          setNewStoryOpen(true);
           break;
         default:
           return;
@@ -854,6 +860,18 @@ function DeskHome() {
     if (window.location.hash) void navigate({ to: "/desk", replace: true });
     else setPanel(null);
   };
+
+  /*
+    Unit BN2, item 6: the drawn New-story dialog (phase 4), opened by the
+    header's "+ New story", by the N key, and by the left rail's own copy in the
+    shell. It is mounted with no `onDone`, like the Queue's empty state mounts
+    it: the closing sentence stays on the screen it was pressed from, next to
+    the button, and the editor closes it when they have read it. Today owns the
+    state rather than mounting `NewStoryButton` because the N key has to reach
+    the same dialog, and a self-contained button cannot be pressed from the
+    keyboard handler.
+  */
+  const [newStoryOpen, setNewStoryOpen] = useState(false);
 
   /*
     WHICH LEAD IS BEING HELD (Unit BN, item 2). One dialog, re-pointed by the
@@ -909,9 +927,28 @@ function DeskHome() {
             reason is written out on `desk.queue.tsx` and in `questions/BN.md`.
           */}
           <AddLeadButton label="+ Add a lead" />
-          <Link to="/desk" hash="story-composer" className="btn solid">
+          {/*
+            Unit BN2, item 6: "+ New story" opens the drawn New-story dialog
+            (phase 4's three tabs) instead of jumping to `#story-composer`, and
+            the N key below opens the same dialog.
+
+            The old composer is still mounted for the hash: `/desk#story-composer`
+            is a door the walks and the palette use (`scripts/custom-api-ui-
+            acceptance.mjs` reads its "Writing model" field), and tab (a) of this
+            dialog IS that intake -- the dialog is the intake with the drop zone
+            in front of it -- so the hash is not superseded, it is a deep link to
+            the same work. The press closes the hash panel first, so pressing this
+            while #story-composer is in the address bar cannot leave two dialogs
+            open over each other.
+          */}
+          <InkButton
+            onClick={() => {
+              closePanel();
+              setNewStoryOpen(true);
+            }}
+          >
             + New story <kbd>N</kbd>
-          </Link>
+          </InkButton>
           <Link to="/desk/opinion" className="btn">
             + Opinion
           </Link>
@@ -2141,6 +2178,10 @@ function DeskHome() {
           </section>
         </aside>
       </div>
+
+      {/* Unit BN2, item 6: the drawn New-story dialog this page's "+ New story"
+          and the N key open. Mounted once, like the Hold dialog below. */}
+      <NewStoryDialog open={newStoryOpen} onClose={() => setNewStoryOpen(false)} />
 
       {/*
         Unit BN, item 2: the drawn Hold dialog, mounted once for the list and

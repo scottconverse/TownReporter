@@ -35,6 +35,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { useEditorSections } from "@/lib/use-sections";
+import { parseUrlList } from "@/lib/paper";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
@@ -60,6 +61,25 @@ function bulkSelectLabel(filter: QueueFilter): string {
   if (filter === "printed") return "matching printed";
   if (filter === "all") return "";
   return filter;
+}
+
+/**
+ * Unit BN2, item 4: what a row's "Send to Dark Desk" already knows, handed to
+ * `DarkFileDialog` so the editor does not retype it.
+ *
+ * The tip is a *starting point* -- the field's own placeholder is "Link,
+ * document, post or what you heard" -- so it leads with the first source URL
+ * the lead carries: that is the thing an investigation can actually fetch. A
+ * lead filed by hand with no link falls back to this desk's own story path, so
+ * the tip is never empty (`darkProblem` wants eight characters) and never
+ * pretends to be a link it is not.
+ *
+ * The question is left blank on purpose: it is the one field only the editor
+ * can answer, and it is what the drawing's dialog asks for first.
+ */
+function darkPrefill(lead: LeadRow): { tip: string } {
+  const source = parseUrlList(lead.source_urls)[0];
+  return { tip: `${lead.headline}\n${source ?? `/desk/story/${lead.id}`}` };
 }
 
 function QueuePage() {
@@ -878,45 +898,38 @@ function QueuePage() {
                     printing each action twice under two sets of words. The
                     menu the brief asks for is the one LeadRowView builds.
 
-                    Unit BN, item 3: the drawn lead menu's own rows (phase 4's
-                    `MORE_LEAD_ITEMS`, in the design's order) are added back
-                    through this prop. They are not a second set of words for
-                    the built-in rows: "Hold with a reason" opens the drawn hold
-                    dialog -- the reason is the point -- and "Send to Dark Desk"
-                    and "Start an AI follow-up" open dialogs the built-in rows
-                    cannot. `onHold` is therefore not passed (its plain "Hold"
-                    would be the same action with the reason dropped) and
-                    `onKill` is not passed either: this menu's last row is the
-                    drawn "Kill with a reason".
+                    Unit BN2, item 2: the drawn lead menu's own rows (phase 4's
+                    `MORE_LEAD_ITEMS`, in the design's order) come back as named
+                    props, not as a caller's array. The array could not put the
+                    drawn "Merge with a printed story" *between* "Hold with a
+                    reason" and "Send to Dark Desk": the merge press needs the
+                    duplicate the ROW matched (`dup`, and with it the row's
+                    three-state saved/failed line), which only the row holds. So
+                    the row owns the order and this screen supplies the handlers.
+                    `onHold` is not passed (its plain "Hold" would be the same
+                    action with the reason dropped) and `onKill` is not passed
+                    either: this menu's kill row is the drawn "Kill with a
+                    reason" below.
                   */
                   onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
-                  more={[
-                    { label: "Hold with a reason", onSelect: () => setHoldFor(l) },
-                    { label: "Send to Dark Desk", onSelect: () => setDarkFor(l) },
-                    {
-                      /*
-                        The drawn row is a button that owns its own dialog, which
-                        a word-and-a-handler pair cannot mount, so it renders as
-                        this menu's block item the way the draft control does.
-                      */
-                      label: "Start an AI follow-up",
-                      content: <AddFollowUpButton leadId={l.id} headline={l.headline} />,
-                    },
-                    {
-                      /*
-                        The drawn "Kill with a reason" dialog lives on the phase
-                        2b branch, which is not merged here, so this press keeps
-                        the behavior every kill on this screen has today: an
-                        immediate `setLeadStatus`. Nothing an editor can do
-                        changes. `TODO(BN2)` is written once, on Today's Kill
-                        press (`desk.index.tsx`), which is the same situation;
-                        the report lists that one place.
-                      */
-                      label: "Kill with a reason",
-                      danger: true,
-                      onSelect: () => setStatus.mutate({ id: l.id, status: "killed" }),
-                    },
-                  ]}
+                  onHoldWithReason={() => setHoldFor(l)}
+                  onDarkDesk={() => setDarkFor(l)}
+                  /*
+                    The drawn row is a button that owns its own dialog, which a
+                    word-and-a-handler pair cannot mount, so the row renders this
+                    node as the menu's block item the way the draft control does.
+                  */
+                  followUp={<AddFollowUpButton leadId={l.id} headline={l.headline} />}
+                  /*
+                    TODO(BN2): the drawn "Kill with a reason" dialog lives on the
+                    phase 2b branch (PR #124), which is not merged here, so this
+                    press keeps the behavior every kill on this screen has today:
+                    an immediate `setLeadStatus`. Nothing an editor can do
+                    changes. The marker is written once, on Today's Kill press
+                    (`desk.index.tsx`), which is the same situation; the report
+                    lists that one place.
+                  */
+                  onKillWithReason={() => setStatus.mutate({ id: l.id, status: "killed" })}
                   onKillAsDuplicate={
                     /* Unit AK item 4: the reason names the piece the desk matched,
                    so the kill record on the story page means something to
@@ -1212,12 +1225,12 @@ function QueuePage() {
         lead it was pressed for.
 
         `DarkFileDialog` takes no `lead` prop -- its own contract is `open`,
-        `onClose`, `onOpened` -- so "prefilled with the lead" cannot be done
-        from here without changing phase 4's file, which this unit does not own.
-        What the row's press can do is what the dialog's own doc says the
-        mounting screen does: open the file, then put the editor on the file
-        page, where the round is started and the activity log and the stop live.
-        The gap is named in the report and in `questions/BN.md`.
+        `onClose`, `prefill`, `onOpened` -- so the row's press hands over the
+        two fields it already knows as `prefill` (unit BN2, item 4) and the
+        dialog does the rest. What happens after the file opens is what the
+        dialog's own doc says the mounting screen does: put the editor on the
+        file page, where the round is started and the activity log and the stop
+        live.
 
         `onDone` is not decoration: `holdLead` writes the status and returns,
         and nothing in the dialog reaches the query cache, so without this the
@@ -1236,6 +1249,7 @@ function QueuePage() {
       {darkFor ? (
         <DarkFileDialog
           open
+          prefill={darkPrefill(darkFor)}
           onClose={() => setDarkFor(null)}
           onOpened={() => void navigate({ to: "/desk/dark" })}
         />

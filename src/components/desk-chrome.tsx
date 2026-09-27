@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
@@ -312,6 +312,38 @@ export function DeskShell({
           <strong>TownReporter</strong>
           <span>Editor’s desk</span>
         </Link>
+        {/*
+          Unit BN2, item 5: the rail's own "+ New story", at the top of the nav,
+          opening the drawn New-story dialog (phase 4). It is the phone bar's
+          "+ New" control in its desktop place, and it mounts the same dialog
+          this shell already owns for that button -- one mount, two controls, so
+          both open the same three tabs on the same screen. The drawer closes
+          first for the reason the phone bar records above: on a phone the rail
+          IS the modal drawer, and a dialog opened over it would land behind its
+          scrim.
+
+          The rail slot is the one the stylesheet already keeps for it: the
+          `.astra-new` rule that sits between `.astra-brand` and
+          `.astra-navigation` and, until now, had no element to style. Where the
+          drawn captures actually put this button is in the report: the search of
+          `Desk Nav.dc.html` found the yellow `+ New` only on the *phone* bar
+          (line 17) and found no such control anywhere in the desktop `<aside>`
+          (lines 23-45); the drawn desktop `+ New story` is a header action
+          (`Desk Command.dc.html:25`, `Desk Screens.dc.html:364`). Item 5 asks for
+          the rail, so the rail gets it, and the report says which drawing does
+          not.
+        */}
+        <button
+          type="button"
+          className="btn solid astra-new"
+          aria-haspopup="dialog"
+          onClick={() => {
+            setMenuOpen(false);
+            setNewStoryOpen(true);
+          }}
+        >
+          <Plus size={18} aria-hidden /> New story
+        </button>
         <RunningBox jobs={running} nowMs={nowMs} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
@@ -893,6 +925,16 @@ export type DeskMoreItem = {
  * a pointerdown outside closes it, and Escape closes it and puts focus back
  * on the summary so the keyboard does not land at the top of the document.
  *
+ * BN2 item 1 adds a third: which way the panel opens. It was `top: calc(100%
+ * + 6px)` and nothing else, so on a row with less than the panel's height below
+ * it -- the panel is ~414 px on a lead row -- the rows past the window's bottom
+ * edge could not be pressed at all (measured: 0 of 7 rows hit their own element
+ * on the last row of a six-lead Queue). The room below the summary is not
+ * knowable in CSS, so it is measured here on open and `more-up` is set when the
+ * panel is taller than that room; desk-astra.css hangs the panel from the
+ * summary's top edge instead. The measurement happens with `more-up` removed,
+ * so the height read is the panel's own and not a direction-dependent one.
+ *
  * This is a disclosure, not an ARIA `menu`: a real `menu` role has to own
  * arrow-key movement between items, and claiming the role without that is a
  * worse experience than a plain list of buttons. It is a `<ul>` of buttons.
@@ -909,6 +951,21 @@ export function DeskMoreMenu({
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const summary = useRef<HTMLElement>(null);
+  /**
+   * Open upward when there is less room below the summary than the panel is
+   * tall. Read after the browser has laid the open panel out, which is why it
+   * runs from `onToggle` and not from the press that sets `open`.
+   */
+  const place = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.classList.remove("more-up");
+    if (!el.open || typeof window === "undefined") return;
+    const panel = el.querySelector(".more-menu");
+    if (!(panel instanceof HTMLElement)) return;
+    const room = window.innerHeight - el.getBoundingClientRect().bottom;
+    if (panel.getBoundingClientRect().height > room) el.classList.add("more-up");
+  }, []);
   useEffect(() => {
     const outside = (event: Event) => {
       const el = ref.current;
@@ -930,7 +987,7 @@ export function DeskMoreMenu({
     };
   }, []);
   return (
-    <details className="more" ref={ref}>
+    <details className="more" ref={ref} onToggle={place}>
       <summary className="btn quiet more-sum" ref={summary} aria-label={ariaLabel}>
         {label} <span aria-hidden>▾</span>
       </summary>
