@@ -19,6 +19,7 @@ import {
   draftLead,
   importFinishedStories,
   listDraftsDesk,
+  listFollowUpFindings,
   listFollowUps,
   listLeads,
   listRecentStoryWork,
@@ -34,6 +35,8 @@ import {
   writeStoryFromInput,
 } from "@/lib/news/desk";
 import { FollowUpItem } from "@/components/follow-up-item";
+import { AddLeadButton, HoldLeadDialog } from "@/components/dialogs";
+import { cardResultLine, parseFinding } from "@/lib/news/follow-up-copy";
 import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
   NO_SECTION,
@@ -205,11 +208,34 @@ function DeskHome() {
     queryKey: ["follow-ups", "open"],
     queryFn: () => listFollowUps({ data: { status: "open" } }),
   });
+  /*
+    THE RAIL'S OWN HALF OF THE FOLLOW-UPS PANEL (README "1. Today", rail:
+    "the latest AI follow-up results").
+
+    A different question from the query above, and a different server
+    function: `listFollowUps` is what the desk has asked a person to chase,
+    and this is what the AI agents have already found and are still working.
+    It reads `last_state` and `finding_json` rather than the story's notes, so
+    a finding an editor deleted from the notes does not come back here. The
+    query is its own key -- `["follow-up-findings"]` is not a child of
+    `["follow-ups"]`, so a prefix invalidation reaches one and not the other --
+    and the reply/drop/nudge mutations below refresh both, because dropping or
+    answering a row takes it out of this list as well.
+
+    It never publishes and nothing behind it can: a finding is a note and a
+    state. Phase 6 (lane 2) wrote the server function; mounting it on Today is
+    lane 3's half of that item.
+  */
+  const findings = useQuery({
+    queryKey: ["follow-up-findings"],
+    queryFn: () => listFollowUpFindings({ data: {} }),
+  });
   const replyFollowUp = useMutation({
     mutationFn: (input: { id: number; replyText: string; repliedOn: string }) =>
       recordFollowUpReply({ data: input }),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      void qc.invalidateQueries({ queryKey: ["follow-up-findings"] });
       announceToDesk(
         res?.ok
           ? "Reply recorded."
@@ -221,6 +247,7 @@ function DeskHome() {
     mutationFn: (id: number) => nudgeFollowUp({ data: { id } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      void qc.invalidateQueries({ queryKey: ["follow-up-findings"] });
       announceToDesk("Nudge stamped.");
     },
   });
@@ -228,6 +255,7 @@ function DeskHome() {
     mutationFn: (id: number) => dropFollowUp({ data: { id } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      void qc.invalidateQueries({ queryKey: ["follow-up-findings"] });
       announceToDesk("Follow-up dropped.");
     },
   });
@@ -761,10 +789,13 @@ function DeskHome() {
           if (lead) startDraft.mutate(lead.id);
           break;
         case "h":
-          if (lead) setStatus.mutate({ id: lead.id, status: "held" });
+          // The drawn dialog, not the bare write: H and the row's Hold H are
+          // the same press, and it asks for the reason the desk learns from.
+          if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
           break;
         case "x":
-          if (lead) setStatus.mutate({ id: lead.id, status: "killed" });
+          // `killLead` carries the unit's one TODO(BN2) marker.
+          if (lead) killLead(lead.id);
           break;
         case "u":
           if (lead) setStatus.mutate({ id: lead.id, status: "new" });
@@ -824,6 +855,33 @@ function DeskHome() {
     else setPanel(null);
   };
 
+  /*
+    WHICH LEAD IS BEING HELD (Unit BN, item 2). One dialog, re-pointed by the
+    row that opened it -- the same shape the Queue uses -- so a page of eight
+    rows does not carry eight shut dialogs, and the two screens open the same
+    component on the same lead.
+
+    The row's hold and the H key both come here. `onDone` refreshes `["leads"]`
+    for the reason the Queue's mount does: `holdLead` writes and returns, and
+    nothing inside the dialog reaches the query cache, so without it the row
+    would sit in the open list until the page was reloaded.
+  */
+  const [holdLead, setHoldLead] = useState<{ id: number; headline: string } | null>(null);
+
+  /*
+    KILL, IN ONE PLACE. The row's Kill X and the X key are the same press, so
+    the write they make is written once.
+
+    TODO(BN2): mount KillDialog from phase 2b.
+    The drawn Kill dialog (a reason, "Kill as duplicate" when the lead matches
+    a printed piece) lives on the phase 2b branch, which is not merged into
+    phase 4's suite, so there is nothing to import here yet. Until it lands
+    this keeps today's behaviour -- an immediate status write, with Undo on the
+    row -- and this one marker is where the mount goes. It is the only
+    `TODO(BN2)` in the unit; the Queue's kill press points at it.
+  */
+  const killLead = (id: number) => setStatus.mutate({ id, status: "killed" });
+
   const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
   // The two queries the front page cannot render anything useful without.
   // Everything else on this page degrades gracefully to "empty"; these two
@@ -837,9 +895,20 @@ function DeskHome() {
       kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
       actions={
         <>
-          <Link to="/desk/queue" hash="file-lead" className="btn">
-            + Add a lead
-          </Link>
+          {/*
+            Unit BN, item 2: the drawn Add-a-lead dialog (phase 4), in the
+            drawn secondary style -- `tone="ghost"` is the mapping's plain
+            `.btn`, which is what this control was before. It files a lead
+            without leaving Today, which is the point of the drawing.
+
+            It replaced a `<Link to="/desk/queue" hash="file-lead">`, i.e. the
+            legacy `#file-lead` form on the Queue. That door still exists and
+            still opens that form -- ten CI fixtures build their whole setup
+            through the exact hash -- so nothing here is the only way in any
+            more, and the hash is no longer where this button points. The
+            reason is written out on `desk.queue.tsx` and in `questions/BN.md`.
+          */}
+          <AddLeadButton label="+ Add a lead" />
           <Link to="/desk" hash="story-composer" className="btn solid">
             + New story <kbd>N</kbd>
           </Link>
@@ -1648,13 +1717,13 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet"
-                                  onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
+                                  onClick={() => setHoldLead({ id: l.id, headline: l.headline })}
                                 >
                                   Hold <kbd>H</kbd>
                                 </InkButton>
                                 <InkButton
                                   tone="quiet-danger"
-                                  onClick={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                                  onClick={() => killLead(l.id)}
                                 >
                                   Kill <kbd>X</kbd>
                                 </InkButton>
@@ -1712,6 +1781,69 @@ function DeskHome() {
                 promise. `followUpsRailCopy` carries that sentence.
               */}
             <p className="rail-note">{followUpsRailCopy(false)}</p>
+            {/*
+              Unit BN, item 2: the drawn panel's own content -- README "1.
+              Today", rail: "the latest AI follow-up results".
+
+              Each row is the drawn four: the question the agent is watching
+              (`what`), what it found (the phase 6 card's own result sentence,
+              from the same `cardResultLine` + `parseFinding` the card uses, so
+              the two cannot describe one finding differently), the story it
+              belongs to, and the link to the screen where it can be read in
+              full and acted on.
+
+              Three rows, like the desk's other rail lists, and the empty case
+              is a sentence rather than nothing: a panel that renders only its
+              heading over nothing reads as a broken page (UX-002, the same
+              reason the memory widget below states its own).
+            */}
+            {findings.isError ? (
+              <p className="rail-note">
+                The follow-up findings could not be loaded. The list is at{" "}
+                <Link to="/desk/follow-ups" className="inline-link">
+                  Follow-ups
+                </Link>
+                .
+              </p>
+            ) : (findings.data ?? []).length === 0 ? (
+              <p className="rail-note">
+                No findings yet. When an AI follow-up finds something, its result is listed here.
+              </p>
+            ) : (
+              (findings.data ?? []).slice(0, 3).map((f) => {
+                const finding = parseFinding(f.finding_json);
+                const storyTo = f.lead_id
+                  ? {
+                      to: "/desk/story/$leadId" as const,
+                      params: { leadId: String(f.lead_id) },
+                    }
+                  : f.article_slug
+                    ? { to: "/articles/$slug" as const, params: { slug: f.article_slug } }
+                    : null;
+                const storyTitle = f.lead_headline ?? f.article_headline;
+                return (
+                  <div className="followup-item" key={f.id}>
+                    <p className="followup-who">{f.what}</p>
+                    <p className="followup-what">
+                      {cardResultLine("found", finding, { nextRunAt: f.next_run_at })}
+                    </p>
+                    <p className="meta">
+                      {storyTo ? (
+                        <Link {...storyTo} className="inline-link">
+                          {storyTitle ?? "the story"}
+                        </Link>
+                      ) : (
+                        "No story linked"
+                      )}
+                      {" · "}
+                      <Link to="/desk/follow-ups" className="inline-link">
+                        Review finding
+                      </Link>
+                    </p>
+                  </div>
+                );
+              })
+            )}
             {followUps.isError || (followUps.data ?? []).length === 0
               ? null
               : (followUps.data ?? [])
@@ -2009,6 +2141,23 @@ function DeskHome() {
           </section>
         </aside>
       </div>
+
+      {/*
+        Unit BN, item 2: the drawn Hold dialog, mounted once for the list and
+        re-pointed by `holdLead`. The composer and the paste path above are
+        hash-driven because the drawing reaches them from elsewhere too; this
+        one is only ever opened from a row on this page or from H, so it needs
+        no address of its own.
+      */}
+      {holdLead ? (
+        <HoldLeadDialog
+          leadId={holdLead.id}
+          headline={holdLead.headline}
+          open
+          onClose={() => setHoldLead(null)}
+          onDone={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+        />
+      ) : null}
     </DeskShell>
   );
 }
