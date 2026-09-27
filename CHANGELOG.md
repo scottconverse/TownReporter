@@ -1,6 +1,13 @@
 # Changelog
 
-Current software version: **0.6.78**. Publication state is recorded by GitHub.
+Current software version: **0.6.79**. Publication state is recorded by GitHub.
+
+## 0.6.79 — 2026-09-27
+
+- **The Queue's picked row is tinted, as the drawing tints it.** `docs/design/handoff-2026-09-26/design/Desk Screens.dc.html:284` builds the Queue row's whole style (`display:grid; …; padding:14px 0; border-bottom:1px solid var(--line)`) and appends `background:var(--panel)` only when the row is `selected`, so in the drawing the list is bare paper with rules and the one picked row is its only `--panel` block. The desk drew no picked state at all: the tick in the first column was the row's only sign it was in the bulk bar's set. `LeadRowView` now adds `picked` to `.lead-row` when that row's own selection box is ticked, and `.desk-ltr.astra .lead-list.roomy .lead-row.picked` is the tint. The color is not a one-line addition: the desk already paints every `.lead-row` `var(--surface)`, and `--surface` **is** the prototype's `--panel` here — the shell's own mapping is `--panel->--surface` and the values match (#f6f2e7 light, #27231f dark) — so painting `.picked` with `--panel` alone would have changed nothing on screen. What buys the tint is stepping the **unpicked** Queue row back to the page (`var(--bg)`), which is what the drawing's rows already are since they carry no fill; the picked row keeps the `--panel` block. Scoped to `.lead-list.roomy`, the Queue's own table, so Published, Scan, Drafts and Dark Desk rows keep the fill they had, and the killed row's `.dead` rule (opacity, which multiplies whatever is under it) still works. Measured on a built server in both themes, the picked fill is rgb(246,242,231) / rgb(39,35,31) against the page's rgb(255,253,247) / rgb(27,25,22); **every text color on that fill passes WCAG AA in both themes** — the weakest on the panel is the muted ink at 10.17:1 light and 8.05:1 dark, and control text on its own fill is 9.05:1 at the weakest. Nothing under 14px was added, and no unpicked row moved.
+- **No migration.** `git diff origin/main...HEAD --stat -- migrations` shows no output — nothing under `migrations/` changed since the 0.6.78 merge base.
+
+The packaged release note names `v0.6.79` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.78 — 2026-09-27
 
