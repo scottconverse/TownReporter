@@ -2544,9 +2544,24 @@
   align-items: center;
   gap: 8px;
   padding: 0;
+  /*
+    The four things the handoff's phone bar carries -- Menu, the wordmark, the
+    "Desk" tag, "+ New" -- do not fit a 390px phone at Text: Large: the row's
+    min-content is 8px wider than the screen, so the "+ New" button (the last
+    item) hung off the right edge and the whole desk scrolled sideways. The
+    wordmark is the only item here that can give ground without losing a
+    control or a 44px target, so it takes the shrink -- the same treatment
+    `.astra-breadcrumb b` gets -- and the tag and the button keep their size.
+  */
+  min-width: 0;
+  overflow: hidden;
 }
 .desk-ltr.astra .astra-brand-bar strong {
   font-size: calc(20px * var(--ts));
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .desk-ltr.astra .astra-bar-new {
   margin-left: auto;
@@ -2554,6 +2569,7 @@
   gap: 6px;
   font-size: calc(15px * var(--ts));
   font-weight: 800;
+  flex-shrink: 0;
 }
 .desk-ltr.astra .astra-icon {
   width: 44px;
@@ -2578,10 +2594,26 @@
   color: var(--fg2);
 }
 
+/* The phone bar is pinned, and phase 2a dropped that.
+   On main the topbar carried `position: sticky; top: 0; z-index: 30` (plus its
+   own surface and bottom rule) because it was drawn at every width. Phase 2a
+   made it phone-only -- the nav column is always on screen at desktop, so the
+   strip's breadcrumb and theme toggle were dead weight -- and the rewrite kept
+   `display` and dropped the rest, so at 375 the bar scrolls away with the
+   page. scripts/sections-source-add-e2e.mjs measures it: with nothing focused
+   the header must sit at the viewport's top edge, and it was landing at
+   top: -11876. A phone bar that scrolls off is a bar you cannot reach the
+   drawer from, so this restores main's pinning rather than relaxing the
+   measurement. */
 @media (max-width: 700px) {
   .desk-ltr.astra .astra-topbar {
     display: flex;
     align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
   }
 }
 
