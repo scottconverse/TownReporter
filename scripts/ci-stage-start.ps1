@@ -77,6 +77,26 @@ $shell = $shellCommand.Source
 
 $world = Join-Path ([IO.Path]::GetTempPath()) ("al-stage-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $app = Join-Path $world 'app'
+
+# %LOCALAPPDATA% is pointed at a folder inside this world for the whole run.
+#
+# The machine-wide staged-copy pointer (%LOCALAPPDATA%\TownReporter\staged-copy.json)
+# is read at call time by the watchdog's own ops\lib-stage.ps1, and a machine
+# that has ever staged a copy has one. Scenario 4 asserts the opposite state --
+# "nothing staged, and it says nothing" -- which cannot be true while the real
+# pointer is within reach: the run finds it, prints a line about a staged copy,
+# and the check fails on machine state rather than on the code under test. That
+# is exactly how it failed on this machine (the pointer names the 3100 copy)
+# while passing on a clean one.
+#
+# No new WATCHDOG_* seam was invented for this, and none was needed: the
+# pointer's path is resolved from the environment at the moment it is used, so
+# a disposable LOCALAPPDATA is the seam. It is the same one scripts\
+# ci-stage-pointer.ps1 uses for the same file. The real value goes back in
+# `finally`, on every exit path.
+$fakeLocalAppData = Join-Path $world 'localappdata'
+$previousLocalAppData = $env:LOCALAPPDATA
+$env:LOCALAPPDATA = $fakeLocalAppData
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'ops'), (Join-Path $app 'scripts'), (Join-Path $app 'logs'), (Join-Path $app '.output\server') | Out-Null
 
 foreach ($name in @('lib-port.ps1', 'lib-ownership.ps1', 'lib-stage.ps1', 'start-stage.ps1', 'watchdog.ps1')) {
@@ -318,6 +338,10 @@ try {
   foreach ($name in @('WATCHDOG_TEST_MODE', 'WATCHDOG_APP_PORT', 'WATCHDOG_PG_PORT', 'WATCHDOG_START_SCRIPT', 'WATCHDOG_STAGE_APP', 'PUBLIC_SITE_URL')) {
     Remove-Item "Env:\$name" -ErrorAction SilentlyContinue
   }
+  # The operator's own %LOCALAPPDATA% back, whatever happened above: the machine
+  # -wide staged-copy pointer has to be reachable again the moment this exits.
+  if ($previousLocalAppData) { $env:LOCALAPPDATA = $previousLocalAppData }
+  else { Remove-Item Env:\LOCALAPPDATA -ErrorAction SilentlyContinue }
 }
 
 Say ''
