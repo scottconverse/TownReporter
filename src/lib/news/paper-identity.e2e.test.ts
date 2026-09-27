@@ -393,9 +393,25 @@ describe("the configured paper identity, not Longmont's", () => {
       await page.goto(`${BASE_URL}/desk`, { waitUntil: "domcontentloaded" });
       // The desk shows "Opening the desk / Checking this newsroom" until the
       // session resolves; reading the body before then reads the placeholder.
-      await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+      // The nav item carries its count beside the label now, so the accessible
+      // name is "Queue 3" on a busy desk -- the handoff draws it that way
+      // (README:222, "Nav items (44px, 16/700, count at the right in --ink2)").
+      await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
+      /*
+        Where the desk carries THIS paper's identity moved with the redesign,
+        and this assertion follows it rather than dropping it. The desktop
+        top bar's breadcrumb -- which printed `paper.name` -- is gone: the top
+        bar is phone-only now (README:225, "the nav collapses to a top bar
+        with the wordmark, a 'Desk' tag…") and the drawn nav is the wordmark
+        with the "Editor's desk" tag (README:220), which the handoff draws as
+        the product's own name. What the desk prints of this paper is its
+        city, on Today's line ("Sunday, Sep 27 · Riverbend", DeskShell's
+        kicker), and its full name is still the document title -- the same
+        root head the front page's own assertion reads at line 270.
+      */
+      assert.equal(await page.title(), "Riverbend Record — Riverbend, Ohio");
       const deskBody = (await page.textContent("body")) ?? "";
-      assert.match(deskBody, /Riverbend Record/);
+      assert.match(deskBody, /Riverbend/);
       assert.doesNotMatch(deskBody, /Longmont/);
     },
   );
