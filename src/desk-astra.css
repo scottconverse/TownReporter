@@ -2309,6 +2309,563 @@
   color: var(--warn);
 }
 
+/* ---------------------------------------------------------------- Stats --
+   The Stats page (migration 0103 + the read beacon). Plain boxes and one
+   grid per panel: the drawing draws every bar as a div, so no chart library
+   is loaded for this screen. Yellow is always var(--a), which is the yellow
+   in both themes, and it is only ever a fill -- never a text colour.
+   Sizes are the drawing's numbers scaled by --ts, the desk's text scale. */
+.desk-ltr.astra .st-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.desk-ltr.astra .st-error {
+  margin: 0;
+  font: 700 calc(15px * var(--ts))/1.5 var(--fd);
+  color: var(--danger);
+}
+.desk-ltr.astra .st-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 3px solid var(--fg);
+}
+.desk-ltr.astra .st-kick {
+  margin: 0 0 6px;
+  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-h1 {
+  margin: 0;
+  font: 800 calc(40px * var(--ts))/1 var(--fd);
+  letter-spacing: -0.03em;
+}
+.desk-ltr.astra .st-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.desk-ltr.astra .st-ranges {
+  display: flex;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra .st-range {
+  min-height: 44px;
+  padding: 0 calc(14px * var(--ts));
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  cursor: pointer;
+}
+.desk-ltr.astra .st-range.on {
+  background: var(--fg);
+  color: var(--bg);
+}
+.desk-ltr.astra .st-export {
+  min-height: 44px;
+  padding: 0 calc(16px * var(--ts));
+  border: 2px solid var(--fg);
+  background: transparent;
+  color: var(--fg);
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  cursor: pointer;
+}
+.desk-ltr.astra .st-export:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.desk-ltr.astra .st-livegrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.desk-ltr.astra .st-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra .st-card.live {
+  border: 2px solid var(--a);
+}
+.desk-ltr.astra .st-card.dashed {
+  border: 1px dashed var(--fg2);
+  gap: 8px;
+}
+.desk-ltr.astra .st-side {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.desk-ltr.astra .st-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra .st-livehead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.desk-ltr.astra .st-pulse {
+  display: block;
+  width: 12px;
+  height: 12px;
+  background: var(--a);
+  animation: trPulse 1.2s ease-in-out infinite;
+}
+.desk-ltr.astra .st-livetitle {
+  margin: 0;
+  font: 800 calc(20px * var(--ts))/1.2 var(--fd);
+}
+.desk-ltr.astra .st-hint {
+  margin: 0 0 0 auto;
+  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-livecount {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0;
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-livecount strong {
+  font: 800 calc(72px * var(--ts))/1 var(--fd);
+  letter-spacing: -0.03em;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .st-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 56px;
+}
+.desk-ltr.astra .st-spark i {
+  flex: 1 1 0;
+  min-width: 0;
+  display: block;
+  background: var(--line);
+}
+.desk-ltr.astra .st-spark i.on {
+  background: var(--a);
+}
+.desk-ltr.astra .st-livetbl {
+  display: flex;
+  flex-direction: column;
+}
+.desk-ltr.astra .st-livehead3,
+.desk-ltr.astra .st-liverow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 130px;
+  gap: 12px;
+  align-items: center;
+}
+.desk-ltr.astra .st-livehead3 {
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--fg);
+  font: 800 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.desk-ltr.astra .st-liverow {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+}
+.desk-ltr.astra .st-livepage {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.desk-ltr.astra .st-livebar {
+  display: inline-block;
+  height: 10px;
+  margin-left: 8px;
+  vertical-align: middle;
+  background: var(--a);
+}
+.desk-ltr.astra .st-note {
+  margin: 0;
+  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--fg2);
+}
+/* The heatmap's one-line caption. The drawing puts it under the grid rather
+   than in a panel of its own, so it carries a little more weight than a note
+   -- it is the line an editor is meant to leave with. */
+.desk-ltr.astra .st-takeaway {
+  margin: 12px 0 6px;
+  font: 600 calc(15px * var(--ts))/1.5 var(--fd);
+  color: var(--fg);
+}
+.desk-ltr.astra .st-empty {
+  margin: 0;
+  font: 500 calc(15px * var(--ts))/1.5 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-h2 {
+  margin: 0;
+  font: 800 calc(22px * var(--ts))/1.2 var(--fd);
+}
+.desk-ltr.astra .st-h3 {
+  margin: 0;
+  font: 800 calc(18px * var(--ts))/1.25 var(--fd);
+}
+.desk-ltr.astra .st-sechead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.desk-ltr.astra .st-aside {
+  margin: 0;
+  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-panel-body {
+  margin: 0;
+  font: 500 calc(15px * var(--ts))/1.55 var(--fd);
+  color: var(--fg);
+}
+.desk-ltr.astra .st-big {
+  margin: 0;
+  font: 800 calc(40px * var(--ts))/1 var(--fd);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .st-big span {
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-num {
+  font-variant-numeric: tabular-nums;
+  /* "229 hrs" is one measure, not two words: it must not break across lines in
+     a narrow cell. */
+  white-space: nowrap;
+}
+
+/* The six-cell summary: one-pixel gaps over a line-coloured background, so the
+   cells are separated by a rule without any cell owning a border. */
+.desk-ltr.astra .st-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra .st-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--bg);
+}
+.desk-ltr.astra .st-kpi-l {
+  margin: 0;
+  font: 800 calc(14px * var(--ts))/1.3 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-kpi-v {
+  margin: 0;
+  font: 800 calc(32px * var(--ts))/1 var(--fd);
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .st-kpi-d {
+  margin: 0;
+  font: 800 calc(14px * var(--ts))/1.3 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-kpi-d.up {
+  color: var(--ok);
+}
+.desk-ltr.astra .st-kpi-d.down {
+  color: var(--danger);
+}
+.desk-ltr.astra .st-kpi-note {
+  margin: 0;
+  font: 500 calc(14px * var(--ts))/1.35 var(--fd);
+  color: var(--fg2);
+}
+
+.desk-ltr.astra .st-daily {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 180px;
+}
+.desk-ltr.astra .st-daily-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+}
+.desk-ltr.astra .st-daily-col i {
+  display: block;
+  height: 6px;
+  background: transparent;
+}
+.desk-ltr.astra .st-daily-col i.on {
+  background: var(--a);
+}
+.desk-ltr.astra .st-daily-col b {
+  display: block;
+  background: var(--fg);
+}
+.desk-ltr.astra .st-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font: 500 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+}
+
+.desk-ltr.astra .st-scroll {
+  overflow-x: auto;
+}
+.desk-ltr.astra .st-story-head,
+.desk-ltr.astra .st-story {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 110px 200px 110px;
+  gap: 14px;
+  align-items: center;
+  min-width: 44rem;
+}
+.desk-ltr.astra .st-story-head {
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--fg);
+  font: 800 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.desk-ltr.astra .st-story {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+}
+.desk-ltr.astra .st-story-sec {
+  margin: 0 0 4px;
+  font: 800 calc(14px * var(--ts))/1.3 var(--fd);
+  color: var(--fg2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.desk-ltr.astra .st-story-title {
+  font: 700 calc(17px * var(--ts))/1.3 var(--fd);
+  color: var(--fg);
+  text-decoration: none;
+}
+.desk-ltr.astra .st-story-title:hover {
+  text-decoration: underline;
+}
+.desk-ltr.astra .st-depth {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 32px;
+}
+.desk-ltr.astra .st-depth i {
+  display: block;
+  width: 22px;
+  background: var(--line);
+}
+.desk-ltr.astra .st-depth i.end {
+  background: var(--a);
+}
+.desk-ltr.astra .st-depth-pct {
+  align-self: center;
+  margin-left: 8px;
+  font: 800 calc(15px * var(--ts))/1.3 var(--fd);
+  font-variant-numeric: tabular-nums;
+}
+.desk-ltr.astra .st-footnote {
+  margin: 10px 0 0;
+  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--fg2);
+}
+
+.desk-ltr.astra .st-panels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.desk-ltr.astra .st-ref,
+.desk-ltr.astra .st-arrive {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 54px;
+  gap: 10px;
+  align-items: center;
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+}
+.desk-ltr.astra .st-arrive {
+  grid-template-columns: 150px minmax(0, 1fr) 36px;
+}
+.desk-ltr.astra .st-track {
+  display: block;
+  height: 14px;
+  background: var(--line);
+}
+.desk-ltr.astra .st-track i {
+  display: block;
+  height: 100%;
+  background: var(--a);
+}
+
+.desk-ltr.astra .st-devices {
+  display: flex;
+  height: 28px;
+}
+.desk-ltr.astra .st-device {
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  overflow: hidden;
+  font: 800 calc(14px * var(--ts))/1 var(--fd);
+}
+/* The drawing's last row: the hour-by-day grid wide on the left, the trust
+   signals beside it, the gap the same as the three panels above. */
+.desk-ltr.astra .st-heatwrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.desk-ltr.astra .st-heat {
+  display: grid;
+  grid-template-columns: 40px repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 12px;
+}
+.desk-ltr.astra .st-heat-day {
+  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-heat-cell {
+  display: block;
+  height: 18px;
+  background: var(--a);
+}
+.desk-ltr.astra .st-heataxis {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 42px;
+  margin-top: 8px;
+  /* 14px, not the drawing's smaller axis type: the desk's floor is 14px at
+     Normal text size and this is a rule an editor has to be able to read. */
+  font: 500 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg2);
+}
+.desk-ltr.astra .st-trust {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+}
+.desk-ltr.astra .st-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 20px;
+  align-items: start;
+}
+.desk-ltr.astra .st-btn {
+  min-height: 44px;
+  padding: 0 calc(16px * var(--ts));
+  border: 2px solid var(--fg);
+  background: transparent;
+  color: var(--fg);
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  cursor: pointer;
+}
+.desk-ltr.astra .st-btn.ghost {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  padding: 0 calc(12px * var(--ts));
+  font-size: calc(14px * var(--ts));
+}
+.desk-ltr.astra .st-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.desk-ltr.astra .st-report {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font: 500 calc(15px * var(--ts))/1.4 var(--fd);
+}
+.desk-ltr.astra .st-report-reader {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 1200px) {
+  .desk-ltr.astra .st-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .desk-ltr.astra .st-livegrid,
+  .desk-ltr.astra .st-heatwrap,
+  .desk-ltr.astra .st-bottom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 960px) {
+  .desk-ltr.astra .st-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .desk-ltr.astra .st-h1 {
+    font-size: calc(32px * var(--ts));
+  }
+  .desk-ltr.astra .st-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .desk-ltr.astra .st-livecount strong {
+    font-size: calc(52px * var(--ts));
+  }
+  .desk-ltr.astra .st-livehead3,
+  .desk-ltr.astra .st-liverow {
+    grid-template-columns: minmax(0, 1fr) 60px 90px;
+  }
+  .desk-ltr.astra .st-heat {
+    grid-template-columns: 34px repeat(24, minmax(0, 1fr));
+  }
+}
+
 /* Defined locally because phase 0's motion keyframes are not on main yet;
    trPulse and trSlide are the names the reference uses, so a later phase that
    lands the shared file only has to delete these two blocks. */
