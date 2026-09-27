@@ -325,7 +325,7 @@ async function ownTheDesk(pass) {
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();
   }
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue/ }).waitFor({ timeout: 45_000 });
   if (create) await completeFirstRunSetup(page, base);
   step(create ? "the desk exists" : "the same desk is signed in again");
 }

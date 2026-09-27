@@ -209,7 +209,7 @@ async function main() {
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
     await page.getByRole("button", { name: "Create editor account" }).click();
-    await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+    await page.getByRole("link", { name: /^Queue/ }).waitFor();
     await completeFirstRunSetup(page, base);
     await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
     await page.getByLabel("Headline").fill(headline);

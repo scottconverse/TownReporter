@@ -41,7 +41,7 @@ await page.goto(base + "/login", { waitUntil: "domcontentloaded" });
 await page.getByLabel("Email").fill(email);
 await page.getByLabel("Password", { exact: true }).fill(password);
 await page.getByRole("button", { name: "Sign in with email" }).click();
-await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+await page.getByRole("link", { name: /^Queue/ }).waitFor({ timeout: 45_000 });
 
 const NAV_SELECTOR = 'nav a, aside a, [aria-label*="navigation"] a';
 
