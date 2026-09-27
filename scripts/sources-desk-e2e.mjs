@@ -74,19 +74,30 @@ async function ownTheDesk() {
 /**
  * The row for a given source URL, wherever it currently sits (On watch/
  * Suggested/Rejected). The middle tab was renamed in 0.6.70 and the last tab
- * again in the redesign (Redesign p2c); this walk only ever opens On watch and
- * Rejected, so the row lookup is unchanged.
+ * again in the redesign (Redesign p2c).
+ *
+ * The row markup moved with the redesign too: On watch is drawn as
+ * `div.astra-row.src` rows now, while Suggested and Rejected are still the
+ * `tr.lead-tr` table, so the lookup names both. It is matched by the row's own
+ * link rather than by its text, because the drawn row prints the URL's host
+ * ("example-town-council.test") where the table printed the whole URL.
  */
 function rowFor(url) {
-  return page.locator("tr.lead-tr", { hasText: url });
+  return page
+    .locator("tr.lead-tr, .astra-row.src")
+    .filter({ has: page.locator(`a[href="${url}"]`) });
 }
 
 async function theScreenRenders() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor({ timeout: 30_000 });
+  await page
+    .getByRole("heading", { level: 1, name: "Sources & scan", exact: true })
+    .waitFor({ timeout: 30_000 });
   step("the Sources page renders its own heading");
 
-  await page.getByText("Add a source", { exact: true }).click();
+  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
+  // panel no longer draws a control of its own at the top of the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("URL", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByLabel("Name", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByRole("button", { name: "Add source" }).waitFor({ timeout: 30_000 });
@@ -118,20 +129,24 @@ async function addingASourcePersists() {
 
 async function droppingThenRestoringUpdatesTheList() {
   const row = rowFor(sourceUrl);
-  await row.getByRole("button", { name: "Drop" }).click();
+  // The drawn On watch row says "Remove" (Redesign p2c); the table rows the
+  // Suggested and Rejected lists still use say "Drop".
+  await row.getByRole("button", { name: /^(Remove|Drop)$/ }).click();
 
-  // Dropped moves the row out of On watch and into Rejected.
+  // Rejecting moves the row out of On watch and into Rejected.
   await page.getByRole("button", { name: /^Rejected / }).click();
   await page.getByRole("heading", { name: "Rejected", exact: true }).waitFor({ timeout: 30_000 });
   const rejectedSection = page.locator("section.src-sec", { hasText: "Rejected" });
-  await rejectedSection.locator("tr.lead-tr", { hasText: sourceUrl }).waitFor({ timeout: 30_000 });
-  step("Drop removes the source from On watch and files it under Rejected");
+  await rejectedSection
+    .locator("tr.lead-tr, .astra-row.src", { hasText: sourceUrl })
+    .waitFor({ timeout: 30_000 });
+  step("Remove takes the source off On watch and files it under Rejected");
 
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: /^Rejected / }).click();
   const stillRejected = page
     .locator("section.src-sec", { hasText: "Rejected" })
-    .locator("tr.lead-tr", { hasText: sourceUrl });
+    .locator("tr.lead-tr, .astra-row.src", { hasText: sourceUrl });
   await stillRejected.waitFor({ timeout: 30_000 });
   step("the rejected state survives a reload too");
 

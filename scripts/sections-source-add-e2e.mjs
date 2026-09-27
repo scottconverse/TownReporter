@@ -102,6 +102,18 @@ const bar = () => page.locator('[aria-label="Section changes not saved"]');
  * click.
  */
 const queueLink = () => page.locator('a[href="/desk/queue"]:visible').first();
+/**
+ * A source's row on the Sources page, wherever it sits (On watch/Suggested/
+ * Rejected). On watch is drawn as `div.astra-row.src` rows since Redesign p2c
+ * and that row prints the URL's host ("example-city-council.test"), not the
+ * whole URL, so it is matched by its own link instead of by its text; the
+ * Suggested and Rejected lists are still the `tr.lead-tr` table.
+ */
+const rowForUrl = (url) =>
+  page
+    .locator("tr.lead-tr, .astra-row.src")
+    .filter({ has: page.locator(`a[href="${url}"]`) })
+    .or(page.locator("tr.lead-tr, .astra-row.src", { hasText: url }));
 
 async function ownTheDesk() {
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
@@ -177,7 +189,7 @@ async function addingFromInsideTheSectionTicksItButDoesNotSaveIt() {
     .getByText("Sources this section reads (0)")
     .waitFor({ timeout: 45_000 });
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  await page.locator("tr.lead-tr", { hasText: sourceUrl }).waitFor({ timeout: 45_000 });
+  await rowForUrl(sourceUrl).first().waitFor({ timeout: 45_000 });
   step("the source is on watch after a reload; the assignment is not yet saved");
 }
 
@@ -202,10 +214,12 @@ async function aDuplicateUrlIsTickedRatherThanDuplicated() {
   step("re-adding with the label left blank ticks the row and keeps its name");
 
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  const rows = page.locator("tr.lead-tr", { hasText: sourceUrl });
+  // On watch is drawn as `div.astra-row.src` rows since Redesign p2c; the row's
+  // title sits in `.astra-row-t` there and in `.src-t` in the table.
+  const rows = rowForUrl(sourceUrl);
   await rows.first().waitFor({ timeout: 45_000 });
   assert.equal(await rows.count(), 1, "a duplicate URL must not create a second source row");
-  const name = await rows.first().locator(".src-t").innerText();
+  const name = await rows.first().locator(".astra-row-t, .src-t").innerText();
   assert.equal(name, sourceTitle, `a blank label renamed the row to "${name}"`);
   step(`the watch list holds one row for that URL, still named "${name}"`);
 }
@@ -302,7 +316,9 @@ async function leavingInAppIsBlocked() {
 
 async function theSourcesPageCanAssignWithoutASecondTrip() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  await page.getByText("Add a source", { exact: true }).click();
+  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
+  // panel no longer draws a control of its own at the top of the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   const picker = page.getByRole("group", { name: "Assign to sections (optional)" });
   await picker.waitFor({ timeout: 45_000 });
   await picker.getByRole("checkbox", { name: "Business", exact: true }).check();
@@ -316,15 +332,18 @@ async function theSourcesPageCanAssignWithoutASecondTrip() {
   step("adding on the Sources page files the source under the ticked section, in one step");
 
   await page.reload({ waitUntil: "networkidle" });
-  await page.locator("tr.lead-tr", { hasText: secondUrl }).waitFor({ timeout: 45_000 });
+  await rowForUrl(secondUrl).first().waitFor({ timeout: 45_000 });
   step("the assignment survives a reload of the Sources page");
 
   // The accept path: a row has to be accepted before a section can read it, so
   // the tick and the Accept are one step -- accept first, then file it.
-  const row = page.locator("tr.lead-tr", { hasText: secondUrl });
-  await row.getByRole("button", { name: "Drop" }).click();
+  const row = rowForUrl(secondUrl).first();
+  // The drawn On watch row says "Remove"; the tables still say "Drop".
+  await row.getByRole("button", { name: /^(Remove|Drop)$/ }).click();
   await page.getByRole("button", { name: /^Rejected / }).click();
-  const rejected = page.locator("tr.lead-tr", { hasText: secondUrl });
+  // Rejected is the table the row lands in after Remove, so the same lookup
+  // finds it there (and only there -- the URL is on one list at a time).
+  const rejected = rowForUrl(secondUrl).first();
   await rejected.getByText("Assign to sections", { exact: true }).click();
   await rejected
     .getByRole("checkbox", { name: "Council", exact: true })

@@ -126,7 +126,9 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
   const addForm = page.locator("details.astra-source-add");
-  await addForm.getByText("Add a source", { exact: true }).click();
+  // BJ2 item 4: opened from the header button now -- the panel keeps no
+  // resting control of its own above the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await addForm.getByLabel("URL", { exact: true }).waitFor({ timeout: 30_000 });
   await shot("sources-add-form", addForm, 1280);
   await shot("sources-add-form", addForm, 375);

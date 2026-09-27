@@ -278,7 +278,9 @@ async function ownTheDesk() {
 
 async function addAcceptedSource() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Add a source", { exact: true }).click();
+  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
+  // panel no longer draws a control of its own at the top of the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("URL", { exact: true }).fill(SOURCE_URL);
   await page.getByLabel("Name", { exact: true }).fill(SOURCE_NAME);
   await page.getByRole("button", { name: "Add source" }).click();

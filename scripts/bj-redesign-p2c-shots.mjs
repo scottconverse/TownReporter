@@ -37,16 +37,42 @@ const base = checkedUrl(
 ).replace(/\/$/, "");
 const outDir = checkedOutputPath(
   resolve(
-    process.env.BJ_SHOTS_OUT_DIR || "../townreporter-deepseek-oversight/evidence/BJ",
+    process.env.BJ_SHOTS_OUT_DIR || "../townreporter-deepseek-oversight/evidence/BJ2",
   ),
   [resolve("..")],
   "output directory",
 );
 mkdirSync(outDir, { recursive: true });
 
+/**
+ * The dev-only seed route. The desk on this server runs on in-memory PGLite --
+ * one instance per process -- so the rows that make the screens look like the
+ * drawings have to be written by the same process that serves them, and the way
+ * in is an HTTP route on that server. It refuses to run under
+ * `import.meta.env.PROD`.
+ *
+ * The file is kept outside src/, as scripts/dev-seed-route.ts: tsconfig only
+ * includes "src" and "server", nothing imports it, and the vite build never
+ * reads it, so it cannot ship. To use it, copy it to src/routes/api/dev-seed.ts
+ * on a dev server bound to 127.0.0.1:8090, take the captures, then delete the
+ * copy and restore src/routeTree.gen.ts. It was not committed as a route.
+ *
+ * BJ2: without it every capture was an empty desk, so rows, chips and states
+ * could not be compared with the drawings at all -- the finding this pass
+ * exists to fix.
+ */
+const SEED_PATH = "/api/dev-seed";
+
+
 const screens = [
   { slug: "opinion", path: "/desk/opinion", name: "Opinion" },
-  { slug: "dark", path: "/desk/dark", name: "Dark Desk" },
+  /*
+    Dark Desk's right side is the open file, and the drawing only ever shows the
+    screen with one open -- an editor reading a file. Clicking the first rail row
+    is what puts the page in the state the drawing is of; without it the capture
+    is the empty state, which the drawing does not show.
+  */
+  { slug: "dark", path: "/desk/dark", name: "Dark Desk", openFirstFile: true },
   { slug: "sources", path: "/desk/sources", name: "Sources" },
   { slug: "scan", path: "/desk/scan", name: "Scan" },
   { slug: "published", path: "/desk/published", name: "Published" },
@@ -54,9 +80,9 @@ const screens = [
 ];
 
 const shapes = [
-  { tag: "1280-light", width: 1280, height: 900, dark: false },
-  { tag: "1280-dark", width: 1280, height: 900, dark: true },
-  { tag: "390-light", width: 390, height: 844, dark: false },
+  { tag: "1280-light", width: 1280, height: 900, dark: false, appearance: "light" },
+  { tag: "1280-dark", width: 1280, height: 900, dark: true, appearance: "desk-dark" },
+  { tag: "390-light", width: 390, height: 844, dark: false, appearance: "light" },
 ];
 
 /*
@@ -150,6 +176,22 @@ async function shot(screen, shape) {
   await page.setViewportSize({ width: shape.width, height: shape.height });
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.waitForTimeout(300);
+  /*
+    BJ2 finding 2: `dark-light.png` came out dark. The mode is a storage key the
+    pre-paint script stamps on `<html>`, and one route was forcing the night
+    class on the shell whatever the key said -- so the file name and the page
+    disagreed. Asserting the attribute here is what makes the name true: a
+    capture whose `data-appearance` is not the one this shape asked for fails
+    the run rather than being filed under a misleading name.
+  */
+  const appearance = await page.evaluate(
+    () => document.documentElement.dataset.appearance ?? "",
+  );
+  if (appearance !== shape.appearance) {
+    throw new Error(
+      `${name}: asked for data-appearance="${shape.appearance}", page says "${appearance}"`,
+    );
+  }
   const style = await page.addStyleTag({ content: PINNED_CHROME_HIDDEN });
   const file = resolve(outDir, `${name}.png`);
   const full = await page.evaluate(() => document.documentElement.scrollHeight);
@@ -193,6 +235,17 @@ try {
     console.log("  ok    signed in to an existing desk");
   }
 
+  /*
+    Seed before the first navigation: the desk reads its lists on render, so the
+    rows have to exist by the time a screen is opened, not after.
+  */
+  const seedResp = await page.request.post(`${base}${SEED_PATH}`);
+  const seedBody = await seedResp.text();
+  if (!seedResp.ok()) {
+    throw new Error(`${SEED_PATH} answered ${seedResp.status()}: ${seedBody.slice(0, 400)}`);
+  }
+  console.log(`  ok    seeded the dev desk: ${seedBody.trim().slice(0, 400)}`);
+
   for (const screen of screens) {
     for (const shape of shapes) {
       // The desk's dark mode is a storage key the head script paints from, so
@@ -205,6 +258,14 @@ try {
       const resp = await page.goto(`${base}${screen.path}`, { waitUntil: "domcontentloaded" });
       if (resp && !resp.ok()) throw new Error(`${screen.path} answered ${resp.status()}`);
       await page.waitForTimeout(900);
+      if (screen.openFirstFile) {
+        const row = page.locator(".astra-piles .astra-file-open").first();
+        if (!(await row.count())) {
+          throw new Error(`${screen.path}: no file in the rail to open after seeding`);
+        }
+        await row.click();
+        await page.waitForTimeout(900);
+      }
       await shot(screen, shape);
       const body = await page.locator("body").innerText();
       if (body.trim().length < 40) {

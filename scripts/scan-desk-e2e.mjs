@@ -148,7 +148,9 @@ function futureDenverTime() {
 async function addAcceptedSource() {
   const sourceUrl = `https://daily-settings-${stamp}.example.test/agenda`;
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Add a source", { exact: true }).click();
+  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
+  // panel no longer draws a control of its own at the top of the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("URL", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill("Daily settings source");
   await page.getByRole("button", { name: "Add source" }).click();
@@ -158,7 +160,9 @@ async function addAcceptedSource() {
 
 async function addRoutineNoticeFixtureSource() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  await page.getByText("Add a source", { exact: true }).click();
+  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
+  // panel no longer draws a control of its own at the top of the list.
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("URL", { exact: true }).fill(routineNoticeFixtureUrl);
   await page.getByLabel("Name", { exact: true }).fill("Routine notice fixture source");
   await page.getByRole("button", { name: "Add source" }).click();
@@ -479,7 +483,9 @@ async function routineNoticePermissionsJourney(context, observePage) {
   const linked = await context.newPage();
   observePage(linked, "routine-sources-link");
   await linked.goto(`${base}${sourcesHref}`, { waitUntil: "domcontentloaded" });
-  await linked.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor();
+  await linked
+    .getByRole("heading", { level: 1, name: "Sources & scan", exact: true })
+    .waitFor();
   await linked.close();
   step("owner sees empty routine permissions, separate activation, and the source link");
 
@@ -585,8 +591,11 @@ async function routineNoticePermissionsJourney(context, observePage) {
   step("a stale routine-permissions tab gets an explicit conflict and reload path");
 
   await other.goto(`${base}/desk/sources`, { waitUntil: "domcontentloaded" });
-  const sourceRow = other.locator("tr", { hasText: "Daily settings source" });
-  await sourceRow.getByRole("button", { name: "Drop", exact: true }).click();
+  // On watch is drawn as `div.astra-row.src` rows since Redesign p2c, and its
+  // reject button reads "Remove"; the Suggested and Rejected tables still say
+  // "Drop", so both markup shapes are named here.
+  const sourceRow = other.locator("tr, .astra-row.src", { hasText: "Daily settings source" });
+  await sourceRow.getByRole("button", { name: /^(Remove|Drop)$/ }).click();
   await other.getByRole("button", { name: /^Rejected / }).click();
   await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
   await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
