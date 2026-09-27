@@ -9,6 +9,10 @@ the desk changed. No migration, no new route, no new scheduled task, no new
 service, no new port, and no model was called or loaded to build or check any of
 it.
 
+A second round (unit BX2) followed the first onto the same page: the dates
+panel was still empty on the live paper after the fix above, for a reason the
+first round could not see from here. That round is in its own section below.
+
 ## "This week" was empty beside stories that named dates
 
 The live front page printed an empty **This week** panel while the stories
@@ -40,8 +44,64 @@ before are kept:
   guessed. A day that does not exist ("2026-02-31") is refused by a round trip
   through the calendar rather than rolled forward into 3 March.
 
-When there is genuinely nothing due, the panel is not rendered at all: the lead
-runs the full width of the row and nothing on the page explains the absence.
+### The dates the stories name in their own words (unit BX2)
+
+Fixing that reader was not enough. On the live paper's twelve newest published
+articles the fix changed nothing, because there was nothing to read: every
+record's `document_date` came across as `''`. The dates were not in the rows at
+all — they were in the stories' own sentences:
+
+- a headline, "… Applications Close **Sept. 29**"
+- a headline, "…schedules **Sept. 26** canvassing day and **Oct. 3** Brighton
+  event for 3C and 3D"
+- a dek, "…sends the plan to an **Oct. 6** public hearing and second reading…"
+- a dek, "…a posted **Oct. 1** funding hearing packet…"
+- a headline, "…beginner DaVinci Resolve editing class for **Sept. 29**"
+
+The sweep now has a second source alongside the records. It reads a
+month-name day out of the story's **headline and dek** — not the body, which is
+deliberate: a headline and a dek are the desk's own summary of the story and
+carry one date each, while a body sentence mentioning a date in passing ("the
+council last met on Aug. 12") is indistinguishable from one announcing an event
+without reading it closely enough to be wrong. A panel that stays short is
+better than one that fills up.
+
+The rules that keep that source honest:
+
+- **Whole month names only.** The month alternatives are word-bounded and
+  refuse a digit after them, so "Section 8", "Prop 123", "3C and 3D", "3D" and
+  "the March 2026 packet" are read as no date at all, and a number that is not
+  a real day of that month is refused.
+- **The year comes from the story.** A day written with no year ("Sept. 29")
+  takes the year of `published_at`; if that lands more than about two months
+  behind the publish day the day is the coming year's. Filed in December, "Jan.
+  5" means next January, not the one eleven months gone. A year written into
+  the words ("Oct. 8, 2026") is the date's own and is never rolled.
+- **One date per story per day.** A story that names the same day twice — in
+  its headline and again in its dek, or in a record and again in its words —
+  gets one line, and the record's own title is the better line.
+- **Every line links to the story that named it.** A reader who wants to know
+  why Oct. 6 is on the list can open the story that said so.
+- **Nothing is invented.** A date outside the sweep's window is not printed,
+  and a story naming nothing contributes nothing.
+
+The same source now feeds the article page's own "Dates in this story" panel,
+so a reader on the story sees the day it named. There the row carries no link:
+it would point at the page the reader is already on.
+
+### When the panel goes, the lead takes the width
+
+With the panel absent the lead's **box** was the full width of the row but its
+**text** was not — at 1440 px the headline and dek stayed about half-width with
+a large blank area to their right (`evidence/audit-BX/front-desktop-light.png`).
+The sole lead now reads as two columns at 901 px and wider: the section tag and
+headline on the left, the dek and the line under it on the right. Below that the
+existing rules already stack the lead, so the phone layout is unchanged, and the
+row's own grid is untouched — `.lead`'s box is still the whole row, so a check
+that measures the box measures the same thing it did before.
+
+When there is genuinely nothing due, the panel is still not rendered at all and
+nothing on the page explains the absence.
 
 ## "Around the region" hides the same way
 
@@ -123,10 +183,42 @@ Every number below is from a command run in this working copy.
 - `typecheck` exit 0, `typecheck:test` exit 0, `lint` exit 0,
   `node scripts/with-app-env.mjs npx vite build` exit 0.
 
+**Unit BX2**, the second source, from this working copy:
+
+- `src/lib/story-dates.test.ts` over `with-app-env` — exit 0, 14 tests, 4
+  suites, 14 pass, 0 fail. The five live strings, the past date (Sept. 26 on a
+  Sept. 27 front page is outside the week and prints nothing), the year roll
+  ("Jan. 5" on a story published in December), the written year that is never
+  rolled, the non-dates ("Section 8", "Prop 123", "3C and 3D", "March 2026"),
+  and the article page's row printing plain while the front page's row links.
+- The four-part Playwright walk over the built server (`work/bx-shots.mjs`) —
+  exit 0, 150 expectations, 0 failed. Its seed is the point: **every** story's
+  `document_date` is `''` and the dates exist only in the headlines and deks,
+  which is the live condition. At all four themes it reads the panel's rows as
+  `canvassing day, applications close, public hearing and second reading,
+  Brighton event` on the days `Tue 29, Wed 30, Thu 1, Sat 3`, each linking to
+  the story that named it. On the article page the same panel prints its own
+  story's one date with no link. With the panel gone — the empty-week seed —
+  the row is `ledgerow solo` at 1440 and 390 px in both themes, the lead's box
+  is the row's width, and the furthest-right text reaches 0.972 of the lead's
+  width at 1440 px (0.954 at 390 px), against roughly half before.
+- `scripts/paper-panels.mjs` run of its own against that seeded paper — exit 0,
+  panel present and heading matched in all four theme/width combinations, 0
+  contrast violations, 0 overflows past the panel edge, 0 words split.
+- `scripts/front-page-river-e2e.mjs` — exit 0, 18 assertions. Its seed's
+  headlines carry no month names, so the new source cannot repopulate the
+  three-story panel that case asserts is absent.
+- `lint` exit 0, `typecheck` exit 0, `typecheck:test` exit 0, `vite build` exit
+  0.
+
+Screenshots from the walk are in `evidence/BX2/`.
+
 **Red before green.** With the released `src/lib/story-dates.ts` restored, the
 new story-dates test exits 1 — actual `[]` against expected
 `['2026-09-29','2026-10-01','2026-10-03']` — which is the live empty panel as a
-unit test. With this version it exits 0.
+unit test. With this version it exits 0. Unit BX2's red check is the walk's own
+seed: the same walk run against the previous reader finds no rows at all in the
+panel, because every `document_date` it would read is empty.
 
 ## Limits
 
@@ -141,3 +233,17 @@ unit test. With this version it exits 0.
   `docs/design/handoff-2026-09-26/`.
 - The phone-width rules were measured on the built page at 390 px. Nothing in
   this change was checked against a real phone.
+- **The story body is deliberately not read** (unit BX2). The brief left the
+  precision of body-text date reading unverified and asked this work to decide
+  and say so. It is not read: a date in a headline or a dek is the desk's
+  summary of the story and is nearly always the event's own date, while a date
+  inside a body sentence — a past meeting, a quoted document, an aside — reads
+  identically and would put events on the front page that no story announced.
+  The cost is real and is not hidden: a story that names its one date only in
+  its body contributes nothing to the panel. The other cost is that this source
+  reads **month-name days only**; "tomorrow", "next Tuesday" and "in two weeks"
+  are not read, because turning them into a day needs a sentence parser that
+  the live strings did not require.
+- Unit BX2's panel was checked against a seeded paper whose records are all
+  empty, not against the live paper's rows. The live paper's own rows were
+  read, not written to, and no claim here is measured from them.
