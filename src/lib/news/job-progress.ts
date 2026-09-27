@@ -75,16 +75,19 @@ export type JobProgressView = {
 const TITLES: Partial<Record<JobKind, string>> = {
   draft: "Drafting story",
   reconcile: "Checking the draft against the evidence",
+  "follow-up": "Running the check",
 };
 
 const DONE_TEXT: Partial<Record<JobKind, string>> = {
   draft: "Your draft is ready",
   reconcile: "The evidence check is done",
+  "follow-up": "The check is done",
 };
 
 const OPEN_LABEL: Partial<Record<JobKind, string>> = {
   draft: "Open the draft",
   reconcile: "Open the checked draft",
+  "follow-up": "Open the follow-up",
 };
 
 const ms = (value: string | null | undefined): number | null => {
@@ -94,21 +97,25 @@ const ms = (value: string | null | undefined): number | null => {
 };
 
 /**
- * A `desk_jobs` row as the card needs it. Exported so a route that already has
- * the row from its own loader can render the first paint from it instead of
- * waiting a round trip for the poll -- a story that is running must not lose
- * its progress bar for one frame because the card moved to a live query.
+ * The fields every kind of job shares, mapped once.
+ *
+ * Two kinds are drawn by this module now -- a story job (draft, reconcile) and
+ * an agent's run -- and the fifteen fields below are identical between them.
+ * They were duplicated for a while; the second copy is what this replaces, so a
+ * change to how a percentage or a heartbeat is read cannot land on one card and
+ * miss the other.
  */
-export function jobProgressView(row: DeskJob, leadId: number, draftId: number | null): JobProgressView {
-  const kind = row.kind;
-  const open = row.status === "queued" || row.status === "running";
+type ProgressShape = Omit<
+  JobProgressView,
+  "leadId" | "title" | "doneText" | "openLabel" | "resultHref" | "resultDraftId" | "canRetry"
+>;
+
+function progressShape(row: DeskJob, model: string): ProgressShape {
   return {
     id: row.id,
-    leadId,
-    kind,
+    kind: row.kind,
     status: row.status,
-    title: TITLES[kind] ?? row.kind,
-    model: modelChoiceLabel(effectiveStoryModelChoice(row.model_choice)),
+    model,
     stages: jobStages(row),
     stageIndex: row.stage_index ?? null,
     pct: row.pct ?? null,
@@ -123,6 +130,23 @@ export function jobProgressView(row: DeskJob, leadId: number, draftId: number | 
     endedAt: ms(row.finished_at),
     beatAt: ms(row.beat_at),
     error: row.error ?? null,
+    failoverNote: row.failover_note ?? "",
+    cancelRequested: (row.status === "queued" || row.status === "running") && Boolean(row.cancel_requested),
+  };
+}
+
+/**
+ * A `desk_jobs` row as the card needs it. Exported so a route that already has
+ * the row from its own loader can render the first paint from it instead of
+ * waiting a round trip for the poll -- a story that is running must not lose
+ * its progress bar for one frame because the card moved to a live query.
+ */
+export function jobProgressView(row: DeskJob, leadId: number, draftId: number | null): JobProgressView {
+  const kind = row.kind;
+  return {
+    ...progressShape(row, modelChoiceLabel(effectiveStoryModelChoice(row.model_choice))),
+    leadId,
+    title: TITLES[kind] ?? row.kind,
     resultHref:
       row.result_href ??
       (kind === "draft" || kind === "reconcile"
@@ -133,8 +157,6 @@ export function jobProgressView(row: DeskJob, leadId: number, draftId: number | 
     resultDraftId: draftId,
     doneText: DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
-    failoverNote: row.failover_note ?? "",
-    cancelRequested: open && Boolean(row.cancel_requested),
     /*
       Retry re-runs the request the row describes, so it is only offered for the
       two kinds whose request IS the row: a lead and a model choice. Every other
@@ -146,6 +168,106 @@ export function jobProgressView(row: DeskJob, leadId: number, draftId: number | 
     canRetry: kind === "draft" || kind === "reconcile",
   };
 }
+
+/**
+ * A `follow-up` job as the card needs it -- the live Job the drawn Running card
+ * shows inline.
+ *
+ * `leadId` is 0 and not the job's `subject_id`: a follow-up job's subject is a
+ * `follow_ups` id, and handing a story-card that number would be a plausible
+ * looking wrong lead. Nothing in JobCard.tsx reads the field (the route passes
+ * what it needs through `onNavigate`), so 0 is the honest "not a story".
+ *
+ * `resultHref` is null and `canRetry` is false for the same reason: a run has
+ * no page of its own to open, and its request lives in the follow-up row rather
+ * than in the job -- "Run now" on the card is the retry, through the path that
+ * claims the row and honors the fences.
+ *
+ * The model label is passed in rather than computed, because the follow-up's
+ * model comes from the phase 5 `follow-up` job key, which the caller resolves
+ * with the same `resolveFollowUpModel` the worker uses. Reading the story
+ * default here would put a model name on the card that the run may not use.
+ */
+export function followUpJobProgressView(row: DeskJob, model: string): JobProgressView {
+  return {
+    ...progressShape(row, model),
+    leadId: 0,
+    title: TITLES["follow-up"] ?? "Running the check",
+    resultHref: null,
+    resultDraftId: null,
+    doneText: DONE_TEXT["follow-up"] ?? "The check is done",
+    openLabel: OPEN_LABEL["follow-up"] ?? "Open the follow-up",
+    canRetry: false,
+  };
+}
+
+/**
+ * A running follow-up job, keyed by the follow-up card it belongs to.
+ *
+ * The card is the unit here, not the job: the screen draws one card per
+ * `follow_ups` row and a running one needs the live Job inside it, so the
+ * caller looks up its own row's id and finds either a view or nothing. A job
+ * whose follow-up has been deleted is dropped rather than returned with a
+ * guessed card.
+ */
+export type FollowUpJobProgress = {
+  /** The `follow_ups` id this job's `subject_id` is. */
+  followUpId: number;
+  view: JobProgressView;
+};
+
+/**
+ * The follow-up runs in flight in this newsroom -- normally zero or one, since
+ * `tickFollowUpsFor` enqueues at most one and refuses to start another while one
+ * is open.
+ *
+ * The model label comes from the SAME `resolveFollowUpModel` the worker uses,
+ * resolved at read time. It has to be resolved rather than read off the row:
+ * `model_choice` is `auto` for most follow-ups, and the whole point of the
+ * phase 5 assignment table is that `auto` means different models on different
+ * surfaces. A card that showed "Automatic" while the run uses Codex would be
+ * telling the editor something the run is not doing.
+ */
+export const listFollowUpJobProgress = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }): Promise<FollowUpJobProgress[]> => {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema();
+    const sql = await getSql();
+    const newsroomId = context.newsroomId ?? 1;
+    const rows = await sql<DeskJob>`
+      select * from desk_jobs
+      where newsroom_id = ${newsroomId} and kind = 'follow-up'
+        and status in ('queued', 'running')
+      order by id desc
+      limit 20
+    `;
+    if (!rows.length) return [];
+    /*
+      Both imports are inside the handler for the reason the file's header
+      gives: this module is in the client bundle graph, and `follow-ups.ts`
+      reaches PGlite and `follow-up-agents.ts` reaches the provider adapters.
+      Neither can be a top-level import here.
+    */
+    const [{ performReadFollowUp }, { resolveFollowUpModel }] = await Promise.all([
+      import("./follow-ups.ts"),
+      import("./follow-up-agents.ts"),
+    ]);
+    const out: FollowUpJobProgress[] = [];
+    for (const row of rows) {
+      const followUp = await performReadFollowUp(context, row.subject_id);
+      if (!followUp) continue;
+      // A resolution failure is a label problem, not a card problem: the run is
+      // real and its progress bar is worth showing, so it falls back to the
+      // resolver's own word for "no opinion" rather than dropping the card.
+      const resolved = await resolveFollowUpModel(followUp).catch(() => null);
+      out.push({
+        followUpId: row.subject_id,
+        view: followUpJobProgressView(row, modelChoiceLabel(resolved?.providerId ?? "auto")),
+      });
+    }
+    return out;
+  });
 
 /**
  * The newsroom's recent story work, newest first.

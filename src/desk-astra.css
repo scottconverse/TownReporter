@@ -2864,6 +2864,169 @@
   .desk-ltr.astra .st-heat {
     grid-template-columns: 34px repeat(24, minmax(0, 1fr));
   }
+/*
+  AI follow-ups (redesign phase 6, lane 2).
+
+  Ported from the follow screen in docs/design/handoff-2026-09-26/design/
+  "Desk Screens.dc.html" (lines 71-90 of the markup, `fTasks`/`tk`/`sb` in the
+  script). The reference is inline-styled against the PROTOTYPE's tokens
+  (--panel, --ink, --ink2, --yel, --danger, --ok), which this shell does not
+  define -- so the geometry, the copy and the state rules are the reference's
+  and the colors are the desk's own (--surface is the prototype's --panel,
+  --fg/--fg2 are --ink/--ink2, --a is --yel). The buttons are the desk's .btn
+  family, which is already the reference's button geometry: .btn base is its
+  "outline" (2px ink), .btn.solid is its "primary" (yellow, #111), .btn.danger
+  is its "stop". Nothing here draws its own button.
+
+  THE 4px LEFT EDGE IS THE STATE, and it is a different axis from the chip:
+  `followUpCardState` picks one of eight states and this file gives five of
+  them a color. A stopped card is neutral rather than green, because the
+  editor ended it and a green edge would say the opposite.
+*/
+.desk-ltr.astra .fu-intro {
+  margin: 0;
+  font-size: calc(16px * var(--ts));
+  line-height: 1.5;
+  color: var(--fg2);
+  max-width: 900px;
+}
+.desk-ltr.astra .fu-filters {
+  display: flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  align-self: flex-start;
+}
+.desk-ltr.astra .fu-filter {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.desk-ltr.astra .fu-filter:hover {
+  background: var(--hover);
+}
+.desk-ltr.astra .fu-filter.on {
+  background: var(--fg);
+  color: var(--bg);
+}
+.desk-ltr.astra .fu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.desk-ltr.astra .fu-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 20px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--fu-col, var(--line));
+  color: var(--fg);
+}
+.desk-ltr.astra .fu-card.state-found { --fu-col: var(--a); }
+.desk-ltr.astra .fu-card.state-running { --fu-col: var(--fg); }
+.desk-ltr.astra .fu-card.state-waiting { --fu-col: var(--line); }
+.desk-ltr.astra .fu-card.state-no-change { --fu-col: var(--ok); }
+.desk-ltr.astra .fu-card.state-could-not-check { --fu-col: var(--danger); }
+.desk-ltr.astra .fu-card.state-stopped,
+.desk-ltr.astra .fu-card.state-done { --fu-col: var(--line); }
+
+.desk-ltr.astra .fu-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.desk-ltr.astra .fu-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.desk-ltr.astra .fu-chip {
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.desk-ltr.astra .fu-chip.found { background: var(--a); color: #111; }
+.desk-ltr.astra .fu-chip.run { border: 2px solid var(--fg); color: var(--fg); }
+.desk-ltr.astra .fu-chip.wait { border: 1px solid var(--fg2); color: var(--fg2); }
+.desk-ltr.astra .fu-chip.fail { border: 2px dashed var(--danger); color: var(--danger); }
+.desk-ltr.astra .fu-chip.none { border: 1px solid var(--ok); color: var(--ok); }
+
+.desk-ltr.astra .fu-method,
+.desk-ltr.astra .fu-meta {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .fu-q {
+  font-weight: 800;
+  font-size: calc(18px * var(--ts));
+  line-height: 1.3;
+}
+.desk-ltr.astra .fu-result {
+  font-family: var(--fb);
+  font-size: calc(16px * var(--ts));
+  line-height: 1.45;
+}
+.desk-ltr.astra .fu-story-link {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--a);
+  text-decoration-thickness: 3px;
+}
+.desk-ltr.astra .fu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+/* The live Job the drawn Running card embeds spans both columns. */
+.desk-ltr.astra .fu-job {
+  grid-column: 1 / -1;
+}
+/* Two lines of card body at the top of a screen that has not loaded yet. */
+.desk-ltr.astra .fu-card.skeleton {
+  display: block;
+  min-height: 132px;
+}
+/*
+  "Review finding" opens the finding in place rather than navigating: a search
+  agent's answer arrives before anyone has decided which story it belongs to,
+  so the card may have nothing to open, and a link to nowhere is worse than a
+  panel. The panel spans both of the card's columns.
+*/
+.desk-ltr.astra .fu-finding {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .fu-finding-title {
+  font-weight: 800;
+  font-size: calc(16px * var(--ts));
+  line-height: 1.3;
+}
+.desk-ltr.astra .fu-finding-summary {
+  font-family: var(--fb);
+  font-size: calc(15px * var(--ts));
+  line-height: 1.5;
+}
+.desk-ltr.astra .fu-finding-meta {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+  word-break: break-word;
 }
 
 /* Defined locally because phase 0's motion keyframes are not on main yet;

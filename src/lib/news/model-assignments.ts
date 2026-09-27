@@ -145,7 +145,14 @@ export const MODEL_JOBS: readonly ModelJob[] = [
     label: "AI follow-ups",
     note: "Re-checks pages, looks for answers",
     surface: "scan",
-    built: false,
+    /*
+      Turned on in redesign phase 6: ./follow-up-agents.ts is the backend that
+      was missing when phase 5 drew this row as "Not built yet". The `scan`
+      surface is still what an `auto` assignment falls back to -- a follow-up
+      is a background check with the same shape as the daily scan, not a
+      writing job.
+    */
+    built: true,
   },
   {
     key: "ocr",
