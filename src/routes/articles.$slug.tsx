@@ -249,7 +249,7 @@ function ArticlePage() {
               Front page
             </Link>
             <span>/</span>
-            <SectionTag topic={article.topic}>
+            <SectionTag topic={article.topic} className="tag">
               {sectionName}
               {isOpinion ? " · Perspective" : ""}
             </SectionTag>

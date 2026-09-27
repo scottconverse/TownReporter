@@ -149,6 +149,10 @@ export const LIMITS = {
   followUpWho: 200,
   followUpWhat: 400,
   followUpReply: 2000,
+  /** `follow-ups.ts:395` cuts one target at 500 characters. */
+  aiFollowUpTarget: 500,
+  /** `follow-ups.ts:400` cuts the saved model choice at 120. */
+  aiFollowUpModel: 120,
   /**
    * A correction body. The form caps it at 2000 (`correction-form.tsx:71`)
    * and the server checked only a minimum, so there was no upper bound at all.
@@ -254,6 +258,16 @@ export const LIMITS = {
    * writes either way.
    */
   suggestedBatch: 500,
+  /**
+   * How many (job, rank) rows the Models screen may save in one press.
+   *
+   * The screen holds ten jobs (`MODEL_JOB_KEYS`) and three ranks each, so 30 is
+   * the whole set and 60 is that with every job doubled. The number exists so a
+   * body that is not a set of assignments at all is refused at the boundary
+   * rather than parsed; it is not a product limit anyone can reach, because the
+   * screen has no way to send more rows than it draws.
+   */
+  modelAssignments: 60,
 } as const;
 
 /*
@@ -934,6 +948,44 @@ export const followUpReplyInput = z.object({
   repliedOn: z.string().max(40).nullable().optional(),
 });
 
+/*
+  Redesign phase 6: AI follow-ups (`follow-ups.ts:358-402`, migrations/0101).
+
+  The two enums are written out rather than imported from the vocabulary in
+  `follow-up-copy.ts`, which is the file's convention everywhere else and is
+  what puts the legal values next to the columns they land in. They mirror
+  `AGENT_KINDS` and `FOLLOW_UP_SCHEDULES` there, and the 0101 check constraints
+  behind them; a value added in one place without the others is what
+  `follow-up-migration.test.ts` fails on.
+*/
+
+/** `desk.ts:2791` createAiFollowUp and `desk.ts:2796` updateAiFollowUp. */
+export const aiFollowUpInput = z.object({
+  leadId: nullableId.optional(),
+  articleId: nullableId.optional(),
+  what: z.string().trim().min(1).max(LIMITS.followUpWhat),
+  agentKind: z.enum(["recheck", "search", "agenda"]),
+  schedule: z.enum(["2h", "6h", "12h", "daily", "weekly", "posting-days"]),
+  /** `follow-ups.ts:389` takes at most 8, each cut at 500. */
+  targets: z.array(z.string().max(LIMITS.aiFollowUpTarget)).max(8).optional(),
+  modelChoice: z.string().max(LIMITS.aiFollowUpModel).optional(),
+});
+
+/** `desk.ts:2796` updateAiFollowUp. */
+export const aiFollowUpUpdateInput = aiFollowUpInput.extend({ id: rowId });
+
+/** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
+export const followUpActionInput = z.object({
+  id: rowId,
+  action: z.enum(["pause", "resume", "stop", "done", "run-now"]),
+});
+
+/** `desk.ts:2860` listFollowUpFindings (`input ?? {}`). */
+export const followUpFindingsInput = z.preprocess(
+  (v) => (v === undefined || v === null ? {} : v),
+  z.object({ limit: z.number().int().positive().max(50).optional() }),
+);
+
 /** `desk.ts:2510` overrideNamedOutlet. */
 export const outletInput = z.object({ leadId: rowId, outlet: z.string().max(LIMITS.outlet) });
 
@@ -1331,3 +1383,33 @@ export const importStoriesInput = z.object({
   /** Only the ticked cards arrive here; the server re-checks every one. */
   stories: z.array(importStorySelection).max(LIMITS.importStories),
 });
+
+/* --- model-assignments-settings.ts (1 row) ------------------------------- */
+
+/**
+ * `saveModelAssignmentsFn`: the whole set the Models screen is holding.
+ *
+ * The body IS the array -- the screen has one thing to say and wrapping it in
+ * an object would be a shape with one key -- so a non-array is refused here
+ * rather than reaching the store. `jobKey` is bounded text and not an enum on
+ * purpose: the vocabulary is `MODEL_JOB_KEYS` in `model-assignments.ts`, and a
+ * name written out here could drift from it. The store checks the key against
+ * that list and answers a plain sentence for one it does not know, which is the
+ * same division of labour the local-model rows above use.
+ *
+ * `effort` is the loose one. It is stored, not acted on: `modelEffort()` in the
+ * registry already reads a level it does not know as "the model's own default",
+ * and a level that is valid but wrong for the model behind the id is dropped to
+ * that model's default at read time (`cleanJobEffort`). A 4 MB string, though,
+ * is not a level at all, so it is read as null here instead of being carried.
+ */
+export const modelAssignmentRowsInput = z
+  .array(
+    z.object({
+      jobKey: idText,
+      rank: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+      providerId: modelChoiceText,
+      effort: modelEffortLoose.optional(),
+    }),
+  )
+  .max(LIMITS.modelAssignments);

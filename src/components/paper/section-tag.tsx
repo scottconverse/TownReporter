@@ -19,14 +19,34 @@ import { Link } from "@tanstack/react-router";
  * `topic` makes the tag a link to that section's front-page listing. It is a
  * section *key* rather than an href so the tag goes through the router like
  * every other link on the paper; the label text is the caller's.
+ *
+ * `className` adds the article page's own `.tag` hook. The prototype keeps the
+ * section tag inside the article's breadcrumb row (`design/Article
+ * Daily.dc.html:29-31`: "Front page / <a background:var(--yel)>Housing"), and
+ * a `.tag` class is what that markup carried before the redesign -- the browser
+ * walks that import and paste a story read the section an editor chose from
+ * `.articlehead .tag` (`scripts/import-stories-e2e.mjs:463`,
+ * `scripts/paste-one-story-e2e.mjs:523`). It is a hook, not a style: `sectiontag`
+ * already sets every declaration this element needs and still wins the `tag`
+ * rules it does not set here.
  */
-export function SectionTag({ children, topic }: { children: ReactNode; topic?: string }) {
+export function SectionTag({
+  children,
+  topic,
+  className,
+}: {
+  children: ReactNode;
+  topic?: string;
+  /** Extra classes for the element, e.g. the article head's `tag` hook. */
+  className?: string;
+}) {
+  const cls = className ? `sectiontag ${className}` : "sectiontag";
   if (topic) {
     return (
-      <Link className="sectiontag" to="/" search={{ topic }}>
+      <Link className={cls} to="/" search={{ topic }}>
         {children}
       </Link>
     );
   }
-  return <span className="sectiontag">{children}</span>;
+  return <span className={cls}>{children}</span>;
 }

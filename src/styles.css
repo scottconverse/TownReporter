@@ -2150,6 +2150,70 @@
   font-size: calc(0.875rem * var(--ts));
   color: var(--fg2);
 }
+/*
+  Form fields inside a dialog. They live here rather than in desk-astra.css
+  because the dialog is portalled to a wrapper that carries only
+  `.desk-ltr.astra-modal-layer` -- every rule in desk-astra.css is scoped to
+  `.desk-ltr.astra`, which that wrapper does not have, so a field class put
+  there would render unstyled rather than wrong-looking.
+  The geometry is the reference's: a 44px box with a 1px ink border and the
+  serif face, because a field the editor types a question into is reading
+  matter, not chrome.
+*/
+.desk-ltr.astra-modal-layer .fu-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.desk-ltr.astra-modal-layer .fu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .fu-field-hint {
+  font-weight: 500;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .fu-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--fg);
+  border-radius: 0;
+  font-family: var(--fb);
+  font-size: calc(1rem * var(--ts));
+  font-weight: 400;
+  line-height: 1.5;
+  resize: vertical;
+}
+.desk-ltr.astra-modal-layer select.fu-input {
+  resize: none;
+}
+.desk-ltr.astra-modal-layer .fu-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.desk-ltr.astra-modal-layer .fu-choices-label {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(0.9375rem * var(--ts));
+}
+/* A refusal the editor can fix by typing -- the re-check method needs a link,
+   and the dialog says so under the field instead of only disabling the button. */
+.desk-ltr.astra-modal-layer .fu-err {
+  margin: 0;
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(0.9375rem * var(--ts));
+  color: var(--danger);
+}
 @media (max-width: 700px) {
   .desk-ltr.astra-modal-layer {
     padding: 24px 12px;

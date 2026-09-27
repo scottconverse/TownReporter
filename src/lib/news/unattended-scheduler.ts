@@ -3,6 +3,7 @@ import { drainQueuedJobs, reattachDurableJobsOnStartup } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
+import { tickFollowUps } from "./follow-up-scheduler.ts";
 
 /**
  * The built server's unattended clock: monitors recapture, job reclaim, and
@@ -47,6 +48,14 @@ export function startUnattendedScheduler(): void {
       await tickAllDueMonitors();
       await tickDailyScans();
       await tickRoutineNoticeEditions();
+      /*
+        Follow-ups last, and on this same five-minute clock rather than the
+        twenty-second job drain: one is started per newsroom per tick, and the
+        job it enqueues is picked up by `tickJobs` below within twenty seconds.
+        Putting the tick on the fast clock would re-run the two fences every
+        twenty seconds to learn the same answer.
+      */
+      await tickFollowUps();
     } catch (err) {
       console.error("[townreporter] monitor tick failed:", err);
     } finally {
