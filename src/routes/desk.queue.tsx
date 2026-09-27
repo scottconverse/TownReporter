@@ -472,7 +472,7 @@ function QueuePage() {
     Today's "+ Add a lead" links to /desk/queue#file-lead, and phase 0's
     dialogs are unmounted while shut, so there is nothing for a hash to scroll
     to -- the hash has to open the dialog instead. That is the whole
-    behaviour, and it keeps the link landing on the form it names.
+    behavior, and it keeps the link landing on the form it names.
 
     Read from the router's location rather than a `hashchange` listener: a
     same-path hash change is a `pushState` the router owns, and no
@@ -961,7 +961,7 @@ function QueuePage() {
 
       {/*
         The old "Draft selected leads" panel (unit BF2, defect 8). Its picker
-        is the same `ModelPicker` with the same 0.6.71 behaviour -- scope
+        is the same `ModelPicker` with the same 0.6.71 behavior -- scope
         "forced", no Automatic, the lead's own stored research scope kept --
         and the press beneath it queues the same batch of jobs the bulk bar's
         Start N stories named. What the dialog is about to queue was copied

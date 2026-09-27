@@ -3286,7 +3286,7 @@
 /* BF4, defect 2: the row's selection box, drawn as the drawing draws it.
 
    The drawing puts a 24px square with a 2px edge in the row's 44px first
-   track, and fills it ink with a background-coloured tick when the lead is
+   track, and fills it ink with a background-colored tick when the lead is
    picked (`Desk Screens.dc.html`: `width:24px;height:24px;...border:2px solid
    var(--ink2)` / `background:var(--ink);color:var(--bg)`). Measured before this
    rule existed, the desk drew a 44px native box that filled the whole track --
@@ -3300,7 +3300,7 @@
 
    The tick is a character rather than a mask: the drawing draws "✓" as text
    (`box: selected ? "✓" : ""`), and a text glyph needs no data URI to keep its
-   colour. It is `--fg` on `--bg` when picked -- ink on cream in light, light on
+   color. It is `--fg` on `--bg` when picked -- ink on cream in light, light on
    warm black in dark -- which is a stronger pair than the `--sel` this box used
    to paint itself with through `accent-color` (contrast-audit.mjs checks
    `--sel` on `--bg` as a 3:1 non-text indicator; see styles.css:587). */
@@ -3502,7 +3502,7 @@
   gap: 8px;
 }
 /* The Held badge rides inside an ink-filled tab when Held is active, so it
-   only keeps its own weight -- the segment's colour already carries the fill. */
+   only keeps its own weight -- the segment's color already carries the fill. */
 .desk-ltr.astra .seg-strip .filter-badge {
   font-weight: 800;
 }

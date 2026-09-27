@@ -9,7 +9,7 @@ import ts from "typescript";
 // prove the Large/Normal control the readability pass added is actually in the
 // header, next to Light/Dark, with real button semantics (aria-pressed, not
 // decoration). Since unit BF2 it is drawn as the design's "Aa Large" button
-// rather than a <select>; the behaviour it toggles is unchanged. Follows the
+// rather than a <select>; the behavior it toggles is unchanged. Follows the
 // same stub-everything-but-React pattern lead-badge-render.test.mjs uses for
 // desk-leads.tsx.
 //
@@ -204,7 +204,7 @@ test("the desk exposes accessible appearance and text size controls alongside ev
   assert.match(html, /aria-label="Switch to dark appearance"/);
   /*
     Unit BF2, defect 9: the footer is drawn as buttons -- "Dark" and "Aa Large"
-    side by side -- not a text-size <select>. The Large/Normal behaviour is the
+    side by side -- not a text-size <select>. The Large/Normal behavior is the
     same one the select had; only the control changed.
   */
   assert.match(html, /class="astra-foot-row"/);

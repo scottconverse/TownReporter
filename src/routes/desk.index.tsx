@@ -1041,7 +1041,7 @@ function DeskHome() {
                   while the desk is writing, ink once the draft is ready to
                   edit, line for everything else (queued, or stopped with a
                   reason). The stage is also in words, because the rule alone
-                  is a colour and the desk never says a state in colour only.
+                  is a color and the desk never says a state in color only.
                 */
                   <article
                     className={

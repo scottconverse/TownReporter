@@ -276,7 +276,7 @@ export function LeadRowView({
         take this box's state.
 
         BF4, defect 2: the drawing draws the box SMALL inside the column -- a
-        24px square with a 2px edge, filled ink with a background-coloured tick
+        24px square with a 2px edge, filled ink with a background-colored tick
         when the lead is picked (`Desk Screens.dc.html`). The desk drew a 44px
         native box that filled the whole track, which read as a button, not a
         tick. The 44px *press area* is kept by making this element the label

@@ -61,7 +61,7 @@
  * starts a fake one (scripts/fakes/fake-deepseek-endpoint.mjs) and points the
  * product at it with TOWNREPORTER_DEEPSEEK_BASE_URL. Rung 2's stand-in
  * (scripts/fakes/fake-lmstudio-endpoint.mjs) listens on 1234, because local
- * discovery only recognises an LM Studio server by that port, and LLM_BASE_URL
+ * discovery only recognizes an LM Studio server by that port, and LLM_BASE_URL
  * (the only way to move it) would make Automatic skip its ladder entirely.
  * Rung 3 is scripts/fakes/fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1.
  * Nothing here spends money, needs a subscription, or touches a credential.

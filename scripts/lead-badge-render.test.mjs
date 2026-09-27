@@ -88,7 +88,7 @@ const deskChromeStub = inlineModule(`
     "3. Queue": "More ▾ opens the lead menu"). The stub keeps the real element
     names -- details.more / summary.more-sum / ul.more-menu of button.more-item --
     so a render assertion about the row still describes the markup the desk
-    ships. The outside-press and Escape behaviour needs a live DOM, and the desk
+    ships. The outside-press and Escape behavior needs a live DOM, and the desk
     e2e scripts are what exercise it; this test only pins the row's shape.
 
     Unit BF3: an item may carry content instead of a label (the real

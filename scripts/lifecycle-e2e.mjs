@@ -119,7 +119,7 @@ async function main() {
     website -- while Delete, which keeps a copy for thirty days, asked
     twice. If someone removes the confirmation, the second click here finds
     no "Yes, print it in <section>" and this walk fails, which is the
-    behaviour we want. The section is named on BOTH buttons (0.6.67), so the
+    behavior we want. The section is named on BOTH buttons (0.6.67), so the
     second one is matched by its own wording and not by the first's.
   */
   await page.getByRole("button", { name: /^Publish in / }).click();
