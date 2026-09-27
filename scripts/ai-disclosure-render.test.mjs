@@ -103,6 +103,7 @@ const provenanceStub = inlineModule(`
   }
 `);
 const beaconStub = inlineModule(`export function ViewBeacon() { return null; }`);
+const readBeaconStub = inlineModule(`export function ReadBeacon() { return null; }`);
 const deskChromeUtilsStub = inlineModule(`export const inkGhost = "";`);
 const publicStub = inlineModule(`
   export async function getPublishedArticle() { return null; }
@@ -150,6 +151,7 @@ const routeImports = {
   "@/components/reader-controls": controlsStub,
   "@/components/provenance": provenanceStub,
   "@/components/view-beacon": beaconStub,
+  "@/components/read-beacon": readBeaconStub,
   "@/components/desk-chrome-utils": deskChromeUtilsStub,
   "@/components/paper/dates-panel": datesPanelStub,
   "@/components/paper/section-tag": sectionTagStub,
