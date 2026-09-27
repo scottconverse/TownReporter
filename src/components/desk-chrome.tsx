@@ -9,6 +9,14 @@ import { createEditorCopy, openLeads } from "@/lib/news/desk-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { useAppearance } from "@/lib/appearance-context";
 import { Dialog } from "@/components/dialog";
+/*
+  The drawn New-story dialog (Unit BN, item 1). `editor-dialogs.tsx` imports
+  `InkButton` back from this file, so the two are a cycle; it is safe because
+  both halves only reach for the other inside a function body -- neither
+  evaluates the other at module scope -- and the real `vite build` is what
+  proves it rather than this comment.
+*/
+import { NewStoryDialog } from "@/components/dialogs";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
@@ -165,6 +173,12 @@ export function DeskShell({
   const { mode, choose } = useDeskMode();
   const { size, choose: chooseSize } = useDeskTextSize();
   const [menuOpen, setMenuOpen] = useState(false);
+  /*
+    The nav's own New-story dialog (Unit BN, item 1). Held here rather than in
+    each page: the button that opens it is in the shell's phone top bar, so one
+    mount serves every desk screen.
+  */
+  const [newStoryOpen, setNewStoryOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -384,9 +398,37 @@ export function DeskShell({
             <strong>TownReporter</strong>
             <span>Desk</span>
           </Link>
-          <Link to="/desk" hash="story-composer" className="btn solid astra-bar-new">
+          {/*
+            Unit BN, item 1: the nav's New control opens the drawn New-story
+            dialog (phase 4) instead of jumping to `#story-composer` on Today.
+            It is the same button in the same place with the same words -- the
+            drawing's phone bar is "Menu", the wordmark, a "Desk" tag and
+            "+ New" -- so what changed is only what the press does: the three
+            drawn tabs (AI drafts from material, write it myself, paste a
+            finished story) open over the screen the editor is already on.
+
+            `/desk/import` stays a route and stays in the palette's page list.
+            Tab (a) of this dialog is that same intake -- the drawn dialog is
+            the intake with the drop zone in front of it -- so the route is not
+            superseded by it, it is what the dialog is made of. README
+            "Existing routes to keep reachable" names it, and nothing here
+            removes it.
+
+            The drawer closes first on the phone: the nav is a modal panel
+            there (`role="dialog"` above), and a dialog opened over an open
+            drawer would land behind its scrim.
+          */}
+          <button
+            type="button"
+            className="btn solid astra-bar-new"
+            aria-haspopup="dialog"
+            onClick={() => {
+              setMenuOpen(false);
+              setNewStoryOpen(true);
+            }}
+          >
             <Plus size={18} aria-hidden /> New
-          </Link>
+          </button>
         </header>
         <div
           id="desk-announcer"
@@ -411,6 +453,12 @@ export function DeskShell({
       </div>
       <DeskSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
+      {/*
+        Unit BN, item 1: the drawn New-story dialog, owned by the shell because
+        the control that opens it is the nav's, so every desk screen gets it
+        from one mount rather than each page carrying its own.
+      */}
+      <NewStoryDialog open={newStoryOpen} onClose={() => setNewStoryOpen(false)} />
     </div>
   );
 }
