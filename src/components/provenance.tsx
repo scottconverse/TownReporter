@@ -1,7 +1,49 @@
 import { Link } from "@tanstack/react-router";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { SourceCard } from "@/components/paper/source-card";
 import type { ProvenanceItem, StoryFinding } from "@/lib/news/findings";
 
+/**
+ * The record line under a card's title.
+ *
+ * The organization is the hostname for a source discovered from a URL
+ * (`describeSourceUrl` in findings.ts sets it), and a real newsroom name when a
+ * fetch found one. Printing both when they are the same string would read
+ * "longmont.primegov.com · longmont.primegov.com", so the duplicate is dropped;
+ * when they differ the reader gets the newsroom and its address, which is the
+ * pair that lets them judge it.
+ */
+function hostOf(item: ProvenanceItem): string {
+  const organization = item.organization.trim();
+  let hostname = "";
+  try {
+    hostname = item.url ? new URL(item.url).hostname.replace(/^www\./i, "") : "";
+  } catch {
+    hostname = "";
+  }
+  if (!organization) return hostname;
+  if (!hostname) return organization;
+  const same =
+    organization.toLowerCase().replace(/^www\./i, "") === hostname.toLowerCase();
+  return same ? organization : `${organization} · ${hostname}`;
+}
+
+/**
+ * "How we reported this" -- the evidence behind a story, as cards.
+ *
+ * Restyled into the handoff's 2-column card grid (`design-system/README.md`,
+ * "Article page": a "Follow the evidence" kicker, source cards, and the
+ * closing trust line). It is a restyle of a section that already existed, not
+ * a replacement: every branch below -- the disappeared-source notice, the
+ * citation with no page to open, View captured version, Compare versions, the
+ * findings appendix -- is the feature that was already here.
+ *
+ * The heading is a `<h2>` reading exactly "How we reported this" inside this
+ * `<section>`. That is not decoration: `scripts/sources-reach-the-reader.mjs`
+ * locates the block that way and asserts the story's own source is inside it,
+ * because a check that searched the whole page passed against a build whose
+ * source list was empty.
+ */
 export function ProvenanceBlock({
   items,
   findings,
@@ -34,108 +76,97 @@ export function ProvenanceBlock({
   });
   if (!items.length && !publicFindings.length) return null;
   return (
-    <section className="enter-rise mt-10 max-w-2xl border-t border-rule pt-4">
-      {form && form !== "reported" ? (
-        <p className="text-[11px] tracking-[0.16em] text-muted uppercase">{form}</p>
-      ) : null}
+    <section className="evidence">
+      {form && form !== "reported" ? <p className="evidenceform">{form}</p> : null}
       {items.length > 0 && (
         <>
-          <h2 className="text-[11px] tracking-[0.16em] text-muted uppercase">
-            How we reported this
-          </h2>
-          <ul className="mt-3 space-y-3 text-sm">
+          <div className="evidencehead">
+            <span className="kicker">Follow the evidence</span>
+            <h2>How we reported this</h2>
+          </div>
+          <div className="sourcegrid">
             {items.map((item, index) => (
-              <li
+              <SourceCard
                 key={item.url || `${item.title}-${index}`}
-                className="border-b border-rule pb-3 last:border-0"
-              >
-                <p className="font-medium text-ink">
-                  {item.title}
-                  {item.role && item.role !== "source" ? (
-                    <span className="font-normal text-muted"> · {item.role}</span>
-                  ) : null}
-                </p>
-                <p className="text-muted">
-                  {item.organization}
-                  {item.document_date ? ` · ${item.document_date}` : ""}
-                </p>
-                {item.disappeared ? (
-                  <p className="mt-1 text-ink-2">
-                    Original source no longer available
-                    {item.captured_at
-                      ? ` — captured by TownReporter on ${formatShortDate(item.captured_at)}`
-                      : " — captured by TownReporter"}
-                    .
-                  </p>
-                ) : item.url ? (
-                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                    <a
-                      href={item.url}
-                      className="break-all text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Current source
-                    </a>
-                    {item.captured_at ? (
-                      <span className="text-muted">
-                        Captured {formatDateTime(item.captured_at)}
-                      </span>
+                role={item.role && item.role !== "source" ? item.role : "Source"}
+                title={item.title}
+                host={hostOf(item)}
+                {...(item.document_date ? { documentDate: item.document_date } : {})}
+                {...(item.captured_at
+                  ? { captured: formatDateTime(item.captured_at) }
+                  : {})}
+                actions={
+                  <>
+                    {item.disappeared ? (
+                      <p className="sourcecardnote">
+                        Original source no longer available
+                        {item.captured_at
+                          ? ` — captured by TownReporter on ${formatShortDate(item.captured_at)}`
+                          : " — captured by TownReporter"}
+                        .
+                      </p>
                     ) : null}
-                  </p>
-                ) : (
-                  /*
-                    A citation, not a link. The report the story came from named
-                    this document and nobody has a page for it; a "Current
-                    source" pointing at nothing would be worse than saying so.
-                  */
-                  <p className="mt-1 text-ink-2">
-                    Named in the report we worked from — there is no page to open for this one.
-                  </p>
-                )}
-                <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                  {item.version_id != null ? (
-                    <Link
-                      to="/evidence/$versionId"
-                      params={{ versionId: String(item.version_id) }}
-                      className="text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
-                    >
-                      View captured version
-                    </Link>
-                  ) : null}
-                  {item.url && (item.version_count ?? 0) > 1 ? (
-                    <Link
-                      to="/evidence/compare"
-                      search={{ url: item.url }}
-                      className="text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
-                    >
-                      Compare versions
-                    </Link>
-                  ) : null}
-                </p>
-              </li>
+                    {!item.url ? (
+                      /*
+                        A citation, not a link. The report the story came from
+                        named this document and nobody has a page for it; a
+                        "Current source" pointing at nothing would be worse than
+                        saying so.
+                      */
+                      <p className="sourcecardnote">
+                        Named in the report we worked from — there is no page to open for this
+                        one.
+                      </p>
+                    ) : null}
+                    {item.url && !item.disappeared ? (
+                      <a
+                        href={item.url}
+                        className="sourcelink"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Current source
+                      </a>
+                    ) : null}
+                    {item.version_id != null ? (
+                      <Link
+                        to="/evidence/$versionId"
+                        params={{ versionId: String(item.version_id) }}
+                        className="sourcelink"
+                      >
+                        View captured version
+                      </Link>
+                    ) : null}
+                    {item.url && (item.version_count ?? 0) > 1 ? (
+                      <Link
+                        to="/evidence/compare"
+                        search={{ url: item.url }}
+                        className="sourcelink"
+                      >
+                        Compare versions
+                      </Link>
+                    ) : null}
+                  </>
+                }
+              />
             ))}
-          </ul>
+          </div>
         </>
       )}
       {publicFindings.length > 0 ? (
-        <div className="mt-6 border border-ink bg-paper-2 p-4">
-          <h2 className="text-[11px] tracking-[0.16em] text-rust uppercase">
-            What TownReporter found
-          </h2>
-          <ul className="mt-2 space-y-3">
+        <div className="findingblock">
+          <h2 className="findingtitle">What TownReporter found</h2>
+          <ul className="findinglist">
             {publicFindings.map((f) => (
-              <li key={f.text} className="text-ink-2">
+              <li key={f.text}>
                 <p className="whitespace-pre-wrap">{f.text}</p>
-                {f.source_urls[0] ? (
-                  <p className="mt-1 break-all text-sm text-muted">{f.source_urls[0]}</p>
-                ) : null}
+                {f.source_urls[0] ? <p className="findingsource">{f.source_urls[0]}</p> : null}
                 {f.artifact_version_ids[0] != null ? (
-                  <p className="mt-1 text-sm">
+                  <p>
                     <Link
                       to="/evidence/$versionId"
                       params={{ versionId: String(f.artifact_version_ids[0]) }}
-                      className="text-rust transition-[color] duration-150 ease-out hover:text-rust-2"
+                      className="sourcelink"
                     >
                       Captured record
                     </Link>
@@ -146,9 +177,8 @@ export function ProvenanceBlock({
           </ul>
         </div>
       ) : null}
-      <p className="mt-3 text-sm text-muted">
-        Trust is verifiable. Check the official record before you act on a figure
-        or a vote.
+      <p className="trustline">
+        Trust is verifiable. Check the official record before you act on a figure or a vote.
       </p>
     </section>
   );

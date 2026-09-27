@@ -188,7 +188,9 @@ describe("desk jobs", () => {
         topic text not null,
         source_urls text not null default '[]',
         status text not null default 'published',
-        published_at timestamptz not null default now()
+        published_at timestamptz not null default now(),
+        /* 0098. Hand-built schema tracks production, column for column. */
+        area text
       )
     `);
 
