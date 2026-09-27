@@ -1,6 +1,15 @@
 # Changelog
 
-Current software version: **0.6.74**. Publication state is recorded by GitHub.
+Current software version: **0.6.75**. Publication state is recorded by GitHub.
+
+## 0.6.75 — 2026-09-27
+
+- **The Queue's batch panel stops showing finished work as if it were still open.** Under "Draft selected", the panel loaded the newsroom's latest batch and drew every job in it forever — including stories the paper had already printed or that an editor had killed, each still carrying a **Redraft** button. Published and killed stories now drop out of the panel, the panel draws nothing once that leaves the batch empty, and a batch that is still running is shown exactly as before.
+- **A finished batch can be put away.** A **Dismiss** button appears once every item in a batch is done, sets one nullable `dismissed_at` timestamp on the batch row, and the next batch an editor starts is a new row that shows normally.
+- **One additive migration**, `0104_draft_batch_dismissed.sql`, adds the nullable `dismissed_at timestamptz` column to `draft_batches` and runs on start. `git diff 34d2d7ea..HEAD --stat -- migrations` shows only that file changed under `migrations/` since 0.6.74.
+- **A new CI job, `batch-published-panel-e2e`**, drives the owner's own path — one desk, one Custom AI connection, two leads, one batch, one of the two stories printed — against a fake OpenAI-compatible provider and a fresh, DATABASE_URL-free database, and fails against 0.6.74 exactly where the owner did.
+
+The packaged release note names `v0.6.75` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.74 — 2026-09-26
 
