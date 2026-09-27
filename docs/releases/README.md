@@ -1,9 +1,11 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.76](0.6.76.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.77](0.6.77.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
+
+- **0.6.77** — The redesign's dialogs reach Today, the Queue and the nav (units BN, BN2), and the drawn Kill dialog replaces the last plain status write (unit BW). **+ Add a lead** and **+ New story** open in place instead of linking away, **Hold H** opens **Hold this lead** from Today and the Queue, the Queue row's **More ▾** gains **Hold with a reason**, **Send to Dark Desk**, **Start an AI follow-up** and **Kill with a reason**, the left rail and phone bar both carry **+ New story**, the Follow-ups rail on Today reads real findings, and a row's **More ▾** panel no longer clips at the bottom of a short list. **Kill X**, the **X** key and the Queue's **Kill with a reason** now all open the drawn **Kill this lead** dialog, with the reason landing in the lead's existing `kill_reason`/`kill_reason_url` fields; this unit also merges the BN/BN2 mount work with everything 0.6.76 shipped. No migration. See [the release guide](0.6.77.md); it does not assert GitHub publication, production deployment, or live-model proof.
 
 - **0.6.76** — The redesign reaches the desk's shell, the Queue and the story workbench (phases 2a and 2b), plus a legal-removal fix on in-app navigation. Phase 2a: the drawn left nav with live counts and a pinned phone bar, the Queue's **Open / Held / Killed / ≈ Printed / All** segments with the bulk strip on its own row, new dialogs for drafting selected leads and filing a lead by hand, and the batch panel's **Dismiss** button restyled to the plain outlined look. Phase 2b: the story workbench in one column with a **Lead / Draft / Check / Publish** stepper, **Redraft** opening a dialog that asks what should change and keeps the editor's own headline by default, a Preview dialog, and a sticky publish bar listing **Saved / Evidence checked / Names reviewed / Preview viewed** with an inline print confirm. A legally removed story now says so when reached by an in-app link or **Back**, not only at its own URL, with no headline or summary leaking into the page's share card; new CI job `legal-gone-nav`. No migration. See [the release guide](0.6.76.md); it does not assert GitHub publication, production deployment, or live-model proof.
 
