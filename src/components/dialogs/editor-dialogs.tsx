@@ -92,7 +92,7 @@ import {
   addToInitial,
   addToProblem,
   addToRequest,
-  darkFileInitial,
+  darkFileSeed,
   darkProblem,
   darkRequest,
   fillStepId,
@@ -114,6 +114,7 @@ import {
   type AddLeadState,
   type AddSourcesState,
   type AddToState,
+  type DarkFilePrefill,
   type DarkFileState,
   type HeadlineState,
   type HoldState,
@@ -788,6 +789,12 @@ export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
   /**
+   * Seeds the two fields the caller already knows, instead of making the editor
+   * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
+   * row's prefill is cleared again by the next open that has none.
+   */
+  prefill?: DarkFilePrefill;
+  /**
    * The file is open. The screen owns what happens next: it can navigate to the
    * file, and it may start the first round with the material and the model the
    * editor chose in this dialog.
@@ -808,11 +815,29 @@ export type DarkFileDialogProps = {
  * is handed the material and the pick to do it with.
  *
  * Mounted by: `/desk/dark` (`desk.dark.tsx`, phase 2c) as the New file control,
- * and the More menu's "Send to Dark Desk". Props: `open`, `onClose`, `onOpened`.
+ * and the More menu's "Send to Dark Desk". Props: `open`, `onClose`, `prefill`,
+ * `onOpened`.
+ *
+ * PREFILL: the lead row's "Send to Dark Desk" already knows the headline and the
+ * link, and `darkProblem` wants a tip of eight characters or more, so the editor
+ * who pressed that row should not have to paste them back in. The prefill goes
+ * through the same factory `useDialogState` reseeds from on every open (see the
+ * `prefill` note on `DarkFileDialogProps`), which is also why the factory is
+ * memoized on the two strings rather than on the object: a caller passing an
+ * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, onOpened }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, prefill, onOpened }: DarkFileDialogProps) {
   const press = usePress();
-  const [state, set] = useDialogState<DarkFileState>(darkFileInitial, open, press.clear);
+  // Broken into the two strings on purpose: `useDialogState` reseeds whenever
+  // the factory's identity changes, and a caller passing an inline object
+  // literal would hand over a new one on every render.
+  const prefillQuestion = prefill?.question;
+  const prefillTip = prefill?.tip;
+  const factory = React.useCallback(
+    () => darkFileSeed({ question: prefillQuestion, tip: prefillTip }),
+    [prefillQuestion, prefillTip],
+  );
+  const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
   const models = React.useMemo(() => modelRowFor("dark"), []);
 
   const onPrimary = () =>

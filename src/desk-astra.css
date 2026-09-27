@@ -221,9 +221,18 @@
   padding: 2px 8px;
   line-height: 1.6;
 }
+/* Unit BN2, item 5: the rail's "+ New story", at the top of the nav. Sized like
+   the nav rows it sits above (`.astra-nav` below), so the rail reads as one
+   column of targets; the margins are the ones this rule already carried. */
 .desk-ltr.astra .astra-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin: 0 8px 10px;
   gap: 8px;
+  min-height: 44px;
+  font-size: calc(15px * var(--ts));
+  font-weight: 800;
 }
 .desk-ltr.astra .astra-navigation {
   display: flex;
@@ -1072,6 +1081,19 @@
   border: 1px solid var(--line);
   border-radius: 0;
   overflow: hidden;
+}
+/* BN2 item 1. `overflow: hidden` here is only ever a clip: none of these four
+   lists scrolls (no max-height, no `overflow: auto` anywhere in this file), so
+   the one thing it does is cut the row's More ▾ panel off at the list's edge.
+   Measured on the Queue: the panel is 414 px tall and the list's bottom edge
+   sits 107 px above the panel's own bottom on the *first* row of a two-lead
+   list, so `Hold with a reason`, `Send to Dark Desk`, the draft control and
+   `Kill with a reason` painted outside it and no mouse press could reach them
+   (`questions/BN.md`). While a menu is open, the list stops clipping; the
+   panel is still bounded by the viewport, which is what `.more-up` below is
+   for. `:has()` is already this file's tool (see `.queue-check:has(...)`). */
+.desk-ltr.astra :is(.lead-list, .pub-list, .scan-hist, .src-sec):has(.more[open]) {
+  overflow: visible;
 }
 .desk-ltr.astra .gc-queue .lead-list {
   border: 0;
@@ -2632,6 +2654,19 @@
   min-width: 232px;
   background: var(--bg);
   border: 2px solid var(--fg);
+}
+/* BN2 item 1. The panel only ever opened downward, so a row within its own
+   height of the bottom of the window (`top: calc(100% + 6px)` + 414 px of menu)
+   put six of its seven rows past the viewport edge -- measured on the last row
+   of a six-lead Queue, where 0 of 7 rows hit their own element and the panel's
+   top was 770 px against a 900 px window (`questions/BN.md`). `DeskMoreMenu`
+   measures the room below the summary on open and sets `more-up` when the menu
+   is taller than that room; the panel then hangs from the summary's top edge
+   instead of its bottom. Right-anchored either way, so the width is unchanged
+   and only the vertical anchor moves. */
+.desk-ltr.astra .more.more-up .more-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .desk-ltr.astra .more-menu .more-item {
   display: block;

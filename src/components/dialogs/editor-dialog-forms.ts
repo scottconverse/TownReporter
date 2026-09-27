@@ -700,6 +700,32 @@ export function darkFileInitial(): DarkFileState {
   return { question: "", tip: "", explanation: "", limit: DARK_LIMITS[1].key, model: "auto", effort: null };
 }
 
+/**
+ * The two fields a caller may already know when it opens the file. Only the
+ * question and the starting point: the Limits dial and the model pick are the
+ * editor's calls, and a caller that guessed them would be choosing how much
+ * money to spend.
+ */
+export type DarkFilePrefill = { question?: string; tip?: string };
+
+/**
+ * Unit BN2, item 4: the state the dialog opens on, seeded with what the caller
+ * already knows. A lead row knows its headline and where the story came from,
+ * and `darkProblem` wants a starting point of eight characters, so the editor
+ * who pressed that row should not have to paste them back in.
+ *
+ * An absent field is left exactly as `darkFileInitial` leaves it: `undefined`
+ * means "the caller did not know this one", not "the editor should see an
+ * empty box they must notice is empty". The dialog reseeds from this on every
+ * open (`useDialogState`), so one row's prefill never leaks into the next open.
+ */
+export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
+  const seed = darkFileInitial();
+  if (prefill?.question !== undefined) seed.question = prefill.question;
+  if (prefill?.tip !== undefined) seed.tip = prefill.tip;
+  return seed;
+}
+
 export function holdInitial(): HoldState {
   return { choice: HOLD_CHOICES[0]?.key ?? "record-or-date", note: "" };
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
 import { formatAge, parseUrlList } from "@/lib/paper";
@@ -48,7 +48,10 @@ export function LeadRowView({
   batchDisabled = false,
   onBatchSelect,
   roomy = false,
-  more,
+  onHoldWithReason,
+  onDarkDesk,
+  followUp,
+  onKillWithReason,
 }: {
   lead: LeadRow;
   dup?: PrintedDup | null;
@@ -81,21 +84,42 @@ export function LeadRowView({
   onBatchSelect?: (selected: boolean) => void;
   roomy?: boolean;
   /**
-   * Redesign phase 2a (README "3. Queue": "More ▾ opens the lead menu").
+   * Redesign phase 2a (README "3. Queue": "More ▾ opens the lead menu"), then
+   * unit BN's drawn order.
    *
    * Secondary actions, so the row's first line is the two or three presses an
-   * editor makes all day. Opt-in: a screen that passes nothing renders exactly
-   * the row it rendered before this prop existed, and every item here calls a
-   * handler the row's visible buttons already call -- the menu adds no action
-   * the desk cannot do.
+   * editor makes all day. Opt-in: a screen that passes none of these renders
+   * exactly the row it rendered before they existed, and every one of them
+   * calls a handler the screen owns -- the menu adds no action the desk cannot
+   * do.
    *
-   * Unit BN widened this from `{label, onSelect}` to the menu's own
-   * `DeskMoreItem`: the drawn lead menu's "Start an AI follow-up" is a button
-   * that owns its own dialog (`AddFollowUpButton`), which a word-and-a-handler
-   * pair cannot mount. Widening is additive -- every existing caller passes
-   * exactly the two fields it passed before.
+   * BN2 item 2 replaced the `more?: DeskMoreItem[]` escape hatch with these
+   * four named slots, because the drawn menu's order is
+   *   Edit · Hold with a reason · Merge with a printed story · Send to Dark
+   *   Desk · Start an AI follow-up · Kill with a reason   then Open · Draft
+   * with a chosen model · Delete
+   * and "Merge with a printed story" belongs *between* two of the rows that
+   * array used to hold. A caller-supplied list could not put a row the row
+   * itself owns into the middle of itself, and the row owns Merge because only
+   * it holds the possible-duplicate match and the three-state duplicate press
+   * (`scripts/lead-badge-render.test.mjs` pins that press's markup). `hold`,
+   * `dark` and `kill` are still handlers the screen owns: on the Queue they all
+   * open a dialog -- or, until phase 2b lands, an immediate status change --
+   * which is why none of them is the row's own plain `onHold`/`onKill`.
    */
-  more?: DeskMoreItem[];
+  onHoldWithReason?: () => void;
+  /** "Send to Dark Desk" -- opens the drawn Dark Desk file. */
+  onDarkDesk?: () => void;
+  /**
+   * "Start an AI follow-up" is a button that owns its own dialog
+   * (`AddFollowUpButton`), which a word-and-a-handler pair cannot mount, so it
+   * comes in as a node. It is passed rather than imported here so this row's
+   * render tests keep their module list: they stub the menu and nothing under
+   * `@/components/dialogs`.
+   */
+  followUp?: ReactNode;
+  /** "Kill with a reason" -- the last of the drawn six. */
+  onKillWithReason?: () => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
@@ -121,43 +145,53 @@ export function LeadRowView({
   */
   const sources = parseUrlList(lead.source_urls).length;
   /*
-    One "More ▾" per row, holding every action this row used to print inline:
-    Open, The piece, Hold, Back, Kill, Kill as duplicate, Delete and the draft
-    control. The drawing's actions cell is Start story + More ▾ and nothing
-    else (README 282-289), and the row's own checkbox is the one selection box.
-    The menu's words are the old buttons' words, so the desk's own walks still
-    find them by name; they now open the menu first.
+    One "More ▾" per row, holding every action this row used to print inline.
+    The drawing's actions cell is Start story + More ▾ and nothing else (README
+    282-289), and the row's own checkbox is the one selection box. The menu's
+    words are the old buttons' words, so the desk's own walks still find them by
+    name; they now open the menu first.
+
+    BN2 item 2: the drawn menu's own six rows come first, in the design's order
+    (`MORE_LEAD_ITEMS`, `editor-dialog-forms.ts`), then the three the drawing
+    gives the row anyway -- Open, the draft control, Delete. "Edit the lead" is
+    the sixth drawn row and is not here: nothing in this app edits a lead
+    (BN question 3, hidden by decision), so a press that only says so would be
+    a row that does nothing.
   */
-  const items: DeskMoreItem[] = [
-    {
-      label: "Open",
-      content: (
-        <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="more-item">
-          Open
-        </Link>
-      ),
-    },
-  ];
-  if (dup) {
-    items.push({
-      label: "The piece",
-      content: (
-        <Link to="/articles/$slug" params={{ slug: dup.slug }} className="more-item">
-          The piece
-        </Link>
-      ),
-    });
-  }
-  if (!closed && !held && onHold) items.push({ label: "Hold", onSelect: onHold });
-  if ((held || closed) && onBack) items.push({ label: "Back", onSelect: onBack });
-  if (!closed && onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
+  const items: DeskMoreItem[] = [];
+  if (onHoldWithReason) items.push({ label: "Hold with a reason", onSelect: onHoldWithReason });
   /*
-    Unit AK item 4: "Kill as duplicate" says what it is doing. The three states
-    are pinned here rather than left to the row vanishing on the next refetch.
+    BN2 item 3: the drawn "Merge with a printed story" -- and the one row of the
+    drawn six whose press this app already has.
+
+    THE WORDS ARE THE DRAWING'S, THE PRESS IS THE DESK'S. The drawing's row reads
+    "Merge with a printed story" over the note "Adds this as an update to
+    '<headline>'", and the design wires its button to the `add-to` dialog. This
+    app has no press that adds a lead's material to the *printed* story: the
+    `add-to` dialog (`AddToStoryDialog`) weaves into the story belonging to the
+    lead it is given, and is mounted on that lead's own screen for exactly that
+    reason. What the desk does have is the duplicate-resolution press this row
+    already carries -- `onKillAsDuplicate`, the Queue's half of the Compare panel
+    (`desk.story.$leadId.tsx`'s `killAsDuplicateOfPrior`, same
+    `duplicateKillReason(prior.headline)`), whose server path is
+    `resolveLeadDuplicate` behind `leadDuplicateResolutionInput`
+    (`request-input.ts:960`) via `setLeadStatus`.
+
+    So the row is drawn where the drawing puts it, on the drawing's condition
+    ("only when the lead has a possible duplicate"), and its *button* keeps the
+    word the press actually does. Calling the press "Merge" would promise the
+    editor an update to the printed piece and instead close their lead, which is
+    the one thing this menu must not do; the Compare panel already keeps the
+    opposite discipline for the same press ("Same story — kill this one"). The
+    label below is the drawn row's name -- it is this item's key and its name in
+    the list, not a word printed to the editor.
+
+    Unit AK item 4: the three states are pinned here rather than left to the row
+    vanishing on the next refetch.
   */
   if (dup && !closed && onKillAsDuplicate) {
     items.push({
-      label: "Kill as duplicate",
+      label: "Merge with a printed story",
       content:
         dupKill === "saved" ? (
           <span className="meta dup-kill-note" role="status">
@@ -202,10 +236,74 @@ export function LeadRowView({
         ),
     });
   }
+  if (onDarkDesk) items.push({ label: "Send to Dark Desk", onSelect: onDarkDesk });
+  if (followUp) items.push({ label: "Start an AI follow-up", content: followUp });
+  if (onKillWithReason) {
+    items.push({ label: "Kill with a reason", danger: true, onSelect: onKillWithReason });
+  }
+  items.push({
+    label: "Open",
+    content: (
+      <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="more-item">
+        Open
+      </Link>
+    ),
+  });
+  if (dup) {
+    items.push({
+      label: "The piece",
+      content: (
+        <Link to="/articles/$slug" params={{ slug: dup.slug }} className="more-item">
+          The piece
+        </Link>
+      ),
+    });
+  }
+  if ((held || closed) && onBack) items.push({ label: "Back", onSelect: onBack });
+  /*
+    The row's own plain Hold and Kill. On the Queue neither is passed -- "Hold
+    with a reason" and "Kill with a reason" above are that screen's rows, and a
+    second pair of words for the same press is what BF3 took out. They stay for
+    a screen that has no dialog to open.
+  */
+  if (!closed && !held && onHold) items.push({ label: "Hold", onSelect: onHold });
+  if (!closed && onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
+  if (!closed && onDraft) {
+    items.push({
+      label: "Draft with a chosen model",
+      content: (
+        <div className="queue-draft-controls">
+          <InkButton
+            small
+            disabled={drafting}
+            onClick={() => onDraft(modelChoice, modelEffort)}
+            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
+          >
+            {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
+          </InkButton>
+          <details>
+            <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
+            <ModelPicker
+              value={modelChoice}
+              onChange={(choice) => {
+                setModelChoice(choice);
+                setModelEffort(defaultModelEffort(choice));
+              }}
+              effort={modelEffort}
+              onEffortChange={setModelEffort}
+              disabled={drafting}
+              compact
+            />
+          </details>
+        </div>
+      ),
+    });
+  }
   /*
     Delete is not Kill: a killed lead stays under Killed, which is right for
     "not this one" and wrong for a lead filed against the wrong person. It
     still asks once, in the menu, and still says the copy is kept for 30 days.
+    Last, as the drawing draws it.
   */
   if (onDelete) {
     if (confirming) {
@@ -238,38 +336,6 @@ export function LeadRowView({
       });
     }
   }
-  if (!closed && onDraft) {
-    items.push({
-      label: "Draft with a chosen model",
-      content: (
-        <div className="queue-draft-controls">
-          <InkButton
-            small
-            disabled={drafting}
-            onClick={() => onDraft(modelChoice, modelEffort)}
-            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
-          >
-            {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
-          </InkButton>
-          <details>
-            <summary className="meta">Model: {modelChoiceLabel(modelChoice)} · change</summary>
-            <ModelPicker
-              value={modelChoice}
-              onChange={(choice) => {
-                setModelChoice(choice);
-                setModelEffort(defaultModelEffort(choice));
-              }}
-              effort={modelEffort}
-              onEffortChange={setModelEffort}
-              disabled={drafting}
-              compact
-            />
-          </details>
-        </div>
-      ),
-    });
-  }
-  if (more) items.push(...more);
   return (
     <div
       className={"lead-row" + (lead.status === "killed" ? " dead" : "") + (roomy ? " roomy" : "")}

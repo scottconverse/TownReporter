@@ -7,6 +7,7 @@ import { ChoiceDouble } from "./test-choice.ts";
 import { DARK_LIMITS, hopsForLimit } from "../../lib/news/editor-dialog-logic.ts";
 import {
   darkFileInitial,
+  darkFileSeed,
   darkProblem,
   darkRequest,
   modelRowFor,
@@ -112,6 +113,41 @@ describe("Start a Dark Desk file dialog", () => {
     // And the dial it falls back to is the one this dialog opens on.
     assert.equal(req.limit, darkFileInitial().limit);
     assert.equal(hopsForLimit("not-a-dial"), 5);
+  });
+
+  it("opens seeded with the row's headline and link, and still asks the question", () => {
+    // Unit BN2, item 4: a lead row's "Send to Dark Desk" knows these two.
+    const tip = "Longmont council has two closed-door sessions on the books\nhttps://example.test/council-notes";
+    const seeded = darkFileSeed({ tip });
+    assert.equal(seeded.tip, tip);
+    // The question is the one field only the editor can answer, so a prefill
+    // that does not carry one leaves the box -- and the refusal -- as drawn.
+    assert.equal(seeded.question, darkFileInitial().question);
+    assert.match(darkProblem(seeded) ?? "", /Say what you are trying to find out/);
+    // The tip clears the eight-character rule the dialog refuses on.
+    assert.equal(darkProblem({ ...seeded, question: "What happened behind those doors?" }), null);
+
+    // What the editor sees in the box, and what a press would send.
+    const html = render(seeded);
+    assert.match(html, /Longmont council has two closed-door sessions on the books/);
+    const req = darkRequest({ ...seeded, question: "What happened behind those doors?" });
+    assert.equal(req.open.paste, tip);
+    assert.equal(req.run.paste, tip);
+  });
+
+  it("leaves a field the caller did not know exactly as the dialog opens it, and carries a question when one is given", () => {
+    assert.deepEqual(darkFileSeed(), darkFileInitial());
+    assert.deepEqual(darkFileSeed({}), darkFileInitial());
+    // An empty string is a real value the caller chose, unlike `undefined`.
+    assert.equal(darkFileSeed({ tip: "" }).tip, "");
+    assert.equal(darkFileSeed({ question: "Where did the money go?" }).tip, darkFileInitial().tip);
+    assert.equal(darkFileSeed({ question: "Where did the money go?" }).limit, darkFileInitial().limit);
+    assert.equal(darkFileSeed({ question: "Where did the money go?" }).model, darkFileInitial().model);
+    // Seeding one dialog does not reach the next one: the dialog reseeds from
+    // this factory on every open, so the row's headline must not still be in the
+    // box when the editor opens the file from somewhere else.
+    darkFileSeed({ tip: "Longmont council has two closed-door sessions on the books" });
+    assert.equal(darkFileSeed().tip, "");
   });
 
   it("keeps a cancelled dialog exactly as it opened", () => {
