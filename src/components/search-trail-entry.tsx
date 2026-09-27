@@ -1,4 +1,5 @@
 import { assertHttpUrl } from "../lib/news/url-guard.ts";
+import { searchOutcomeWords } from "../lib/news/search-trail-words.ts";
 
 export type SearchTrailRecord = {
   query: string;
@@ -8,25 +9,6 @@ export type SearchTrailRecord = {
   url?: string | null;
   selected_json?: string | null;
 };
-const SEARCH_WORDS: Record<string, string> = {
-  SEARCH_SUCCESS_RESULTS: "Results returned",
-  SEARCH_SUCCESS_ZERO_RESULTS: "No results found",
-  SEARCH_FAILED_NETWORK: "Search could not connect",
-  SEARCH_FAILED_PROVIDER: "Search service failed",
-  SEARCH_FAILED_PARSE: "Search response could not be read",
-  SEARCH_BLOCKED: "Search was blocked",
-  SEARCH_TIMEOUT: "Search timed out",
-};
-function outcomeWords(record: SearchTrailRecord): string {
-  if (record.state) return SEARCH_WORDS[record.state] ?? "Search outcome not recorded";
-  const raw = record.outcome ?? "";
-  if (/blocked/i.test(raw)) return "Search was blocked";
-  if (/timeout|timed out/i.test(raw)) return "Search timed out";
-  if (/fail/i.test(raw)) return "Search could not finish";
-  if (/no results/i.test(raw)) return "No results found";
-  if (/^\d+ result\(s\)$/.test(raw)) return raw;
-  return "Search outcome not recorded";
-}
 function returnedUrls(record: SearchTrailRecord): string[] {
   const urls: unknown[] = [record.url];
   try {
@@ -60,7 +42,7 @@ export function SearchTrailEntry({ record }: { record: SearchTrailRecord }) {
   return (
     <div className="side-item">
       <p>
-        “{record.query}” · {tier} · {outcomeWords(record)}
+        “{record.query}” · {tier} · {searchOutcomeWords(record)}
       </p>
       {returnedUrls(record).map((url, i) => (
         <p key={url}>

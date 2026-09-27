@@ -6,6 +6,7 @@ import { DarkFileBody } from "./editor-dialog-bodies.ts";
 import { ChoiceDouble } from "./test-choice.ts";
 import { DARK_LIMITS, hopsForLimit } from "../../lib/news/editor-dialog-logic.ts";
 import {
+  darkFileFromSeed,
   darkFileInitial,
   darkProblem,
   darkRequest,
@@ -114,7 +115,27 @@ describe("Start a Dark Desk file dialog", () => {
     assert.equal(hopsForLimit("not-a-dial"), 5);
   });
 
-  it("keeps a cancelled dialog exactly as it opened", () => {
+  it("opens a handed-over hypothesis as the question and the material, keeping the dial defaults", () => {
+    const seed = "Where did the money go?\n\nThe 2024 audit, page 12.";
+    const seeded = darkFileFromSeed(seed);
+    // The first line is the question, which is how the screen's paste box
+    // titled files before this dialog replaced it.
+    assert.equal(seeded.question, "Where did the money go?");
+    // The whole paste is the material: nothing the editor wrote is dropped.
+    assert.equal(seeded.tip, seed);
+    assert.equal(seeded.explanation, "");
+    assert.deepEqual(
+      { limit: seeded.limit, model: seeded.model, effort: seeded.effort },
+      { limit: darkFileInitial().limit, model: "auto", effort: null },
+    );
+    // And it is a real, pressable file rather than one the dialog refuses.
+    assert.equal(darkProblem(seeded), null);
+    assert.equal(darkRequest(seeded).open.title, "Where did the money go?");
+    // A one-line seed is its own question, with no trailing blank line.
+    assert.equal(darkFileFromSeed("Costco rebate cap").question, "Costco rebate cap");
+  });
+
+  it("keeps a canceled dialog exactly as it opened", () => {
     assert.deepEqual(darkFileInitial(), darkFileInitial());
     const held = Object.freeze(
       state({ question: "Where did the money go?", tip: "The 2024 audit", explanation: "A typo.", limit: "quick", model: named?.value ?? "auto", effort: "high" }),

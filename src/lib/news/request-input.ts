@@ -790,8 +790,17 @@ export const addSourceInput = z.object({
 /** `desk.ts:187` addSourcesFromText: one row per line, so this is the row cap. */
 export const bulkSourceInput = z.object({ text: z.string().max(LIMITS.bulkSourceText) });
 
-/** `desk.ts:220` setSourceStatus. */
-export const sourceStatusValue = z.enum(["accepted", "rejected", "proposed"]);
+/**
+ * `desk.ts:220` setSourceStatus.
+ *
+ * `paused` is the drawn Pause/Resume on a watch-list row. It needs no
+ * migration: `sources.status` is unconstrained text, and every reader that
+ * means "the scanner may read this" already asks for `status = 'accepted'`
+ * (daily-scan.ts, dark.ts, desk.ts's three pickers), so a paused row genuinely
+ * stops being fetched. It is not a review decision -- `setSourceStatus` records
+ * `reviewed_at` only for accepted and rejected -- it is the same row, held.
+ */
+export const sourceStatusValue = z.enum(["accepted", "rejected", "proposed", "paused"]);
 export const sourceStatusInput = z.object({ id: rowId, status: sourceStatusValue });
 
 /**

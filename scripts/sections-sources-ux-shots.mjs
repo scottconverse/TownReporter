@@ -122,12 +122,14 @@ try {
   await shot("sections-empty-business-viewport", null, 375, { scrollTo: business });
   await shot("sections-empty-business", business, 375, { hidePinnedChrome: true });
 
-  // The Sources add form, on its own page.
+  // The Sources add form, on its own page. BJ3 item 3: it is phase 4's
+  // `AddSourcesDialog` now, opened from the header's "+ Add a source" -- the
+  // `details.astra-source-add` panel this used to photograph is gone.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  const addForm = page.locator("details.astra-source-add");
-  await addForm.getByText("Add a source", { exact: true }).click();
-  await addForm.getByLabel("URL", { exact: true }).waitFor({ timeout: 30_000 });
+  const addForm = page.locator(".astra-modal");
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
+  await addForm.getByLabel("Link", { exact: true }).waitFor({ timeout: 30_000 });
   await shot("sources-add-form", addForm, 1280);
   await shot("sources-add-form", addForm, 375);
 

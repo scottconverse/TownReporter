@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
+import { DeskJobCard } from "@/components/JobCard";
 import { CopyButton } from "@/components/copy-button";
 import {
   deleteEditorial,
@@ -251,33 +252,62 @@ function OpinionPage() {
   const working = rows.filter((r) => !r.finished_at && !r.stalled);
 
   return (
-    <DeskShell
-      title="Opinion"
-      kicker="Editor desk"
-      lede={
-        <>
-          Editorials run unsigned, as the paper's own position, with OPINION in the headline and the
-          receipts at the end. They are drafts until you publish one, and a published piece is never
-          edited — a correction runs as a dated note above it.
-        </>
-      }
-    >
-      <section className="mt-8">
-        <SecHead
-          title="Write one"
-          sub="Paste your source material, add documents, or give it a subject and links. The writer reads the material before drafting."
-        />
-        {ready.isPending || ready.isFetching ? (
+    <DeskShell title="Opinion" kicker="Editorials and requests" hideTitle>
+      {/*
+        The drawn header: kicker, title, the page's own action, rule. The
+        drawing's "+ New editorial" opens the New-editorial dialog, which is
+        lane 1's work and not in this tree; the button takes the editor to the
+        card that does that job today -- the AI intake, which is also card one
+        in the drawing -- and puts the cursor in its subject box.
+
+        The lede moves out of the shell and into the body: `hideTitle` is what
+        buys the action slot, and it drops the shell's sentence with the title,
+        so the same prose is rendered here instead of being lost.
+      */}
+      <div className="astra-head">
+        <div>
+          <p className="kick">Editorials and requests</p>
+          <h1 className="h1">Opinion</h1>
+        </div>
+        <div className="astra-head-acts">
+          <button
+            type="button"
+            className="btn solid"
+            onClick={() => {
+              const card = document.getElementById("astra-new-editorial");
+              card?.scrollIntoView({ block: "start" });
+              document.getElementById("astra-editorial-subject")?.focus();
+            }}
+          >
+            + New editorial
+          </button>
+        </div>
+      </div>
+      <p className="lede">
+        Editorials run unsigned, as the paper's own position, with OPINION in the headline and the
+        receipts at the end. They are drafts until you publish one, and a published piece is never
+        edited — a correction runs as a dated note above it.
+      </p>
+      <div className="astra-2col wide">
+        <div className="astra-panel hot astra-jump" id="astra-new-editorial">
+          <h2 className="astra-panel-h lg">
+            Have the AI write an editorial <span aria-hidden="true">→</span>
+          </h2>
+          <p className="astra-panel-sub">
+            Paste your source material, add documents, or give it a subject and links. The writer
+            reads the material before drafting.
+          </p>
+          {ready.isPending || ready.isFetching ? (
           <p
             role="status"
-            className="mt-4 max-w-2xl border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted"
+            className="border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted"
           >
             Checking the editorial voice and writing model…
           </p>
         ) : ready.isError ? (
           <div
             role="alert"
-            className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
+            className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
           >
             <b>The desk could not check the writing model.</b> Nothing can be queued until the check
             succeeds.{" "}
@@ -288,7 +318,7 @@ function OpinionPage() {
         ) : ready.data && !ready.data.ready ? (
           <div
             role="alert"
-            className="mt-4 max-w-2xl border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
+            className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
           >
             <b>This desk cannot write yet.</b>
             <ul className="mt-1 list-disc pl-5">
@@ -298,12 +328,13 @@ function OpinionPage() {
             </ul>
           </div>
         ) : null}
-        <div className="mt-4 max-w-2xl space-y-3">
+        <div className="space-y-3">
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Subject, source text, or links
             </span>
             <textarea
+              id="astra-editorial-subject"
               className={areaClass + " mt-1 w-full"}
               rows={3}
               value={subject}
@@ -339,7 +370,7 @@ function OpinionPage() {
             onEffortChange={setModelEffort}
             disabled={start.isPending}
           />
-          <div className="flex items-center gap-3">
+          <div className="astra-panel-acts">
             <InkButton
               tone="solid"
               onClick={() => start.mutate()}
@@ -379,16 +410,19 @@ function OpinionPage() {
               {notice && notice.kind !== "error" ? notice.text : ""}
             </span>
           </div>
+          </div>
         </div>
-      </section>
 
-      <section className="mt-10">
-        <SecHead
-          title="Or file one you wrote"
-          sub="Paste a finished piece. It lands as a draft, exactly like one written here, and nothing publishes without your click."
-        />
+        <div className="astra-panel">
+          <h2 className="astra-panel-h lg">
+            File one you wrote <span aria-hidden="true">→</span>
+          </h2>
+          <p className="astra-panel-sub">
+            Paste a finished piece. It lands as a draft, exactly like one written here, and nothing
+            publishes without your click.
+          </p>
         {showWritten ? (
-          <div className="mt-4 max-w-2xl space-y-3">
+          <div className="space-y-3">
             <label className="block">
               <span className="text-sm tracking-[0.14em] text-muted uppercase">The piece</span>
               <textarea
@@ -399,7 +433,7 @@ function OpinionPage() {
                 placeholder="Headline on the first line, then the piece. CLAIMS AND SOURCES, EDITOR'S FACT SHEET and the image prompt are picked up if they are there."
               />
             </label>
-            <div className="flex items-center gap-3">
+            <div className="astra-panel-acts">
               <InkButton
                 tone="solid"
                 onClick={() => fileWritten.mutate(written)}
@@ -413,13 +447,14 @@ function OpinionPage() {
             </div>
           </div>
         ) : (
-          <div className="mt-4">
+          <div className="astra-panel-acts">
             <InkButton tone="ghost" onClick={() => setShowWritten(true)}>
               Paste a piece I wrote
             </InkButton>
           </div>
         )}
-      </section>
+        </div>
+      </div>
 
       {undo != null ? (
         <p className="mt-6 text-sm text-muted">
@@ -437,7 +472,7 @@ function OpinionPage() {
 
       <section className="mt-12">
         <SecHead
-          title="Editorials"
+          title="Requests & editorials"
           count={rows.length || null}
           sub={
             working.length
@@ -458,49 +493,76 @@ function OpinionPage() {
         ) : rows.length === 0 ? (
           <p className="mt-4 text-ink-2">Nothing yet. Write the first one above.</p>
         ) : (
-          <ul className="mt-4 divide-y divide-rule border-y border-rule">
-            {rows.map((r) => (
-              <li key={r.id} className="py-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <span className="min-w-0 flex-1">
-                    <span className="font-display text-lg">
-                      {r.headline || r.subject.slice(0, 90)}
+          <ul className="astra-plain">
+            {rows.map((r) => {
+              /*
+                The chip is the row's state, and it is the only place the desk
+                states one. `integrity_notes` is what the writer's own source
+                check wrote when the piece was filed -- the same sentence
+                `editorialSourcesError` produces -- so the chip reads the
+                database rather than re-parsing every body on the list.
+              */
+              const claims = r.finished_at && !r.error && !r.published_slug ? r.integrity_notes || "" : "";
+              return (
+                <li key={r.id} className="astra-row opinion">
+                  {!r.finished_at && r.stalled ? (
+                    <span className="astra-chip fail">Stalled</span>
+                  ) : !r.finished_at ? (
+                    <span className="astra-chip run">
+                      Writing <Elapsed since={r.created_at} />
                     </span>
-                    <span className="ml-2 text-sm text-muted">
+                  ) : r.error ? (
+                    <span className="astra-chip fail">Failed</span>
+                  ) : r.published_slug ? (
+                    <span className="astra-chip none">Published</span>
+                  ) : claims ? (
+                    <span className="astra-chip held" title={claims}>
+                      ! Claims missing
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <span className="astra-cell">
+                    <span className="astra-row-t">{r.headline || r.subject.slice(0, 90)}</span>
+                    <span className="astra-row-meta">
                       {r.source_kind === "article" ? "from our story" : "from a note"}
                       {r.words ? ` · ${r.words} words` : ""}
                       {` · ${editorialAttribution(r)}`}
                     </span>
                   </span>
-                  {!r.finished_at && r.stalled ? (
-                    <span className="text-sm tracking-[0.14em] text-rust uppercase">
-                      Stalled
-                    </span>
-                ) : !r.finished_at ? (
-                    <span className="text-sm text-muted">
-                      {r.stage || "Working…"} · <Elapsed since={r.created_at} />
-                    </span>
-                  ) : r.error ? (
-                    <span className="text-sm tracking-[0.14em] text-rust uppercase">
-                      Failed
-                    </span>
-                  ) : r.published_slug ? (
-                    <span className="text-sm tracking-[0.14em] text-muted uppercase">
-                      Published
-                    </span>
-                  ) : null}
+                  <span className="astra-row-meta">
+                    Asked {formatDateTime(r.created_at)}
+                    {r.finished_at ? ` · finished ${formatDateTime(r.finished_at)}` : ""}
+                  </span>
                   {/*
-                    Read, Edit, Delete — always shown, never behind a hover.
-                    Edit is the one that was missing entirely: the story
-                    workbench opens by lead, and an editorial has no lead, so a
-                    finished piece could be read here and nowhere else.
+                    Read, Edit, Delete -- always shown, never behind a hover.
+                    The drawn state primary sits in front of them: Repair claims
+                    for a piece whose appendix is incomplete, View for one that
+                    is already on the paper.
                   */}
-                  <span className="row-acts static">
+                  <span className="astra-row-acts">
+                    {claims && r.draft_id ? (
+                      <Link
+                        to="/desk/story/draft/$draftId"
+                        params={{ draftId: String(r.draft_id) }}
+                        className="btn solid"
+                      >
+                        Repair claims
+                      </Link>
+                    ) : null}
+                    {r.published_slug ? (
+                      <Link
+                        to="/articles/$slug"
+                        params={{ slug: r.published_slug }}
+                        className="btn solid"
+                      >
+                        View
+                      </Link>
+                    ) : null}
                     {r.draft_id ? (
                       <>
                         <InkButton
                           tone="quiet"
-                          small
                           onClick={() =>
                             setOpenId((current) => toggleEditorialReader(current, r.draft_id!))
                           }
@@ -510,7 +572,7 @@ function OpinionPage() {
                         <Link
                           to="/desk/story/draft/$draftId"
                           params={{ draftId: String(r.draft_id) }}
-                          className="btn quiet small"
+                          className="btn quiet"
                         >
                           Edit
                         </Link>
@@ -520,7 +582,6 @@ function OpinionPage() {
                       <>
                         <InkButton
                           tone="ghost"
-                          small
                           disabled={remove.isPending || discard.isPending}
                           onClick={() =>
                             r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id)
@@ -532,54 +593,54 @@ function OpinionPage() {
                               ? "Yes, delete"
                               : "Yes, clear it"}
                         </InkButton>
-                        <InkButton tone="quiet" small onClick={() => setConfirmId(null)}>
+                        <InkButton tone="quiet" onClick={() => setConfirmId(null)}>
                           Keep
                         </InkButton>
                       </>
                     ) : (
-                      <InkButton tone="quiet" small onClick={() => setConfirmId(r.id)}>
+                      <InkButton tone="quiet" onClick={() => setConfirmId(r.id)}>
                         {r.draft_id ? "Delete" : "Clear"}
                       </InkButton>
                     )}
                   </span>
-                </div>
-                <p className="mt-1 text-sm text-muted">
-                  Asked {formatDateTime(r.created_at)}
-                  {r.finished_at ? ` · finished ${formatDateTime(r.finished_at)}` : ""}
-                </p>
-                {!r.finished_at && r.stalled ? (
-                  <p className="mt-2 max-w-md text-sm text-rust">{stalledRunCopy("editorial")}</p>
-                ) : !r.finished_at ? (
-                  <div className="mt-2 max-w-md">
-                    <Busy label={r.stage || "Working…"} />
-                  </div>
-                ) : null}
-                {r.error ? (
-                  <div className="mt-1 text-sm text-rust">
-                    {editorDraftError(r.error) ?? r.error}
-                    {looksLikeProviderAuthFailure(r.error) ? (
-                      <ProviderSignInButton detail={r.error} />
-                    ) : null}
-                    {!r.draft_id ? (
-                      <button type="button" className="inline-link ml-2" disabled={restoreMaterial.isPending} onClick={() => restoreMaterial.mutate(r.id)}>
-                        {restoreMaterial.isPending ? "Restoring…" : "Restore saved material"}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-                {confirmId === r.id ? (
-                  <p className="mt-1 text-sm text-rust">
-                    {editorialRemovalCopy(Boolean(r.draft_id), Boolean(r.published_slug))}
-                  </p>
-                ) : null}
-              </li>
-            ))}
+                  {!r.finished_at && r.stalled ? (
+                    <p className="astra-span text-rust">{stalledRunCopy("editorial")}</p>
+                  ) : !r.finished_at ? (
+                    <div className="astra-span">
+                      {r.job ? <DeskJobCard job={r.job} compact /> : <Busy label={r.stage || "Working…"} />}
+                    </div>
+                  ) : null}
+                  {r.error ? (
+                    <div className="astra-span text-rust">
+                      {editorDraftError(r.error) ?? r.error}
+                      {looksLikeProviderAuthFailure(r.error) ? (
+                        <ProviderSignInButton detail={r.error} />
+                      ) : null}
+                      {!r.draft_id ? (
+                        <InkButton
+                          tone="quiet"
+                          disabled={restoreMaterial.isPending}
+                          onClick={() => restoreMaterial.mutate(r.id)}
+                        >
+                          {restoreMaterial.isPending ? "Restoring…" : "Restore saved material"}
+                        </InkButton>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {confirmId === r.id ? (
+                    <p className="astra-span text-rust">
+                      {editorialRemovalCopy(Boolean(r.draft_id), Boolean(r.published_slug))}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
 
       {openId != null ? (
-        <section ref={pieceRef} className="mt-12 border-2 border-ink p-4">
+        <section ref={pieceRef} className="astra-panel hot mt-12">
           <SecHead
             title="The piece"
             aside={
@@ -591,7 +652,7 @@ function OpinionPage() {
                       <Link
                         to="/articles/$slug"
                         params={{ slug: row.published_slug }}
-                        className="btn quiet small"
+                        className="btn quiet"
                       >
                         On the paper
                       </Link>
@@ -600,7 +661,7 @@ function OpinionPage() {
                   if (piece.data) {
                     return (
                       <InkButton
-                        small
+                        tone="solid"
                         disabled={publish.isPending}
                         onClick={() => publish.mutate(openId)}
                       >
@@ -610,7 +671,7 @@ function OpinionPage() {
                   }
                   return null;
                 })()}
-                <InkButton tone="quiet" small onClick={() => setOpenId(null)}>
+                <InkButton tone="quiet" onClick={() => setOpenId(null)}>
                   Close
                 </InkButton>
               </span>
@@ -693,10 +754,15 @@ function Elapsed({ since }: { since: string }) {
   const mm = Math.floor(secs / 60);
   const ss = String(secs % 60).padStart(2, "0");
 
+  /*
+    The clock only. The word "Writing" and the chip around it belong to the
+    row, so the same clock can sit inside the drawn state chip without
+    printing "Writing" twice.
+  */
   return (
-    <span className="inline-flex items-center gap-2 text-sm tracking-[0.14em] text-rust uppercase">
+    <span className="inline-flex items-center gap-2">
       <span className="ink-dot" aria-hidden />
-      Writing {mm}:{ss}
+      {mm}:{ss}
     </span>
   );
 }

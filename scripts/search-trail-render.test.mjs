@@ -11,6 +11,10 @@ let code = ts.transpileModule(
 for (const [key, url] of Object.entries({
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
   "../lib/news/url-guard.ts": new URL("../src/lib/news/url-guard.ts", import.meta.url).href,
+  "../lib/news/search-trail-words.ts": new URL(
+    "../src/lib/news/search-trail-words.ts",
+    import.meta.url,
+  ).href,
 }))
   code = code.replaceAll(JSON.stringify(key), JSON.stringify(url));
 const { SearchTrailEntry } = await import(

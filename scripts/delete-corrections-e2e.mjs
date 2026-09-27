@@ -491,7 +491,10 @@ async function main() {
   // walk scopes to the row carrying THIS run's headline — otherwise a click
   // meant for the fixture story could land on the masthead piece instead.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const pubRow = page.locator(".pub-row", { hasText: leadHeadline }).first();
+  // `div.pub-row` became `div.astra-row.pub` in Redesign p2c, when the
+  // Published list moved onto the astra grid. Still scoped to THIS run's
+  // headline, which is what keeps a click off the seeded masthead story.
+  const pubRow = page.locator(".astra-row.pub", { hasText: leadHeadline }).first();
   await pubRow.waitFor({ timeout: 20_000 });
   await openCorrectionForm(pubRow);
 
@@ -1235,7 +1238,7 @@ async function main() {
   // way, and the follow-up "delete where article_id = X" cleaned up nothing —
   // the correction survived the story it belonged to.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const pubRow2 = page.locator(".pub-row", { hasText: leadHeadline }).first();
+  const pubRow2 = page.locator(".astra-row.pub", { hasText: leadHeadline }).first();
   await pubRow2.getByRole("button", { name: "Delete", exact: true }).click();
   await pubRow2.getByRole("button", { name: /Yes, take it off/ }).click();
   await page.getByText(/Taken off the paper, and kept for 30 days/).waitFor({ timeout: 20_000 });
