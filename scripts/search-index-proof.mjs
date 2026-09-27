@@ -75,7 +75,8 @@ try {
     await c.query(`
       create table articles (
         id serial primary key, newsroom_id int default 1, status text,
-        headline text, dek text, body text, published_at timestamptz default now()
+        headline text, dek text, body text, published_at timestamptz default now(),
+        area text
       )`);
     await c.query(
       `insert into articles (status, headline, dek, body)

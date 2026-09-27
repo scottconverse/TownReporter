@@ -7,7 +7,7 @@ it("a replacement draft landing after the publish read prevents stale publicatio
   const sql = await getSql();
   await sql.query(`create table leads(id integer primary key, newsroom_id integer, status text)`);
   await sql.query(`create table drafts(id serial primary key, lead_id integer, newsroom_id integer, headline text, dek text, body text, topic text, source_urls text, updated_at timestamptz)`);
-  await sql.query(`create table articles(id serial primary key, body text)`);
+  await sql.query(`create table articles(id serial primary key, body text, area text)`);
   await sql.query(`insert into leads values(501,81,'drafted')`);
   await sql.query(`insert into drafts(lead_id,newsroom_id,headline,dek,body,topic,source_urls,updated_at) values(501,81,'Original','','Draft A','community','[]','2026-09-07T01:00:00Z')`);
   const [readBeforePause] = await sql<DraftRow>`select * from drafts where lead_id=501 order by updated_at desc,id desc limit 1`;

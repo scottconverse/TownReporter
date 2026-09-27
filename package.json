@@ -20,6 +20,7 @@
     "preview": "node scripts/with-app-env.mjs vite preview",
     "playwright:install": "playwright install chromium",
     "check:auth": "node scripts/check-auth-invariant.mjs",
+    "check:panels": "node scripts/paper-panels.mjs",
     "test:lifecycle": "node scripts/lifecycle-e2e.mjs",
     "test": "node scripts/run-tests-safe.mjs",
     "typecheck": "tsc --noEmit",

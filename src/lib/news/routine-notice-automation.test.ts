@@ -43,7 +43,7 @@ beforeEach(async () => {
     "create table if not exists audit_events(id serial primary key,user_id text not null,action text not null,detail text not null default '',created_at timestamptz not null default now(),newsroom_id integer not null default 1,subject_kind text,subject_id integer)",
   );
   await sql.query(
-    "create table if not exists articles(id serial primary key,user_id text not null,newsroom_id integer not null,slug text not null unique,headline text not null,dek text not null default '',body text not null,topic text not null,source_urls text not null default '[]',status text not null default 'published',published_at timestamptz not null default now())",
+    "create table if not exists articles(id serial primary key,user_id text not null,newsroom_id integer not null,slug text not null unique,headline text not null,dek text not null default '',body text not null,topic text not null,source_urls text not null default '[]',status text not null default 'published',published_at timestamptz not null default now(),area text)",
   );
   await sql.query(
     "create table if not exists corrections(id serial primary key,user_id text not null,newsroom_id integer not null,article_id integer references articles(id) on delete set null,body text not null,created_at timestamptz not null default now())",
