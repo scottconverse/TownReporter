@@ -1,4 +1,4 @@
-import { getSql, withTransaction, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { assertRate } from "./ops.ts";
 import { parseNotes } from "./notes.ts";
 import { kickJobs } from "./jobs.ts";
@@ -126,29 +126,28 @@ export function batchRuntimeFailure(error: unknown): DraftBatchFailure {
   };
 }
 
-let draftBatchSchemaReady: Promise<void> | null = null;
+/**
+ * Statement for statement as it was, in the same order.
+ *
+ * The `do $$ ... $$` entry is why this is a list and not a `split(";")`: it has
+ * semicolons of its own. Routing the list through `ensureSchemaOnce` replaces
+ * the former per-process promise memo -- which was the stale-cache hazard
+ * `dark-schema-rebuild.test.ts` exists to forbid, and which could not see a
+ * database dropped and recreated underneath it -- with a marker recorded in the
+ * database, and stops the three `alter`/`create index` statements from running
+ * on a request path. See `paper-settings-read-lock.test.ts`.
+ */
+const DRAFT_BATCH_SCHEMA = [
+  "create table if not exists draft_batches(id serial primary key,newsroom_id integer not null references newsrooms(id),user_id text not null,runtime_snapshot jsonb not null,created_at timestamptz not null default now())",
+  "alter table desk_jobs add column if not exists draft_batch_id integer",
+  "create index if not exists draft_batches_newsroom_idx on draft_batches(newsroom_id,id desc)",
+  "do $$ begin if not exists(select 1 from pg_constraint where conname='desk_jobs_draft_batch_fk') then alter table desk_jobs add constraint desk_jobs_draft_batch_fk foreign key(draft_batch_id) references draft_batches(id); end if; end $$",
+  "create index if not exists desk_jobs_draft_batch_idx on desk_jobs(newsroom_id,draft_batch_id,id) where draft_batch_id is not null",
+];
 
-export function ensureDraftBatchSchema(provided?: Sql): Promise<void> {
-  draftBatchSchemaReady ??= (async () => {
-    const sql = provided ?? (await getSql());
-    await sql.query(
-      "create table if not exists draft_batches(id serial primary key,newsroom_id integer not null references newsrooms(id),user_id text not null,runtime_snapshot jsonb not null,created_at timestamptz not null default now())",
-    );
-    await sql.query("alter table desk_jobs add column if not exists draft_batch_id integer");
-    await sql.query(
-      "create index if not exists draft_batches_newsroom_idx on draft_batches(newsroom_id,id desc)",
-    );
-    await sql.query(
-      "do $$ begin if not exists(select 1 from pg_constraint where conname='desk_jobs_draft_batch_fk') then alter table desk_jobs add constraint desk_jobs_draft_batch_fk foreign key(draft_batch_id) references draft_batches(id); end if; end $$",
-    );
-    await sql.query(
-      "create index if not exists desk_jobs_draft_batch_idx on desk_jobs(newsroom_id,draft_batch_id,id) where draft_batch_id is not null",
-    );
-  })().catch((error) => {
-    draftBatchSchemaReady = null;
-    throw error;
-  });
-  return draftBatchSchemaReady;
+export async function ensureDraftBatchSchema(provided?: Sql): Promise<void> {
+  const sql = provided ?? (await getSql());
+  await ensureSchemaOnce(sql, "draft-batch", DRAFT_BATCH_SCHEMA);
 }
 
 type CommitDeps = {

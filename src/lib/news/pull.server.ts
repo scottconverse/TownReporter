@@ -1,4 +1,4 @@
-import { getSql, withTransaction, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { ingestDocument, type IngestDocument } from "./ingest.ts";
 import {
@@ -512,9 +512,11 @@ export async function runPullPipeline(
 
 async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<PullCheckpoint> {
   const sql = await getSql();
-  await sql.query(
+  // ACCESS EXCLUSIVE on `leads` when it runs, so once per database rather than
+  // once per pull; see `paper-settings-read-lock.test.ts`.
+  await ensureSchemaOnce(sql, "pull-lead-memo-column", [
     "alter table leads add column if not exists notes_json text not null default '{}'",
-  );
+  ]);
   const rows = await sql<{ notes_json: string | null; headline: string; source_urls: string }>`
     select notes_json, headline, source_urls from leads
     where id = ${receipt.leadId} and newsroom_id = ${job.newsroom_id} limit 1

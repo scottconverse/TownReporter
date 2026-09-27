@@ -27,7 +27,7 @@ import { createServerFn } from "@tanstack/react-start";
   `node --test` loads this module.
 */
 import { authMiddleware } from "../auth/middleware.ts";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID, ensureNewsroomSchema } from "./membership.ts";
 import {
   PROVIDER_REGISTRY,
@@ -61,7 +61,8 @@ import {
 export async function ensureProviderSettingsSchema() {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  await sql.query(`
+  await ensureSchemaOnce(sql, "provider-settings", [
+    `
     create table if not exists provider_settings (
       id serial primary key,
       newsroom_id integer not null default 1,
@@ -75,12 +76,12 @@ export async function ensureProviderSettingsSchema() {
       updated_at timestamptz not null default now(),
       unique (newsroom_id, provider_id)
     )
-  `);
-  // Mirrors migrations/0041_provider_local_model.sql for an install whose
-  // table predates it -- same reason the rest of this function exists.
-  await sql.query(`alter table provider_settings add column if not exists local_model_base_url text`);
-  await sql.query(`alter table provider_settings add column if not exists local_model_id text`);
-  await sql.query(`
+  `,
+    // Mirrors migrations/0041_provider_local_model.sql for an install whose
+    // table predates it -- same reason the rest of this function exists.
+    `alter table provider_settings add column if not exists local_model_base_url text`,
+    `alter table provider_settings add column if not exists local_model_id text`,
+    `
     create table if not exists newsroom_local_model_choices (
       newsroom_id integer not null references newsrooms(id) on delete cascade,
       scope text not null check (scope in ('story', 'scan', 'opinion', 'dark', 'forced')),
@@ -89,7 +90,8 @@ export async function ensureProviderSettingsSchema() {
       updated_at timestamptz not null default now(),
       primary key (newsroom_id, scope)
     )
-  `);
+  `,
+  ]);
 }
 
 type ProviderSettingRow = {

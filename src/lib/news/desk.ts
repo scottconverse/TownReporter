@@ -9,7 +9,7 @@ import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 import { buildScanBatches, mergeScanBatchResults } from "./scan-batches.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { getSql, withTransaction, type Sql } from "@/lib/db";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig } from "./paper-settings";
@@ -185,14 +185,19 @@ function effortFromJob(job: Pick<DeskJob, "model_choice" | "result_json">): Mode
   }
 }
 
+/**
+ * Both statements are `alter table ... add column if not exists`, so both take
+ * ACCESS EXCLUSIVE on `drafts` and `leads` -- and this runs on `getLead`, a GET
+ * handler, among others. While the nightly `pg_dump` held ACCESS SHARE, every
+ * lead page waited here. `ensureSchemaOnce` runs them once per database
+ * instead; see `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+ */
 async function ensureDraftMemoColumn() {
   const sql = await getSql();
-  await sql.query(
+  await ensureSchemaOnce(sql, "desk-draft-memo-columns", [
     "alter table drafts add column if not exists research_json text not null default '{}'",
-  );
-  await sql.query(
     "alter table leads add column if not exists notes_json text not null default '{}'",
-  );
+  ]);
 }
 
 export const bootstrapDesk = createServerFn({ method: "POST" })
