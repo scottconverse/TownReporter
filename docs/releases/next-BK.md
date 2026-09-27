@@ -108,7 +108,7 @@ The design's Dark Desk copy is in records and hours ("up to 100 records, 8 hours
 engine's unit is a hop, and there is no records-per-hop conversion in the codebase. The
 dialog draws the design's words unchanged and the three dials map to the hop counts whose own
 estimate lands closest to the drawn times. The mismatch is recorded rather than papered over
-with a number the engine does not honour.
+with a number the engine does not honor.
 
 The "Updated \<time\>" line an update writes is a plain first paragraph, not a marker any
 renderer expands — a search for such a renderer across the routes, components and libraries

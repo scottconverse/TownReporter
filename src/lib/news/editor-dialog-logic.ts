@@ -121,7 +121,7 @@ export function previewSplit(preview: SourcePreview): string {
  * (`estimateMinutes`) lands closest to the drawn times -- 2 hops ≈ 20 minutes,
  * 5 ≈ 2 hours, 10 ≈ the deep end. The copy is the design's, unchanged; the
  * mismatch is recorded in the unit's report rather than papered over with a
- * number the engine does not actually honour.
+ * number the engine does not actually honor.
  */
 export const DARK_LIMITS = [
   { key: "quick", label: "Quick look · up to 10 records, 20 minutes", hops: 2 },

@@ -27,7 +27,7 @@
  *   in this app, so the visible feedback is the `astra-msg` line plus
  *   `announceToDesk` (`desk-chrome-utils.ts`), the same pair every other desk
  *   control uses.
- * - The dialog's drawn foot note stays drawn. Where the build cannot honour a
+ * - The dialog's drawn foot note stays drawn. Where the build cannot honor a
  *   sentence of it (the Dark Desk run, the first check on a new source, the
  *   Headline model's name), the unit's report names it instead of the dialog
  *   quietly pretending.
