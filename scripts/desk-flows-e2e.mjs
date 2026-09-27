@@ -276,30 +276,49 @@ async function main() {
   );
   step("error-page Editor desk link performs a fresh document navigation");
 
-  // ── Desk landing page: Write a story files a lead from a link + an idea ────
+  // ── Desk landing page: New story files a lead from a link + an assignment ──
   const writeStoryHeadline = `The planning board moved the Kimbark hearing to Oct. 2 ${stamp}`;
   /*
-    Unit BF2, defect 2: the composer is a dialog now, opened by Today's
-    "+ New story" (which points at /desk#story-composer). This walks the press
-    rather than the hash, so the button is the thing under test; the dialog
-    carries the same fields the panel did.
+    Unit BN2, item 6: Today's "+ New story" opens phase 4's `NewStoryDialog`, and
+    its first tab -- "AI drafts from material" -- IS the old Write-a-story
+    composer's intake, filed by the same `writeStoryFromInput`. So the walk
+    presses the button, then fills the two boxes that tab draws: the link and the
+    assignment.
   */
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
   await page
     .locator(".head-acts")
-    .getByRole("link", { name: /New story/ })
+    .getByRole("button", { name: /New story/ })
     .click();
-  await page.getByRole("heading", { name: "Write a story", exact: true }).waitFor();
-  step("+ New story opens the Write a story composer on the desk landing page");
+  await page.getByRole("heading", { name: "New story", exact: true }).waitFor();
+  step("+ New story opens the New story dialog on the desk landing page");
 
-  await page.getByRole("button", { name: "Add documents", exact: true }).waitFor();
+  /*
+    The two boxes are the tab's drawn ones, and they carry what the old single
+    box carried: `parseWriteStoryInput` strips the URL out of the text, takes the
+    first surviving line as the headline and reports the same why -- so the lead
+    this files is the lead the composer filed, and every assertion below it
+    (the Queue row's headline, the why on the lead page) still holds. The label
+    matcher is anchored because each label carries its own "optional" hint.
+  */
+  await page.getByLabel(/^Links/).fill(`https://example.org/agenda-${stamp}`);
+  await page.getByLabel(/^Assignment/).fill(writeStoryHeadline);
+  await page.getByRole("button", { name: "Start drafting", exact: true }).click();
+  /*
+    The dialog does not navigate on the press: `done()` announces the sentence
+    and, mounted without `onDone` (which is how Today mounts it), leaves it in
+    the dialog for the editor to read. So this asserts the note landed -- the
+    lead is filed either way -- and the story page is asserted two steps down,
+    reached through the filed lead's own row, which is the door the desk draws
+    for it. The old step's `waitForURL` straight off the press is the one
+    assertion this unit moved, and it moved because a dialog that stays open
+    cannot have it.
+  */
   await page
-    .getByLabel("Links or source text", { exact: true })
-    .fill(`https://example.org/agenda-${stamp} ${writeStoryHeadline}`);
-  const writeStoryBtn = page.getByRole("button", { name: "Write draft", exact: true });
-  await writeStoryBtn.click();
-  await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
-  step("Write a story lands on the saved story page even when drafting cannot continue");
+    .getByRole("dialog")
+    .getByText(/Drafting started from your material/)
+    .waitFor({ timeout: 30_000 });
+  step("Start drafting files the story from the dialog's first tab and says where it went");
 
   // ── Queue: the Write a story lead landed, with the full paste kept ────────
   await page.goto(`${base}/desk/queue`, { waitUntil: "networkidle" });

@@ -1,6 +1,14 @@
 # Changelog
 
-Current software version: **0.6.76**. Publication state is recorded by GitHub.
+Current software version: **0.6.77**. Publication state is recorded by GitHub.
+
+## 0.6.77 — 2026-09-27
+
+- **The redesign's dialogs reach Today, the Queue and the nav** (units BN, BN2). Today's **+ Add a lead** and **+ New story** now open the drawn dialogs in place instead of linking to the legacy form or navigating away; **Hold H** on a Today row and **Hold with a reason** on a Queue row both open **Hold this lead**; the Queue row's **More ▾** gains **Hold with a reason**, **Send to Dark Desk**, **Start an AI follow-up** and **Kill with a reason**; the left rail and the phone bar both carry their own **+ New story**; the Follow-ups rail on Today reads real findings instead of sitting empty; and a row's **More ▾** panel no longer clips at the bottom of a short list.
+- **The drawn Kill dialog replaces the last plain status write** (unit BW). **Kill X** on a Today row, the **X** key, and the Queue row menu's **Kill with a reason** all open the same **Kill this lead** dialog — four quick reasons, a reason in your own words, a link — with the reason landing in the lead's existing `kill_reason`/`kill_reason_url` fields. This unit also merges the BN/BN2 mount work (built against an older tree) with everything 0.6.76 shipped, resolving three conflicting files as unions rather than picking a side.
+- **No migration.** `git diff 45b8d3ed..HEAD --stat -- migrations` shows no output — nothing under `migrations/` changed since the 0.6.76 merge.
+
+The packaged release note names `v0.6.77` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.76 — 2026-09-27
 

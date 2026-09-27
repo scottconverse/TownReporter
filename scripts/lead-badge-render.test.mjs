@@ -691,6 +691,16 @@ const { Chip } = await import(
       "@/components/dialog": inlineModule(
         "export function Dialog() { return null; } export function ChoiceCard() { return null; }",
       ),
+      /*
+        Redesign BN item 1 put the drawn New-story dialog in the shell header
+        through the dialogs barrel (`@/components/dialogs`). Chip() never opens
+        it -- a controlled dialog is shut until a press, and draws nothing then
+        -- but desk-chrome.tsx cannot load without the specifier resolving, the
+        same reason the Dialog above is stubbed.
+      */
+      "@/components/dialogs": inlineModule(
+        "export function NewStoryDialog() { return null; }",
+      ),
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
         "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; }",

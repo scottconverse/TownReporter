@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
@@ -9,6 +9,14 @@ import { createEditorCopy, openLeads } from "@/lib/news/desk-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { useAppearance } from "@/lib/appearance-context";
 import { Dialog } from "@/components/dialog";
+/*
+  The drawn New-story dialog (Unit BN, item 1). `editor-dialogs.tsx` imports
+  `InkButton` back from this file, so the two are a cycle; it is safe because
+  both halves only reach for the other inside a function body -- neither
+  evaluates the other at module scope -- and the real `vite build` is what
+  proves it rather than this comment.
+*/
+import { NewStoryDialog } from "@/components/dialogs";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
@@ -165,6 +173,12 @@ export function DeskShell({
   const { mode, choose } = useDeskMode();
   const { size, choose: chooseSize } = useDeskTextSize();
   const [menuOpen, setMenuOpen] = useState(false);
+  /*
+    The nav's own New-story dialog (Unit BN, item 1). Held here rather than in
+    each page: the button that opens it is in the shell's phone top bar, so one
+    mount serves every desk screen.
+  */
+  const [newStoryOpen, setNewStoryOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -298,6 +312,38 @@ export function DeskShell({
           <strong>TownReporter</strong>
           <span>Editor’s desk</span>
         </Link>
+        {/*
+          Unit BN2, item 5: the rail's own "+ New story", at the top of the nav,
+          opening the drawn New-story dialog (phase 4). It is the phone bar's
+          "+ New" control in its desktop place, and it mounts the same dialog
+          this shell already owns for that button -- one mount, two controls, so
+          both open the same three tabs on the same screen. The drawer closes
+          first for the reason the phone bar records above: on a phone the rail
+          IS the modal drawer, and a dialog opened over it would land behind its
+          scrim.
+
+          The rail slot is the one the stylesheet already keeps for it: the
+          `.astra-new` rule that sits between `.astra-brand` and
+          `.astra-navigation` and, until now, had no element to style. Where the
+          drawn captures actually put this button is in the report: the search of
+          `Desk Nav.dc.html` found the yellow `+ New` only on the *phone* bar
+          (line 17) and found no such control anywhere in the desktop `<aside>`
+          (lines 23-45); the drawn desktop `+ New story` is a header action
+          (`Desk Command.dc.html:25`, `Desk Screens.dc.html:364`). Item 5 asks for
+          the rail, so the rail gets it, and the report says which drawing does
+          not.
+        */}
+        <button
+          type="button"
+          className="btn solid astra-new"
+          aria-haspopup="dialog"
+          onClick={() => {
+            setMenuOpen(false);
+            setNewStoryOpen(true);
+          }}
+        >
+          <Plus size={18} aria-hidden /> New story
+        </button>
         <RunningBox jobs={running} nowMs={nowMs} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
@@ -384,9 +430,37 @@ export function DeskShell({
             <strong>TownReporter</strong>
             <span>Desk</span>
           </Link>
-          <Link to="/desk" hash="story-composer" className="btn solid astra-bar-new">
+          {/*
+            Unit BN, item 1: the nav's New control opens the drawn New-story
+            dialog (phase 4) instead of jumping to `#story-composer` on Today.
+            It is the same button in the same place with the same words -- the
+            drawing's phone bar is "Menu", the wordmark, a "Desk" tag and
+            "+ New" -- so what changed is only what the press does: the three
+            drawn tabs (AI drafts from material, write it myself, paste a
+            finished story) open over the screen the editor is already on.
+
+            `/desk/import` stays a route and stays in the palette's page list.
+            Tab (a) of this dialog is that same intake -- the drawn dialog is
+            the intake with the drop zone in front of it -- so the route is not
+            superseded by it, it is what the dialog is made of. README
+            "Existing routes to keep reachable" names it, and nothing here
+            removes it.
+
+            The drawer closes first on the phone: the nav is a modal panel
+            there (`role="dialog"` above), and a dialog opened over an open
+            drawer would land behind its scrim.
+          */}
+          <button
+            type="button"
+            className="btn solid astra-bar-new"
+            aria-haspopup="dialog"
+            onClick={() => {
+              setMenuOpen(false);
+              setNewStoryOpen(true);
+            }}
+          >
             <Plus size={18} aria-hidden /> New
-          </Link>
+          </button>
         </header>
         <div
           id="desk-announcer"
@@ -411,6 +485,12 @@ export function DeskShell({
       </div>
       <DeskSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
+      {/*
+        Unit BN, item 1: the drawn New-story dialog, owned by the shell because
+        the control that opens it is the nav's, so every desk screen gets it
+        from one mount rather than each page carrying its own.
+      */}
+      <NewStoryDialog open={newStoryOpen} onClose={() => setNewStoryOpen(false)} />
     </div>
   );
 }
@@ -845,6 +925,16 @@ export type DeskMoreItem = {
  * a pointerdown outside closes it, and Escape closes it and puts focus back
  * on the summary so the keyboard does not land at the top of the document.
  *
+ * BN2 item 1 adds a third: which way the panel opens. It was `top: calc(100%
+ * + 6px)` and nothing else, so on a row with less than the panel's height below
+ * it -- the panel is ~414 px on a lead row -- the rows past the window's bottom
+ * edge could not be pressed at all (measured: 0 of 7 rows hit their own element
+ * on the last row of a six-lead Queue). The room below the summary is not
+ * knowable in CSS, so it is measured here on open and `more-up` is set when the
+ * panel is taller than that room; desk-astra.css hangs the panel from the
+ * summary's top edge instead. The measurement happens with `more-up` removed,
+ * so the height read is the panel's own and not a direction-dependent one.
+ *
  * This is a disclosure, not an ARIA `menu`: a real `menu` role has to own
  * arrow-key movement between items, and claiming the role without that is a
  * worse experience than a plain list of buttons. It is a `<ul>` of buttons.
@@ -861,6 +951,21 @@ export function DeskMoreMenu({
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const summary = useRef<HTMLElement>(null);
+  /**
+   * Open upward when there is less room below the summary than the panel is
+   * tall. Read after the browser has laid the open panel out, which is why it
+   * runs from `onToggle` and not from the press that sets `open`.
+   */
+  const place = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.classList.remove("more-up");
+    if (!el.open || typeof window === "undefined") return;
+    const panel = el.querySelector(".more-menu");
+    if (!(panel instanceof HTMLElement)) return;
+    const room = window.innerHeight - el.getBoundingClientRect().bottom;
+    if (panel.getBoundingClientRect().height > room) el.classList.add("more-up");
+  }, []);
   useEffect(() => {
     const outside = (event: Event) => {
       const el = ref.current;
@@ -882,7 +987,7 @@ export function DeskMoreMenu({
     };
   }, []);
   return (
-    <details className="more" ref={ref}>
+    <details className="more" ref={ref} onToggle={place}>
       <summary className="btn quiet more-sum" ref={summary} aria-label={ariaLabel}>
         {label} <span aria-hidden>▾</span>
       </summary>

@@ -243,6 +243,52 @@ async function ensureRungTwoServer() {
   return `${line} -- started because nothing answered on ${LMSTUDIO_BASE}`;
 }
 
+/**
+ * Unit BW3: the composer an editor reaches is the drawn `NewStoryDialog`, opened
+ * by the desk header's "+ New story" press (desk.index.tsx:956-963). The old
+ * composer was a `Link` named "+ New story" onto the `#story-composer` hash, a
+ * path this desk no longer draws a way into. Returns the dialog so every
+ * locator stays scoped to it (the desk is still behind the modal).
+ */
+async function openNewStoryDialog(tabLabel) {
+  await page.getByRole("button", { name: /^\+ New story/ }).click();
+  const dialog = page.getByRole("dialog", { name: "New story" });
+  await dialog.waitFor({ timeout: 45_000 });
+  const tab = dialog.getByRole("tab", { name: tabLabel, exact: true });
+  await tab.click();
+  await tab.waitFor({ timeout: 10_000 });
+  return dialog;
+}
+
+/**
+ * The door the drawn dialog leaves open, for the walk that pressed it.
+ *
+ * The old composer navigated the desk to the story the instant it filed one
+ * (`desk.index.tsx:455`, `void navigate({to: "/desk/story/$leadId", ...})`), so
+ * a walk could press and land on the workspace. The drawn New story dialog does
+ * not navigate: it starts the job and says so in its own foot note -- "Watch it
+ * under Running now; it lands in Drafts" (`editor-dialog-forms.ts:312`). The
+ * desk's own drafts grid is that sentence's door: one card per recent story,
+ * "View progress" while it writes and "Open draft" once it is done
+ * (`desk.index.tsx:1205`), so the walk lands on the same page whichever way the
+ * job went -- which this walk's failover needs, since the first rung gives up
+ * and the second one finishes the job while the walk is watching.
+ */
+async function openTheStoryJustFiled() {
+  // The modal covers the desk and holds focus, so nothing behind it can be
+  // pressed until it is closed. Escape is the desk's own close (`dialog.tsx:125`).
+  await page.keyboard.press("Escape");
+  // A fresh desk load asks for its stories immediately; a desk left open polls
+  // its idle jobs only every 30 s (`job-card-state.ts:30`).
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  const door = page
+    .getByRole("region", { name: "In progress" })
+    .getByRole("link", { name: /^(View progress|Open draft)$/ })
+    .first();
+  await door.waitFor({ timeout: 45_000 });
+  await door.click();
+}
+
 async function main() {
   preconditions();
 
@@ -294,17 +340,18 @@ async function main() {
   await completeFirstRunSetup(page, base);
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
   /*
-    "Write a story" is a dialog now (src/routes/desk.index.tsx: the composer is
-    a `Dialog` opened by `panel === "story-composer"`), so the attach input, the
-    story box, the scope select, the model picker and the "Write draft" press
-    all live inside it. The walk opens it the way the chrome draws the way in --
-    the header's "+ New story". Nothing below this moved.
+    Unit BW3: the composer an editor reaches is the drawn `NewStoryDialog`
+    (src/components/dialogs/editor-dialogs.tsx), opened by the desk header's own
+    "+ New story" press. Tab (a) -- "AI drafts from material" -- carries the drop
+    zone, the Assignment box, the scope row and the model row, which is every
+    control this press uses. The old composer's "Research & section"
+    details/summary is an always-visible row here, with the same two scope values
+    (`writeStoryInput.researchScope`). Nothing below this point moved.
   */
-  await page.getByRole("link", { name: /^\+ New story/ }).click();
-  await page.getByRole("dialog", { name: "Write a story" }).waitFor({ timeout: 45_000 });
-  step("created an isolated editor and opened Write a story");
+  const dialog = await openNewStoryDialog("AI drafts from material");
+  step("created an isolated editor and opened the drawn New story dialog");
 
-  await page.getByLabel("Attach documents").setInputFiles({
+  await dialog.getByLabel("Choose files").setInputFiles({
     name: "quota-failover-packet.txt",
     mimeType: "text/plain",
     buffer: Buffer.from(
@@ -312,23 +359,26 @@ async function main() {
         "The council approved the packet item after public discussion.",
     ),
   });
-  await page.getByText("quota-failover-packet.txt", { exact: false }).waitFor();
-  await page
-    .getByLabel("What story do you want?")
+  /*
+    The drop zone lists no file names; the drawn dialog's own sentence is where
+    the attachment shows. Singular, because this press attaches exactly one
+    document.
+  */
+  await dialog.getByText("Document ready. The drafter reads it.").waitFor({ timeout: 45_000 });
+  await dialog
+    .getByLabel("Assignment")
     .fill("Write a short news story from the attached packet and preserve its exact evidence marker.");
-  await page.getByText("Research & section", { exact: false }).click();
-  await page.getByLabel("Drafting scope").selectOption("supplied");
-  // The composer's panel is the dialog itself now -- a Radix dialog has no DOM
-  // id, so the assertion reads the dialog, which is the same node the old
-  // `#story-composer` wrapper was.
-  assert.doesNotMatch(
-    await page.getByRole("dialog", { name: "Write a story" }).innerText(),
-    /Codex does not support/i,
-  );
-  assert.equal(await page.getByLabel("Writing model").inputValue(), "auto");
-  step("attached a real text document and kept Automatic with supplied material only");
+  // Supplied material only, the same pin the old composer's scope select made.
+  await dialog.getByLabel("Research scope").selectOption("supplied");
+  assert.equal(await dialog.getByLabel("Research scope").inputValue(), "supplied");
+  // A Radix dialog has no DOM id, so the assertion reads the dialog itself --
+  // the node the old `#story-composer` wrapper was.
+  assert.doesNotMatch(await dialog.innerText(), /Codex does not support/i);
+  assert.equal(await dialog.getByLabel("Model").inputValue(), "auto");
+  step("attached a real text document and kept Automatic beside the model row");
 
-  await page.getByRole("button", { name: "Write draft", exact: true }).click();
+  await dialog.getByRole("button", { name: "Start drafting", exact: true }).click();
+  await openTheStoryJustFiled();
   await page.getByRole("heading", { name: "Story workspace", exact: true }).waitFor();
 
   const visibleSwitch = page

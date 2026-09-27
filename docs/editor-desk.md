@@ -1,6 +1,6 @@
 # Editor desk: current workflow
 
-For [TownReporter 0.6.76](releases/0.6.76.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. Models opens from **Server settings** ("Assign models to jobs →"). New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
+For [TownReporter 0.6.77](releases/0.6.77.md). The sidebar contains Desk, Sources, Scan, Queue, Published, Opinion, Server and Stats. Models opens from **Server settings** ("Assign models to jobs →"). New story opens document intake. Dark Desk opens investigations; the TownReporter logo, breadcrumb and Public news page control return to the public newspaper. The public header’s labeled Editor’s desk button opens this workspace on desktop and phones. On narrow desk screens, open the navigation menu.
 
 ## Start with evidence
 

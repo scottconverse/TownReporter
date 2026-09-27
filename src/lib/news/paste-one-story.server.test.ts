@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
-import { performImportFinishedStories } from "./import-stories.server.ts";
+import { IMPORT_ORIGIN, performImportFinishedStories } from "./import-stories.server.ts";
 import { SECTION_REQUIRED, cardProblems, selectionFromCard } from "./import-review.ts";
-import { headlineFromPaste, pasteOneStoryCard } from "./paste-one-story.ts";
+import { PASTE_ONE_ORIGIN, headlineFromPaste, pasteOneStoryCard } from "./paste-one-story.ts";
 
 /**
  * "Paste a story I already have", driven the whole way: the card the Desk
@@ -171,6 +171,21 @@ describe("pasteOneStoryCard: one story, exactly as pasted", () => {
     assert.equal(pasteOneStoryCard({ text: PASTED }).disclosureKey, "person");
     const ai = pasteOneStoryCard({ text: PASTED, disclosureKey: "outside-ai" });
     assert.equal(ai.disclosureKey, "outside-ai");
+  });
+
+  it("marks a pasted lead with the import path's own word", () => {
+    /*
+      Unit BW5. `PASTE_ONE_ORIGIN` is a copy of `IMPORT_ORIGIN` and not an
+      import of it -- the original lives in a `.server.ts` and this constant is
+      read by dialogs in the browser (see its own note). A copy that drifted
+      would be the Queue's Imported chip (`desk-leads.tsx:516`) disappearing
+      from every paste the drawn dialog files, silently, on a screen no test
+      with a database would be looking at. So the two are asserted equal here,
+      beside the row-level assertion just above that the import path writes
+      "import" at all.
+    */
+    assert.equal(PASTE_ONE_ORIGIN, IMPORT_ORIGIN);
+    assert.equal(PASTE_ONE_ORIGIN, "import");
   });
 });
 
