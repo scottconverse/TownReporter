@@ -7,7 +7,7 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import { Busy, Chip, InkButton, Score, SecHead } from "@/components/desk-chrome";
+import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
 import { LeadFlags } from "@/components/desk-leads";
@@ -1607,23 +1607,15 @@ function DeskHome() {
                               <span className="meta">
                                 {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
                               </span>
-                              <Chip s={l.status} />
-                              {l.possible_duplicate ? (
-                                <Link
-                                  to="/desk/story/$leadId"
-                                  params={{ leadId: String(l.id) }}
-                                  className="chip maybe-same"
-                                  title={
-                                    l.dup_kind === "developing"
-                                      ? `This story came back with facts the killed lead "${l.possible_duplicate.headline}" did not have. Open it to compare.`
-                                      : `Possible duplicate of ${l.possible_duplicate.headline} (${l.possible_duplicate.status}). Open it to compare.`
-                                  }
-                                >
-                                  {l.dup_kind === "developing"
-                                    ? "New facts · compare"
-                                    : "Possible duplicate · compare"}
-                                </Link>
-                              ) : null}
+                              {/*
+                                The status chip and the possible-duplicate chip
+                                used to be drawn here as well, and `LeadFlags`
+                                two lines down draws both of them from the same
+                                fields -- so the row printed NEW twice, stacked,
+                                which is what the BF3 side-by-side caught against
+                                the drawing's one chip line. One row, one chip,
+                                and it is the component both screens render.
+                              */}
                             </div>
                             {/*
                             Same component the Queue's row renders, so the two
