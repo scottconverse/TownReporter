@@ -52,6 +52,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import { useAreaLabels, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
+  clipTodoText,
   mergeDraftEvidenceIntoNotes,
   notesHaveMemo,
   parseNotes,
@@ -2520,6 +2521,35 @@ function DraftHistoryPanel({ leadId, currentDraftId }: { leadId: number; current
   );
 }
 
+/**
+ * The site name a claim's source link shows (0.6.74). The full URL used to be
+ * the link text, and in the inspector's width it broke into a column of
+ * fragments with the " · " that preceded it left alone on a line above them.
+ * The host is short enough to sit on the claim's own line; the URL an editor
+ * needs to copy is in the link's `title` and in its href.
+ */
+function shortSourceHost(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/** The reporting-note line the Add-to-notes button writes, exactly as stored. */
+function claimNoteLine(claim: string, url: string): string {
+  return clipTodoText(`${claim} — ${url}`);
+}
+
+/**
+ * Whether that line is already in the notes. `addHumanLine` refuses a
+ * duplicate, so the button can say so instead of looking like it did nothing.
+ */
+function hasNoteLine(notes: ReportingNotes, line: string): boolean {
+  const wanted = clipTodoText(line).toLowerCase();
+  return notes.todo.some((row) => row.src === "you" && row.t.toLowerCase() === wanted);
+}
+
 function ReportingNotesPane({
   leadId,
   notes,
@@ -2550,7 +2580,13 @@ function ReportingNotesPane({
 }) {
   const qc = useQueryClient();
   const [line, setLine] = useState("");
-  const [startingPullIndex, setStartingPullIndex] = useState<number | null>(null);
+  /*
+    Which Pull was just asked for, as `todo:<index>` or `claim:<source url>`.
+    One key rather than one state per row: a reporting line and a claim's
+    source can both be waiting, and the row that pressed the button is the only
+    one that should show "Pulling…".
+  */
+  const [startingPullKey, setStartingPullKey] = useState<string | null>(null);
   const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
   const filled =
@@ -2641,14 +2677,14 @@ function ReportingNotesPane({
   });
 
   const pull = useMutation({
-    mutationFn: (input: { index: number; query: string }) =>
-      pullTodo({ data: { leadId, query: input.query, index: input.index } }),
+    mutationFn: (input: { index?: number; query: string; url?: string; key: string }) =>
+      pullTodo({ data: { leadId, query: input.query, index: input.index, url: input.url } }),
     onMutate: (input) => {
-      setStartingPullIndex(input.index);
+      setStartingPullKey(input.key);
       setPullMsg("");
     },
-    onSuccess: (res) => {
-      setStartingPullIndex(null);
+    onSuccess: (res, input) => {
+      setStartingPullKey(null);
       if (!answered(res)) {
         setPullMsg(NO_ANSWER);
         return;
@@ -2657,11 +2693,15 @@ function ReportingNotesPane({
         setPullMsg(res.error);
         return;
       }
-      setPullMsg("Pull started. Its live progress is shown under the reporting line.");
+      setPullMsg(
+        input.url
+          ? "Pull started. The page it reads is dropped in the box under the story."
+          : "Pull started. Its live progress is shown under the reporting line.",
+      );
       void qc.invalidateQueries({ queryKey: ["pull-jobs", leadId] });
     },
     onError: (err) => {
-      setStartingPullIndex(null);
+      setStartingPullKey(null);
       setPullMsg(
         editorActionError(err instanceof Error ? err.message : "", "start the Pull") ??
           "Pull failed.",
@@ -2788,9 +2828,9 @@ function ReportingNotesPane({
               item={t}
               disabled={locked}
               run={run}
-              starting={startingPullIndex === i}
+              starting={startingPullKey === `todo:${i}`}
               onToggle={() => save.mutate({ toggle: i, todos: notes.todo })}
-              onPull={() => pull.mutate({ index: i, query: t.t })}
+              onPull={() => pull.mutate({ index: i, query: t.t, key: `todo:${i}` })}
               onStop={() => run && stopPull.mutate(run.jobId)}
               onContinue={() => run && continuePull.mutate(run.jobId)}
             />
@@ -2851,19 +2891,95 @@ function ReportingNotesPane({
           {notes.found.length ? (
             <div className="note-sec">
               <p className="side-label">Claims and sources</p>
-              {notes.found.map((f) => (
-                <p key={f.t} className="note-one">
-                  {f.t}
-                  {f.src ? (
-                    <span className="meta-inline">
-                      {" · "}
-                      <a href={f.src} target="_blank" rel="noreferrer" className="inline-link">
-                        {f.src}
-                      </a>
-                    </span>
-                  ) : null}
-                </p>
-              ))}
+              {notes.found.map((f, i) => {
+                const run = f.src
+                  ? (pullRuns.data ?? []).find((candidate) => candidate.sourceUrl === f.src)
+                  : undefined;
+                const key = `claim:${f.src ?? i}`;
+                const active =
+                  startingPullKey === key ||
+                  run?.jobStatus === "queued" ||
+                  run?.jobStatus === "running";
+                // The accessible name the buttons and any test can address them
+                // by, so two claims on one story never share a button name.
+                const named = f.t.slice(0, 40).trim();
+                const noted = f.src ? hasNoteLine(notes, claimNoteLine(f.t, f.src)) : false;
+                return (
+                  <div key={`claim-${i}-${f.t}`} className="note-one claim-row">
+                    <span className="claim-t">{f.t}</span>
+                    {f.src ? (
+                      <span className="claim-meta">
+                        <a
+                          href={f.src}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-link"
+                          title={f.src}
+                        >
+                          {shortSourceHost(f.src)}
+                        </a>
+                        {!locked ? (
+                          <>
+                            <button
+                              type="button"
+                              className="claim-act"
+                              aria-label={`Pull source for: ${named}`}
+                              disabled={active || pull.isPending}
+                              onClick={() =>
+                                pull.mutate({
+                                  query: f.t.slice(0, 200),
+                                  url: f.src!,
+                                  key,
+                                })
+                              }
+                            >
+                              {active ? "Pulling…" : "Pull"}
+                            </button>
+                            <button
+                              type="button"
+                              className="claim-act"
+                              aria-label={`Add to notes for: ${named}`}
+                              disabled={noted || save.isPending}
+                              onClick={() => {
+                                save.mutate({
+                                  add: claimNoteLine(f.t, f.src!),
+                                  todos: notes.todo,
+                                });
+                                announceToDesk("Added to reporting notes. Redraft reads it.");
+                              }}
+                            >
+                              {noted ? "In notes" : "Add to notes"}
+                            </button>
+                          </>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    {run ? (
+                      <PullProgress
+                        run={run}
+                        onStop={() => stopPull.mutate(run.jobId)}
+                        onContinue={() => continuePull.mutate(run.jobId)}
+                        disabled={locked}
+                      />
+                    ) : startingPullKey === key ? (
+                      <div className="pull-progress active">
+                        <div className="pull-progress-head">
+                          <strong>Starting Pull…</strong>
+                          <span>0s</span>
+                        </div>
+                        <p>Reading the page this claim cites — no AI model is being used.</p>
+                        <p className="pull-counts" aria-live="polite">
+                          Creating the saved background job…
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <p className="note-hint">
+                Pull reads that claim&rsquo;s source page and drops the excerpt in the box under
+                the story. Add to notes writes the claim and its link into your reporting notes.
+              </p>
             </div>
           ) : null}
           {verifyItems.length ? (
@@ -3018,7 +3134,7 @@ function ReportingNotesPane({
 
   if (small) {
     const activePull =
-      startingPullIndex != null ||
+      startingPullKey != null ||
       (pullRuns.data ?? []).some(
         (run) => run.jobStatus === "queued" || run.jobStatus === "running",
       );

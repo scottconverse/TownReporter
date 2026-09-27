@@ -943,6 +943,13 @@ export const pullTodoInput = z.object({
   leadId: rowId,
   query: z.string().max(LIMITS.pullQuery),
   index: z.number().int().nonnegative().max(1_000).optional(),
+  /**
+   * 0.6.74: a claim's Pull reads one exact page instead of searching. Anything
+   * that is not an http(s) URL is dropped here rather than refused loudly --
+   * `pullTodo` falls back to the search it has always run, and the page itself
+   * is checked again by the desk's URL guard before it is fetched.
+   */
+  url: z.string().max(2_000).optional(),
 });
 
 /** `desk.ts:2065` listPullJobs. */

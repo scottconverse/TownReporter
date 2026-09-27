@@ -77,6 +77,14 @@
  *                         pages were read and their notes reached the writer.
  *                         The canned answers are otherwise unchanged. Off by
  *                         default: every other walk asserts the canned text.
+ *   FAKE_DEEPSEEK_CLAIM_FACT / FAKE_DEEPSEEK_CLAIM_URL
+ *                         give the write reply one claim, quoted in its own
+ *                         `body` and cited with that URL, and add the URL to
+ *                         `source_urls`. A walk uses this to make the product
+ *                         itself put a claim with a source on the story, so
+ *                         "Claims and sources" carries a fixture the desk's own
+ *                         pipeline built rather than a row the walk wrote into
+ *                         the table. Both must be set; off by default.
  *
  * A vision call is answered from its content SHAPE, not its prompt: OCR sends
  * `content: [{type:"image_url"...},{type:"text"...}]`, an array no draft or
@@ -85,10 +93,14 @@
  * and it answers in page-call order because the fake cannot see the image it
  * was handed.
  *
- * Two control routes, for the walk itself (never called by the product):
+ * Three control routes, for the walk itself (never called by the product):
  *
  *   POST /__mode  {"mode":"quota","researchMode":"unreadable-json"} -- what the
  *                 next requests should do; omit a key to leave it alone
+ *   POST /__probe {"probes":["<literal>", ...]} -- literals the log should
+ *                 report per call, so a walk can ask "did THIS prompt carry
+ *                 this exact line?" instead of inferring it from a marker some
+ *                 earlier pass could have copied. Replaces the list.
  *   GET  /__log   {"requests":[{"path","method","class","mode","status"}...]} --
  *                 every request in order, so a walk can prove HOW MANY times a
  *                 pass was asked (the unreadable case is one retry: two calls)
@@ -123,7 +135,23 @@ const requests = [];
 /** Pages this instance's scan has, and how many vision calls it has answered. */
 const OCR_PAGES = Number(process.env.FAKE_DEEPSEEK_OCR_PAGES || 13);
 const ECHO_EVIDENCE = process.env.FAKE_DEEPSEEK_ECHO_EVIDENCE === "1";
+/** The one claim this instance's write reply carries, when a walk sets one. */
+const CLAIM_FACT = (process.env.FAKE_DEEPSEEK_CLAIM_FACT || "").trim();
+const CLAIM_URL = (process.env.FAKE_DEEPSEEK_CLAIM_URL || "").trim();
 let ocrCalls = 0;
+
+/**
+ * Exact literals a walk asked the log to watch for (POST /__probe). A literal
+ * is answered with a plain `includes`, so a walk can prove a line the editor
+ * typed -- or one the desk assembled from two fields -- reached THIS prompt,
+ * without a marker that a previous pass could have copied forward.
+ */
+let PROBES = [];
+
+/** Which of the watched literals this prompt carries, in the order asked. */
+function probeHits(prompt) {
+  return PROBES.filter((literal) => prompt.includes(literal));
+}
 
 /**
  * The labels a prompt actually carries, in the words the fixture wrote them.
@@ -288,8 +316,23 @@ function payload(klass, prompt = "") {
           `Source labels the writer was shown: ${evidenceTokens(prompt).join("; ") || "none"}.`,
       }
     : READY_WRITE;
+  /*
+    The claim, when a walk asked for one. It is quoted in the reply's own body
+    as well as returned in `claims`, because the desk keeps only the claims its
+    draft still says, and a claim it cannot read back in the body is one it
+    drops. In the body the fact is what the writer wrote, so it survives.
+  */
+  const claimed =
+    CLAIM_FACT && CLAIM_URL
+      ? {
+          ...echoedWrite,
+          body: `${echoedWrite.body}\n\n${CLAIM_FACT}`,
+          source_urls: [CLAIM_URL],
+          claims: [{ fact: CLAIM_FACT, url: CLAIM_URL, kind: "primary" }],
+        }
+      : echoedWrite;
   const body =
-    klass === "research" ? READY_RESEARCH : klass === "scan" ? scanAnswer(prompt) : echoedWrite;
+    klass === "research" ? READY_RESEARCH : klass === "scan" ? scanAnswer(prompt) : claimed;
   return JSON.stringify({
     id: "fake-deepseek-1",
     object: "chat.completion",
@@ -346,6 +389,23 @@ const server = createServer(async (req, res) => {
   if (path === "/__log") {
     log({ path, method: req.method, class: "control", mode, status: 200 });
     return send(res, 200, { mode, researchMode, scanMode, model: MODEL, requests });
+  }
+
+  if (path === "/__probe" && req.method === "POST") {
+    const raw = await readBody(req);
+    let wanted = {};
+    try {
+      wanted = JSON.parse(raw || "{}");
+    } catch {
+      return send(res, 400, { error: "POST /__probe wants JSON" });
+    }
+    const list = Array.isArray(wanted.probes) ? wanted.probes : null;
+    if (!list || list.some((p) => typeof p !== "string" || !p)) {
+      return send(res, 400, { error: "POST /__probe wants {probes:[non-empty string, ...]}" });
+    }
+    PROBES = [...new Set(list)];
+    log({ path, method: req.method, class: "control", mode, status: 200 });
+    return send(res, 200, { ok: true, probes: PROBES.length });
   }
 
   if (path === "/__mode" && req.method === "POST") {
@@ -445,7 +505,19 @@ const server = createServer(async (req, res) => {
         ],
       });
     }
-    log({ path, method: req.method, class: klass, mode: applied, status: 200 });
+    // In echo mode the log also carries the labels THIS call's prompt held, so
+    // a walk can tell which of its several calls carried a marker -- the reply
+    // alone says what the writer saw, not which pass asked. `probes` answers
+    // the same question for a literal a walk named itself.
+    log({
+      path,
+      method: req.method,
+      class: klass,
+      mode: applied,
+      status: 200,
+      ...(ECHO_EVIDENCE ? { tokens: evidenceTokens(user) } : {}),
+      ...(PROBES.length ? { probes: probeHits(user) } : {}),
+    });
     return send(res, 200, JSON.parse(payload(klass, user)));
   }
 
