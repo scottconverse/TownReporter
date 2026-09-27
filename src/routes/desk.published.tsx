@@ -557,10 +557,16 @@ function PublishedPage() {
                 <span className="astra-row-meta">{formatShortDate(p.published_at)}</span>
               </div>
               <div className="astra-cell">
-                <p className="astra-row-meta">
-                  {p.topic}
-                  {p.lead_score != null ? ` · scored ${p.lead_score}/20 at filing` : ""}
-                </p>
+                {/*
+                  The section label and the headline, and nothing else, which is
+                  how the design draws this row (docs/design/handoff-2026-09-26,
+                  desk-19-published-dark.png / desk-20-published-light.png). The
+                  dek and the filing score used to print here too, and between
+                  them they made every row as tall as the story: a dek is ten
+                  lines at this width. Both are on the story itself, one press
+                  of View away, and the score is on the story's own page.
+                */}
+                <p className="astra-row-meta pub-kick">{p.topic}</p>
                 {/*
                   h2, not h3. This list has no section heading of its own
                   above it (the page's only heading before it is the h1 in
@@ -606,7 +612,6 @@ function PublishedPage() {
                     </div>
                   </div>
                 ) : null}
-                {p.dek ? <p className="pub-dek">{p.dek}</p> : null}
                 {p.corrections.map((c, i) => (
                   <p key={i} className="pub-corr">
                     <b>Correction, {formatShortDate(c.date)}:</b> {c.body}
@@ -903,9 +908,17 @@ function PublishedPage() {
                   <span className="astra-chip warn">Review needed</span>
                 ) : null}
               </div>
+              {/*
+                Three acts on the row, as the design draws them: View, Edit
+                headline, More. Reading, rewriting the headline and whatever is
+                behind More is what this screen is for. Posting a correction and
+                taking a story off the paper moved in behind More -- they are
+                still here, one press further in, and the words a walk looks for
+                did not change.
+              */}
               <div className="astra-row-acts">
                 <Link to="/articles/$slug" params={{ slug: p.slug }} className="btn quiet">
-                  Read on the paper
+                  View
                 </Link>
                 <InkButton
                   tone="quiet"
@@ -918,9 +931,12 @@ function PublishedPage() {
                 >
                   {headFor === p.slug ? "Close headline" : "Edit headline"}
                 </InkButton>
-                <InkButton tone="quiet" onClick={() => setCorrFor(p.slug)}>
-                  Post correction
-                </InkButton>
+                {/*
+                  Delete's confirm stays on the row, exactly as it was: pressing
+                  Delete in the More panel puts the panel away and the pair that
+                  asks "are you sure" takes its place. The panel floats above the
+                  row, so if it stayed open it would cover the pair it opened.
+                */}
                 {killFor === p.slug ? (
                   <>
                     <InkButton
@@ -934,24 +950,39 @@ function PublishedPage() {
                       Keep it
                     </InkButton>
                   </>
-                ) : (
-                  <InkButton tone="quiet" onClick={() => setKillFor(p.slug)}>
-                    Delete
-                  </InkButton>
-                )}
+                ) : null}
                 {/*
-                  More, as the design draws it. The two things under it are the
-                  ones an editor does rarely: hand the story to the legal
-                  removal desk, and jump to an evidence review that is still
-                  open. The four acts above it stay on the row rather than
-                  moving in here -- reading, rewriting the headline, posting a
-                  correction and taking a story off the paper are what this
-                  screen is for, and a walk that clicks them expects to find
-                  them where they have always been.
+                  More, as the design draws it. The order is the design's: the
+                  two things an editor does to a published story, then the two
+                  rare ones -- hand the story to the legal removal desk, and jump
+                  to an evidence review that is still open. The panel items are
+                  plain buttons rather than InkButton because each one has to
+                  close the panel it was pressed in, and InkButton hands its
+                  onClick no event to find that panel with.
                 */}
                 <details className="row-more">
                   <summary className="btn quiet">More ▾</summary>
                   <div className="row-more-panel">
+                    <button
+                      type="button"
+                      className="btn quiet"
+                      onClick={(event) => {
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                        setCorrFor(p.slug);
+                      }}
+                    >
+                      Post correction
+                    </button>
+                    <button
+                      type="button"
+                      className="btn quiet"
+                      onClick={(event) => {
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                        setKillFor(p.slug);
+                      }}
+                    >
+                      Delete
+                    </button>
                     {deskRole.data?.ok && deskRole.data.role === "owner" ? (
                       <a href={`/desk/legal-removals?article=${p.id}`}>Legal removal</a>
                     ) : null}
@@ -968,6 +999,25 @@ function PublishedPage() {
               </div>
             </div>
           ))}
+          {/*
+            The drawing's line under the table (`desk-19-published-dark.png`
+            prints it in the gap after the last row, above whatever follows).
+            It earns its place now that Legal removal is one press in behind
+            More ▾: the only other signpost on this screen was a header link
+            an editor had to already know to look for. Both halves are true of
+            this application -- the flow asks for a required reason, and a
+            removed story leaves the paper and the ordinary trash -- so the
+            sentence is a description, not a promise. Owner-only, exactly as
+            the panel's own link is: on any other desk it would name a door
+            that is not there.
+          */}
+          {deskRole.data?.role === "owner" ? (
+            <div className="mt-4">
+              <p className="astra-note">
+                Legal removal is under More ▾. It skips the trash and asks for a reason.
+              </p>
+            </div>
+          ) : null}
         </div>
       )}
 
