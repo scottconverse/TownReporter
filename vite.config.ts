@@ -184,6 +184,10 @@ function darkDeskMonitorPlugin(): Plugin {
           )) as { tickRoutineNoticeEditions?: () => Promise<unknown> };
           if (typeof routine.tickRoutineNoticeEditions === "function")
             await routine.tickRoutineNoticeEditions();
+          const followUps = (await server.ssrLoadModule("/src/lib/news/follow-up-scheduler.ts")) as {
+            tickFollowUps?: () => Promise<unknown>;
+          };
+          if (typeof followUps.tickFollowUps === "function") await followUps.tickFollowUps();
         } catch (err) {
           console.error("[townreporter] monitor tick failed:", err);
         } finally {

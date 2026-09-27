@@ -149,6 +149,10 @@ export const LIMITS = {
   followUpWho: 200,
   followUpWhat: 400,
   followUpReply: 2000,
+  /** `follow-ups.ts:395` cuts one target at 500 characters. */
+  aiFollowUpTarget: 500,
+  /** `follow-ups.ts:400` cuts the saved model choice at 120. */
+  aiFollowUpModel: 120,
   /**
    * A correction body. The form caps it at 2000 (`correction-form.tsx:71`)
    * and the server checked only a minimum, so there was no upper bound at all.
@@ -943,6 +947,44 @@ export const followUpReplyInput = z.object({
   replyText: z.string().max(LIMITS.followUpReply),
   repliedOn: z.string().max(40).nullable().optional(),
 });
+
+/*
+  Redesign phase 6: AI follow-ups (`follow-ups.ts:358-402`, migrations/0101).
+
+  The two enums are written out rather than imported from the vocabulary in
+  `follow-up-copy.ts`, which is the file's convention everywhere else and is
+  what puts the legal values next to the columns they land in. They mirror
+  `AGENT_KINDS` and `FOLLOW_UP_SCHEDULES` there, and the 0101 check constraints
+  behind them; a value added in one place without the others is what
+  `follow-up-migration.test.ts` fails on.
+*/
+
+/** `desk.ts:2791` createAiFollowUp and `desk.ts:2796` updateAiFollowUp. */
+export const aiFollowUpInput = z.object({
+  leadId: nullableId.optional(),
+  articleId: nullableId.optional(),
+  what: z.string().trim().min(1).max(LIMITS.followUpWhat),
+  agentKind: z.enum(["recheck", "search", "agenda"]),
+  schedule: z.enum(["2h", "6h", "12h", "daily", "weekly", "posting-days"]),
+  /** `follow-ups.ts:389` takes at most 8, each cut at 500. */
+  targets: z.array(z.string().max(LIMITS.aiFollowUpTarget)).max(8).optional(),
+  modelChoice: z.string().max(LIMITS.aiFollowUpModel).optional(),
+});
+
+/** `desk.ts:2796` updateAiFollowUp. */
+export const aiFollowUpUpdateInput = aiFollowUpInput.extend({ id: rowId });
+
+/** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
+export const followUpActionInput = z.object({
+  id: rowId,
+  action: z.enum(["pause", "resume", "stop", "done", "run-now"]),
+});
+
+/** `desk.ts:2860` listFollowUpFindings (`input ?? {}`). */
+export const followUpFindingsInput = z.preprocess(
+  (v) => (v === undefined || v === null ? {} : v),
+  z.object({ limit: z.number().int().positive().max(50).optional() }),
+);
 
 /** `desk.ts:2510` overrideNamedOutlet. */
 export const outletInput = z.object({ leadId: rowId, outlet: z.string().max(LIMITS.outlet) });

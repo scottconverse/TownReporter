@@ -49,7 +49,11 @@ import {
   draftMeetingReviewInput,
   draftStyleFixInput,
   fileLeadInput,
+  aiFollowUpInput,
+  aiFollowUpUpdateInput,
+  followUpActionInput,
   followUpCreateInput,
+  followUpFindingsInput,
   followUpReplyInput,
   followUpsInput,
   idOnlyInput,
@@ -2716,6 +2720,10 @@ export {
   performRecordFollowUpReply,
   performNudgeFollowUp,
   performDropFollowUp,
+  performCreateAiFollowUp,
+  performUpdateAiFollowUp,
+  performFollowUpAction,
+  performListFollowUpFindings,
 } from "./follow-ups.ts";
 import {
   performListFollowUps as _performListFollowUps,
@@ -2723,7 +2731,15 @@ import {
   performRecordFollowUpReply as _performRecordFollowUpReply,
   performNudgeFollowUp as _performNudgeFollowUp,
   performDropFollowUp as _performDropFollowUp,
+  performCreateAiFollowUp as _performCreateAiFollowUp,
+  performUpdateAiFollowUp as _performUpdateAiFollowUp,
+  performFollowUpAction as _performFollowUpAction,
+  performListFollowUpFindings as _performListFollowUpFindings,
 } from "./follow-ups.ts";
+// Type-only, so `follow-up-scheduler.ts` (and the agents behind it) is not
+// pulled into any bundle that imports `desk.ts`. The runtime import is inside
+// the `run-now` handler above, which is the only place it is needed.
+import type { FollowUpRunStart } from "./follow-up-scheduler.ts";
 
 export const listFollowUps = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
@@ -2761,6 +2777,122 @@ export const dropFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => idOnlyInput.parse(input))
   .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
+
+/* ==========================================================================
+   Redesign phase 6 (lane 2): the AI follow-ups.
+
+   The screen lists rows through the EXISTING `listFollowUps` and splits them
+   itself: an agent row carries an `agent_kind`, a manual ask does not, and the
+   one query already orders both the way the two sections want. What is new
+   here is what only an agent row needs -- being made, being edited, being moved
+   through the states its cards offer, and the findings query the Today rail
+   mounts.
+   ========================================================================== */
+
+export const createAiFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => aiFollowUpInput.parse(input))
+  .handler(async ({ context, data }) => _performCreateAiFollowUp(context, data));
+
+export const updateAiFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => aiFollowUpUpdateInput.parse(input))
+  .handler(async ({ context, data }) => _performUpdateAiFollowUp(context, data));
+
+/**
+ * Why a "Run now" press did not start: one sentence per fence, and no silent
+ * no-op. The two fences are the brief's rule ("one at a time, never beside a
+ * running draft") and the third is a card that has been ended -- Stop has to
+ * mean stop, and Resume is the way back.
+ */
+const RUN_START_REFUSALS: Record<NonNullable<FollowUpRunStart["skipped"]>, string> = {
+  "draft-running":
+    "A draft is being written right now. Follow-ups run one at a time and never alongside a draft — try again once it finishes.",
+  "follow-up-running":
+    "Another follow-up is already running. They run one at a time — try again once it finishes.",
+  "not-found": "That follow-up is gone.",
+  "not-active": "That follow-up has been stopped or finished. Resume it first if you want it to run again.",
+};
+
+/**
+ * The card's action buttons, and the one that press-starts a run.
+ *
+ * Pause, Resume, Stop and Done are status writes and nothing else -- they move
+ * the row, and the scheduler picks it up from there. "Run now" / "Retry now" is
+ * different: it goes through `startFollowUpRun` (./follow-up-scheduler.ts),
+ * which is the same path the clock uses, including both fences and the same
+ * queued `follow-up` job. A run started by a press is therefore indistinguishable
+ * from one the clock started, in the queue and in the row, and the card's inline
+ * progress takes over as soon as this returns.
+ *
+ * The refusals above are thrown rather than returned so the press that could not
+ * do anything says why on the card. A returned `{ ok: false }` here would be a
+ * button that appears to work.
+ */
+export const followUpAction = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => followUpActionInput.parse(input))
+  .handler(async ({ context, data }): Promise<{ ok: true }> => {
+    if (data.action !== "run-now") {
+      const result = await _performFollowUpAction(context, data.id, data.action);
+      if (!result.ok) throw new Error(result.error);
+      return { ok: true };
+    }
+    const { startFollowUpRun } = await import("./follow-up-scheduler.ts");
+    const started = await startFollowUpRun(
+      { userId: context.userId, newsroomId: context.newsroomId ?? 1 },
+      data.id,
+    );
+    if (!started.started) throw new Error(RUN_START_REFUSALS[started.skipped ?? "not-found"]);
+    return { ok: true };
+  });
+
+/**
+ * The findings an editor should see on Today: agent follow-ups that have found
+ * something and are still being worked.
+ *
+ * This is the "surface it on Today" half of the brief's item 4. The other half
+ * -- the note in the story's reporting notes -- was written once, by the agent
+ * that found it, in `performRecordFollowUpRun`; this reads the state, not the
+ * notes, so a finding the editor removed from the notes does not come back.
+ * Nothing here publishes, and nothing behind it can: a finding is a note and a
+ * `last_state`, and there is no publish path in either.
+ */
+export const listFollowUpFindings = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => followUpFindingsInput.parse(input))
+  .handler(async ({ context, data }) => _performListFollowUpFindings(context, data));
+
+/**
+ * What the follow-up dialog's Story picker offers: two columns over the recent
+ * leads, newest first.
+ *
+ * Deliberately NOT `listLeads`. That one returns every lead in the newsroom
+ * with twenty columns and a correlated duplicate-lookup per row, because the
+ * Queue renders all of it; a `<select>` needs an id and a line of text, and
+ * pulling the Queue's payload into a dialog to build it would fetch a screen's
+ * worth of data to draw a dropdown. The window is the 200 most recent leads,
+ * which is a limit the picker names rather than hides -- an agent linked to an
+ * older story keeps that story in its list because the dialog keeps the row's
+ * own headline (see `FollowUpDialog`).
+ */
+export const listFollowUpStoryOptions = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }): Promise<{ id: number; headline: string }[]> => {
+    const sql = await getSql();
+    const room = context.newsroomId ?? 1;
+    return sql<{ id: number; headline: string }>`
+      select l.id,
+             coalesce(a.headline, (select nullif(d.headline, '') from drafts d
+               where d.lead_id = l.id and d.newsroom_id = l.newsroom_id
+               order by d.updated_at desc, d.id desc limit 1), l.headline) as headline
+      from leads l
+      left join articles a on a.lead_id = l.id and a.newsroom_id = l.newsroom_id
+      where l.newsroom_id = ${room} and l.status <> 'killed'
+      order by l.created_at desc, l.id desc
+      limit 200
+    `;
+  });
 
 /**
  * The section the story files under, confirmed by a person for this draft.
