@@ -431,7 +431,17 @@ async function theEditorEditsTheHeadline() {
  * INSERTs a new row, and before 0.6.67 that row's headline was the model's.
  */
 async function aRedraftKeepsTheEditorsHeadline(seededDraftId) {
+  /*
+    Unit BH2 decision 6 put a dialog in front of this press: "Redraft" now opens
+    "What should change?" and that dialog's Start makes the two calls the press
+    itself used to make (the direction is saved, then the draft starts). Only
+    the number of presses changed -- the redraft still runs against the stub
+    model below and every assertion in this step is the one it always was.
+  */
   await page.getByRole("button", { name: "Redraft", exact: true }).click();
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  await startRedraft.waitFor({ timeout: 30_000 });
+  await startRedraft.click();
   const landed = await waitForTruth("the redraft to land", async () => {
     const pg = await db();
     const job = await pg.query(
