@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.75](docs/releases/0.6.75.md).** A small hotfix for the Queue's batch panel: published and killed stories now drop out of it instead of sitting there forever with a stale **Redraft** button, the panel disappears once a batch's stories are all done, and a finished batch gets a **Dismiss** button that puts it away for good — the next batch still shows normally. One additive migration, `0104_draft_batch_dismissed.sql`. GitHub remains the authority for publication state. [0.6.74 release guide](docs/releases/0.6.74.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.76](docs/releases/0.6.76.md).** The desk's shell, nav, Queue and story workbench follow the approved redesign (phases 2a and 2b): the drawn left nav with live counts, the Queue's **Open / Held / Killed / ≈ Printed / All** segments with the bulk strip on its own row, new dialogs for drafting selected leads and filing a lead by hand, a pinned phone bar, the workbench's one-column layout with its 4-step **Lead / Draft / Check / Publish** stepper, **Redraft** now asking what should change and keeping the editor's own headline by default, a Preview dialog, and a sticky publish bar listing **Saved / Evidence checked / Names reviewed / Preview viewed** with an inline print confirm. A legally removed story now says so when a reader reaches it by an in-app link or **Back**, not only at its own URL, and no longer leaks its headline into the page's share card. No migration. GitHub remains the authority for publication state. [0.6.75 release guide](docs/releases/0.6.75.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.75 release guide](docs/releases/0.6.75.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.76 release guide](docs/releases/0.6.76.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 

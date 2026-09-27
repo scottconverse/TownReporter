@@ -1,6 +1,15 @@
 # Changelog
 
-Current software version: **0.6.75**. Publication state is recorded by GitHub.
+Current software version: **0.6.76**. Publication state is recorded by GitHub.
+
+## 0.6.76 — 2026-09-27
+
+- **Redesign phase 2a: the desk shell, Today and the Queue** (PR #122). The left nav follows the drawn order with live counts and a pinned phone bar on narrow widths; **Today** opens on the four-step strip **Pick leads / Draft / Check / Publish**; the **Queue** keeps its **Open / Held / Killed / ≈ Printed / All** segments with the bulk strip moved to its own row, plus new dialogs for drafting the selected leads and filing a lead by hand. The batch panel's **Dismiss** button is now the plain outlined style instead of the yellow primary (audit finding BS-001).
+- **Redesign phase 2b: the story workbench** (PR #124). One column in the drawn order, with a **Lead / Draft / Check / Publish** stepper derived from page state. **Redraft** now opens a dialog asking what should change and keeps the editor's own headline by default. A **Preview** dialog shows the story before publish, and the sticky publish bar lists **Saved / Evidence checked / Names reviewed / Preview viewed** with an inline print confirm. The legal-removal dialog is drawn as the design here too.
+- **A legally removed story now says so on in-app navigation** (commits e6bca61f, 01a957eb). Reaching a removed slug by a link inside the paper, or by pressing **Back** to a story that was live when opened, now shows the same removal notice the story's own URL already gave as a 410, instead of the router's ordinary "not in this edition" panel — and no longer leaks the removed story's headline or summary into the page's share-card tags. New CI job, `legal-gone-nav`, walks this path in a browser.
+- **No migration.** `git diff d5ff81bc..HEAD --stat -- migrations` shows no output — nothing under `migrations/` changed since the 0.6.75 merge.
+
+The packaged release note names `v0.6.76` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.75 — 2026-09-27
 

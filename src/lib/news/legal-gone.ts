@@ -1,5 +1,7 @@
+import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { publicSlug } from "./request-input.ts";
 
 /**
  * The public page for a story that was LEGALLY removed.
@@ -53,7 +55,42 @@ export async function isLegallyRemovedSlug(slug: string): Promise<boolean> {
   }
 }
 
+/**
+ * The same question, asked by the BROWSER.
+ *
+ * The 410 above is an answer about a URL, and it only exists when a request is
+ * made for one. A reader who is already inside the app never makes that
+ * request: the route's loader runs in the browser, there is no HTTP response to
+ * re-status, and the page is whatever React renders. Before this, that reader
+ * got the router's ordinary "not in this edition" panel -- the answer a
+ * mistyped address gets -- and, worse, kept the removed story's own share-card
+ * head (`og:title`, `og:description`, `article:published_time`, `twitter:*`)
+ * because a loader that throws leaves the previous match's data in place for
+ * the route's `head` to read. A removal the desk confirmed has to be true on
+ * that path too: the removal words, none of the story, and `noindex`.
+ *
+ * A `createServerFn` because the loader is client code and `isLegallyRemovedSlug`
+ * reaches the database: the read has to happen on the server, at the reader's
+ * own request, exactly as `getPublishedArticle` does. `publicSlug` is the same
+ * bound `public.ts` puts on that read -- and the loader calls it second, after
+ * `getPublishedArticle` has already validated the same slug, so nothing new can
+ * be rejected here.
+ */
+export const isLegallyRemovedForReader = createServerFn({ method: "GET" })
+  .validator((slug: string) => publicSlug.parse(slug))
+  .handler(async ({ data: slug }) => isLegallyRemovedSlug(slug));
+
 export const LEGAL_GONE_TITLE = "This story was removed.";
+
+/**
+ * The sentence under the heading, in one place because it is said in two: the
+ * hand-written 410 page below, and the panel the in-app path renders. They are
+ * the same words on purpose -- a reader should not be able to tell which door
+ * they came through -- and a test asserts this string is in the 410 page so the
+ * two cannot drift apart.
+ */
+export const LEGAL_GONE_BODY =
+  "This page is gone for good. It was removed from the paper, and the record of the story is no longer published here.";
 
 /**
  * The page itself, as one string.
@@ -92,7 +129,7 @@ export function legalGonePageHtml(): string {
 <body>
 <main>
 <h1>${LEGAL_GONE_TITLE}</h1>
-<p>This page is gone for good. It was removed from the paper, and the record of the story is no longer published here.</p>
+<p>${LEGAL_GONE_BODY}</p>
 <hr>
 <nav class="links">
 <a href="/">Back to the paper</a>

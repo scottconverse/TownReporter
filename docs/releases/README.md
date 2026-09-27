@@ -1,9 +1,11 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.75](0.6.75.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.76](0.6.76.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
+
+- **0.6.76** — The redesign reaches the desk's shell, the Queue and the story workbench (phases 2a and 2b), plus a legal-removal fix on in-app navigation. Phase 2a: the drawn left nav with live counts and a pinned phone bar, the Queue's **Open / Held / Killed / ≈ Printed / All** segments with the bulk strip on its own row, new dialogs for drafting selected leads and filing a lead by hand, and the batch panel's **Dismiss** button restyled to the plain outlined look. Phase 2b: the story workbench in one column with a **Lead / Draft / Check / Publish** stepper, **Redraft** opening a dialog that asks what should change and keeps the editor's own headline by default, a Preview dialog, and a sticky publish bar listing **Saved / Evidence checked / Names reviewed / Preview viewed** with an inline print confirm. A legally removed story now says so when reached by an in-app link or **Back**, not only at its own URL, with no headline or summary leaking into the page's share card; new CI job `legal-gone-nav`. No migration. See [the release guide](0.6.76.md); it does not assert GitHub publication, production deployment, or live-model proof.
 
 - **0.6.75** — Small hotfix for the Queue's batch panel: published and killed stories now drop out of it instead of sitting there forever with a stale **Redraft** button, the panel disappears once a batch's stories are all done, and a finished batch gets a **Dismiss** button that puts it away for good — the next batch still shows normally. `getDraftBatch` now left-joins the lead into the same read that already loads the batch's jobs, so every item carries the story's current status with no extra round trip, and dismissal is one nullable timestamp on the batch row, set once and never cleared. One additive migration, `0104_draft_batch_dismissed.sql`. A new CI job, `batch-published-panel-e2e`, drives the owner's own path — one desk, one batch, two leads, one story printed — against a fake OpenAI-compatible provider and a fresh database, and fails against 0.6.74 exactly where the owner did. See [the release guide](0.6.75.md); it does not assert GitHub publication, production deployment, or live-model proof.
 

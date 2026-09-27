@@ -639,12 +639,13 @@ async function thePictures() {
   */
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
   // Redesign p2c moved the Published list onto the astra grid, so the row that
-  // was `div.pub-row` is `div.astra-row.pub`. The other two names in the list
-  // stay: this locator has always said "whatever holds the story on this
-  // screen", and the drawn row holds the same "Read on the paper" link.
+  // was `div.pub-row` is `div.astra-row.pub`, and the BV pass renamed the link
+  // on it to the drawing's "View" (the design draws three acts on the row: View,
+  // Edit headline, More). Same element, same href, same meaning: this locator
+  // has always said "whatever holds the story on this screen".
   const printedRow = page.locator("li, .astra-row.pub, article").filter({ hasText: REFILED }).first();
   await printedRow.waitFor({ timeout: 45_000 });
-  const readOnPaper = printedRow.getByRole("link", { name: "Read on the paper", exact: true });
+  const readOnPaper = printedRow.getByRole("link", { name: "View", exact: true });
   const printed = await readOnPaper.getAttribute("href");
   must(Boolean(printed), "the published story has no link to the paper");
   await page.goto(new URL(printed, base).href, { waitUntil: "networkidle" });
