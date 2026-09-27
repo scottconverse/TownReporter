@@ -284,7 +284,9 @@ describe("the story's own words (unit BX2)", () => {
       ]).map((i) => i.date),
       ["2026-08-01"],
     );
-    // A written year is the date's own and is never rolled.
+    // A written year is the date's own and is never rolled. Its line is the
+    // headline: "hearing" is what is left of the sentence once the stop words
+    // after it are cut, and one word is a fragment, not a line (unit BX3).
     assert.deepEqual(
       collectStoryDates([
         story({
@@ -293,7 +295,7 @@ describe("the story's own words (unit BX2)", () => {
           published_on: "2026-12-15",
         }),
       ]).map((i) => [i.date, i.what]),
-      [["2026-10-08", "hearing"]],
+      [["2026-10-08", "Records for the Oct. 8, 2026 hearing are posted"]],
     );
   });
 
@@ -337,6 +339,128 @@ describe("the story's own words (unit BX2)", () => {
     assert.deepEqual(
       items.map((i) => [i.date, i.what, i.note]),
       [["2026-10-01", "Funding hearing packet", "longmontcolorado.gov"]],
+    );
+  });
+
+  it("reads a whole date expression, not just the day it starts on", () => {
+    // A RANGE names its first day. The headline is the shape BX3 built: the
+    // live page printed "-2 instrument collection drive" under Oct. 1.
+    //
+    // Each dash is read on its own story: two identical rows from two stories
+    // collapse into one, so a single call cannot tell which dash was read.
+    for (const [slug, headline] of [
+      ["drive", "Oct. 1-2 instrument collection drive"],
+      ["drive-en", "Oct. 1–2 instrument collection drive"],
+    ] as const) {
+      assert.deepEqual(
+        collectStoryDates([story({ slug, headline, published_on: "2026-09-27" })]).map((i) => [
+          i.date,
+          i.what,
+        ]),
+        [["2026-10-01", "instrument collection drive"]],
+        `read a range out of: ${headline}`,
+      );
+    }
+    // A LIST names a day per number, and each gets its own row on that day --
+    // the same line, because it is one clause about one thing. The live page
+    // printed "8 regular meeting" under Oct. 1.
+    for (const headline of ["Oct. 1 and 8 regular meeting", "Oct. 1, 8 regular meeting"]) {
+      assert.deepEqual(
+        collectStoryDates([story({ headline, published_on: "2026-09-27" })]).map((i) => [
+          i.date,
+          i.what,
+        ]),
+        [
+          ["2026-10-01", "regular meeting"],
+          ["2026-10-08", "regular meeting"],
+        ],
+        `read a list out of: ${headline}`,
+      );
+      // The second day is a day like any other: outside the week, it is not
+      // printed, and the first day's line is not the list's tail.
+      assert.deepEqual(
+        collectStoryDates([story({ headline, published_on: "2026-09-27" })], {
+          from: "2026-09-28",
+          days: 7,
+        }).map((i) => [i.date, i.what]),
+        [["2026-10-01", "regular meeting"]],
+        `read a list out of: ${headline}`,
+      );
+    }
+    // The tail reader does not run a date into the next one.
+    assert.deepEqual(
+      collectStoryDates([
+        story({
+          slug: "ranked",
+          headline:
+            "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D",
+          published_on: "2026-09-25",
+        }),
+      ]).map((i) => [i.date, i.what]),
+      [
+        ["2026-09-26", "canvassing day"],
+        ["2026-10-03", "Brighton event"],
+      ],
+    );
+  });
+
+  it("prints the headline when the clause is a place and not an event", () => {
+    // The shapes BX3 quotes off the live page: the words after the date name
+    // where the reader goes, not what happens when they get there.
+    //
+    // The third is the REAL string, not a shape. "Longmont Senior Center to
+    // begin free meal pickups Oct. 2" is the desk's own headline for that story
+    // (`src/lib/news/fixtures/civic-scanner-v26-longmont-2026-09-25.md:59`, and
+    // the design handoff's own front page), and it is where the live paper's
+    // Fri 2 line "Longmont Senior Center" came from: with the date at the END
+    // the words before it are the sentence's subject, and the STOP_WORDS loop
+    // cut the verb phrase off it. It printed that name until unit BX3.
+    //
+    // The Clark Centennial Park source string is NOT in this repo -- grep for
+    // it over every tracked file finds it only in the design handoff's rendered
+    // front page, which carries the row ("Growing Shade tree pickup, Clark
+    // Centennial Park", `docs/design/handoff-2026-09-26/design/Front
+    // Daily.dc.html:130`) and not the story text behind it. So Sat 3 is the
+    // sanctioned shape, and the row the handoff prints is what the shape is
+    // trying to reach.
+    for (const [slug, text, date] of [
+      ["meal-dek", "on Oct. 2 at the Longmont Senior Center", "2026-10-02"],
+      ["tree-shape", "Oct. 3 at Clark Centennial Park", "2026-10-03"],
+      ["meal-real", "Longmont Senior Center to begin free meal pickups Oct. 2", "2026-10-02"],
+    ] as const) {
+      assert.deepEqual(
+        collectStoryDates([story({ slug, headline: text, published_on: "2026-09-27" })]).map((i) => [
+          i.date,
+          i.what,
+        ]),
+        [[date, text]],
+        `printed the headline for: ${text}`,
+      );
+    }
+    // The exception is the desk's own title case, and it is kept: a clause
+    // about what happens is not a name, and the live page prints this row.
+    assert.deepEqual(
+      collectStoryDates([
+        story({
+          slug: "applications",
+          headline:
+            "Longmont Hiring Director of Power Delivery and Operations; Applications Close Sept. 29",
+          published_on: "2026-09-27",
+        }),
+      ]).map((i) => [i.date, i.what]),
+      [["2026-09-29", "Applications Close"]],
+    );
+    // A line left as a fragment of a longer sentence is refused too, and a
+    // headline that only capitalizes because headlines do is not a name.
+    assert.deepEqual(
+      collectStoryDates([
+        story({
+          slug: "written",
+          headline: "Records for the Oct. 8, 2026 hearing are posted",
+          published_on: "2026-12-15",
+        }),
+      ]).map((i) => [i.date, i.what]),
+      [["2026-10-08", "Records for the Oct. 8, 2026 hearing are posted"]],
     );
   });
 

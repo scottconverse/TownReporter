@@ -89,6 +89,40 @@ The same source now feeds the article page's own "Dates in this story" panel,
 so a reader on the story sees the day it named. There the row carries no link:
 it would point at the page the reader is already on.
 
+### Four of ten lines read wrong on the live paper (unit BX3)
+
+Filling the panel exposed the reading underneath it. On the coordinator's copy
+of the live paper the week of Sept. 28 - Oct. 3 printed ten rows and four of
+them were wrong: "-2 instrument collection drive" and "8 regular meeting" under
+Oct. 1 were the **tails** of date expressions the reader had stopped short of
+("Oct. 1-2 …", "Oct. 1 and 8 …"), and "Longmont Senior Center" (Fri 2) and
+"Clark Centennial Park" (Sat 3) were **places**, not what happens there. The
+first two were the reader taking the rest of a date as the event line; the last
+two were it taking a name for an event.
+
+The reader now consumes a whole date expression before it cuts the line: a range
+("Oct. 1-2", "Oct. 1–2") names its first day and its tail is thrown away, while
+a list ("Oct. 1 and 8", "Oct. 1, 8") names a day per number and each gets its
+own row, if the day falls inside the window. And a line that is only a name is
+refused in favour of the story's headline — a line that opens on a digit, a
+dash, a comma or a conjunction, or that runs to fewer than two words, was
+already no line, and an all-capital line cut from a headline now has to be a
+whole clause and not the subject a cut-off verb phrase left behind. That last
+clause is the one that matters for the live string: the desk's real headline
+"Longmont Senior Center to begin free meal pickups Oct. 2" printed the venue
+until this round, because the reader cut the sentence at "to" and the subject
+was all the line had left. "Applications Close Sept. 29" is the exception the
+rule is written around — a clause about what happens, title case only because a
+headline is written that way — and the live row it prints is kept.
+
+Two of the four strings are quoted off the measured page. The source text
+behind "Clark Centennial Park" is not in this repository (grep for it over every
+tracked file finds it only in the design handoff's rendered front page, row and
+not story), so that one is tested as the shape the brief sanctions:
+`"Oct. 3 at Clark Centennial Park"`. The other three, and the live strings for
+the Senior Center story, are real. `docs/releases/next-BX.md` is a summary; the
+measurements, the command exits and the limits are in the unit report.
+
 ### When the panel goes, the lead takes the width
 
 With the panel absent the lead's **box** was the full width of the row but its

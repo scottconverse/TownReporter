@@ -197,6 +197,25 @@ export function structuredDate(value: string | undefined, reference = ""): strin
 const WORDED_DAY =
   /\b(january|february|march|april|may|june|july|august|september|october|november|december|sept|sep|jan|feb|mar|apr|jun|jul|aug|oct|nov|dec)\.?\s+(\d{1,2})(?!\d)(?:st|nd|rd|th)?(?:,?\s+(\d{4})(?!\d))?/gi;
 
+/**
+ * The tail of a date EXPRESSION that follows the day `WORDED_DAY` matched: the
+ * second day of a range ("Oct. 1-2"), and each further day of a list ("Oct. 1
+ * and 8", "Oct. 1, 8").
+ *
+ * Unit BX3. The reader used to stop at the first day, so the rest of the
+ * expression was left in the sentence and read as the event line: the live
+ * front page printed "-2 instrument collection drive" under Oct. 1 and "8
+ * regular meeting" under the same day, each of them the tail of a date range or
+ * list the headline had written. A range names its first day (a two-day drive
+ * that opens on the 1st is printed on the 1st) and a list names a day per
+ * number, which is why the range tail is consumed and thrown away while the
+ * list tail is consumed and kept.
+ */
+const RANGE_TAIL = /^\s*[-–—]\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?/;
+const LIST_TAIL = /^\s*(?:,|and\b|&)\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?/;
+/** Words that never OPEN a line: they join it to something already said. */
+const CONJUNCTIONS = new Set(["and", "or", "but", "nor", "yet", "so", "plus"]);
+
 /** How many words an event line carries before it stops. */
 const EVENT_WORDS = 6;
 /** How many words a line written BEFORE its date may run; longer is a headline. */
@@ -291,6 +310,12 @@ function plain(word: string): string {
   return word.toLowerCase().replace(/[^\w'-]/g, "");
 }
 
+/** Every word of `line` opens on a capital letter ("Clark Centennial Park"). */
+function allCapitalized(line: string): boolean {
+  const words = line.split(/\s+/).filter(Boolean);
+  return words.length > 1 && words.every((word) => /^[A-Z]/.test(word));
+}
+
 /**
  * The words around a date, cut down to one line a panel can print.
  *
@@ -298,23 +323,58 @@ function plain(word: string): string {
  * first punctuation mark, drops a leading joiner ("to an Oct. 6 hearing" reads
  * "hearing"), stops before a word that opens a trailing phrase or a new clause
  * ("Brighton event for 3C and 3D" reads "Brighton event") and drops a trailing
- * joiner ("canvassing day and Oct. 3" reads "canvassing day"). A line that is
- * left as a single joiner, or that opens on a verb, is no line at all.
+ * joiner ("canvassing day and Oct. 3" reads "canvassing day").
+ *
+ * A line that is left as a single joiner, that opens on a verb, or that is a
+ * fragment of one -- what is left of a longer sentence -- is no line at all.
+ * Unit BX3 sharpened this: the live front page printed "-2 instrument
+ * collection drive" and "8 regular meeting", each the tail of a date the reader
+ * had stopped short of reading, so a line that opens on a digit, a dash, a
+ * comma or a conjunction is refused, and so is one of fewer than two words.
+ *
+ * `fromHeadline` is where `raw` was cut from, and it decides one case: a line
+ * whose every word opens on a capital letter reads as a NAME -- a place, a
+ * building, a body -- and not as what happens there ("at the Longmont Senior
+ * Center", "Oct. 3 at Clark Centennial Park" both print the story's headline
+ * now). The exception is a headline's own title case, which is the desk's
+ * style rather than a signal: "Applications Close Sept. 29" is a clause about
+ * what happens, every word capital only because a headline is written that way,
+ * and it stays.
+ *
+ * Unit BX3 sharpened the exception to the exception. It used to be an all-cap
+ * line cut from a headline, full stop, and that kept the live paper's worst
+ * line: the real headline "Longmont Senior Center to begin free meal pickups
+ * Oct. 2" printed the venue on Fri 2, because the STOP_WORDS loop cut the
+ * sentence at "to" and left a bare subject behind. An all-cap line is now kept
+ * only when nothing was cut off it -- "Applications Close" is the whole clause,
+ * while "Longmont Senior Center" is what is left of one whose verb phrase was
+ * cut away, which is a NAME. A line we reached by stripping a preposition is a
+ * place whatever it was cut from -- the phrase is the preposition's object.
  */
-function cleanLine(raw: string, maxWords: number): string {
+function cleanLine(raw: string, maxWords: number, fromHeadline: boolean): string {
   const stop = raw.search(CLAUSE_BREAK);
   let words = (stop < 0 ? raw : raw.slice(0, stop)).trim().split(/\s+/).filter(Boolean);
-  while (words.length > 1 && JOINERS.has(plain(words[0]))) words = words.slice(1);
+  let stripped = false;
+  while (words.length > 1 && JOINERS.has(plain(words[0]))) {
+    words = words.slice(1);
+    stripped = true;
+  }
   if (words.length > 0 && AUXILIARIES.has(plain(words[0]))) return "";
+  let truncated = false;
   for (let i = 1; i < words.length; i += 1) {
     if (STOP_WORDS.has(plain(words[i]))) {
       words = words.slice(0, i);
+      truncated = true;
       break;
     }
   }
   while (words.length > 1 && JOINERS.has(plain(words[words.length - 1]))) words.pop();
   const line = words.slice(0, maxWords).join(" ").replace(/[\s,;:.—–!?-]+$/, "").trim();
-  return words.length === 1 && JOINERS.has(plain(line)) ? "" : line;
+  if (words.length < 2) return "";
+  if (/^[\d\-,;:.–—]/.test(line)) return "";
+  if (CONJUNCTIONS.has(plain(words[0]))) return "";
+  if (allCapitalized(line) && !(fromHeadline && !stripped && !truncated)) return "";
+  return line;
 }
 
 /** Where the sentence or clause the date sits in begins. */
@@ -342,12 +402,42 @@ function eventLine(
   end: number,
   next: number,
   headline: string,
+  fromHeadline: boolean,
 ): string {
-  const after = cleanLine(text.slice(end, next), EVENT_WORDS);
+  const after = cleanLine(text.slice(end, next), EVENT_WORDS, fromHeadline);
   if (after) return after;
-  const before = cleanLine(text.slice(clauseStart(text, start), start), BEFORE_WORDS + 99);
+  const before = cleanLine(text.slice(clauseStart(text, start), start), BEFORE_WORDS + 99, fromHeadline);
   if (before && before.split(" ").length <= BEFORE_WORDS) return before;
   return headline.trim() || "A date this story names";
+}
+
+/**
+ * How far a date expression runs past the day `WORDED_DAY` matched, and the
+ * further days it names: `{ end }` is where the expression stops and `more` is
+ * every listed day after the first (a range names none -- see `RANGE_TAIL`).
+ *
+ * The scan is anchored at the day itself, so it moves only over a dash, a
+ * comma, an "and"/"&" and the number after it. A month name is none of those,
+ * which is what keeps "Sept. 26 canvassing day and Oct. 3" two dates rather
+ * than one.
+ */
+function readDayTail(text: string, from: number): { end: number; more: number[] } {
+  let end = from;
+  const more: number[] = [];
+  for (;;) {
+    const range = RANGE_TAIL.exec(text.slice(end));
+    if (range) {
+      end += range[0].length;
+      continue;
+    }
+    const list = LIST_TAIL.exec(text.slice(end));
+    if (list) {
+      more.push(Number(list[1]));
+      end += list[0].length;
+      continue;
+    }
+    return { end, more };
+  }
 }
 
 /**
@@ -362,6 +452,7 @@ function wordedDates(
   text: string,
   publishedOn: string,
   headline: string,
+  fromHeadline: boolean,
 ): { date: string; what: string }[] {
   if (!text || !publishedOn) return [];
   const matches = [...text.matchAll(WORDED_DAY)];
@@ -369,24 +460,29 @@ function wordedDates(
   for (let i = 0; i < matches.length; i += 1) {
     const match = matches[i];
     const start = match.index ?? 0;
-    const end = start + match[0].length;
+    /* The whole expression, not just its first day: "Oct. 1-2" ends after the
+       2 and "Oct. 1 and 8" after the 8, so neither tail is read as the line. */
+    const tail = readDayTail(text, start + match[0].length);
+    const end = tail.end;
     const next = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
-    const day = Number(match[2]);
     const month = monthNumber(match[1]);
-    let date = "";
-    if (match[3]) {
+    /** One day of this expression, on the year the expression names or implies. */
+    const on = (day: number): string => {
       // A written year is the date's own and is never second-guessed.
-      date = dayOf(day, month, Number(match[3]));
-    } else {
+      if (match[3]) return dayOf(day, month, Number(match[3]));
       const year = Number(publishedOn.slice(0, 4));
       const candidate = dayOf(day, month, year);
-      date =
-        candidate && candidate < addDays(publishedOn, -ROLL_DAYS)
-          ? dayOf(day, month, year + 1)
-          : candidate;
+      return candidate && candidate < addDays(publishedOn, -ROLL_DAYS)
+        ? dayOf(day, month, year + 1)
+        : candidate;
+    };
+    const what = eventLine(text, start, end, next, headline, fromHeadline);
+    for (const day of [Number(match[2]), ...tail.more]) {
+      const date = on(day);
+      // One row per day the expression names; the day it does not name is the
+      // calendar's to refuse ("Oct. 1 and 32"), and a range's first day alone.
+      if (date) found.push({ date, what });
     }
-    if (!date) continue;
-    found.push({ date, what: eventLine(text, start, end, next, headline) });
   }
   return found;
 }
@@ -500,8 +596,8 @@ export function collectStoryDates(
     const publishedOn = source.published_on ?? "";
     const headline = source.headline ?? "";
     for (const worded of [
-      ...wordedDates(headline, publishedOn, headline),
-      ...wordedDates(source.dek ?? "", publishedOn, headline),
+      ...wordedDates(headline, publishedOn, headline, true),
+      ...wordedDates(source.dek ?? "", publishedOn, headline, false),
     ]) {
       take(source, worded.date, worded.what, "");
     }
