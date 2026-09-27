@@ -1,4 +1,4 @@
-import { getSql, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   documentKind,
@@ -68,26 +68,34 @@ export type DocumentReadingRouting = {
 };
 
 export async function ensureStoryDocuments(sql: Sql) {
-  await sql.query(`create table if not exists story_documents (
+  /*
+    0.6.64 Unit AB: a document that could not be finished inside the reading
+    budget keeps its retained pages and records how many pages were actually
+    read, so the desk can say "pages 12 of 13" and resume from the rest with
+    "Read the rest" instead of asking the editor to press Redraft blindly.
+
+    The caller's handle is passed straight through -- some callers hand this a
+    `Sql`, some a `tx` -- so whichever one it is records the marker. Before
+    this list existed the six `alter`s ran on every upload; they take ACCESS
+    EXCLUSIVE and so queue behind the nightly `pg_dump`. See
+    `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+  */
+  await ensureSchemaOnce(sql, "story-documents", [
+    `create table if not exists story_documents (
     id text primary key, newsroom_id integer not null, user_id text not null,
     lead_id integer references leads(id) on delete cascade,
     filename text not null, mime text not null, original bytea not null,
     full_text text, extraction_pages text not null default '[]', evidence text, status text not null default 'uploaded',
     detail text not null default '', pages integer, read_parts integer not null default 0,
     total_parts integer not null default 0, created_at timestamptz not null default now()
-  )`);
-  await sql.query("alter table story_documents add column if not exists source_url text");
-  await sql.query("alter table story_documents add column if not exists expected_size integer");
-  await sql.query("alter table story_documents add column if not exists editorial_request_id integer");
-  await sql.query("alter table story_documents add column if not exists reading_key text");
-  await sql.query("alter table story_documents add column if not exists extraction_pages text not null default '[]'");
-  /*
-    0.6.64 Unit AB: a document that could not be finished inside the reading
-    budget keeps its retained pages and records how many pages were actually
-    read, so the desk can say "pages 12 of 13" and resume from the rest with
-    "Read the rest" instead of asking the editor to press Redraft blindly.
-  */
-  await sql.query("alter table story_documents add column if not exists read_pages integer");
+  )`,
+    "alter table story_documents add column if not exists source_url text",
+    "alter table story_documents add column if not exists expected_size integer",
+    "alter table story_documents add column if not exists editorial_request_id integer",
+    "alter table story_documents add column if not exists reading_key text",
+    "alter table story_documents add column if not exists extraction_pages text not null default '[]'",
+    "alter table story_documents add column if not exists read_pages integer",
+  ]);
 }
 export async function storeStoryDocument(
   room: number,

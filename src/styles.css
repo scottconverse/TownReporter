@@ -1449,6 +1449,17 @@
 .desk-ltr .todo-pull {flex:none;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg);background:transparent;color:var(--fg);padding:3px 8px;cursor:pointer;font:inherit}
 .desk-ltr .todo-pull:hover {background:var(--bg2)}
 .desk-ltr .todo-pull:disabled {opacity:.5;cursor:wait}
+/* Claims and sources (0.6.74): the source link shows the site name and the row
+   carries its own Pull / Add to notes. The URL used to be the link text and,
+   at the inspector's width, broke into a column of fragments under a stranded
+   " · ". The unit never wraps inside the host or a button, so the row stays a
+   row; if the panel is too narrow it wraps BEFORE the host, never mid-URL. */
+.desk-ltr .claim-row {margin-top:8px}
+.desk-ltr .claim-meta {display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin-left:6px;vertical-align:baseline}
+.desk-ltr .claim-meta .inline-link {white-space:nowrap}
+.desk-ltr .claim-act {font-family:inherit;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;line-height:1.5;white-space:nowrap;border:1px solid var(--fg2);background:transparent;color:var(--fg2);padding:3px 8px;cursor:pointer}
+.desk-ltr .claim-act:hover {background:var(--bg2);color:var(--fg)}
+.desk-ltr .claim-act:disabled {opacity:.5;cursor:default}
 .desk-ltr .todo:hover {color:var(--fg)}
 .desk-ltr .todo-box {width:11px;height:11px;border:1px solid var(--fg2);flex:none;position:relative;top:1px}
 .desk-ltr .todo.done .todo-box {background:var(--fg2)}
