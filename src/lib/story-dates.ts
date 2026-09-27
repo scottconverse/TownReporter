@@ -11,10 +11,22 @@
  * an edition went out, not the date inside it, so it is not read here.
  *
  * `document_date` is a free-form string on the wire -- `report.ts` coerces
- * whatever the scanner reported. Only an ISO `YYYY-MM-DD` prefix is treated as
- * a date; anything else ("early September", "Sept 7") is skipped here and is
- * still printed verbatim in the article's provenance appendix, so nothing is
- * lost by not guessing at it.
+ * whatever the scanner reported as `String(o.document_date ?? "")` and asks the
+ * scanner for no particular format. This module used to accept only a value
+ * that STARTED with an ISO `YYYY-MM-DD`, which is why a paper whose records
+ * read "October 1, 2026" printed an empty "This week" beside stories that named
+ * the first of October in their own headlines: the date was there, in the row,
+ * in a shape this reader did not read. It now reads the written forms a
+ * document bears -- `2026-10-01`, `10/1/2026`, `October 1, 2026`, `Oct. 1,
+ * 2026`, `1 October 2026`, with an optional weekday and an ordinal suffix --
+ * and a value that carries NO DAY ("early September", "September 2026", "last
+ * week") is still skipped, because a panel that prints a date no printed story
+ * reports is worse than a short panel.
+ *
+ * A day with no year ("Sept. 29", "10/1") is resolved to the year of the
+ * reference day the caller passes -- `collectStoryDates` passes its window's
+ * first day, so a front page read on 27 September 2026 reads "Sept. 29" as
+ * 2026-09-29. With no reference day such a value is skipped, never guessed.
  *
  * The premise of these panels is written up in full in
  * `questions/BD-redesign-phase1-paper.md`. Nothing in this schema records a
@@ -22,7 +34,42 @@
  * from data, and why an honest short panel is a real state rather than a bug.
  */
 
-const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})/;
+const ISO_DAY = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/;
+/** "October 1, 2026" / "Oct. 1" / "Thursday, October 1st, 2026". */
+const MONTH_DAY =
+  /^(?:[a-z]{3,9}\.?,?\s+)?([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b\s*,?\s*(\d{2}|\d{4})?\b/i;
+/** "1 October 2026" / "1st Oct 2026". */
+const DAY_MONTH =
+  /^(?:[a-z]{3,9}\.?,?\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\.?,?\s*(\d{2}|\d{4})?\b/i;
+/** "10/1/2026" / "10/1" -- US month first, the paper's own convention. */
+const NUMERIC_DAY = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?(?!\d)/;
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** The month number a written month names, or 0 when the word is not one. */
+function monthNumber(word: string): number {
+  const index = MONTHS.indexOf(word.slice(0, 3).toLowerCase());
+  return index < 0 ? 0 : index + 1;
+}
+
+/** `YYYY-MM-DD` for a real calendar day, or `""` for one that does not exist. */
+function dayOf(day: number, month: number, year: number): string {
+  if (!year || !month || !day) return "";
+  const value = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(
+    day,
+  ).padStart(2, "0")}`;
+  const parts = dayParts(value);
+  // The round trip is the calendar check: 31 February formats back as 3 March.
+  return parts.day === String(day) && parts.dow ? value : "";
+}
+
+/**
+ * The year a written date carries, or the reference day's. `""` when the value
+ * names no year and the caller gave no reference to resolve it against.
+ */
+function yearOf(written: string | undefined, reference: string): number {
+  if (written) return written.length === 2 ? 2000 + Number(written) : Number(written);
+  return Number(reference.slice(0, 4)) || 0;
+}
 
 /** One printed story, reduced to the records it carries. */
 export type StoryDateSource = {
@@ -58,18 +105,40 @@ export type StoryDateRow = {
 };
 
 /**
- * `YYYY-MM-DD` for a string that starts with a real calendar day, or `""`.
+ * `YYYY-MM-DD` for a string that names a real calendar day, or `""`.
  *
- * The round trip through `dayParts` rejects a day that does not exist
+ * `reference` is the day a value with no year of its own is read against
+ * (`YYYY-MM-DD`), and `""` means such a value is skipped rather than guessed
+ * at. The round trip through `dayParts` rejects a day that does not exist
  * ("2026-02-31" formats back as 3 March, so its number does not match) rather
  * than rolling it forward into a date the record never bore.
  */
-export function structuredDate(value: string | undefined): string {
+export function structuredDate(value: string | undefined, reference = ""): string {
   if (!value) return "";
-  const match = ISO_DAY.exec(value.trim());
-  if (!match) return "";
-  const day = `${match[1]}-${match[2]}-${match[3]}`;
-  return dayParts(day).day === String(Number(match[3])) ? day : "";
+  const text = value.trim();
+  const iso = ISO_DAY.exec(text);
+  if (iso) return dayOf(Number(iso[3]), Number(iso[2]), Number(iso[1]));
+  const written = MONTH_DAY.exec(text);
+  if (written)
+    return dayOf(Number(written[2]), monthNumber(written[1]), yearOf(written[3], reference));
+  const reverse = DAY_MONTH.exec(text);
+  if (reverse)
+    return dayOf(Number(reverse[1]), monthNumber(reverse[2]), yearOf(reverse[3], reference));
+  const numeric = NUMERIC_DAY.exec(text);
+  if (numeric) {
+    const first = Number(numeric[1]);
+    const second = Number(numeric[2]);
+    /*
+      Month first, the way this paper writes a date, unless the first number
+      cannot be a month at all ("17/10/2026") -- then it is the day, and the
+      second is the month. Never both: a value that is ambiguous is not a value
+      to invent a reading for.
+    */
+    const month = first > 12 && second <= 12 ? second : first;
+    const day = first > 12 && second <= 12 ? first : second;
+    return dayOf(day, month, yearOf(numeric[3], reference));
+  }
+  return "";
 }
 
 /**
@@ -145,7 +214,8 @@ export function collectStoryDates(
   const seen = new Set<string>();
   for (const source of sources) {
     for (const record of source.records) {
-      const date = structuredDate(record.document_date);
+      // The window's first day is also what a day with no year is read against.
+      const date = structuredDate(record.document_date, from ?? "");
       if (!date) continue;
       if (from && date < from) continue;
       if (to && date >= to) continue;
