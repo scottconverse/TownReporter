@@ -2313,7 +2313,7 @@
    The Stats page (migration 0103 + the read beacon). Plain boxes and one
    grid per panel: the drawing draws every bar as a div, so no chart library
    is loaded for this screen. Yellow is always var(--a), which is the yellow
-   in both themes, and it is only ever a fill -- never a text colour.
+   in both themes, and it is only ever a fill -- never a text color.
    Sizes are the drawing's numbers scaled by --ts, the desk's text scale. */
 .desk-ltr.astra .st-page {
   display: flex;
@@ -2564,7 +2564,7 @@
   white-space: nowrap;
 }
 
-/* The six-cell summary: one-pixel gaps over a line-coloured background, so the
+/* The six-cell summary: one-pixel gaps over a line-colored background, so the
    cells are separated by a rule without any cell owning a border. */
 .desk-ltr.astra .st-kpis {
   display: grid;

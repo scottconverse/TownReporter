@@ -279,8 +279,8 @@ function StatsPage() {
                 ),
                 note: "Under 10 seconds on the page",
                 // The one cell where a rise is the bad direction. The drawing
-                // colours by arrow alone, which would paint more abandonment
-                // green; this page colours by what the number means.
+                // colors by arrow alone, which would paint more abandonment
+                // green; this page colors by what the number means.
                 invert: true,
               },
             ].map((kpi) => {

@@ -40,7 +40,7 @@ import type { ReadDepthBucket } from "@/lib/news/reading";
  * to one of eight words and only the word is sent. Nothing is written to
  * cookies, localStorage or sessionStorage, no id of any kind is generated,
  * and the server never looks at an IP or a user-agent -- so there is nothing
- * to recognise a reader by, on either side of the wire.
+ * to recognize a reader by, on either side of the wire.
  *
  * WHY NOTHING IS REMEMBERED BETWEEN LOADS. `reportedDepth` lives in this
  * closure: it exists while the page is open and is gone when the tab is. That
