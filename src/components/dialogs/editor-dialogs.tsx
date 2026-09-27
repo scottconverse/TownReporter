@@ -93,7 +93,6 @@ import {
   addToProblem,
   addToRequest,
   darkFileFromSeed,
-  darkFileInitial,
   darkFileSeed,
   darkProblem,
   darkRequest,
