@@ -16,10 +16,15 @@ export function usePaper(): PaperIdentity {
  * The pill row, the region band's place labels and the desk's select all read
  * this one hook, so a paper configured for another town cannot print the
  * shipped default's geography on any of its screens (see `areaLabelsFor`).
+ *
+ * The county comes off the identity with the city and the state (unit BX):
+ * before that this hook passed neither, so the county pill printed the generic
+ * word "County" on a paper whose owner had configured "Boulder County" in Paper
+ * setup. A paper that has never named one still prints "County".
  */
 export function useAreaLabels(): AreaLabels {
-  const { city, state } = usePaper();
-  return useMemo(() => areaLabelsFor({ city, state }), [city, state]);
+  const { city, state, county } = usePaper();
+  return useMemo(() => areaLabelsFor({ city, state }, county), [city, state, county]);
 }
 
 /** Date formatters bound to the current paper's configured timezone. */

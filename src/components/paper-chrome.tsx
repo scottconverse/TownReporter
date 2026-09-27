@@ -10,6 +10,7 @@ import { deskClaimState } from "@/lib/news/claim";
 import { createEditorCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { usePublicSections } from "@/lib/use-sections";
+import { isMiscTopic } from "@/lib/news/section-types";
 import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
 import {
   DarkModeButton,
@@ -209,27 +210,6 @@ function FollowFeed() {
     </>
   );
 }
-export function ReaderResources() {
-  const paper = usePaper();
-  const analyzer = utilityBillAnalyzerUrl(paper);
-  if (!paper.councilVotesUrl && !analyzer) return null;
-  return (
-    <section className="sidebarcard warm">
-      <h2>Useful around town</h2>
-      <p>A few good places to go deeper.</p>
-      {paper.councilVotesUrl && (
-        <a className="toolitem" href={paper.councilVotesUrl} target="_blank" rel="noreferrer">
-          City Council Votes <ExternalLink aria-hidden />
-        </a>
-      )}
-      {analyzer && (
-        <a className="toolitem" href={analyzer} target="_blank" rel="noreferrer">
-          Utility Bill Analyzer <ExternalLink aria-hidden />
-        </a>
-      )}
-    </section>
-  );
-}
 export function PaperShell({
   children,
   compact = false,
@@ -241,6 +221,15 @@ export function PaperShell({
   geography?: ReactNode;
 }) {
   const paper = usePaper();
+  /*
+    The paper's own tool links. They lived in a "Useful around town" card at
+    the foot of the front page; unit BX removed the card and moved the two
+    links here, into the footer's publication column. Neither is dropped: a
+    configured council-votes address and the analyzer (which
+    `utilityBillAnalyzerUrl` only offers to the town it belongs to) print
+    exactly as before, one column over.
+  */
+  const townTools = utilityBillAnalyzerUrl(paper);
   return (
     <ReaderProvider>
       <Masthead geography={geography} compact={compact} />
@@ -275,6 +264,16 @@ export function PaperShell({
                 <Link to="/" search={{ view: "saved" }}>
                   Saved stories
                 </Link>
+                {paper.councilVotesUrl && (
+                  <a href={paper.councilVotesUrl} target="_blank" rel="noreferrer">
+                    City Council Votes <ExternalLink aria-hidden />
+                  </a>
+                )}
+                {townTools && (
+                  <a href={townTools} target="_blank" rel="noreferrer">
+                    Utility Bill Analyzer <ExternalLink aria-hidden />
+                  </a>
+                )}
                 <FollowFeed />
               </div>
               <div>
@@ -309,8 +308,14 @@ export function PaperShell({
     </ReaderProvider>
   );
 }
+/**
+ * A section chip. The reader side never names the "misc" bucket (unit BX), so
+ * a misc chip prints nothing rather than a label for a filing instruction.
+ * (No caller today; kept correct so the next one cannot reintroduce it.)
+ */
 export function TopicChip({ topic, active }: { topic: string; active?: boolean }) {
   const { sections } = usePublicSections();
+  if (isMiscTopic(topic)) return null;
   return (
     <Link to="/" search={{ topic }} className={`btn ${active ? "primary" : ""}`}>
       {sections.find((s) => s.key === topic)?.name ?? topic}

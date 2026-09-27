@@ -2116,6 +2116,26 @@ test(
     assert.match(text, /WATCHDOG_STAGE_APP/, "the harness must run the real watchdog against its disposable stage world");
     assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
     assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+    /*
+      Unit BX. The machine-wide staged-copy pointer is read at call time from
+      %LOCALAPPDATA%, and this machine has one (it names the 3100 copy), so the
+      fixture's "nothing staged" scenario found it and reported on machine
+      state instead of on the code under test. The fixture now points
+      LOCALAPPDATA into its own world for the whole run -- the same seam
+      scripts\ci-stage-pointer.ps1 uses for the same file -- and puts the
+      operator's value back afterwards.
+    */
+    assert.match(
+      text,
+      /Join-Path \$world 'localappdata'/,
+      "the fixture must point LOCALAPPDATA inside its own world, so the operator's real pointer is neither read nor written",
+    );
+    assert.match(text, /\$env:LOCALAPPDATA = \$fakeLocalAppData/, "and it must actually set it");
+    assert.match(
+      text,
+      /\$env:LOCALAPPDATA = \$previousLocalAppData|Remove-Item Env:\\LOCALAPPDATA/,
+      "and put the real LOCALAPPDATA back",
+    );
     assert.match(
       text,
       /foreach \(\$processId in \$script:spawned\) \{\s*\n\s*Stop-Process -Id \$processId/,

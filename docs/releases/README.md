@@ -1,9 +1,11 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.77](0.6.77.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.78](0.6.78.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
+
+- **0.6.78** — The front page, designer round 1 (units BX, BX2, BX3). **"This week"** now reads dates a document itself bears in the forms an agenda, notice or filing actually carries, and, failing that, the one date a story's own headline and dek name in their own words — never the story body. A date range or list is read whole instead of cutting mid-expression, and a line naming only a place or a person is refused in favor of the story's own headline. **"Around the region"** and the Opinion block each hide, rather than leave a blank half, when there's nothing to show; no story anywhere on the reader's side prints the catch-all section tag "misc"; and the lead story's text now spans the full row when "This week" is absent. Small corrections: "1 min read" wording, no repeated "OPINION" label, **Latest stories**' "All stories →" link, one date per row, a configured county printing as configured, three promotional strips removed, **"Useful around town"**'s links moved to the footer, and a tighter phone top bar. No migration. See [the release guide](0.6.78.md); it does not assert GitHub publication, production deployment, or live-model proof.
 
 - **0.6.77** — The redesign's dialogs reach Today, the Queue and the nav (units BN, BN2), and the drawn Kill dialog replaces the last plain status write (unit BW). **+ Add a lead** and **+ New story** open in place instead of linking away, **Hold H** opens **Hold this lead** from Today and the Queue, the Queue row's **More ▾** gains **Hold with a reason**, **Send to Dark Desk**, **Start an AI follow-up** and **Kill with a reason**, the left rail and phone bar both carry **+ New story**, the Follow-ups rail on Today reads real findings, and a row's **More ▾** panel no longer clips at the bottom of a short list. **Kill X**, the **X** key and the Queue's **Kill with a reason** now all open the drawn **Kill this lead** dialog, with the reason landing in the lead's existing `kill_reason`/`kill_reason_url` fields; this unit also merges the BN/BN2 mount work with everything 0.6.76 shipped. No migration. See [the release guide](0.6.77.md); it does not assert GitHub publication, production deployment, or live-model proof.
 

@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, FileText, Search } from "lucide-react";
-import { PaperShell, ReaderResources } from "@/components/paper-chrome";
-import { ReaderRow, SaveStory, ReadingButton } from "@/components/reader-controls";
+import { PaperShell } from "@/components/paper-chrome";
+import { ReaderRow, SaveStory } from "@/components/reader-controls";
 import { DatesPanel } from "@/components/paper/dates-panel";
 import { GeoPills } from "@/components/paper/geo-pills";
 import { SectionTag } from "@/components/paper/section-tag";
@@ -14,13 +14,24 @@ import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
 import { thisWeekDates } from "@/lib/news/story-dates-public";
 import { storyDateRows } from "@/lib/story-dates";
+import { opinionHeadlineDisplay } from "@/lib/news/editorial";
 import { HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
 import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 
-/** How many stories one "Latest stories" batch carries. */
-const RIVER_BATCH = 12;
+/**
+ * How many stories "Latest stories" prints.
+ *
+ * Six, then an "All stories →" link to the archive (unit BX, design round 1).
+ * It used to be the first batch of an infinite scroll -- twelve, then more as a
+ * sentinel below the list came into view, with a "Load more stories" button as
+ * the no-JavaScript fallback. The design has no scroll-for-more on the front
+ * page: the paper's newest six are the front page's, and everything else is one
+ * link away on the archive, which is a real page a crawler and a keyboard can
+ * both reach. The whole machinery is gone with it.
+ */
+const RIVER_BATCH = 6;
 /**
  * How many cells the front page's ruled story grid prints: three across, two
  * down (design-system/README.md, "Story grid"). On a phone the stylesheet
@@ -217,82 +228,12 @@ function Home() {
   */
   const week = storyDateRows(initial.week);
   /*
-    The "Latest stories" river. The loader server-renders its first batch, so
-    the list is there without JavaScript and for a crawler; the rest arrives
-    one batch at a time as a sentinel below the list scrolls into view, and
-    the Load more link under it does the same job for a keyboard, a reader
-    with no JavaScript (it is a real link to the archive) or a slow connection.
+    The "Latest stories" river. The loader server-renders the whole list --
+    six stories, newest first, and nothing behind them (unit BX). It used to
+    be the first batch of an infinite scroll; the design's front page ends
+    here, with "All stories →" in the section head as the way to the rest.
   */
-  const [loadedRiver, setLoadedRiver] = useState<ReaderStory[]>([]);
-  const [riverCursor, setRiverCursor] = useState(initial.river?.nextCursor ?? null);
-  const [riverHasMore, setRiverHasMore] = useState(initial.river?.hasMore ?? false);
-  const [loadingRiver, setLoadingRiver] = useState(false);
-  const [riverNote, setRiverNote] = useState("");
-  // The real guard: an IntersectionObserver can fire again before the state
-  // update above lands, and two batches off one cursor repeat every story.
-  const riverBusy = useRef(false);
-  const sentinel = useRef<HTMLDivElement | null>(null);
-  const listed = [...(initial.river?.stories ?? []), ...loadedRiver];
-  /*
-    What every batch AFTER the first one must leave out, carried in a ref so the
-    callback below reads the current list rather than the one it closed over.
-
-    The loader's first batch already excludes what the page prints above the
-    river -- the seven at the top, and the opinion band's own piece
-    (`exclude: [...above, ...opinion.stories.map((s) => s.id)]` there). A cursor
-    is a position in the paper, not a filter, so it carries none of that with
-    it: the batches fetched here came back with the band's story in them, and a
-    reader who scrolled read the band's piece a second time, in the river, under
-    the band that already prints it. That is the repeat the loader's own comment
-    says the front page used to carry; it has to hold for every batch, not just
-    the server-rendered one.
-  */
-  const riverExclude = useRef<number[]>([]);
-  riverExclude.current = [...aboveIds, ...(featuredOpinion ? [featuredOpinion.id] : [])];
-  useEffect(() => {
-    // A new loader run is a new page: the batches it did not fetch are gone.
-    setLoadedRiver([]);
-    setRiverCursor(initial.river?.nextCursor ?? null);
-    setRiverHasMore(initial.river?.hasMore ?? false);
-    setRiverNote("");
-  }, [initial.river]);
-  const loadRiver = useCallback(async () => {
-    if (!riverCursor || riverBusy.current) return;
-    riverBusy.current = true;
-    setLoadingRiver(true);
-    try {
-      const batch = await readerArticles({
-        data: { limit: RIVER_BATCH, cursor: riverCursor, exclude: riverExclude.current },
-      });
-      setLoadedRiver((prev) => [...prev, ...batch.stories]);
-      setRiverCursor(batch.nextCursor);
-      setRiverHasMore(batch.hasMore);
-      setRiverNote(
-        `${batch.stories.length} more ${batch.stories.length === 1 ? "story" : "stories"} loaded`,
-      );
-    } catch {
-      setRiverNote("Those stories could not load. Try again.");
-    } finally {
-      riverBusy.current = false;
-      setLoadingRiver(false);
-    }
-  }, [riverCursor]);
-  const loadRiverRef = useRef(loadRiver);
-  loadRiverRef.current = loadRiver;
-  useEffect(() => {
-    const target = sentinel.current;
-    if (!target || !riverHasMore || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) void loadRiverRef.current();
-      },
-      // Start a screen early so the next batch is usually there before the
-      // reader reaches the bottom.
-      { rootMargin: "600px 0px" },
-    );
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [riverHasMore]);
+  const listed = initial.river?.stories ?? [];
   const nav = (change: Partial<typeof search>) =>
     void navigate({ to: "/", search: { ...search, ...change, page: change.page } });
   return (
@@ -451,7 +392,10 @@ function Home() {
                 1px gap, so no cell carries a border that doubles where two
                 meet.
               */}
-              <section className="ledgerow" aria-label="Featured story">
+              <section
+                className={`ledgerow${week.length ? "" : " solo"}`}
+                aria-label="Featured story"
+              >
                 <article className="lead">
                   <SectionTag topic={lead.topic}>{sectionName(lead.topic)}</SectionTag>
                   <h2 className="leadhead">
@@ -472,12 +416,15 @@ function Home() {
                     <SaveStory story={lead} />
                   </div>
                 </article>
-                <DatesPanel
-                  title="This week"
-                  items={week}
-                  empty={`No published story carries a date in the next seven days, and this panel
-                    never prints a meeting that no story has reported.`}
-                />
+                {/*
+                  No dated items, no panel: the lead runs the full width instead
+                  and no sentence explains the absence (unit BX). A panel whose
+                  only content is a note about why it has nothing to say tells
+                  the reader about the newsroom's filing, not about their town.
+                  The rule underneath is unchanged -- a date prints only when a
+                  published story reports it (`story-dates.ts`).
+                */}
+                {week.length ? <DatesPanel title="This week" items={week} /> : null}
               </section>
               {/*
                 The ruled story grid: three across on a desktop, two on a
@@ -525,46 +472,57 @@ function Home() {
             covers beyond the home town, and the paper's own voice. Both are
             printed from stories already loaded, and neither repeats a story
             from above.
+
+            Either half may be missing (unit BX). No ground has a story the top
+            of the page has not already printed -> no "Around the region", and
+            Opinion runs the full width; no opinion piece at all -> no Opinion
+            panel, and the region column runs the full width. Neither absence
+            gets a sentence: the reader is told what the paper has, not what it
+            does not. With both missing the whole band goes.
           */}
-          <section className="regionband">
-            <div className="regioncol">
-              <div className="sectionhead">
-                <h2>Around the region</h2>
-              </div>
+          {(regionRows.length > 0 || featuredOpinion) && (
+            <section className={`regionband${regionRows.length && featuredOpinion ? "" : " solo"}`}>
               {regionRows.length ? (
-                <ul className="regionlist">
-                  {regionRows.map(({ area, story }) => (
-                    <li key={area}>
-                      <span className="regionplace">{labels[area]}</span>
-                      <Link to="/articles/$slug" params={{ slug: story.slug }}>
-                        {story.headline}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="regionempty">
-                  Every story in this edition is a {paper.city} story. The towns around us appear
-                  here when we report from them.
-                </p>
-              )}
-              <Link className="textlink" to="/" search={{ view: "archive" }}>
-                All stories <ArrowRight aria-hidden />
-              </Link>
-            </div>
-            {featuredOpinion ? (
-              <aside className="opinionpanel">
-                <h2>Opinion</h2>
-                <Link to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
-                  <h3>{featuredOpinion.headline}</h3>
-                </Link>
-                <p>{featuredOpinion.dek}</p>
-                <Link className="textlink" to="/" search={{ topic: "opinion" }}>
-                  All opinion <ArrowRight aria-hidden />
-                </Link>
-              </aside>
-            ) : null}
-          </section>
+                <div className="regioncol">
+                  <div className="sectionhead">
+                    <h2>Around the region</h2>
+                  </div>
+                  <ul className="regionlist">
+                    {regionRows.map(({ area, story }) => (
+                      <li key={area}>
+                        <span className="regionplace">{labels[area]}</span>
+                        <Link to="/articles/$slug" params={{ slug: story.slug }}>
+                          {story.headline}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                  <Link className="textlink" to="/" search={{ view: "archive" }}>
+                    All stories <ArrowRight aria-hidden />
+                  </Link>
+                </div>
+              ) : null}
+              {featuredOpinion ? (
+                <aside className="opinionpanel">
+                  <h2>Opinion</h2>
+                  <Link to="/articles/$slug" params={{ slug: featuredOpinion.slug }}>
+                    {/*
+                      The stored headline carries the literal "OPINION: "
+                      prefix that makes an unsigned editorial unmistakable in a
+                      feed or a reprint; this block is already titled
+                      "Opinion", so it prints the headline without it (unit
+                      BX). Display only -- nothing is rewritten.
+                    */}
+                    <h3>{opinionHeadlineDisplay(featuredOpinion.headline)}</h3>
+                  </Link>
+                  <p>{featuredOpinion.dek}</p>
+                  <Link className="textlink" to="/" search={{ topic: "opinion" }}>
+                    All opinion <ArrowRight aria-hidden />
+                  </Link>
+                </aside>
+              ) : null}
+            </section>
+          )}
           {listed.length > 0 && (
             <section className="river" aria-labelledby="latest-stories">
               <div className="sectionhead">
@@ -576,71 +534,28 @@ function Home() {
               <p className="riverintro">
                 Every story we have published, newest first, as it went to press.
               </p>
+              {/*
+                `datebox={false}`: the row's own meta line under the headline
+                already carries the date, and the front page printed it twice --
+                once in the left gutter, once there (unit BX). The archive keeps
+                the gutter, which is what it is for: a run of stories read in
+                order, where the date is the thing you scan.
+              */}
               {listed.map((s) => (
-                <ReaderRow key={s.id} story={s} />
+                <ReaderRow key={s.id} story={s} datebox={false} />
               ))}
-              {riverHasMore ? (
-                <a
-                  className="btn more"
-                  href="/?view=archive&page=2"
-                  aria-busy={loadingRiver}
-                  onClick={(e) => {
-                    // No JavaScript: the href is the archive's second page.
-                    e.preventDefault();
-                    void loadRiver();
-                  }}
-                >
-                  {loadingRiver ? "Loading stories…" : "Load more stories"}
-                </a>
-              ) : (
-                <p className="riverend">You&rsquo;ve reached the first story we published.</p>
-              )}
-              <p className="rivernote" role="status" aria-live="polite">
-                {riverNote}
-              </p>
-              <div className="riversentinel" ref={sentinel} aria-hidden="true" />
             </section>
           )}
           {/*
-            The back of the book: the sections, the places to go deeper and
-            the reading controls. These used to sit in a sidebar beside "The
-            latest"; the ruled grid took that space, so they close the page
-            instead. Every one of them is the same data source as before --
-            `newsroom_sections`, the paper's configured tool links, and the
-            reader's own text size.
+            The three sidebarcards that used to close the page -- "Find your
+            way around.", "Useful around town" and "A little easier on the
+            eyes." -- are gone (unit BX, design round 1) together with "Your
+            community. An open record.". The design's front page ends at the
+            river. Nothing was dropped with them: the sections they listed are
+            the section nav in the masthead and the archive's own section
+            filter, the two town links moved into the footer, text size is in
+            the top bar, and About is in the footer too.
           */}
-          <section className="backmatter" aria-label="Ways through the paper">
-            <div className="sidebarcard">
-              <h2>Find your way around.</h2>
-              <p>Start with what matters to you.</p>
-              <div className="topiclist">
-                {visible.map((s) => (
-                  <Link key={s.key} to="/" search={{ topic: s.key }}>
-                    {s.name}
-                    <span>
-                      <ArrowRight aria-hidden />
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-            <ReaderResources />
-            <div className="sidebarcard">
-              <span className="eyebrow">YOUR READING, YOUR WAY</span>
-              <h2>A little easier on the eyes.</h2>
-              <p>Adjust the type size or switch to a darker page.</p>
-              <ReadingButton label />
-            </div>
-          </section>
-          <section className="aboutstrip">
-            <div>
-              <h2>Your community. An open record.</h2>
-              <p>Follow the documents, see how we report and hold our work to account.</p>
-            </div>
-            <Link className="btn" to="/about">
-              Meet the publication <ArrowRight aria-hidden />
-            </Link>
-          </section>
         </>
       )}
     </>

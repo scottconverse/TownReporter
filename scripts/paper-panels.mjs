@@ -76,6 +76,17 @@ const WORD_SPLIT_ALLOWED = ".datenote";
 
 const TARGETS = [
   {
+    /*
+      The front page's "This week" panel is CONDITIONAL since unit BX: it
+      renders only when a published story names a date inside the next seven
+      days, and the lead runs full width when none does. So this target needs a
+      paper whose stories carry such a date -- a dated story in the seed (any
+      form a document bears: "October 1, 2026" and "2026-10-01" both read) --
+      and an empty paper now fails here as a missing panel. That is deliberate:
+      an instrument that passes because it measured nothing is worse than no
+      instrument, and a silently absent panel is exactly the defect this walk
+      would need to see.
+    */
     name: "this-week",
     route: "/",
     selectors: [".ledgerow .datespanel", ".datespanel"],
@@ -187,7 +198,15 @@ function auditPanels(cfg) {
       if (panel) break;
     }
     if (!panel) {
-      panels.push({ name: target.name, fatal: `no panel matched ${target.selectors.join(" | ")}` });
+      panels.push({
+        name: target.name,
+        fatal:
+          `no panel matched ${target.selectors.join(" | ")}` +
+          (target.name === "this-week"
+            ? ` -- since unit BX the front page's panel renders only when a published story names a` +
+              ` date inside the next seven days; check the paper this run points at has one`
+            : ""),
+      });
       continue;
     }
     const panelRect = panel.getBoundingClientRect();

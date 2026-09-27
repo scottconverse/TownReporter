@@ -21,6 +21,17 @@ export type PaperIdentity = {
   deck: string;
   trust: string;
   councilVotesUrl: string;
+  /**
+   * The county this paper covers, from `dark_settings.county`, or null when it
+   * has never been named.
+   *
+   * It rides on the public identity rather than being read where the pills are
+   * built (unit BX): the geography pill row is a reader surface, and the county
+   * is a server-side setting, so the one public read per page load is where it
+   * belongs. Null is the ordinary state of an install that has not said -- the
+   * county ground then prints the generic word "County" (`areaLabelsFor`).
+   */
+  county: string | null;
   /** Runtime-configurable editor contact address; falls back to the build-time EDITOR_EMAIL. */
   editorEmail: string | null;
 };
@@ -41,6 +52,9 @@ export const DEFAULT_PAPER_IDENTITY: PaperIdentity = {
   deck: PAPER.deck,
   trust: PAPER.trust,
   councilVotesUrl: COUNCIL_VOTES_URL,
+  // The shipped default names no county: `dark_settings` is per newsroom and
+  // this constant is the client-safe duplicate of `defaultConfig()`.
+  county: null,
   editorEmail: EDITOR_EMAIL,
 };
 

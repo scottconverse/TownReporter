@@ -2,12 +2,14 @@
 /**
  * The front page "Latest stories" river, in a browser.
  *
- * The owner asked for more than five stories on the front page, loading in the
- * order they were published. The top of the page is unchanged; below it the
- * river prints every published story, newest first, and pulls the next batch in
- * when a sentinel near the bottom scrolls into view -- with a visible button
- * under the list as the fallback for a keyboard, a slow connection, or a
- * browser with no observer at all.
+ * Unit BX (design round 1) changed what this walk measures, so the walk changed
+ * with it. The front page's river is now SIX stories, newest first, and an
+ * "All stories ->" link in the section head as the way to the rest -- the
+ * infinite scroll, its sentinel and the "Load more stories" button are gone
+ * from the front page. The claim the old machinery carried is not dropped with
+ * it: the rest of the paper must still be reachable from the front page, and it
+ * is reachable one hop away, on the archive, which `theArchiveCarriesTheRestOfThePaper`
+ * now measures by clicking through the pagination to the oldest story.
  *
  * This walk drives the built server in-process against its own in-memory PGlite
  * (never Postgres: DATABASE_URL is cleared below), seeds 40 published stories
@@ -17,8 +19,15 @@
  * the front page. The lead, the cells of the ruled grid under it, the opinion
  * band beside "Around the region" and the river read the same paper, so every
  * card on the page is counted -- on the server-rendered HTML, where a crawler
- * or a reader with no JavaScript stops, and again after two river batches have
- * loaded.
+ * or a reader with no JavaScript stops, and again on the hydrated page.
+ *
+ * What this walk no longer covers, and what covers it: the sentinel's scroll
+ * trigger, the button's batching and the no-IntersectionObserver fallback are
+ * gone from the product, so their three scenarios are gone from here rather
+ * than kept green against code that no longer exists. Nothing about reach was
+ * lost with them -- the archive step below asserts the same end state the
+ * button used to reach (every published story printed and reachable), which is
+ * the check that survives the removal.
  *
  *   node scripts/front-page-river-e2e.mjs
  */
@@ -65,7 +74,17 @@ const OPINION_IN_TOP = 3;
 const OPINION_BAND = 20;
 /** The river's rows: the paper, less the top seven, less the band's piece. */
 const RIVER = SEEDED - ABOVE - 1; // 32
-const BATCH = 12;
+/**
+ * How many of those the front page prints, and therefore how many are left for
+ * the archive (unit BX).
+ *
+ * `LISTED` is `RIVER_BATCH` in `src/routes/index.tsx`: the design's front page
+ * ends after six river rows and one "All stories ->" link. `REST` is what the
+ * archive owes the reader -- every published story the front page did not print
+ * -- and it is the number the archive step at the end of this walk counts.
+ */
+const LISTED = 6;
+const REST = RIVER - LISTED; // 26
 
 let page;
 const done = [];
@@ -349,11 +368,11 @@ async function theServerRenderedHtmlPrintsEveryStoryOnce(browser) {
     await server.goto(`${base}/`, { waitUntil: "domcontentloaded" });
     await server.locator("#latest-stories").waitFor({ timeout: 30_000 });
     const counts = await assertEveryStoryIsPrintedOnce(server, "server-rendered");
-    // The seven above the river, the opinion band's own card, and one batch.
-    const expected = ABOVE + 1 + BATCH;
+    // The seven above the river, the opinion band's own card, and the six rows.
+    const expected = ABOVE + 1 + LISTED;
     if (counts.cards !== expected)
       throw new Error(
-        `the server-rendered page holds ${counts.cards} cards, expected ${expected} (${ABOVE} above the river, the opinion band and one batch)`,
+        `the server-rendered page holds ${counts.cards} cards, expected ${expected} (${ABOVE} above the river, the opinion band and ${LISTED} river rows)`,
       );
     step(`the server-rendered HTML prints ${counts.stories} stories in ${counts.cards} cards, once each`);
   } finally {
@@ -361,28 +380,41 @@ async function theServerRenderedHtmlPrintsEveryStoryOnce(browser) {
   }
 }
 
-/** The first batch is server-rendered: no JavaScript has run yet. */
-async function theHtmlCarriesTheFirstBatch() {
+/** The river rows are server-rendered: no JavaScript has run yet. */
+async function theHtmlCarriesTheRiverRowsAndTheArchiveLink() {
   const html = await (await fetch(`${base}/`)).text();
   const missing = [];
-  for (let n = ABOVE + 1; n <= ABOVE + BATCH; n += 1) {
+  for (let n = ABOVE + 1; n <= ABOVE + LISTED; n += 1) {
     if (!html.includes(headline(n))) missing.push(headline(n));
   }
   if (missing.length) throw new Error(`the server-rendered HTML is missing ${missing.join(", ")}`);
   for (let n = 1; n <= ABOVE; n += 1) {
     if (!html.includes(headline(n))) throw new Error(`the top of the page lost ${headline(n)}`);
   }
-  if (!html.includes('href="/?view=archive&amp;page=2"') && !html.includes('href="/?view=archive&page=2"'))
-    throw new Error("the Load more fallback is not a real link to the archive");
+  /*
+    The way to the rest of the paper, and the reason this assertion changed with
+    unit BX. It used to require `?view=archive&page=2` -- the "Load more
+    stories" fallback's href, which was the river's own next batch. The front
+    page has no next batch now, so the link it must carry is the section head's
+    "All stories ->", and it must point at the archive a reader can page
+    through. Same claim (the paper does not stop at the front page), one hop
+    instead of a cursor.
+  */
+  if (!html.includes('href="/?view=archive"'))
+    throw new Error('the river head carries no "All stories" link to the archive');
+  if (html.includes("Load more stories"))
+    throw new Error("the front page still carries the removed Load more stories control");
   if (html.includes("A DRAFT THAT MUST NOT PRINT")) throw new Error("the draft reached the front page");
   const newest = html.indexOf(headline(ABOVE + 1));
-  const older = html.indexOf(headline(ABOVE + BATCH));
+  const older = html.indexOf(headline(ABOVE + LISTED));
   if (newest < 0 || older < 0 || newest > older)
-    throw new Error("the first batch is not newest first in the HTML");
-  step(`the first ${BATCH} river stories are server-rendered, newest first, as links`);
+    throw new Error("the river rows are not newest first in the HTML");
+  step(
+    `the ${LISTED} river stories are server-rendered, newest first, and the head links to the archive`,
+  );
 }
 
-async function theFrontPageRendersTheTopAndTheFirstBatch() {
+async function theFrontPageRendersTheTopAndTheRiverRows() {
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
   /*
     The masthead's wordmark, not an `h1` tagline.
@@ -403,7 +435,7 @@ async function theFrontPageRendersTheTopAndTheFirstBatch() {
   await page.getByRole("heading", { level: 2, name: "Latest stories" }).waitFor({ timeout: 30_000 });
   step("the front page renders its masthead and the Latest stories heading");
 
-  await waitForRows(BATCH, `the river opens with one server-rendered batch of ${BATCH}`);
+  await waitForRows(LISTED, `the river prints ${LISTED} rows, server-rendered, and no more`);
 
   const first = (await page.locator(".river .newsrow h3").first().innerText()).trim();
   if (first !== headline(ABOVE + 1))
@@ -431,8 +463,23 @@ async function theFrontPageRendersTheTopAndTheFirstBatch() {
   if (repeated.length) throw new Error(`the river repeats ${repeated.join(", ")}`);
   step(`the ${ABOVE} stories above the river are each printed once, and none of them in the river`);
 
-  await page.getByRole("link", { name: "Load more stories" }).waitFor({ timeout: 10_000 });
-  step("the Load more fallback link is visible under the list");
+  /*
+    The river stops at `LISTED` once the page has hydrated. This is the check
+    that the infinite scroll is really gone rather than merely unreachable: a
+    page that still fetched the next batch on hydration would print more rows
+    than the six, and `waitForRows` above already waits for an exact count.
+    Scrolling to the bottom changes nothing, which is what the old walk's
+    sentinel scenario asserted the opposite of.
+  */
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(1500);
+  const afterScroll = await riverRows();
+  if (afterScroll !== LISTED)
+    throw new Error(`scrolling the page changed the river: ${afterScroll} rows, expected ${LISTED}`);
+  step(`scrolling the whole page leaves the river at ${LISTED} rows -- there is no more to fetch`);
+
+  await page.getByRole("link", { name: "All stories" }).first().waitFor({ timeout: 10_000 });
+  step('the river head carries the "All stories" link');
 }
 
 /**
@@ -456,95 +503,71 @@ async function theOpinionBandTakesAnOpinionStoryTheTopHasNotPrinted() {
   step(`the opinion band prints ${shown}, not the opinion story the top of the page already carries`);
 }
 
-/** The same count with a second river batch loaded. */
-async function noStoryIsPrintedTwiceTwoBatchesIn() {
-  const counts = await assertEveryStoryIsPrintedOnce(page, "two batches in");
-  const expected = ABOVE + 1 + BATCH * 2;
-  if (counts.cards !== expected)
-    throw new Error(`${counts.cards} cards on the page, expected ${expected}`);
-  step(`with ${BATCH * 2} river rows loaded, all ${counts.stories} cards hold a different story`);
-}
-
-async function scrollingLoadsTheNextBatch() {
-  await page.locator(".riversentinel").scrollIntoViewIfNeeded();
-  await waitForRows(BATCH * 2, `scrolling the sentinel into view loaded a second batch of ${BATCH}`);
-}
-
-async function theButtonLoadsAnother() {
-  const before = await riverRows();
-  const link = page.getByRole("link", { name: "Load more stories" });
-  await link.click();
-  await page.waitForFunction(
-    (want) => document.querySelectorAll(".river .newsrow").length > want,
-    before,
-    { timeout: 30_000 },
-  );
-  await waitForRows(RIVER, `the button loaded the rest: ${RIVER} river rows in all`);
-}
-
-async function theEndMessageAppearsAndNothingRepeats() {
-  await page.getByText(/reached the first story we published/).waitFor({ timeout: 30_000 });
-  step("every story shown, the page says you've reached the first story we published");
-
-  const count = await riverRows();
-  if (count !== RIVER) throw new Error(`the river ends with ${count} rows, expected ${RIVER}`);
-
-  const headlines = (await page.locator(".river .newsrow h3").allInnerTexts()).map((h) => h.trim());
-  const seen = new Set(headlines);
-  if (seen.size !== headlines.length)
-    throw new Error(`a headline appears twice in the river: ${headlines.length} rows, ${seen.size} titles`);
+/**
+ * The rest of the paper is one hop away, and it is all there.
+ *
+ * This is where the removed infinite scroll's claim went (unit BX). The old
+ * walk reached the end of the paper by loading three more river batches and
+ * asserting the river ended at `headline(SEEDED)`; the front page's river is
+ * six rows and a link now, so the same end state is asserted where the reader
+ * actually gets it -- the archive, reached by clicking the front page's own
+ * "All stories ->" link and then the pagination it prints. Every published
+ * story the front page did not print has to be printed here, the draft has to
+ * be absent, and the order has to be newest first.
+ */
+async function theArchiveCarriesTheRestOfThePaper() {
+  const printedOnTheFrontPage = await page.locator("body").innerText();
+  await page.getByRole("link", { name: "All stories" }).first().click();
+  await page.locator(".listing").waitFor({ timeout: 30_000 });
+  const count = await page.getByRole("status").innerText();
+  if (!count.includes(String(SEEDED)))
+    throw new Error(`the archive says "${count.trim()}", expected all ${SEEDED} published stories`);
+  step(`the front page's "All stories" link opens the archive, and it holds all ${SEEDED} stories`);
 
   /*
-    Every story, counted across the WHOLE page -- the top section, the band and
-    the river together. Each of the forty is owed the reader exactly one card.
+    Page through to the oldest story. `PAGE_SIZE` is 12 (`src/lib/news/reader-
+    articles.ts:13`), so forty stories are four pages and the last one is where
+    the oldest four are; the loop is bounded by the paper's own count rather
+    than by a page number so it cannot spin.
   */
-  const whole = await page.locator("body").innerText();
-  const wrong = [];
+  const seen = new Set();
+  for (let guard = 0; guard < Math.ceil(SEEDED / 12) + 2; guard += 1) {
+    for (const h of await page.locator(".newsrow h3").allInnerTexts()) seen.add(h.trim());
+    const next = page.getByRole("button", { name: /Next/ });
+    if (!(await next.isEnabled())) break;
+    await next.click();
+    await page.waitForTimeout(400);
+  }
+  const missing = [];
+  for (let n = ABOVE + 1; n <= SEEDED; n += 1) {
+    if (!seen.has(headline(n))) missing.push(headline(n));
+  }
+  if (missing.length)
+    throw new Error(`the archive never printed ${missing.length} of the paper's stories: ${missing.join(", ")}`);
+  if ([...seen].some((h) => h.includes("DRAFT THAT MUST NOT PRINT")))
+    throw new Error("the draft is on the archive");
+  step(`paging the archive reaches every one of the ${SEEDED - ABOVE} stories below the front page`);
+
+  /*
+    And the front page itself did not carry them: the six rows plus the top.
+    This is the "exactly once" claim the old river made across the whole page,
+    kept for the page it is still true on.
+  */
+  const onFront = [];
+  const frontPage = new Set([...Array(ABOVE).keys()].map((i) => i + 1));
+  frontPage.add(OPINION_BAND);
+  for (let n = ABOVE + 1; n <= ABOVE + LISTED; n += 1) frontPage.add(n);
   for (let n = 1; n <= SEEDED; n += 1) {
-    const printed = whole.split(headline(n)).length - 1;
-    if (printed !== 1) wrong.push(`${headline(n)} printed ${printed}x, expected once`);
+    if (frontPage.has(n)) continue;
+    if (printedOnTheFrontPage.includes(headline(n))) onFront.push(headline(n));
   }
-  if (wrong.length) throw new Error(wrong.join("; "));
-  if (whole.includes("DRAFT THAT MUST NOT PRINT")) throw new Error("the draft is on the page");
-  step(`all ${SEEDED} published stories are printed exactly once across the whole page`);
-
-  const last = headlines.at(-1);
-  if (last !== headline(SEEDED)) throw new Error(`the oldest river story is ${last}`);
-  step(`the river ends at the oldest story, ${headline(SEEDED)}, in publication order`);
-}
-
-/** The fallback path, with no observer in the browser at all. */
-async function theButtonWorksWithoutAnObserver(browser, main) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  await context.addInitScript(() => {
-    // What a browser without the API looks like: `typeof` is "undefined".
-    Object.defineProperty(window, "IntersectionObserver", { value: undefined, configurable: true });
-  });
-  const plain = await context.newPage();
-  page = plain;
-  try {
-    await plain.goto(`${base}/`, { waitUntil: "networkidle" });
-    await plain.locator(".river .newsrow").first().waitFor({ timeout: 30_000 });
-    const count = await plain.locator(".river .newsrow").count();
-    if (count !== BATCH) throw new Error(`${count} rows on a fresh page, expected ${BATCH}`);
-    step("a fresh front page still shows one server-rendered batch");
-    const noObserver = await plain.evaluate(() => typeof window.IntersectionObserver === "undefined");
-    if (!noObserver) throw new Error("the observer was not removed, so this is not the fallback path");
-
-    for (const want of [BATCH * 2, RIVER]) {
-      await plain.getByRole("link", { name: "Load more stories" }).click();
-      await plain.waitForFunction(
-        (n) => document.querySelectorAll(".river .newsrow").length === n,
-        want,
-        { timeout: 30_000 },
-      );
-    }
-    await plain.getByText(/reached the first story we published/).waitFor({ timeout: 30_000 });
-    step("with no IntersectionObserver at all, the button alone loads every remaining batch");
-  } finally {
-    page = main;
-    await context.close();
-  }
+  if (onFront.length)
+    throw new Error(`the front page printed ${onFront.length} stories it no longer lists: ${onFront.join(", ")}`);
+  if (REST !== SEEDED - frontPage.size)
+    throw new Error(
+      `this walk's own arithmetic is off: REST is ${REST} but ${SEEDED - frontPage.size} stories are off the front page`,
+    );
+  step(`the front page prints none of the ${REST} stories the archive holds for it`);
 }
 
 async function theListIsReadableWithNoJavaScript(browser, main) {
@@ -557,9 +580,9 @@ async function theListIsReadableWithNoJavaScript(browser, main) {
       .getByRole("heading", { level: 2, name: "Latest stories" })
       .waitFor({ timeout: 30_000 });
     const rows = await still.locator(".river .newsrow").count();
-    if (rows !== BATCH) throw new Error(`${rows} rows without JavaScript, expected ${BATCH}`);
-    await still.getByRole("link", { name: "Load more stories" }).waitFor({ timeout: 10_000 });
-    step("with JavaScript switched off the river still reads, and the fallback link is there");
+    if (rows !== LISTED) throw new Error(`${rows} rows without JavaScript, expected ${LISTED}`);
+    await still.getByRole("link", { name: "All stories" }).first().waitFor({ timeout: 10_000 });
+    step("with JavaScript switched off the river still reads, and the archive link is there");
   } finally {
     page = main;
     await context.close();
@@ -601,21 +624,31 @@ async function theScreenshots(browser, main) {
 }
 
 /**
- * A three-story paper prints three cards, and no river.
+ * A three-story paper prints three cards, no river -- and an empty half leaves
+ * the other half the whole width.
  *
  * Three stories: the lead is the first, the ruled grid carries the other two,
  * and there is no fourth story to fill a third cell. Nothing is padded out with
  * a story the page already prints, and the river is left out entirely because
  * there is nothing left for it.
  *
- * "This week" is NOT left out, and the lead does not take the whole width. The
- * approved design keeps the lead and the panel side by side in one row --
- * `docs/design/handoff-2026-09-26/design/Front Daily.dc.html:34`, with the
- * desktop columns `--leadCols: "minmax(0,1.7fr) minmax(0,1fr)"` at line 109 --
- * and the panel's empty state is first-class (`src/components/paper/dates-panel
- * .tsx:38-41`). So the claim measured here is the design's own row: the lead is
- * a share of `.ledgerow`, never the whole of it (`src/reader-astra.css:2254`);
- * the single-column collapse is under 900px (`:3211`), off this walk's 1280px.
+ * Unit BX inverted the second half of this. The walk used to require the
+ * "This week" panel to be PRESENT with its empty state, and the lead to keep
+ * its column beside it, on the grounds that the approved design draws the lead
+ * and the panel side by side (`docs/design/handoff-2026-09-26/design/Front
+ * Daily.dc.html:34`, `--leadCols` at line 109). The brief's rule is now the
+ * opposite for a panel with nothing to say: no dated items means no panel and
+ * no explanatory sentence, and the lead runs the full width
+ * (`src/routes/index.tsx:396`, the `solo` class; `src/reader-astra.css`, the
+ * `min-width: 901px` block). The two halves of the band follow the same rule.
+ *
+ * So the claims measured here are: the panel is ABSENT, the whole region band
+ * is ABSENT (this paper's three stories are all home-ground and none of them is
+ * left over as an opinion piece), and the lead fills the row it sits in.
+ *
+ * `clientWidth` is the row's inside width: the 1px rules between the columns
+ * are the row's own background showing through a gap, not a border, so a lead
+ * that fills the row measures the row.
  *
  * This runs last: it deletes the rest of the paper.
  */
@@ -633,19 +666,25 @@ async function aThreeStoryPaperPrintsThreeCardsAndNoRiver() {
     throw new Error("the grid did not stop at the two stories the lead leaves");
   if (await page.locator(".river").count())
     throw new Error("a river with nothing left in it was rendered");
-  await page.locator(".ledgerow > .datespanel .datesempty").waitFor({ timeout: 10_000 });
-  // `clientWidth` is the row's inside width: the 1px rules between the columns
-  // are the row's own background showing through a gap, not a border, so the
-  // two column widths already add up to it.
+  if (await page.locator(".ledgerow > .datespanel").count())
+    throw new Error("This week printed a panel although no published story names a date this week");
+  if ((await page.locator(".datesempty").count()))
+    throw new Error("an empty panel's explanatory sentence was printed");
+  if (await page.locator(".regionband").count())
+    throw new Error("the region band was rendered with neither half to print");
+  if ((await page.locator(".regionband.solo").count()))
+    throw new Error("a one-column region band was rendered with neither column to print");
   const [row, lead] = await page.evaluate(() => [
     document.querySelector(".ledgerow")?.clientWidth ?? 0,
     document.querySelector(".lead")?.getBoundingClientRect().width ?? 0,
   ]);
-  if (!(lead > 0 && lead < row - 40))
+  if (!(lead > 0 && lead >= row - 2))
     throw new Error(
-      `the lead is ${Math.round(lead)}px inside a ${Math.round(row)}px lead row: This week is not beside it`,
+      `the lead is ${Math.round(lead)}px inside a ${Math.round(row)}px lead row: it did not take the full width when This week was absent`,
     );
-  step("with three stories each is printed once, and the lead keeps its column beside This week");
+  step(
+    "with three stories each is printed once, no empty This week or region band is rendered, and the lead runs the full width",
+  );
 }
 
 async function main() {
@@ -654,21 +693,16 @@ async function main() {
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
-    // The fallback is tested on its own page, later, with this removed.
     deviceScaleFactor: 1,
   });
   page = await context.newPage();
   try {
     await theServerRenderedHtmlPrintsEveryStoryOnce(browser);
-    await theHtmlCarriesTheFirstBatch();
-    await theFrontPageRendersTheTopAndTheFirstBatch();
+    await theHtmlCarriesTheRiverRowsAndTheArchiveLink();
+    await theFrontPageRendersTheTopAndTheRiverRows();
     await theOpinionBandTakesAnOpinionStoryTheTopHasNotPrinted();
-    await scrollingLoadsTheNextBatch();
-    await noStoryIsPrintedTwiceTwoBatchesIn();
-    await theButtonLoadsAnother();
-    await theEndMessageAppearsAndNothingRepeats();
+    await theArchiveCarriesTheRestOfThePaper();
     await theListIsReadableWithNoJavaScript(browser, page);
-    await theButtonWorksWithoutAnObserver(browser, page);
     await theScreenshots(browser, page);
     await aThreeStoryPaperPrintsThreeCardsAndNoRiver();
   } catch (err) {

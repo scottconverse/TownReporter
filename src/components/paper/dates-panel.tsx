@@ -39,6 +39,13 @@ export type DateItem = {
  * reason: this panel reads dated items out of *published stories* only (owner
  * ruling, 2026-09-26), and a paper whose stories carry no future dates must
  * say so rather than pad the column.
+ *
+ * `empty` is optional, and with no items and no sentence the panel prints
+ * nothing at all (unit BX). The front page reaches that state whenever no
+ * published story names a date in the next seven days, and there the lead runs
+ * the full width instead: a note saying why the panel is empty is the
+ * newsroom talking about its own filing rather than about the reader's town.
+ * The article page still passes its sentence.
  */
 export function DatesPanel({
   title,
@@ -50,9 +57,10 @@ export function DatesPanel({
   items: DateItem[];
   /** Where the panel's footer link goes, when the caller has a real one. */
   footLink?: { label: string; topic: string };
-  /** What to print in place of the rows when there are none. */
-  empty: string;
+  /** What to print in place of the rows when there are none; omit to print nothing. */
+  empty?: string;
 }) {
+  if (!items.length && !empty) return null;
   return (
     <aside className="datespanel" aria-labelledby="datespanel-title">
       <h2 id="datespanel-title">{title}</h2>

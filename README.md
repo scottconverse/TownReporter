@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.77](docs/releases/0.6.77.md).** The redesign's dialogs reach Today, the Queue and the nav: **+ Add a lead** and **+ New story** open in place instead of linking away, **Hold H** opens **Hold this lead** from Today and the Queue, the Queue row's **More ▾** gains **Hold with a reason**, **Send to Dark Desk**, **Start an AI follow-up** and **Kill with a reason**, the left rail and phone bar both carry **+ New story**, the Follow-ups rail on Today reads real findings, and a row's **More ▾** panel no longer clips at the bottom of a short list. **Kill** now opens the same drawn **Kill this lead** dialog from Today, the X key and the Queue, with the reason landing in the lead's existing `kill_reason`/`kill_reason_url` fields — the last plain status write the redesign had left behind. No migration. GitHub remains the authority for publication state. [0.6.76 release guide](docs/releases/0.6.76.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.78](docs/releases/0.6.78.md).** The front page's designer round 1: "This week" now reads dates a document itself bears and, failing that, a date a story's own headline and dek name in their own words; "Around the region" and the Opinion block each hide rather than leave a blank half when there's nothing to show; no story anywhere on the reader's side prints the catch-all section tag "misc"; and the lead story's text now spans the full row when "This week" is absent. No migration. GitHub remains the authority for publication state. [0.6.77 release guide](docs/releases/0.6.77.md) · [Changelog](CHANGELOG.md).
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.77 release guide](docs/releases/0.6.77.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.78 release guide](docs/releases/0.6.78.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 

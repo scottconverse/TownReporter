@@ -4,6 +4,7 @@ import {
   NEWSROOM_NOTE,
   buildEditorialPack,
   opinionHeadline,
+  opinionHeadlineDisplay,
   parseEditorial,
 } from "./editorial.ts";
 import type { EditorialOrchestrationRuntime as EditorialRuntime, WriteEditorialInput } from "./editorial-orchestration.ts";
@@ -178,6 +179,47 @@ describe("opinionHeadline", () => {
 
   it("survives an empty headline", () => {
     assert.equal(opinionHeadline(""), "OPINION");
+  });
+});
+
+/*
+  Unit BX, item 5: the front page's Opinion block is titled Opinion, and the
+  headline under it printed the stored "OPINION: ..." a second time.
+
+  Display only -- the stored headline is what the desk, the archive and the
+  article page keep, so `opinionHeadline` above still prefixes. This pair is the
+  contract: the display form takes a stored headline back to its plain words.
+*/
+describe("opinionHeadlineDisplay", () => {
+  it("shows the headline without the prefix the stored one carries", () => {
+    assert.equal(
+      opinionHeadlineDisplay("OPINION: A Libertarian case for the rail tax"),
+      "A Libertarian case for the rail tax",
+    );
+  });
+
+  it("takes the dashes the newsroom's own prefix rule allows", () => {
+    assert.equal(opinionHeadlineDisplay("Opinion — The rail tax"), "The rail tax");
+    assert.equal(opinionHeadlineDisplay("opinion - The rail tax"), "The rail tax");
+    assert.equal(opinionHeadlineDisplay("OPINION: The rail tax"), "The rail tax");
+  });
+
+  it("leaves a headline that was never prefixed exactly as it is", () => {
+    assert.equal(
+      opinionHeadlineDisplay("A Libertarian case for the rail tax"),
+      "A Libertarian case for the rail tax",
+    );
+  });
+
+  it("has something to show when the headline was only the prefix", () => {
+    assert.equal(opinionHeadlineDisplay("OPINION:"), "Opinion");
+    assert.equal(opinionHeadlineDisplay(""), "Opinion");
+  });
+
+  it("never rewrites what is stored: the round trip returns the plain headline", () => {
+    const stored = opinionHeadline("A Libertarian case for the rail tax");
+    assert.equal(stored, "OPINION: A Libertarian case for the rail tax");
+    assert.equal(opinionHeadlineDisplay(stored), "A Libertarian case for the rail tax");
   });
 });
 
