@@ -49,7 +49,9 @@ async function ensureFixtureTables() {
       slug text not null unique,
       headline text not null,
       status text not null default 'published',
-      published_at timestamptz not null default now()
+      published_at timestamptz not null default now(),
+      /* 0098. Hand-built schema tracks production, column for column. */
+      area text
     )
   `);
 }

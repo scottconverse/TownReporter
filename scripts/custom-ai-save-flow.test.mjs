@@ -6,7 +6,12 @@ const component = await readFile(
   new URL("../src/components/custom-ai-connections.tsx", import.meta.url),
   "utf8",
 );
-const route = await readFile(new URL("../src/routes/desk.ops.tsx", import.meta.url), "utf8");
+// Phase 5 moved the connections panel off Server settings into the Models
+// screen's Connections tab; the save flow lives in its own panel component now.
+const route = await readFile(
+  new URL("../src/components/custom-ai-connections-panel.tsx", import.meta.url),
+  "utf8",
+);
 const settings = await readFile(
   new URL("../src/lib/news/custom-ai-settings.ts", import.meta.url),
   "utf8",

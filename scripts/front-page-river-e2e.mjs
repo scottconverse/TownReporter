@@ -14,10 +14,10 @@
  * plus one draft, and asserts on the real DOM at every step.
  *
  * The second half of the unit's rule is here too: NO story is printed twice on
- * the front page. The lead, "The latest", the "More of the story" box beside
- * the lead, the opinion band and the river read the same paper, so every card
- * on the page is counted -- on the server-rendered HTML, where a crawler or a
- * reader with no JavaScript stops, and again after two river batches have
+ * the front page. The lead, the cells of the ruled grid under it, the opinion
+ * band beside "Around the region" and the river read the same paper, so every
+ * card on the page is counted -- on the server-rendered HTML, where a crawler
+ * or a reader with no JavaScript stops, and again after two river batches have
  * loaded.
  *
  *   node scripts/front-page-river-e2e.mjs
@@ -42,20 +42,29 @@ const base = checkedUrl(`http://127.0.0.1:${PORT_FRONT_PAGE_RIVER}`);
 /** Published stories seeded, newest first: "River story 01" is the newest. */
 const SEEDED = 40;
 /**
- * The front page's top section prints the first nine -- the lead, the five
- * under "The latest", and the three in the "More of the story" box beside the
- * lead (src/routes/index.tsx: TOP_STORIES). The river carries the rest.
+ * The front page's top section prints the first seven -- the lead, and the six
+ * cells of the ruled grid under it (src/routes/index.tsx: TOP_STORIES =
+ * 1 + GRID_CELLS, GRID_CELLS = 6).
+ *
+ * Seven, not the nine this walk was written against: the approved design puts
+ * one lead and a six-cell grid above the band, and no "More of the story" box
+ * beside the lead. `docs/design/handoff-2026-09-26/design/Front Daily.dc.html`:
+ * the lead row is line 34 (`.lead`, one story), the grid is line 56 with
+ * `hint-placeholder-count="6"` (line 57) over `six`, and `six` is
+ * `phone ? S.slice(0, 4) : S` (line 125) with the desktop columns
+ * `--sixCols: "repeat(3,minmax(0,1fr))"` (line 109) -- six cells on a desktop
+ * viewport, the one this walk drives.
  */
-const ABOVE = 9;
+const ABOVE = 7;
 /**
- * Two opinion pieces. The first sits inside the top nine, where the opinion
+ * Two opinion pieces. The first sits inside the top seven, where the opinion
  * band would print it a second time; the second sits below, and is the newest
- * opinion piece left for the band once the top nine are excluded.
+ * opinion piece left for the band once the top seven are excluded.
  */
 const OPINION_IN_TOP = 3;
 const OPINION_BAND = 20;
-/** The river's rows: the paper, less the top nine, less the band's piece. */
-const RIVER = SEEDED - ABOVE - 1; // 30
+/** The river's rows: the paper, less the top seven, less the band's piece. */
+const RIVER = SEEDED - ABOVE - 1; // 32
 const BATCH = 12;
 
 let page;
@@ -110,6 +119,39 @@ async function bootTheServer() {
 async function seedThePaper() {
   const pg = await globalThis.__pgliteInstance__;
   if (!pg) throw new Error("the server booted without a PGlite instance to seed");
+  /*
+    The PGlite global resolves to the instance, not to a MIGRATED instance.
+    `createPgliteSql` (src/lib/db.ts) publishes `__pgliteInstance__` and only
+    then applies migrations/ on top of it, and `bootTheServer` above returns as
+    soon as `/` answers -- which an unmigrated server can do out of an error or
+    empty state. Awaiting the global and seeding straight away is therefore a
+    race: the seed can die on `relation "paper_settings" does not exist`, or
+    (worse, because it looks like a real failure) it can seed fine while the
+    server is still mid-migration and then render a page with no river at all.
+    Both were seen on this machine, several runs in a row.
+
+    Wait for the migration pass to go QUIET: `_migrations` stops growing. A
+    fixed table name is not enough -- `paper_settings` is created early and the
+    later files are what the front page's queries need.
+  */
+  let applied = -1;
+  let quiet = 0;
+  for (let i = 0; i < 240 && quiet < 3; i += 1) {
+    let count = -1;
+    try {
+      count = Number(
+        (await pg.query("select count(*)::int as n from _migrations")).rows[0]?.n,
+      );
+    } catch {
+      /* the migrations table itself is not there yet */
+    }
+    if (count === applied && count >= 0) quiet += 1;
+    else {
+      quiet = 0;
+      applied = count;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
   await pg.query(
     `insert into paper_settings (newsroom_id, onboarded) values (1, true)
      on conflict (newsroom_id) do update set onboarded = true`,
@@ -144,26 +186,29 @@ async function seedThePaper() {
 /** Every headline the page prints, in document order. */
 async function printedHeadlines() {
   return page.evaluate(() =>
-    [...document.querySelectorAll("h2, h3, .record-list strong")].map((el) =>
-      (el.textContent || "").trim(),
-    ),
+    [...document.querySelectorAll("h2, h3")].map((el) => (el.textContent || "").trim()),
   );
 }
 
 /**
  * Every story on the page, once.
  *
- * A CARD is one printed slot -- the lead, a line of the "More of the story"
- * box, a row under "The latest", the opinion feature, a row in the river -- and
- * a card may hold two links to the same story (the lead prints a headline link
- * and a "Read the story" button). So the slugs are deduped PER CARD first, then
- * no slug may appear in two cards. Counting raw anchors would flag the lead's
- * own button as a repeat; counting headlines would miss a card that links the
- * wrong story.
+ * A CARD is one printed slot -- the lead, a cell of the ruled grid, the opinion
+ * band's card, a row in the river -- and a card may hold two links to the same
+ * story (the lead prints a headline link and a "Read the story" button). So the
+ * slugs are deduped PER CARD first, then no slug may appear in two cards.
+ * Counting raw anchors would flag the lead's own button as a repeat; counting
+ * headlines would miss a card that links the wrong story.
+ *
+ * The selector follows the redesign's markup, not the page it replaced: the
+ * old top was `.record-list li` under "The latest" plus an `.opinionfeature`
+ * box; the approved design puts `.storycell` cells in a `.storygrid` and the
+ * band's card in `.opinionpanel` (`docs/design/handoff-2026-09-26/design/Front
+ * Daily.dc.html:56`, and `src/components/paper/story-grid.tsx`).
  */
 async function assertEveryStoryIsPrintedOnce(pg, when) {
   const cards = await pg.evaluate(() => {
-    const selector = ".lead, .record-list li, .newsrow, .opinionfeature";
+    const selector = ".lead, .storycell, .regionlist li, .newsrow, .opinionpanel";
     return [...document.querySelectorAll(selector)].map((card) => ({
       where: (card.className || card.tagName).trim(),
       slugs: [
@@ -304,7 +349,7 @@ async function theServerRenderedHtmlPrintsEveryStoryOnce(browser) {
     await server.goto(`${base}/`, { waitUntil: "domcontentloaded" });
     await server.locator("#latest-stories").waitFor({ timeout: 30_000 });
     const counts = await assertEveryStoryIsPrintedOnce(server, "server-rendered");
-    // The nine above the river, the opinion band's own card, and one batch.
+    // The seven above the river, the opinion band's own card, and one batch.
     const expected = ABOVE + 1 + BATCH;
     if (counts.cards !== expected)
       throw new Error(
@@ -339,7 +384,22 @@ async function theHtmlCarriesTheFirstBatch() {
 
 async function theFrontPageRendersTheTopAndTheFirstBatch() {
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { level: 1, name: /A clearer view of/ }).waitFor({ timeout: 30_000 });
+  /*
+    The masthead's wordmark, not an `h1` tagline.
+
+    The old front page opened with `<h1>A clearer view of {city}.</h1>`
+    (`main:src/routes/index.tsx:208`), and this step waited on it. The redesign
+    removed that heading: the prototype's front page carries no `h1` at all --
+    its top-of-page identity is the wordmark beside the city tag
+    (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html:22-23`,
+    `TownReporter` / `Longmont`) sitting over the dateline (`:15`) -- and the
+    tagline became footer body copy in the shipped product
+    (`src/components/paper-chrome.tsx`, the `<p>A clearer view of ...`). So the
+    step waits on the shipped masthead hook instead, `.mast .brand`, which
+    carries the paper's own name. The `Latest stories` heading is unchanged and
+    still the river's own `h2#latest-stories`.
+  */
+  await page.locator(".mast .brand").waitFor({ timeout: 30_000 });
   await page.getByRole("heading", { level: 2, name: "Latest stories" }).waitFor({ timeout: 30_000 });
   step("the front page renders its masthead and the Latest stories heading");
 
@@ -350,10 +410,14 @@ async function theFrontPageRendersTheTopAndTheFirstBatch() {
     throw new Error(`the river starts at ${first}, not ${headline(ABOVE + 1)}`);
 
   /*
-    The nine the river leaves out: the lead, the five under "The latest" and the
-    three in the box beside the lead. Each is printed once up there -- before
-    this unit the box printed stories 2-4, which "The latest" prints too -- and
-    none of them appears again inside the river.
+    The seven the river leaves out: the lead and the six cells of the ruled grid
+    under it. Each is printed once up there, and none of them appears again
+    inside the river.
+
+    The region band prints nothing in this walk: the seeds carry no `area`, and a
+    null area reads as the home town (`src/lib/story-area.ts`), so "Around the
+    region" has no ground to print. The census names `.regionlist li` anyway, so
+    a story printed there would be counted rather than quietly missed.
   */
   const top = await printedHeadlines();
   const above = [];
@@ -371,15 +435,25 @@ async function theFrontPageRendersTheTopAndTheFirstBatch() {
   step("the Load more fallback link is visible under the list");
 }
 
-/** The band takes an opinion story the top of the page has not printed. */
+/**
+ * The band takes an opinion story the top of the page has not printed.
+ *
+ * `main:src/routes/index.tsx:328` wrapped it in `<section class="opinionband">`;
+ * the redesign makes it an `<aside class="opinionpanel">`
+ * (`src/routes/index.tsx:536`), which is the shape the prototype draws -- the
+ * band's own heading over one headline link and "All opinion →"
+ * (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html:80-82`). The `<h3>`
+ * headline this step reads is the same `<h3>` in both, so the assertion is
+ * unchanged; only the hook moved.
+ */
 async function theOpinionBandTakesAnOpinionStoryTheTopHasNotPrinted() {
   await page.getByRole("heading", { level: 2, name: "Opinion" }).waitFor({ timeout: 30_000 });
-  const shown = (await page.locator(".opinionband h3").innerText()).trim();
+  const shown = (await page.locator(".opinionpanel h3").innerText()).trim();
   if (shown !== headline(OPINION_BAND))
     throw new Error(
-      `the opinion band prints ${shown}; ${headline(OPINION_BAND)} is the newest opinion story the top nine do not carry`,
+      `the opinion band prints ${shown}; ${headline(OPINION_BAND)} is the newest opinion story the top seven do not carry`,
     );
-  step(`the opinion band prints ${shown}, not the opinion story "The latest" already carries`);
+  step(`the opinion band prints ${shown}, not the opinion story the top of the page already carries`);
 }
 
 /** The same count with a second river batch loaded. */
@@ -527,40 +601,51 @@ async function theScreenshots(browser, main) {
 }
 
 /**
- * A paper with nothing past "The latest" prints no box beside the lead.
+ * A three-story paper prints three cards, and no river.
  *
- * Three stories: the lead is the first, "The latest" carries the other two, and
- * there is no seventh story to fill the box. The box is left out rather than
- * filled with stories the page already prints, and the lead takes the width the
- * box would have had -- `.reader .hero.single` (`src/reader-astra.css:324`),
- * measured here as the lead's own width, because a class with no rule behind it
- * would hide the box and still leave the column empty.
+ * Three stories: the lead is the first, the ruled grid carries the other two,
+ * and there is no fourth story to fill a third cell. Nothing is padded out with
+ * a story the page already prints, and the river is left out entirely because
+ * there is nothing left for it.
+ *
+ * "This week" is NOT left out, and the lead does not take the whole width. The
+ * approved design keeps the lead and the panel side by side in one row --
+ * `docs/design/handoff-2026-09-26/design/Front Daily.dc.html:34`, with the
+ * desktop columns `--leadCols: "minmax(0,1.7fr) minmax(0,1fr)"` at line 109 --
+ * and the panel's empty state is first-class (`src/components/paper/dates-panel
+ * .tsx:38-41`). So the claim measured here is the design's own row: the lead is
+ * a share of `.ledgerow`, never the whole of it (`src/reader-astra.css:2254`);
+ * the single-column collapse is under 900px (`:3211`), off this walk's 1280px.
  *
  * This runs last: it deletes the rest of the paper.
  */
-async function theBoxIsLeftOutWhenThePaperHasNothingLeft() {
+async function aThreeStoryPaperPrintsThreeCardsAndNoRiver() {
   const pg = await globalThis.__pgliteInstance__;
   await pg.query(
     `delete from articles where slug not in ('river-e2e-1','river-e2e-2','river-e2e-3')`,
   );
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { level: 2, name: "The latest" }).waitFor({ timeout: 30_000 });
+  await page.getByRole("heading", { level: 2, name: headline(1) }).waitFor({ timeout: 30_000 });
   const counts = await assertEveryStoryIsPrintedOnce(page, "three stories in");
   if (counts.cards !== 3)
     throw new Error(`the short front page prints ${counts.cards} cards, expected 3`);
-  if (await page.locator(".record, .record-list").count())
-    throw new Error("the empty box was rendered anyway");
+  if ((await page.locator(".storygrid .storycell").count()) !== 2)
+    throw new Error("the grid did not stop at the two stories the lead leaves");
   if (await page.locator(".river").count())
     throw new Error("a river with nothing left in it was rendered");
-  // `clientWidth` is the hero's inside width: the 1px border on each side would
-  // otherwise read as a 2px gap and the lead would look like it left a sliver.
-  const [hero, lead] = await page.evaluate(() => [
-    document.querySelector(".hero")?.clientWidth ?? 0,
+  await page.locator(".ledgerow > .datespanel .datesempty").waitFor({ timeout: 10_000 });
+  // `clientWidth` is the row's inside width: the 1px rules between the columns
+  // are the row's own background showing through a gap, not a border, so the
+  // two column widths already add up to it.
+  const [row, lead] = await page.evaluate(() => [
+    document.querySelector(".ledgerow")?.clientWidth ?? 0,
     document.querySelector(".lead")?.getBoundingClientRect().width ?? 0,
   ]);
-  if (Math.abs(hero - lead) > 1)
-    throw new Error(`the lead is ${Math.round(lead)}px inside a ${Math.round(hero)}px hero`);
-  step("with three stories the box is left out and the lead takes the whole width");
+  if (!(lead > 0 && lead < row - 40))
+    throw new Error(
+      `the lead is ${Math.round(lead)}px inside a ${Math.round(row)}px lead row: This week is not beside it`,
+    );
+  step("with three stories each is printed once, and the lead keeps its column beside This week");
 }
 
 async function main() {
@@ -585,7 +670,7 @@ async function main() {
     await theListIsReadableWithNoJavaScript(browser, page);
     await theButtonWorksWithoutAnObserver(browser, page);
     await theScreenshots(browser, page);
-    await theBoxIsLeftOutWhenThePaperHasNothingLeft();
+    await aThreeStoryPaperPrintsThreeCardsAndNoRiver();
   } catch (err) {
     await dump(err);
   }

@@ -317,6 +317,16 @@ test("every server function in src/ is gated, or is named on the public allowlis
     "src/lib/news/public.ts::listPublicCorrections",
     // Paginated reader archive: published rows in the public newsroom only.
     "src/lib/news/reader-public.ts::readerArticles",
+    // The two dated-item panels on the reader side: "This week" on the front
+    // page and "Dates in this story" on the article page. Both read
+    // `articles.provenance_json` on rows the query already restricts to
+    // `newsroom_id = DEFAULT_NEWSROOM_ID and status = 'published'`
+    // (`story-dates.server.ts:readSources`), so they expose nothing a reader
+    // could not read as the story itself. Neither takes a newsroom id from the
+    // client: `thisWeekDates` takes no input at all, and `articleDates` takes
+    // only a published story's slug.
+    "src/lib/news/story-dates-public.ts::thisWeekDates",
+    "src/lib/news/story-dates-public.ts::articleDates",
     // The paper's public identity (name/city/tagline/etc, CITY-SETUP slice
     // B) -- fetched once per page load, before any session exists, by every
     // reader-facing route via __root.tsx's beforeLoad. No newsroom-internal

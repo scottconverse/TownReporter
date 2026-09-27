@@ -121,6 +121,23 @@ const paperIdentityStub = inlineModule(`
 `);
 const sectionsStub = inlineModule(`export function usePublicSections() { return { sections: [] }; }`);
 const readerStub = inlineModule(`export function readMinutes() { return 3; }`);
+const storyDatesPublicStub = inlineModule(`
+  export async function articleDates() { return []; }
+  export async function thisWeekDates() { return []; }
+`);
+const storyDatesStub = inlineModule(`
+  export function storyDateRows(items) {
+    return (items ?? []).map((i) => ({ dow: "", day: "", what: i.what }));
+  }
+`);
+const datesPanelStub = inlineModule(`
+  import { createElement } from "react";
+  export function DatesPanel({ title }) { return createElement("aside", null, title); }
+`);
+const sectionTagStub = inlineModule(`
+  import { createElement } from "react";
+  export function SectionTag({ children }) { return createElement("span", null, children); }
+`);
 
 const routeImports = {
   ...pageImports,
@@ -134,7 +151,11 @@ const routeImports = {
   "@/components/provenance": provenanceStub,
   "@/components/view-beacon": beaconStub,
   "@/components/desk-chrome-utils": deskChromeUtilsStub,
+  "@/components/paper/dates-panel": datesPanelStub,
+  "@/components/paper/section-tag": sectionTagStub,
   "@/lib/news/public": publicStub,
+  "@/lib/news/story-dates-public": storyDatesPublicStub,
+  "@/lib/story-dates": storyDatesStub,
   "@/lib/paper": paperStub,
   "@/lib/paper-context-state": paperContextStub,
   "@/lib/paper-identity": paperIdentityStub,

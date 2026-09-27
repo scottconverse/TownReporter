@@ -11,6 +11,8 @@ import {
   type ReaderPage,
 } from "./reader-articles.ts";
 import type { ReaderStory } from "../reader.ts";
+import { readStoryArea } from "../story-area.ts";
+import { ensureStoryAreaSchema } from "./story-area.server.ts";
 
 /**
  * The public reader query, as a plain function so a `node --test` file can
@@ -26,6 +28,8 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
   if (!(await isOnboarded(DEFAULT_NEWSROOM_ID)))
     return { stories: [], total: 0, pageSize: PAGE_SIZE, hasMore: false, nextCursor: null };
   const sql = await getSql();
+  /* This read is the one that reads `articles.area`; see `story-area.server.ts`. */
+  await ensureStoryAreaSchema();
   const page = data.page ?? 1;
   const oldest = data.oldest ?? false;
   const topic = data.topic ? await resolveSectionKey(DEFAULT_NEWSROOM_ID, data.topic) : "";
@@ -57,6 +61,17 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     count is "how many this query still has", which is what tells the river
     whether to keep going and the archive how many pages it has.
   */
+  /*
+    The geography pill. `''` is "no pill pressed", which is the whole paper.
+
+    The case expression is `readStoryArea` written in SQL, deliberately the same
+    rule rather than a second one: a row whose stored value is null or is not one
+    of the four keys is the home town. Without the case, the Longmont pill would
+    drop every story printed before 0098 -- which is most of the paper -- and
+    "stories with no area count as the home town" is the owner's rule, not a
+    fallback.
+  */
+  const area = data.area ?? "";
   const where = () => sql<{
     count: string;
   }>`select count(*)::text as count from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
@@ -64,15 +79,17 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     and (${q}='' or headline ilike ${like} or dek ilike ${like} or (${q.length >= 3} and body ilike ${like}))
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))
-    and (${data.exclude === undefined} or id not in (select (jsonb_array_elements_text(${exclude}::jsonb))::int))`;
+    and (${data.exclude === undefined} or id not in (select (jsonb_array_elements_text(${exclude}::jsonb))::int))
+    and (${area}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) = ${area})`;
   const counts = await where();
   const rows =
-    await sql<ReaderStory & { published_at_text: string }>`select id,slug,headline,dek,body,topic,published_at,published_at::text as published_at_text from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
+    await sql<Omit<ReaderStory, "area"> & { area: string | null; published_at_text: string }>`select id,slug,headline,dek,body,topic,published_at,published_at::text as published_at_text,area from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
     and (${topic}='' or topic=${topic})
     and (${q}='' or headline ilike ${like} or dek ilike ${like} or (${q.length >= 3} and body ilike ${like}))
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))
     and (${data.exclude === undefined} or id not in (select (jsonb_array_elements_text(${exclude}::jsonb))::int))
+    and (${area}='' or (case when area in ('longmont','nearby','county','colorado') then area else 'longmont' end) = ${area})
     order by case when ${oldest} then published_at end asc, case when ${!oldest} then published_at end desc, id desc
     limit ${river ? batch + 1 : PAGE_SIZE} offset ${river ? 0 : (page - 1) * PAGE_SIZE}`;
   /*
@@ -95,6 +112,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
         body: stripReporterNotebook(u.body),
         topic: u.topic,
         published_at: row.published_at,
+        area: readStoryArea(row.area),
       };
     }),
     total,
