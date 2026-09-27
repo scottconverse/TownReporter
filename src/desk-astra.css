@@ -3310,6 +3310,52 @@
     white-space: nowrap;
   }
 }
+/*
+  BJ3 item 3: the kill pattern, under the watch row it belongs to.
+
+  `SourceKillPatternBody` (editor-dialog-bodies.ts) renders out of the modal's
+  own classes -- `.astra-msg`, `.astra-items`, `.astra-item-*` -- and every rule
+  for those is scoped to `.desk-ltr.astra-modal-layer` in `styles.css`, because
+  until now the panel was only ever mounted inside a dialog. On a page they
+  match nothing: the count would draw as a plain paragraph and the examples as
+  bare divs with no spacing at all. These rules are the page's half of the same
+  vocabulary, under the row rather than in a portal.
+
+  The examples are deliberately NOT the modal's 56px action rows: nothing here
+  is a control (the panel is read-only by design), so they are a quiet list of
+  headline-over-reason lines. Nothing draws a rule of its own -- the next row's
+  `border-top` still closes the block, which is why the panel only needs bottom
+  padding.
+*/
+.desk-ltr.astra .astra-kill { padding: 0 0 12px 2px; }
+.desk-ltr.astra .astra-kill .astra-msg {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 600;
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-kill .astra-msg.danger { color: var(--danger); }
+.desk-ltr.astra .astra-kill .astra-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.desk-ltr.astra .astra-kill .astra-item,
+.desk-ltr.astra .astra-kill .astra-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-kill .astra-item-label {
+  font-size: calc(0.875rem * var(--ts));
+  font-weight: 700;
+}
+.desk-ltr.astra .astra-kill .astra-item-note {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+  line-height: 1.4;
+}
 .desk-ltr.astra .astra-row.pubhead {
   grid-template-columns: 110px minmax(0, 1fr) 80px 150px 340px;
   padding: 10px 0;

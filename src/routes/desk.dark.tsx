@@ -66,7 +66,7 @@ import { takeDarkSeed } from "@/lib/news/dark-seed";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
-import { ModelPicker } from "@/components/model-picker";
+import { DarkFileDialog } from "@/components/dialogs/editor-dialogs";
 import { PageWatchPanel } from "@/components/page-watch-panel";
 import {
   darkModelChoice,
@@ -89,10 +89,19 @@ const OPEN_KEY = "townreporter.dark.openId";
 function DarkPage() {
   const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
-  const [paste, setPaste] = useState("");
+  /*
+    A hand-over the editor asked for on another screen -- an import's review
+    screen, a lead's "Send to Dark Desk" -- carried in `sessionStorage` because
+    a couple of long paragraphs cannot ride in a URL. It waits here until the
+    Start-a-file dialog opens with it (see the mount effect below) and is
+    cleared the moment the dialog closes, so a second visit to the desk does
+    not offer the same file twice.
+  */
+  const [seedFromImport, setSeedFromImport] = useState("");
+  /** The header's "+ Start a file": the drawn dialog, open or shut. */
+  const [startOpen, setStartOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
-  const [noticeAt, setNoticeAt] = useState<"paste" | "work">("work");
   const [openId, setOpenId] = useState<number | null>(null);
   const [fileFocusRequest, setFileFocusRequest] = useState<{ id: number } | null>(null);
   const [queued, setQueued] = useState<{
@@ -117,17 +126,11 @@ function DarkPage() {
     try {
       const raw = sessionStorage.getItem(OPEN_KEY);
       if (raw) setOpenId(Number(raw));
-      /*
-        A hypothesis the editor sent over from an import's review screen arrives
-        here in `sessionStorage`, for the same reason the import paste does
-        (`import-review.ts:38`): a couple of long paragraphs cannot ride in a
-        URL. `takeDarkSeed` reads it once and clears it, so this opens the start
-        box holding the lead and the next visit opens its own empty one -- the
-        file it describes has been started by then, and re-filling the box would
-        invite a second copy of it.
-      */
+      // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
+      // copy, so this holds the lead for the dialog and the next visit to the
+      // desk opens its own empty one.
       const seed = takeDarkSeed(sessionStorage);
-      if (seed) setPaste(seed);
+      if (seed) setSeedFromImport(seed);
     } catch {
       /* ignore */
     }
@@ -140,15 +143,16 @@ function DarkPage() {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }
 
-  function showPasteNotice(text: string | null, ok = false) {
+  /*
+    Where a notice shows. Before the Start-a-file dialog, this screen had two
+    boxes -- the paste panel above the split and the open file's workspace --
+    and a notice had to say which one it belonged to. Starting a file is the
+    dialog's own press now and reports its refusals inside itself, so the only
+    notices left are the file's, and there is one place to put them.
+  */
+  function showNotice(text: string | null, ok = false) {
     setNotice(text);
     setNoticeOk(ok);
-    setNoticeAt("paste");
-  }
-  function showWorkNotice(text: string | null, ok = false) {
-    setNotice(text);
-    setNoticeOk(ok);
-    setNoticeAt("work");
   }
 
   function rememberOpen(id: number | null) {
@@ -256,7 +260,7 @@ function DarkPage() {
     if (!briefWaiting || !bj) return;
     if (bj.status === "queued" || bj.status === "running") return;
     setBriefWaiting(false);
-    showWorkNotice(
+    showNotice(
       bj.status === "completed"
         ? "The brief is written."
         : `No brief: ${editorError(bj.error ?? "") || bj.error || "it did not finish."}`,
@@ -291,8 +295,27 @@ function DarkPage() {
     void qc.invalidateQueries({ queryKey: ["dark-runs"] });
   }, [openId, detailInvestigationId, currentDarkJob, qc]);
 
+  /*
+    The model the Start-a-file dialog was set to, for the first round only.
+
+    The dialog hands its pick back with the new id, and the round it starts is
+    issued in the same tick -- one render before `setModelChoice` could take
+    effect, so reading the state there would dig with the previous file's
+    model. Holding the pick in a ref and consuming it here is what makes the
+    dialog's pick the model that actually runs; later rounds ("Keep digging",
+    the picker under the file) read the state as before.
+  */
+  const firstRoundPick = useRef<StoryModelChoice | null>(null);
   const advance = useMutation({
-    mutationFn: (id: number) => continueInvestigation({ data: { id, modelChoice, modelEffort } }),
+    mutationFn: (id: number) => {
+      const picked = firstRoundPick.current;
+      firstRoundPick.current = null;
+      return continueInvestigation({
+        data: picked
+          ? { id, modelChoice: picked, modelEffort: defaultModelEffort(picked) }
+          : { id, modelChoice, modelEffort },
+      });
+    },
     onSuccess: (res) => {
       if (!res || res.ok !== true) {
         const raw = res && "error" in res ? String(res.error ?? "") : "Research failed";
@@ -311,7 +334,7 @@ function DarkPage() {
         */
         const isPreflightRefusal = Boolean(res && typeof res === "object" && "kind" in res);
         const msg = isPreflightRefusal ? raw : editorError(raw) || raw || "Research failed";
-        showWorkNotice(msg, false);
+        showNotice(msg, false);
         setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
         clearPhase();
         invalidate();
@@ -323,7 +346,7 @@ function DarkPage() {
     onError: (err) => {
       const msg =
         editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
-      showWorkNotice(msg, false);
+      showNotice(msg, false);
       setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
       clearPhase();
       invalidate();
@@ -375,33 +398,6 @@ function DarkPage() {
     },
   });
 
-  const openPaste = useMutation({
-    mutationFn: () => openDarkInvestigation({ data: { paste, title: paste.split("\n")[0] } }),
-    onMutate: () => {
-      setPendingCard("paste");
-      setCardError(null);
-      setCardPhase("Starting…");
-    },
-    onSuccess: (res) => {
-      if (!res?.ok || !res.investigationId) {
-        showPasteNotice("Could not open an investigation.");
-        clearPhase();
-        return;
-      }
-      setPaste("");
-      afterOpen(res.investigationId, "paste");
-    },
-    onError: (err) => {
-      // This box is capped at 200,000 characters by `darkOpenInput`, so the
-      // one refusal that gets here is the paste: name it.
-      showPasteNotice(
-        editorError(err instanceof Error ? err.message : "Could not start", "start that file") ??
-          "Could not start",
-      );
-      clearPhase();
-    },
-  });
-
   const find = useMutation({
     mutationFn: () => findSomethingToDigInto(),
     onMutate: () => {
@@ -410,14 +406,14 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
-        showWorkNotice("Nothing to open yet. Paste a lead to start.");
+        showNotice("Nothing to open yet. Paste a lead to start.");
         clearPhase();
         return;
       }
       afterOpen(res.investigationId, "find");
     },
     onError: (err) => {
-      showWorkNotice(editorError(err instanceof Error ? err.message : "Find failed"));
+      showNotice(editorError(err instanceof Error ? err.message : "Find failed"));
       clearPhase();
     },
   });
@@ -454,14 +450,14 @@ function DarkPage() {
     },
     onSuccess: (res, seed) => {
       if (!res?.ok || !res.investigationId) {
-        showWorkNotice("Could not follow that lead.");
+        showNotice("Could not follow that lead.");
         clearPhase();
         return;
       }
       afterOpen(res.investigationId, seed.title);
     },
     onError: (err) => {
-      showWorkNotice(
+      showNotice(
         editorError(err instanceof Error ? err.message : "Could not follow that lead"),
       );
       clearPhase();
@@ -472,11 +468,11 @@ function DarkPage() {
     mutationFn: (id: number) => parkInvestigation({ data: id }),
     onSuccess: () => {
       rememberOpen(null);
-      showWorkNotice("Set aside. Pull it back from that pile anytime.", true);
+      showNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not set that aside.");
+      showNotice(err instanceof Error ? err.message : "Could not set that aside.");
     },
   });
 
@@ -487,12 +483,12 @@ function DarkPage() {
         rememberOpen(res.investigationId);
         setNotice(null);
       } else {
-        showWorkNotice("Could not pull that back.");
+        showNotice("Could not pull that back.");
       }
       invalidate();
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not pull that back.");
+      showNotice(err instanceof Error ? err.message : "Could not pull that back.");
     },
   });
 
@@ -511,7 +507,7 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok) {
-        showWorkNotice("Reddit did not answer. Try again in a few minutes.");
+        showNotice("Reddit did not answer. Try again in a few minutes.");
         setRedditAnnounce("Reddit did not answer.");
         return;
       }
@@ -527,14 +523,14 @@ function DarkPage() {
       if (res.incomplete && res.reason) parts.push(res.reason);
       // A quiet subreddit is a successful read, not a failure — style it as
       // one. Only an actual incomplete/failed read gets the err styling.
-      showWorkNotice(parts.join(" "), !res.incomplete);
+      showNotice(parts.join(" "), !res.incomplete);
       setRedditResult(res);
       setRedditAnnounce(`Finished reading r/${res.subreddit}. ${redditResultHeadline(res)}.`);
       invalidate();
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : "Reddit did not answer.";
-      showWorkNotice(msg);
+      showNotice(msg);
       setRedditAnnounce(msg);
     },
   });
@@ -560,7 +556,7 @@ function DarkPage() {
       }
     },
     onError: (err) => {
-      showWorkNotice(err instanceof Error ? err.message : "Could not file that tip.");
+      showNotice(err instanceof Error ? err.message : "Could not file that tip.");
     },
   });
 
@@ -585,21 +581,21 @@ function DarkPage() {
     mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
     onSuccess: (res) => {
       if (!res?.ok) {
-        showWorkNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+        showNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
         return;
       }
       // Queued, not written: the brief is a job now, and the file view below
       // polls until it lands. See `startBriefJob` in src/lib/news/dark.ts.
       setBriefWaiting(true);
-      showWorkNotice("Writing the brief…", true);
+      showNotice("Writing the brief…", true);
       invalidate();
     },
     onError: (err) =>
-      showWorkNotice(err instanceof Error ? err.message : "Could not write the brief."),
+      showNotice(err instanceof Error ? err.message : "Could not write the brief."),
   });
 
   const starting =
-    openFromCard.isPending || openPaste.isPending || find.isPending || followLead.isPending;
+    openFromCard.isPending || find.isPending || followLead.isPending;
   const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
@@ -653,12 +649,11 @@ function DarkPage() {
     <DeskShell title="Dark Desk" kicker="Investigations · nothing here prints on its own" hideTitle>
       {/*
         The drawn header: kicker, title, the page's own action, rule. The
-        drawing's "+ Start a file" opens the Start-a-Dark-Desk-file dialog,
-        which is lane 1's work and not in this tree; the button opens the desk's
-        own way to start a file -- the paste box, in the panel directly below
-        the header -- and puts the cursor in it. The drawing puts no form in
-        the rail: the rail is the index of files, and a form at the top of it
-        pushed the first file out of the first screenful.
+        drawing's "+ Start a file" opens the Start-a-Dark-Desk-file dialog, and
+        so does this: the dialog owns the question, the tip, the ordinary
+        explanation, the Limits dial and the model, and it opens the file. The
+        drawing puts no form in the rail: the rail is the index of files, and a
+        form at the top of it pushed the first file out of the first screenful.
       */}
       <div className="astra-head">
         <div>
@@ -666,102 +661,46 @@ function DarkPage() {
           <h1 className="h1">Dark Desk</h1>
         </div>
         <div className="astra-head-acts">
-          <button
-            type="button"
-            className="btn solid"
-            onClick={() => {
-              const form = document.getElementById("astra-start-file");
-              form?.scrollIntoView({ block: "start" });
-              form?.querySelector("textarea")?.focus();
-              if (form instanceof HTMLDetailsElement) form.open = true;
-            }}
-          >
+          <button type="button" className="btn solid" onClick={() => setStartOpen(true)}>
             + Start a file
           </button>
         </div>
       </div>
+      {/*
+        Start a Dark Desk file, as drawn. The dialog opens the file and stops
+        there (`editor-dialogs.tsx`); this screen starts the first round from
+        `onOpened`, where the activity log and the stop are on screen.
+
+        `seed` is a hand-over from another screen -- an import's review screen,
+        a lead's "Send to Dark Desk" -- and is cleared on close so the same file
+        is not offered twice.
+      */}
+      <DarkFileDialog
+        open={startOpen}
+        seed={seedFromImport || undefined}
+        onClose={() => {
+          setStartOpen(false);
+          setSeedFromImport("");
+        }}
+        onOpened={(id, run) => {
+          // The editor's pick, for the first round: `afterOpen` issues the
+          // round in this same tick, before `setModelChoice` can be read.
+          const picked = run.modelChoice ? darkModelChoice(run.modelChoice) : null;
+          if (picked) {
+            firstRoundPick.current = picked;
+            setModelChoice(picked);
+            setModelEffort(defaultModelEffort(picked));
+          }
+          afterOpen(id);
+        }}
+      />
       {/*
         The drawing's grid: a 320px rail of piles on the left, the open file on
         the right (desk-astra.css `.astra-split-deep`). The rail is the desk's
         index -- every file, every unopened signal -- so an editor can switch
         files without leaving the one they are reading. Below 980px the two
         columns stack and the rail becomes the top of the page.
-
-        The rail is the piles and nothing else, as drawn: the paste box that
-        starts a file is in the panel above the split, which is where the
-        header's button opens.
       */}
-      {/*
-        Start a file, behind the header's button as drawn. A `details` panel for
-        now -- phase 4's `DarkFileDialog` replaces it when phase 4 merges -- and
-        it keeps every control the rail version had: the paste box, the model
-        and effort pickers, the start press and their notices. `id` and
-        `#dark-start-actions` are unchanged, so anything that reaches this form
-        still finds it. The drawing puts no form in the rail: the rail is the
-        index of files, and a form at the top of it pushed the first file off
-        the first screenful.
-      */}
-      <details className="file-form astra-panel astra-jump" id="astra-start-file">
-        <summary>Start a file</summary>
-        <form
-          className="tipbox top"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!paste.trim() || busyStart || digging) return;
-            openPaste.mutate();
-          }}
-        >
-          <p className="meta">
-            Paste a URL, a subject, a person, an LLC, a contract number, a rumor, or a chunk of
-            text. It opens a new file on the desk.
-          </p>
-          <textarea
-            rows={3}
-            value={paste}
-            onChange={(e) => setPaste(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                if (paste.trim() && !busyStart && !digging) openPaste.mutate();
-              }
-            }}
-            placeholder="https://…  ·  Costco rebate cap  ·  Front Range Civic Partners LLC"
-            aria-label="Tip, URL, or subject to investigate"
-          />
-          <div className="row-acts static" id="dark-start-actions">
-            {/*
-              The same picker the open file has, and the same state behind it:
-              the first round of a new file is a round like any other, and an
-              editor who has decided which model digs should not have to open
-              the file first to say so.
-            */}
-            <ModelPicker
-              scope="dark"
-              value={modelChoice}
-              onChange={(choice) => {
-                setModelChoice(choice);
-                setModelEffort(defaultModelEffort(choice));
-              }}
-              effort={modelEffort}
-              onEffortChange={setModelEffort}
-              disabled={busyStart || digging}
-              compact
-            />
-            <InkButton type="submit" disabled={busyStart || digging || !paste.trim()}>
-              {openPaste.isPending ? "Starting…" : "Start digging"}
-            </InkButton>
-          </div>
-          {notice && noticeAt === "paste" ? (
-            <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
-          ) : null}
-          {pendingCard === "paste" && cardPhase ? (
-            <p className="meta" aria-live="polite">
-              {cardPhase}
-            </p>
-          ) : null}
-        </form>
-      </details>
-
       <div className="astra-split-deep">
         <div className="astra-piles">
           <div className="astra-pile">
@@ -997,7 +936,7 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
-          {notice && noticeAt === "work" && openId == null && !redditResult ? (
+          {notice && openId == null && !redditResult ? (
             <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
           ) : null}
 
@@ -1034,7 +973,7 @@ function DarkPage() {
                   : null
               }
               phase={liveJobStage || cardPhase || liveLine}
-              notice={noticeAt === "work" ? notice : null}
+              notice={notice}
               noticeOk={noticeOk}
               queuedLead={queued?.invId === openId ? queued.leadId : null}
               queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
@@ -1054,12 +993,6 @@ function DarkPage() {
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
               modelChoice={modelChoice}
-              onModelChoice={(choice) => {
-                setModelChoice(choice);
-                setModelEffort(defaultModelEffort(choice));
-              }}
-              modelEffort={modelEffort}
-              onModelEffort={setModelEffort}
             />
           ) : null}
 
@@ -1071,7 +1004,16 @@ function DarkPage() {
             walk that checks "How hard to dig" is on this screen. It is not in
             the rail -- the rail is 320px and this panel is a form.
           */}
-          <DarkDialsPanel />
+          <DarkDialsPanel
+            modelChoice={modelChoice}
+            onModelChoice={(choice) => {
+              setModelChoice(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }}
+            modelEffort={modelEffort}
+            onModelEffort={setModelEffort}
+            modelDisabled={digging || busyStart}
+          />
         </div>
       </div>
     </DeskShell>
@@ -1120,7 +1062,7 @@ function DeskFileCard({
         </span>
       </button>
       {/*
-        Keep digging and Set aside keep the behaviour they had on the old card,
+        Keep digging and Set aside keep the behavior they had on the old card,
         but move under More: the drawing's rail row carries one action, and the
         rail is an index, not a workbench. Neither act is lost -- both are one
         click away, and Keep digging is also on the open file's own Decide
@@ -1419,9 +1361,6 @@ function InvestigationWorkspace({
   onWriteBrief,
   briefPending,
   modelChoice,
-  onModelChoice,
-  modelEffort,
-  onModelEffort,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -1446,10 +1385,12 @@ function InvestigationWorkspace({
   onFollow: (seed: { paste: string; title: string }) => void;
   onWriteBrief: () => void;
   briefPending: boolean;
+  /*
+    The chosen model, read-only here: this component prints it (the file's own
+    line, the PDF reader's "Uses …"), while the picker that sets it lives with
+    the dials in `DarkDialsPanel`. The effort is not read here at all.
+  */
   modelChoice: StoryModelChoice;
-  onModelChoice: (value: StoryModelChoice) => void;
-  modelEffort: ModelEffort | null;
-  onModelEffort: (value: ModelEffort | null) => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
@@ -1862,22 +1803,13 @@ function InvestigationWorkspace({
           <p className="astra-label">Decide</p>
           <p className="astra-note">It digs; it never prints.</p>
         </div>
-        <div className="row-acts static">
-          {/*
-            The picker sits next to the button that spends, not in a settings
-            page: the editor decides which model digs at the moment they press
-            Keep digging, the same way they do on a Story draft.
-          */}
-          <ModelPicker
-            scope="dark"
-            value={modelChoice}
-            onChange={onModelChoice}
-            effort={modelEffort}
-            onEffortChange={onModelEffort}
-            disabled={keepDisabled}
-            compact
-          />
-        </div>
+        {/*
+          The drawing's Decide is the five verbs and the sentence under them.
+          Which model digs is a dial, not a verb, and it lives with the other
+          dials in "How hard to dig" below the file -- see the panel's own
+          comment. Nothing became unreachable: the state behind it is the same
+          one this route has always held, and the picker writes it from there.
+        */}
         <div className="astra-panel-acts">
           <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
             {digging ? "Reading…" : "Keep digging"}

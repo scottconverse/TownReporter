@@ -12,6 +12,7 @@
  */
 import { parseSourceLines, type ParsedSourceLine } from "./source-lines.ts";
 import { sourceIdentity } from "./url-guard.ts";
+import { isBadSourceReason } from "./kill-reasons.ts";
 
 /* ------------------------------------------------------------------ sources -- */
 
@@ -381,14 +382,113 @@ export function parseScore(text: string): { score: number; reason: string } | nu
  */
 export function sourceUrlsContain(sourceUrlsJson: string | null | undefined, identity: string | null): boolean {
   if (!identity) return false;
+  return sourceIdentitiesIn(sourceUrlsJson)?.has(identity) ?? false;
+}
+
+/**
+ * Every identity in a lead's `source_urls`, parsed once.
+ *
+ * A malformed, absent or non-array value, and any element that is not a string
+ * or has no identity, are simply not in the set -- "no evidence of a kill",
+ * never a throw. This is the one place the JSON is read, so the single-row test
+ * above and the whole-list count below cannot disagree about what the column
+ * means.
+ */
+function sourceIdentitiesIn(sourceUrlsJson: string | null | undefined): Set<string> | null {
   const raw = String(sourceUrlsJson ?? "").trim();
-  if (!raw) return false;
+  if (!raw) return null;
   let urls: unknown;
   try {
     urls = JSON.parse(raw);
   } catch {
-    return false;
+    return null;
   }
-  if (!Array.isArray(urls)) return false;
-  return urls.some((value) => typeof value === "string" && sourceIdentity(value) === identity);
+  if (!Array.isArray(urls)) return null;
+  const out = new Set<string>();
+  for (const value of urls) {
+    if (typeof value !== "string") continue;
+    const identity = sourceIdentity(value);
+    if (identity) out.add(identity);
+  }
+  return out;
+}
+
+/**
+ * The same count as `performSourceKillPattern`, for many sources at once.
+ *
+ * WHY THIS EXISTS. The watch list shows a kill pattern under a row only when
+ * that row has one, and the panel is what counts: mounting it to find out would
+ * put "No leads killed from this source yet." under every row of the list, grow
+ * every row by a line, and still cost one read per row. So the screen computes
+ * the count first, from one read it already needs, and mounts the panel behind
+ * the answer.
+ *
+ * IT AGREES WITH THE PANEL BY CONSTRUCTION, not by a second rule: same
+ * `sourceIdentity` identity, same `sourceUrlsContain` linkage between a lead
+ * and a source, same `isBadSourceReason` reason test, and the same window --
+ * the newest `limit` killed leads, ordered here exactly as
+ * `performSourceKillPattern` orders them in SQL (`killed_at` desc, nulls last,
+ * then `id` desc) rather than trusting the caller's order, because `listLeads`
+ * sorts by batch and score and would otherwise cut the 500 at a different
+ * place. A gate that disagreed with the thing it gates would hide a real
+ * pattern, which is the failure this whole feature is meant to catch. The one
+ * thing it can do that the panel cannot is be wrong about a *stale* count: the
+ * gate is drawn from whatever the screen read, the panel re-reads on mount.
+ *
+ * Rows are keyed by source id and hold both drawn numbers, because
+ * `killPatternLine` prints both and a source with nine kills, none of them its
+ * fault, is a source to keep. A source with no kill from it is absent from the
+ * map rather than present with a zero, which is what makes the caller's
+ * `counts.get(id)` a gate the panel cannot contradict by agreeing.
+ *
+ * THE WORK IS ONE PARSE PER LEAD, not one per lead-per-source. The obvious
+ * shape -- for each source, filter the window through `sourceUrlsContain` --
+ * re-parses the same 500 JSON arrays once per row of the watch list, which at a
+ * few hundred rows is a few hundred thousand parses on every render of the
+ * screen. So each window row's identities are parsed once and matched against
+ * the sources by identity; a row can still count for more than one source,
+ * exactly as it did before, when two watch rows are the same page.
+ */
+export function badSourceKillsBySource(
+  sources: readonly { id: number; url: string }[],
+  killed: readonly {
+    id: number;
+    killed_at?: string | null;
+    kill_reason?: string | null;
+    source_urls?: string | null;
+  }[],
+  limit = 500,
+): Map<number, { badSource: number; killedFromSource: number }> {
+  const window = [...killed]
+    .sort((a, b) => {
+      const at = a.killed_at ?? "";
+      const bt = b.killed_at ?? "";
+      if (at !== bt) return at < bt ? 1 : -1;
+      return b.id - a.id;
+    })
+    .slice(0, Math.max(0, limit));
+  const counts = new Map<number, { badSource: number; killedFromSource: number }>();
+  const watched = new Map<string, number[]>();
+  for (const source of sources) {
+    const identity = sourceIdentity(source.url);
+    if (!identity) continue;
+    const ids = watched.get(identity);
+    if (ids) ids.push(source.id);
+    else watched.set(identity, [source.id]);
+  }
+  if (!watched.size) return counts;
+  for (const row of window) {
+    const identities = sourceIdentitiesIn(row.source_urls);
+    if (!identities) continue;
+    const bad = isBadSourceReason(row.kill_reason);
+    for (const identity of identities) {
+      for (const id of watched.get(identity) ?? []) {
+        const at = counts.get(id) ?? { badSource: 0, killedFromSource: 0 };
+        at.killedFromSource += 1;
+        if (bad) at.badSource += 1;
+        counts.set(id, at);
+      }
+    }
+  }
+  return counts;
 }

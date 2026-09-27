@@ -1,24 +1,23 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
+import { Fragment, useMemo, useState } from "react";
+import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
-  addSource,
-  addSourcesBulk,
+  listLeads,
   listScans,
   listSources,
   reviewSuggestedSources,
   runScan,
   setSourceStatus,
 } from "@/lib/news/desk";
+import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import {
   editorActionError,
   editorFetchError,
-  kindFromSourceUrl,
   scanCountsLine,
   suggestedOriginLine,
-  tierFromKind,
 } from "@/lib/news/desk-copy";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -47,7 +46,6 @@ function SourcesPage() {
   const search = Route.useSearch();
   const [sourceTab, setSourceTab] = useState<string>(search.tab ?? "accepted");
   const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
   const {
     data: sources = [],
     isPending,
@@ -59,39 +57,41 @@ function SourcesPage() {
     queryKey: ["sources"],
     queryFn: () => listSources(),
   });
-  const [url, setUrl] = useState("");
-  const [title, setTitle] = useState("");
-  const [bulk, setBulk] = useState("");
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [addedId, setAddedId] = useState<number | null>(null);
   /*
-    The add panel's two doors. The drawing puts a single "+ Add a source" in
-    the header and one dialog behind it, whose second tab is the bulk import
-    ("+ Add a source opens the add-source dialog, which includes bulk import",
-    README 337). Phase 4's AddSourcesDialog replaces this panel on merge; until
-    then the two tabs are the same two forms that used to sit open on the page.
+    The row the dialog just added, which is drawn with the tint.
+
+    `AddSourcesDialog` reports what it did in a sentence, not in an id: it adds
+    through the same server function this screen would have called and never
+    hands the new row back. So the tint is keyed on the watch list's own
+    high-water mark -- the largest id on screen when the dialog said it had
+    added -- rather than on an id the dialog cannot give. A newly saved source
+    is minted with a higher id than every row already drawn, so the tint lands
+    on the new row and on nothing else, and the next add moves the mark.
   */
-  const [addTab, setAddTab] = useState<"one" | "file">("one");
+  const [addedFloor, setAddedFloor] = useState<number | null>(null);
+  /** The header's "+ Add a source" dialog (BJ3 item 3), open or shut. */
+  const [addOpen, setAddOpen] = useState(false);
   /*
-    Which sections a source joins, chosen here at the moment the source is
-    added or accepted.
+    Which sections a source joins, chosen here at the moment a source is
+    *accepted*.
 
     Assigning a source to a section is a `SectionConfig` write, and
     `applySections` refuses anyone but the owner ("Only the owner can configure
     newspaper sections.") -- so this chooser is shown only when that same
-    server function says `canEdit`. Adding and accepting a source stay
-    editor-level, exactly as they were; nothing about who may do what changed,
-    only where the owner can do it from.
+    server function says `canEdit`. Accepting a source stays editor-level,
+    exactly as it was; nothing about who may do what changed, only where the
+    owner can do it from. Filing a source under a section at the moment it is
+    *added* is on Server -> Sections (see the note at the dialog's mount).
   */
   const sectionsQuery = useQuery({
     queryKey: ["editor-sections"],
     queryFn: () => editorSections(),
   });
-  const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const reportingSections = (sectionsQuery.data?.sections ?? []).filter(
     (s) => !["opinion", "about"].includes(s.key) && !s.replacementKey,
   );
-  const [assignKeys, setAssignKeys] = useState<string[]>([]);
+  const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
   // The search box the design draws beside the group filters. Client-side over
   // the rows already loaded: the watch list is a few hundred rows at most and
@@ -176,103 +176,6 @@ function SourcesPage() {
     if (result.ok) await qc.invalidateQueries({ queryKey: ["editor-sections"] });
     return result;
   };
-  const add = useMutation({
-    mutationFn: () =>
-      addSource({
-        data: {
-          url,
-          title,
-          kind: kindFromSourceUrl(url),
-          tier: tierFromKind(kindFromSourceUrl(url)),
-        },
-      }),
-    onSuccess: (res) => {
-      if (!res.ok) {
-        setNotice({ kind: "err", text: res.error });
-        return;
-      }
-      setUrl("");
-      setTitle("");
-      setAddedId(res.source.id);
-      setSourceTab("accepted");
-      const keys = assignKeys;
-      setNotice({
-        kind: "ok",
-        text: `On watch: ${res.source.title} — ${res.source.url}`,
-      });
-      qc.setQueryData(["sources"], (old: SourceRow[] | undefined) => {
-        if (!old) return [res.source];
-        return [
-          res.source,
-          ...old.filter((s) => s.id !== res.source.id && s.url !== res.source.url),
-        ];
-      });
-      void qc.invalidateQueries({ queryKey: ["sources"] });
-      // The section assignment is a second write, so it can fail on its own
-      // (a stale revision, an expired session). Say which half landed.
-      void assignSourceToSections(res.source.id, keys).then((assignment) => {
-        if (!assignment.ok) {
-          setNotice({
-            kind: "err",
-            text: `On watch: ${res.source.title} — ${res.source.url}. The section assignment failed: ${assignment.error}`,
-          });
-          return;
-        }
-        if (keys.length) {
-          setAssignKeys([]);
-          setNotice({
-            kind: "ok",
-            text: `On watch: ${res.source.title} — ${res.source.url}. Assigned to ${sectionNames(keys)}.`,
-          });
-        }
-      });
-      requestAnimationFrame(() => {
-        document.getElementById("on-watch")?.scrollIntoView({ block: "start", behavior: "smooth" });
-      });
-    },
-    onError: (err) => {
-      // The URL and Name boxes carry no `maxLength` and `addSourceInput` caps
-      // both, so a long paste reached the notice bar as the issues array.
-      const raw = err instanceof Error ? err.message : "";
-      setNotice({
-        kind: "err",
-        text:
-          raw === "Unauthorized"
-            ? "Session expired. Sign in again, then retry."
-            : editorActionError(raw, "add that source") ?? "Could not add that source.",
-      });
-    },
-  });
-  const addBulk = useMutation({
-    mutationFn: (text: string) => addSourcesBulk({ data: { text } }),
-    onSuccess: (res) => {
-      if (!res.ok) {
-        setNotice({ kind: "err", text: res.error });
-        return;
-      }
-      setBulk("");
-      setSourceTab("accepted");
-      const t = res.byTier;
-      setNotice({
-        kind: "ok",
-        text: `Added ${res.added} sources (A ${t.A} · B ${t.B} · C ${t.C}). Tier C is scanned as a discovery clue, never treated as fact.`,
-      });
-      void qc.invalidateQueries({ queryKey: ["sources"] });
-    },
-    onError: (err) => {
-      // Same boundary on the registry box: `bulkSourceInput.text` caps at
-      // 200,000 and the textarea is unbounded (a chosen file is read whole
-      // into it), so a big paste or file dumped the schema.
-      const raw = err instanceof Error ? err.message : "";
-      setNotice({
-        kind: "err",
-        text:
-          raw === "Unauthorized"
-            ? "Session expired. Sign in again, then retry."
-            : editorActionError(raw, "read that registry") ?? "Bulk add failed.",
-      });
-    },
-  });
   /** Tick or untick one reporting section for one row's pending assignment. */
   const toggleRowKey = (rowId: number, key: string) =>
     setRowKeys((map) => {
@@ -351,35 +254,63 @@ function SourcesPage() {
   */
   const onWatch = (s: SourceRow) => s.status === "accepted" || s.status === "paused";
   /*
+    Which watch rows have a kill pattern under them (BJ3 item 3).
+
+    The panel is what counts, and mounting it to find out would put "No leads
+    killed from this source yet." under every row, add a line to every row, and
+    cost one read per row. So the count is computed here from one read of the
+    leads the screen did not otherwise need -- `listLeads` is the Queue's own
+    reader, with no validator, so this adds no server function and no input
+    contract -- and only rows with a count above zero mount the panel, which
+    then re-reads for itself and prints both numbers.
+
+    WHAT THIS COSTS: one extra `listLeads` query per visit to this screen, when
+    at least one row is on watch, carrying the whole lead row (the Queue's
+    columns, including the duplicate-comparison block). It is gated on
+    `enabled` so an empty watch list pays nothing, and it is not invalidated
+    separately -- `["leads"]` is the key the scan runner already invalidates.
+
+    WHAT IT CANNOT DO: `badSourceKillsBySource` applies the same identity,
+    linkage, reason test and 500-kill window as the panel, so the two agree
+    about the same rows -- see its own note. The gate can still be *stale*
+    against the panel's fresh read, and the panel wins, because the panel is
+    what prints.
+  */
+  const killPatternWanted = sources.some(onWatch);
+  const leadsForKills = useQuery({
+    queryKey: ["leads"],
+    queryFn: () => listLeads(),
+    enabled: killPatternWanted,
+  });
+  const killCounts = useMemo(
+    () =>
+      badSourceKillsBySource(
+        // Recomputed from `sources` inside the memo rather than from the
+        // filtered `watchRows`, because that array is new on every render and
+        // would make the memo recompute every render.
+        sources
+          .filter((s) => s.status === "accepted" || s.status === "paused")
+          .map((s) => ({ id: s.id, url: s.url })),
+        leadsForKills.data ?? [],
+      ),
+    [sources, leadsForKills.data],
+  );
+  /*
     How many pages the scanner is allowed to read. This is the "files up to"
     the design puts in the Daily scan panel, and it is the same number the Scan
     screen computes for its own run. Paused rows are deliberately not in it.
   */
   const watch = sources.filter((s) => s.status === "accepted").length;
 
-  async function onPickFile(file: File | undefined) {
-    if (!file) return;
-    const text = await file.text();
-    setBulk(text);
-    setNotice(null);
-    addBulk.mutate(text);
-  }
-
   return (
-    <DeskShell
-      title="Sources"
-      kicker="What the desk watches, and whether it could check"
-      hideTitle
-    >
+    <DeskShell title="Sources" kicker="What the desk watches, and whether it could check" hideTitle>
       {/*
         The drawn header: kicker, title, the page's own action, rule. The
-        drawing puts "+ Add a source" on the title line; this build has no
-        add-source dialog yet (the dialogs are lane 1's, and Desk Dialogs is not
-        in the tree), so the button opens the panel that adds one today -- the
-        same form the walks press, reached from the header instead. The plus is
-        a literal character here: the walks match the panel's own summary by its
-        exact text "Add a source", and the ::before that draws the panel's plus
-        is CSS, so only this button reads "+ Add a source" to a text match.
+        drawing puts "+ Add a source" on the title line, and phase 4's
+        `AddSourcesDialog` is what it opens -- one control here and one dialog
+        behind it, which is what the drawing draws. The plus is a literal
+        character in the label: the walks match this button by its exact text,
+        and the dialog's own headings carry no plus to confuse a text match.
 
         The title is the drawing's "Sources & scan" (BJ2 item 4). Two walks
         moved with it -- sources-desk-e2e.mjs and scan-desk-e2e.mjs wait on a
@@ -392,18 +323,7 @@ function SourcesPage() {
           <h1 className="h1">Sources &amp; scan</h1>
         </div>
         <div className="astra-head-acts">
-          <button
-            type="button"
-            className="btn solid"
-            onClick={() => {
-              const panel = document.getElementById("astra-add-source");
-              if (panel instanceof HTMLDetailsElement) {
-                panel.open = true;
-                panel.scrollIntoView({ block: "start" });
-                panel.querySelector("summary")?.focus();
-              }
-            }}
-          >
+          <button type="button" className="btn solid" onClick={() => setAddOpen(true)}>
             + Add a source
           </button>
         </div>
@@ -413,146 +333,42 @@ function SourcesPage() {
         the machine proposes.
       </p>
       {/*
-        The add panel, behind the header's "+ Add a source" (BJ2 item 4).
+        The add dialog, behind the header's "+ Add a source" (BJ3 item 3).
 
-        The drawing draws one control there and one dialog behind it, not two
-        open panels above the list. Phase 4's AddSourcesDialog replaces this
-        panel on merge, and the registry import that used to be its own top
-        disclosure is now this panel's second tab -- which is where the README
-        says the bulk import lives ("includes bulk import", line 337).
+        Phase 4's `AddSourcesDialog` replaced BJ2's temporary
+        `#astra-add-source` panel when `origin/main` merged. Its four tabs are
+        the behaviors the panel held and two it did not: one source, a pasted
+        list, a file, and "ask the AI to find sources" -- so the panel's
+        "Upload a file" and its bulk registry import are both still here, as
+        the README's line 337 says ("includes bulk import"), and the find
+        path landed with them.
 
-        Two things are deliberate. The panel keeps `.astra-source-add` and the
-        id `astra-add-source`, because that is what the header button above
-        reaches for. And it is closed on load and drawn only when open
-        (`desk-astra.css`: `main > details.astra-source-add:not([open])` is
-        `display: none`), so the resting page shows the list and nothing else --
-        the walks open it through the header button
-        (sources-desk-e2e, scan-desk-e2e, sections-source-add-e2e).
+        `onDone` is why this is mounted with a callback rather than as a bare
+        trigger: the screen prints the dialog's own sentence in its notice bar
+        (the walks wait on it) and re-reads the watch list, because the add
+        happened inside the dialog.
+
+        One behavior the panel had is NOT here: the owner-only "Assign to
+        sections" picker on the single-source form. Filing a brand-new source
+        under a section is reachable without leaving a page at Server ->
+        Sections, which is the surface `sections-source-add-e2e.mjs` drives
+        ("adding a source from inside a section calls the Sources page's own
+        server function"), and it is where the owner's report asked for it.
+        Adding a fourth control to the drawn watch-list row to keep the old
+        one would have cost the row its single line (BJ3 item 1).
       */}
-      <details className="file-form astra-source-add astra-panel astra-jump" id="astra-add-source">
-        <summary>Add a source</summary>
-        <div className="astra-seg" role="group" aria-label="How to add sources">
-          <button
-            type="button"
-            className={"astra-seg-opt" + (addTab === "one" ? " on" : "")}
-            aria-pressed={addTab === "one"}
-            onClick={() => setAddTab("one")}
-          >
-            One source
-          </button>
-          <button
-            type="button"
-            className={"astra-seg-opt" + (addTab === "file" ? " on" : "")}
-            aria-pressed={addTab === "file"}
-            onClick={() => setAddTab("file")}
-          >
-            Upload a file
-          </button>
-        </div>
-        {addTab === "file" ? (
-          /* The registry import, as the dialog's second tab: paste it, or
-             choose a file, which is read into the same box and added. */
-          <div className="src-bulk">
-            <p className="meta">
-              Paste a registry or choose a .txt, .md or .csv file. TIER A/B/C headers are
-              preserved. Selecting a file adds its sources to the watch list.
-            </p>
-            <textarea
-              rows={5}
-              className="bulk"
-              aria-label="Paste source registry"
-              value={bulk}
-              onChange={(e) => setBulk(e.target.value)}
-              placeholder={
-                "TIER A — OFFICIAL RECORD\n* City Council: https://www.longmontcolorado.gov/…\nTIER B — JOURNALISM\n* Times-Call: https://www.timescall.com/"
-              }
-            />
-            <div className="row-acts static">
-              <InkButton
-                disabled={addBulk.isPending || !bulk.trim()}
-                onClick={() => addBulk.mutate(bulk)}
-              >
-                {addBulk.isPending ? "Adding list…" : "Add list"}
-              </InkButton>
-              <InkButton
-                tone="ghost"
-                disabled={addBulk.isPending}
-                onClick={() => fileRef.current?.click()}
-              >
-                Choose registry file
-              </InkButton>
-              <input
-                ref={fileRef}
-                type="file"
-                aria-label="Choose source registry file"
-                accept=".txt,.csv,.md,.tsv,text/plain,text/csv,text/markdown"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  void onPickFile(file);
-                }}
-              />
-            </div>
-          </div>
-        ) : (
-        <form
-          className="src-add"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setNotice(null);
-            add.mutate();
-          }}
-        >
-          <Field label="URL">
-            <input
-              type="text"
-              inputMode="url"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://www.longmontcolorado.gov/…"
-              required
-            />
-          </Field>
-          <Field label="Name">
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="City Council packets"
-            />
-          </Field>
-          <InkButton type="submit" disabled={add.isPending || !url.trim()}>
-            {add.isPending ? "Adding…" : "Add source"}
-          </InkButton>
-          {/* The form is a three-column grid, so this spans it rather than
-              becoming a fourth column. */}
-          <div className="[grid-column:1/-1]">
-            {canAssignSections ? (
-              <SectionPicker
-                legend="Assign to sections (optional)"
-                hint="Tick the newspaper sections this source should feed. Saved with the source, in the same step."
-                options={reportingSections}
-                picked={assignKeys}
-                disabled={add.isPending}
-                onToggle={(key) =>
-                  setAssignKeys((keys) =>
-                    keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key],
-                  )
-                }
-              />
-            ) : sectionsQuery.isSuccess ? (
-              <p className="meta">
-                Only the owner can file a source under a section. Adding and accepting are yours to
-                do; an owner can tick the sections here, or on Server → Sections.
-              </p>
-            ) : null}
-          </div>
-        </form>
-        )}
-      </details>
+      <AddSourcesDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onDone={(note) => {
+          setNotice({ kind: "ok", text: note });
+          setAddedFloor(sources.reduce((high, s) => Math.max(high, s.id), 0));
+          void qc.invalidateQueries({ queryKey: ["sources"] });
+          requestAnimationFrame(() => {
+            document.getElementById("on-watch")?.scrollIntoView({ block: "start", behavior: "smooth" });
+          });
+        }}
+      />
       {notice ? (
         <p className={"note" + (notice.kind === "err" ? " err" : "")}>{notice.text}</p>
       ) : null}
@@ -581,12 +397,12 @@ function SourcesPage() {
                   aria-pressed={sourceTab === g.k}
                   onClick={() => setSourceTab(g.k)}
                 >
-                  {g.k === "accepted"
-                    ? "On watch"
-                    : g.k === "proposed"
-                      ? "Suggested"
-                      : "Rejected"}{" · "}
-                  {sources.filter((s) => (g.k === "accepted" ? onWatch(s) : s.status === g.k)).length}
+                  {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Suggested" : "Rejected"}
+                  {" · "}
+                  {
+                    sources.filter((s) => (g.k === "accepted" ? onWatch(s) : s.status === g.k))
+                      .length
+                  }
                 </button>
               ))}
               {/*
@@ -646,7 +462,11 @@ function SourcesPage() {
               );
             });
           return (
-            <section key={g.k} id={g.k === "accepted" ? "on-watch" : "suggested"} className="src-sec">
+                <section
+                  key={g.k}
+                  id={g.k === "accepted" ? "on-watch" : "suggested"}
+                  className="src-sec"
+                >
               <SecHead
                 title={sourceTab === "unchecked" ? "Could not check" : g.title}
                 count={rows.length}
@@ -668,11 +488,16 @@ function SourcesPage() {
                 /* The one list built for volume: 175 rows were waiting when
                    this was written, so it carries a select-all, a per-press
                    Saving/Saved/Failed line, and one transaction per press. */
-                <SuggestedSources rows={rows} canAssign={canAssignSections} options={reportingSections} />
+                    <SuggestedSources
+                      rows={rows}
+                      canAssign={canAssignSections}
+                      options={reportingSections}
+                    />
               ) : g.k === "accepted" ? (
                 <WatchRows
                   rows={rows}
-                  addedId={addedId}
+                      justAddedSince={addedFloor}
+                      killCounts={killCounts}
                   checkingId={checkOne.isPending ? (checkOne.variables ?? null) : null}
                   onCheck={(id) => checkOne.mutate(id)}
                   onStatus={(id, status) => setStatus.mutate({ id, status })}
@@ -681,7 +506,7 @@ function SourcesPage() {
                 <SourceTable
                   rows={rows}
                   acts={g.acts}
-                  addedId={addedId}
+                      justAddedSince={addedFloor}
                   onStatus={(id, status) => setStatus.mutate({ id, status })}
                   /* Only where an Accept button sits, because only there can
                      the tick be saved in the same step. */
@@ -839,14 +664,24 @@ function SectionPicker({
 }
 
 /** Which filter bucket a suggestion falls in; anything unknown is "unrecorded". */
-function suggesterKey(by: string | null | undefined): "scan" | "research" | "dark" | "editor" | "unrecorded" {
+function suggesterKey(
+  by: string | null | undefined,
+): "scan" | "research" | "dark" | "editor" | "unrecorded" {
   return by === "scan" || by === "research" || by === "dark" || by === "editor" ? by : "unrecorded";
 }
 
-const SUGGESTER_FILTERS: { k: "all" | ReturnType<typeof suggesterKey>; label: string; none: string }[] = [
+const SUGGESTER_FILTERS: {
+  k: "all" | ReturnType<typeof suggesterKey>;
+  label: string;
+  none: string;
+}[] = [
   { k: "all", label: "Anyone", none: "Nothing is waiting for review." },
   { k: "scan", label: "The scan", none: "No suggestions from the scan are waiting." },
-  { k: "research", label: "The research pass", none: "No suggestions from the research pass are waiting." },
+  {
+    k: "research",
+    label: "The research pass",
+    none: "No suggestions from the research pass are waiting.",
+  },
   { k: "dark", label: "The Dark Desk", none: "No suggestions from the Dark Desk are waiting." },
   {
     k: "unrecorded",
@@ -931,7 +766,8 @@ function SuggestedSources({
         return;
       }
       const n = input.ids.length;
-      const one = n === 1 ? (rows.find((r) => r.id === input.ids[0])?.title ?? "That suggestion") : null;
+      const one =
+        n === 1 ? (rows.find((r) => r.id === input.ids[0])?.title ?? "That suggestion") : null;
       const noteSaved = input.note ? " The note was saved with it." : "";
       const verb = input.decision === "accepted" ? "Accepted" : "Rejected";
       const what = one ? `"${one}"` : `${n} suggestions`;
@@ -1025,7 +861,9 @@ function SuggestedSources({
       <div className="filters" aria-label="Who suggested these sources">
         {SUGGESTER_FILTERS.map((f) => {
           const count =
-            f.k === "all" ? rows.length : rows.filter((r) => suggesterKey(r.proposed_by) === f.k).length;
+            f.k === "all"
+              ? rows.length
+              : rows.filter((r) => suggesterKey(r.proposed_by) === f.k).length;
           return (
             <button
               key={f.k}
@@ -1145,7 +983,14 @@ function SuggestedSources({
                       <InkButton
                         tone="quiet"
                         disabled={review.isPending}
-                        onClick={() => decide([s.id], "accepted", canAssign ? picked || undefined : undefined, noteFor(s))}
+                        onClick={() =>
+                          decide(
+                            [s.id],
+                            "accepted",
+                            canAssign ? picked || undefined : undefined,
+                            noteFor(s),
+                          )
+                        }
                       >
                         {canAssign && picked ? `Accept to ${nameOf(picked)}` : "Accept"}
                       </InkButton>
@@ -1200,13 +1045,20 @@ function hostLabel(url: string): string {
  */
 function WatchRows({
   rows,
-  addedId,
+  justAddedSince,
+  killCounts,
   checkingId,
   onCheck,
   onStatus,
 }: {
   rows: SourceRow[];
-  addedId?: number | null;
+  /** The watch list's high-water mark when the add dialog last reported a save. */
+  justAddedSince?: number | null;
+  /**
+   * The rows with a kill pattern, from `badSourceKillsBySource`. A row absent
+   * from the map has no kill from it and mounts no panel.
+   */
+  killCounts?: Map<number, { badSource: number; killedFromSource: number }>;
   /** The row a check is in flight for, so only that row says "Checking…". */
   checkingId: number | null;
   onCheck: (id: number) => void;
@@ -1238,47 +1090,51 @@ function WatchRows({
                 ? `Checked ${formatDateTime(s.last_fetched_at)}`
                 : "Added, not fetched yet";
         const checking = checkingId === s.id;
+        const kills = killCounts?.get(s.id);
         return (
-          <div
-            key={s.id}
-            className={"astra-row src" + (addedId === s.id ? " just-added" : "")}
-          >
-            <div className="astra-cell src-name">
-              <span className="astra-row-t">{s.title}</span>
-              <span className="astra-row-meta">
-                <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
-                  {hostLabel(s.url)} ↗
-                </a>
-                {s.kind ? ` · ${s.kind}` : ""}
-              </span>
-            </div>
-            <div className="astra-cell src-state">
-              <span className={"astra-chip " + chip.cls}>{chip.label}</span>
-              <span className="astra-row-meta">{note}</span>
-            </div>
-            <div className="astra-row-acts">
-              {paused ? (
-                <>
-                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
-                    Resume
-                  </InkButton>
-                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
-                    Remove
-                  </InkButton>
-                </>
-              ) : (
-                <>
-                  <InkButton
-                    tone={failed ? "solid" : "quiet"}
-                    disabled={checking}
-                    onClick={() => onCheck(s.id)}
-                  >
-                    {checking ? "Checking…" : failed ? "Retry" : "Check now"}
-                  </InkButton>
-                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "paused")}>
-                    Pause
-                  </InkButton>
-                  {/*
+          <Fragment key={s.id}>
+            <div
+              className={
+                "astra-row src" +
+                (justAddedSince != null && s.id > justAddedSince ? " just-added" : "")
+              }
+            >
+              <div className="astra-cell src-name">
+                <span className="astra-row-t">{s.title}</span>
+                <span className="astra-row-meta">
+                  <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
+                    {hostLabel(s.url)} ↗
+                  </a>
+                  {s.kind ? ` · ${s.kind}` : ""}
+                </span>
+              </div>
+              <div className="astra-cell src-state">
+                <span className={"astra-chip " + chip.cls}>{chip.label}</span>
+                <span className="astra-row-meta">{note}</span>
+              </div>
+              <div className="astra-row-acts">
+                {paused ? (
+                  <>
+                    <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
+                      Resume
+                    </InkButton>
+                    <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
+                      Remove
+                    </InkButton>
+                  </>
+                ) : (
+                  <>
+                    <InkButton
+                      tone={failed ? "solid" : "quiet"}
+                      disabled={checking}
+                      onClick={() => onCheck(s.id)}
+                    >
+                      {checking ? "Checking…" : failed ? "Retry" : "Check now"}
+                    </InkButton>
+                    <InkButton tone="quiet" onClick={() => onStatus(s.id, "paused")}>
+                      Pause
+                    </InkButton>
+                    {/*
                     Remove, one click deeper.
 
                     BJ3 item 1: three 44px buttons at their natural width came
@@ -1291,22 +1147,39 @@ function WatchRows({
                     other desks use: still one tab stop, still one click away,
                     and the row keeps the width for its name.
                   */}
-                  <details className="row-more">
-                    <summary className="btn quiet">More ▾</summary>
-                    <div className="row-more-panel">
-                      <button
-                        type="button"
-                        className="btn quiet"
-                        onClick={() => onStatus(s.id, "rejected")}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </details>
-                </>
-              )}
+                    <details className="row-more">
+                      <summary className="btn quiet">More ▾</summary>
+                      <div className="row-more-panel">
+                        <button
+                          type="button"
+                          className="btn quiet"
+                          onClick={() => onStatus(s.id, "rejected")}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </details>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+            {/*
+              The kill pattern, under the row it belongs to and only where the
+              count above zero. A sibling of the row rather than a fourth grid
+              cell: the panel is a paragraph and a list of examples, and putting
+              it in the grid would either squeeze the name column or land under
+              one column while the row's rule spans all three.
+
+              It reads for itself (`sourceKillPattern`), so what prints here is
+              the fresh count and the gate is only the gate -- see the note on
+              `killCounts` where it is computed.
+            */}
+            {kills ? (
+              <div className="astra-kill">
+                <SourceKillPattern sourceId={s.id} />
+              </div>
+            ) : null}
+          </Fragment>
         );
       })}
     </div>
@@ -1316,13 +1189,14 @@ function WatchRows({
 function SourceTable({
   rows,
   acts,
-  addedId,
+  justAddedSince,
   onStatus,
   assignUI,
 }: {
   rows: SourceRow[];
   acts: ("accepted" | "rejected")[];
-  addedId?: number | null;
+  /** The watch list's high-water mark when the add dialog last reported a save. */
+  justAddedSince?: number | null;
   onStatus: (id: number, status: "accepted" | "rejected") => void;
   /** Absent for a non-owner, and on the On watch list, where a source is already accepted. */
   assignUI?: {
@@ -1345,7 +1219,12 @@ function SourceTable({
       </thead>
       <tbody>
         {rows.map((s) => (
-          <tr key={s.id} className={"lead-tr" + (addedId === s.id ? " just-added" : "")}>
+          <tr
+            key={s.id}
+            className={
+              "lead-tr" + (justAddedSince != null && s.id > justAddedSince ? " just-added" : "")
+            }
+          >
             <td className="td-hl" data-label="Source">
               <span className="src-t">{s.title}</span>
               <span className="meta-inline block">
