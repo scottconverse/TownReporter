@@ -314,32 +314,50 @@ async function leavingInAppIsBlocked() {
   step("Leave and discard changes goes where the editor asked");
 }
 
-async function theSourcesPageCanAssignWithoutASecondTrip() {
+async function theSourcesPageAddsThroughTheDialog() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
-  // panel no longer draws a control of its own at the top of the list.
+  /*
+    BJ3 item 3: the header's "+ Add a source" opens phase 4's
+    `AddSourcesDialog`.
+
+    The temporary BJ2 panel this replaced also carried an owner-only "Assign to
+    sections (optional)" picker on the single-source form, and the dialog does
+    not: that is a deliberate loss, because the drawn watch-list row cannot hold
+    a fourth control and still keep its single line (BJ3 item 1). Filing a
+    brand-new source under a section is reachable without leaving a page, which
+    is the section half of this walk above ("adding from inside the section
+    ticks it") and the owner's own report's surface. So what this step proves is
+    the add, and the assign half below is the Rejected table's own tick, which
+    is unchanged.
+  */
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
-  const picker = page.getByRole("group", { name: "Assign to sections (optional)" });
-  await picker.waitFor({ timeout: 45_000 });
-  await picker.getByRole("checkbox", { name: "Business", exact: true }).check();
-  await page.getByLabel("URL", { exact: true }).fill(secondUrl);
+  await page.getByLabel("Link", { exact: true }).fill(secondUrl);
   await page.getByLabel("Name", { exact: true }).fill(secondTitle);
-  await page.getByRole("button", { name: "Add source" }).click();
-  await page.getByText(`On watch: ${secondTitle}`).waitFor({ timeout: 45_000 });
+  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  // The dialog's sentence lands in two places: the desk's always-mounted
+  // sr-only `#desk-announcer` live region and this page's notice bar. A bare
+  // text match resolves to both and fails strict mode, so the walk reads the
+  // notice bar itself.
   await page
-    .getByText(`Assigned to Business.`)
+    .locator("p.note")
+    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
     .waitFor({ timeout: 45_000 });
-  step("adding on the Sources page files the source under the ticked section, in one step");
+  step("adding on the Sources page still adds, through the phase-4 dialog");
 
   await page.reload({ waitUntil: "networkidle" });
   await rowForUrl(secondUrl).first().waitFor({ timeout: 45_000 });
-  step("the assignment survives a reload of the Sources page");
+  step("the new source is on the watch list after a reload");
 
   // The accept path: a row has to be accepted before a section can read it, so
   // the tick and the Accept are one step -- accept first, then file it.
   const row = rowForUrl(secondUrl).first();
-  // The drawn On watch row says "Remove"; the tables still say "Drop".
-  await row.getByRole("button", { name: /^(Remove|Drop)$/ }).click();
+  // The drawn On watch row keeps two buttons on its single line and puts
+  // Remove one click deeper, under "More ▾"; the tables still say "Drop".
+  await row.locator("details.row-more > summary").click();
+  await row
+    .locator(".row-more-panel")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
   await page.getByRole("button", { name: /^Rejected / }).click();
   // Rejected is the table the row lands in after Remove, so the same lookup
   // finds it there (and only there -- the URL is on one list at a time).
@@ -352,10 +370,13 @@ async function theSourcesPageCanAssignWithoutASecondTrip() {
   await page.getByText("Accepted and filed under Council.").waitFor({ timeout: 45_000 });
   step("accepting a proposed source files it under the ticked section in the same step");
 
+  // Business still reads the one source the section half above ticked; the
+  // Sources page's own add no longer files anything (see the note at the top of
+  // this function), so it is 1, not 2.
   await openSections();
-  await group("Business").getByText(/Sources this section reads \(2\)/).waitFor({ timeout: 45_000 });
+  await group("Business").getByText(/Sources this section reads \(1\)/).waitFor({ timeout: 45_000 });
   await group("Council").getByText(/Sources this section reads \(1\)/).waitFor({ timeout: 45_000 });
-  step("both assignments are on the sections panel, with no second trip");
+  step("the Council assignment is on the sections panel, with no second trip");
 }
 
 async function keyboardAndPhoneWidth() {
@@ -592,7 +613,7 @@ async function main() {
   await theBarCanCancel();
   await beforeUnloadIsGuardedOnlyWhileDirty();
   await leavingInAppIsBlocked();
-  await theSourcesPageCanAssignWithoutASecondTrip();
+  await theSourcesPageAddsThroughTheDialog();
   await keyboardAndPhoneWidth();
   await theBarStaysInsideTheContentColumn();
 

@@ -95,25 +95,43 @@ async function theScreenRenders() {
     .waitFor({ timeout: 30_000 });
   step("the Sources page renders its own heading");
 
-  // BJ2 item 4: the form lives behind the header's "+ Add a source", so the
-  // panel no longer draws a control of its own at the top of the list.
+  // BJ3 item 3: the header's "+ Add a source" opens phase 4's
+  // `AddSourcesDialog` -- one control and one dialog, which is what the drawing
+  // draws. Its four tabs are the behaviors BJ2's temporary panel held; the walk
+  // drives the first ("One link"), whose fields are Link / Name / What to watch
+  // for and whose primary press is "Add & run first check".
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
-  await page.getByLabel("URL", { exact: true }).waitFor({ timeout: 30_000 });
+  await page
+    .getByRole("heading", { name: "Add sources to watch", exact: true })
+    .waitFor({ timeout: 30_000 });
+  await page.getByLabel("Link", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByLabel("Name", { exact: true }).waitFor({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Add source" }).waitFor({ timeout: 30_000 });
-  step("the add-a-source form renders URL, Name, and Add source");
+  await page
+    .getByRole("button", { name: "Add & run first check", exact: true })
+    .waitFor({ timeout: 30_000 });
+  step("+ Add a source opens the dialog with Link, Name and its primary press");
 
   await page.getByText("Nothing on watch yet — add a URL above.").waitFor({ timeout: 30_000 });
   step("a fresh desk shows the on-watch zero state");
 }
 
 async function addingASourcePersists() {
-  await page.getByLabel("URL", { exact: true }).fill(sourceUrl);
+  // The dialog is still open from the step above.
+  await page.getByLabel("Link", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill(sourceTitle);
-  await page.getByRole("button", { name: "Add source" }).click();
+  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
 
-  await page.getByText(`On watch: ${sourceTitle}`).waitFor({ timeout: 30_000 });
-  step("adding a source shows the on-watch confirmation");
+  // The dialog reports what it did in its own sentence, and it says it twice:
+  // once into the desk's always-mounted `#desk-announcer` live region, which is
+  // sr-only, and once into this page's notice bar through `onDone`. A bare text
+  // match resolves to both and fails strict mode, so the walk reads the notice
+  // an editor can actually see. (`p.note` is the notice bar; the page's other
+  // `p.note` elements carry different text and are filtered out here.)
+  await page
+    .locator("p.note")
+    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .waitFor({ timeout: 30_000 });
+  step("adding a source shows the dialog's own confirmation on the page");
 
   await page.getByRole("heading", { name: "On watch", exact: true }).waitFor({ timeout: 30_000 });
   await rowFor(sourceUrl).waitFor({ timeout: 30_000 });
@@ -129,9 +147,15 @@ async function addingASourcePersists() {
 
 async function droppingThenRestoringUpdatesTheList() {
   const row = rowFor(sourceUrl);
-  // The drawn On watch row says "Remove" (Redesign p2c); the table rows the
-  // Suggested and Rejected lists still use say "Drop".
-  await row.getByRole("button", { name: /^(Remove|Drop)$/ }).click();
+  // The drawn active row keeps two buttons on its single line (BJ3 item 1), so
+  // Remove sits one click deeper, under "More ▾" -- the same `row-more`
+  // disclosure the other desks use. (A paused row draws Resume + Remove
+  // directly; the table rows Suggested and Rejected use say "Drop".)
+  await row.locator("details.row-more > summary").click();
+  await row
+    .locator(".row-more-panel")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
 
   // Rejecting moves the row out of On watch and into Rejected.
   await page.getByRole("button", { name: /^Rejected / }).click();

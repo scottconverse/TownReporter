@@ -38,6 +38,21 @@ const NEWSROOM_ID = 1;
   cast (`scanner_yyerror` on `now() - $1::interval`), and the same shape fails
   for `current_date - $1`. A `Date` binds cleanly on both backends.
 */
+/* The imports the route body needs. They were dropped when the file was first
+   committed as a record of the pass, which left the copy unrunnable: the first
+   POST answers "getSql is not defined", then "ensureInvestigateSchema is not
+   defined", then `seedSources` cannot find `SEED_SOURCES`. BJ3 restored them.
+
+   `SEED_SOURCES` is the paper's own watch list from `src/lib/paper.ts`, which
+   is what `seedSources` below keys its plan to -- `ensureNewsroomSources` re-adds
+   any seed URL that is missing on every render of /desk/sources, so a row keyed
+   to the real list is the only way to hold a chosen state steady. */
+import { createFileRoute } from "@tanstack/react-router";
+import { getSql, type Sql } from "@/lib/db";
+import { ensureInvestigateSchema } from "@/lib/news/investigate";
+import { ensureDarkSchema } from "@/lib/news/dark";
+import { SEED_SOURCES } from "@/lib/paper";
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
