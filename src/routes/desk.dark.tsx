@@ -129,8 +129,18 @@ function DarkPage() {
       // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
       // copy, so this holds the lead for the dialog and the next visit to the
       // desk opens its own empty one.
+      //
+      // The dialog opens with it: a hand-over the editor asked for on another
+      // screen ("Send it to Dark Desk") is the drawn start box "opened with its
+      // text already in it" (`dark-seed.ts:10`), and the box lives in the
+      // dialog since phase 2c. A seed that only filled a shut dialog would
+      // leave the editor on the desk with nothing to see and no sign the
+      // hypothesis arrived.
       const seed = takeDarkSeed(sessionStorage);
-      if (seed) setSeedFromImport(seed);
+      if (seed) {
+        setSeedFromImport(seed);
+        setStartOpen(true);
+      }
     } catch {
       /* ignore */
     }
