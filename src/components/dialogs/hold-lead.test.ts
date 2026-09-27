@@ -35,6 +35,10 @@ describe("Hold dialog", () => {
       if (c.note) assert.ok(html.includes(c.note), c.note);
     }
     assert.match(html, /astra-field-label">Note<span class="astra-field-hint"> optional</);
+    // The drawn order: the note above the reasons, as `dialog-08-hold.png`
+    // shows and as the reference's hold entry renders its `fields` against its
+    // `choiceLabel`.
+    assert.ok(html.indexOf("Note<span") < html.indexOf("astra-choices-label"), "Note comes first");
     assert.equal(HOLD_CHOICES.length, 3);
     // The reasons are the desk's own list, not a second copy written here.
     assert.match(selectedCard(html), new RegExp(`<b>${HOLD_CHOICES[0]!.label}</b>`));

@@ -293,6 +293,14 @@ function dropZone(
 
 /** The source preview table: the count, the split, then one row per line. */
 export function sourcePreviewTable(preview: SourcePreview): ReactNode {
+  /*
+    The tick marks the row that WILL BE ADDED, which is the drawing's own
+    reading: `Desk Dialogs.dc.html` fills the 22px box and tints its label
+    `--ink2` for the five rows it is about to add, and leaves the box empty and
+    the label `--warn` for the one it already watches, labelled "Already
+    watched". The stylesheet's `.on` is that filled state, so new rows carry it
+    and watched rows carry nothing -- the earlier build had the two swapped.
+  */
   return createElement(
     "div",
     { className: "astra-preview" },
@@ -312,13 +320,13 @@ export function sourcePreviewTable(preview: SourcePreview): ReactNode {
             className: "astra-preview-mark" + (r.isNew ? " on" : ""),
             "aria-hidden": "true",
           },
-          r.isNew ? "+" : "✓",
+          r.isNew ? "✓" : "",
         ),
         createElement("span", { className: "astra-preview-url" }, r.url),
         createElement(
           "span",
-          { className: "astra-preview-kind" + (r.isNew ? "" : " on") },
-          r.isNew ? r.kind : "already watched",
+          { className: "astra-preview-kind" + (r.isNew ? " on" : "") },
+          r.isNew ? r.kind : "Already watched",
         ),
       ),
     ),
@@ -659,9 +667,16 @@ export type HoldBodyProps = {
 export function HoldBody(p: HoldBodyProps): ReactNode {
   const s = p.state;
   const set = p.set;
+  /*
+    The note comes first and the reasons second, which is the drawn order: the
+    reference's hold entry lists `fields` (Note) separately from `choiceLabel`
+    and renders the fields above the choices -- the same split the kill entry
+    uses in the other direction with `fields2`. `dialog-08-hold.png` shows it.
+  */
   return createElement(
     Fragment,
     null,
+    fields([field("Note", "optional", line(s.note, "Optional", (v) => set({ note: v })), "note")]),
     choiceSet(
       "Why (optional)",
       HOLD_CHOICES.map((c) => ({ key: c.key, label: c.label, note: c.note })),
@@ -669,7 +684,6 @@ export function HoldBody(p: HoldBodyProps): ReactNode {
       (key) => set({ choice: key }),
       p.Choice,
     ),
-    fields([field("Note", "optional", line(s.note, "Optional", (v) => set({ note: v })), "note")]),
     message(p.problem, "warn"),
     message(p.note, "ok"),
   );
@@ -695,13 +709,19 @@ export type HeadlineBodyProps = {
 export function HeadlineBody(p: HeadlineBodyProps): ReactNode {
   const s = p.state;
   const set = p.set;
+  /*
+    Every suggestion carries the same note. The drawing gives each row its own
+    ("leads with the conflict", "shorter, reader-first", "leads with the service
+    info") because its three rows are the design's own mock text and the
+    designer could read them; `headlineSuggest` returns bare strings with no
+    angle attached, so a per-row angle here would be the dialog inventing a
+    claim about text it has not analysed. The first row used to hardcode
+    "leads with the conflict" -- a false note whenever the model's first
+    suggestion led with something else.
+  */
   const items = [
     { key: "keep", label: `Keep mine: ${s.current}`, note: "Your current headline" },
-    ...s.suggestions.map((text, i) => ({
-      key: text,
-      label: text,
-      note: i === 0 ? "Suggested · leads with the conflict" : "Suggested",
-    })),
+    ...s.suggestions.map((text) => ({ key: text, label: text, note: "Suggested" })),
   ];
   return createElement(
     Fragment,

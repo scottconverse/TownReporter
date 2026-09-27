@@ -78,15 +78,17 @@ describe("Add sources dialog", () => {
     const html = render({ tab: "list" }, { preview: watched });
     assert.match(html, /Preview · 2 found/);
     assert.match(html, /1 new · 1 already watched/);
-    // The watched row is the paste's non-www URL against the watch list's www
-    // one: same identity, so it is a tick, not a plus.
+    // The tick is the row that will be added -- the drawing fills the box for
+    // the rows it is about to add and leaves it empty for the one it already
+    // watches. The watched row is the paste's non-www URL against the watch
+    // list's www one: same identity, so its box is empty.
     assert.ok(
-      html.includes('<span class="astra-preview-mark" aria-hidden="true">✓</span>'),
+      html.includes('<span class="astra-preview-mark" aria-hidden="true"></span>'),
       html.slice(html.indexOf("astra-preview"), html.indexOf("astra-preview") + 400),
     );
-    assert.ok(html.includes('<span class="astra-preview-mark on" aria-hidden="true">+</span>'));
-    assert.match(html, /astra-preview-kind on">already watched/);
-    assert.match(html, /astra-preview-kind">Official page/);
+    assert.ok(html.includes('<span class="astra-preview-mark on" aria-hidden="true">✓</span>'));
+    assert.match(html, /astra-preview-kind">Already watched/);
+    assert.match(html, /astra-preview-kind on">Official page/);
     assert.match(html, /astra-preview-url">https:\/\/longmontcolorado\.gov\/news/);
 
     // Nothing watched: every row is new, and the split says only that.

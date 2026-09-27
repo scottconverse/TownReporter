@@ -50,12 +50,17 @@ describe("Headline dialog", () => {
     assert.match(html, /Type a headline here; it replaces the choice above/);
   });
 
-  it("draws Keep mine first, then each suggestion, with the first marked as leading the story", () => {
+  it("draws Keep mine first, then each suggestion, with no angle the desk did not compute", () => {
     const html = render({ suggestions: SUGGESTED });
     assert.match(html, /astra-choices-label">Choose one</);
     assert.match(html, /<b>Keep mine: Council delays the budget<\/b>/);
-    assert.match(html, /<b>Council votes 4-3 to delay the budget<\/b><span class="astra-choice-note">Suggested · leads with the conflict</);
+    assert.match(html, /<b>Council votes 4-3 to delay the budget<\/b><span class="astra-choice-note">Suggested</);
     assert.match(html, /<b>Budget delayed until November<\/b><span class="astra-choice-note">Suggested</);
+    // The drawing's per-row angles describe the design's own mock rows.
+    // `headlineSuggest` answers bare strings, so no row may claim an angle --
+    // including the first, which is not special.
+    assert.ok(!html.includes("leads with the conflict"), "no suggestion claims an angle");
+    assert.ok(!html.includes("reader-first"));
     assert.match(html, /<b>Keep mine: Council delays the budget<\/b><span class="astra-choice-note">Your current headline</);
     // The dialog opens on Keep mine, which is a real press: it undoes a
     // suggestion the editor clicked without saving.
