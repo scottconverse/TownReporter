@@ -65,8 +65,13 @@ export function sourceKindLabel(row: ParsedSourceLine): string {
  * row the add would then skip would be worse than no preview at all. The
  * caller passes the identities it read from the watch list.
  *
- * `parseSourceLines` already de-duplicates within the paste, so a URL twice in
- * one paste is one row, and the count under the head line is the count of rows.
+ * `parseSourceLines` de-duplicates on the URL string, but the write path
+ * (`saveAcceptedNewsroomSource`) refuses a row whose `sourceIdentity` is already
+ * on the watch list -- so a paste holding `x.example/news` and
+ * `www.x.example/news` would be drawn as two new rows and added as one. The rows
+ * are therefore de-duplicated here by the same identity the add uses, first
+ * spelling wins, and the count under the head line is the count the add will
+ * report.
  */
 export function previewSources(text: string, watchedIdentities: Iterable<string>): SourcePreview {
   const watched = new Set<string>();
@@ -75,8 +80,11 @@ export function previewSources(text: string, watchedIdentities: Iterable<string>
     if (identity) watched.add(identity);
   }
   const rows: SourcePreviewRow[] = [];
+  const seen = new Set<string>();
   for (const row of parseSourceLines(text)) {
     const identity = sourceIdentity(row.url) ?? row.url;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
     const isNew = !watched.has(identity);
     rows.push({
       url: row.url,
@@ -158,10 +166,11 @@ export function updateStamp(at: Date): string {
 /**
  * The update paragraph, put at the top of the body.
  *
- * `UPDATED_TEXT` is the desk's existing marker word for a timed update and the
- * story page already renders a leading "Updated <time>" line, so the shape here
- * is the one the reader-facing page expects: a labelled first paragraph, then
- * the editor's material, then the story as it was.
+ * The line is plain text in the body, not a marker any renderer knows about:
+ * a grep for an "Updated <time>" renderer across `src/routes`, `src/components`
+ * and `src/lib` finds none, so what the reader sees is this paragraph printed
+ * like any other. That is why the label is spelled out in full rather than
+ * being a token -- nothing downstream is going to expand it.
  */
 export const UPDATED_TEXT = "Updated";
 
@@ -332,7 +341,18 @@ export function parseScore(text: string): { score: number; reason: string } | nu
   if (!match) return null;
   try {
     const row = JSON.parse(match[0]) as { score?: unknown; reason?: unknown };
-    const score = Math.round(Number(row.score));
+    /*
+      A number, or a string that IS a number -- and nothing else.
+
+      `Number(null)`, `Number("")`, `Number(false)` and `Number([])` are all 0,
+      so `{"score": null}`, which is how a model declines to score a lead, used
+      to parse as a real score of 0 and file the lead at the bottom of the Queue.
+      A refusal must come back null so the caller leaves the lead unscored.
+    */
+    const raw = row.score;
+    const score = Math.round(
+      typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : Number.NaN,
+    );
     if (!Number.isFinite(score)) return null;
     return {
       score: Math.max(0, Math.min(100, score)),
