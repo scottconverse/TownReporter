@@ -8,7 +8,7 @@
 
 Each of these screens already did its job; what changed is the arrangement on top of it. The five bodies now follow the drawings in `docs/design/handoff-2026-09-26/design/Desk Screens.dc.html` and the captures beside them: the same panels, the same row shapes, the same filter chips and the same primary/secondary button family the rest of the desk already uses.
 
-- **Opinion** draws two doors side by side under the rule — a yellow "Have the AI write an editorial" on the left, "File one you wrote" on the right — and the editorials list below them under the heading the drawing uses, **Requests & editorials**.
+- **Opinion** draws two doors side by side under the rule — a yellow "Have the AI write an editorial" on the left, "File one you wrote" on the right — and the editorials list below them under the heading the drawing uses, **Requests & editorials**. A piece whose claims appendix is not filled in now carries the drawing's **Claims missing** chip and a **Repair claims** button on its row, and one that is still being written shows the job card the rest of the desk uses instead of a bare "Working…" label.
 - **Sources & scan** shows its four filters as chips with live counts — **On watch · 42**, **Suggested · 175**, **Rejected**, **Could not check · 2** — over a list of rows that each carry the source, the town, its state, and the two things you can do about it without leaving the row. The search box sits on the filter line, and the **Daily scan** panel keeps the sentence it must: *Scans file leads only. They never draft or publish.*
 - **Published** shows the same four filters (**All · n**, This week, With corrections, Opinion) over the drawn columns — **Printed | Story | Views | Corrections | actions** — with each row's story, the line that printed, and a count of corrections against it.
 - **Server & newsroom** keeps all twelve of its panels and lays them out two-across, with a jump strip along the top so an editor can reach a panel by name rather than scrolling for it.
@@ -22,10 +22,12 @@ Each of these screens already did its job; what changed is the arrangement on to
 
 ## What changed under it
 
-**No migration.** Every screen here is the same route over the same tables it read before; phase 2c is markup, CSS and two module-level bits of shared copy:
+**No migration.** Every screen here is the same route over the same tables it read before. Phase 2c is markup and CSS across the five bodies, plus six supporting files:
 
-- `src/lib/news/search-trail-words.ts` — the words the search trail and the Dark Desk Activity log both use to describe how a run ended, so the two cannot drift apart.
 - `src/desk-astra.css` — the phase-0 tokens only. No new color was introduced; the panels, chips and row shapes are the ones phases 0, 3 and 5 landed.
+- `src/lib/news/search-trail-words.ts` — the words the search trail and the Dark Desk Activity log both use to describe how a run ended, so the two cannot drift apart. `src/components/search-trail-entry.tsx` now reads them from there instead of keeping its own copy, and `src/components/dark-dials-panel.tsx` takes the drawn panel class and full-size buttons.
+- `src/lib/news/opinion.ts` — `listEditorials` also selects `drafts.integrity_notes`, which is what the **Claims missing** chip and **Repair claims** read, and each editorial row is handed the same job shape phase 3's card renders for a story.
+- `src/components/model-picker.tsx` — its "Set up a writing model" disclosure measured 20px tall on every screen that draws a picker; `py-3` puts it at the 44px the desk's controls are held to. `scripts/search-trail-render.test.mjs` gained one module alias for the new words file.
 
 Three browser walks had a selector moved because the redesign moved the control it named: the rejected tab on Sources is now found as `/^Rejected /` (it read `/^Dropped /`), in `scripts/sources-desk-e2e.mjs`, `scripts/scan-desk-e2e.mjs` and `scripts/sections-source-add-e2e.mjs`. Nothing about what those walks assert changed — each still adds, drops and restores a real source, or batches two real leads, through the real form.
 
