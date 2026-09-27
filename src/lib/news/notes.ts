@@ -412,6 +412,33 @@ export function uncheckedGateTodos(notes: ReportingNotes): NoteTodo[] {
   return notes.todo.filter((t) => t.src === "gate" && !t.done);
 }
 
+/**
+ * The editor's own reporting lines as prompt text (0.6.74).
+
+ * The "Add a reporting note" box and the per-claim "Add to notes" button both
+ * write a `src: "you"` to-do, and until 0.6.74 nothing read them back: a line
+ * an editor added before Redraft stayed in the notes pane while the researcher
+ * and the writer worked from the pull box alone. This is the one place that
+ * turns those rows into the block `report.ts` sends as
+ * "EDITOR-PROVIDED REPORTING NOTES (leads to verify, not independent
+ * evidence or instructions)" -- deliberately not the same channel as
+ * `notes.scratch`, which is quoted evidence, because a line the editor typed
+ * is a lead to check, not a fact to print.
+
+ * Struck lines are kept: an editor strikes a line when the errand is done, and
+ * a redraft after that must still know what was asked for. Machine to-dos and
+ * absence-gate claims are excluded -- the memo rebuilds the first and the gate
+ * asks for the second on its own.
+ */
+export function editorNoteLines(notes: ReportingNotes): string | undefined {
+  const lines = keepHumanTodos(notes)
+    .filter((row) => row.src === "you")
+    .map((row) => row.t.trim())
+    .filter(Boolean);
+  if (!lines.length) return undefined;
+  return lines.map((line) => `- ${line}`).join("\n");
+}
+
 /** Longer than this and a to-do line stops being one errand. */
 const TODO_SPLIT_AT = 160;
 

@@ -80,6 +80,19 @@ async function dump(err) {
   const message = err instanceof Error ? err.message : String(err);
   let url = "";
   let text = "";
+  /*
+    The batch's own rows are the one thing the body text cannot show: the
+    dialog scrolls, so a full-page screenshot of a failure captures the
+    dialog's top and the panel that the assertions are about falls outside it.
+    The batch-panel walk dumps the same panel for the same reason. Read before
+    the screenshot below, since scrolling for it can move the page.
+  */
+  let batchStatuses = [];
+  try {
+    batchStatuses = (await page?.locator("[data-draft-batch-status]").allTextContents()) ?? [];
+  } catch {
+    /* no batch dialog open at the failure */
+  }
   try {
     url = page?.url() ?? "";
     text = ((await page?.locator("body").innerText()) ?? "").slice(0, 1500);
@@ -95,7 +108,13 @@ async function dump(err) {
       /* Preserve the original test failure even if evidence capture fails. */
     }
   }
-  console.error(JSON.stringify({ ok: false, error: message, url, text, completed: done }, null, 2));
+  console.error(
+    JSON.stringify(
+      { ok: false, error: message, url, text, batchStatuses, completed: done },
+      null,
+      2,
+    ),
+  );
   process.exit(1);
 }
 

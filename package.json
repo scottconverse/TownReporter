@@ -1,6 +1,6 @@
 {
   "name": "townreporter",
-  "version": "0.6.73",
+  "version": "0.6.75",
   "private": true,
   "engines": {
     "node": ">=22"

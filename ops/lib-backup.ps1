@@ -22,9 +22,11 @@
        caller is told so and must not treat the file as a backup. pg_dump
        writes a plain-SQL file whose last line is a closing marker; a full disk
        or a killed process leaves a file that looks like a backup by name and
-       size and is not one. Such a file is renamed to "<name>.sql.incomplete",
-       not deleted: out of the series so it cannot be copied or counted, still
-       on disk so a person can look at it. The newest two of those are kept.
+       size and is not one. Such a file is not a backup and is not kept: the
+       log gets the size pg_dump reached and the file's last 2 KB, and then the
+       file is deleted, so a database that is down at 2 AM cannot fill the disk
+       with dumps that failed. A dump that is still valid, or older than the
+       rule allows, is a different case and is kept like any other backup.
     2. Nothing is deleted locally until every local file is proven identical on
        D: -- same length AND same SHA256. A delete is the one operation here
        that cannot be undone, so it goes last and only after a proof.
@@ -178,10 +180,11 @@ function Get-TownReporterBackupList {
 
   The extension test is what keeps the walking wounded out, and it is the
   whole reason this is a -match on the name instead of -Filter '*.sql*':
-  a dump that died is renamed <name>.sql.incomplete and a copy that died is
-  <name>.sql.partial, and neither of those ends in .sql. A file that is not
-  a backup must never be presented to the offsite copy wearing a backup's
-  name, and it must never be hashed and copied to D: as though it were one.
+  a copy that died is <name>.sql.partial, and an <name>.sql.incomplete is a
+  dump that died under the version of this file that kept those -- either way
+  it does not end in .sql. A file that is not a backup must never be presented
+  to the offsite copy wearing a backup's name, and it must never be hashed and
+  copied to D: as though it were one.
 
   Oldest first, same as the series pass, so a run that is cut off leaves the
   newest safety copies already on the other drive.
@@ -458,6 +461,48 @@ function Remove-TownReporterStaleCopy {
   }
 }
 
+# --- What a failed dump's last words look like -----------------------------
+<#
+  The last few bytes of a file, as ONE line of ASCII, for the backup log.
+
+  Read as bytes, not text: the point is a dying pg_dump's last words, and the
+  file may end mid-character or hold bytes that are not valid UTF-8. Reading it
+  as text would either throw or turn the rest of the line into mojibake, and a
+  mojibake byte in a BOM-less UTF-8 file is exactly what truncates the line
+  when PS 5.1 reads it back (see this file's ASCII-only note in the header).
+
+  So: any run of whitespace collapses to one space -- the tail is a diagnostic,
+  and 2 KB of a SQL file is mostly newlines otherwise -- and every byte left
+  outside plain printable ASCII becomes '.'. The result is one line, always, of
+  a length an operator can read. A read that fails says so rather than
+  pretending the file ended there.
+#>
+function Read-TownReporterDumpTail {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [int]$Bytes = 2048
+  )
+  try {
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+      $length = $stream.Length
+      $take = [int][Math]::Min([int64]$Bytes, $length)
+      if ($take -le 0) { return '(the file is empty)' }
+      $null = $stream.Seek([int64]($length - $take), [IO.SeekOrigin]::Begin)
+      $buffer = New-Object byte[] $take
+      $read = $stream.Read($buffer, 0, $take)
+      $text = [Text.Encoding]::UTF8.GetString($buffer, 0, $read)
+    } finally {
+      $stream.Dispose()
+    }
+  } catch {
+    return "(the tail could not be read: $($_.Exception.Message))"
+  }
+  $text = $text -replace '\s+', ' '
+  $text = $text -replace '[^\x20-\x7E]', '.'
+  return $text.Trim()
+}
+
 # --- Getting a failed dump out of the way ----------------------------------
 <#
   A dump that failed or was cut short must not keep wearing a backup's name.
@@ -472,44 +517,54 @@ function Remove-TownReporterStaleCopy {
       unverified, so the folder on C: grows without limit.
     * The "last backup" on the Control page is a file that is not a backup.
 
-  So it is renamed to <name>.sql.incomplete: still on disk, still whole, still
-  there for a person to look at, and no longer part of the backup series. An
-  operator can read the size and the tail of the file and see exactly how far
-  pg_dump got.
+  It used to be renamed to <name>.sql.incomplete and the newest two were kept
+  "for inspection". The owner ended that, in his words: "this is how my disk
+  fills with junk". Nobody reads them. A database that is down at 2 AM is asked
+  again every five minutes, so a pg_dump that wrote 300 MB before dying left
+  300 MB behind 288 times in one night, and the folder on C: is the one that
+  fills.
 
-  The newest two of these are kept and the rest are dropped, because a database
-  that is down at 2 AM is asked again every five minutes: without a cap, a
-  pg_dump that wrote 300 MB before dying would leave 300 MB behind 288 times in
-  one night. Dropping an old one of these is not the "never delete a backup"
-  rule being bent -- a file here is the output of a dump that FAILED, which is
-  the one thing in this file that is provably not a backup.
+  So the file is read one last time -- its size, and its last 2 KB as one line
+  of text -- that line goes to the log, and then the file is deleted. An
+  operator still sees exactly how far pg_dump got, from the log, without the
+  bytes staying on the disk. A file this function deletes is the output of a
+  dump that FAILED, which is the one thing in this file that is provably not a
+  backup, so this is not the "never delete a backup" rule being bent.
+
+  It also sweeps <name>.sql.incomplete files the older version of this file
+  left in that same folder, which is the only reason that pattern is still
+  named here. Only *.sql.incomplete, and only in the folder a dump was just
+  attempted in -- never a .sql or a .dump, which are the backups and the
+  owner's safety copies.
 #>
-function Move-TownReporterFailedDump {
+function Remove-TownReporterFailedDump {
   param(
     [string]$Path,
     [string]$LogFile
   )
-  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
-  $bad = $Path + '.incomplete'
-  try {
-    Move-Item -LiteralPath $Path -Destination $bad -Force -ErrorAction Stop
-    Write-TownReporterBackupLog $LogFile "the failed dump was kept for inspection as $bad"
-    # Keep the newest two and no more. A Postgres that is down at 2 AM is asked
-    # again every five minutes, and a failing pg_dump that wrote 300 MB before
-    # it died would otherwise leave 300 MB behind 288 times over one night.
-    # These were never backups -- they are the output of dumps that failed -- so
-    # deleting the old ones is not the "never delete a backup" rule being bent.
-    try {
-      $dir = Split-Path -Parent $bad
-      $old = @(Get-ChildItem -LiteralPath $dir -Filter '*.incomplete' -File -ErrorAction SilentlyContinue | Sort-Object -Property LastWriteTime -Descending | Select-Object -Skip 2)
-      foreach ($item in $old) {
-        Remove-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue
-        Write-TownReporterBackupLog $LogFile "dropped the older failed dump $($item.Name); the newest two are kept"
+  $dir = Split-Path -Parent $Path
+  if ($dir) {
+    foreach ($item in @(Get-ChildItem -LiteralPath $dir -Filter '*.sql.incomplete' -File -ErrorAction SilentlyContinue)) {
+      try {
+        $leftover = $item.Length
+        Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
+        Write-TownReporterBackupLog $LogFile "dropped the leftover failed dump $($item.Name) ($leftover bytes) from an older version that kept these"
+      } catch {
+        Write-TownReporterBackupLog $LogFile "could not drop the leftover failed dump $($item.Name): $($_.Exception.Message)"
       }
-    } catch { }
-    return $bad
+    }
+  }
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+  $size = (Get-Item -LiteralPath $Path).Length
+  $tail = Read-TownReporterDumpTail -Path $Path -Bytes 2048
+  # Logged before the delete, not after: what an operator would have opened the
+  # file to find out, written down while the file is still there to be read.
+  Write-TownReporterBackupLog $LogFile "dropping the failed dump ${Path}: $size bytes were written; last up to 2048 bytes: $tail"
+  try {
+    Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    return $Path
   } catch {
-    Write-TownReporterBackupLog $LogFile "the failed dump could not be moved aside ($($_.Exception.Message)); it is still at $Path and is NOT a backup"
+    Write-TownReporterBackupLog $LogFile "the failed dump could not be deleted ($($_.Exception.Message)); it is still at $Path and is NOT a backup -- delete it by hand"
     return $null
   }
 }
@@ -524,10 +579,13 @@ function Move-TownReporterFailedDump {
   not take it, because the copy to D: and the prune that follow are part of the
   same unit of work and must not interleave with another run.
 
-  A dump that fails, or that does not END like a complete pg_dump, is moved
-  aside by Move-TownReporterFailedDump so it cannot be mistaken for a backup by
-  the copy step or the prune. What is returned in that case is Ok = $false plus
-  the plain reason -- the file is never deleted and never counted.
+  A dump that fails, or that does not END like a complete pg_dump, is dropped
+  by Remove-TownReporterFailedDump -- logged first (its size and last 2 KB),
+  then deleted -- so it can never be mistaken for a backup by the copy step or
+  the prune. What is returned in that case is Ok = $false plus the plain
+  reason; DroppedPath is the file that was deleted, or $null when there was
+  nothing there to delete. No backup is ever deleted: what goes is the output
+  of a dump that failed.
 
   -DumpCommand exists for the test harness in scripts\ci-backup.ps1: a script
   block that receives the path to write and returns $true or $false, so the
@@ -581,12 +639,12 @@ function New-TownReporterBackup {
     try {
       $ran = & $DumpCommand $path
     } catch {
-      Move-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
+      Remove-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
       Write-TownReporterBackupLog $LogFile "$name FAILED: the dump command threw $($_.Exception.Message)"
       return @{ Ok = $false; Reason = "the dump command threw $($_.Exception.Message)"; Name = $name; Path = $path }
     }
     if (-not $ran) {
-      Move-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
+      Remove-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
       Write-TownReporterBackupLog $LogFile "$name FAILED: the dump command reported failure"
       return @{ Ok = $false; Reason = 'the dump command reported failure'; Name = $name; Path = $path }
     }
@@ -602,12 +660,12 @@ function New-TownReporterBackup {
     try {
       & $pgDump -p $PgPort -U postgres -d $Database -f $path
     } catch {
-      Move-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
+      Remove-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
       Write-TownReporterBackupLog $LogFile "$name FAILED: pg_dump would not run ($($_.Exception.Message))"
       return @{ Ok = $false; Reason = "pg_dump would not run ($($_.Exception.Message))"; Name = $name; Path = $path }
     }
     if ($LASTEXITCODE -ne 0) {
-      Move-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
+      Remove-TownReporterFailedDump -Path $path -LogFile $LogFile | Out-Null
       Write-TownReporterBackupLog $LogFile "$name FAILED: pg_dump exited $LASTEXITCODE"
       return @{ Ok = $false; Reason = "pg_dump exited $LASTEXITCODE"; Name = $name; Path = $path }
     }
@@ -617,8 +675,8 @@ function New-TownReporterBackup {
   if (-not $check.Ok) {
     $badBytes = (Get-Item -LiteralPath $path -ErrorAction SilentlyContinue).Length
     Write-TownReporterBackupLog $LogFile "$name FAILED: $($check.Reason)"
-    $kept = Move-TownReporterFailedDump -Path $path -LogFile $LogFile
-    return @{ Ok = $false; Reason = $check.Reason; Name = $name; Path = $path; KeptPath = $kept; Bytes = $badBytes }
+    $dropped = Remove-TownReporterFailedDump -Path $path -LogFile $LogFile
+    return @{ Ok = $false; Reason = $check.Reason; Name = $name; Path = $path; DroppedPath = $dropped; Bytes = $badBytes }
   }
 
   $bytes = (Get-Item -LiteralPath $path).Length
@@ -1336,9 +1394,10 @@ function Get-TownReporterBackupAlertConditions {
   -Offsite retry that copies everything and prunes is a success, and reporting
   it as a failure would leave the operator with no way to clear it.
 
-  A failed dump is renamed to <name>.sql.incomplete by New-TownReporterBackup,
-  so lastError is a record of something that happened, never a file that is
-  still sitting in the backup series blocking tonight's run.
+  A failed dump is dropped -- logged, then deleted -- by New-TownReporterBackup
+  (see Remove-TownReporterFailedDump), so lastError is a record of something
+  that happened, never a file that is still sitting in the backup folder
+  blocking tonight's run or filling the disk.
 #>
 function Invoke-TownReporterBackupRun {
   param(

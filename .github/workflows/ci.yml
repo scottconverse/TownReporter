@@ -1186,6 +1186,49 @@ jobs:
           }
           kill_tree "$DEV_PID"
 
+  batch-published-panel:
+    name: The Queue's batch panel drops a story once the paper has printed it
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Print one batch item, then put the batch away
+        env:
+          BETTER_AUTH_SECRET: ci-batch-panel-secret-not-for-production
+          PORT: "3532"
+          HOST: 127.0.0.1
+          BATCH_PANEL_BASE_URL: http://127.0.0.1:3532
+          BATCH_PANEL_OUT_DIR: artifacts/batch-published-panel
+          DATABASE_URL: ""
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm start > /tmp/batch-panel.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3532/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3532/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/batch-panel.log; exit 1;
+          }
+          node scripts/batch-published-panel-e2e.mjs
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
   # X: import finished stories. These four walks boot the built server in their
   # own process (they import .output/server/index.mjs and set their own PORT,
   # HOST and empty DATABASE_URL), so the job builds and then runs the script --
@@ -1500,3 +1543,55 @@ jobs:
           BETTER_AUTH_SECRET: ci-editor-controls-0667-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/editor-controls-0667-walk.mjs
+
+  # TKT-0674: the Reporting tab printed a claim, then a lone "·" on its own line
+  # and the raw URL wrapped over four lines -- no site name, no way to pull that
+  # claim's source, and nothing proving the reporting notes reached the draft at
+  # all. This walk presses both new buttons on a story the product itself built,
+  # then reads the STUB'S LOG, per call, to prove the redraft's writer prompt
+  # carried the line the editor added. It watches those lines as exact literals
+  # (POST /__probe), not as a marker inside the claim text: the desk files the
+  # stub's claim and feeds it forward into every later prompt, so a claim-string
+  # marker is present in a redraft whether or not the notes ever reached it. The
+  # same three probes must be ABSENT from the first draft, before those lines
+  # exist, which is the control.
+  #
+  # The app's own safe-fetch reads https://example.com/ (IANA's static page) for
+  # the Pull; that is the walk's one outbound GET. ONE fake endpoint on 3531
+  # stands in for the model -- it is the configured gateway (LLM_BASE_URL +
+  # LLM_MODEL, which Automatic resolves before its ladder runs) and
+  # TOWNREPORTER_CLAUDE_CODE=0 keeps the CLI rungs unreachable -- so no call
+  # leaves the runner and no credential is used. Port 3531 belongs to this walk
+  # alone (scripts/integration-ports-are-unique.test.mjs).
+  claim-sources-pull-0674:
+    name: A claim's source reads as its site name, Pull fills the box, Add to notes writes one line, and the redraft carries it
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Read the claim's line, pull its source, add it to the notes, redraft, and read the stub's log
+        env:
+          BETTER_AUTH_SECRET: ci-claim-sources-0674-secret-not-for-production
+          PORT: "8080"
+          HOST: 127.0.0.1
+          LLM_BASE_URL: http://127.0.0.1:3531/v1
+          LLM_MODEL: deepseek-v4.1-flash:cloud
+          TOWNREPORTER_CLAUDE_CODE: "0"
+          CLAIM_BASE_URL: http://127.0.0.1:8080
+        run: |
+          npm start > /tmp/claim-sources.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/claim-sources.log; exit 1;
+          }
+          node scripts/claim-sources-pull-walk.mjs

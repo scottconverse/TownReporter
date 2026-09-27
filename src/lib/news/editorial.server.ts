@@ -1,4 +1,4 @@
-import { getSql, withTransaction } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import { claudeCodeChat } from "./ai-claude-code.server.ts";
 import { grokChat, probeProvider } from "./ai.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
@@ -95,7 +95,8 @@ export async function ensureEditorialSchema() {
 
     The desk-facing parts do not belong in the story, so they live here.
   */
-  await sql.query(`
+  await ensureSchemaOnce(sql, "editorial-extras", [
+    `
     create table if not exists editorial_extras (
       draft_id integer primary key,
       newsroom_id integer not null default 1,
@@ -105,7 +106,8 @@ export async function ensureEditorialSchema() {
       source_ref text not null default '',
       generated_at timestamptz not null default now()
     )
-  `);
+  `,
+  ]);
 }
 
 export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
@@ -541,7 +543,8 @@ export async function fileEditorial(
  */
 export async function ensureEditorialRequestSchema() {
   const sql = await getSql();
-  await sql.query(`
+  await ensureSchemaOnce(sql, "editorial-requests", [
+    `
     create table if not exists editorial_requests (
       id serial primary key,
       user_id text not null,
@@ -559,13 +562,10 @@ export async function ensureEditorialRequestSchema() {
       created_at timestamptz not null default now(),
       finished_at timestamptz
     )
-  `);
-  await sql.query(
+  `,
     `alter table editorial_requests add column if not exists model_choice text not null default 'auto'`,
-  );
-  await sql.query(
     `alter table editorial_requests add column if not exists source_text text not null default ''`,
-  );
+  ]);
 }
 
 type EditorialWorkDeps = {

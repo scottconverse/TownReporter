@@ -81,7 +81,48 @@ function Test-TownReporterPort {
 }
 
 <#
-  A process is this install's server only when it is node.exe and its command
+  A process's command line with its slashes normalized to backslashes.
+
+  Windows reports a command line as it was typed, and the scripts here build
+  paths with Join-Path (backslashes) -- but a caller that typed forward
+  slashes, or a shim that rewrote them, produces the same process with a
+  different spelling. Every path comparison against a command line goes
+  through this first, so no caller can re-introduce the mismatch below.
+#>
+function Get-TownReporterNormalizedCommandLine {
+  param([Parameter(Mandatory = $true)]$Process)
+  if ($null -eq $Process) { return '' }
+  return ([string]$Process.CommandLine) -replace '/', '\'
+}
+
+<#
+  A process is ANY install's TownReporter server when it is node.exe and its
+  command line contains a built-server path.
+
+  Deliberately wider than Test-TownReporterServerProcess, which asks about one
+  checkout: the watchdog uses this one to tell "some install's built server"
+  from "some other program entirely" BEFORE it decides whether the owner is
+  the checkout it is repairing (see ops\watchdog.ps1).
+
+  The 2026-09-26 outage is why this exists as a function rather than an inline
+  pattern. The watchdog tested the command line with
+  `-notlike "*.output/server/index.mjs*"` -- forward slashes against a command
+  line Windows reports with backslashes -- so the match failed for the app's
+  OWN server, every port owner took the "not this app -- not touching it"
+  branch, and a stalled paper was never repaired. A pattern in a string is
+  also untestable; this is called from a real PowerShell process by
+  scripts\ops-promote-process.test.mjs.
+#>
+function Test-TownReporterBuiltServerProcess {
+  param([Parameter(Mandatory = $true)]$Process)
+  if ($null -eq $Process -or $Process.Name -ne 'node.exe') { return $false }
+  $normalized = Get-TownReporterNormalizedCommandLine -Process $Process
+  if (-not $normalized) { return $false }
+  return $normalized -like '*.output\server\index.mjs*'
+}
+
+<#
+  A process is THIS install's server only when it is node.exe and its command
   line contains this exact checkout's built-server path. Normalize slashes
   first because Windows reports the path with backslashes, while the old
   promotion guard looked only for forward slashes.
@@ -91,10 +132,8 @@ function Test-TownReporterServerProcess {
     [Parameter(Mandatory = $true)]$Process,
     [Parameter(Mandatory = $true)][string]$App
   )
-  if ($null -eq $Process -or $Process.Name -ne 'node.exe') { return $false }
-  $commandLine = [string]$Process.CommandLine
-  if (-not $commandLine) { return $false }
-  $normalized = $commandLine -replace '/', '\'
+  if (-not (Test-TownReporterBuiltServerProcess -Process $Process)) { return $false }
+  $normalized = Get-TownReporterNormalizedCommandLine -Process $Process
   $expected = [IO.Path]::GetFullPath((Join-Path $App '.output\server\index.mjs'))
   return $normalized.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -ge 0
 }

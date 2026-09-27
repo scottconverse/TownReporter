@@ -21,7 +21,7 @@
  */
 
 import { DEFAULT_NEWSROOM_ID, requireEditor } from "./membership.ts";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { decryptApiKey, encryptApiKey } from "./custom-ai-connections.server.ts";
 import { assertPublicHttpUrl, resolveFetch } from "./fetch-url.ts";
 import {
@@ -69,9 +69,13 @@ const SCHEMA = [
    )`,
 ];
 
+/**
+ * Goes through `ensureSchemaOnce` so a running server issues no DDL at all:
+ * every caller below is a request path. See `paper-settings-read-lock.test.ts`
+ * and `questions/BP.md`.
+ */
 async function ensureSchema(): Promise<void> {
-  const sql = await getSql();
-  for (const statement of SCHEMA) await sql.query(statement);
+  await ensureSchemaOnce(await getSql(), "youtube-data-api", SCHEMA);
 }
 
 /* ------------------------------------------------------------------ *

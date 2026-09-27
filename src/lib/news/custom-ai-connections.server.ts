@@ -209,16 +209,23 @@ export async function testConnection(
   }
 }
 
-const SCHEMA = `create table if not exists custom_ai_connections (
+const SCHEMA = [
+  `create table if not exists custom_ai_connections (
   id text primary key, newsroom_id integer not null, name text not null,
   base_url text not null, encrypted_api_key text, model_id text,
   enabled boolean not null default true,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   unique(newsroom_id, name)
-)`;
+)`,
+];
 
+/**
+ * Goes through `ensureSchemaOnce` so a running server issues no DDL at all:
+ * every caller below is a request path, and the `create table` here used to run
+ * on each one. See `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+ */
 async function ensureSchema() {
-  await (await getSql()).query(SCHEMA);
+  await ensureSchemaOnce(await getSql(), "custom-ai-connections", SCHEMA);
 }
 function encryptionKey(): Buffer {
   const secret = process.env.BETTER_AUTH_SECRET?.trim();
@@ -380,5 +387,5 @@ export async function testCustomAiConnection(
 }
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { requireEditor } from "./membership.ts";

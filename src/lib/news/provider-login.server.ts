@@ -32,7 +32,7 @@
  * MUST keep the `.server` suffix and be reached by dynamic import only.
  */
 import { spawn } from "node:child_process";
-import { getSql, withTransaction, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
 import { claudeChildEnv, codexChildEnv } from "./cli-child-env.server.ts";
@@ -184,7 +184,11 @@ export function lastLine(text: string, max = 200): string {
  */
 export async function ensureProviderLoginsSchema() {
   const sql = await getSql();
-  await sql.query(`
+  // Statement for statement as it was, now once per database rather than once
+  // per call -- the `alter` here is ACCESS EXCLUSIVE and used to queue behind
+  // the nightly `pg_dump`. See `paper-settings-read-lock.test.ts`.
+  await ensureSchemaOnce(sql, "provider-logins", [
+    `
     create table if not exists provider_logins (
       id serial primary key,
       newsroom_id integer not null default 1,
@@ -199,20 +203,21 @@ export async function ensureProviderLoginsSchema() {
       finished_at timestamptz,
       supersedes_login_id integer references provider_logins(id)
     )
-  `);
-  await sql.query(`
+  `,
+    `
     alter table provider_logins
       add column if not exists supersedes_login_id integer references provider_logins(id)
-  `);
-  await sql.query(`
+  `,
+    `
     create unique index if not exists provider_logins_supersedes_login_id_key
       on provider_logins (supersedes_login_id)
       where supersedes_login_id is not null
-  `);
-  await sql.query(`
+  `,
+    `
     create index if not exists provider_logins_open_idx
       on provider_logins (newsroom_id, provider, status, id desc)
-  `);
+  `,
+  ]);
   await sweepStaleProviderLoginsOnStartup();
 }
 
