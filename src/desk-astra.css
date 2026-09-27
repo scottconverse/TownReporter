@@ -3313,9 +3313,23 @@
    header below sits on the same track list with the same gap and inset, so
    every label lands over the cell it names. `.lead-list.roomy` is the Queue's
    list; the batch-results list inside the draft dialog carries the same class
-   and the same six children, so it lays out identically. */
+   and the same six children, so it lays out identically.
+
+   The actions track is a named width rather than `auto` on purpose. With
+   `auto` each grid works out its own: the header's track sizes to the word
+   ACTIONS (~70px) and the row's to Start story + More (~202px), and because
+   the lead track is `1fr` the header's Evidence, Filed and Actions labels sat
+   ~132px right of the cells they name -- measured at 1280 before this line
+   existed: header lead track 346.188px against the rows' 212.438px. One
+   number for both keeps the labels over their cells. If a larger text size
+   outgrows it the presses wrap inside the cell (`flex-wrap` above) instead of
+   pushing the columns apart. */
+.desk-ltr.astra .lead-list.roomy,
+.desk-ltr.astra .queue-head {
+  --queue-acts-w: 202px;
+}
 .desk-ltr.astra .lead-list.roomy .lead-row {
-  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px auto;
+  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px var(--queue-acts-w);
   column-gap: 16px;
   align-items: start;
   padding: 10px 24px;
@@ -3386,7 +3400,7 @@
    column off from the cells below it. */
 .desk-ltr.astra .queue-head {
   display: grid;
-  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px auto;
+  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px var(--queue-acts-w);
   column-gap: 16px;
   align-items: center;
   padding: 0 24px 8px;
