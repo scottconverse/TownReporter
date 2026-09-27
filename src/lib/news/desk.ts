@@ -413,8 +413,14 @@ export const listLeads = createServerFn({ method: "GET" })
  * Insert a lead exactly the way `fileLead` always has, plus the draft row
  * `publishLead` reads its source_urls from (see the note below) — pulled out
  * so `writeStoryFromInput` can file the same shape without duplicating it.
+ *
+ * Exported for Unit BK's "Add a lead" dialog. That dialog files a lead and then
+ * branches (score it, draft it, or leave it), so it needs the filing without
+ * the rest of `fileLead`; the alternative was a second insert of the same two
+ * rows in a new file, which is how the draft's `source_urls` would eventually
+ * be forgotten again and a hand-added lead would publish with no sources.
  */
-async function insertLeadWithDraft(
+export async function insertLeadWithDraft(
   context: { userId: string; newsroomId?: number },
   input: { headline: string; why: string; topic: string; urls: string[]; notesJson?: string },
 ): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
@@ -3620,6 +3626,7 @@ export async function performSuggestHeadlines(
   context: { userId: string; newsroomId?: number },
   leadId: number,
   currentHeadline?: string,
+  model?: { choice?: string | null; effort?: string | null },
 ): Promise<{ ok: true; options: string[] } | { ok: false; error: string }> {
   const sql = await getSql();
   const leads = await sql<LeadRow>`
@@ -3641,9 +3648,16 @@ export async function performSuggestHeadlines(
     dek: row?.dek,
     body: row?.body,
   });
+  /*
+    Unit BK's Headline dialog draws the model row the reference draws, so a pick
+    arrives here; absent, this is "auto" and the desk's resolution decides, which
+    is what this call has always done. The pick is the dialog's own row, and
+    `grokChat` is still the thing that resolves an "auto".
+  */
   const got = await grokChat(prompt.system, prompt.user, 700, {
-    choice: "auto",
+    choice: (model?.choice || "auto") as EffectiveProviderChoice,
     newsroomId: owned(context),
+    reasoningEffort: (model?.effort ?? null) as ModelEffort | null,
   });
   if (!got.ok) {
     return {
@@ -3666,7 +3680,12 @@ export async function performSuggestHeadlines(
 export const suggestHeadlines = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => suggestHeadlinesInput.parse(raw))
-  .handler(async ({ context, data }) => performSuggestHeadlines(context, data.leadId, data.headline));
+  .handler(async ({ context, data }) =>
+    performSuggestHeadlines(context, data.leadId, data.headline, {
+      choice: data.modelChoice,
+      effort: data.modelEffort as ModelEffort | null | undefined,
+    }),
+  );
 
 /**
  * A correction note the story model would write, from the editor's two lines.
