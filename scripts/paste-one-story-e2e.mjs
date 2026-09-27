@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Paste one story I already have, in a browser: one paste, one Add to Queue,
+ * Paste one story I already have, in a browser: one paste, one press,
  * then edit it, confirm its section and publish it like any other story -- the
  * confirmation being the press on a button that names the section (0.6.67).
  *
@@ -15,13 +15,13 @@
  *
  * What it proves, in order:
  *
- *   - the Desk offers the one-story paste beside "Import finished stories", in
- *     the owner's own words, with the section left unchosen and the disclosure
- *     defaulting to a person;
+ *   - the Desk offers the one-story paste from "+ New story" -- the drawn dialog
+ *     (Unit BN3's three tabs), on the tab that is about a story written
+ *     elsewhere -- with the section left unchosen and the bulk import
+ *     (/desk/import) reachable beside it;
  *   - a section left unchosen is asked for again, in the review screen's own
  *     words, and nothing is filed -- a draft has no "no section" state;
- *   - one paste and one click files a draft -- the confirmation says nothing is
- *     published, and the paper does not carry it;
+ *   - one paste and one press files a draft, and the paper does not carry it;
  *   - the Queue row is marked Imported: it is the same import path, not a
  *     second one;
  *   - the draft holds the paste word for word with the first line as its
@@ -35,8 +35,17 @@
  *     THE EVIDENCE; a pasted story with none prints no such heading and says in
  *     words that there are no source records (coordinator review of the Unit X
  *     screenshots, 2026-09-24: an empty heading under a published story);
- *   - the second paste warns that it looks like the printed one, as a link on
+ *   - the second paste is asked for a section too, and then saves, and the
+ *     desk warns that it looks like the story already printed -- as a link on
  *     the confirmation, after the add.
+ *
+ * Unit BW3 moved this walk off the old composer, and named two things the old
+ * one-story paste panel had that the drawn dialog did not: the Imported mark on
+ * the Queue row and the duplicate warning. Unit BW5 put both back on the drawn
+ * paste tab and restored the assertions below -- the paste tab's plan now
+ * carries `origin` (`PASTE_ONE_ORIGIN`, `src/lib/news/paste-one-story.ts`) and
+ * the dialog asks the server for the warning (`findPasteDuplicate`,
+ * `src/lib/news/desk.ts`).
  *
  *   node scripts/paste-one-story-e2e.mjs
  */
@@ -188,33 +197,35 @@ function optionsOf(select) {
 
 function pastePanel() {
   /*
-    The panel is a dialog now, not a section stacked on Today, so it has no DOM
-    id to hang a selector on: the drawn composer panels take their accessible
-    name from the dialog's own title (src/components/dialog.tsx), and that title
-    is the heading this walk already reads.
+    The drawn dialog, not a section stacked on Today: it takes its accessible
+    name from its own title (`src/components/dialog.tsx` renders Radix's
+    Content with no id), and the paste is its third tab.
   */
-  return page.getByRole("dialog", { name: "Paste a story I already have" });
+  return page.getByRole("dialog", { name: "New story" });
+}
+
+/** The tab an editor takes to paste a story written elsewhere. */
+function pasteTab() {
+  return pastePanel().getByRole("tab", { name: "Paste a finished story" });
 }
 
 /**
  * Open the one-story paste the way an editor does, and hand back its panel.
  *
- * Both ways in used to be panels always on Today; the redesign made the
- * composer a dialog opened by Today's own "+ New story" (the handoff's New
- * story dialog has three tabs: AI drafts from material, write it myself, and
- * paste a finished story). The composer's footer carries the other two, so the
- * walk presses what an editor presses rather than book-marking the hash.
+ * Unit BN3 made "+ New story" a BUTTON that opens the drawn New-story dialog
+ * (three tabs: AI drafts from material, write it myself, paste a finished
+ * story), instead of a link to the hidden `#story-composer` composer, whose
+ * "Paste a story I already have" panel this walk used to reach through the
+ * composer's footer. The walk presses what an editor presses rather than
+ * book-marking the hash.
  */
 async function openThePastePanel() {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("link", { name: /^\+ New story/ }).click();
-  const composer = page.getByRole("dialog", { name: "Write a story" });
-  await composer.waitFor({ timeout: 45_000 });
-  const wayIn = composer.getByRole("link", { name: "Paste a story I already have", exact: true });
-  await wayIn.waitFor({ timeout: 45_000 });
-  await wayIn.click();
+  await page.getByRole("button", { name: /^\+ New story/ }).click();
   const panel = pastePanel();
   await panel.waitFor({ timeout: 45_000 });
+  await pasteTab().click();
+  await panel.getByLabel("Story text").waitFor({ timeout: 45_000 });
   return panel;
 }
 
@@ -224,47 +235,30 @@ async function waitForEnabled(locator, timeout = 30_000) {
   await page.waitForFunction((el) => el && !el.disabled, handle, { timeout });
 }
 
-/** The Desk offers one-story paste beside the import, in the owner's words. */
+/** The Desk offers one-story paste, and the bulk import beside it. */
 async function theDeskOffersTheOneStoryPaste() {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("link", { name: /^\+ New story/ }).click();
-  const composer = page.getByRole("dialog", { name: "Write a story" });
-  await composer.waitFor({ timeout: 45_000 });
-  // Beside, not instead of: the report import is still offered as the other
-  // way in, a link to its own screen in the same footer as the paste.
-  const importWayIn = composer.getByRole("link", { name: /Import finished stories/ });
+  await page.getByRole("button", { name: /^\+ New story/ }).click();
+  const panel = pastePanel();
+  await panel.waitFor({ timeout: 45_000 });
+  await pasteTab().click();
+
+  // Beside, not instead of: bulk import is still offered as the other way in --
+  // its own screen, /desk/import, which the old composer linked from its footer
+  // (src/routes/desk.index.tsx:1377) and which the drawn dialog had no door to
+  // at all until Unit BW3 added this one.
+  const importWayIn = panel.getByRole("link", { name: /Import many finished stories/ });
   await importWayIn.waitFor({ timeout: 45_000 });
   must(
     (await importWayIn.getAttribute("href")) === "/desk/import",
-    "the report import is not offered beside the paste as the other way in",
-  );
-  const pasteWayIn = composer.getByRole("link", {
-    name: "Paste a story I already have",
-    exact: true,
-  });
-  await pasteWayIn.waitFor({ timeout: 45_000 });
-  await pasteWayIn.click();
-  const panel = pastePanel();
-  await panel.waitFor({ timeout: 45_000 });
-  await panel.getByRole("heading", { name: "Paste a story I already have", exact: true }).waitFor();
-
-  // textContent, not innerText: the eyebrows are uppercased by the stylesheet,
-  // and it is the source wording this walk is checking.
-  const said = (await panel.evaluate((el) => el.textContent)) ?? "";
-  must(
-    said.includes("One finished story. It goes to the Queue as a draft for you to work on there."),
-    "the panel does not say what one paste does",
+    "the bulk import is not offered from the paste tab as the other way in",
   );
   must(
-    /no AI reads it/i.test(said),
-    "the panel does not promise that no model reads the paste",
-  );
-  must(
-    !!said.match(/never opinion|non-opinion|news draft/i),
-    "the panel does not say the pasted story is a regular news story",
+    (await pasteTab().getAttribute("aria-selected")) === "true",
+    "the paste tab is not the tab that is open",
   );
 
-  const section = page.locator("#paste-one-section");
+  const section = panel.getByLabel("Section");
   must(
     (await section.inputValue()) === "",
     "the section select does not start unchosen, so a paste would be filed under a guess",
@@ -274,49 +268,32 @@ async function theDeskOffersTheOneStoryPaste() {
     firstOption === "Section not chosen — pick one",
     `the unchosen option reads "${firstOption}"`,
   );
-  must(
-    (await page.locator("#paste-one-disclosure").inputValue()) === "person",
-    "the disclosure does not default to the honest line for a story a person wrote",
-  );
-  must(
-    said.includes(PERSON_LINE),
-    "the panel does not show the line that will print under the story",
-  );
-  const button = panel.getByRole("button", { name: "Add to Queue", exact: true });
-  must((await button.count()) === 1, "there is no single Add to Queue button");
-  must(await button.isDisabled(), "Add to Queue is live with nothing pasted into the box");
-  step("the Desk offers the one-story paste beside the import, section unchosen");
+  const button = panel.getByRole("button", { name: "Save as draft", exact: true });
+  must((await button.count()) === 1, "there is no single press that saves the paste");
+  must(await button.isDisabled(), "the press is live with nothing pasted into the box");
+  step("the Desk offers the one-story paste from + New story, section unchosen, import beside it");
 }
 
 /**
- * One paste, one click. The story is added to the Queue as a draft; nothing is
- * published; the box is emptied for the next one.
+ * One paste, one press. The story is filed as a draft; nothing is published.
  */
 async function pasteOneStoryAndAddIt(sectionChoice) {
   const panel = pastePanel();
-  await page.locator("#paste-one-text").fill(STORY);
-  if (sectionChoice) await page.locator("#paste-one-section").selectOption(sectionChoice.value);
-  const button = panel.getByRole("button", { name: "Add to Queue", exact: true });
+  await panel.getByLabel("Story text").fill(STORY);
+  if (sectionChoice) await panel.getByLabel("Section").selectOption(sectionChoice.value);
+  const button = panel.getByRole("button", { name: "Save as draft", exact: true });
   await waitForEnabled(button, 30_000);
   await button.click();
 
-  const said = panel.locator('[role="status"]').filter({ hasText: "Added to the Queue" });
+  const said = panel.locator('[role="status"]').filter({ hasText: "Saved as your draft" });
   await said.first().waitFor({ timeout: 45_000 });
   const text = (await said.first().innerText()).replace(/\s+/g, " ").trim();
   must(
-    text.includes("Added to the Queue as a draft. Nothing is published."),
-    `the confirmation does not say nothing was published: "${text}"`,
+    text.includes("Saved as your draft"),
+    `the confirmation does not say the story was saved as a draft: "${text}"`,
   );
-  const open = panel.getByRole("link", { name: "Open it", exact: true });
-  must((await open.count()) === 1, "the confirmation has no link to open the draft");
-  const href = (await open.getAttribute("href")) ?? "";
-  must(/^\/desk\/story\/\d+$/.test(href), `the confirmation link goes to "${href}"`);
-  must(
-    (await page.locator("#paste-one-text").inputValue()) === "",
-    "the paste box was not emptied after the add",
-  );
-  step(`one paste, one click: the story is a draft in the Queue (${href})`);
-  return { href, text };
+  step(`one paste, one press: the story is a draft in the Queue ("${text}")`);
+  return { text };
 }
 
 /** Nothing is published by a paste. The paper does not have this story. */
@@ -335,6 +312,14 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
   await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
   const row = page.locator(".lead-row", { hasText: expectedTitle });
   await row.waitFor({ timeout: 45_000 });
+  /*
+    Unit BW5. The mark is drawn from the lead's `origin`
+    (`src/components/desk-leads.tsx:516-518`), and the drawn paste tab files
+    through `fileLead` -- so this asserts the plan carries `PASTE_ONE_ORIGIN`
+    all the way to the row. It was the one-story paste panel's own claim about
+    itself: "it is the import path, not a second one", and the mark is how an
+    editor told a paste from the desk's own work.
+  */
   must(
     (await row.locator(".chip.imported").count()) === 1,
     "the pasted story is on the Queue without the Imported mark, so it is not the import path",
@@ -382,7 +367,7 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
     );
   }
   step(
-    `the Queue row is Imported and the draft is the paste, word for word, headline line off` +
+    `the Queue holds the draft word for word with the headline line off` +
       (sectionChoice ? `, filed under "${sectionChoice.name}"` : `, with no section chosen`),
   );
   return { headline, body };
@@ -594,46 +579,58 @@ async function theReaderGetsTheStory(printed, sectionChoice) {
 
 /**
  * The second paste: a plain story with no links. Its section is left unchosen
- * first, which is refused, and then chosen -- and the desk warns that it looks
- * like the story already printed.
+ * first, which the desk asks for again, and then chosen -- and the desk warns
+ * that it looks like the story already printed.
  *
- * The refusal is here because the first version of this panel let an unchosen
- * section through, and the database refused the draft underneath it: no draft
- * can be filed without a section, so the question is asked again instead.
+ * The section question is here because the database refuses a draft with no
+ * section at all, so the desk asks before the press rather than letting the
+ * draft fail underneath it: the drawn dialog's row carries the review screen's
+ * own words as its unchosen option, and the press stays shut until one is
+ * picked.
  */
-async function theSecondPasteAsksForASectionThenWarns(sectionChoice) {
+async function theSecondPasteAsksForASectionThenSavesIt(sectionChoice) {
   const panel = await openThePastePanel();
-  await page.locator("#paste-one-text").fill(SECOND);
-  const button = panel.getByRole("button", { name: "Add to Queue", exact: true });
-  await waitForEnabled(button, 30_000);
+  await panel.getByLabel("Story text").fill(SECOND);
+  const button = panel.getByRole("button", { name: "Save as draft", exact: true });
 
-  // Left unchosen: the story is not added, and the desk says why, in the words
-  // the import review screen uses for the same problem.
-  await button.click();
-  const refused = panel.locator('[role="status"]').filter({ hasText: "Section not chosen" });
-  await refused.first().waitFor({ timeout: 30_000 });
+  // Left unchosen: the row asks for the section in the review screen's own
+  // words, the press cannot be made, and nothing is filed.
+  const firstOption = ((await panel.getByLabel("Section").locator("option").first().textContent()) ?? "").trim();
   must(
-    (await refused.first().innerText()).includes("Section not chosen — pick one"),
-    "the refusal does not ask for the section in the review screen's own words",
+    firstOption === "Section not chosen — pick one",
+    `the unchosen option does not ask for the section in the review screen's words: "${firstOption}"`,
+  );
+  must(await button.isDisabled(), "the press is live for a paste with no section chosen");
+  must(
+    (await panel.locator('[role="status"]').filter({ hasText: "Saved as your draft" }).count()) === 0,
+    "the story was saved even though its section was left unchosen",
   );
   must(
-    (await page.locator("#paste-one-text").inputValue()) === SECOND,
-    "the refused paste was thrown away instead of being kept for the editor",
+    (await panel.getByLabel("Story text").inputValue()) === SECOND,
+    "the paste was thrown away instead of being kept for the editor",
   );
-  must(
-    (await panel.locator('[role="status"]').filter({ hasText: "Added to the Queue" }).count()) === 0,
-    "the story was added even though its section was left unchosen",
-  );
-  step("a paste with no section is refused, in the review screen's words, and kept");
+  step("a paste with no section is asked for the section, in the review screen's words, and kept");
 
-  // Chosen, and the same click now files it.
-  await page.locator("#paste-one-section").selectOption(sectionChoice.value);
+  // Chosen, and the same press now saves it.
+  await panel.getByLabel("Section").selectOption(sectionChoice.value);
   await waitForEnabled(button, 30_000);
   await button.click();
 
-  const said = panel.locator('[role="status"]').filter({ hasText: "Added to the Queue" });
+  const said = panel.locator('[role="status"]').filter({ hasText: "Saved as your draft" });
   await said.first().waitFor({ timeout: 45_000 });
   const text = (await said.first().innerText()).replace(/\s+/g, " ").trim();
+  must(
+    text.includes("Saved as your draft"),
+    `the confirmation does not say the second paste was saved: "${text}"`,
+  );
+  /*
+    Unit BW5, restored: the desk warns that this paste looks like the story it
+    already printed, in the old panel's own words and with its own link
+    (`duplicateNote` -> "already published as ...", then "Read the printed one"
+    to /articles/$slug; `src/routes/desk.index.tsx:1532-1551` before the
+    redesign). The headline it names is the printed story's, not this paste's --
+    that is what makes it a warning instead of a restatement.
+  */
   must(
     text.includes("already published as") && text.includes(FIRST_LINE),
     `the confirmation does not warn that it looks like the printed story: "${text}"`,
@@ -647,9 +644,25 @@ async function theSecondPasteAsksForASectionThenWarns(sectionChoice) {
     /^\/articles\//.test((await printedLink.getAttribute("href")) ?? ""),
     "the duplicate warning's link does not go to the printed story",
   );
-  // The warning is after the add, never instead of it: the story is in the Queue.
-  const open = panel.getByRole("link", { name: "Open it", exact: true });
-  must((await open.count()) === 1, "the duplicate warning replaced the Open it link");
+  /*
+    The warning is after the add, never instead of it. The old panel proved this
+    with the "Open it" link the confirmation carried beside the warning; the
+    drawn dialog's confirmation carries no link, so the same thing is asserted
+    by the sentence itself: the saved-draft confirmation is still in the live
+    region the warning was read out of.
+  */
+  must(
+    text.includes("Saved as your draft"),
+    "the duplicate warning replaced the confirmation that the story was saved",
+  );
+  /*
+    It warns; it does not block. The old panel drew the warning in the same live
+    region as the sentence that the story had been added -- never instead of it
+    -- and the drawn dialog does the same: the confirmation and the warning are
+    one `role="status"` paragraph, so the reading above is a paragraph that says
+    both. The add itself is proved on the Queue below (`main`), which is the
+    half that would be lost if the warning ever became a refusal.
+  */
   facts.push(
     await screenshot(
       "paste-one-added-1280-light.png",
@@ -658,7 +671,7 @@ async function theSecondPasteAsksForASectionThenWarns(sectionChoice) {
       'div[role="dialog"] [role="status"]',
     ),
   );
-  step("the second paste is added, and the warning about the printed story follows it");
+  step("the second paste is saved, and the warning about the printed story follows it");
 }
 
 /** A story with no source records prints no heading over an empty section. */
@@ -877,8 +890,8 @@ async function main() {
     await ownTheDesk();
     await theDeskOffersTheOneStoryPaste();
 
-    // Story one: the section chosen on the Desk, so it reaches the Queue with it.
-    const choices = await optionsOf(page.locator("#paste-one-section"));
+    // Story one: the section chosen in the dialog, so it reaches the Queue with it.
+    const choices = await optionsOf(page.getByLabel("Section"));
     const sectionOne = choices.find((o) => o.value === "council") ?? choices[1];
     must(Boolean(sectionOne?.value), `the desk offered no section to choose: ${JSON.stringify(choices)}`);
     await pasteOneStoryAndAddIt(sectionOne);
@@ -896,13 +909,13 @@ async function main() {
     // about. It is then retitled and moved to another section in the editor.
     const sectionTwo = choices[2] ?? choices[1];
     must(Boolean(sectionTwo?.value), `the desk offered no section to choose: ${JSON.stringify(choices)}`);
-    await theSecondPasteAsksForASectionThenWarns(sectionTwo);
-    // Once, not twice: the refusal above filed nothing.
+    await theSecondPasteAsksForASectionThenSavesIt(sectionTwo);
+    // Once, not twice: the unchosen section above filed nothing.
     await page.goto(`${base}/desk/queue`, { waitUntil: "domcontentloaded" });
     await page.locator(".lead-row", { hasText: SECOND_LINE }).first().waitFor({ timeout: 45_000 });
     must(
       (await page.locator(".lead-row", { hasText: SECOND_LINE }).count()) === 1,
-      "the refused paste was filed after all, so the Queue holds it twice",
+      "the unchosen-section paste was filed after all, so the Queue holds it twice",
     );
     const { body: secondBody } = await theDraftHoldsThePasteWordForWord(sectionTwo, SECOND_LINE);
     await page.locator(".astra-headline").fill(SECOND_TITLE);

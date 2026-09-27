@@ -202,6 +202,16 @@ const DESK_CHROME_IMPORTS = {
   "@/components/dialog": inlineModule(
     "export function Dialog() { return null; } export function ChoiceCard() { return null; }",
   ),
+  /*
+    Redesign BN item 1 put the drawn New-story dialog in the shell header,
+    reached through the dialogs barrel (`@/components/dialogs`). Nothing
+    rendered here opens it; it is a controlled dialog and draws nothing while
+    shut. desk-chrome.tsx still cannot be compiled without the specifier
+    resolving, the same reason the Dialog above is stubbed.
+  */
+  "@/components/dialogs": inlineModule(
+    "export function NewStoryDialog() { return null; }",
+  ),
   "lucide-react": import.meta.resolve("lucide-react"),
   react: import.meta.resolve("react"),
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

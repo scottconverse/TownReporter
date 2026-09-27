@@ -39,20 +39,24 @@
  * was not shown.
  */
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { openDarkInvestigation } from "@/lib/news/dark";
 import {
   addSource,
   addSourcesBulk,
   fileLead,
+  findPasteDuplicate,
   listSources,
   saveDraft,
   suggestHeadlines,
   writeStoryFromInput,
 } from "@/lib/news/desk";
+import type { DuplicateWarning } from "@/lib/news/import-review";
 import { requestDraftReconciliationFn } from "@/lib/news/draft-reconcile-actions";
 import {
   addLead,
@@ -70,6 +74,7 @@ import {
 import { uploadStoryDocument } from "@/lib/news/story-document-api";
 import { DOCUMENT_COUNT_LIMIT, DOCUMENT_FILE_LIMIT } from "@/lib/news/story-document-text";
 import type { SourceRow } from "@/lib/news/types";
+import { useEditorSections } from "@/lib/use-sections";
 import { sourceIdentity } from "@/lib/news/url-guard";
 import {
   AddLeadBody,
@@ -93,7 +98,7 @@ import {
   addToProblem,
   addToRequest,
   darkFileFromSeed,
-  darkFileInitial,
+  darkFileSeed,
   darkProblem,
   darkRequest,
   fillStepId,
@@ -115,6 +120,7 @@ import {
   type AddLeadState,
   type AddSourcesState,
   type AddToState,
+  type DarkFilePrefill,
   type DarkFileState,
   type HeadlineState,
   type HoldState,
@@ -297,7 +303,25 @@ type WriteStoryStepIn = {
   modelChoice?: string;
   modelEffort?: string | null;
 };
-type FileLeadStepIn = { headline: string; why: string; topic: string; url?: string };
+type FileLeadStepIn = {
+  headline: string;
+  why: string;
+  topic: string;
+  url?: string;
+  /** Unit BW3: the pages the pasted story cites (see `newStoryRequest`). */
+  urls?: string[];
+  disclosureKey?: "outside-ai" | "person" | "other";
+  disclosureOther?: string;
+  /** Unit BW3: the body is an editor's paste (`draft-evidence.ts:36`). */
+  importedText?: boolean;
+  /**
+   * Unit BW5: how the lead entered the desk, when the screen that filed it
+   * knows -- the one-story paste is the import path, so its lead carries the
+   * import path's own word (`PASTE_ONE_ORIGIN`, `paste-one-story.ts`), which is
+   * what draws the Queue row's Imported chip (`desk-leads.tsx:516`).
+   */
+  origin?: "import";
+};
 type SaveDraftStepIn = {
   headline: string;
   dek: string;
@@ -323,10 +347,54 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<NewStoryState>(newStoryInitial, open, press.clear);
   const [documents, setDocuments] = React.useState<string[]>([]);
-  const models = React.useMemo(() => modelRowFor("story"), []);
+  /*
+    Unit BW5: the paste tab's duplicate warning.
+
+    The old one-story paste panel warned, after adding the story, that it looked
+    like one the paper already had, and linked to that one. The drawn dialog's
+    paste tab filed the story and said nothing. This holds the server's answer
+    for the paste that was just saved; the body draws it beside the
+    confirmation, and the next press clears it (a warning about the last paste
+    over the current one would be a sentence about a story the editor is not
+    looking at).
+  */
+  const [duplicate, setDuplicate] = React.useState<DuplicateWarning | null>(null);
+  /*
+    Unit BW3: the row carries the editor's own saved connections as well.
+
+    `modelRowFor` reads the static registry, and a custom connection lives in
+    the database, so the same merge `ModelPicker` does for this surface is done
+    here (`model-picker.tsx:273-315`): the built-ins, then one row per saved
+    connection, keyed `custom:<id>` -- the id the server resolves
+    (`model-choice.ts` `isCustomModelChoice`). Without this the dialog could not
+    pin a newsroom's own connection for a story at all.
+  */
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+  });
+  /*
+    Unit BW3: tabs (b) and (c) save the editor's own text, and `saveDraft`
+    writes `topic` -- which the database refuses unless it names a section of
+    this newsroom (`sections.server.ts:38`). Tabs (b) and (c) had no control for
+    it at all, so the row is fed by the desk's own sections query, the same one
+    the write box and the import screen draw (`use-sections.ts:3`).
+  */
+  const sectionQuery = useEditorSections();
+  const models = React.useMemo(
+    () => [
+      ...modelRowFor("story"),
+      ...(connections.data ?? []).map((c) => ({ value: `custom:${c.id}`, label: c.name })),
+    ],
+    [connections.data],
+  );
 
   React.useEffect(() => {
-    if (open) setDocuments([]);
+    if (open) {
+      setDocuments([]);
+      setDuplicate(null);
+    }
   }, [open]);
 
   const done = (text: string): PressAnswer => {
@@ -341,6 +409,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
 
   const start = (which: "primary" | "alt") => () =>
     press.run(async () => {
+      setDuplicate(null);
       const plan = newStoryRequest(state, which, documents);
       let leadId: number | null = null;
       for (const raw of plan.steps) {
@@ -377,6 +446,27 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
             instead of a check that can never be true.
           */
           await saveDraft({ data: step.input as SaveDraftStepIn });
+          /*
+            Unit BW5: and then the warning the old paste panel drew.
+
+            Asked AFTER the save, from the headline that was just saved, and the
+            lead this press just filed is named and left out (`excludeLeadId`) --
+            the old panel looked the duplicate up before the add, from lists
+            loaded before the click, so its paste could not find itself; here the
+            lead is already on the desk, and its own headline is the one row it
+            would always match.
+
+            Only the paste tab: this save writes the editor's own words, and the
+            paper already tells them what is in its own Queue.
+          */
+          if (state.tab === "paste" && leadId !== null) {
+            const saved = step.input as SaveDraftStepIn;
+            setDuplicate(
+              (await findPasteDuplicate({
+                data: { headline: saved.headline, excludeLeadId: leadId },
+              })) ?? null,
+            );
+          }
           continue;
         }
         if (step.call === "checkEvidence") {
@@ -441,7 +531,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
       footNote={foot}
       primaryLabel={state.tab === "ai" ? "Start drafting" : state.tab === "self" ? "Save draft" : "Save as draft"}
       onPrimary={start("primary")}
-      primaryDisabled={press.busy || newStoryProblem(state) !== null}
+      primaryDisabled={press.busy || newStoryProblem(state, documents.length) !== null}
       altLabel={state.tab === "self" ? "Save & check against evidence" : undefined}
       onAlt={state.tab === "self" ? start("alt") : undefined}
       altDisabled={press.busy}
@@ -449,10 +539,12 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
       <NewStoryBody
         state={state}
         set={set}
-        problem={press.problem ?? newStoryProblem(state)}
+        problem={press.problem ?? newStoryProblem(state, documents.length)}
         note={press.note}
         models={models}
+        sections={sectionQuery.sections}
         onFiles={onFiles}
+        duplicate={duplicate}
         Choice={Choice}
       />
     </Dialog>
@@ -789,10 +881,21 @@ export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
   /**
+   * Seeds the two fields the caller already knows, instead of making the editor
+   * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
+   * row's prefill is cleared again by the next open that has none.
+   */
+  prefill?: DarkFilePrefill;
+  /**
    * A hypothesis to open the dialog already holding, handed over from another
    * screen (an import's review screen, a lead's More menu). The dialog reseeds
    * from it every time it opens, so a caller that leaves it in place gets the
    * same file offered again; the caller clears its own copy when it is spent.
+   *
+   * A `seed` is the whole hand-over and wins over `prefill` when a caller
+   * passes both: it already carries the question and the material. The two are
+   * separate props because a seed is one paste that has to be split, while a
+   * prefill is two fields the caller already has apart.
    */
   seed?: string;
   /**
@@ -815,16 +918,33 @@ export type DarkFileDialogProps = {
  * screen starts the round on the file page, where those two things exist, and
  * is handed the material and the pick to do it with.
  *
- * Mounted by: `/desk/dark` (`desk.dark.tsx`, phase 2c) as the New file control,
- * and the More menu's "Send to Dark Desk". Props: `open`, `onClose`, `onOpened`.
+ * Mounted by: `/desk/dark` (`desk.dark.tsx`, phase 2c) as the New file control
+ * (which hands over a `seed`), and the lead rows' More menu on `/desk` and
+ * `/desk/queue` (which hand over a `prefill`). Props: `open`, `onClose`,
+ * `prefill`, `seed`, `onOpened`.
+ *
+ * PREFILL: the lead row's "Send to Dark Desk" already knows the headline and the
+ * link, and `darkProblem` wants a tip of eight characters or more, so the editor
+ * who pressed that row should not have to paste them back in. The prefill goes
+ * through the same factory `useDialogState` reseeds from on every open (see the
+ * `prefill` note on `DarkFileDialogProps`), which is also why the factory is
+ * memoized on the two strings rather than on the object: a caller passing an
+ * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, onOpened, seed }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkFileDialogProps) {
   const press = usePress();
   // The factory must be stable -- `useDialogState` reseeds on every open -- so
-  // it is memoized on the seed rather than rebuilt on each render.
+  // it is memoized on the seed and on the prefill's two strings rather than
+  // rebuilt on each render. A caller passing an inline object literal for
+  // `prefill` would otherwise hand over a new factory every render, which is
+  // why the fields are read out here; `seed` is a string and needs no such care
+  // beyond winning over the prefill when a caller somehow passes both.
+  const prefillQuestion = prefill?.question;
+  const prefillTip = prefill?.tip;
   const factory = React.useCallback(
-    () => (seed ? darkFileFromSeed(seed) : darkFileInitial()),
-    [seed],
+    () =>
+      seed ? darkFileFromSeed(seed) : darkFileSeed({ question: prefillQuestion, tip: prefillTip }),
+    [seed, prefillQuestion, prefillTip],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
   const models = React.useMemo(() => modelRowFor("dark"), []);

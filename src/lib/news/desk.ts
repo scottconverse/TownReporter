@@ -28,6 +28,8 @@ import {
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { cleanStoryArea } from "../story-area.ts";
+import { disclosureLine } from "./import-stories.ts";
+import { findDuplicate } from "./import-review.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
@@ -66,6 +68,7 @@ import {
   packDeleteInput,
   packRenameInput,
   packSaveInput,
+  pasteDuplicateInput,
   importStoriesInput,
   importStructureInput,
   pullTodoInput,
@@ -446,24 +449,59 @@ export const listLeads = createServerFn({ method: "GET" })
  */
 export async function insertLeadWithDraft(
   context: { userId: string; newsroomId?: number },
-  input: { headline: string; why: string; topic: string; urls: string[]; notesJson?: string },
+  input: {
+    headline: string;
+    why: string;
+    topic: string;
+    urls: string[];
+    notesJson?: string;
+    /**
+     * The line readers see under the story, for a filing screen that knows who
+     * wrote it (Unit BW3: the New story dialog's paste tab). Empty is every
+     * other caller and every story the desk writes, which prints the paper's
+     * own AI line (`ai-disclosure.tsx:33`).
+     */
+    disclosure?: string;
+    /**
+     * `drafts.research_json.importedText`: the body is an editor's paste, not
+     * prose a model wrote. The evidence-review gate reads this flag to tell the
+     * two apart (`draft-evidence.ts:36`), and the paste screens mark their
+     * drafts with it (`import-stories.server.ts:432`). False is every other
+     * caller, which is the column's own default ('{}', `desk.ts:200`).
+     */
+    importedText?: boolean;
+    /**
+     * `leads.origin`: how this lead entered the desk, for a filing screen that
+     * knows. The Queue draws its Imported mark off this one word
+     * (`desk-leads.tsx:516`), and a lead filed by a scanner or by hand carries
+     * none (`0091_import_provenance.sql`: null = not recorded).
+     *
+     * Unit BW5: the one-story paste panel filed through the import path, which
+     * wrote `origin = 'import'` (`import-stories.server.ts:402`, `IMPORT_ORIGIN`),
+     * so its paste wore the Imported mark on the Queue row. The drawn New story
+     * dialog's paste tab is the same act on a different screen and now says so
+     * with the same word (see `fileLead`). Absent is every other caller.
+     */
+    origin?: string;
+  },
 ): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
   const sql = await getSql();
   const urlsJson = JSON.stringify(input.urls);
+  const origin = input.origin ?? null;
   const rows = input.notesJson
     ? await sql<{ id: number }>`
-        insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json)
+        insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, origin, notes_json)
         values (
           ${context.userId}, ${owned(context)}, ${input.headline}, ${input.why}, ${input.topic},
-          ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new', ${input.notesJson}
+          ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new', ${origin}, ${input.notesJson}
         )
         returning id
       `
     : await sql<{ id: number }>`
-        insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status)
+        insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, origin)
         values (
           ${context.userId}, ${owned(context)}, ${input.headline}, ${input.why}, ${input.topic},
-          ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new'
+          ${urlsJson}, ${input.why.slice(0, 400)}, 0, 'new', ${origin}
         )
         returning id
       `;
@@ -480,10 +518,11 @@ export async function insertLeadWithDraft(
     evidence is there, and it is not.
   */
   await sql`
-    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls)
+    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, disclosure_text, research_json)
     values (
       ${context.userId}, ${owned(context)}, ${id}, ${input.headline}, ${input.why.slice(0, 220)}, '', ${input.topic},
-      ${urlsJson}
+      ${urlsJson}, ${input.disclosure ?? ""},
+      ${input.importedText ? JSON.stringify({ importedText: true }) : "{}"}
     )
   `;
   await audit(context.userId, "lead", `filed ${id}`, owned(context));
@@ -511,13 +550,90 @@ export const fileLead = createServerFn({ method: "POST" })
         return { ok: false as const, error: "That source URL is not a public http(s) address." };
       }
     }
+    /*
+      Unit BW3: the New story dialog's paste tab knows every page the pasted
+      story cites, not only its original link, and the reader sees exactly what
+      the DRAFT carries (`publishLead`, `desk.ts:3659`) -- so a story saved
+      from that tab would publish with an empty Sources section while the page
+      still promised "Sources shown." Dropped here rather than refused, the way
+      the old paste panel dropped them (`sanitizePublicUrls` also de-dupes).
+    */
+    if (data.urls?.length) {
+      urls = sanitizePublicUrls([...urls, ...data.urls]);
+    }
     return insertLeadWithDraft(context, {
       headline,
       why,
       topic,
       urls,
       notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }),
+      /*
+        Who wrote it, for the filing screen that asked. Every other caller
+        sends nothing and the paper prints its own AI line
+        (`ai-disclosure.tsx:33`).
+      */
+      disclosure: data.disclosureKey
+        ? disclosureLine(data.disclosureKey, data.disclosureOther ?? "")
+        : "",
+      importedText: data.importedText === true,
+      /*
+        Unit BW5: the drawn New story dialog's paste tab files a story written
+        elsewhere, and the Queue's Imported mark is drawn from `leads.origin`
+        (`desk-leads.tsx:516`). The one-story paste panel this tab replaces was
+        the import path, which wrote `origin = 'import'`
+        (`import-stories.server.ts:402`) -- so the same paste filed from the
+        drawn tab has to carry the same word or the mark the old panel put on
+        the row disappears with the panel. Absent -- every other caller -- files
+        no origin, which is the scanner lead's own answer (`0091`: null).
+      */
+      origin: data.origin,
     });
+  });
+
+/**
+ * Whether a story about to be filed looks like one the paper already has.
+ *
+ * Unit BW5. The one-story paste panel warned "already published as ..." with a
+ * link to the story, computed from the Queue's own loaded lists
+ * (`findDuplicate`, `import-review.ts:322`, over `listLeads` + `listPublishedDesk`)
+ * -- and the drawn dialog holds no such lists, so the warning went with the
+ * panel. This is that lookup, asked by the dialog that needs it.
+ *
+ * Same rule, same words as every other duplicate warning on the desk: the
+ * comparison is `titlesOverlap` inside `findDuplicate`, the same one behind the
+ * Queue's own ≈ PRINTED flag, so a paste is judged by the rule every other
+ * story on the desk is. Published is offered before the desk's own leads, which
+ * "already in the paper" being the more useful fact.
+ *
+ * `excludeLeadId` is the lead this press has just filed. The old panel looked
+ * the duplicate up BEFORE the add, from lists loaded before the click, so the
+ * paste could not find itself; this is asked after the draft is saved, when the
+ * paste's own lead is already on the desk, so the row it would match is named
+ * and left out. Its own headline is the one it always matches, and it is never
+ * a duplicate of itself.
+ *
+ * A warning and nothing else: nothing is merged, killed or renamed.
+ */
+export const findPasteDuplicate = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => pasteDuplicateInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    /*
+      The two lists the Queue screen loads, narrowed to what the comparison
+      reads. `listLeads` returns every lead of the newsroom with no status
+      filter (`desk.ts:372`), and `listPublishedDesk` every published article
+      (`desk.ts:4253`); these are the same rows with the same scope.
+    */
+    const published = await sql<{ slug: string; headline: string }>`
+      select slug, headline from articles
+      where newsroom_id = ${owned(context)} and status = ${"published"}
+    `;
+    const leads = await sql<{ id: number; headline: string }>`
+      select id, headline from leads
+      where newsroom_id = ${owned(context)} and id <> ${data.excludeLeadId ?? 0}
+    `;
+    return findDuplicate({ headline: data.headline }, { leads, published }) ?? null;
   });
 
 export const getLead = createServerFn({ method: "GET" })

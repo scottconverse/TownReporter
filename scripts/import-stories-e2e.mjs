@@ -230,6 +230,23 @@ async function cardFacts() {
 /* ---------------------------------------------------------------- the walk */
 
 /**
+ * Unit BW3: the composer an editor reaches is the drawn `NewStoryDialog`, opened
+ * by the desk header's "+ New story" press (desk.index.tsx:956-963). The old
+ * composer was a `Link` named "+ New story" onto the `#story-composer` hash, a
+ * path this desk no longer draws a way into. Handed back so every locator below
+ * stays scoped to the dialog (the desk is still behind the modal).
+ */
+async function openNewStoryDialog(tabLabel) {
+  await page.getByRole("button", { name: /^\+ New story/ }).click();
+  const dialog = page.getByRole("dialog", { name: "New story" });
+  await dialog.waitFor({ timeout: 45_000 });
+  const tab = dialog.getByRole("tab", { name: tabLabel, exact: true });
+  await tab.click();
+  await tab.waitFor({ timeout: 10_000 });
+  return dialog;
+}
+
+/**
  * The Desk's second choice: "Import finished stories", carrying the owner's
  * own promise, and taking the paste to the import screen untouched.
  *
@@ -238,24 +255,27 @@ async function cardFacts() {
  * "Existing routes to keep reachable: `/desk/import` (New story intake)"
  * (docs/design/handoff-2026-09-26/README.md:224), and the New story dialog's
  * first tab "is the existing `/desk/import` intake" (README.md:446). So the
- * second choice is now the composer's own footer link, offered beside the
- * fields for writing it yourself -- the same place in the editor's path, one
- * press further in. Every claim below is the same claim, checked at the screen
- * that now carries it.
+ * second choice is a link inside the drawn New story dialog, on the tab that is
+ * about a story written elsewhere ("Paste a finished story") -- the same place
+ * in the editor's path, one press further in. Unit BW3 moved this walk there
+ * with the link, and re-worded the assertion to the link's own words: what it
+ * proves is unchanged, that the desk marks the import screen out as the way in
+ * for stories already written, and the paste then reaches that screen exactly
+ * as written.
  */
 async function theDeskOffersTheSecondChoice() {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  // The composer is a dialog in phase 2a, opened by Today's own "+ New story".
-  await page.getByRole("link", { name: /^\+ New story/ }).click();
-  const wayIn = page
+  // The composer is the drawn dialog, opened by Today's own "+ New story".
+  const dialog = await openNewStoryDialog("Paste a finished story");
+  const wayIn = dialog
     .locator('a[href="/desk/import"]')
-    .filter({ hasText: /Import finished stories/i })
+    .filter({ hasText: /Import many finished stories/i })
     .first();
   await wayIn.waitFor({ timeout: 45_000 });
   // textContent, not innerText: the link's wording is what this walk reads.
   const offered = ((await wayIn.textContent()) ?? "").replace(/\s+/g, " ").trim();
   must(
-    /already written somewhere else\?/i.test(offered),
+    /^Import many finished stories\b/i.test(offered),
     `the import is not marked out as the other way in for a story already written (it says "${offered}")`,
   );
   await wayIn.click();

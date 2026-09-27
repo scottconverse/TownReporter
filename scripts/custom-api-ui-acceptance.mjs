@@ -92,6 +92,51 @@ await new Promise((resolve, reject) => {
   fakeProvider.once("error", reject);
   fakeProvider.listen(3471, "127.0.0.1", resolve);
 });
+/**
+ * Unit BW3: the composer an editor reaches is the drawn `NewStoryDialog`, opened
+ * by the desk header's "+ New story" press (desk.index.tsx:956-963). The old
+ * composer was a `Link` named "+ New story" onto the `#story-composer` hash, a
+ * path this desk no longer draws a way into. Handed back so every locator stays
+ * scoped to the dialog (the desk is still behind the modal).
+ */
+async function openNewStoryDialog(tabLabel) {
+  await page.getByRole("button", { name: /^\+ New story/ }).click();
+  const dialog = page.getByRole("dialog", { name: "New story" });
+  await dialog.waitFor({ timeout: 45_000 });
+  const tab = dialog.getByRole("tab", { name: tabLabel, exact: true });
+  await tab.click();
+  await tab.waitFor({ timeout: 10_000 });
+  return dialog;
+}
+
+/**
+ * The door the drawn dialog leaves open, for the walk that pressed it.
+ *
+ * The old composer navigated the desk to the story the instant it filed one
+ * (`desk.index.tsx:455`, `void navigate({to: "/desk/story/$leadId", ...})`), so
+ * a walk could press and land on the workspace. The drawn New story dialog does
+ * not navigate: it starts the job and says so in its own foot note -- "Watch it
+ * under Running now; it lands in Drafts" (`editor-dialog-forms.ts:312`). The
+ * desk's own drafts grid is that sentence's door: one card per recent story,
+ * "View progress" while it writes and "Open draft" once it is done
+ * (`desk.index.tsx:1205`) -- so this walks through on either, which matters
+ * here because the fixture provider answers in well under a second.
+ */
+async function openTheStoryJustFiled() {
+  // The modal covers the desk and holds focus, so nothing behind it can be
+  // pressed until it is closed. Escape is the desk's own close (`dialog.tsx:125`).
+  await page.keyboard.press("Escape");
+  // A fresh desk load asks for its stories immediately; a desk left open polls
+  // its idle jobs only every 30 s (`job-card-state.ts:30`).
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  const door = page
+    .getByRole("region", { name: "In progress" })
+    .getByRole("link", { name: /^(View progress|Open draft)$/ })
+    .first();
+  await door.waitFor({ timeout: 45_000 });
+  await door.click();
+}
+
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 const rawLog = {
@@ -177,29 +222,47 @@ try {
 
   const documentMarker = `CUSTOM_DOCUMENT_MARKER_${Date.now()}`;
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
-  // "Write a story" is a dialog now (src/routes/desk.index.tsx), so the attach
-  // input and the story box only exist once it is open; open it the way the
-  // chrome draws the way in, the header's "+ New story".
-  await page.getByRole("link", { name: /^\+ New story/ }).click();
-  await page.getByRole("dialog", { name: "Write a story" }).waitFor({ timeout: 45_000 });
-  await page.getByLabel("Attach documents").setInputFiles({
+  /*
+    Unit BW3: the composer an editor reaches is the drawn New story dialog
+    (src/components/dialogs/editor-dialogs.tsx), opened by the desk header's own
+    "+ New story" press. Tab (a) -- "AI drafts from material" -- carries the drop
+    zone, the Assignment box, the scope row and the model row. That row merges
+    the newsroom's saved connections the same way the desk's own picker does
+    (`model-picker.tsx:299-311`), which is the whole point of this leg: the
+    editor pins "Isolated API fixture" and the fixture provider has to receive
+    the document text.
+  */
+  const dialog = await openNewStoryDialog("AI drafts from material");
+  await dialog.getByLabel("Choose files").setInputFiles({
     name: "custom-story-source.txt",
     mimeType: "text/plain",
     buffer: Buffer.from(`Retained custom provider evidence: ${documentMarker}.`),
   });
-  await page.getByText("Documents saved. Ready to draft when you are.").waitFor();
-  await page.getByLabel("What story do you want?").fill("Write a brief from the attached source.");
-  await page.getByText("Research & section", { exact: false }).click();
-  await page.getByLabel("Drafting scope").selectOption("supplied");
-  const storyPicker = page
-    .getByRole("dialog", { name: "Write a story" })
-    .getByLabel("Writing model");
+  await dialog.getByText("Document ready. The drafter reads it.").waitFor({ timeout: 45_000 });
+  await dialog.getByLabel("Assignment").fill("Write a brief from the attached source.");
+  await dialog.getByLabel("Research scope").selectOption("supplied");
+  /*
+    The saved connection reaches the drawn row through a query, and this page
+    load started fresh, so the row is waited for by the option the editor has to
+    be able to pick. Scoped to the modal layer, which is where Radix portals the
+    dialog (dialog.tsx:147) -- the desk behind it draws its own pickers.
+  */
+  await page.waitForFunction(
+    () =>
+      Array.from(
+        document.querySelectorAll('.astra-modal-layer select[aria-label="Model"] option'),
+      ).some((option) => option.textContent.includes("Isolated API fixture")),
+    null,
+    { timeout: 30_000 },
+  );
+  const storyPicker = dialog.getByLabel("Model");
   const storyCustomChoice = await storyPicker
     .locator("option", { hasText: "Isolated API fixture" })
     .getAttribute("value");
   assert.match(storyCustomChoice ?? "", /^custom:/);
   await storyPicker.selectOption(storyCustomChoice);
-  await page.getByRole("button", { name: "Write draft", exact: true }).click();
+  await dialog.getByRole("button", { name: "Start drafting", exact: true }).click();
+  await openTheStoryJustFiled();
   await page.getByRole("heading", { name: "Story workspace", exact: true }).waitFor();
   await page.getByRole("button", { name: "Redraft", exact: true }).waitFor({ timeout: 45_000 });
   assert.match(await page.getByLabel("Body").inputValue(), new RegExp(documentMarker));
