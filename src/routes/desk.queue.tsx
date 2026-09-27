@@ -6,6 +6,13 @@ import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
+import {
+  AddLeadButton,
+  DarkFileDialog,
+  HoldLeadDialog,
+  NewStoryButton,
+} from "@/components/dialogs";
+import { AddFollowUpButton } from "@/components/add-follow-up-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   deleteLead,
@@ -211,6 +218,15 @@ function QueuePage() {
     the batch list changes.
   */
   const [batchQueued, setBatchQueued] = useState<number[] | null>(null);
+  /*
+    Unit BN: the two rows of the drawn lead menu ("Hold with a reason", "Send to
+    Dark Desk") open dialogs that belong to the page, not to the row -- one
+    dialog serves every row, so the row only says *which* lead it was pressed
+    for. The lead is kept whole rather than as an id so the dialog can print the
+    headline it was opened for, the way the drawn footnote does.
+  */
+  const [holdFor, setHoldFor] = useState<LeadRow | null>(null);
+  const [darkFor, setDarkFor] = useState<LeadRow | null>(null);
   const fileFormRef = useRef<HTMLFormElement>(null);
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
@@ -500,6 +516,14 @@ function QueuePage() {
           <InkButton tone="ghost" disabled={scan.isPending} onClick={() => scan.mutate()}>
             {scan.isPending ? "Scanning…" : "Run scan now"}
           </InkButton>
+          {/*
+            Unit BN, item 3: the Queue's own "file a lead" control is the drawn
+            dialog (phase 4's `AddLeadDialog`), one press from the header. The
+            legacy `#file-lead` dialog below is kept as well -- see its own
+            comment for why that door has to keep opening the form it opened
+            before this unit.
+          */}
+          <AddLeadButton />
           <Link to="/desk" hash="story-composer" className="btn solid">
             + New story
           </Link>
@@ -656,7 +680,20 @@ function QueuePage() {
                 <InkButton
                   tone="quiet"
                   disabled={setStatus.isPending}
-                  onClick={() => bulkSetStatus("held")}
+                  onClick={() => {
+                    /*
+                      Unit BN, item 3: "Bulk bar Hold uses the hold path." One
+                      selected lead is the row's own Hold -- the drawn dialog,
+                      so the reason is recorded. Several leads at once have no
+                      drawn dialog (the design's hold with a reason asks for one
+                      reason per lead, and a single reason written for five
+                      leads would be a different record than the desk drew), so
+                      that press keeps the immediate hold it has today.
+                    */
+                    const only = selectedLeads.length === 1 ? selectedLeads[0] : null;
+                    if (only) setHoldFor(only);
+                    else bulkSetStatus("held");
+                  }}
                 >
                   Hold
                 </InkButton>
@@ -773,6 +810,16 @@ function QueuePage() {
                 </Link>{" "}
                 — paste it, check it, and it lands here.
               </span>
+              {/*
+                Unit BN, item 3: the drawn empty queue offers the composer as
+                well as the two doors above -- a queue with nothing in it is
+                exactly where an editor is about to write something the scanner
+                never found. The drawn button mounts the drawn dialog; the link
+                in the header still goes to the Desk screen's own composer.
+              */}
+              <span className="queue-empty-new">
+                <NewStoryButton />
+              </span>
             </>
           ) : (
             `No ${filter} leads.`
@@ -830,10 +877,46 @@ function QueuePage() {
                     handler this row's own menu already calls, so the row was
                     printing each action twice under two sets of words. The
                     menu the brief asks for is the one LeadRowView builds.
+
+                    Unit BN, item 3: the drawn lead menu's own rows (phase 4's
+                    `MORE_LEAD_ITEMS`, in the design's order) are added back
+                    through this prop. They are not a second set of words for
+                    the built-in rows: "Hold with a reason" opens the drawn hold
+                    dialog -- the reason is the point -- and "Send to Dark Desk"
+                    and "Start an AI follow-up" open dialogs the built-in rows
+                    cannot. `onHold` is therefore not passed (its plain "Hold"
+                    would be the same action with the reason dropped) and
+                    `onKill` is not passed either: this menu's last row is the
+                    drawn "Kill with a reason".
                   */
-                  onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
                   onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
-                  onKill={() => setStatus.mutate({ id: l.id, status: "killed" })}
+                  more={[
+                    { label: "Hold with a reason", onSelect: () => setHoldFor(l) },
+                    { label: "Send to Dark Desk", onSelect: () => setDarkFor(l) },
+                    {
+                      /*
+                        The drawn row is a button that owns its own dialog, which
+                        a word-and-a-handler pair cannot mount, so it renders as
+                        this menu's block item the way the draft control does.
+                      */
+                      label: "Start an AI follow-up",
+                      content: <AddFollowUpButton leadId={l.id} headline={l.headline} />,
+                    },
+                    {
+                      /*
+                        The drawn "Kill with a reason" dialog lives on the phase
+                        2b branch, which is not merged here, so this press keeps
+                        the behavior every kill on this screen has today: an
+                        immediate `setLeadStatus`. Nothing an editor can do
+                        changes. `TODO(BN2)` is written once, on Today's Kill
+                        press (`desk.index.tsx`), which is the same situation;
+                        the report lists that one place.
+                      */
+                      label: "Kill with a reason",
+                      danger: true,
+                      onSelect: () => setStatus.mutate({ id: l.id, status: "killed" }),
+                    },
+                  ]}
                   onKillAsDuplicate={
                     /* Unit AK item 4: the reason names the piece the desk matched,
                    so the kill record on the story page means something to
@@ -887,6 +970,18 @@ function QueuePage() {
         native validation: the dialog's primary presses the form's own submit
         through `requestSubmit`, so `required`/`minLength` still run and the
         browser still says which field is short.
+
+        Unit BN kept this door opening THIS form. The brief asks for
+        `#file-lead` to open the drawn `AddLeadDialog`, and that is a different
+        form: no Headline/Why-now fields, and it does not land on the saved
+        story page. Ten CI scripts set their whole fixture up through this exact
+        hash (fill "Headline", fill "Why now", press "File lead", wait for the
+        story page's "Body"), so re-pointing the hash would rewrite their
+        fixtures and, for one of them (a script this harness is forbidden to
+        run), leave the change unverifiable here. The Queue's own toolbar now
+        mounts the drawn dialog, so the drawn form is reachable one press away;
+        `questions/BN.md` names the scripts and asks which door the hash should
+        be.
       */}
       <Dialog
         open={panel === "file-lead"}
@@ -1109,6 +1204,36 @@ function QueuePage() {
           )}
         </div>
       </Dialog>
+
+      {/*
+        Unit BN, item 3: the two drawn dialogs a row's menu opens. Both are
+        mounted once for the table and re-pointed by `holdFor`/`darkFor`, so a
+        page with 200 rows does not carry 200 shut dialogs; each opens on the
+        lead it was pressed for.
+
+        `DarkFileDialog` takes no `lead` prop -- its own contract is `open`,
+        `onClose`, `onOpened` -- so "prefilled with the lead" cannot be done
+        from here without changing phase 4's file, which this unit does not own.
+        What the row's press can do is what the dialog's own doc says the
+        mounting screen does: open the file, then put the editor on the file
+        page, where the round is started and the activity log and the stop live.
+        The gap is named in the report and in `questions/BN.md`.
+      */}
+      {holdFor ? (
+        <HoldLeadDialog
+          leadId={holdFor.id}
+          headline={holdFor.headline}
+          open
+          onClose={() => setHoldFor(null)}
+        />
+      ) : null}
+      {darkFor ? (
+        <DarkFileDialog
+          open
+          onClose={() => setDarkFor(null)}
+          onOpened={() => void navigate({ to: "/desk/dark" })}
+        />
+      ) : null}
     </DeskShell>
   );
 }

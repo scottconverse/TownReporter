@@ -88,8 +88,14 @@ export function LeadRowView({
    * the row it rendered before this prop existed, and every item here calls a
    * handler the row's visible buttons already call -- the menu adds no action
    * the desk cannot do.
+   *
+   * Unit BN widened this from `{label, onSelect}` to the menu's own
+   * `DeskMoreItem`: the drawn lead menu's "Start an AI follow-up" is a button
+   * that owns its own dialog (`AddFollowUpButton`), which a word-and-a-handler
+   * pair cannot mount. Widening is additive -- every existing caller passes
+   * exactly the two fields it passed before.
    */
-  more?: { label: string; onSelect: () => void }[];
+  more?: DeskMoreItem[];
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
