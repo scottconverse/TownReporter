@@ -1186,6 +1186,49 @@ jobs:
           }
           kill_tree "$DEV_PID"
 
+  batch-published-panel:
+    name: The Queue's batch panel drops a story once the paper has printed it
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Print one batch item, then put the batch away
+        env:
+          BETTER_AUTH_SECRET: ci-batch-panel-secret-not-for-production
+          PORT: "3532"
+          HOST: 127.0.0.1
+          BATCH_PANEL_BASE_URL: http://127.0.0.1:3532
+          BATCH_PANEL_OUT_DIR: artifacts/batch-published-panel
+          DATABASE_URL: ""
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: |
+          npm start > /tmp/batch-panel.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3532/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3532/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/batch-panel.log; exit 1;
+          }
+          node scripts/batch-published-panel-e2e.mjs
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
+
   # X: import finished stories. These four walks boot the built server in their
   # own process (they import .output/server/index.mjs and set their own PORT,
   # HOST and empty DATABASE_URL), so the job builds and then runs the script --

@@ -139,6 +139,14 @@ export function batchRuntimeFailure(error: unknown): DraftBatchFailure {
  */
 const DRAFT_BATCH_SCHEMA = [
   "create table if not exists draft_batches(id serial primary key,newsroom_id integer not null references newsrooms(id),user_id text not null,runtime_snapshot jsonb not null,created_at timestamptz not null default now())",
+  /*
+    Unit BS. `ensureSchemaOnce` keys on a fingerprint of this list, so changing
+    it re-runs the whole list on a database that already has the table -- which
+    is why the column arrives as `add column if not exists` and not as a second
+    create. migrations/0104 carries the same statement for the deploy path
+    (scripts/migrate.mjs), the way 0051 carries the rest of this table.
+  */
+  "alter table draft_batches add column if not exists dismissed_at timestamptz",
   "alter table desk_jobs add column if not exists draft_batch_id integer",
   "create index if not exists draft_batches_newsroom_idx on draft_batches(newsroom_id,id desc)",
   "do $$ begin if not exists(select 1 from pg_constraint where conname='desk_jobs_draft_batch_fk') then alter table desk_jobs add constraint desk_jobs_draft_batch_fk foreign key(draft_batch_id) references draft_batches(id); end if; end $$",
@@ -231,8 +239,9 @@ async function batchView(
     id: number;
     created_at: Date | string;
     runtime_snapshot: unknown;
+    dismissed_at: Date | string | null;
   }>(
-    "select b.id,b.created_at,b.runtime_snapshot from draft_batches b where b.newsroom_id=$1 " +
+    "select b.id,b.created_at,b.runtime_snapshot,b.dismissed_at from draft_batches b where b.newsroom_id=$1 " +
       idClause +
       " order by b.id desc limit 1",
     params,
@@ -251,8 +260,18 @@ async function batchView(
     stage: string;
     error: string | null;
     result_json: string;
+    lead_status: string | null;
   }>(
-    "select subject_id,id,status,stage,error,result_json from desk_jobs where newsroom_id=$1 and draft_batch_id=$2 order by id",
+    /*
+      Unit BS: the lead's state comes back in the same statement that reads the
+      job -- a left join, no per-item round trip -- because the panel's whole
+      question is what the story is NOW, and a batch can sit in front of an
+      editor for days while its leads get printed. A missing lead row leaves
+      `lead_status` null and is kept by `visibleDraftBatchItems`.
+    */
+    "select j.subject_id,j.id,j.status,j.stage,j.error,j.result_json,l.status as lead_status " +
+      "from desk_jobs j left join leads l on l.id=j.subject_id and l.newsroom_id=j.newsroom_id " +
+      "where j.newsroom_id=$1 and j.draft_batch_id=$2 order by j.id",
     [context.newsroomId, batch.id],
   );
   const parsed = new Map(jobs.map((job) => [job.id, parseDraftBatchCompletion(job.result_json)]));
@@ -272,6 +291,7 @@ async function batchView(
         batch.created_at instanceof Date
           ? batch.created_at.toISOString()
           : new Date(batch.created_at).toISOString(),
+      dismissed: batch.dismissed_at != null,
       runtime: {
         runtime: snapshot.runtime,
         modelChoice: snapshot.modelChoice,
@@ -293,6 +313,7 @@ async function batchView(
         evidenceCheckIncomplete: draftId != null && completion?.evidenceCheckIncomplete === true,
         reviewRequired: draftId != null && completion?.reviewRequired === true,
         workbenchHref: "/desk/story/" + job.subject_id,
+        leadStatus: job.lead_status ?? null,
         };
       }),
     },
@@ -318,6 +339,46 @@ export async function readDraftBatchForAuthenticatedEditor(
   const sql = await getSql();
   await ensureDraftBatchSchema(sql);
   return batchView(sql, context, batchId);
+}
+
+/**
+ * Unit BS: mark one batch dismissed for this newsroom.
+ *
+ * Idempotent on purpose -- the panel's button can be pressed twice, and the
+ * second press must not be an error the editor has to read about. The stamp
+ * is only ever set (never cleared): "hides that batch for good" is the whole
+ * point, and a batch that could be un-dismissed would be one more state for
+ * the Queue to explain.
+ *
+ * A batch belonging to another newsroom reads as not-found, the same answer
+ * `readDraftBatchForAuthenticatedEditor` gives for an explicit foreign id.
+ */
+export async function dismissDraftBatchForAuthenticatedEditor(
+  context: AuthenticatedEditorContext,
+  batchId: number,
+): Promise<{ ok: true; batchId: number } | DraftBatchFailure> {
+  if (!Number.isSafeInteger(batchId) || batchId <= 0) {
+    return {
+      ok: false,
+      code: "invalid-input",
+      error: "Draft batch ID must be a positive integer.",
+    };
+  }
+  if (!(await isCurrentBatchEditor(context))) {
+    return { ok: false, code: "not-found", error: "Draft batch not found." };
+  }
+  const sql = await getSql();
+  await ensureDraftBatchSchema(sql);
+  await sql.query(
+    "update draft_batches set dismissed_at=now() where id=$1 and newsroom_id=$2 and dismissed_at is null",
+    [batchId, context.newsroomId],
+  );
+  const [row] = await sql.query<{ id: number }>(
+    "select id from draft_batches where id=$1 and newsroom_id=$2",
+    [batchId, context.newsroomId],
+  );
+  if (!row) return { ok: false, code: "not-found", error: "Draft batch not found." };
+  return { ok: true, batchId: Number(row.id) };
 }
 
 export async function commitDraftBatchForAuthenticatedEditor(
