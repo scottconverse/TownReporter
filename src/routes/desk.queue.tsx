@@ -383,6 +383,14 @@ function QueuePage() {
   const selectedBatchLeads = batchLeadIds.filter((leadId) =>
     batchEligible.some((lead) => lead.id === leadId),
   );
+  /*
+    The same selection as rows, so the dialog can name what it is about to
+    queue instead of only counting it: "3 of 5 selected" tells an editor how
+    much model work the press costs, and this tells them what it is spent on.
+  */
+  const selectedBatchLeadRows = batchEligible.filter((lead) =>
+    selectedBatchLeads.includes(lead.id),
+  );
   const batchQueuedNow =
     batchQueued !== null &&
     batchQueued.length === selectedBatchLeads.length &&
@@ -1061,6 +1069,21 @@ function QueuePage() {
             excludeAutomatic
           />
           <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
+          {/*
+            BF5: name the leads the press below will draft. Until the batch
+            moved into this dialog the panel's own checkboxes showed which
+            leads were queued -- including the ones "Add suggested focus"
+            picked -- so the count alone left an editor unable to see what the
+            model calls were about to be spent on. Each lead keeps its stored
+            research scope, so the list is the whole of what Start queues.
+          */}
+          {selectedBatchLeadRows.length > 0 ? (
+            <ul className="meta" aria-label="Leads in this batch">
+              {selectedBatchLeadRows.map((lead) => (
+                <li key={lead.id}>{lead.headline}</li>
+              ))}
+            </ul>
+          ) : null}
           {batchNotice ? <Notice kind={batchNotice.kind}>{batchNotice.text}</Notice> : null}
           {desk.isPending || batch.isPending ? (
             <p className="meta">Loading the latest draft batch…</p>
