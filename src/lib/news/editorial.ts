@@ -182,6 +182,28 @@ export function opinionHeadline(headline: string): string {
 }
 
 /**
+ * The same headline with the prefix taken back off, for display only.
+ *
+ * `opinionHeadline` writes "OPINION: " into the STORED headline, which is what
+ * makes an unsigned editorial unmistakable in a feed, a search result or
+ * somebody else's reprint. The front page's Opinion block is already titled
+ * "Opinion", so the prefix prints the block's own name twice: "OPINION: A
+ * Libertarian quit one day late" under a heading that says Opinion.
+ *
+ * Unit BX: the block prints this. Nothing else changes -- the stored headline
+ * is never rewritten, so the desk, the feed and the article page keep the
+ * prefix that makes the piece unmistakable where there is no block around it.
+ */
+export function opinionHeadlineDisplay(headline: string): string {
+  const clean = String(headline ?? "")
+    .replace(/^\s*OPINION\s*[:—–-]\s*/i, "")
+    .trim();
+  // A headline that was exactly "OPINION" has nothing left to show; the block's
+  // own heading carries it.
+  return clean || "Opinion";
+}
+
+/**
  * The two things the newsroom must tell the voice, and nothing else.
  *
  * The voice file is not edited — the operator built it over months and says
