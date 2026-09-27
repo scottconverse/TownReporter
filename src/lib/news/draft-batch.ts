@@ -3,7 +3,7 @@ import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-registry.ts";
-import { cleanOrRaw, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
+import { cleanOrRaw, draftBatchDismissInput, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
 
 export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 export type DraftBatchStoredRuntime =
@@ -23,10 +23,24 @@ export type DraftBatchItem = {
   evidenceCheckIncomplete: boolean;
   reviewRequired: boolean;
   workbenchHref: string;
+  /**
+   * Unit BS: the lead's state NOW, read in the same statement that reads the
+   * job (`batchView`, the join on `leads`), not what it was when the batch
+   * was queued. `null` means the lead row is gone; the panel treats that the
+   * way it always has (it falls back to `lead #<id>`), which is why the
+   * filter below names the two states it drops instead of allow-listing.
+   */
+  leadStatus: string | null;
 };
 export type DraftBatchView = {
   id: number;
   createdAt: string;
+  /**
+   * Unit BS: the editor put this batch away. The panel renders nothing for a
+   * dismissed batch, and the next batch shows normally because a new batch is
+   * a new row. Stored on the batch, per newsroom, so a reload agrees.
+   */
+  dismissed: boolean;
   runtime: {
     runtime: DraftBatchStoredRuntime;
     modelChoice: DraftBatchRuntime;
@@ -49,6 +63,28 @@ export type DraftBatchFailure = {
   jobId?: number;
 };
 export type DraftBatchResult = { ok: true; batch: DraftBatchView } | DraftBatchFailure;
+
+/**
+ * Unit BS. The batch panel is a list of work the editor still has, not a log
+ * of everything a batch ever touched.
+ *
+ * The owner's report (2026-09-27): Batch #3 listed five rows offering
+ * "Redraft with Local model" for stories that were already printed on
+ * townreporter.org. A printed story is not work; neither is one the desk
+ * killed. Held and open leads stay exactly as they were, and so does every
+ * item of a batch that is still running -- a queued or running item's lead is
+ * still open, so it is kept by the same rule rather than by a second one.
+ *
+ * A lead whose row is gone (`null`) is kept: this filter names the two states
+ * it drops rather than allow-listing the ones it keeps, so a lead that was
+ * deleted underneath the batch behaves as it always has instead of vanishing
+ * on a rule nobody wrote.
+ */
+export function visibleDraftBatchItems<T extends { leadStatus: string | null }>(
+  items: readonly T[],
+): T[] {
+  return items.filter((item) => item.leadStatus !== "published" && item.leadStatus !== "killed");
+}
 
 const runtimes = new Set<string>(PICKER_PROVIDER_IDS);
 
@@ -165,5 +201,26 @@ export const getDraftBatch = createServerFn({ method: "GET" })
     return (await import("./draft-batch.server.ts")).readDraftBatchForAuthenticatedEditor(
       { userId: context.userId, newsroomId: context.newsroomId },
       row.batchId === undefined ? undefined : Number(row.batchId),
+    );
+  });
+
+/**
+ * Unit BS: put this batch away for good.
+ *
+ * The owner's report was a batch panel he could not get rid of -- five rows of
+ * already-printed stories every time he opened the Queue. Dropping the
+ * published and killed items answers the rows; this answers the panel. It is
+ * recorded on the batch row (`dismissed_at`) rather than in the editor's
+ * browser, so the Queue after a reload agrees, and the next batch he starts is
+ * a new row and shows normally.
+ */
+export const dismissDraftBatch = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((value: unknown) => cleanOrRaw(draftBatchDismissInput)(value))
+  .handler(async ({ data, context }) => {
+    const batchId = (data as { batchId?: unknown } | null)?.batchId;
+    return (await import("./draft-batch.server.ts")).dismissDraftBatchForAuthenticatedEditor(
+      { userId: context.userId, newsroomId: context.newsroomId },
+      typeof batchId === "number" ? batchId : Number(batchId),
     );
   });

@@ -14,6 +14,7 @@ import {
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import { editorActionError } from "@/lib/news/desk-copy";
+import { getViewStatsFn } from "@/lib/news/views";
 import { myDesk } from "@/lib/news/claim";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -32,6 +33,16 @@ function PublishedPage() {
     isRefetching: pubRefetching,
   } = published;
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
+  /*
+    The drawn Views column. The desk already counts raw page views per story
+    (`page_views`, keyed `story:<slug>`), and Stats already reads them through
+    `getViewStatsFn`, which is what this calls -- the same numbers the Stats
+    page shows, not a second counter. It is an editor-only read, so a
+    non-owner's query fails and the column reads "-" rather than the page
+    pretending every story has no readers.
+  */
+  const viewStats = useQuery({ queryKey: ["view-stats"], queryFn: () => getViewStatsFn() });
+  const viewsBySlug = new Map((viewStats.data?.stories ?? []).map((s) => [s.slug, s.views]));
   const [corrFor, setCorrFor] = useState<string | null>(null);
   const [corrReviewFor, setCorrReviewFor] = useState<Record<string, number | undefined>>({});
   const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
@@ -72,6 +83,9 @@ function PublishedPage() {
   const [undo, setUndo] = useState<number | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
   const [reviewChecks, setReviewChecks] = useState<Record<number, number[]>>({});
+  // Which of the design's four filters is on. "All" is the list as it was.
+  const [pubFilter, setPubFilter] = useState<"all" | "week" | "corrections" | "opinion">("all");
+  const [pubQuery, setPubQuery] = useState("");
   /*
     Post the correction, and -- when the editor asked for it -- the story text
     that goes with it.
@@ -362,8 +376,67 @@ function PublishedPage() {
     status: review.status,
   })).filter((review) => review.status === "pending" || review.status === "correction-required"));
 
+  /*
+    The four filters the design draws above the list.
+
+    "Opinion" reads the row's `topic`, which is where an editorial's kind lands
+    on the printed article: `publishEditorial` writes `d.topic || "opinion"`
+    (opinion.ts:292) and every other writer of a published editorial writes the
+    literal "opinion" too, while a reported story's topic is its section. The
+    desk has no separate "is this an editorial" column on the printed row, and
+    adding one would be a migration for a filter, which the brief rules out.
+
+    "This week" is the last seven days against the row's own timestamp rather
+    than the paper's edition date, because that is what an editor means by it
+    when they are looking for what just went out.
+  */
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  /*
+    The design draws a search box beside the four filters. The list is already
+    on the page -- /desk/published loads published rows in one read -- so the
+    search is a filter over what is loaded, the same as the one on Sources, and
+    never a second round trip. Headline and the kicker above it are what an
+    editor has to hand when they are looking for a story they remember.
+  */
+  const pubNeedle = pubQuery.trim().toLowerCase();
+  const shownRows = rows.filter((p) => {
+    if (pubNeedle && !`${p.headline} ${p.topic ?? ""}`.toLowerCase().includes(pubNeedle)) {
+      return false;
+    }
+    switch (pubFilter) {
+      case "week":
+        return p.published_at != null && Date.parse(p.published_at) >= weekAgo;
+      case "corrections":
+        return p.corrections.length > 0;
+      case "opinion":
+        return (p.topic ?? "").trim().toLowerCase() === "opinion";
+      default:
+        return true;
+    }
+  });
+
   return (
-    <DeskShell title="Published" kicker="The record">
+    <DeskShell title="Published" kicker="The record of what printed" hideTitle>
+      {/*
+        The drawn header: the kicker and title, the page's own action on the
+        right, and the rule under the pair. DeskShell renders a title but no
+        slot for a control beside it, so this screen draws the row itself and
+        keeps `title` for the breadcrumb (see `.astra-head` in desk-astra.css).
+        The action is a plain link to the paper: that is what the drawing puts
+        there, and /desk/published is the screen where an editor is most likely
+        to want to see the result.
+      */}
+      <div className="astra-head">
+        <div>
+          <p className="kick">The record of what printed</p>
+          <h1 className="h1">Published</h1>
+        </div>
+        <div className="astra-head-acts">
+          <Link to="/" className="btn">
+            View the paper <span aria-hidden="true">↗</span>
+          </Link>
+        </div>
+      </div>
       {deskRole.data?.role === "owner" && (
         <p className="mb-4">
           <Link
@@ -426,14 +499,74 @@ function PublishedPage() {
       ) : rows.length === 0 ? (
         <p className="wire-sum">Empty until you publish.</p>
       ) : (
-        <div className="pub-list">
-          {rows.map((p) => (
-            <div key={p.id} className="pub-row">
-              <div className="pub-main">
-                <p className="meta">
-                  {p.topic} · {formatShortDate(p.published_at)}
-                  {p.lead_score != null ? ` · scored ${p.lead_score}/20 at filing` : ""}
-                </p>
+        <div>
+          <div className="astra-toolbar">
+            <div className="astra-seg" role="group" aria-label="Which stories to show">
+              {(["all", "week", "corrections", "opinion"] as const).map((key) => {
+                const label =
+                  key === "all"
+                    ? `All · ${rows.length}`
+                    : key === "week"
+                      ? "This week"
+                      : key === "corrections"
+                        ? "With corrections"
+                        : "Opinion";
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={"astra-seg-opt" + (pubFilter === key ? " on" : "")}
+                    aria-pressed={pubFilter === key}
+                    onClick={() => setPubFilter(key)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <input
+              type="search"
+              className="astra-search"
+              aria-label="Search published stories"
+              placeholder="Search published stories…"
+              value={pubQuery}
+              onChange={(e) => setPubQuery(e.target.value)}
+            />
+          </div>
+          {/*
+            The column headers name the grid the rows below are laid out on. It
+            is a plain row rather than a <table> because a row grows: the
+            headline editor, the correction form and a transcript review all
+            span it, and a table cell cannot do that without a colgroup for
+            every case. Hidden below 980px, where the cells stack and labels
+            stop meaning anything.
+          */}
+          <div className="astra-row pubhead" aria-hidden="true">
+            <span>Printed</span>
+            <span>Story</span>
+            <span>Views</span>
+            <span>Corrections</span>
+            <span>Actions</span>
+          </div>
+          {shownRows.length === 0 ? (
+            <p className="wire-sum">Nothing matches that filter.</p>
+          ) : null}
+          {shownRows.map((p) => (
+            <div key={p.id} className="astra-row pub">
+              <div className="astra-cell">
+                <span className="astra-row-meta">{formatShortDate(p.published_at)}</span>
+              </div>
+              <div className="astra-cell">
+                {/*
+                  The section label and the headline, and nothing else, which is
+                  how the design draws this row (docs/design/handoff-2026-09-26,
+                  desk-19-published-dark.png / desk-20-published-light.png). The
+                  dek and the filing score used to print here too, and between
+                  them they made every row as tall as the story: a dek is ten
+                  lines at this width. Both are on the story itself, one press
+                  of View away, and the score is on the story's own page.
+                */}
+                <p className="astra-row-meta pub-kick">{p.topic}</p>
                 {/*
                   h2, not h3. This list has no section heading of its own
                   above it (the page's only heading before it is the h1 in
@@ -462,7 +595,6 @@ function PublishedPage() {
                     />
                     <div className="row-acts static">
                       <InkButton
-                        small
                         disabled={!(headBySlug[p.slug] ?? "").trim() || editHeadline.isPending}
                         onClick={() =>
                           editHeadline.mutate({
@@ -474,13 +606,12 @@ function PublishedPage() {
                       >
                         {editHeadline.isPending ? "Saving…" : "Save the new headline"}
                       </InkButton>
-                      <InkButton tone="quiet" small onClick={() => setHeadFor(null)}>
+                      <InkButton tone="quiet" onClick={() => setHeadFor(null)}>
                         Cancel
                       </InkButton>
                     </div>
                   </div>
                 ) : null}
-                {p.dek ? <p className="pub-dek">{p.dek}</p> : null}
                 {p.corrections.map((c, i) => (
                   <p key={i} className="pub-corr">
                     <b>Correction, {formatShortDate(c.date)}:</b> {c.body}
@@ -564,7 +695,6 @@ function PublishedPage() {
                       />
                       <div className="row-acts static">
                         <InkButton
-                          small
                           disabled={!allChecked || !(reviewNotes[review.id] ?? "").trim() || resolveTranscript.isPending}
                           onClick={() => resolveTranscript.mutate({
                             reviewId: review.id, slug: p.slug, resolution: "still-accurate",
@@ -575,7 +705,6 @@ function PublishedPage() {
                         </InkButton>
                         <InkButton
                           tone="quiet"
-                          small
                           disabled={!(reviewNotes[review.id] ?? "").trim() || resolveTranscript.isPending}
                           onClick={() => resolveTranscript.mutate({
                             reviewId: review.id, slug: p.slug, resolution: "correction-required",
@@ -625,7 +754,6 @@ function PublishedPage() {
                     />
                     <div className="row-acts static">
                       <InkButton
-                        small
                         disabled={
                           !(corrWrongBySlug[p.slug] ?? "").trim() ||
                           !(corrRightBySlug[p.slug] ?? "").trim() ||
@@ -645,7 +773,6 @@ function PublishedPage() {
                       */}
                       <InkButton
                         tone="quiet"
-                        small
                         disabled={
                           !(corrWrongBySlug[p.slug] ?? "").trim() ||
                           !(corrRightBySlug[p.slug] ?? "").trim() ||
@@ -727,7 +854,6 @@ function PublishedPage() {
                     ) : null}
                     <div className="row-acts static">
                       <InkButton
-                        small
                         disabled={!(corrBySlug[p.slug] ?? "").trim() || corr.isPending}
                         onClick={() =>
                           corr.mutate({ slug: p.slug, fixing: corrFixBySlug[p.slug] === true })
@@ -737,7 +863,6 @@ function PublishedPage() {
                       </InkButton>
                       <InkButton
                         tone="quiet"
-                        small
                         onClick={() => {
                           setCorrFor(null);
                           setWordingFor(null);
@@ -749,18 +874,54 @@ function PublishedPage() {
                   </div>
                 ) : null}
               </div>
-              <div className="pub-acts">
-                <Link to="/articles/$slug" params={{ slug: p.slug }} className="btn quiet small">
-                  Read on the paper
-                </Link>
-                {deskRole.data?.ok && deskRole.data.role === "owner" && (
-                  <a className="btn quiet small" href={`/desk/legal-removals?article=${p.id}`}>
-                    Legal removal
-                  </a>
+              {/*
+                Corrections, as its own column rather than a paragraph under the
+                story. What an editor scanning this list needs first is which
+                stories have been corrected and which have a review still open;
+                the words of the correction stay under the story where they are
+                readable. A review that is still open is the one thing here that
+                is a live obligation, so it is the one thing that carries amber.
+              */}
+              {/*
+                Views, read out of the desk's own page-view counter by slug.
+                A story with no recorded views prints 0, which is real
+                information on this screen; a read that failed (a non-owner, or
+                no views table yet) prints an em dash rather than 0, so "nobody
+                is reading it" and "I cannot see" never look the same.
+              */}
+              <div className="astra-cell">
+                <span className="astra-row-num">
+                  {viewStats.isError ? "—" : (viewsBySlug.get(p.slug) ?? 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="astra-cell">
+                {p.corrections.length > 0 ? (
+                  <span className="astra-row-meta">
+                    {p.corrections.length} correction{p.corrections.length === 1 ? "" : "s"}
+                  </span>
+                ) : (
+                  <span className="astra-row-meta">None</span>
                 )}
+                {p.transcriptReviews.some(
+                  (review) => review.status === "pending" || review.status === "correction-required",
+                ) ? (
+                  <span className="astra-chip warn">Review needed</span>
+                ) : null}
+              </div>
+              {/*
+                Three acts on the row, as the design draws them: View, Edit
+                headline, More. Reading, rewriting the headline and whatever is
+                behind More is what this screen is for. Posting a correction and
+                taking a story off the paper moved in behind More -- they are
+                still here, one press further in, and the words a walk looks for
+                did not change.
+              */}
+              <div className="astra-row-acts">
+                <Link to="/articles/$slug" params={{ slug: p.slug }} className="btn quiet">
+                  View
+                </Link>
                 <InkButton
                   tone="quiet"
-                  small
                   onClick={() => {
                     // Seed the box with the words on the paper, so pressing
                     // Edit twice is never a way to lose them.
@@ -770,31 +931,93 @@ function PublishedPage() {
                 >
                   {headFor === p.slug ? "Close headline" : "Edit headline"}
                 </InkButton>
-                <InkButton tone="quiet" small onClick={() => setCorrFor(p.slug)}>
-                  Post correction
-                </InkButton>
+                {/*
+                  Delete's confirm stays on the row, exactly as it was: pressing
+                  Delete in the More panel puts the panel away and the pair that
+                  asks "are you sure" takes its place. The panel floats above the
+                  row, so if it stayed open it would cover the pair it opened.
+                */}
                 {killFor === p.slug ? (
                   <>
                     <InkButton
                       tone="ghost"
-                      small
                       disabled={remove.isPending}
                       onClick={() => remove.mutate(p.slug)}
                     >
                       {remove.isPending ? "Removing…" : "Yes, take it off"}
                     </InkButton>
-                    <InkButton tone="quiet" small onClick={() => setKillFor(null)}>
+                    <InkButton tone="quiet" onClick={() => setKillFor(null)}>
                       Keep it
                     </InkButton>
                   </>
-                ) : (
-                  <InkButton tone="quiet" small onClick={() => setKillFor(p.slug)}>
-                    Delete
-                  </InkButton>
-                )}
+                ) : null}
+                {/*
+                  More, as the design draws it. The order is the design's: the
+                  two things an editor does to a published story, then the two
+                  rare ones -- hand the story to the legal removal desk, and jump
+                  to an evidence review that is still open. The panel items are
+                  plain buttons rather than InkButton because each one has to
+                  close the panel it was pressed in, and InkButton hands its
+                  onClick no event to find that panel with.
+                */}
+                <details className="row-more">
+                  <summary className="btn quiet">More ▾</summary>
+                  <div className="row-more-panel">
+                    <button
+                      type="button"
+                      className="btn quiet"
+                      onClick={(event) => {
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                        setCorrFor(p.slug);
+                      }}
+                    >
+                      Post correction
+                    </button>
+                    <button
+                      type="button"
+                      className="btn quiet"
+                      onClick={(event) => {
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                        setKillFor(p.slug);
+                      }}
+                    >
+                      Delete
+                    </button>
+                    {deskRole.data?.ok && deskRole.data.role === "owner" ? (
+                      <a href={`/desk/legal-removals?article=${p.id}`}>Legal removal</a>
+                    ) : null}
+                    {p.transcriptReviews.some(
+                      (review) =>
+                        review.status === "pending" || review.status === "correction-required",
+                    ) ? (
+                      <a href={`#transcript-review-${p.transcriptReviews.find((review) => review.status === "pending" || review.status === "correction-required")?.id}`}>
+                        Go to the evidence review
+                      </a>
+                    ) : null}
+                  </div>
+                </details>
               </div>
             </div>
           ))}
+          {/*
+            The drawing's line under the table (`desk-19-published-dark.png`
+            prints it in the gap after the last row, above whatever follows).
+            It earns its place now that Legal removal is one press in behind
+            More ▾: the only other signpost on this screen was a header link
+            an editor had to already know to look for. Both halves are true of
+            this application -- the flow asks for a required reason, and a
+            removed story leaves the paper and the ordinary trash -- so the
+            sentence is a description, not a promise. Owner-only, exactly as
+            the panel's own link is: on any other desk it would name a door
+            that is not there.
+          */}
+          {deskRole.data?.role === "owner" ? (
+            <div className="mt-4">
+              <p className="astra-note">
+                Legal removal is under More ▾. It skips the trash and asks for a reason.
+              </p>
+            </div>
+          ) : null}
         </div>
       )}
 

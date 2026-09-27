@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { DEFAULT_NEWSROOM_ID, requireEditor } from "./membership.ts";
 
@@ -27,9 +27,8 @@ export function storyTarget(slug: string): string {
 }
 
 /** Mirrors migrations/0037_page_views.sql -- see that file for the schema note. */
-export async function ensureViewsSchema() {
-  const sql = await getSql();
-  await sql.query(`
+const PAGE_VIEWS_SCHEMA = [
+  `
     create table if not exists page_views (
       newsroom_id integer not null default 1,
       target text not null,
@@ -37,7 +36,16 @@ export async function ensureViewsSchema() {
       count bigint not null default 0,
       primary key (newsroom_id, target, day)
     )
-  `);
+  `,
+];
+
+/**
+ * The stats read below is a read path, so it goes through `ensureSchemaOnce`
+ * too: it used to issue this DDL on every page load of the desk stats. See
+ * `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+ */
+export async function ensureViewsSchema() {
+  await ensureSchemaOnce(await getSql(), "page-views", PAGE_VIEWS_SCHEMA);
 }
 
 /**
@@ -178,7 +186,8 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
     The shape below is the migrated one (0005 plus 0012's `newsroom_id`), the
     same one `audit()` ends up with, so the count is answerable at zero.
   */
-  await sql.query(`
+  await ensureSchemaOnce(sql, "views-stats-audit-events", [
+    `
     create table if not exists audit_events (
       id serial primary key,
       user_id text not null,
@@ -187,7 +196,8 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
       created_at timestamptz not null default now(),
       newsroom_id integer not null default 1
     )
-  `);
+  `,
+  ]);
   const [overrides] = await sql<{ c: number | null }>`
     select count(*)::int as c from audit_events
     where action = 'section-override' and newsroom_id = ${newsroomId}

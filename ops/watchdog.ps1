@@ -255,11 +255,16 @@ if (-not $appHealthy) {
     foreach ($owner in $bindableOwners) {
       $p = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction SilentlyContinue
       if (-not $p) { continue }
-      if ($p.Name -ne 'node.exe' -or $p.CommandLine -notlike "*.output/server/index.mjs*") {
+      # Ask the shared predicate, which normalizes slashes. The inline pattern
+      # that used to be here -- -notlike "*.output/server/index.mjs*" -- tested
+      # forward slashes against a command line Windows reports with backslashes,
+      # so it failed for this app's OWN server and took the "not touching it"
+      # branch below on 2026-09-26 while the paper was stalled (PID 35156).
+      if (-not (Test-TownReporterBuiltServerProcess -Process $p)) {
         Write-Log "app: port $port is held by PID $owner ($($p.Name)), which is not this app -- not touching it"
         continue
       }
-      if ($env:WATCHDOG_TEST_MODE -ne '1' -and !($p.CommandLine -replace '/', '\').Contains((Join-Path $app '.output\server\index.mjs'))) { throw 'Port owner is not this exact checkout; refusing repair.' }
+      if ($env:WATCHDOG_TEST_MODE -ne '1' -and -not (Test-TownReporterServerProcess -Process $p -App $app)) { throw 'Port owner is not this exact checkout; refusing repair.' }
       Write-Log "app: stopping stale PID $owner on port $port"
       Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
     }

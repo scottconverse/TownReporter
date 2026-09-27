@@ -17,7 +17,7 @@ import { createServerFn } from "@tanstack/react-start";
   node --test file loads it.
 */
 import { authMiddleware } from "../auth/middleware.ts";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 /*
   MEETING_KEYWORDS and LONGMONT_YOUTUBE_CHANNELS come from ../paper.ts, not
   from ./youtube.ts where they were written: this module is loaded by the
@@ -90,10 +90,19 @@ type PaperSettingsRow = {
  * deployment's source of truth, this exists because Node's unit-test
  * runner never runs migrations/*.sql (see src/lib/db.ts createPgliteSql --
  * `import.meta.glob` is a Vite-only transform).
+ *
+ * Run through `ensureSchemaOnce` (Unit BP2, option (ii)): the four
+ * `alter table ... add column if not exists` statements below need ACCESS
+ * EXCLUSIVE, and this function is the first line of the PUBLIC read
+ * (`getPublicPaperConfig` -> `isOnboarded`). While the nightly `pg_dump` held
+ * ACCESS SHARE on `paper_settings`, those ALTERs queued behind it and the
+ * paper's own pages waited with them. The marker lives in the database, so a
+ * warm process issues no ALTER at all -- and a database rebuilt underneath it
+ * re-runs the batch, exactly as `dark-schema-rebuild.test.ts` requires.
+ * `paper-settings-read-lock.test.ts` holds the lock and proves it.
  */
-export async function ensurePaperSettingsSchema() {
-  const sql = await getSql();
-  await sql.query(`
+const PAPER_SETTINGS_SCHEMA: readonly string[] = [
+  `
     create table if not exists paper_settings (
       id serial primary key,
       newsroom_id integer not null default 1,
@@ -114,17 +123,19 @@ export async function ensurePaperSettingsSchema() {
       updated_at timestamptz not null default now(),
       unique (newsroom_id)
     )
-  `);
+  `,
   // CITY-SETUP final slice: mirrors migrations/0022_paper_settings_onboarded.sql
-  await sql.query(`alter table paper_settings add column if not exists onboarded boolean not null default false`);
+  `alter table paper_settings add column if not exists onboarded boolean not null default false`,
   // CITY-SETUP release-walkthrough Critical fix: mirrors migrations/0024_paper_settings_editor_email.sql
-  await sql.query(`alter table paper_settings add column if not exists editor_email text`);
+  `alter table paper_settings add column if not exists editor_email text`,
   // Unit P item 5: mirrors migrations/0088_paper_settings_named_outlets.sql
-  await sql.query(`alter table paper_settings add column if not exists named_outlets jsonb`);
+  `alter table paper_settings add column if not exists named_outlets jsonb`,
   // Unit W item 3: mirrors migrations/0089_paper_settings_named_outlets_revision.sql
-  await sql.query(
-    `alter table paper_settings add column if not exists named_outlets_revision integer not null default 0`,
-  );
+  `alter table paper_settings add column if not exists named_outlets_revision integer not null default 0`,
+];
+
+export async function ensurePaperSettingsSchema() {
+  await ensureSchemaOnce(await getSql(), "paper-settings", PAPER_SETTINGS_SCHEMA);
 }
 
 function defaultConfig(): PaperConfig {

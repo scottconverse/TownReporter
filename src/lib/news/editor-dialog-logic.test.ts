@@ -15,6 +15,7 @@ import {
   previewSplit,
   scopeFromKey,
   sourceKindLabel,
+  badSourceKillsBySource,
   sourceUrlsContain,
   updateStamp,
   weavePrompt,
@@ -204,5 +205,108 @@ describe("does this lead come from this source", () => {
     assert.equal(sourceUrlsContain("[1, null, 2]", identity), false);
     assert.equal(sourceUrlsContain(JSON.stringify(["https://x.example/news"]), null), false);
     assert.equal(sourceUrlsContain(JSON.stringify(["https://x.example/news"]), null), false);
+  });
+});
+
+/**
+ * The gate under a watch row (BJ3 item 3): the same numbers
+ * `performSourceKillPattern` prints, computed for every row from one read.
+ *
+ * The window and the ordering are the server's (`killed_at` desc, nulls last,
+ * then `id` desc, limit 500), so the cases below pin the two places they can
+ * drift: which kills are in the window at all, and which lead counts for which
+ * watch row.
+ */
+describe("the kill pattern under a watch row", () => {
+  const url = "https://longmontcolorado.gov/news";
+  const row = (
+    source_urls: string | null,
+    kill_reason: string | null,
+    id: number,
+    killed_at: string | null = "2026-01-01T00:00:00.000Z",
+  ) => ({ id, killed_at, kill_reason, source_urls });
+
+  it("counts a kill from the source once, and a bad-source kill in both numbers", () => {
+    const counts = badSourceKillsBySource(
+      [{ id: 7, url }],
+      [
+        row(JSON.stringify([url]), "Bad source or unreadable.", 2),
+        row(JSON.stringify([url]), "Already printed — matches a story we ran.", 1),
+      ],
+    );
+    assert.deepEqual(counts.get(7), { badSource: 1, killedFromSource: 2 });
+  });
+
+  it("matches on the watch list's identity, www and all, and never on a longer path", () => {
+    const counts = badSourceKillsBySource(
+      [{ id: 7, url }],
+      [
+        row(JSON.stringify(["https://www.longmontcolorado.gov/news"]), "unreadable", 3),
+        row(JSON.stringify(["https://longmontcolorado.gov/news-archive"]), "unreadable", 2),
+        row(JSON.stringify(["https://other.example/news"]), "unreadable", 1),
+      ],
+    );
+    assert.deepEqual(counts.get(7), { badSource: 1, killedFromSource: 1 });
+  });
+
+  it("counts one lead for both watch rows when two of them are the same page", () => {
+    const counts = badSourceKillsBySource(
+      [
+        { id: 7, url },
+        { id: 8, url: "https://www.longmontcolorado.gov/news" },
+      ],
+      [row(JSON.stringify([url]), "unreadable", 1)],
+    );
+    assert.deepEqual(counts.get(7), { badSource: 1, killedFromSource: 1 });
+    assert.deepEqual(counts.get(8), { badSource: 1, killedFromSource: 1 });
+  });
+
+  it("counts a lead once however many times its own list repeats the identity", () => {
+    const counts = badSourceKillsBySource(
+      [{ id: 7, url }],
+      [row(JSON.stringify([url, "https://www.longmontcolorado.gov/news", url]), "unreadable", 1)],
+    );
+    assert.deepEqual(counts.get(7), { badSource: 1, killedFromSource: 1 });
+  });
+
+  it("reads only the newest `limit` kills, in the server's order", () => {
+    const counts = badSourceKillsBySource(
+      [{ id: 7, url }],
+      [
+        row(JSON.stringify([url]), null, 1, "2026-01-01T00:00:00.000Z"),
+        row(JSON.stringify([url]), "unreadable", 2, "2026-06-01T00:00:00.000Z"),
+      ],
+      1,
+    );
+    assert.deepEqual(counts.get(7), { badSource: 1, killedFromSource: 1 });
+  });
+
+  it("leaves out a row with no kill date when the window is full of dated ones", () => {
+    const counts = badSourceKillsBySource(
+      [{ id: 7, url }],
+      [
+        row(JSON.stringify([url]), "unreadable", 1),
+        row(JSON.stringify([url]), "unreadable", 2, null),
+      ],
+      1,
+    );
+    assert.deepEqual(counts.get(7), { badSource: 1, killedFromSource: 1 });
+  });
+
+  it("skips a lead that names no source at all, and a source that cannot be an identity", () => {
+    assert.equal(
+      badSourceKillsBySource([{ id: 7, url }], [row(null, "unreadable", 1), row("not json", "unreadable", 2)])
+        .size,
+      0,
+    );
+    assert.equal(
+      badSourceKillsBySource([{ id: 7, url: "not a url" }], [row(JSON.stringify(["https://x.example/n"]), "unreadable", 1)])
+        .size,
+      0,
+    );
+  });
+
+  it("has nothing to say when the watch list is empty", () => {
+    assert.equal(badSourceKillsBySource([], [row(JSON.stringify([url]), "unreadable", 1)]).size, 0);
   });
 });

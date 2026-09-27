@@ -448,7 +448,7 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk");
 
@@ -525,9 +525,19 @@ async function main() {
 
   // --- draft 2: rung 1 is ready, misreads twice, then hits its quota -----
   await setDeepSeekMode({ mode: "quota", researchMode: "unreadable-json" });
+  /*
+    Unit BH5: unit BH2's decision 6 put the direction in front of the redraft --
+    pressing Redraft on the pane now opens RedraftDialog, and the dialog's own
+    "Start redraft" is what starts the run (the dialog arrives holding the
+    direction already on the page, so the same draft is asked for). Two presses
+    where there used to be one; every ladder assertion below is unchanged.
+  */
   await page.getByRole("button", { name: /^Redraft$/ }).click();
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  await startRedraft.waitFor({ timeout: 30_000 });
+  await startRedraft.click();
   const second = await waitForDraft("the second draft", (entry) => entry.job.id !== first.job.id);
-  step("clicked Redraft; rung 1 now misreads its research answer twice and 429s on the write");
+  step("pressed Redraft and Start redraft; rung 1 now misreads its research answer twice and 429s on the write");
 
   const secondReceipt = JSON.parse(second.job.result_json || "{}");
   assertReceipt(secondReceipt, {

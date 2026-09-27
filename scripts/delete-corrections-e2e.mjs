@@ -66,10 +66,28 @@ const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:80
  * correction box closed and the next fill timed out -- the same line CI failed
  * on. The same press with force removed opened the box. Do not put it back.
  */
+/**
+ * Open the row's More panel and press one of the items under it.
+ *
+ * BV moved "Post correction" and "Delete" in behind More ▾, which is where the
+ * design draws them (docs/design/handoff-2026-09-26, desk-19-published-dark.png
+ * and desk-20-published-light.png): the row keeps three acts -- View, Edit
+ * headline, More -- and everything else sits one press in. The panel is a native
+ * `<details>`, so the press is what puts it away again; what the calling step
+ * waits for afterwards is the same thing it has always waited for.
+ */
+async function pressInMore(row, name) {
+  const more = row.locator("details.row-more");
+  const summary = more.locator("> summary");
+  await summary.scrollIntoViewIfNeeded();
+  await summary.click();
+  const item = more.locator(".row-more-panel").getByRole("button", { name, exact: true });
+  await item.waitFor({ timeout: 15_000 });
+  await item.click();
+}
+
 async function openCorrectionForm(row) {
-  const button = row.getByRole("button", { name: "Post correction" });
-  await button.scrollIntoViewIfNeeded();
-  await button.click();
+  await pressInMore(row, "Post correction");
   await row.getByLabel("The correction").waitFor({ timeout: 15_000 });
 }
 
@@ -454,7 +472,7 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk with no setup token");
 
@@ -490,7 +508,10 @@ async function main() {
   // walk scopes to the row carrying THIS run's headline — otherwise a click
   // meant for the fixture story could land on the masthead piece instead.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const pubRow = page.locator(".pub-row", { hasText: leadHeadline }).first();
+  // `div.pub-row` became `div.astra-row.pub` in Redesign p2c, when the
+  // Published list moved onto the astra grid. Still scoped to THIS run's
+  // headline, which is what keeps a click off the seeded masthead story.
+  const pubRow = page.locator(".astra-row.pub", { hasText: leadHeadline }).first();
   await pubRow.waitFor({ timeout: 20_000 });
   await openCorrectionForm(pubRow);
 
@@ -1008,8 +1029,22 @@ async function main() {
   await page
     .locator("#finding-evidence-review")
     .screenshot({ path: join(evidenceArtifactDir, "finding-evidence-review-desktop.png") });
+  /*
+    BF5 (redesign p2a) -- the text-size control moved and changed shape. The
+    old shell put a `<select aria-label="Text size">` beside the account; the
+    design draws it in the nav footer as "Aa Large"/"Aa Normal", whose
+    accessible name is "Switch to large text"/"Switch to normal text"
+    (src/components/desk-chrome.tsx:340-346, and
+    scripts/desk-text-size-render.test.mjs asserts both). The footer lives in
+    the nav, which at phone width is the closed drawer, so both controls are
+    unreachable once the viewport is 390 -- the mode is therefore set at the
+    desk's own width, where the footer is on screen, and taken back off after
+    the viewport is restored. Nothing the steps assert changes: the panel is
+    shot and measured at 390 in dark large-text mode, and the desk ends the
+    section in light normal text.
+  */
   await page.getByRole("button", { name: "Switch to dark appearance", exact: true }).click();
-  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("large");
+  await page.getByRole("button", { name: "Switch to large text", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   if (!(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)))
     throw new Error("finding evidence review overflows at 390px dark large text");
@@ -1018,9 +1053,9 @@ async function main() {
     .screenshot({
       path: join(evidenceArtifactDir, "finding-evidence-review-mobile-dark-large.png"),
     });
-  await page.getByRole("button", { name: "Switch to light appearance", exact: true }).click();
   if (originalViewport) await page.setViewportSize(originalViewport);
-  await page.getByRole("combobox", { name: "Text size", exact: true }).selectOption("normal");
+  await page.getByRole("button", { name: "Switch to light appearance", exact: true }).click();
+  await page.getByRole("button", { name: "Switch to normal text", exact: true }).click();
   const queuedDraftJob = await pool.query(
     `insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status,stage,claim_token,started_at,updated_at)
      values($1,$2,'draft',$3,'running','drafting',$4,now(),now()) returning id`,
@@ -1083,8 +1118,32 @@ async function main() {
   };
   await page.route("**/*", holdActualDraft);
   const acknowledgementRecoveryBody = `TEST FIXTURE acknowledgement recovery replacement ${stamp}.`;
+  /*
+    Unit BH8: unit BH2's decision 6 put the direction in front of the redraft --
+    pressing Redraft on the story page now opens RedraftDialog, and the dialog's
+    own "Start redraft" is what starts the run (the dialog arrives holding the
+    direction already on the page, so the same draft is asked for). Two presses
+    where there used to be one; the held request, the seeded replacement and
+    every assertion below are unchanged.
+
+    The two presses are what `holdActualDraft` is waiting to see, so the wait
+    for the held request is bounded. A press that starts nothing used to leave
+    this walk waiting on a promise nothing would ever settle -- the job's last
+    line printed, then silence until CI's 20-minute timeout, with no sentence
+    naming what it was waiting for. It now fails in 30 s with the press named.
+  */
   await page.getByRole("button", { name: "Redraft", exact: true }).click({ noWaitAfter: true });
-  await draftHeld;
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  await startRedraft.waitFor({ timeout: 30_000 });
+  await startRedraft.click({ noWaitAfter: true });
+  const heldDraftArrived = await Promise.race([
+    draftHeld.then(() => true),
+    new Promise((settle) => setTimeout(() => settle(false), 30_000)),
+  ]);
+  if (!heldDraftArrived)
+    throw new Error(
+      'pressing "Redraft" then "Start redraft" did not start a draft request within 30 s',
+    );
   if (!heldDraftRoute)
     throw new Error("the acknowledgement recovery fixture did not hold the actual draft request");
   const acknowledgementRecoveryJob = await pool.query(
@@ -1153,7 +1212,18 @@ async function main() {
   holdPostAbortRefresh = true;
   expectedAcknowledgementTimeoutErrors = 1;
   await heldDraftRoute.abort("timedout");
-  await postAbortLeadRefreshHeld;
+  // The same bound as the held draft above, and for the same reason: this is
+  // the other promise nothing outside the walk ever settles, so a replacement
+  // the page does not re-fetch must fail here, naming the request, rather than
+  // hang until the job's timeout.
+  const postAbortLeadRefreshArrived = await Promise.race([
+    postAbortLeadRefreshHeld.then(() => true),
+    new Promise((settle) => setTimeout(() => settle(false), 30_000)),
+  ]);
+  if (!postAbortLeadRefreshArrived)
+    throw new Error(
+      "the page did not re-fetch the lead within 30 s of the aborted acknowledgement",
+    );
   await page.waitForFunction(
     (replacement) =>
       [...document.querySelectorAll("textarea")].some(
@@ -1234,8 +1304,8 @@ async function main() {
   // way, and the follow-up "delete where article_id = X" cleaned up nothing —
   // the correction survived the story it belonged to.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const pubRow2 = page.locator(".pub-row", { hasText: leadHeadline }).first();
-  await pubRow2.getByRole("button", { name: "Delete", exact: true }).click();
+  const pubRow2 = page.locator(".astra-row.pub", { hasText: leadHeadline }).first();
+  await pressInMore(pubRow2, "Delete");
   await pubRow2.getByRole("button", { name: /Yes, take it off/ }).click();
   await page.getByText(/Taken off the paper, and kept for 30 days/).waitFor({ timeout: 20_000 });
   step("deleting a story asks once and says the copy is kept");

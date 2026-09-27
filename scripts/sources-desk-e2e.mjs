@@ -66,42 +66,72 @@ async function ownTheDesk() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk");
 }
 
 /**
  * The row for a given source URL, wherever it currently sits (On watch/
- * Suggested sources/Dropped). The middle tab was renamed in 0.6.70; this walk
- * only ever opens On watch and Dropped, so the row lookup is unchanged.
+ * Suggested/Rejected). The middle tab was renamed in 0.6.70 and the last tab
+ * again in the redesign (Redesign p2c).
+ *
+ * The row markup moved with the redesign too: On watch is drawn as
+ * `div.astra-row.src` rows now, while Suggested and Rejected are still the
+ * `tr.lead-tr` table, so the lookup names both. It is matched by the row's own
+ * link rather than by its text, because the drawn row prints the URL's host
+ * ("example-town-council.test") where the table printed the whole URL.
  */
 function rowFor(url) {
-  return page.locator("tr.lead-tr", { hasText: url });
+  return page
+    .locator("tr.lead-tr, .astra-row.src")
+    .filter({ has: page.locator(`a[href="${url}"]`) });
 }
 
 async function theScreenRenders() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { level: 1, name: "Sources", exact: true }).waitFor({ timeout: 30_000 });
+  await page
+    .getByRole("heading", { level: 1, name: "Sources & scan", exact: true })
+    .waitFor({ timeout: 30_000 });
   step("the Sources page renders its own heading");
 
-  await page.getByText("Add a source", { exact: true }).click();
-  await page.getByLabel("URL", { exact: true }).waitFor({ timeout: 30_000 });
+  // BJ3 item 3: the header's "+ Add a source" opens phase 4's
+  // `AddSourcesDialog` -- one control and one dialog, which is what the drawing
+  // draws. Its four tabs are the behaviors BJ2's temporary panel held; the walk
+  // drives the first ("One link"), whose fields are Link / Name / What to watch
+  // for and whose primary press is "Add & run first check".
+  await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Add sources to watch", exact: true })
+    .waitFor({ timeout: 30_000 });
+  await page.getByLabel("Link", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByLabel("Name", { exact: true }).waitFor({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Add source" }).waitFor({ timeout: 30_000 });
-  step("the add-a-source form renders URL, Name, and Add source");
+  await page
+    .getByRole("button", { name: "Add & run first check", exact: true })
+    .waitFor({ timeout: 30_000 });
+  step("+ Add a source opens the dialog with Link, Name and its primary press");
 
   await page.getByText("Nothing on watch yet — add a URL above.").waitFor({ timeout: 30_000 });
   step("a fresh desk shows the on-watch zero state");
 }
 
 async function addingASourcePersists() {
-  await page.getByLabel("URL", { exact: true }).fill(sourceUrl);
+  // The dialog is still open from the step above.
+  await page.getByLabel("Link", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill(sourceTitle);
-  await page.getByRole("button", { name: "Add source" }).click();
+  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
 
-  await page.getByText(`On watch: ${sourceTitle}`).waitFor({ timeout: 30_000 });
-  step("adding a source shows the on-watch confirmation");
+  // The dialog reports what it did in its own sentence, and it says it twice:
+  // once into the desk's always-mounted `#desk-announcer` live region, which is
+  // sr-only, and once into this page's notice bar through `onDone`. A bare text
+  // match resolves to both and fails strict mode, so the walk reads the notice
+  // an editor can actually see. (`p.note` is the notice bar; the page's other
+  // `p.note` elements carry different text and are filtered out here.)
+  await page
+    .locator("p.note")
+    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .waitFor({ timeout: 30_000 });
+  step("adding a source shows the dialog's own confirmation on the page");
 
   await page.getByRole("heading", { name: "On watch", exact: true }).waitFor({ timeout: 30_000 });
   await rowFor(sourceUrl).waitFor({ timeout: 30_000 });
@@ -117,20 +147,30 @@ async function addingASourcePersists() {
 
 async function droppingThenRestoringUpdatesTheList() {
   const row = rowFor(sourceUrl);
-  await row.getByRole("button", { name: "Drop" }).click();
+  // The drawn active row keeps two buttons on its single line (BJ3 item 1), so
+  // Remove sits one click deeper, under "More ▾" -- the same `row-more`
+  // disclosure the other desks use. (A paused row draws Resume + Remove
+  // directly; the table rows Suggested and Rejected use say "Drop".)
+  await row.locator("details.row-more > summary").click();
+  await row
+    .locator(".row-more-panel")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
 
-  // Dropped moves the row out of On watch and into Rejected.
-  await page.getByRole("button", { name: /^Dropped / }).click();
+  // Rejecting moves the row out of On watch and into Rejected.
+  await page.getByRole("button", { name: /^Rejected / }).click();
   await page.getByRole("heading", { name: "Rejected", exact: true }).waitFor({ timeout: 30_000 });
   const rejectedSection = page.locator("section.src-sec", { hasText: "Rejected" });
-  await rejectedSection.locator("tr.lead-tr", { hasText: sourceUrl }).waitFor({ timeout: 30_000 });
-  step("Drop removes the source from On watch and files it under Rejected");
+  await rejectedSection
+    .locator("tr.lead-tr, .astra-row.src", { hasText: sourceUrl })
+    .waitFor({ timeout: 30_000 });
+  step("Remove takes the source off On watch and files it under Rejected");
 
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("button", { name: /^Dropped / }).click();
+  await page.getByRole("button", { name: /^Rejected / }).click();
   const stillRejected = page
     .locator("section.src-sec", { hasText: "Rejected" })
-    .locator("tr.lead-tr", { hasText: sourceUrl });
+    .locator("tr.lead-tr, .astra-row.src", { hasText: sourceUrl });
   await stillRejected.waitFor({ timeout: 30_000 });
   step("the rejected state survives a reload too");
 

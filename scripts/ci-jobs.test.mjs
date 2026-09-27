@@ -33,6 +33,7 @@ const CLAIMERS = [
   "scripts/dark-picker-e2e.mjs",
   "scripts/scan-desk-e2e.mjs",
   "scripts/sources-desk-e2e.mjs",
+  "scripts/claim-sources-pull-walk.mjs",
 ];
 
 test("each desk-claiming walk exists and is referenced by CI", () => {

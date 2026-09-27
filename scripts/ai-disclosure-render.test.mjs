@@ -70,7 +70,16 @@ const reactRouterStub = inlineModule(`
     return (options) => ({
       options,
       useParams: () => ({ slug: "the-story" }),
-      useLoaderData: () => undefined,
+      /*
+        The route's loader always returns an object -- article, dates and
+        legalGone, the last being whether the desk removed this slug on legal
+        advice (BH6). The stub used to hand back undefined, which the component
+        read as loaded?.article; now that the component asks loaded.legalGone
+        before anything else, the stub has to answer the way the real router
+        does. The article the page shows still comes from the query stub,
+        exactly as before.
+      */
+      useLoaderData: () => ({ article: null, dates: null, legalGone: false }),
     });
   }
   export function notFound() { return new Error("not found"); }
@@ -103,10 +112,30 @@ const provenanceStub = inlineModule(`
   }
 `);
 const beaconStub = inlineModule(`export function ViewBeacon() { return null; }`);
+const readBeaconStub = inlineModule(`export function ReadBeacon() { return null; }`);
 const deskChromeUtilsStub = inlineModule(`export const inkGhost = "";`);
 const publicStub = inlineModule(`
   export async function getPublishedArticle() { return null; }
   export async function listPublishedArticles() { return []; }
+`);
+/*
+  This route gained a legality check of its own -- a slug that was removed on
+  legal advice answers 410 Gone before the page renders, on a full load by the
+  route's own handler and in the browser by this check in the loader. None of it
+  is what the disclosure line is made of, so it is stubbed the way every other
+  non-page import here is: "not legally removed", which is the answer an
+  ordinary article gets. The three exports added by unit BH6
+  (`isLegallyRemovedForReader` and the removal page's two strings, which the
+  route prints when it does answer "removed") are here for the same reason: a
+  `data:` module that does not export a name the route imports fails to load.
+  The assertions below are untouched.
+*/
+const legalGoneStub = inlineModule(`
+  export async function isLegallyRemovedSlug() { return false; }
+  export async function isLegallyRemovedForReader() { return false; }
+  export function legalGoneResponse() { return new Response(null, { status: 410 }); }
+  export const LEGAL_GONE_TITLE = "This story was removed.";
+  export const LEGAL_GONE_BODY = "This page is gone for good. It was removed from the paper, and the record of the story is no longer published here.";
 `);
 const paperStub = inlineModule(`
   export function parseUrlList(value) { try { const p = JSON.parse(value || "[]"); return Array.isArray(p) ? p : []; } catch { return []; } }
@@ -150,10 +179,12 @@ const routeImports = {
   "@/components/reader-controls": controlsStub,
   "@/components/provenance": provenanceStub,
   "@/components/view-beacon": beaconStub,
+  "@/components/read-beacon": readBeaconStub,
   "@/components/desk-chrome-utils": deskChromeUtilsStub,
   "@/components/paper/dates-panel": datesPanelStub,
   "@/components/paper/section-tag": sectionTagStub,
   "@/lib/news/public": publicStub,
+  "@/lib/news/legal-gone": legalGoneStub,
   "@/lib/news/story-dates-public": storyDatesPublicStub,
   "@/lib/story-dates": storyDatesStub,
   "@/lib/paper": paperStub,

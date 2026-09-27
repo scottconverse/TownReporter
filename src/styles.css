@@ -1449,6 +1449,17 @@
 .desk-ltr .todo-pull {flex:none;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg);background:transparent;color:var(--fg);padding:3px 8px;cursor:pointer;font:inherit}
 .desk-ltr .todo-pull:hover {background:var(--bg2)}
 .desk-ltr .todo-pull:disabled {opacity:.5;cursor:wait}
+/* Claims and sources (0.6.74): the source link shows the site name and the row
+   carries its own Pull / Add to notes. The URL used to be the link text and,
+   at the inspector's width, broke into a column of fragments under a stranded
+   " · ". The unit never wraps inside the host or a button, so the row stays a
+   row; if the panel is too narrow it wraps BEFORE the host, never mid-URL. */
+.desk-ltr .claim-row {margin-top:8px}
+.desk-ltr .claim-meta {display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin-left:6px;vertical-align:baseline}
+.desk-ltr .claim-meta .inline-link {white-space:nowrap}
+.desk-ltr .claim-act {font-family:inherit;font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;line-height:1.5;white-space:nowrap;border:1px solid var(--fg2);background:transparent;color:var(--fg2);padding:3px 8px;cursor:pointer}
+.desk-ltr .claim-act:hover {background:var(--bg2);color:var(--fg)}
+.desk-ltr .claim-act:disabled {opacity:.5;cursor:default}
 .desk-ltr .todo:hover {color:var(--fg)}
 .desk-ltr .todo-box {width:11px;height:11px;border:1px solid var(--fg2);flex:none;position:relative;top:1px}
 .desk-ltr .todo.done .todo-box {background:var(--fg2)}
@@ -1900,6 +1911,10 @@
 .desk-ltr .composer-submit {text-align:right;flex-shrink:0}
 .desk-ltr .composer-submit .btn {min-height:48px;min-width:180px;font-size:17px;border-radius: 0}
 .desk-ltr .composer-submit p {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:8px 0 0}
+/* The two ways into a story that are not this dialog -- the report import and
+   the one-story paste -- stacked under the drawn submit button rather than run
+   together into one line. */
+.desk-ltr .composer-submit .composer-other-ways {display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-top:8px}
 .desk-ltr .composer-error:empty {display:none}
 .desk-ltr .composer-error:not(:empty) {padding:16px;border:1px solid var(--danger);margin-top:16px}
 @media (max-width:800px) {
@@ -1911,6 +1926,7 @@
   .desk-ltr .composer-footer .model-picker,.desk-ltr .composer-submit {width:100%;max-width:100%}
   .desk-ltr .composer-submit .btn {width:100%}
   .desk-ltr .composer-submit {text-align:left}
+  .desk-ltr .composer-submit .composer-other-ways {align-items:flex-start}
   .desk-ltr .composer-options summary>span {display:block;margin:8px 0 0}
   .desk-ltr .desk-home .desk-cc-grid>section {padding:16px}
 }
@@ -2060,7 +2076,7 @@
   color: var(--fg2);
 }
 /* The close control is a quiet InkButton -- a 1px `--line` outline -- but it
-   is a square glyph button, not a labelled one, so it is width-constrained
+   is a square glyph button, not a labeled one, so it is width-constrained
    here rather than given a second button style. */
 .desk-ltr.astra-modal-layer .astra-modal-head .btn {
   min-width: 44px;
@@ -2227,13 +2243,399 @@
 .desk-ltr .draft-batch-panel {display:flex;flex-direction:column;align-items:stretch;gap:14px}
 .desk-ltr .draft-batch-panel .wire-sum {display:flex;flex-direction:column;align-items:flex-start;gap:8px;font-style:normal}
 .desk-ltr .draft-batch-panel .wire-sum > .meta {margin:0;max-width:640px}
+/*
+  ---------------------------------------------------------------------------
+  Unit BH2: the new dialog bodies, and the one flow a page shares with them.
+
+  Phase 0 drew the shell (the panel, the head, the footer, ChoiceCard) and left
+  the middle to whoever filled it. The six dialogs in src/components/dialogs/
+  are that middle.
+
+  The rules below come in two scopes, and the split is deliberate:
+
+    * the SHARED group -- a field, a set of choices, a fieldset of checks, the
+      impact list, the flow's own title and press -- is scoped `.desk-ltr`,
+      because unit BH2 decision 3 renders `LegalRemovalFlow` from two places:
+      the dialog and `/desk/legal-removals`. That page is live, and pulling the
+      flow out of it must not leave its fieldset without a rule. Both surfaces
+      get the same field, drawn the same way.
+    * the DIALOG-ONLY group -- the body stack, the preview, the diff, the menu,
+      the model row, the alerts -- is scoped `.desk-ltr.astra-modal-layer`, so
+      nothing there can reach a page.
+
+  Tokens only -- `--fg` / `--fg2` / `--line` / `--bg2` / `--a` / `--fb` / `--ts`
+  -- because the dark palette is re-declared above on the modal layer. A literal
+  color here would be a light-only dialog, which is the failure the portal
+  wrapper exists to avoid.
+  ---------------------------------------------------------------------------
+*/
+/* A dialog body is a stack of blocks. Phase 0 only set the type; flex+gap is
+   what gives a body with ten children any rhythm, and it is additive: a block
+   child stacks exactly as it did. */
+.desk-ltr.astra-modal-layer .astra-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* ---------- shared by the dialogs and /desk/legal-removals ---------- */
+.desk-ltr .astra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.desk-ltr .astra-field-label {
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg);
+}
+.desk-ltr .astra-field-opt {
+  font-weight: 400;
+  color: var(--fg2);
+}
+/* The field controls, as the drawing paints them: square, one hairline rule,
+   and a ground one step up off the panel (`--bg2`) so the box is visible in
+   both palettes without a second border color. */
+.desk-ltr .astra-field input,
+.desk-ltr .astra-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--fd);
+  font-size: calc(0.875rem * var(--ts));
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+.desk-ltr .astra-field input::placeholder,
+.desk-ltr .astra-field textarea::placeholder {
+  color: var(--fg2);
+}
+.desk-ltr .astra-field input:focus-visible,
+.desk-ltr .astra-field textarea:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 1px;
+}
+.desk-ltr .astra-field input[readonly] {
+  color: var(--fg2);
+}
+.desk-ltr .astra-choice-set {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* A group of checkboxes: the legend is a field label, the box is the drawing's
+   bordered block. */
+.desk-ltr .astra-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+}
+.desk-ltr .astra-fieldset legend {
+  padding: 0 6px;
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg);
+}
+.desk-ltr .astra-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg);
+  cursor: pointer;
+}
+.desk-ltr .astra-check input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--a);
+}
+.desk-ltr .astra-check-wrap span {
+  min-width: 0;
+  text-wrap: pretty;
+}
+.desk-ltr .astra-flow-title {
+  margin: 0;
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: calc(1.0625rem * var(--ts));
+  color: var(--fg);
+}
+.desk-ltr .astra-flow-press {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+/*
+  The impact list. Unit BH3: one bordered block per thing that will change, laid
+  out as a column with a gap -- that is how `dialog-15-legal.png` draws the four
+  consequence rows (four separate boxes, the last one wearing the danger rule),
+  and this list is the only place the family is used. Only the legal flow's rows
+  are drawn here; `.astra-impact-what b` no longer capitalizes, because the
+  drawing's row titles are sentence case ("Public story page").
+*/
+.desk-ltr .astra-impacts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.desk-ltr .astra-impact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+}
+.desk-ltr .astra-impact.danger {
+  border-width: 2px;
+  border-color: var(--danger);
+}
+.desk-ltr .astra-impact-what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.desk-ltr .astra-impact-what b {
+  font-family: var(--fd);
+  font-size: calc(0.9375rem * var(--ts));
+}
+.desk-ltr .astra-impact.danger .astra-impact-what b {
+  color: var(--danger);
+}
+.desk-ltr .astra-impact-note {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr .astra-impact-act {
+  flex: none;
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg);
+}
+/* The drawn "Keep ▾" is the one act that opens something: the copies the
+   preview really found. It is drawn as a plain act, so the button carries no
+   chrome of its own. */
+.desk-ltr .astra-impact-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.desk-ltr .astra-impact-toggle:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+/* What "Keep ▾" opens: the same box the rows wear, one step in. */
+.desk-ltr .astra-impact-more {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr .astra-impact-more p {
+  margin: 0;
+}
+/* ---------- dialogs only ---------- */
+/* The model/effort row: labels and controls on one line inside a bordered box. */
+.desk-ltr.astra-modal-layer .astra-set-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-modal-note-inline {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+/* The one alert in a dialog body. Neutral for a status ("writing a note…"),
+   dashed `--danger` for a failure -- the desk's own split (see `.notice-err`),
+   because a sentence that only says something is not the same as a sentence
+   that says it went wrong. */
+.desk-ltr.astra-modal-layer .astra-modal-alert {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: calc(0.875rem * var(--ts));
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-modal-alert[role="alert"] {
+  border: 2px dashed var(--danger);
+  color: var(--danger);
+}
+/* The correction preview: the note as it will print, so it is set in the body
+   serif and carries the accent rule the drawing puts down its left edge. */
+/* Both sides declare this block: phase 4 gives it the line border, and this
+   branch gives it the padding, the fill and the accent edge. One rule, and
+   the border comes first so the shorthand does not reset the left edge. */
+.desk-ltr.astra-modal-layer .astra-preview {
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border-left: 3px solid var(--a);
+}
+.desk-ltr.astra-modal-layer .astra-preview-kick {
+  font-family: var(--fd);
+  font-weight: 700;
+  /* 14px, the informational floor: at 13px `desk-min-font` fails this rule by
+     name, and small caps at 13px was below the floor the rest of the desk keeps. */
+  font-size: calc(0.875rem * var(--ts));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-preview-body {
+  margin: 0;
+  font-family: var(--fb);
+  font-size: calc(1rem * var(--ts));
+  line-height: 1.5;
+  color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-preview-note {
+  margin: 0;
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+/*
+  Compare versions. Two columns in one frame, split by a hairline; the changed
+  pass is a yellow wash (`--a` at a third, which is the drawing's muted olive in
+  dark and a pale gold in light) and the removed pass is struck through. Marking
+  both sides is what makes the comparison readable without color: the strike
+  says "gone" and the wash says "added" on their own.
+*/
+.desk-ltr.astra-modal-layer .astra-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.desk-ltr.astra-modal-layer .astra-diff-field {
+  margin: 0;
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: calc(1.0625rem * var(--ts));
+  color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-diff-grid > div {
+  min-width: 0;
+  padding: 12px 14px;
+}
+.desk-ltr.astra-modal-layer .astra-diff-grid > div + div {
+  border-left: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-diff-kick {
+  margin: 0 0 8px;
+  font-family: var(--fd);
+  font-weight: 700;
+  /* 14px, the same floor as `.astra-preview-kick` above. */
+  font-size: calc(0.875rem * var(--ts));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg2);
+}
+.desk-ltr.astra-modal-layer .astra-diff-text {
+  margin: 0;
+  font-family: var(--fb);
+  font-size: calc(0.9375rem * var(--ts));
+  line-height: 1.6;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.desk-ltr.astra-modal-layer .astra-diff-add {
+  background: color-mix(in srgb, var(--a) 32%, transparent);
+  color: var(--fg);
+}
+.desk-ltr.astra-modal-layer .astra-diff-del {
+  color: var(--fg2);
+  text-decoration: line-through;
+}
+.desk-ltr.astra-modal-layer .astra-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border-left: 3px solid var(--warn);
+}
+/* The more-menu's rows: one frame, a row per action, divided by hairlines. The
+   legal row is the one that carries `--danger` -- on its rule and its name,
+   never on its press, which stays the same ink outline as the four above it. */
+.desk-ltr.astra-modal-layer .astra-menu {
+  display: flex;
+  flex-direction: column;
+}
+.desk-ltr.astra-modal-layer .astra-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+}
+.desk-ltr.astra-modal-layer .astra-menu-row + .astra-menu-row {
+  border-top: 0;
+}
+.desk-ltr.astra-modal-layer .astra-menu-row.is-danger {
+  border-color: var(--danger);
+}
+.desk-ltr.astra-modal-layer .astra-menu-what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.desk-ltr.astra-modal-layer .astra-menu-what b {
+  font-family: var(--fd);
+  font-size: calc(1rem * var(--ts));
+}
+.desk-ltr.astra-modal-layer .astra-menu-row.is-danger .astra-menu-what b {
+  color: var(--danger);
+}
+.desk-ltr.astra-modal-layer .astra-menu-note {
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg2);
+}
+@media (max-width: 700px) {
+  .desk-ltr.astra-modal-layer .astra-diff-grid {
+    grid-template-columns: 1fr;
+  }
+  .desk-ltr.astra-modal-layer .astra-diff-grid > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
 
 /*
   ---------------------------------------------------------------- dialogs ---
   The desk's dialog *contents*, from the redesign's Desk Dialogs.dc.html
   (docs/design/handoff-2026-09-26). Phase 0 built the shell -- .astra-modal,
   the head, the foot, .astra-choice-card -- and this is everything that goes
-  *inside* one: tabs, labelled fields, the drop zone, the source preview table,
+  *inside* one: tabs, labeled fields, the drop zone, the source preview table,
   the More list, the model row, and the note preview.
 
   The reference draws all of it with inline styles. Those are converted here,
@@ -2416,11 +2818,6 @@
 
 /* The source preview table. The head line carries the count and the split;
    every row is a URL and whether the desk already watches it. */
-.desk-ltr.astra-modal-layer .astra-preview {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line);
-}
 .desk-ltr.astra-modal-layer .astra-preview-head {
   display: flex;
   justify-content: space-between;

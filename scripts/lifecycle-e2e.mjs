@@ -87,7 +87,7 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
 
   // Unit BF3: the "File a lead yourself" button is off the Queue controls row
@@ -136,15 +136,28 @@ async function main() {
   // Was "Leave as editor", which sat in the header of every desk page. It moved
   // to the Server page and asks you to type your address; see claim.ts. The desk
   // is still proven to be rendering by the nav link on the next line.
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
-  await page.getByRole("link", { name: "Published", exact: true }).first().click();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
+  await page.getByRole("link", { name: /^Published\b/ }).first().click();
   await page.waitForURL(/\/desk\/published/);
+  // BV moved "Post correction" in behind the row's More ▾ -- the design draws
+  // three acts on a published row (View, Edit headline, More) and everything
+  // else sits one press in. Same button, same click, one press further in.
+  const pubRowForCorrection = page.locator(".astra-row.pub").first();
   // Click until the form actually opens. A force-click that lands before
   // React has hydrated the handler silently does nothing, and this walk
   // clicks faster than any person can -- CI caught the page in exactly that
   // window (the captured DOM showed the button present, the form absent).
   for (let i = 0; i < 6; i++) {
-    await page.getByRole("button", { name: "Post correction" }).first().click({ force: true });
+    const rowMore = pubRowForCorrection.locator("details.row-more").first();
+    // The panel item puts the panel away as it fires, so every retry starts
+    // from closed and opens it again.
+    if ((await rowMore.getAttribute("open")) === null) {
+      await rowMore.locator("> summary").click({ force: true });
+    }
+    await rowMore
+      .locator(".row-more-panel")
+      .getByRole("button", { name: "Post correction", exact: true })
+      .click({ force: true });
     const open = await page
       .getByPlaceholder("What was wrong")
       .waitFor({ timeout: 5_000 })

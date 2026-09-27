@@ -174,7 +174,7 @@ async function ownTheDesk() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   step("first account owns the desk");
 }
@@ -187,7 +187,35 @@ function optionsOf(select) {
 }
 
 function pastePanel() {
-  return page.locator("#paste-one-story");
+  /*
+    The panel is a dialog now, not a section stacked on Today, so it has no DOM
+    id to hang a selector on: the drawn composer panels take their accessible
+    name from the dialog's own title (src/components/dialog.tsx), and that title
+    is the heading this walk already reads.
+  */
+  return page.getByRole("dialog", { name: "Paste a story I already have" });
+}
+
+/**
+ * Open the one-story paste the way an editor does, and hand back its panel.
+ *
+ * Both ways in used to be panels always on Today; the redesign made the
+ * composer a dialog opened by Today's own "+ New story" (the handoff's New
+ * story dialog has three tabs: AI drafts from material, write it myself, and
+ * paste a finished story). The composer's footer carries the other two, so the
+ * walk presses what an editor presses rather than book-marking the hash.
+ */
+async function openThePastePanel() {
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  const composer = page.getByRole("dialog", { name: "Write a story" });
+  await composer.waitFor({ timeout: 45_000 });
+  const wayIn = composer.getByRole("link", { name: "Paste a story I already have", exact: true });
+  await wayIn.waitFor({ timeout: 45_000 });
+  await wayIn.click();
+  const panel = pastePanel();
+  await panel.waitFor({ timeout: 45_000 });
+  return panel;
 }
 
 /** Wait for a control to stop being disabled, so the click lands on a live one. */
@@ -199,14 +227,26 @@ async function waitForEnabled(locator, timeout = 30_000) {
 /** The Desk offers one-story paste beside the import, in the owner's words. */
 async function theDeskOffersTheOneStoryPaste() {
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  const composer = page.getByRole("dialog", { name: "Write a story" });
+  await composer.waitFor({ timeout: 45_000 });
+  // Beside, not instead of: the report import is still offered as the other
+  // way in, a link to its own screen in the same footer as the paste.
+  const importWayIn = composer.getByRole("link", { name: /Import finished stories/ });
+  await importWayIn.waitFor({ timeout: 45_000 });
+  must(
+    (await importWayIn.getAttribute("href")) === "/desk/import",
+    "the report import is not offered beside the paste as the other way in",
+  );
+  const pasteWayIn = composer.getByRole("link", {
+    name: "Paste a story I already have",
+    exact: true,
+  });
+  await pasteWayIn.waitFor({ timeout: 45_000 });
+  await pasteWayIn.click();
   const panel = pastePanel();
   await panel.waitFor({ timeout: 45_000 });
   await panel.getByRole("heading", { name: "Paste a story I already have", exact: true }).waitFor();
-  // Beside, not instead of: the report import is still the other way in.
-  await page
-    .locator("#import-story")
-    .getByRole("heading", { name: "Import finished stories", exact: true })
-    .waitFor();
 
   // textContent, not innerText: the eyebrows are uppercased by the stylesheet,
   // and it is the source wording this walk is checking.
@@ -562,9 +602,7 @@ async function theReaderGetsTheStory(printed, sectionChoice) {
  * can be filed without a section, so the question is asked again instead.
  */
 async function theSecondPasteAsksForASectionThenWarns(sectionChoice) {
-  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  const panel = pastePanel();
-  await panel.waitFor({ timeout: 45_000 });
+  const panel = await openThePastePanel();
   await page.locator("#paste-one-text").fill(SECOND);
   const button = panel.getByRole("button", { name: "Add to Queue", exact: true });
   await waitForEnabled(button, 30_000);
@@ -612,7 +650,14 @@ async function theSecondPasteAsksForASectionThenWarns(sectionChoice) {
   // The warning is after the add, never instead of it: the story is in the Queue.
   const open = panel.getByRole("link", { name: "Open it", exact: true });
   must((await open.count()) === 1, "the duplicate warning replaced the Open it link");
-  facts.push(await screenshot("paste-one-added-1280-light.png", 1280, 900, '#paste-one-story [role="status"]'));
+  facts.push(
+    await screenshot(
+      "paste-one-added-1280-light.png",
+      1280,
+      900,
+      'div[role="dialog"] [role="status"]',
+    ),
+  );
   step("the second paste is added, and the warning about the printed story follows it");
 }
 
@@ -654,8 +699,10 @@ async function aStoryWithNoRecordsPrintsNoHeading(printed, sectionChoice) {
 async function fitsAt375(note, enforceType = false) {
   const measured = await page.evaluate((enforce) => {
     const size = (el) => Number.parseFloat(getComputedStyle(el).fontSize);
+    // The panel's own labels and paragraphs. It is a dialog now, so this scopes
+    // to the open one rather than to an id the dialog does not carry.
     const own = enforce
-      ? [...document.querySelectorAll("#paste-one-story label, #paste-one-story p")]
+      ? [...document.querySelectorAll('div[role="dialog"] label, div[role="dialog"] p')]
       : [];
     const limit = window.innerWidth + 1;
     return {
@@ -739,25 +786,69 @@ async function screenshot(name, width, height, anchor, index = 0) {
   return { file, width, height, ...measured };
 }
 
+/*
+  The panel's own frame, as a stable hook for the screenshots. The dialog takes
+  its accessible name from its title rather than an id (src/components/dialog.tsx
+  renders Radix's Content with no id), so the role is what there is to anchor to.
+*/
+const PANEL_ANCHOR = 'div[role="dialog"]';
+
+/**
+ * The desk's own Dark/Light button, pressed while no panel is open.
+ *
+ * The panel is a modal dialog now, and while one is open the nav footer is
+ * behind its scrim: the button is aria-hidden and its clicks are intercepted, so
+ * an editor cannot reach it either. The theme is therefore chosen first, with
+ * the real control, and the panel is opened afterwards.
+ */
+async function chooseTheDeskTheme(buttonName) {
+  const button = page.getByRole("button", { name: buttonName });
+  await button.waitFor({ timeout: 45_000 });
+  await button.click();
+  await page.waitForTimeout(400);
+}
+
+/** Close the panel with Escape, the way its own close control does. */
+async function closeThePanel() {
+  await page.keyboard.press("Escape");
+  await pastePanel().waitFor({ state: "hidden", timeout: 30_000 });
+}
+
 async function thePictures(sectionChoice) {
-  // The panel as the editor meets it, empty and beside the import box.
+  // The panel as the editor meets it, empty and beside the import box, in the
+  // light desk first: a desk starts light, and the button's label names what
+  // pressing it gets you.
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
-  await pastePanel().waitFor({ timeout: 45_000 });
-  facts.push(await screenshot("paste-one-story-desk-1280-light.png", 1280, 900, "#paste-one-story-title"));
-  await page.getByRole("button", { name: "Switch to dark appearance" }).click();
-  await page.waitForTimeout(400);
-  facts.push(await screenshot("paste-one-story-desk-1280-dark.png", 1280, 900, "#paste-one-story-title"));
-  await page.getByRole("button", { name: "Switch to light appearance" }).click();
-  await page.waitForTimeout(400);
+  await openThePastePanel();
+  facts.push(await screenshot("paste-one-story-desk-1280-light.png", 1280, 900, PANEL_ANCHOR));
+  // The panel is modal, so while it is open the nav footer's theme button is
+  // behind the scrim and unreachable for an editor too: close the panel, press
+  // the desk's own button, and open the panel again for each shot.
+  await closeThePanel();
+  await chooseTheDeskTheme("Switch to dark appearance");
+  await openThePastePanel();
+  facts.push(await screenshot("paste-one-story-desk-1280-dark.png", 1280, 900, PANEL_ANCHOR));
+  await closeThePanel();
+  await chooseTheDeskTheme("Switch to light appearance");
+  // Opened at the desk's own width, then measured and shot at 375 -- the panel
+  // is open while the viewport changes, so nothing has to be pressed at 375.
+  await openThePastePanel();
+  await page.setViewportSize({ width: 375, height: 720 });
   facts.push(await fitsAt375("the one-story paste panel", true));
-  facts.push(await screenshot("paste-one-story-desk-375-light.png", 375, 720, "#paste-one-story-title"));
+  facts.push(await screenshot("paste-one-story-desk-375-light.png", 375, 720, PANEL_ANCHOR));
+  await closeThePanel();
 
   // The published story, and the section under it: the cited page beneath the
   // heading that is there because there is something to follow.
   await page.goto(`${base}/desk/published`, { waitUntil: "networkidle" });
-  const printedRow = page.locator("li, .pub-row, article").filter({ hasText: FIRST_LINE }).first();
+  // Redesign p2c moved the Published list onto the astra grid, so the row that
+  // was `div.pub-row` is `div.astra-row.pub`, and the BV pass renamed the link
+  // on it to the drawing's "View" (the design draws three acts on the row: View,
+  // Edit headline, More). The locator still means "whatever holds this story on
+  // this screen", read for the same link.
+  const printedRow = page.locator("li, .astra-row.pub, article").filter({ hasText: FIRST_LINE }).first();
   await printedRow.waitFor({ timeout: 45_000 });
-  const readOnPaper = printedRow.getByRole("link", { name: "Read on the paper", exact: true });
+  const readOnPaper = printedRow.getByRole("link", { name: "View", exact: true });
   const printed = await readOnPaper.getAttribute("href");
   must(Boolean(printed), "the published story has no link to the paper");
   await page.goto(new URL(printed, base).href, { waitUntil: "networkidle" });

@@ -1352,12 +1352,23 @@ function DeskHome() {
               The composer's own submit button is the dialog's primary press
               now, so nothing here duplicates it -- one control named "Write
               draft" on the screen, not two. What is left in the footer is the
-              other way in, which used to be the panel below this one.
+              other ways in, which used to be the panels below this one: the
+              handoff's New story dialog has three tabs -- (a) *AI drafts from
+              material*, which is the /desk/import intake, (b) *Write it
+              myself*, which is this dialog, and (c) *Paste a finished story*
+              (docs/design/handoff-2026-09-26/README.md, the dialog table).
+              Both of the other two are offered here, so the one-story paste is
+              reachable from the desk and not only by its own hash.
             */}
                 <div className="composer-submit">
-                  <Link to="/desk/import" className="inline-link">
-                    Already written somewhere else? Import finished stories
-                  </Link>
+                  <div className="composer-other-ways">
+                    <Link to="/desk/import" className="inline-link">
+                      Already written somewhere else? Import finished stories
+                    </Link>
+                    <Link to="/desk" hash="paste-one-story" className="inline-link">
+                      Paste a story I already have
+                    </Link>
+                  </div>
                 </div>
               </footer>
               <div role="alert" aria-live="assertive" aria-atomic="true" className="composer-error">

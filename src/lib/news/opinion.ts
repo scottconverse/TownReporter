@@ -4,6 +4,7 @@ import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { audit } from "./ops";
 import { latestJob, runLooksStalled } from "./jobs";
+import { jobProgressView, type JobProgressView } from "./job-progress.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { opinionModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
@@ -54,6 +55,19 @@ export type EditorialRow = {
    * the source of truth for "is this open at all".
    */
   stalled?: boolean;
+  /**
+   * The same job, shaped for phase 3's card. Already fetched above for the
+   * stalled check, so the Writing row gets a live progress card without a
+   * second query and without widening `listStoryJobProgress` -- which is the
+   * story desk's query and would leak editorial rows onto Today.
+   */
+  job?: JobProgressView | null;
+  /**
+   * `drafts.integrity_notes`: the sentence the writer's own source check
+   * produced, stored when the piece was filed. Non-empty means the claims
+   * appendix is incomplete, which is what blocks publication.
+   */
+  integrity_notes?: string | null;
 };
 
 export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
@@ -94,6 +108,7 @@ export const listEditorials = createServerFn({ method: "GET" })
              r.draft_id, r.error,
              r.created_at, r.finished_at,
              d.headline,
+             d.integrity_notes,
              case when d.body is null then null
                   else array_length(regexp_split_to_array(trim(d.body), '\\s+'), 1)
              end as words,
@@ -122,6 +137,13 @@ export const listEditorials = createServerFn({ method: "GET" })
       });
       row.stage = job?.stage || undefined;
       row.stalled = runLooksStalled({ runOpen: true, job });
+      /*
+        `row.id`, not a lead id: an editorial has no lead. `jobProgressView`'s
+        second argument is only ever used to build a failover destination for
+        the two story kinds, and an editorial job's `resultHref` stays null, so
+        nothing on the card can navigate anywhere wrong.
+      */
+      row.job = job ? jobProgressView(job, row.id, row.draft_id) : null;
     }
     return rows;
   });

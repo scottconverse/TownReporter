@@ -21,6 +21,15 @@ export type SourceRow = {
   proposed_section?: string | null;
   reviewed_at?: string | null;
   review_note?: string | null;
+  /*
+    How many new snapshots this source produced on the most recent pass -- 0 on
+    a source that was fetched and had not changed. It is what lets the watch
+    list say "Changed · 2 new items" rather than only when it was last seen.
+    Optional for the same reason as the block above: most readers of this type
+    select only the watch-list columns, and a row read by an older select has
+    no answer rather than a wrong one.
+  */
+  new_since_last_pass?: number | null;
 };
 
 export type LeadRow = {

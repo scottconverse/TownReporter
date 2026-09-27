@@ -290,9 +290,18 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
+  /*
+    "Write a story" is a dialog now (src/routes/desk.index.tsx: the composer is
+    a `Dialog` opened by `panel === "story-composer"`), so the attach input, the
+    story box, the scope select, the model picker and the "Write draft" press
+    all live inside it. The walk opens it the way the chrome draws the way in --
+    the header's "+ New story". Nothing below this moved.
+  */
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  await page.getByRole("dialog", { name: "Write a story" }).waitFor({ timeout: 45_000 });
   step("created an isolated editor and opened Write a story");
 
   await page.getByLabel("Attach documents").setInputFiles({
@@ -309,7 +318,13 @@ async function main() {
     .fill("Write a short news story from the attached packet and preserve its exact evidence marker.");
   await page.getByText("Research & section", { exact: false }).click();
   await page.getByLabel("Drafting scope").selectOption("supplied");
-  assert.doesNotMatch(await page.locator("#story-composer").innerText(), /Codex does not support/i);
+  // The composer's panel is the dialog itself now -- a Radix dialog has no DOM
+  // id, so the assertion reads the dialog, which is the same node the old
+  // `#story-composer` wrapper was.
+  assert.doesNotMatch(
+    await page.getByRole("dialog", { name: "Write a story" }).innerText(),
+    /Codex does not support/i,
+  );
   assert.equal(await page.getByLabel("Writing model").inputValue(), "auto");
   step("attached a real text document and kept Automatic with supplied material only");
 

@@ -317,6 +317,14 @@ test("every server function in src/ is gated, or is named on the public allowlis
     "src/lib/news/public.ts::listPublicCorrections",
     // Paginated reader archive: published rows in the public newsroom only.
     "src/lib/news/reader-public.ts::readerArticles",
+    // Was this slug removed on legal advice? The reader who needs the answer is
+    // by definition not signed in, and the answer is already public: a request
+    // for the same URL gets BH4's 410 and nothing else. It takes only a
+    // published story's slug (`publicSlug`, the same bound `getPublishedArticle`
+    // puts on the read above) and reveals one bit about a slug the caller had
+    // to name -- no title, no body, no newsroom internals. It is the reader's
+    // own question, not a desk one.
+    "src/lib/news/legal-gone.ts::isLegallyRemovedForReader",
     // The two dated-item panels on the reader side: "This week" on the front
     // page and "Dates in this story" on the article page. Both read
     // `articles.provenance_json` on rows the query already restricts to

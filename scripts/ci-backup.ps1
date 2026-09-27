@@ -34,7 +34,9 @@
     * the "after 2 AM and older than 20 hours" rule, on a fake clock, both as
       the rule itself and through a whole run
     * a dump that fails, or that fails the completeness check, is not left
-      wearing a backup's name, and stops the run
+      wearing a backup's name, and stops the run: the part of it pg_dump did
+      write is logged (its size and its last 2 KB) and then deleted, and any
+      .sql.incomplete an older version left in that folder goes with it
     * the nightly lock: two backups never run at once, a run can wait for one
       that is in flight, and a stale lock from a killed run is taken over
     * the daily-scan rule, on a fake clock and a fake scan row
@@ -498,9 +500,16 @@ $dumpGood = { param($Path) $script:dumpCalls++; [IO.File]::WriteAllText($Path, (
 # Cut just after the last line of the dump body, on a line boundary, so the
 # file ends with a newline (not "in the middle of a line") and the closing
 # marker is simply not there -- a pg_dump that was killed before it finished.
-$dumpCut = { param($Path) $t = New-FakeDumpText -Token 'CUTSHORTaCUTSHORTaCUTSHORTaCUTSHORTaCUTSHORTaCUTSHORTaC'; [IO.File]::WriteAllText($Path, $t.Substring(0, (Get-FakeDumpTailOffset -Text $t) + 2), (New-Object Text.UTF8Encoding $false)); return $true }
+$dumpCut = { param($Path) $t = New-FakeDumpText -Token 'CUTSHORTaCUTSHORTaCUTSHORTaCUTSHORTaCUTSHORTaCUTSHORTaC'; $body = $t.Substring(0, (Get-FakeDumpTailOffset -Text $t) + 2); $script:cutBytes = (New-Object Text.UTF8Encoding $false).GetByteCount($body); [IO.File]::WriteAllText($Path, $body, (New-Object Text.UTF8Encoding $false)); return $true }
 $dumpNo = { param($Path) return $false }
 $dumpThrow = { param($Path) throw 'there is no pg_dump on this machine' }
+
+# One of the files the version of the library that kept failed dumps left
+# behind. Planted before a run that WORKS, which is the point: the sweep is
+# scoped to the moment a dump of this run's own failed, so a good run must
+# leave this exactly where it is. The next run, the cut-short one, takes it.
+$leftover = Join-Path $script:backupDir 'townreporter_2026-09-25_0235.sql.incomplete'
+[IO.File]::WriteAllText($leftover, 'a dump that died under the older version of the library', (New-Object Text.UTF8Encoding $false))
 
 $run = Invoke-TownReporterBackupRun -App $script:app -Force -BackupDir $script:backupDir -OffsiteDir $script:offsite `
   -LogFile $script:log -StateFile $script:state -LockFile $script:lock -DumpCommand $dumpGood `
@@ -511,6 +520,7 @@ Check "named for the minute it was taken" ((Get-LocalNames) -contains 'townrepor
 Check "it copied that one to the other drive" ((Get-OffsiteNames).Count -eq 1)
 Check "the state file has the newest backup's name and size" ($run.State.lastName -eq 'townreporter_2026-09-25_0230.sql' -and $run.State.lastBytes -gt 100000)
 Check "the state file has no error on it" ($null -eq $run.State.lastError)
+Check "a run whose dump worked sweeps nothing out of the folder" (Test-Path -LiteralPath $leftover -PathType Leaf)
 
 $run = Invoke-TownReporterBackupRun -App $script:app -Force -BackupDir $script:backupDir -OffsiteDir $script:offsite `
   -LogFile $script:log -StateFile $script:state -LockFile $script:lock -DumpCommand $dumpCut `
@@ -519,9 +529,22 @@ $text = Read-Log $script:log
 Check "a dump cut short is not a backup" ($run.DumpOk -eq $false -and $run.Ok -eq $false)
 Check "it says the closing marker is missing" ($run.Reason -match 'closing marker is missing') $run.Reason
 Check "the cut-short file is NOT left wearing a backup's name" (-not (Test-Path -LiteralPath (Join-Path $script:backupDir 'townreporter_2026-09-25_0240.sql') -PathType Leaf))
-$incomplete = @(Get-ChildItem -LiteralPath $script:backupDir -Filter '*.sql.incomplete' -File)
-Check "it is kept beside the others with .incomplete on the end, so a person can look at it" ($incomplete.Count -eq 1 -and $incomplete[0].Name -eq 'townreporter_2026-09-25_0240.sql.incomplete') (($incomplete | ForEach-Object { $_.Name }) -join ', ')
-Check "the log says it was kept for inspection" ($text -match 'kept for inspection as')
+Check "the cut-short dump is deleted, not renamed and kept beside the others" `
+  (-not (Test-Path -LiteralPath (Join-Path $script:backupDir 'townreporter_2026-09-25_0240.sql.incomplete') -PathType Leaf)) `
+  ((Get-ChildItem -LiteralPath $script:backupDir -File | ForEach-Object { $_.Name }) -join ', ')
+Check "the .incomplete the old version left behind goes in the same breath" (-not (Test-Path -LiteralPath $leftover -PathType Leaf))
+Check "no .incomplete file is left in the backup folder at all" `
+  (@(Get-ChildItem -LiteralPath $script:backupDir -Filter '*.sql.incomplete' -File).Count -eq 0) `
+  ((Get-ChildItem -LiteralPath $script:backupDir -File | ForEach-Object { $_.Name }) -join ', ')
+$dropLines = @($text -split "`r?`n" | Where-Object { $_ -match 'dropping the failed dump' })
+Check "the log says it dropped the failed dump, with the size pg_dump had reached" `
+  ($dropLines.Count -eq 1 -and $dropLines[0] -match ('\b{0} bytes were written\b' -f $script:cutBytes)) `
+  ($dropLines -join ' | ')
+Check "the log shows the last 2 KB it saw, so a person can see how far pg_dump got" `
+  ($dropLines.Count -eq 1 -and $dropLines[0] -match '(-- x{74} ){2,}' -and $dropLines[0].Length -ge 2000) `
+  ("$($dropLines[0].Length) characters, ending: " + $dropLines[0].Substring([Math]::Max(0, $dropLines[0].Length - 40)))
+Check "the log says the leftover went too, and how big it was" `
+  ($text -match 'dropped the leftover failed dump townreporter_2026-09-25_0235\.sql\.incomplete \(\d+ bytes\)')
 Check "the state file now carries the failure" ($run.State.lastError -match 'closing marker is missing')
 Check "the good backup from a moment ago is still there and still the newest" ((Get-LocalNames).Count -eq 1)
 

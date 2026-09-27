@@ -18,6 +18,14 @@ import { DatesPanel } from "@/components/paper/dates-panel";
 import { SectionTag } from "@/components/paper/section-tag";
 import { ReaderRow, SaveStory, ShareStory, ReadingButton, CopyButton } from "@/components/reader-controls";
 import { readMinutes } from "@/lib/reader";
+import {
+  LEGAL_GONE_BODY,
+  LEGAL_GONE_TITLE,
+  isLegallyRemovedForReader,
+  isLegallyRemovedSlug,
+  legalGoneResponse,
+} from "@/lib/news/legal-gone";
+import { ReadBeacon } from "@/components/read-beacon";
 import { ViewBeacon } from "@/components/view-beacon";
 
 /**
@@ -46,7 +54,35 @@ export const Route = createFileRoute("/articles/$slug")({
       anything that resolves after the loader arrives too late to change a head
       that has already gone out.
     */
-    if (!article) throw notFound();
+    /*
+      A story that is missing from the paper is missing for one of two reasons,
+      and they are not the same answer.
+
+      A mistyped or retired address is 404 -- that is what `notFound()` below
+      still means, and its panel still says "not in this edition". A story the
+      desk removed on legal advice is not a wrong address: it was here, the desk
+      decided it may not be published, and the record of that decision is in
+      `legal_removal_slugs`. BH4 made the URL answer 410 for it; this is the
+      same claim on the path that never makes a request for the URL.
+
+      A reader who reaches the story by clicking a link -- or by pressing Back
+      to a story they had open when it was live -- never asks the server for the
+      URL: the router runs this loader in the BROWSER and re-renders. So the
+      answer has to come back as data, not as a status, and the page has to be
+      the removal page itself. Returning a flag rather than throwing
+      `notFound({ data })` is deliberate: a loader that throws leaves the
+      PREVIOUS match's `loaderData` in place, which the route's own `head` then
+      reads -- measured, and it is how the removed story's headline, dek,
+      `og:title`, `twitter:title` and `article:published_time` stayed on the
+      not-found panel. A load that SUCCEEDS replaces that data, so the head can
+      say "removed" and nothing else (BH6).
+    */
+    if (!article) {
+      if (await isLegallyRemovedForReader({ data: params.slug })) {
+        return { article: null, dates: null, legalGone: true };
+      }
+      throw notFound();
+    }
     /*
       "Dates in this story" is read here, not in a client query, so the panel
       is in the first HTML a reader (or a crawler) receives. It reads dated
@@ -55,7 +91,7 @@ export const Route = createFileRoute("/articles/$slug")({
       a meeting nobody has written about.
     */
     const dates = await articleDates({ data: { slug: params.slug } });
-    return { article, dates };
+    return { article, dates, legalGone: false };
   },
   notFoundComponent: () => (
     <PaperShell compact>
@@ -82,6 +118,31 @@ export const Route = createFileRoute("/articles/$slug")({
    * sharing links, that is the difference between a story travelling and not.
    */
   head: ({ loaderData, params, match }) => {
+    /*
+      A removed story's head is the removal notice, and nothing else.
+
+      "Nothing else" is the load-bearing half. The head is what a share card,
+      a browser tab and a crawler read, and the story's head here is its
+      headline, its dek, its publication time and its canonical URL -- so
+      leaving it in place on a removal page republishes the story at a second
+      URL, which is the one thing a legal removal exists to stop. This runs on
+      the in-app path too: the framework projects `head` for the match on every
+      client-side navigation, so a reader who arrives by link or by Back gets
+      the removal title and `noindex` in the tab, not the story's.
+
+      `noindex` on the in-app path is a belt to the 410's braces: the URL
+      already answers 410 to a plain request, and this covers the crawler that
+      runs the page's JavaScript instead.
+    */
+    if (loaderData?.legalGone) {
+      return {
+        meta: [
+          { title: LEGAL_GONE_TITLE },
+          { name: "description", content: LEGAL_GONE_BODY },
+          { name: "robots", content: "noindex" },
+        ],
+      };
+    }
     const article = loaderData?.article;
     if (!article) return {};
     const paper = match.context.paper ?? DEFAULT_PAPER_IDENTITY;
@@ -119,6 +180,35 @@ export const Route = createFileRoute("/articles/$slug")({
       // local dev, and a relative canonical is not a canonical.
       links: url.startsWith("http") ? [{ rel: "canonical", href: url }] : [],
     };
+  },
+  /*
+    A legally removed story answers 410 Gone, not 404.
+
+    The two are not the same claim and the desk makes the difference
+    deliberately: `removeLegally` deletes the row, so without this the read
+    below finds nothing and the page answers 404 -- the answer a mistyped
+    address gets. But the removal dialog the owner confirms promises, on the
+    record, "Removed now; the URL returns 410 Gone" (README Dialogs table,
+    drawing `dialog-15-legal.png`), and a promise the UI makes about a URL has
+    to be true of the URL. 410 also tells a crawler something 404 cannot: it
+    was here, it is gone for good, stop asking.
+
+    This lives in the route's own handler because the status cannot be set any
+    other way here. SSR streams: the head leaves before the loader has
+    resolved, the router hardcodes 404 for `notFound()` and 500 for a thrown
+    error, and h3 keeps a returned `Response`'s own status -- which is why the
+    feed and the sitemap build their responses this way. A route WITH a
+    component is the one case where a handler may hand the request back:
+    `next()` falls through to the ordinary render, so a story that was not
+    legally removed is served exactly as before.
+  */
+  server: {
+    handlers: {
+      GET: async ({ params, next }) => {
+        if (await isLegallyRemovedSlug(params.slug)) return legalGoneResponse();
+        return next();
+      },
+    },
   },
   component: ArticlePage,
 });
@@ -193,6 +283,35 @@ function ArticlePage() {
   }, [body]);
   const current = useCurrentJump(jumps);
 
+  /*
+    The reader reached a story the desk removed on legal advice -- by a link, or
+    by pressing Back to a story they had open when it was still live. They get
+    the same words a real request to the URL gets (BH4's 410 page), with none of
+    the story on it: not the headline, not the dek, not one word of the body.
+
+    This branch is FIRST, above the pending state and above `!article`. The
+    query below is keyed by slug and the browser may still be holding this
+    story's own response from the visit that put it in the reader's history --
+    `initialData` comes from the loader, but react-query's cache does not, and a
+    removal page that flashed the cached story before settling would have shown
+    it anyway. Nothing from that query is rendered here.
+  */
+  if (loaded.legalGone) {
+    return (
+      <PaperShell compact>
+        <EmptyState
+          kicker="Archive"
+          title={LEGAL_GONE_TITLE}
+          body={LEGAL_GONE_BODY}
+          action={
+            <Link to="/" className={inkGhost}>
+              Back to the paper
+            </Link>
+          }
+        />
+      </PaperShell>
+    );
+  }
   if (isPending) {
     return (
       <PaperShell compact>
@@ -240,6 +359,7 @@ function ArticlePage() {
   return (
     <PaperShell compact>
       <ViewBeacon targets={[`story:${slug}`, "site"]} />
+      <ReadBeacon />
 
       {/* The story proper. "Keep reading" below it is about other stories, so it sits outside. */}
       <article>

@@ -12,7 +12,7 @@
  * were instead of with the first choice gone and no fallbacks written.
  */
 
-import { getSql, withTransaction, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import {
   MODEL_EFFORT_LABELS,
@@ -36,7 +36,8 @@ import {
 export async function ensureModelAssignmentsSchema() {
   await ensureNewsroomSchema();
   const sql = await getSql();
-  await sql.query(`
+  await ensureSchemaOnce(sql, "model-assignments", [
+    `
     create table if not exists model_assignments (
       newsroom_id integer not null default 1 references newsrooms(id) on delete cascade,
       job_key text not null,
@@ -47,7 +48,8 @@ export async function ensureModelAssignmentsSchema() {
       updated_at timestamptz not null default now(),
       primary key (newsroom_id, job_key, rank)
     )
-  `);
+  `,
+  ]);
 }
 
 type StoredRow = { job_key: string; rank: number; provider_id: string; effort: string | null };

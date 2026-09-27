@@ -20,6 +20,7 @@ import { Route as HowWeReportRouteImport } from './routes/how-we-report'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as ApiReadRouteImport } from './routes/api/read'
 import { Route as ApiViewRouteImport } from './routes/api/view'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
@@ -98,6 +99,11 @@ const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiReadRoute = ApiReadRouteImport.update({
+  id: '/api/read',
+  path: '/api/read',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiViewRoute = ApiViewRouteImport.update({
@@ -233,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/read': typeof ApiReadRoute
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -269,6 +276,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/read': typeof ApiReadRoute
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -307,6 +315,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/read': typeof ApiReadRoute
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -346,6 +355,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/read'
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
@@ -382,6 +392,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/read'
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
@@ -419,6 +430,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/robots.txt'
     | '/sitemap.xml'
+    | '/api/read'
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
@@ -457,6 +469,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  ApiReadRoute: typeof ApiReadRoute
   ApiViewRoute: typeof ApiViewRoute
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
@@ -542,6 +555,13 @@ declare module '@tanstack/react-router' {
       path: '/sitemap.xml'
       fullPath: '/sitemap.xml'
       preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/read': {
+      id: '/api/read'
+      path: '/api/read'
+      fullPath: '/api/read'
+      preLoaderRoute: typeof ApiReadRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/view': {
@@ -771,6 +791,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  ApiReadRoute: ApiReadRoute,
   ApiViewRoute: ApiViewRoute,
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,

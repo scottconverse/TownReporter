@@ -92,6 +92,8 @@ import {
   addToInitial,
   addToProblem,
   addToRequest,
+  darkFileFromSeed,
+  darkFileInitial,
   darkFileSeed,
   darkProblem,
   darkRequest,
@@ -795,6 +797,18 @@ export type DarkFileDialogProps = {
    */
   prefill?: DarkFilePrefill;
   /**
+   * A hypothesis to open the dialog already holding, handed over from another
+   * screen (an import's review screen, a lead's More menu). The dialog reseeds
+   * from it every time it opens, so a caller that leaves it in place gets the
+   * same file offered again; the caller clears its own copy when it is spent.
+   *
+   * A `seed` is the whole hand-over and wins over `prefill` when a caller
+   * passes both: it already carries the question and the material. The two are
+   * separate props because a seed is one paste that has to be split, while a
+   * prefill is two fields the caller already has apart.
+   */
+  seed?: string;
+  /**
    * The file is open. The screen owns what happens next: it can navigate to the
    * file, and it may start the first round with the material and the model the
    * editor chose in this dialog.
@@ -814,9 +828,10 @@ export type DarkFileDialogProps = {
  * screen starts the round on the file page, where those two things exist, and
  * is handed the material and the pick to do it with.
  *
- * Mounted by: `/desk/dark` (`desk.dark.tsx`, phase 2c) as the New file control,
- * and the More menu's "Send to Dark Desk". Props: `open`, `onClose`, `prefill`,
- * `onOpened`.
+ * Mounted by: `/desk/dark` (`desk.dark.tsx`, phase 2c) as the New file control
+ * (which hands over a `seed`), and the lead rows' More menu on `/desk` and
+ * `/desk/queue` (which hand over a `prefill`). Props: `open`, `onClose`,
+ * `prefill`, `seed`, `onOpened`.
  *
  * PREFILL: the lead row's "Send to Dark Desk" already knows the headline and the
  * link, and `darkProblem` wants a tip of eight characters or more, so the editor
@@ -826,16 +841,20 @@ export type DarkFileDialogProps = {
  * memoized on the two strings rather than on the object: a caller passing an
  * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, prefill, onOpened }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkFileDialogProps) {
   const press = usePress();
-  // Broken into the two strings on purpose: `useDialogState` reseeds whenever
-  // the factory's identity changes, and a caller passing an inline object
-  // literal would hand over a new one on every render.
+  // The factory must be stable -- `useDialogState` reseeds on every open -- so
+  // it is memoized on the seed and on the prefill's two strings rather than
+  // rebuilt on each render. A caller passing an inline object literal for
+  // `prefill` would otherwise hand over a new factory every render, which is
+  // why the fields are read out here; `seed` is a string and needs no such care
+  // beyond winning over the prefill when a caller somehow passes both.
   const prefillQuestion = prefill?.question;
   const prefillTip = prefill?.tip;
   const factory = React.useCallback(
-    () => darkFileSeed({ question: prefillQuestion, tip: prefillTip }),
-    [prefillQuestion, prefillTip],
+    () =>
+      seed ? darkFileFromSeed(seed) : darkFileSeed({ question: prefillQuestion, tip: prefillTip }),
+    [seed, prefillQuestion, prefillTip],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
   const models = React.useMemo(() => modelRowFor("dark"), []);

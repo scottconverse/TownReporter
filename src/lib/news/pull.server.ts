@@ -1,4 +1,4 @@
-import { getSql, withTransaction, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { ingestDocument, type IngestDocument } from "./ingest.ts";
 import {
@@ -75,6 +75,13 @@ export type PullReceipt = {
   attemptId: string;
   leadId: number;
   todoIndex: number | null;
+  /**
+   * 0.6.74: the one page a claim's Pull reads. When it is set the run opens
+   * exactly this URL instead of searching, so `todoIndex` is null and
+   * `finishPullTodo` is skipped -- a claim lives in `notes.found`, not in the
+   * reporting lines, and there is no to-do to strike.
+   */
+  sourceUrl?: string | null;
   query: string;
   status: "queued" | "running" | "completed" | "stopped" | "deadline" | "failed";
   stage: string;
@@ -91,6 +98,8 @@ export type PullRunView = {
   jobId: number;
   leadId: number;
   todoIndex: number | null;
+  /** The claim's source page for a 0.6.74 claim Pull, else null. */
+  sourceUrl: string | null;
   query: string;
   jobStatus: "queued" | "running" | "completed" | "failed";
   status: PullReceipt["status"];
@@ -116,6 +125,7 @@ const EMPTY_COUNTERS: PullCounters = {
 export function newPullReceipt(input: {
   leadId: number;
   todoIndex?: number;
+  sourceUrl?: string | null;
   query: string;
   attemptId?: string;
 }): PullReceipt {
@@ -126,6 +136,7 @@ export function newPullReceipt(input: {
     attemptId: input.attemptId ?? crypto.randomUUID(),
     leadId: input.leadId,
     todoIndex: typeof input.todoIndex === "number" ? input.todoIndex : null,
+    sourceUrl: input.sourceUrl ?? null,
     query: input.query.trim().slice(0, 240),
     status: "queued",
     stage: "Queued",
@@ -157,6 +168,7 @@ export function parsePullReceipt(raw: string | null | undefined): PullReceipt | 
       ...value,
       counters: { ...EMPTY_COUNTERS, ...(value.counters ?? {}) },
       errors: Array.isArray(value.errors) ? value.errors.map(String).slice(-16) : [],
+      sourceUrl: typeof value.sourceUrl === "string" && value.sourceUrl ? value.sourceUrl : null,
     } as PullReceipt;
   } catch {
     return null;
@@ -292,6 +304,52 @@ export async function runPullPipeline(
     await deps.saveReceipt(receipt);
     return receipt;
   };
+
+  /*
+    0.6.74: a claim's Pull names one page, so there is no search to run, no
+    candidate to rank and nothing for the two-minute deadline to cut short
+    beyond the single fetch. This branch reads exactly the page the editor
+    pointed at and finishes.
+
+    Two deliberate differences from the search path. `isOnSubject` is not
+    applied: the editor aimed at this page, and a claim's support is the page
+    itself, not a subject match the desk guessed. And `deps.ingest` is still
+    `ingestDocument`, so the URL guard, the redirect handling and the OCR
+    refusal are the same code an ordinary Pull runs -- a claim Pull can no more
+    reach a private address than a search Pull can.
+  */
+  if (receipt.sourceUrl) {
+    const sourceUrl = receipt.sourceUrl;
+    await save("Opening the source page");
+    try {
+      const got = await withinDeadline((signal) => deps.ingest(sourceUrl, signal), deadlineAt, now);
+      receipt.counters.documentsOpened += 1;
+      if (!got.text || got.text.trim().length < 40) {
+        addFailure(receipt, `${sourceUrl}: ${got.outcome || "no usable text"}`);
+      } else {
+        const document = {
+          title: (got.title || sourceUrl).slice(0, 160),
+          url: sourceUrl,
+          excerpt: selectExcerpt(got.text, receipt.query),
+        };
+        await deps.saveDocument(document, receipt);
+        receipt.checkpoint.documents.push(document);
+        receipt.counters.documentsSaved = receipt.checkpoint.documents.length;
+      }
+    } catch (error) {
+      if (error instanceof PullDeadlineError) return finish("deadline", stoppedStage("deadline"));
+      addFailure(
+        receipt,
+        `${sourceUrl}: ${error instanceof Error ? error.message : "could not open"}`,
+      );
+    }
+    return finish(
+      "completed",
+      receipt.checkpoint.documents.length
+        ? "Finished · the source page is in the box under the story"
+        : "Finished · the source page gave no usable text",
+    );
+  }
 
   await save(`Preparing ${receipt.checkpoint.queries.length} searches`);
   try {
@@ -512,9 +570,11 @@ export async function runPullPipeline(
 
 async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<PullCheckpoint> {
   const sql = await getSql();
-  await sql.query(
+  // ACCESS EXCLUSIVE on `leads` when it runs, so once per database rather than
+  // once per pull; see `paper-settings-read-lock.test.ts`.
+  await ensureSchemaOnce(sql, "pull-lead-memo-column", [
     "alter table leads add column if not exists notes_json text not null default '{}'",
-  );
+  ]);
   const rows = await sql<{ notes_json: string | null; headline: string; source_urls: string }>`
     select notes_json, headline, source_urls from leads
     where id = ${receipt.leadId} and newsroom_id = ${job.newsroom_id} limit 1
@@ -710,7 +770,11 @@ export async function performPullWork(job: DeskJob) {
       stopRequested: () => jobStopRequested(job),
       saveDocument: (document, next) => savePulledDocument(job, next, document),
     });
-    await finishPullTodo(job, final);
+    // A claim Pull has no reporting line to strike (receipt.sourceUrl is a
+    // claim's source, and claims live in `notes.found`), so the to-do
+    // bookkeeping is skipped rather than run against a query that never
+    // matched a to-do.
+    if (!final.sourceUrl) await finishPullTodo(job, final);
     await audit(
       job.user_id,
       "pull",
@@ -724,7 +788,7 @@ export async function performPullWork(job: DeskJob) {
     receipt.finishedAt = new Date().toISOString();
     addFailure(receipt, error instanceof Error ? error.message : "Pull failed");
     await saveJobReceipt(job, receipt);
-    await finishPullTodo(job, receipt);
+    if (!receipt.sourceUrl) await finishPullTodo(job, receipt);
     throw error;
   }
 }

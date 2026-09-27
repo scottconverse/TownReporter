@@ -401,9 +401,20 @@ async function main() {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
   await page.getByRole("button", { name: "Create editor account" }).click();
-  await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
+  await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  /*
+    "Write a story" is a dialog now, not the panel that used to sit open on
+    Today (src/routes/desk.index.tsx: the composer is a `Dialog` with
+    `panel === "story-composer"`). Every control this press uses -- the attach
+    input, the story box, the scope and model selects, the "Write draft"
+    button -- lives inside it, so the walk opens it the way the desk chrome
+    draws the way in: the header's "+ New story" press. Nothing below moved;
+    the composer just has to be on screen for its controls to exist.
+  */
+  await page.getByRole("link", { name: /^\+ New story/ }).click();
+  await page.getByRole("dialog", { name: "Write a story" }).waitFor({ timeout: 45_000 });
   step("created an isolated editor and opened Write a story");
 
   // ---- The press under test: the 13-page scan, plus a document AFTER it,
@@ -553,8 +564,18 @@ async function main() {
     trafficBeforeRedraft,
     `the fake never answered GET ${FAKE_CONTROL}/__log before the Redraft press`,
   );
+  /*
+    Unit BH5: unit BH2's decision 6 put the direction in front of the redraft --
+    pressing Redraft on the pane now opens RedraftDialog, and the dialog's own
+    "Start redraft" is what starts the run (the dialog arrives holding the
+    direction already on the page, so the same draft is asked for). Two presses
+    where there used to be one; every assertion below is unchanged.
+  */
   await page.getByRole("button", { name: "Redraft", exact: true }).click();
-  step("pressed Redraft once on the story the packet and second document are attached to");
+  const startRedraft = page.getByRole("button", { name: "Start redraft", exact: true });
+  await startRedraft.waitFor({ timeout: 30_000 });
+  await startRedraft.click();
+  step("pressed Redraft once on the story the packet and second document are attached to, then started it from the dialog");
 
   const redraftDeadline = Date.now() + Number(process.env.REDRAFT_SCAN_DEADLINE_MS || 300_000);
   while (Date.now() < redraftDeadline) {

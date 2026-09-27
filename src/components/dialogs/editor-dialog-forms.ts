@@ -726,6 +726,21 @@ export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
   return seed;
 }
 
+/**
+ * A hypothesis the editor asked for on another screen, seeded into the dialog.
+ *
+ * `/desk/dark` reads a hand-over out of `sessionStorage` (an import's review
+ * screen, a lead's "Send to Dark Desk") and opens the dialog already holding
+ * it, so the editor sees the question and the material before a file exists.
+ * The whole paste is the tip -- nothing the editor wrote is dropped -- and the
+ * first line is the question, which is how the screen's own paste box titled
+ * files before this dialog replaced it (`paste.split("\n")[0]`), so a hand-over
+ * files the same title it always did.
+ */
+export function darkFileFromSeed(seed: string): DarkFileState {
+  return { ...darkFileInitial(), question: seed.split("\n")[0] ?? "", tip: seed };
+}
+
 export function holdInitial(): HoldState {
   return { choice: HOLD_CHOICES[0]?.key ?? "record-or-date", note: "" };
 }

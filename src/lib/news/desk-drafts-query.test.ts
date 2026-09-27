@@ -19,6 +19,9 @@ import { PGlite } from "@electric-sql/pglite";
   cast would not compile; `distinct on` without the matching order returns a
   row, just not the newest one; and a name check whose rows are not an array
   (an older shape, or `{}`) must count 0 rather than fail the whole screen.
+  The `drafts` table below carries the columns the query reads, `body` among
+  them (migration 0002): a hand-filed lead's empty body is what the row prints
+  as "Nothing written yet", so the projection is checked, not just the SQL.
 */
 
 const desk = await readFile(new URL("./desk.ts", import.meta.url), "utf8");
@@ -45,8 +48,8 @@ test("the drafts list reads the desk's real state out of a text column", async (
     );
     create table drafts (
       id integer primary key, lead_id integer, newsroom_id integer, headline text, dek text,
-      topic text, form text, model_headline text, headline_source text, updated_at timestamptz,
-      research_json text not null default '{}'
+      body text not null, topic text, form text, model_headline text, headline_source text,
+      updated_at timestamptz, research_json text not null default '{}'
     );
     create table desk_jobs (
       id integer primary key, newsroom_id integer, kind text, subject_id integer, status text,
@@ -81,15 +84,17 @@ test("the drafts list reads the desk's real state out of a text column", async (
             (2,1,'An imported story','new','import',4,'Why not'),
             (3,1,'Already printed','published',null,9,'No'),
             (4,1,'Not touched yet','new',null,3,'Not yet written');
-    insert into drafts(id,lead_id,newsroom_id,headline,dek,topic,form,model_headline,headline_source,updated_at,research_json)
-      values(1,1,1,'The model first wrote this','d','council','news','The model first wrote this','model','2026-09-26T08:00:00.000Z','{}'),
-            (2,1,1,'The editor rewrote it','d','council','news','The model first wrote this','model','2026-09-26T09:00:00.000Z','${nameCheck(2)}'),
-            (3,2,1,'An imported story','d','schools','news','An imported story','model','2026-09-26T09:10:00.000Z','{"importedText":true}'),
+    insert into drafts(id,lead_id,newsroom_id,headline,dek,body,topic,form,model_headline,headline_source,updated_at,research_json)
+      values(1,1,1,'The model first wrote this','d','The model first wrote this.','council','news','The model first wrote this','model','2026-09-26T08:00:00.000Z','{}'),
+            (2,1,1,'The editor rewrote it','d','The council voted 4-3.','council','news','The model first wrote this','model','2026-09-26T09:00:00.000Z','${nameCheck(2)}'),
+            (3,2,1,'An imported story','d','Body as it arrived.','schools','news','An imported story','model','2026-09-26T09:10:00.000Z','{"importedText":true}'),
             -- A published lead keeps its draft, and a lead with no draft at all
             -- is not a draft row: neither belongs on "everything not yet printed".
-            (4,3,1,'Already printed','d','arts','news','Already printed','model','2026-09-26T09:20:00.000Z','{}'),
+            (4,3,1,'Already printed','d','Already printed body.','arts','news','Already printed','model','2026-09-26T09:20:00.000Z','{}'),
             -- An older row shape: nameCheck present but rows missing entirely.
-            (5,4,1,'Not touched yet','d','housing','news','Not touched yet','model','2026-09-26T07:00:00.000Z','{"nameCheck":{"version":1,"complete":false}}');
+            -- Its body is empty: fileLead writes body = '' beside the lead the
+            -- moment it is filed, and that is what "nothing written yet" is.
+            (5,4,1,'Not touched yet','d','','housing','news','Not touched yet','model','2026-09-26T07:00:00.000Z','{"nameCheck":{"version":1,"complete":false}}');
     -- Lead 1 is being written right now, so its newest job is 'running' and its
     -- row sorts by the heartbeat rather than by the draft's own updated_at.
     insert into desk_jobs(id,newsroom_id,kind,subject_id,status,stage,started_at,updated_at,model_choice,error)
@@ -121,8 +126,11 @@ test("the drafts list reads the desk's real state out of a text column", async (
     assert.equal(writing.imported_text, false);
     assert.equal(imported.imported_text, true);
     assert.equal(imported.origin, "import");
+    assert.equal(writing.has_body, true, "the editor's draft has prose");
+    assert.equal(imported.has_body, true, "an imported draft arrives with its body");
     assert.equal(bare.names_unresolved, 0, "a name check with no rows counts zero, and does not throw");
     assert.equal(bare.name_check_complete, false);
+    assert.equal(bare.has_body, false, "an empty body reads as no prose, not as prose");
     assert.equal(bare.evidence_required, false);
     assert.equal(bare.headline, "Not touched yet", "a draft with no headline falls back to the lead's");
     assert.equal(bare.job_status, "failed");

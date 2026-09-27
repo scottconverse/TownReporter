@@ -12,11 +12,13 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { usePublicSections } from "@/lib/use-sections";
 import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
 import {
+  DarkModeButton,
   ReaderProvider,
   ReadingButton,
   ReaderDialog,
   CopyButton,
 } from "./reader-controls";
+import { NAV_ID, SectionNav } from "./section-nav";
 import { useReader } from "./reader-context";
 
 /**
@@ -56,42 +58,31 @@ export function Masthead({
     starts with "Front page"; the article prototype's header carries the
     sections only, so in compact mode the wordmark and the story's breadcrumb
     are the two ways home and the list is the sections alone.
+
+    The list itself -- how many of the 21 sections it prints, where it cuts
+    them, and the "More sections" button that carries the rest -- belongs to
+    `SectionNav`, because the fit is a measurement of the real links and not
+    something this component can know. Both rows use the same component, which
+    is the point: the article row and the front row are the same row in the
+    two prototypes.
   */
-  const sectionLinks = (
-    <>
-      {!compact && (
-        <Link
-          to="/"
-          search={{}}
-          className={
-            location.pathname === "/" && !current.topic && !current.q && !current.view
-              ? "active"
-              : ""
-          }
-        >
-          Front page
-        </Link>
-      )}
-      {sections
-        .filter((s) => s.visible)
-        .map((s) => (
-          <Link
-            key={s.key}
-            to="/"
-            search={{ topic: s.key }}
-            className={current.topic === s.key ? "active" : ""}
-          >
-            {s.name}
-          </Link>
-        ))}
-    </>
+  const sectionNav = (
+    <SectionNav
+      sections={sections.filter((s) => s.visible)}
+      activeTopic={current.topic}
+      frontPageActive={
+        location.pathname === "/" && !current.topic && !current.q && !current.view
+      }
+      includeFrontPage={!compact}
+      menuOpen={open}
+    />
   );
   const mobileMenu = (
     <button
       className="mobilemenu"
       type="button"
       aria-expanded={open}
-      aria-controls="reader-sections"
+      aria-controls={NAV_ID}
       onClick={() => setOpen(!open)}
     >
       Explore the publication
@@ -123,6 +114,15 @@ export function Masthead({
               <Bookmark aria-hidden />
               <span>Saved{r.saved.length ? ` · ${r.saved.length}` : ""}</span>
             </Link>
+            {/*
+              Dark mode, in the bar the handoff gives the utilities (unit BD5).
+              It is the reader's own appearance preference -- the same one the
+              reading dialog's Light/Dark pair writes -- so the paper is dark on
+              the next screen too, and `ReaderProvider.update` moves the
+              document attribute with it. The label names the mode it will
+              switch TO, and reads "Light mode" while the paper is dark.
+            */}
+            <DarkModeButton label />
             <ReadingButton label />
             {/*
               The desk entry deliberately performs a document navigation. An
@@ -153,13 +153,7 @@ export function Masthead({
           {compact ? (
             <>
               {mobileMenu}
-              <nav
-                className={`sections ${open ? "open" : ""}`}
-                id="reader-sections"
-                aria-label="News sections"
-              >
-                {sectionLinks}
-              </nav>
+              {sectionNav}
             </>
           ) : (
             geography
@@ -168,13 +162,7 @@ export function Masthead({
         {compact ? null : (
           <div className="navrow">
             {mobileMenu}
-            <nav
-              className={`sections ${open ? "open" : ""}`}
-              id="reader-sections"
-              aria-label="News sections"
-            >
-              {sectionLinks}
-            </nav>
+            {sectionNav}
             <div className="reader-nav-actions">
               {/*
                 The nav row's one action. The desk entry used to sit beside it
