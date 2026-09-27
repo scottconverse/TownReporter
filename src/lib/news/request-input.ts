@@ -826,12 +826,51 @@ export const suggestedSourceReviewInput = z.object({
   note: z.string().max(LIMITS.reviewNote).optional(),
 });
 
-/** `desk.ts:338` fileLead (`desk.ts:340-348` slice the same three fields). */
+/** `desk.ts:507` fileLead (`desk.ts:511-519` slice the same three fields). */
 export const fileLeadInput = z.object({
   headline: z.string().max(LIMITS.leadHeadline),
   why: z.string().max(LIMITS.leadWhy),
   topic: z.string().max(LIMITS.leadTopic),
   url: z.string().max(LIMITS.url).optional(),
+  /**
+   * Unit BW3: every page a filed story leans on, not only the first.
+   *
+   * `url` carried one link, which was all "Add a lead" ever had in its hand.
+   * The drawn New story dialog's paste tab files a story that cites its pages
+   * in its own text, and the one-story paste panel this replaces carried all of
+   * them (`paste-one-story.ts:171` extracts every markdown link, `keep: true`).
+   * What the reader gets is the DRAFT's `source_urls` (`publishLead`,
+   * `desk.ts:3659`), so a paste citing three pages and sending one would print
+   * one. Same cap as a report's own link list, which arrives from a paste of
+   * the same size.
+   */
+  urls: z.array(z.string().max(LIMITS.url)).max(LIMITS.importLinks).optional(),
+  /**
+   * Who wrote the story, when the screen that filed it knows.
+   *
+   * The published page prints `drafts.disclosure_text` over the story and falls
+   * back to its own AI line when it is empty (`ai-disclosure.tsx:33`). A story
+   * an editor pasted in whole is not that line's story, so the paste tab says
+   * which one it is and `fileLead` carries it. Absent -- every other caller --
+   * writes nothing, which is the old behaviour exactly.
+   */
+  disclosureKey: z.enum(["outside-ai", "person", "other"]).optional(),
+  disclosureOther: z.string().max(LIMITS.disclosureOther).optional(),
+  /**
+   * The body is a story an editor pasted, not prose a model wrote beside the
+   * records it gathered.
+   *
+   * `drafts.research_json.importedText` is how the desk tells the two apart
+   * (`draft-evidence.ts:36`), and the evidence-review gate is built for the
+   * second kind: a draft whose body changes after its evidence was gathered has
+   * to be re-reviewed before it prints -- which, over a pasted story, asks the
+   * editor to compare their own words against claims nothing ever extracted.
+   * The import path marks its cards this way (`import-stories.server.ts:432`),
+   * and the one-story paste panel filed through it, so a story pasted into the
+   * drawn New story dialog has to carry the same mark or the gate stops an
+   * editor fixing a typo in it. Absent -- every other caller -- writes nothing.
+   */
+  importedText: z.boolean().optional(),
 });
 
 /** `desk.ts:586` saveScanSourcePackFn (`sections.server.ts:177` refuses > 200). */

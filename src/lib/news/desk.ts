@@ -28,6 +28,7 @@ import {
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { cleanStoryArea } from "../story-area.ts";
+import { disclosureLine } from "./import-stories.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
@@ -446,7 +447,28 @@ export const listLeads = createServerFn({ method: "GET" })
  */
 export async function insertLeadWithDraft(
   context: { userId: string; newsroomId?: number },
-  input: { headline: string; why: string; topic: string; urls: string[]; notesJson?: string },
+  input: {
+    headline: string;
+    why: string;
+    topic: string;
+    urls: string[];
+    notesJson?: string;
+    /**
+     * The line readers see under the story, for a filing screen that knows who
+     * wrote it (Unit BW3: the New story dialog's paste tab). Empty is every
+     * other caller and every story the desk writes, which prints the paper's
+     * own AI line (`ai-disclosure.tsx:33`).
+     */
+    disclosure?: string;
+    /**
+     * `drafts.research_json.importedText`: the body is an editor's paste, not
+     * prose a model wrote. The evidence-review gate reads this flag to tell the
+     * two apart (`draft-evidence.ts:36`), and the paste screens mark their
+     * drafts with it (`import-stories.server.ts:432`). False is every other
+     * caller, which is the column's own default ('{}', `desk.ts:200`).
+     */
+    importedText?: boolean;
+  },
 ): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
   const sql = await getSql();
   const urlsJson = JSON.stringify(input.urls);
@@ -480,10 +502,11 @@ export async function insertLeadWithDraft(
     evidence is there, and it is not.
   */
   await sql`
-    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls)
+    insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, disclosure_text, research_json)
     values (
       ${context.userId}, ${owned(context)}, ${id}, ${input.headline}, ${input.why.slice(0, 220)}, '', ${input.topic},
-      ${urlsJson}
+      ${urlsJson}, ${input.disclosure ?? ""},
+      ${input.importedText ? JSON.stringify({ importedText: true }) : "{}"}
     )
   `;
   await audit(context.userId, "lead", `filed ${id}`, owned(context));
@@ -511,12 +534,32 @@ export const fileLead = createServerFn({ method: "POST" })
         return { ok: false as const, error: "That source URL is not a public http(s) address." };
       }
     }
+    /*
+      Unit BW3: the New story dialog's paste tab knows every page the pasted
+      story cites, not only its original link, and the reader sees exactly what
+      the DRAFT carries (`publishLead`, `desk.ts:3659`) -- so a story saved
+      from that tab would publish with an empty Sources section while the page
+      still promised "Sources shown." Dropped here rather than refused, the way
+      the old paste panel dropped them (`sanitizePublicUrls` also de-dupes).
+    */
+    if (data.urls?.length) {
+      urls = sanitizePublicUrls([...urls, ...data.urls]);
+    }
     return insertLeadWithDraft(context, {
       headline,
       why,
       topic,
       urls,
       notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }),
+      /*
+        Who wrote it, for the filing screen that asked. Every other caller
+        sends nothing and the paper prints its own AI line
+        (`ai-disclosure.tsx:33`).
+      */
+      disclosure: data.disclosureKey
+        ? disclosureLine(data.disclosureKey, data.disclosureOther ?? "")
+        : "",
+      importedText: data.importedText === true,
     });
   });
 

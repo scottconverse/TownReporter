@@ -31,9 +31,11 @@ import {
   type SourcePreview,
 } from "../../lib/news/editor-dialog-logic.ts";
 import { HOLD_CHOICES } from "../../lib/news/kill-reasons.ts";
+import { SECTION_REQUIRED } from "../../lib/news/import-review.ts";
 import {
   ADD_LEAD_THENS,
   MORE_LEAD_ITEMS,
+  NEW_STORY_SCOPES,
   NEW_STORY_TABS,
   PASTE_MODES,
   SOURCE_TABS,
@@ -355,10 +357,59 @@ export type NewStoryBodyProps = {
   problem: string | null;
   note: string | null;
   models: readonly { value: string; label: string }[];
+  /**
+   * Tabs (b) and (c): the newsroom's own sections, for the row that decides
+   * what the editor's text is filed under. The shell reads them with the desk's
+   * own `useEditorSections` (`use-sections.ts:3`), the same query the desk's
+   * write box and the import screen draw from, so the keys offered here are
+   * exactly the keys `resolve_story_section` accepts.
+   */
+  sections?: readonly { key: string; name: string }[];
   /** The drop zone on tab (a): documents the drafter reads. */
   onFiles?: (files: File[]) => void;
   Choice: ChoiceRender;
 };
+
+/**
+ * The Section row, on the two tabs that save the editor's own text.
+ *
+ * Unit BW3. This row is not decoration and not a preference: `saveDraft` writes
+ * `topic` on every save and the `drafts` trigger refuses a key that is not a
+ * row of `newsroom_sections` -- an empty one included (`sections.server.ts:38`,
+ * `:47` via `draft-edit.server.ts:48`). The old composer drew the same control
+ * for the same reason (`desk.index.tsx:1463-1479`), the old one-story paste
+ * panel asked for it in the review screen's own words, and both drawn tabs
+ * planned `topic: ""`, so both tabs' save was a 500 until this row existed.
+ *
+ * The placeholder is `SECTION_REQUIRED`, the review screen's own sentence for
+ * an unchosen section (`import-review.ts:135`), so the question the editor
+ * reads here is the question the rest of the desk asks.
+ */
+function sectionRow(
+  sections: readonly { key: string; name: string }[],
+  value: string,
+  set: (patch: Partial<NewStoryState>) => void,
+): ReactNode {
+  return field(
+    "Section",
+    sections.length
+      ? "Pick one to save it — you still confirm it in the story editor before it can publish."
+      : "Your sections could not load, and there is nothing to file this under without one. Try again in a moment.",
+    createElement(
+      "select",
+      {
+        className: "astra-input",
+        value,
+        "aria-label": "Section",
+        disabled: sections.length === 0,
+        onChange: (e: { target: { value: string } }) => set({ section: e.target.value }),
+      },
+      createElement("option", { key: "none", value: "" }, SECTION_REQUIRED),
+      ...sections.map((s) => createElement("option", { key: s.key, value: s.key }, s.name)),
+    ),
+    "section",
+  );
+}
 
 export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
   const s = p.state;
@@ -382,6 +433,35 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
           field("Links", "optional", textarea(s.links, "https://… one per line (web pages, PDFs, YouTube)", (v) => set({ links: v }), 70), "links"),
           field("Source text", "optional", textarea(s.sourceText, "Paste long material here", (v) => set({ sourceText: v }), 90), "text"),
           field("Assignment", "", textarea(s.assignment, "What's the story? Angle, what to find out, what to ignore", (v) => set({ assignment: v }), 80), "assignment"),
+          /*
+            Unit BW3: the scope the draft may look in, which the old composer's
+            "Research & section" disclosure drew (`DraftScopePicker`,
+            `desk.index.tsx:1314`) and which `writeStoryInput` carries
+            (`request-input.ts:879`; the server reads absent as "public",
+            `desk.ts:1588`). The drawn dialog did not draw it, so this row is
+            added rather than the press going out without one -- an editor who
+            attached their own documents and asked for nothing else would have
+            had real searches run. Options and words come from
+            `NEW_STORY_SCOPES`, so this and the desk's picker cannot drift.
+          */
+          field(
+            "Research scope",
+            NEW_STORY_SCOPES.find((c) => c.value === s.researchScope)?.note ?? "",
+            createElement(
+              "select",
+              {
+                className: "astra-input",
+                value: s.researchScope,
+                "aria-label": "Research scope",
+                onChange: (e: { target: { value: string } }) =>
+                  set({ researchScope: e.target.value === "supplied" ? "supplied" : "public" }),
+              },
+              ...NEW_STORY_SCOPES.map((c) =>
+                createElement("option", { key: c.value, value: c.value }, c.label),
+              ),
+            ),
+            "scope",
+          ),
         ]),
         modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
       ),
@@ -395,6 +475,7 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
           field("Headline", "", line(s.headline, "Your headline", (v) => set({ headline: v })), "headline"),
           field("Summary", "", textarea(s.summary, "One or two sentences", (v) => set({ summary: v }), 60), "summary"),
           field("Story", "", textarea(s.story, "Write here…", (v) => set({ story: v }), 180), "story"),
+          sectionRow(p.sections ?? [], s.section, set),
           field("Sources", "optional", textarea(s.sources, "Links to the records you used, one per line", (v) => set({ sources: v }), 60), "sources"),
         ]),
       ),
@@ -408,6 +489,7 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
           field("Original link", "", line(s.originalLink, "Where it was first published", (v) => set({ originalLink: v })), "link"),
           field("Credit line", "", line(s.creditLine, "e.g. Reprinted with permission from…", (v) => set({ creditLine: v })), "credit"),
           field("Story text", "", textarea(s.pastedStory, "Paste the full story", (v) => set({ pastedStory: v }), 180), "paste"),
+          sectionRow(p.sections ?? [], s.section, set),
         ]),
         choiceSet(
           "What should the AI do?",
@@ -419,6 +501,26 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
         s.pasteMode === "nothing"
           ? null
           : modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
+        /*
+          Unit BW3: bulk import has to stay reachable from the editor's path.
+
+          `/desk/import` is its own screen and the one door the redesign's
+          handoff names as "keep reachable" (docs/design/handoff-2026-09-26/
+          README.md:224). The old composer offered it in its own footer
+          (`src/routes/desk.index.tsx:1377`), and the drawn dialog offered
+          nothing at all: measured on the running desk, no `<a>` in any of the
+          three tabs. A plain anchor, not a router `Link`, for the reason this
+          file is a `.ts` the suite renders with `renderToStaticMarkup` --
+          `Link` needs a router in context and there is none here; every other
+          dialog link to another screen is a plain anchor too
+          (`LegalRemovalDialog.tsx:442`). The wording names the act, not the
+          screen ("many", because one story has its own tab above it).
+        */
+        createElement(
+          "a",
+          { className: "inline-link", href: "/desk/import" },
+          "Import many finished stories →",
+        ),
       ),
     );
   }

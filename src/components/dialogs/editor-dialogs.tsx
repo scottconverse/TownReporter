@@ -39,10 +39,12 @@
  * was not shown.
  */
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { openDarkInvestigation } from "@/lib/news/dark";
 import {
   addSource,
@@ -70,6 +72,7 @@ import {
 import { uploadStoryDocument } from "@/lib/news/story-document-api";
 import { DOCUMENT_COUNT_LIMIT, DOCUMENT_FILE_LIMIT } from "@/lib/news/story-document-text";
 import type { SourceRow } from "@/lib/news/types";
+import { useEditorSections } from "@/lib/use-sections";
 import { sourceIdentity } from "@/lib/news/url-guard";
 import {
   AddLeadBody,
@@ -298,7 +301,18 @@ type WriteStoryStepIn = {
   modelChoice?: string;
   modelEffort?: string | null;
 };
-type FileLeadStepIn = { headline: string; why: string; topic: string; url?: string };
+type FileLeadStepIn = {
+  headline: string;
+  why: string;
+  topic: string;
+  url?: string;
+  /** Unit BW3: the pages the pasted story cites (see `newStoryRequest`). */
+  urls?: string[];
+  disclosureKey?: "outside-ai" | "person" | "other";
+  disclosureOther?: string;
+  /** Unit BW3: the body is an editor's paste (`draft-evidence.ts:36`). */
+  importedText?: boolean;
+};
 type SaveDraftStepIn = {
   headline: string;
   dek: string;
@@ -324,7 +338,36 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<NewStoryState>(newStoryInitial, open, press.clear);
   const [documents, setDocuments] = React.useState<string[]>([]);
-  const models = React.useMemo(() => modelRowFor("story"), []);
+  /*
+    Unit BW3: the row carries the editor's own saved connections as well.
+
+    `modelRowFor` reads the static registry, and a custom connection lives in
+    the database, so the same merge `ModelPicker` does for this surface is done
+    here (`model-picker.tsx:273-315`): the built-ins, then one row per saved
+    connection, keyed `custom:<id>` -- the id the server resolves
+    (`model-choice.ts` `isCustomModelChoice`). Without this the dialog could not
+    pin a newsroom's own connection for a story at all.
+  */
+  const connections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+  });
+  /*
+    Unit BW3: tabs (b) and (c) save the editor's own text, and `saveDraft`
+    writes `topic` -- which the database refuses unless it names a section of
+    this newsroom (`sections.server.ts:38`). Tabs (b) and (c) had no control for
+    it at all, so the row is fed by the desk's own sections query, the same one
+    the write box and the import screen draw (`use-sections.ts:3`).
+  */
+  const sectionQuery = useEditorSections();
+  const models = React.useMemo(
+    () => [
+      ...modelRowFor("story"),
+      ...(connections.data ?? []).map((c) => ({ value: `custom:${c.id}`, label: c.name })),
+    ],
+    [connections.data],
+  );
 
   React.useEffect(() => {
     if (open) setDocuments([]);
@@ -442,7 +485,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
       footNote={foot}
       primaryLabel={state.tab === "ai" ? "Start drafting" : state.tab === "self" ? "Save draft" : "Save as draft"}
       onPrimary={start("primary")}
-      primaryDisabled={press.busy || newStoryProblem(state) !== null}
+      primaryDisabled={press.busy || newStoryProblem(state, documents.length) !== null}
       altLabel={state.tab === "self" ? "Save & check against evidence" : undefined}
       onAlt={state.tab === "self" ? start("alt") : undefined}
       altDisabled={press.busy}
@@ -450,9 +493,10 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
       <NewStoryBody
         state={state}
         set={set}
-        problem={press.problem ?? newStoryProblem(state)}
+        problem={press.problem ?? newStoryProblem(state, documents.length)}
         note={press.note}
         models={models}
+        sections={sectionQuery.sections}
         onFiles={onFiles}
         Choice={Choice}
       />

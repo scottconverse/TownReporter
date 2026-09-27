@@ -19,6 +19,10 @@
 import { modelChoiceLabel, modelChoicesFor } from "../../lib/news/model-choice.ts";
 import { ADD_TO_MODES, DARK_LIMITS, FIND_SOURCE_SCOPES, hopsForLimit } from "../../lib/news/editor-dialog-logic.ts";
 import { HOLD_CHOICES } from "../../lib/news/kill-reasons.ts";
+import { SECTION_REQUIRED } from "../../lib/news/import-review.ts";
+import { PASTE_ONE_DISCLOSURE, bodyFromPaste } from "../../lib/news/paste-one-story.ts";
+import { extractLinks } from "../../lib/news/import-stories.ts";
+import { LIMITS } from "../../lib/news/request-input.ts";
 
 /* ------------------------------------------------------------ model rows -- */
 
@@ -49,11 +53,20 @@ export function automaticLabel(surface: "story" | "scan" | "opinion" | "dark"): 
  * own resolution already falls through to `model_assignments` and the surface
  * default, and sending "auto" explicitly would skip the editor's assignments
  * for this job -- the one thing the brief's resolution order puts second.
+ *
+ * Unit BW3: a saved custom connection (`custom:<uuid>`) is a real pick the
+ * server resolves (`model-choice.ts` `isCustomModelChoice`), and it is NOT in
+ * `modelRowFor` -- the registry this file reads is static and the connections
+ * live in the database. It arrives in the row through the shell, which merges
+ * what `getCustomAiConnectionsFn` answered (the same merge `model-picker.tsx`
+ * does), so dropping it here would be the editor picking their own connection
+ * and the press quietly spending a built-in model instead. Anything else the
+ * row cannot carry is still dropped.
  */
 export function modelPick(surface: "story" | "scan" | "opinion" | "dark", value: string, effort: string | null): ModelPick {
   if (!value || value === "auto") return {};
   const rows = modelRowFor(surface);
-  if (!rows.some((r) => r.value === value)) return {};
+  if (!rows.some((r) => r.value === value) && !/^custom:/.test(value)) return {};
   return { modelChoice: value, modelEffort: effort };
 }
 
@@ -81,11 +94,61 @@ export type NewStoryState = {
   originalLink: string;
   creditLine: string;
   pastedStory: string;
+  /**
+   * Tabs (b) and (c): the section the editor's own text is filed under.
+   *
+   * Unit BW3, measured, not guessed: a draft cannot be written without one.
+   * `saveDraftForEditor` writes `topic` on every save (`draft-edit.server.ts:48`
+   * update, `:61` insert) and the `drafts` trigger fires on `insert or update of
+   * topic` (`sections.server.ts:47`), where `resolve_story_section` raises
+   * "Section not found in this newsroom: " for any key that is not a row of
+   * `newsroom_sections` -- including the empty string (`sections.server.ts:38`).
+   * Both tabs planned `topic: ""`, so both tabs' save was a 500. The rule is the
+   * old one-story paste panel's, in its own words: the section is asked for
+   * before the story is filed, and the placeholder is a question, not an answer
+   * (`desk.index.tsx:366-371`, `paste-one-story.server.test.ts:139-154`).
+   */
+  section: string;
   /** Tab (c)'s "What should the AI do?". */
   pasteMode: "nothing" | "clean" | "check";
+  /**
+   * Tab (a): how far the drafter may look.
+   *
+   * Unit BW3: the old composer's "Research & section" disclosure offered this
+   * (`DraftScopePicker`, `desk.index.tsx:1314`) and it is part of the request --
+   * `writeStoryInput.researchScope` (`request-input.ts:879`), where the server
+   * reads an absent value as "public" (`desk.ts:1588`). A press that could not
+   * say "supplied" would run public research -- real searches and link
+   * following (`report.ts:1337/1347`) -- for an editor who attached their own
+   * documents and did not ask for any.
+   */
+  researchScope: "public" | "supplied";
   model: string;
   effort: string | null;
 };
+
+/**
+ * The two scopes tab (a) offers, in `DraftScopePicker`'s own words and values.
+ *
+ * The desk's picker and this dialog must agree on the vocabulary: the value is
+ * what `writeStoryFromInput` receives and what the desk's own control writes.
+ */
+export const NEW_STORY_SCOPES: readonly {
+  value: "public" | "supplied";
+  label: string;
+  note: string;
+}[] = [
+  {
+    value: "public",
+    label: "Research public sources",
+    note: "Follows supplied links and searches for relevant public evidence.",
+  },
+  {
+    value: "supplied",
+    label: "Use only supplied material",
+    note: "Reads your text and the documents you attached. No discovery or external searches.",
+  },
+];
 
 export const NEW_STORY_TABS: readonly { key: NewStoryTab; label: string }[] = [
   { key: "ai", label: "AI drafts from material" },
@@ -106,9 +169,20 @@ export const PASTE_MODES = [
  * the design draws no other line that could serve. What the press then DOES is
  * in `newStoryRequest` below.
  */
-export function newStoryProblem(state: NewStoryState): Problem {
+export function newStoryProblem(state: NewStoryState, documentCount = 0): Problem {
   if (state.tab === "ai") {
-    if (!state.sourceText.trim() && !state.links.trim()) return "Paste the material or point at it. The AI needs something to read.";
+    /*
+      Unit BW3: attached documents count as material.
+
+      This is the old composer's rule, in its own words -- `desk.index.tsx:
+      1236-1240` shuts the press only when the text is short AND there is no
+      document (`(storyInput.length < 8 && !storyDocuments.length)`). The drawn
+      tab's drop zone accepts files and the request carries them as
+      `documentIds`, so a press with a document attached and nothing typed is
+      the case an editor who uploaded a packet actually performs; before this
+      the button stayed disabled and the walk could not press it at all.
+    */
+    if (!state.sourceText.trim() && !state.links.trim() && documentCount === 0) return "Paste the material or point at it. The AI needs something to read.";
     if (state.assignment.trim().length < 8) return "Say what the story is. That is what the AI works from.";
     return null;
   }
@@ -116,12 +190,19 @@ export function newStoryProblem(state: NewStoryState): Problem {
     if (state.headline.trim().length < 8) return "Headline needs a full sentence.";
     if (state.summary.trim().length < 8) return "Say why this is news.";
     if (state.story.trim().length < 40) return "The story needs some text.";
+    // The section is not a nicety here either: the save below writes `topic`,
+    // and the database refuses a draft with no section (see `section` above).
+    if (!state.section.trim()) return SECTION_REQUIRED;
     return null;
   }
   if (state.pastedStory.trim().length < 40) return "Paste the story text.";
   if (state.pasteMode !== "nothing" && state.originalLink.trim() && !/^https?:\/\//i.test(state.originalLink.trim())) {
     return "The original link has to start with http:// or https://.";
   }
+  // Same rule, same words as the review screen's own card check
+  // (`cardProblems`, `import-review.ts:283`): asked before the story is filed,
+  // because after the press there is nothing to file it under.
+  if (!state.section.trim()) return SECTION_REQUIRED;
   return null;
 }
 
@@ -158,6 +239,24 @@ export function pastedHeadline(text: string): string {
   if (first.length >= 8) return first.slice(0, 180);
   const sentence = (text.trim().match(/^[\s\S]*?[.!?](?=\s|$)/)?.[0] ?? text).trim();
   return sentence.slice(0, 180);
+}
+
+/**
+ * The pasted story's text: the paste with the headline line taken off the top
+ * when the headline IS that line.
+ *
+ * Step G of the paste walk (`paste-one-story.ts:87`, the rule the import screen
+ * files its one card under): every story pasted this way used to open in the
+ * editor with its own headline repeated as the body's first line. Only the case
+ * where `pastedHeadline` returned the first line gets the line removed -- when
+ * the first line was too short to be a headline the headline is a sentence the
+ * desk derived, and taking that line off would drop a paragraph of the story
+ * the editor pasted.
+ */
+export function pastedBody(text: string): string {
+  const headline = pastedHeadline(text);
+  const first = (text.trim().split(/\r?\n/).find((l) => l.trim()) ?? "").trim().slice(0, 180);
+  return first && first === headline ? bodyFromPaste(text) : text;
 }
 
 /**
@@ -209,6 +308,10 @@ export function newStoryRequest(
               .filter(Boolean)
               .join("\n\n"),
             ...modelPick("story", state.model, state.effort),
+            // Tab (a)'s scope row, sent the way the old composer sent it --
+            // `researchScope` is optional on the wire, so this is the same call
+            // the desk made before, with the editor's own answer in it.
+            researchScope: state.researchScope,
             /*
               The tab's drop zone, handed to the drafter as documents it reads.
               Without this the zone would accept a file, the plan would drop it,
@@ -227,16 +330,15 @@ export function newStoryRequest(
     const headline = state.headline.trim();
     const summary = state.summary.trim();
     const url = firstSourceUrl(state.sources);
+    // The editor's own section, on both writes: `fileLead`'s own rule would
+    // otherwise file the lead under its "council" default and this save would
+    // then move the draft off it (`topic` is written on every save,
+    // `draft-edit.server.ts:48`), so the two rows would disagree.
+    const topic = state.section.trim().slice(0, 40);
     return {
       steps: [
-        { call: "fileLead", input: { headline, why: summary, topic: "", ...(url ? { url } : {}) } },
-        /*
-          `topic` goes as "" because `draftEditInput` requires the key and
-          `fileLead`'s own rule is `(data.topic || "council")` -- the section the
-          desk files an untopiced story under. `leadId` is not here: it is the
-          first step's answer, and the shell fills it in (`fillStepId`).
-        */
-        { call: "saveDraft", input: { headline, dek: summary, body: state.story, topic: "" } },
+        { call: "fileLead", input: { headline, why: summary, topic, ...(url ? { url } : {}) } },
+        { call: "saveDraft", input: { headline, dek: summary, body: state.story, topic } },
         ...(press === "alt" ? [{ call: "checkEvidence" as const }] : []),
       ],
       done:
@@ -248,14 +350,50 @@ export function newStoryRequest(
 
   const headline = pastedHeadline(state.pastedStory);
   const link = state.originalLink.trim();
+  const topic = state.section.trim().slice(0, 40);
+  /*
+    Unit BW3: every page the pasted story cites, not only its original link.
+
+    The reader sees the DRAFT's `source_urls` (`publishLead`, `desk.ts:3659`),
+    and this tab's save writes none of them, so a story pasted with its links in
+    the body published with an empty Sources section under a paper that
+    promises "Sources shown" -- the same defect the hand-filed lead had
+    (`desk.ts:486-493`). The links are the paste's own markdown links, the same
+    set `pasteOneStoryCard` keeps (`paste-one-story.ts:171`), capped and
+    length-checked against the wire's own limits so one over-long link cannot
+    turn the whole save into a parse error.
+  */
+  const cited = extractLinks(state.pastedStory)
+    .map((l) => l.url)
+    .filter((u) => u.length <= LIMITS.url)
+    .slice(0, LIMITS.importLinks);
   const steps: NewStoryStep[] = [
     {
       call: "fileLead",
       input: {
         headline,
         why: link ? `Pasted in full from ${link}` : "Pasted in full from a story written elsewhere.",
-        topic: "",
+        topic,
         ...(link && /^https?:\/\//i.test(link) ? { url: link } : {}),
+        ...(cited.length ? { urls: cited } : {}),
+        /*
+          Who wrote it. The old one-story paste panel asked this question and
+          defaulted to "A person" (`desk.index.tsx:348`, `paste-one-story.ts:49`),
+          and the answer is what the reader sees under the story
+          (`ai-disclosure.tsx:33`). The drawn tab draws no such control -- see
+          the BW3 report -- so it sends the same default the panel sent.
+        */
+        disclosureKey: PASTE_ONE_DISCLOSURE,
+        /*
+          And it is an editor's paste, not model prose. The desk's evidence
+          gate turns on that one flag (`draft-evidence.ts:36`): unmarked, a
+          story pasted here and then corrected could not be published at all
+          ("The story changed after its evidence was gathered"), because the
+          gate would ask the editor to compare their own words against claims
+          nothing extracted. `fileLead` writes it onto `research_json`, the same
+          mark the import path writes (`import-stories.server.ts:432`).
+        */
+        importedText: true,
       },
     },
     {
@@ -263,8 +401,8 @@ export function newStoryRequest(
       input: {
         headline,
         dek: state.creditLine.trim() || link,
-        body: state.pastedStory,
-        topic: "",
+        body: pastedBody(state.pastedStory),
+        topic,
       },
     },
   ];
@@ -667,6 +805,19 @@ export function newStoryInitial(): NewStoryState {
     creditLine: "",
     pastedStory: "",
     pasteMode: "nothing",
+    /*
+      Unchosen, and drawn as a question (`SECTION_REQUIRED`), so a story is
+      never filed under a section nobody picked -- the old one-story paste
+      panel's rule, kept here because the save cannot happen without one.
+    */
+    section: "",
+    /*
+      Public, because that is what the desk does when nobody says otherwise:
+      `writeStoryInput.researchScope` is optional and `desk.ts:1588` reads an
+      absent one as "public". The dialog opens on the desk's own default rather
+      than on a narrower scope the editor never chose.
+    */
+    researchScope: "public",
     model: "auto",
     effort: null,
   };
