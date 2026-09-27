@@ -2612,7 +2612,7 @@
   The desk's dialog *contents*, from the redesign's Desk Dialogs.dc.html
   (docs/design/handoff-2026-09-26). Phase 0 built the shell -- .astra-modal,
   the head, the foot, .astra-choice-card -- and this is everything that goes
-  *inside* one: tabs, labelled fields, the drop zone, the source preview table,
+  *inside* one: tabs, labeled fields, the drop zone, the source preview table,
   the More list, the model row, and the note preview.
 
   The reference draws all of it with inline styles. Those are converted here,
