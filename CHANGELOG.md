@@ -1,6 +1,15 @@
 # Changelog
 
-Current software version: **0.6.77**. Publication state is recorded by GitHub.
+Current software version: **0.6.78**. Publication state is recorded by GitHub.
+
+## 0.6.78 — 2026-09-27
+
+- **The front page, designer round 1** (units BX, BX2, BX3). "This week" now reads dates a document itself bears (`document_date`) in the forms an agenda, notice or filing actually carries, and, when a record's own date field is empty, reads the one date a story's own headline and dek name in their own words — never the story body. A date range or list ("Oct. 1-2", "Oct. 1 and 8") is read whole instead of cutting mid-expression, and a line that is only a place or a person is refused in favor of the story's own headline. "Around the region" and the Opinion block each hide, rather than leave a blank half, when there is nothing to show. No story anywhere on the reader's side prints the catch-all section tag "misc". When "This week" is absent the lead story's text now spans the full row instead of stopping at half width with blank space beside it.
+- **Small corrections on the front page.** A grid cell's "1 read" now reads "1 min read"; the Opinion block's headline no longer repeats the word "OPINION"; **Latest stories** shows six stories plus an "All stories →" link instead of "Load more stories"; each latest-stories row's date prints once, in the meta line; a configured county now prints as configured instead of the word "County"; three promotional strips are removed from the front page (their content is still reachable from the top bar and footer); **"Useful around town"**'s two links move into the footer. At 390px the top bar fits in two rows instead of three, and the geography pills scroll sideways in one row instead of wrapping.
+- **A CI fixture stopped reading the machine's own pointer.** `scripts/ci-stage-start.ps1` scenario 4 read the real machine's `%LOCALAPPDATA%\TownReporter\staged-copy.json` record instead of a fixture value, so it passed or failed depending on whether this machine had ever staged a copy. It now points `LOCALAPPDATA` at its own temp folder for the run and restores the real value afterward.
+- **No migration.** `git diff origin/deepseek/redesign-mount-a..HEAD --stat -- migrations` shows no output — nothing under `migrations/` changed since the 0.6.77 merge base.
+
+The packaged release note names `v0.6.78` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.77 — 2026-09-27
 
