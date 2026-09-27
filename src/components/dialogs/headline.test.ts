@@ -57,7 +57,7 @@ describe("Headline dialog", () => {
     assert.match(html, /<b>Council votes 4-3 to delay the budget<\/b><span class="astra-choice-note">Suggested</);
     assert.match(html, /<b>Budget delayed until November<\/b><span class="astra-choice-note">Suggested</);
     // The drawing's per-row angles describe the design's own mock rows.
-    // `headlineSuggest` answers bare strings, so no row may claim an angle --
+    // `suggestHeadlines` answers bare strings, so no row may claim an angle --
     // including the first, which is not special.
     assert.ok(!html.includes("leads with the conflict"), "no suggestion claims an angle");
     assert.ok(!html.includes("reader-first"));

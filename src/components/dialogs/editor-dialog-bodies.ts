@@ -713,7 +713,7 @@ export function HeadlineBody(p: HeadlineBodyProps): ReactNode {
     Every suggestion carries the same note. The drawing gives each row its own
     ("leads with the conflict", "shorter, reader-first", "leads with the service
     info") because its three rows are the design's own mock text and the
-    designer could read them; `headlineSuggest` returns bare strings with no
+    designer could read them; `suggestHeadlines` returns bare strings with no
     angle attached, so a per-row angle here would be the dialog inventing a
     claim about text it has not analysed. The first row used to hardcode
     "leads with the conflict" -- a false note whenever the model's first
