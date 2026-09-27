@@ -126,9 +126,27 @@ function ScanPage() {
 
   return (
     <DeskShell title="Scan" kicker="Reporter pass">
-      {/* P0-1/P0-2: three scan scopes. Functional controls only, reusing the
-          existing section/label patterns; no visual redesign. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+      <div className="astra-split">
+        <div className="astra-col">
+          {/*
+            The run panel, drawn with the same yellow border the Sources screen
+            puts on its Daily scan panel: this is the one control on this page
+            that spends money, and it is what the page is for.
+
+            The scope picker, the section picker and the custom-source pick or
+            saved pack are all the controls that were here before; what changed
+            is that they now sit inside the panel that owns them rather than
+            loose on the page. "Scan scope" keeps its label text and its options
+            verbatim, because the walks select on them.
+          */}
+          <div className="astra-panel hot">
+            <h2 className="astra-panel-h lg">Run a scan</h2>
+            <p className="astra-note">
+              One pass over the watch list: fetch every accepted source, then one AI read for
+              leads and proposed sources. It runs only when you click — this is the expensive
+              button, not a loop.
+            </p>
+            <div className="astra-toolbar">
         <label>Scan scope{" "}
           <select
             className="ml-2 border border-rule bg-transparent p-2"
@@ -164,7 +182,7 @@ function ScanPage() {
         ) : null}
       </div>
       {scope === "section" ? (
-        <p className="mb-4 text-sm">
+        <p className="astra-note">
           Uses this section accepted assigned sources and saved reporting brief.{" "}
           <Link to="/desk/ops" className="underline">Configure sections in Paper setup</Link>.
         </p>
@@ -189,10 +207,6 @@ function ScanPage() {
           onSaved={() => { void qc.invalidateQueries({ queryKey: ["scan-packs"] }); }}
         />
       ) : null}
-      <p className="lede">
-        One pass over the watch list: fetch every accepted source, then one AI read for leads and
-        proposed sources. It runs only when you click — this is the expensive button, not a loop.
-      </p>
       <div className="scan-bar">
         <ModelPicker scope="scan" value={modelChoice} onChange={(choice) => { setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={scanning} compact />
         <InkButton disabled={scanning} onClick={() => scan.mutate()}>
@@ -203,6 +217,10 @@ function ScanPage() {
           {last ? ` · last ran ${formatDateTime(last.started_at)}` : ""}
         </p>
       </div>
+            <p className="astra-note">
+              Scans file leads only. They never draft or publish.
+            </p>
+          </div>
       {scanning ? (
         <Busy label="Fetching accepted sources, then one pass for leads. Stay on this page." />
       ) : null}
@@ -223,7 +241,7 @@ function ScanPage() {
           ) : null}
           {last.summary ? <p className="wire-sum">{last.summary}</p> : null}
           <Link to="/desk/queue">
-            <InkButton small>Open the queue</InkButton>
+            <InkButton>Open the queue</InkButton>
           </Link>
         </div>
       ) : null}
@@ -241,7 +259,7 @@ function ScanPage() {
             <p className="wire-warn">{failedSourcesLine(parseFailedSources(last.failed_sources))}</p>
           ) : null}
           <p className="wire-sum">{scanZeroWhy(last)}</p>
-          <InkButton tone="ghost" small disabled={scanning} onClick={() => scan.mutate()}>
+          <InkButton tone="ghost" disabled={scanning} onClick={() => scan.mutate()}>
             Run again
           </InkButton>
         </div>
@@ -283,11 +301,22 @@ function ScanPage() {
         </Notice>
       ) : null}
 
-      <SecHead
-        title="Previous scans"
-        count={totalScans}
-        sub={`Showing latest ${history.length} of ${totalScans}`}
-      />
+      <MeetingsActivity />
+        </div>
+        {/*
+          Previous scans, in the right-hand column the design draws. The
+          `SecHead` stays: it carries the section's own count, which the
+          scan-desk walk reads as ".sechead .sec-count" and asserts is 0 on a
+          fresh desk. Paging stays here rather than becoming a link to itself
+          -- /desk/scan is where the full history lives.
+        */}
+        <aside className="astra-col">
+          <div className="astra-panel">
+        <SecHead
+          title="Previous scans"
+          count={totalScans}
+          sub={`Showing latest ${history.length} of ${totalScans}`}
+        />
       {scans.isError && history.length === 0 ? (
         <ScreenError
           message={scans.error instanceof Error ? scans.error.message : "Could not load previous scans."}
@@ -302,6 +331,28 @@ function ScanPage() {
         <div className="scan-hist">
           {history.map((s) => (
             <div key={s.id} className="scan-row">
+              {/*
+                The design puts a result chip on every previous scan, so the
+                one fact an editor is scanning for -- did it work -- is readable
+                without reading the line under it. The variants are the shared
+                chip family, not new colours: a failure keeps the danger
+                border, a stall the amber one, and a clean pass the plain rule.
+              */}
+              <div className="astra-row-acts">
+                {s.error ? (
+                  <span className="astra-chip fail">Failed</span>
+                ) : s.stalled ? (
+                  <span className="astra-chip warn">Stalled</span>
+                ) : !s.finished_at ? (
+                  <span className="astra-chip run">Running</span>
+                ) : s.leads_created > 0 ? (
+                  <span className="astra-chip found">
+                    Filed {s.leads_created} lead{s.leads_created === 1 ? "" : "s"}
+                  </span>
+                ) : (
+                  <span className="astra-chip">No leads</span>
+                )}
+              </div>
               <p className="meta">
                 {formatDateTime(s.started_at)} ·{" "}
                 {s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}
@@ -331,7 +382,6 @@ function ScanPage() {
             <div className="mt-4">
               <InkButton
                 tone="ghost"
-                small
                 disabled={scans.isFetching}
                 onClick={() => setPages((n) => n + 1)}
               >
@@ -341,7 +391,9 @@ function ScanPage() {
           ) : null}
         </div>
       )}
-      <MeetingsActivity />
+          </div>
+        </aside>
+      </div>
     </DeskShell>
   );
 }
@@ -407,7 +459,15 @@ function CustomSourcePicker(props: {
   const [renameTo, setRenameTo] = useState("");
 
   return (
-    <div className="mb-4 border border-rule p-3 text-sm">
+    <div className="astra-panel plain">
+      {/*
+        A nested panel: the exact set a Custom scan runs on. Everything under it
+        -- the saved pack, the search, the kind and tier filters, select all,
+        clear all, save as pack, and the checkbox list -- is unchanged; only the
+        wrapper and the button sizes moved, because ".btn.small" is a 36px
+        control and every button on this desk has to clear 44px.
+      */}
+      <h3 className="astra-panel-h">Custom sources</h3>
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <label>
           Saved pack{" "}
@@ -436,7 +496,7 @@ function CustomSourcePicker(props: {
           <>
             <button
               type="button"
-              className="btn small"
+              className="btn"
               disabled={disabled || rename.isPending}
               onClick={() => {
                 const p = packs.find((x) => x.id === packId);
@@ -447,7 +507,7 @@ function CustomSourcePicker(props: {
             </button>
             <button
               type="button"
-              className="btn small danger"
+              className="btn danger"
               disabled={disabled || del.isPending}
               onClick={() => { if (packId) del.mutate(packId); }}
             >
@@ -466,7 +526,7 @@ function CustomSourcePicker(props: {
           />
           <button
             type="button"
-            className="btn small"
+            className="btn"
             disabled={rename.isPending || !renameTo.trim()}
             onClick={() => {
               if (packId) rename.mutate({ packId, name: renameTo }, { onSuccess: () => setRenameTo("") });
@@ -506,18 +566,18 @@ function CustomSourcePicker(props: {
       <div className="mb-2 flex flex-wrap gap-2">
         <button
           type="button"
-          className="btn small"
+          className="btn"
           disabled={disabled}
           onClick={() => setPickedIds([...new Set([...pickedIds, ...visible.map((s) => s.id)])])}
         >
           Select all shown
         </button>
-        <button type="button" className="btn small" disabled={disabled || !pickedIds.length} onClick={() => setPickedIds([])}>
+        <button type="button" className="btn" disabled={disabled || !pickedIds.length} onClick={() => setPickedIds([])}>
           Clear all
         </button>
         <button
           type="button"
-          className="btn small"
+          className="btn"
           disabled={disabled || mutation.isPending || (!pickedIds.length && !packName.trim())}
           onClick={() => {
             const name = packName.trim() || window.prompt("Name this pack")?.trim() || "";

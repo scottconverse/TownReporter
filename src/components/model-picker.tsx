@@ -469,7 +469,13 @@ export function ModelPicker(props: Props) {
         </span>
       ) : null}
       <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
-        <summary className="cursor-pointer underline underline-offset-2 focus-visible:outline-2">
+        {/*
+          `py-3` because this disclosure is a control, and the desk's controls
+          are 44px tall: at the line's own height it measured 20px on every
+          screen that renders a picker. Padding rather than `flex` so the
+          disclosure marker stays where a reader expects it.
+        */}
+        <summary className="cursor-pointer py-3 underline underline-offset-2 focus-visible:outline-2">
           Set up a writing model
         </summary>
         <div className="mt-2 space-y-2">

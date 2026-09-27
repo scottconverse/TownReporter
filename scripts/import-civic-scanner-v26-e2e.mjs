@@ -474,12 +474,24 @@ async function theReviewPictures() {
  * "Send it to Dark Desk" opens the Dark Desk's own start box holding the
  * hypothesis and the check the report named, and a later visit does not
  * re-open it.
+ *
+ * Redesign p2c moved the box: the rail's inline form became the drawn "Start a
+ * Dark Desk file" dialog (`DarkFileDialog`), and the seed now has to open that
+ * dialog as well as fill it -- a hand-over that only filled a shut dialog would
+ * leave the editor on the desk with nothing to see. So this step reads the
+ * hand-over inside the dialog and waits for the dialog itself first, which is
+ * the product behavior it exists to prove. The field names moved with the box:
+ * the old aria-label "Tip, URL, or subject to investigate" is the drawn field
+ * "The tip or starting point", the one `darkFileFromSeed` puts the whole
+ * hand-over in. Every assertion below is the one it was.
  */
 async function theHypothesisReachesTheDarkDesk() {
   const card = cardFor(HYPOTHESIS);
   await card.getByRole("link", { name: "Send it to Dark Desk" }).click();
   await page.waitForURL(/\/desk\/dark/, { timeout: 30_000 });
-  const box = page.getByLabel("Tip, URL, or subject to investigate");
+  const dialog = page.getByRole("dialog", { name: "Start a Dark Desk file", exact: true });
+  await dialog.waitFor({ timeout: 45_000 });
+  const box = dialog.getByLabel("The tip or starting point");
   await box.waitFor({ timeout: 45_000 });
   const seeded = await box.inputValue();
   must(
@@ -500,28 +512,26 @@ async function theHypothesisReachesTheDarkDesk() {
   );
   step("a hypothesis opens the Dark Desk's box: its label, its text and the report's own next check");
 
-  facts.push(
-    await screenshot(
-      "dark-desk-seeded-1280-light.png",
-      1280,
-      900,
-      '[aria-label="Tip, URL, or subject to investigate"]',
-    ),
-  );
+  // Framed on the drawn dialog, which is what holds the seeded box now; the
+  // old anchor was the inline box's own aria-label.
+  facts.push(await screenshot("dark-desk-seeded-1280-light.png", 1280, 900, ".astra-modal"));
   await page.setViewportSize({ width: 375, height: 720 });
   facts.push(await fitsAt375("the Dark Desk with a seeded box"));
-  facts.push(
-    await screenshot(
-      "dark-desk-seeded-375-light.png",
-      375,
-      720,
-      '[aria-label="Tip, URL, or subject to investigate"]',
-    ),
-  );
+  facts.push(await screenshot("dark-desk-seeded-375-light.png", 375, 720, ".astra-modal"));
   await page.setViewportSize({ width: 1280, height: 900 });
 
+  /*
+    The seed is taken once. On the second visit there is nothing to hand over,
+    so the desk opens with no box on screen -- the box lives in the dialog now,
+    and it is opened by the page's own "+ Start a file". The step presses that
+    and reads the box there: the assertion is unchanged ("a later visit opens
+    its own empty box"), read through the control the design draws.
+  */
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
-  const after = page.getByLabel("Tip, URL, or subject to investigate");
+  await page.getByRole("button", { name: "+ Start a file", exact: true }).click();
+  const after = page
+    .getByRole("dialog", { name: "Start a Dark Desk file", exact: true })
+    .getByLabel("The tip or starting point");
   await after.waitFor({ timeout: 45_000 });
   must(
     (await after.inputValue()) === "",

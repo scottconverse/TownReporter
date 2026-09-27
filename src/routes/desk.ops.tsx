@@ -80,9 +80,9 @@ const WORD: Record<HealthState, string> = {
 
 function StateDot({ state }: { state: HealthState }) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[state]}`} aria-hidden />
-      <span className="text-sm tracking-[0.14em] text-muted uppercase">{WORD[state]}</span>
+    <span className="chip">
+      <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[state]}`} aria-hidden />{" "}
+      {WORD[state]}
     </span>
   );
 }
@@ -101,20 +101,57 @@ const SETTINGS_PANELS = [
   "Recently deleted",
   "Editors & access",
 ] as const;
+/**
+ * Where each Server panel sits on the page.
+ *
+ * The drawing puts every panel on the page at once (Desk Screens.dc.html,
+ * `isServer`), so "which panel am I looking at" is no longer state this screen
+ * holds -- arriving with `#named-outlets` from another screen scrolls there
+ * instead of selecting anything. These are the anchors the strip and the
+ * hashes use; the writing-models and custom-ai-connections ids the panels
+ * already carry in their own markup stay where they are.
+ */
+const PANEL_ANCHORS = {
+  "Writing models": "ops-panel-writing-models",
+  "Custom connections": "ops-panel-custom-connections",
+  "Daily scan": "ops-panel-daily-scan",
+  "Meeting capture": "ops-panel-meeting-capture",
+  YouTube: "ops-panel-youtube",
+  "Routine notices": "ops-panel-routine-notices",
+  "Paper identity": "ops-panel-paper-identity",
+  Sections: "ops-panel-sections",
+  "Named outlets": "ops-panel-named-outlets",
+  "Server health": "ops-panel-server-health",
+  "Recently deleted": "ops-panel-recently-deleted",
+  "Editors & access": "ops-panel-editors-access",
+} as const satisfies Record<(typeof SETTINGS_PANELS)[number], string>;
+
+function jumpToPanel(anchor: string) {
+  document.getElementById(anchor)?.scrollIntoView({ block: "start" });
+}
+
 function OpsPage() {
-  const [panel, setPanel] = useState<string>("Writing models");
   const { signin } = Route.useSearch();
   const hash = useRouterState({ select: (s) => s.location.hash });
   useEffect(() => {
-    if (signin) setPanel("Writing models");
-    else if (hash === "custom-ai-connections") setPanel("Custom connections");
-    // "#youtube-key" is the key box; checked before the substring tests below
-    // so a link to it cannot be swallowed by a wider match.
-    else if (hash === "youtube-key") setPanel("YouTube");
-    // "#named-outlets" opens the outlet list; a link that wants Sections still
-    // says "section", which the outlets hash does not contain.
-    else if (hash.includes("outlet")) setPanel("Named outlets");
-    else if (hash.includes("section")) setPanel("Sections");
+    const anchor = signin
+      ? PANEL_ANCHORS["Writing models"]
+      : hash === "custom-ai-connections"
+        ? PANEL_ANCHORS["Custom connections"]
+        : // "#youtube-key" is the key box; checked before the substring tests
+          // below so a link to it cannot be swallowed by a wider match.
+          hash === "youtube-key"
+          ? PANEL_ANCHORS.YouTube
+          : // "#named-outlets" opens the outlet list; a link that wants
+            // Sections still says "section", which the outlets hash does not
+            // contain.
+            hash.includes("outlet")
+            ? PANEL_ANCHORS["Named outlets"]
+            : hash.includes("section")
+              ? PANEL_ANCHORS.Sections
+              : null;
+    // After paint, so the panel is laid out before we scroll to it.
+    if (anchor) requestAnimationFrame(() => jumpToPanel(anchor));
   }, [signin, hash]);
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState<OpsActionId | null>(null);
@@ -166,200 +203,263 @@ function OpsPage() {
   const state = checks.length ? overallState(checks) : "unknown";
 
   return (
-    <DeskShell
-      title="Server & newsroom"
-      kicker="Editor desk"
-      lede={
-        <>
-          Everything this machine is doing to keep the paper online, and the few buttons worth
-          having. Checks show what responds from this machine; they do not prove that a reader in
-          another town can reach your paper.
-        </>
-      }
-    >
+    <DeskShell title="Server & newsroom" kicker="Models, health and setup" hideTitle>
+      {/*
+        The drawn header: kicker, title, the page's own action, rule -- the
+        drawing puts "Give up the desk" on the title line, as the one thing on
+        this screen that leaves the page. It is not a second control: it takes
+        the editor to the section that holds it, which is the same button the
+        panel has always drawn. The drawing's own style for it is `quiet` (one
+        rule, not two): Desk Screens.dc.html, `btns.server`.
+
+        The title stays "Server & newsroom", not the drawing's "Server":
+        desk-flows-e2e.mjs waits on a level-1 heading named exactly that, and
+        the drawing's short name is a *nav* label -- the rail in
+        desk-chrome.tsx (lane 3), which still reads "Server", so renaming the
+        h1 alone would make the rail and the page disagree.
+
+        The lede moves out of the shell and into the body: `hideTitle` is what
+        buys the action slot, and it drops the shell's sentence with the title,
+        so the same prose is rendered here instead of being lost.
+      */}
+      <div className="astra-head">
+        <div>
+          <p className="kick">Models, health and setup</p>
+          <h1 className="h1">Server &amp; newsroom</h1>
+        </div>
+        <div className="astra-head-acts">
+          <button
+            type="button"
+            className="btn quiet"
+            onClick={() => {
+              jumpToPanel(PANEL_ANCHORS["Editors & access"]);
+            }}
+          >
+            Give up the desk
+          </button>
+        </div>
+      </div>
+      <p className="lede">
+        Everything this machine is doing to keep the paper online, and the few buttons worth having.
+        Checks show what responds from this machine; they do not prove that a reader in another town
+        can reach your paper.
+      </p>
       <div className="astra-settings">
         <nav className="astra-settings-nav" aria-label="Server settings">
           {SETTINGS_PANELS.map((name) => (
-            <button
-              key={name}
-              aria-current={panel === name ? "page" : undefined}
-              onClick={() => setPanel(name)}
-            >
+            <button key={name} onClick={() => jumpToPanel(PANEL_ANCHORS[name])}>
               {name}
             </button>
           ))}
         </nav>
         <div className="astra-settings-body">
-          <div hidden={panel !== "Writing models"}>
-            <WritingModels />
+          <div className="astra-ops-col">
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Writing models"]}
+            >
+              <WritingModels />
+            </div>
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Recently deleted"]}
+            >
+              <RecentlyDeleted />
+            </div>
+            <div className="astra-ops-card astra-panel astra-jump" id={PANEL_ANCHORS["Daily scan"]}>
+              <DailyScanSettings />
+            </div>
+            <div className="astra-ops-card astra-panel astra-jump" id={PANEL_ANCHORS.YouTube}>
+              <YoutubeKeySettings />
+            </div>
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Named outlets"]}
+            >
+              <NamedOutletsSetup />
+            </div>
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Custom connections"]}
+            >
+              <CustomAiSettings />
+            </div>
+            {/*
+              The rest of column one is chosen by height, not by the drawing's
+              row pairs. These are the full panels, not the drawing's compact
+              summaries, and a card cannot be split across the two columns --
+              with the drawing's pairing the left column ended several thousand
+              pixels above the right one and the page finished with a blank
+              half-screen. Paper setup and Routine notices are the two that
+              bring the columns out within a couple of hundred pixels.
+            */}
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Paper identity"]}
+            >
+              <PaperSetup />
+            </div>
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Routine notices"]}
+            >
+              <RoutineNoticePermissions />
+            </div>
           </div>
-          <div hidden={panel !== "Custom connections"}>
-            <CustomAiSettings />
-          </div>
-          <div hidden={panel !== "Daily scan"}>
-            <DailyScanSettings />
-          </div>
-          <div hidden={panel !== "Meeting capture"}>
-            <MeetingCaptureSettings />
-          </div>
-          <div hidden={panel !== "YouTube"}>
-            <YoutubeKeySettings />
-          </div>
-          <div hidden={panel !== "Routine notices"}>
-            <RoutineNoticePermissions />
-          </div>
-          <div hidden={panel !== "Paper identity"}>
-            <PaperSetup />
-          </div>
-          <div hidden={panel !== "Sections"}>
-            <SectionsSetup />
-          </div>
-          <div hidden={panel !== "Named outlets"}>
-            <NamedOutletsSetup />
-          </div>
-          <div hidden={panel !== "Server health"}>
-            <section className="mt-12">
-              <SecHead
-                title="Health"
-                aside={
-                  <span className="flex items-center gap-4">
-                    <StateDot state={state} />
-                    <InkButton
-                      tone="quiet"
-                      small
-                      onClick={() => void health.refetch()}
-                      disabled={health.isFetching}
-                    >
-                      {health.isFetching ? "Checking…" : "Check now"}
-                    </InkButton>
-                  </span>
-                }
-                sub={
-                  health.data
-                    ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}`
-                    : undefined
-                }
-              />
+          <div className="astra-ops-col">
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Server health"]}
+            >
+              <section className="mt-12">
+                <SecHead
+                  title="Health"
+                  aside={
+                    <span className="flex items-center gap-4">
+                      <StateDot state={state} />
+                      <InkButton
+                        tone="quiet"
+                        onClick={() => void health.refetch()}
+                        disabled={health.isFetching}
+                      >
+                        {health.isFetching ? "Checking…" : "Check now"}
+                      </InkButton>
+                    </span>
+                  }
+                  sub={
+                    health.data
+                      ? `${health.data.host} · read ${formatAgo(health.data.takenAt)}`
+                      : undefined
+                  }
+                />
 
-              {health.isPending ? (
-                <ListSkeleton />
-              ) : health.isError ? (
-                <p className="mt-4 text-rust">Could not read the server. {String(health.error)}</p>
-              ) : (
-                <ul className="mt-4 divide-y divide-rule border-y border-rule">
-                  {checks.map((c) => (
-                    <li key={c.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-3">
-                      <span className="w-40 shrink-0 text-sm tracking-[0.14em] text-muted uppercase">
-                        {c.label}
-                      </span>
-                      <span className="min-w-0 flex-1 break-words">{c.value}</span>
-                      <StateDot state={c.state} />
-                      {c.note ? <p className="w-full text-sm text-ink-2">{c.note}</p> : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+                {health.isPending ? (
+                  <ListSkeleton />
+                ) : health.isError ? (
+                  <p className="mt-4 text-rust">Could not read the server. {String(health.error)}</p>
+                ) : (
+                  <ul className="mt-4 divide-y divide-rule border-y border-rule">
+                    {checks.map((c) => (
+                      <li key={c.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-3">
+                        <span className="w-40 shrink-0 text-sm tracking-[0.14em] text-muted uppercase">
+                          {c.label}
+                        </span>
+                        <span className="min-w-0 flex-1 break-words">{c.value}</span>
+                        <StateDot state={c.state} />
+                        {c.note ? <p className="w-full text-sm text-ink-2">{c.note}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
 
-            <section className="mt-12">
-              <SecHead
-                title="Actions"
-                sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
-              />
-              <ul className="mt-4 space-y-3">
-                {OPS_ACTIONS.map((rawAction) => {
-                  const a = installAction(rawAction, Boolean(health.data?.managedInstall));
-                  const unavailable = health.data?.unavailableActions?.[a.id];
-                  const isConfirming = confirming === a.id;
-                  const isRunning = running === a.id;
-                  return (
-                    <li key={a.id} className="border border-rule p-4">
-                      <div className="flex flex-wrap items-baseline justify-between gap-3">
-                        <h3 className="font-display text-lg font-semibold">
-                          {a.label}
-                          {a.interrupts ? (
-                            <span className="ml-2 text-sm tracking-[0.14em] text-rust uppercase">
-                              interrupts
+              <section className="mt-12">
+                <SecHead
+                  title="Actions"
+                  sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
+                />
+                <ul className="mt-4 space-y-3">
+                  {OPS_ACTIONS.map((rawAction) => {
+                    const a = installAction(rawAction, Boolean(health.data?.managedInstall));
+                    const unavailable = health.data?.unavailableActions?.[a.id];
+                    const isConfirming = confirming === a.id;
+                    const isRunning = running === a.id;
+                    return (
+                      <li key={a.id} className="astra-panel">
+                        <div className="flex flex-wrap items-baseline justify-between gap-3">
+                          <h3 className="font-display text-lg font-semibold">
+                            {a.label}
+                            {a.interrupts ? (
+                              <span className="ml-2 text-sm tracking-[0.14em] text-rust uppercase">
+                                interrupts
+                              </span>
+                            ) : null}
+                          </h3>
+                          {isConfirming ? (
+                            <span className="flex gap-2">
+                              <InkButton
+                                tone="danger"
+                                disabled={isRunning || Boolean(unavailable) || !health.data}
+                                onClick={() => act.mutate(a.id)}
+                              >
+                                {isRunning ? "Running…" : "Yes, do it"}
+                              </InkButton>
+                              <InkButton tone="quiet" onClick={() => setConfirming(null)}>
+                                Cancel
+                              </InkButton>
                             </span>
-                          ) : null}
-                        </h3>
-                        {isConfirming ? (
-                          <span className="flex gap-2">
+                          ) : (
                             <InkButton
-                              tone="danger"
-                              small
-                              disabled={isRunning || Boolean(unavailable) || !health.data}
-                              onClick={() => act.mutate(a.id)}
+                              tone={a.interrupts ? "ghost" : "solid"}
+                              disabled={Boolean(running) || Boolean(unavailable) || !health.data}
+                              onClick={() => (a.interrupts ? setConfirming(a.id) : act.mutate(a.id))}
                             >
-                              {isRunning ? "Running…" : "Yes, do it"}
+                              {isRunning ? "Running…" : "Run"}
                             </InkButton>
-                            <InkButton tone="quiet" small onClick={() => setConfirming(null)}>
-                              Cancel
-                            </InkButton>
-                          </span>
-                        ) : (
-                          <InkButton
-                            tone={a.interrupts ? "ghost" : "solid"}
-                            small
-                            disabled={Boolean(running) || Boolean(unavailable) || !health.data}
-                            onClick={() => (a.interrupts ? setConfirming(a.id) : act.mutate(a.id))}
-                          >
-                            {isRunning ? "Running…" : "Run"}
-                          </InkButton>
-                        )}
-                      </div>
-                      <p className="mt-2 max-w-2xl text-ink-2">
-                        {health.data ? a.detail : "Checking installation ownership…"}
-                      </p>
-                      {unavailable ? (
-                        <p className="mt-2 text-sm">Unavailable: {unavailable}</p>
-                      ) : null}
-                      <p className="mt-1 text-sm text-muted">
-                        Takes about {a.expectSeconds} seconds.
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-              {message ? (
-                <pre className="mt-4 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
-                  {message}
-                </pre>
-              ) : null}
-            </section>
+                          )}
+                        </div>
+                        <p className="mt-2 max-w-2xl text-ink-2">
+                          {health.data ? a.detail : "Checking installation ownership…"}
+                        </p>
+                        {unavailable ? (
+                          <p className="mt-2 text-sm">Unavailable: {unavailable}</p>
+                        ) : null}
+                        <p className="mt-1 text-sm text-muted">
+                          Takes about {a.expectSeconds} seconds.
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {message ? (
+                  <pre className="mt-4 max-h-72 overflow-auto border border-rule bg-paper-2 p-3 text-sm whitespace-pre-wrap">
+                    {message}
+                  </pre>
+                ) : null}
+              </section>
 
-            <section className="mt-12">
-              <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
-              <div className="mt-4 space-y-6">
-                {(health.data?.logs ?? []).map((l) => (
-                  <div key={l.path}>
-                    <h3 className="text-sm tracking-[0.14em] text-muted uppercase">{l.name}</h3>
-                    {l.error ? (
-                      <p className="mt-1 text-sm text-muted">{l.error}</p>
-                    ) : l.lines.length === 0 ? (
-                      <p className="mt-1 text-sm text-muted">Nothing logged.</p>
-                    ) : (
-                      <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-sm whitespace-pre-wrap text-[var(--fg)]">
-                        {l.lines.join("\n")}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
+              <section className="mt-12">
+                <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
+                <div className="mt-4 space-y-6">
+                  {(health.data?.logs ?? []).map((l) => (
+                    <div key={l.path}>
+                      <h3 className="astra-label">{l.name}</h3>
+                      {l.error ? (
+                        <p className="mt-1 text-sm text-muted">{l.error}</p>
+                      ) : l.lines.length === 0 ? (
+                        <p className="mt-1 text-sm text-muted">Nothing logged.</p>
+                      ) : (
+                        <pre className="mt-1 max-h-56 overflow-auto border border-[var(--line)] bg-[var(--bg2)] p-3 text-sm whitespace-pre-wrap text-[var(--fg)]">
+                          {l.lines.join("\n")}
+                        </pre>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
 
-            <p className="mt-12 max-w-2xl text-sm text-muted">
-              {health.data?.managedInstall
-                ? "This page runs inside the paper. If the server is down, use Start TownReporter.cmd and the logs in your private data folder. This local installation has no automatic Windows watchdog or startup task."
-                : "This page runs inside the paper, so it cannot report when the server is down. Use your installation's external controls. Automatic recovery is available only when its operator has separately configured and verified it."}
-            </p>
-          </div>
-          <div hidden={panel !== "Recently deleted"}>
-            <RecentlyDeleted />
-          </div>
-          <div hidden={panel !== "Editors & access"}>
-            <InviteAnEditor />
-            <GiveUpTheDesk />
+              <p className="mt-12 max-w-2xl text-sm text-muted">
+                {health.data?.managedInstall
+                  ? "This page runs inside the paper. If the server is down, use Start TownReporter.cmd and the logs in your private data folder. This local installation has no automatic Windows watchdog or startup task."
+                  : "This page runs inside the paper, so it cannot report when the server is down. Use your installation's external controls. Automatic recovery is available only when its operator has separately configured and verified it."}
+              </p>
+            </div>
+            <div className="astra-ops-card astra-panel astra-jump" id={PANEL_ANCHORS.Sections}>
+              <SectionsSetup />
+            </div>
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Meeting capture"]}
+            >
+              <MeetingCaptureSettings />
+            </div>
+            <div
+              className="astra-ops-card astra-panel astra-jump"
+              id={PANEL_ANCHORS["Editors & access"]}
+            >
+              <InviteAnEditor />
+              <GiveUpTheDesk />
+            </div>
           </div>
         </div>
       </div>
@@ -460,7 +560,6 @@ function WritingModels() {
         aside={
           <InkButton
             tone="quiet"
-            small
             onClick={() => void statuses.refetch()}
             disabled={statuses.isFetching}
           >
@@ -526,7 +625,7 @@ function WritingModels() {
             row.availableOnThisMachine,
         )
         .map((row) => (
-          <div key={row.providerId} className="mt-3 border border-rule p-4">
+          <div key={row.providerId} className="astra-panel">
             <h3 className="font-display text-lg font-semibold">{row.label}</h3>
             <p className="mt-1 text-sm text-ink-2">
               {row.detail}. No sign-in to manage here: this one is configured by the operator.
@@ -568,10 +667,10 @@ function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => void }) 
   const def = catalog.data?.defaultModel;
   if (servers.length === 0) return null;
   return (
-    <div className="mt-3 border border-rule p-4">
+    <div className="astra-panel">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-display text-lg font-semibold">Local servers found on this machine</h3>
-        <InkButton tone="quiet" small onClick={() => refresh.mutate()} disabled={refresh.isPending}>
+        <InkButton tone="quiet" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
           {refresh.isPending ? "Checking…" : "Refresh"}
         </InkButton>
       </div>
@@ -707,7 +806,6 @@ function RecentlyDeleted() {
                 <span className="row-acts static">
                   <InkButton
                     tone="quiet"
-                    small
                     disabled={restore.isPending}
                     onClick={() => restore.mutate(r.id)}
                   >
@@ -717,18 +815,17 @@ function RecentlyDeleted() {
                     <>
                       <InkButton
                         tone="ghost"
-                        small
                         disabled={purge.isPending}
                         onClick={() => purge.mutate(r.id)}
                       >
                         Yes, for good
                       </InkButton>
-                      <InkButton tone="quiet" small onClick={() => setConfirmPurge(null)}>
+                      <InkButton tone="quiet" onClick={() => setConfirmPurge(null)}>
                         Keep
                       </InkButton>
                     </>
                   ) : (
-                    <InkButton tone="quiet" small onClick={() => setConfirmPurge(r.id)}>
+                    <InkButton tone="quiet" onClick={() => setConfirmPurge(r.id)}>
                       Delete for good
                     </InkButton>
                   )}
@@ -860,7 +957,6 @@ function DarkDeskCounty() {
       <div className="mt-2 flex items-center gap-3">
         <InkButton
           tone="quiet"
-          small
           disabled={save.isPending || county.isPending}
           onClick={() => save.mutate({ county: value })}
         >
@@ -968,20 +1064,19 @@ function InviteAnEditor() {
               placeholder="colleague@example.org"
             />
           </label>
-          <InkButton small disabled={mint.isPending || !email.trim()} onClick={() => mint.mutate()}>
+          <InkButton disabled={mint.isPending || !email.trim()} onClick={() => mint.mutate()}>
             {mint.isPending ? "Minting…" : "Make the invite link"}
           </InkButton>
         </div>
         {err ? <p className="text-sm text-rust">{err}</p> : null}
         {link ? (
           <div className="border border-rule bg-paper-2 p-3">
-            <p className="text-sm tracking-[0.14em] text-muted uppercase">
+            <p className="astra-label">
               Shown once — copy it now
             </p>
             <p className="mt-1 text-sm break-all">{link}</p>
             <InkButton
               tone="quiet"
-              small
               onClick={() => {
                 void copyToClipboard(link).then((ok) => ok && setCopiedLink(true));
               }}
@@ -990,13 +1085,12 @@ function InviteAnEditor() {
             </InkButton>
             {message ? (
               <div className="mt-3 border-t border-rule pt-3">
-                <p className="text-sm tracking-[0.14em] text-muted uppercase">
+                <p className="astra-label">
                   Ready-to-send message
                 </p>
                 <p className="mt-1 whitespace-pre-wrap text-sm">{message}</p>
                 <InkButton
                   tone="quiet"
-                  small
                   onClick={() => {
                     void copyToClipboard(message).then((ok) => ok && setCopiedMessage(true));
                   }}
@@ -1020,7 +1114,7 @@ function GiveUpTheDesk() {
   const { user, isPending } = useCurrentUserState();
   const email = user?.primaryEmail ?? "";
   return (
-    <section className="mt-16 border-t border-rule pt-8">
+    <section className="mt-16 border-t border-rule pt-8 astra-jump" id="astra-give-up-the-desk">
       <SecHead
         title="Give up the desk"
         sub="Hands the newsroom to the next person who signs in: the archive, Dark Desk files, notes and Server controls. There is no way back. You will be asked to type your email address to confirm."
