@@ -374,13 +374,20 @@ async function fileQueueLead(headline, why) {
     Filing a lead by hand moved with the redesign: the page-level
     `details.file-form` accordion on the Queue is gone and the same four fields
     live in the redesign's one "File a lead" dialog (desk.queue.tsx:884-912).
-    The walk opens it the way an editor does -- Today's "+ Add a lead", which
-    the Queue answers by opening that dialog (desk.queue.tsx:472-484) -- and
-    the dialog's own "File lead" primary submits the form, so `required` and
-    `minLength` still run. Every assertion below is unchanged.
+    The walk reaches it through the queue's own `#file-lead` hash, and the
+    dialog's "File lead" primary submits the form, so `required` and `minLength`
+    still run. Every assertion below is unchanged.
+
+    It used to reach that dialog one step earlier, by clicking Today's
+    "+ Add a lead", which was a link to this same hash. Unit BN mounted the
+    drawn `AddLeadDialog` on that button (desk.index.tsx:941), so the press no
+    longer navigates and no longer lands on this form -- the drawn dialog has
+    no Headline/Why-now fields and does not open the saved story page. The
+    destination is unchanged, so the walk names it directly; the hash is the
+    door ten CI fixtures build their setup through and unit BN kept it opening
+    this exact form (desk.queue.tsx:1054-1061).
   */
-  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("link", { name: /^\+ Add a lead/ }).click();
+  await page.goto(`${base}/desk/queue#file-lead`, { waitUntil: "domcontentloaded" });
   const form = page.getByRole("dialog", { name: "File a lead" });
   await form.waitFor({ timeout: 45_000 });
   await form.getByLabel("Headline").fill(headline);
