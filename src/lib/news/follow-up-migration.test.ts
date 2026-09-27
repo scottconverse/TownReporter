@@ -65,7 +65,7 @@ async function ensureColumns(): Promise<string[]> {
   return rows.map((row) => row.column_name);
 }
 
-/** Does this database accept the value? The check constraints' real behaviour. */
+/** Does this database accept the value? The check constraints' real behavior. */
 async function accepts(
   sql: SqlLike,
   column: "status" | "agent_kind" | "last_state",

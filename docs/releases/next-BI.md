@@ -25,7 +25,7 @@ desk works it on a schedule and reports what it finds:
   posted. PrimeGov portals today, which is what the daily scan's meeting capture reads too.
 
 The card says which of the four filters it belongs to — **Active**, **Found something**, **Could
-not check**, **Stopped** — carries a 4px left border in the state's colour, the method line ("Re-check
+not check**, **Stopped** — carries a 4px left border in the state's color, the method line ("Re-check
 pages · every 2 hours"), the question in the editor's own words, the latest result, the story it is
 linked to, and its next check.
 
@@ -63,7 +63,7 @@ constraint because a new build shipped. Mirrored by `ensureFollowUpsSchema()` fo
 
 Runs are **in-app jobs**, not a new service: a `follow-up` job in `desk_jobs` (the kind phase 5
 already declared), dispatched by the same `realWork`, reporting progress through phase 3's
-`reportProgress` and honouring the editor's Stop at every step. Scheduling is the daily scan's
+`reportProgress` and honoring the editor's Stop at every step. Scheduling is the daily scan's
 pattern — `tickFollowUps`, driven by `startUnattendedScheduler()` and the dev Vite plugin. **No
 Windows task, no second service, no operator setup.**
 

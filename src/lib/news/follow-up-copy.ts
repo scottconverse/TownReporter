@@ -101,7 +101,7 @@ export function methodLine(agentKind: FollowUpAgentKind, schedule: string): stri
 /**
  * When this schedule next comes due, from `from` (default: now).
  *
- * Null means "never": an unrecognised schedule has no next run rather than
+ * Null means "never": an unrecognized schedule has no next run rather than
  * running on every tick. That is the safer failure -- an agent that stops is
  * visible on the screen as a follow-up whose schedule line says something the
  * build does not know, where a run-every-5-minutes agent would look busy while
@@ -262,7 +262,7 @@ export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter):
 }
 
 /**
- * The state the card is DRAWN in -- one of the seven the design gives a colour,
+ * The state the card is DRAWN in -- one of the seven the design gives a color,
  * a chip and a set of buttons to.
  *
  * Terminal status wins over `last_state`, because a stopped agent whose last

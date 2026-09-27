@@ -137,7 +137,7 @@ export async function tickFollowUpsFor(
   // `modelChoiceSource: "auto"` and not "editor": the model comes from the
   // follow-up's own saved pick and the phase 5 resolution order, not from a
   // decision made at this moment. The worker re-resolves it from the row (the
-  // row is authoritative, so an edit between enqueue and run is honoured) and
+  // row is authoritative, so an edit between enqueue and run is honored) and
   // this column is what the queue card shows meanwhile.
   await enqueueJob({
     userId: row.user_id,

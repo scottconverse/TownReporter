@@ -181,7 +181,7 @@ export function jobProgressView(row: DeskJob, leadId: number, draftId: number | 
  * `resultHref` is null and `canRetry` is false for the same reason: a run has
  * no page of its own to open, and its request lives in the follow-up row rather
  * than in the job -- "Run now" on the card is the retry, through the path that
- * claims the row and honours the fences.
+ * claims the row and honors the fences.
  *
  * The model label is passed in rather than computed, because the follow-up's
  * model comes from the phase 5 `follow-up` job key, which the caller resolves
