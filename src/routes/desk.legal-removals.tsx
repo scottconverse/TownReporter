@@ -2,9 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskShell, InkButton } from "@/components/desk-chrome";
+import { LegalRemovalFlow } from "@/components/dialogs/LegalRemovalDialog";
 import {
-  legalPreview,
-  legalConfirm,
   legalCases,
   legalCase,
   legalRetainedCopy,
@@ -12,7 +11,6 @@ import {
 } from "@/lib/news/legal-removal";
 import { listPublishedDesk } from "@/lib/news/desk";
 import { myDesk } from "@/lib/news/claim";
-import type { LegalSelection, LegalPreview } from "@/lib/news/legal-removal-types";
 
 export const Route = createFileRoute("/desk/legal-removals")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -22,6 +20,14 @@ export const Route = createFileRoute("/desk/legal-removals")({
   component: LegalRemovalsPage,
 });
 const field = "w-full border border-rule bg-paper p-2 text-sm";
+/**
+ * The flow itself -- preview, fingerprint, retain/destroy, REMOVE to confirm, the
+ * danger press -- moved to `@/components/dialogs/LegalRemovalDialog` in unit BH2
+ * (decision 3), so the drawn `dialog-15-legal.png` and this page run one
+ * implementation instead of two that can drift. What stays here is the page: the
+ * owner gate, the `?case=` detail, the case list, and the one thing a dialog
+ * cannot do -- navigate away on success.
+ */
 function LegalRemovalsPage() {
   const search = Route.useSearch();
   const qc = useQueryClient();
@@ -37,61 +43,6 @@ function LegalRemovalsPage() {
     queryFn: () => legalCases(),
     enabled: owner,
   });
-  const [selection, setSelection] = useState<LegalSelection>({
-    articleIds: search.article ? [search.article] : [],
-    draftIds: [],
-    memoryIds: [],
-    auditIds: [],
-    trashIds: [],
-    reviewedLegacy: false,
-    reviewedEvidence: false,
-  });
-  const [preview, setPreview] = useState<LegalPreview | null>(null);
-  const [policy, setPolicy] = useState<"retain" | "destroy">("retain");
-  const [caseRef, setCaseRef] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const currentPreview = preview && JSON.stringify(preview.selection) === JSON.stringify(selection);
-  function change(next: LegalSelection) {
-    setSelection(next);
-    setConfirm("");
-  }
-  async function review() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await legalPreview({ data: selection });
-      if (result.ok) {
-        setPreview(result.value);
-        setSelection(result.value.selection);
-      } else setError(result.error);
-    } catch {
-      setError("Could not load the impact preview. Your selection is preserved.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function remove() {
-    if (!preview) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await legalConfirm({
-        data: { selection, fingerprint: preview.fingerprint, policy, caseRef },
-      });
-      if (result.ok) {
-        await qc.invalidateQueries();
-        window.location.assign(
-          `/desk/legal-removals?case=${encodeURIComponent(result.value.caseId)}`,
-        );
-      } else setError(result.error);
-    } catch {
-      setError("No removal is confirmed. Reload the case list before retrying.");
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
     <DeskShell
       title="Legal removals"
@@ -112,218 +63,24 @@ function LegalRemovalsPage() {
             <CaseDetail key={search.case} caseId={search.case} />
           ) : (
             <section className="legal-removal-flow space-y-4" aria-label="Legal removal preview">
-              <p>
-                This is separate from ordinary 30-day trash. There is no Undo. Retained copies are
-                protected by owner access, <strong>not encryption</strong>. Existing backups,
-                provider records and reader caches cannot be recalled by this application.
-              </p>
-              <fieldset className="border border-rule p-4">
-                <legend>Articles to remove</legend>
-                {articles.isPending ? (
-                  <p>Loading published articles…</p>
-                ) : articles.isError ? (
-                  <p role="alert">Could not load articles. Reload this page.</p>
-                ) : !articles.data?.length ? (
-                  <p>
-                    No published stories to remove.{" "}
-                    <a className="underline" href="/desk/published">
-                      Back to Published
-                    </a>
-                    .
-                  </p>
-                ) : (
-                  articles.data?.map((a) => (
-                    <label className="my-2 flex gap-2" key={a.id}>
-                      <input
-                        type="checkbox"
-                        checked={selection.articleIds.includes(a.id)}
-                        onChange={(e) =>
-                          change({
-                            ...selection,
-                            articleIds: e.target.checked
-                              ? [...selection.articleIds, a.id]
-                              : selection.articleIds.filter((id) => id !== a.id),
-                          })
-                        }
-                      />
-                      <span>{a.headline}</span>
-                    </label>
-                  ))
-                )}
-              </fieldset>
-              <InkButton
-                disabled={busy || !selection.articleIds.length}
-                onClick={() => void review()}
-              >
-                Review connected copies
-              </InkButton>
-              {preview && (
-                <>
-                  <h2 className="font-display text-xl">Impact before removal</h2>
-                  {!currentPreview && (
-                    <p role="status">
-                      Selection changed. Use Review connected copies again to refresh counts before
-                      confirming.
-                    </p>
-                  )}
-                  <ul>
-                    {Object.entries(preview.counts).map(([kind, count]) => (
-                      <li key={kind}>
-                        {kind.replaceAll("_", " ")}: {count}
-                      </li>
-                    ))}
-                  </ul>
-                  {preview.blockers.map((message) => (
-                    <p role="alert" key={message}>
-                      {message}
-                    </p>
-                  ))}
-                  <p>
-                    Historical records do not always carry an article ID. Select only the drafts,
-                    memory entries, audit labels and trash copies that belong to these stories.
-                    Shared source documents remain independent evidence unless explicitly brought
-                    into the removal scope.
-                  </p>
-                  {preview.selectedHistorical.length > 0 && (
-                    <fieldset className="border border-rule p-3">
-                      <legend>Selected historical records — uncheck to remove from scope</legend>
-                      {preview.selectedHistorical.map((c) => (
-                        <label className="my-2 flex gap-2" key={`${c.kind}-${c.id}`}>
-                          <input
-                            type="checkbox"
-                            checked={selection[c.kind].includes(c.id)}
-                            onChange={() =>
-                              change({
-                                ...selection,
-                                [c.kind]: selection[c.kind].filter((id) => id !== c.id),
-                              })
-                            }
-                          />
-                          <span>
-                            {c.kind.replace("Ids", "")} #{c.id}: {c.label}
-                          </span>
-                        </label>
-                      ))}
-                    </fieldset>
-                  )}
-                  <details>
-                    <summary>Review historical candidates ({preview.candidates.length})</summary>
-                    {preview.candidates.map((c) => (
-                      <label className="my-2 flex gap-2 break-words" key={`${c.kind}-${c.id}`}>
-                        <input
-                          type="checkbox"
-                          checked={selection[c.kind].includes(c.id)}
-                          onChange={(e) =>
-                            change({
-                              ...selection,
-                              [c.kind]: e.target.checked
-                                ? [...selection[c.kind], c.id]
-                                : selection[c.kind].filter((id) => id !== c.id),
-                            })
-                          }
-                        />
-                        <span>
-                          {c.kind.replace("Ids", "")} #{c.id}: {c.label}
-                        </span>
-                      </label>
-                    ))}
-                  </details>
-                  {preview.capturedCopies.length > 0 && (
-                    <p role="alert">
-                      Known captured copies require separate local-operator review:{" "}
-                      {preview.capturedCopies.map((c) => `${c.table} #${c.id}`).join(", ")}.
-                      Retained application removal may proceed with review pending. Court
-                      destruction is blocked until these copies are resolved; the review checkbox
-                      does not override this.
-                    </p>
-                  )}
-                  {preview.sharedInvestigationIds.length > 0 && (
-                    <p>
-                      Related investigation files:{" "}
-                      {preview.sharedInvestigationIds.map((id) => `#${id}`).join(", ")}.{" "}
-                      <a className="underline" href="/desk/dark">
-                        Open Dark Desk to review these files
-                      </a>
-                      . Review independently shared evidence before claiming destruction complete.
-                    </p>
-                  )}
-                  <label className="flex gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selection.reviewedLegacy}
-                      onChange={(e) => change({ ...selection, reviewedLegacy: e.target.checked })}
-                    />
-                    I reviewed the historical candidates and selected the copies in scope.
-                    Unselected records are independent work.
-                  </label>
-                  <label className="flex gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selection.reviewedEvidence}
-                      onChange={(e) => change({ ...selection, reviewedEvidence: e.target.checked })}
-                    />
-                    I reviewed shared evidence; anything retained is independently held and outside
-                    this removal scope.
-                  </label>
-                  <label className="block">
-                    Retention policy
-                    <select
-                      className={field}
-                      value={policy}
-                      onChange={(e) => {
-                        setPolicy(e.target.value as "retain" | "destroy");
-                        setConfirm("");
-                      }}
-                    >
-                      <option value="retain">Keep an owner-only copy for 12 calendar months</option>
-                      <option value="destroy">
-                        Explicit court destruction: keep no removed text
-                      </option>
-                    </select>
-                  </label>
-                  <p>
-                    {policy === "retain"
-                      ? "The retained copy expires automatically. Evidence review and external cleanup may remain pending."
-                      : "No removed text will enter the retained-copy table. Resolve the historical and shared-evidence review first. External erasure still needs operator verification."}
-                  </p>
-                  <label className="block">
-                    Case reference (identifier only; no story text)
-                    <input
-                      className={field}
-                      value={caseRef}
-                      onChange={(e) => setCaseRef(e.target.value)}
-                      maxLength={120}
-                    />
-                  </label>
-                  <label className="block">
-                    Type REMOVE to confirm
-                    <input
-                      className={field}
-                      value={confirm}
-                      onChange={(e) => setConfirm(e.target.value)}
-                      autoComplete="off"
-                    />
-                  </label>
-                  <InkButton
-                    tone="danger"
-                    disabled={
-                      busy ||
-                      !currentPreview ||
-                      confirm !== "REMOVE" ||
-                      !caseRef ||
-                      preview.blockers.length > 0 ||
-                      (policy === "destroy" && preview.reviewPending)
-                    }
-                    onClick={() => void remove()}
-                  >
-                    Remove selected stories and connected copies
-                  </InkButton>
-                  <a className="ml-4 underline" href="/desk/published">
-                    Cancel and return to Published
-                  </a>
-                </>
-              )}
-              {error && <p role="alert">{error}</p>}
+              {/*
+                The same component the dialog renders. Without `onPressChange` it
+                draws the danger press and the return link itself, exactly as this
+                page always has; the only new thing here is where the press goes
+                when it wins.
+              */}
+              <LegalRemovalFlow
+                articles={articles.data ?? null}
+                articlesPending={articles.isPending}
+                articlesError={articles.isError}
+                initialArticleIds={search.article ? [search.article] : []}
+                onConfirmed={async (caseId) => {
+                  await qc.invalidateQueries();
+                  window.location.assign(
+                    `/desk/legal-removals?case=${encodeURIComponent(caseId)}`,
+                  );
+                }}
+              />
             </section>
           )}
           <section className="mt-8">

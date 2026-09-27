@@ -85,6 +85,14 @@ import {
   DraftReconcileControl,
   type EvidenceCheckReview,
 } from "@/components/draft-reconcile-control";
+/*
+  Unit BH2 decisions 5 and 6: the Kill, Redraft and Compare-versions dialogs.
+  All three are mounted at the foot of this page and opened from a press that
+  already existed or from the one new Kill press in the context row.
+*/
+import { KillDialog } from "@/components/dialogs/KillDialog";
+import { RedraftDialog } from "@/components/dialogs/RedraftDialog";
+import { CompareVersionsDialog } from "@/components/dialogs/CompareVersionsDialog";
 import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
 import { jobProgressView } from "@/lib/news/job-progress";
 import {
@@ -254,6 +262,15 @@ function StoryPage() {
   const [checkedDraftStale, setCheckedDraftStale] = useState(false);
   const [evidenceReview, setEvidenceReview] = useState<EvidenceCheckReview | null>(null);
   const [evidenceReviewOpen, setEvidenceReviewOpen] = useState(false);
+  /*
+    Unit BH2 decision 5 and 6, the three dialogs. Each is opened by a press and
+    owns nothing else: the record, the two calls and the saved text all stay
+    where they were, which is what makes these dialogs a new surface rather than
+    a new behaviour.
+  */
+  const [killOpen, setKillOpen] = useState(false);
+  const [redraftOpen, setRedraftOpen] = useState(false);
+  const [compareVersionsOpen, setCompareVersionsOpen] = useState(false);
   /*
     "Preview viewed" is a checklist item in the drawing, not a gate: opening the
     preview is a thing this session has done or has not, and the publish button
@@ -440,9 +457,16 @@ function StoryPage() {
   }, [waitingSince]);
 
   const draft = useMutation({
-    mutationFn: async () => {
+    /*
+      Unit BH2 decision 6: the direction is a variable now, because the Redraft
+      dialog types a new one and the two calls below must save it before the
+      draft starts. `undefined` means "the direction already on the page", which
+      is what every other press on this screen passes, so the order and the
+      arguments of `saveReportingNotes` then `draftLead` are unchanged.
+    */
+    mutationFn: async (direction: string | undefined) => {
       await saveReportingNotes({
-        data: { leadId: id, scratch, storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
+        data: { leadId: id, scratch, storyDirection: direction ?? storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope } });
     },
@@ -1061,6 +1085,33 @@ function StoryPage() {
     return { ok: true };
   }, [id, afterLeadChange]);
 
+  /*
+    Unit BH2 decision 6. The two decisions of the comparison, named once. The
+    inline evidence-check panel and the Compare versions dialog are handed the
+    same two functions, so "Keep checked version" cannot mean one thing in the
+    panel and another in the dialog.
+  */
+  const keepCheckedVersion = useCallback(() => {
+    setEvidenceReviewOpen(false);
+    setReconcileNote("The checked version remains the current saved draft.");
+    setReconcileNoteError(false);
+    setReconcileNoteWarning(false);
+  }, []);
+
+  const restoreOriginalVersion = useCallback(() => {
+    if (!evidenceReview) return;
+    setHeadline(evidenceReview.original.headline);
+    setDek(evidenceReview.original.dek);
+    setBody(stripReporterNotebook(evidenceReview.original.body));
+    setTopic(evidenceReview.original.topic);
+    setEvidenceReviewOpen(false);
+    setReconcileNote(
+      "Previous version loaded as unsaved text. Click Save edits to make it the current saved draft.",
+    );
+    setReconcileNoteError(false);
+    setReconcileNoteWarning(true);
+  }, [evidenceReview]);
+
   if (isPending) {
     return (
       <DeskShell title="Story" kicker="Workbench">
@@ -1345,6 +1396,19 @@ function StoryPage() {
           Story from lead · {sectionNameNow} · score {score}
         </span>
         <Chip s={data.lead.status} />
+        {/*
+          Unit BH2 decision 5: the Kill press, on the row that already carries
+          this lead's status, because a kill is a change to exactly that. It is
+          not drawn for a lead that is already killed (nothing to do) or one on
+          the paper (legal removal is the route there, and unpublish is on the
+          published page). `quiet-danger` is InkButton's own tone for this: a
+          real action heading toward removal that is not a confirm step.
+        */}
+        {!locked && !onPaper ? (
+          <InkButton tone="quiet-danger" small onClick={() => setKillOpen(true)}>
+            Kill this lead
+          </InkButton>
+        ) : null}
       </div>
       {onPaper ? (
           <p className="note">
@@ -1551,7 +1615,7 @@ function StoryPage() {
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
               draftMeetingEvidence={data.draftMeetingEvidence}
-              onMeetingRedraft={locked || onPaper ? undefined : () => draft.mutate()}
+              onMeetingRedraft={locked || onPaper ? undefined : () => draft.mutate(undefined)}
               meetingRedrafting={draft.isPending || waiting}
               evidenceToken={data.evidenceToken}
               onReverifyMeetingCitations={locked || onPaper || !data.draft ? undefined : (review) => draftMeetingReview.mutate(review)}
@@ -1752,7 +1816,7 @@ function StoryPage() {
           <StoryDocumentPartialNotice
             leadId={id}
             busy={waiting || draft.isPending}
-            onReadRest={() => draft.mutate()}
+            onReadRest={() => draft.mutate(undefined)}
           />
 
           {data.draft || body ? (
@@ -2191,6 +2255,18 @@ function StoryPage() {
               Checks & sources
             </a>
             {/*
+              Unit BH2 decision 6: the drawn `dialog-12-compare.png`, opened by a
+              press of its own. It only exists once an evidence check has left two
+              versions behind -- before that there is nothing to compare, and the
+              inline "Evidence check results" panel in the inspector still holds
+              the same two decisions for anyone who reads it there.
+            */}
+            {evidenceReview ? (
+              <InkButton tone="ghost" onClick={() => setCompareVersionsOpen(true)}>
+                Compare versions
+              </InkButton>
+            ) : null}
+            {/*
               Unit AK item 5: the press that opens the side-by-side view. It used
               to be a link on the Queue that opened the other lead's page, which
               had no comparison on it at all.
@@ -2212,7 +2288,17 @@ function StoryPage() {
                   disabled={waiting || reconcileActive}
                   onClick={() => {
                     if (waiting) return;
-                    draft.mutate();
+                    /*
+                      Unit BH2 decision 6: when there is already a draft, the
+                      drawing puts a dialog in front of the redraft -- "What
+                      should change?", the keep rule, the model row -- and that
+                      dialog's Start does these same two calls. With no draft
+                      there is nothing to redraft and nothing to compare, so
+                      "Draft with AI" still starts on the press, as it always
+                      has.
+                    */
+                    if (data.draft?.body) setRedraftOpen(true);
+                    else draft.mutate(undefined);
                   }}
                 >
                   {jobState === "recovering"
@@ -2267,25 +2353,8 @@ function StoryPage() {
                       setReconcileNoteWarning(false);
                     });
                   }}
-                  onKeepChecked={() => {
-                    setEvidenceReviewOpen(false);
-                    setReconcileNote("The checked version remains the current saved draft.");
-                    setReconcileNoteError(false);
-                    setReconcileNoteWarning(false);
-                  }}
-                  onRestoreOriginal={() => {
-                    if (!evidenceReview) return;
-                    setHeadline(evidenceReview.original.headline);
-                    setDek(evidenceReview.original.dek);
-                    setBody(stripReporterNotebook(evidenceReview.original.body));
-                    setTopic(evidenceReview.original.topic);
-                    setEvidenceReviewOpen(false);
-                    setReconcileNote(
-                      "Previous version loaded as unsaved text. Click Save edits to make it the current saved draft.",
-                    );
-                    setReconcileNoteError(false);
-                    setReconcileNoteWarning(true);
-                  }}
+                  onKeepChecked={keepCheckedVersion}
+                  onRestoreOriginal={restoreOriginalVersion}
                 />
               </>
             ) : null}
@@ -2480,6 +2549,81 @@ function StoryPage() {
           </div>
         </article>
       </dialog>
+      {/*
+        Unit BH2 decisions 5 and 6: the three dialogs. They are mounted here, at
+        the foot of the page, because each one portals itself to the body -- the
+        position in this tree decides nothing about where it appears, and
+        grouping them keeps the page's own markup above unchanged.
+
+        Each is opened from a press that already existed, except Kill, whose
+        press is the one control this unit adds to the page.
+      */}
+      <KillDialog
+        leadId={id}
+        open={killOpen}
+        onOpenChange={setKillOpen}
+        onKilled={afterLeadChange}
+      />
+      <RedraftDialog
+        open={redraftOpen}
+        onOpenChange={setRedraftOpen}
+        direction={storyDirection}
+        modelChoice={modelChoice}
+        /*
+          Handed straight over, `null` and all: the dialog's row is the same
+          `ModelPicker` this page already draws, so it takes the page's state as
+          it is rather than a resolved copy that could disagree with it.
+        */
+        modelEffort={modelEffort}
+        onModelChange={(choice) => {
+          modelChoiceTouched.current = true;
+          setModelChoice(choice);
+          setModelEffort(defaultModelEffort(choice));
+        }}
+        onEffortChange={setModelEffort}
+        busy={waiting || draft.isPending}
+        error={redraftOpen ? draftProblem : undefined}
+        onStart={(next) => {
+          /*
+            The two calls the Redraft press has always made, in the same order:
+            the direction is saved first, then the draft starts. The page's own
+            `storyDirection` is updated too, so the box on the page and any later
+            save carry what was typed here.
+          */
+          setStoryDirection(next);
+          setRedraftOpen(false);
+          draft.mutate(next);
+        }}
+      />
+      {evidenceReview ? (
+        <CompareVersionsDialog
+          open={compareVersionsOpen}
+          onOpenChange={setCompareVersionsOpen}
+          review={evidenceReview}
+          /*
+            The drawing's two kickers carry a time each. Only one of the two
+            times exists on this page -- the saved draft's `updated_at`; the
+            checked version is not stored with one (see
+            `DraftReconcileStatus`). So the left kicker carries the time and the
+            right one says what the version is.
+          */
+          originalLabel={
+            data.draft?.updated_at
+              ? `Your saved version · ${formatShortDate(data.draft.updated_at)}`
+              : "Your saved version"
+          }
+          checkedLabel="After evidence check"
+          busy={waiting || reconcileActive || save.isPending}
+          onKeepChecked={() => {
+            keepCheckedVersion();
+            setCompareVersionsOpen(false);
+          }}
+          onRestoreOriginal={() => {
+            restoreOriginalVersion();
+            setCompareVersionsOpen(false);
+          }}
+        />
+      ) : null}
     </DeskShell>
   );
 }
