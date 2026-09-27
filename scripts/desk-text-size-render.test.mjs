@@ -114,6 +114,23 @@ const dialogStub = inlineModule(`
   }
 `);
 
+/*
+  Redesign BN item 1 put the drawn New-story dialog in the shell header, and it
+  reaches it through the dialogs barrel (desk-chrome.tsx imports
+  `@/components/dialogs`). The header render below never opens it -- it is a
+  controlled dialog, shut until a press -- so the stand-in is one that stays
+  shut, exactly what the real one draws while closed. desk-chrome.tsx cannot be
+  compiled without the specifier resolving, the same reason the phase 0 Dialog
+  is stubbed above.
+*/
+const newStoryStub = inlineModule(`
+  import { createElement } from "react";
+  export function NewStoryDialog({ open }) {
+    if (!open) return null;
+    return createElement("div", { className: "new-story-stub" });
+  }
+`);
+
 const deskCopyStub = inlineModule(`
   /*
     openLeads is what the shell counts Queue from. The render test does not care
@@ -189,6 +206,7 @@ const { DeskShell } = await import(
       "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,
       "@/components/dialog": dialogStub,
+      "@/components/dialogs": newStoryStub,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
