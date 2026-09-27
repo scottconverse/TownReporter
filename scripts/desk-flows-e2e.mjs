@@ -408,8 +408,17 @@ async function main() {
   const bulkRow = page.locator(".lead-row", { hasText: leadHeadline }).first();
   await bulkRow.waitFor({ timeout: 20_000 });
 
-  await page.locator(".queue-bulk-delete").first().waitFor({ timeout: 20_000 });
-  step("the queue exposes bulk delete");
+  /*
+    Unit BF3: the yellow bulk bar is only on screen while rows are selected --
+    with nothing selected it is an empty section and `:empty` in desk-astra.css
+    hides it (the drawing has no band there, now that Select-all is the header
+    row's checkbox). This wait was always "the queue table is drawn", so it
+    names the drawn table's header row instead. The bar itself is still
+    asserted, twice, a few lines down: the "Delete selected (1)" press this
+    walk waits for lives in no other element.
+  */
+  await page.locator(".queue-head").first().waitFor({ timeout: 20_000 });
+  step("the queue table is drawn, column labels and all");
 
   // Selecting must NOT delete. Prove it survives a reload before confirmation.
   await bulkRow.getByLabel(`Select ${leadHeadline} for deletion`).check();

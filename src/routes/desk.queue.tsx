@@ -609,12 +609,14 @@ function QueuePage() {
         >
           {/*
             BF3: the "Select all …" label that sat here is the header row's
-            checkbox now (the drawing has no yellow strip). What is left of the
-            strip is what it always was underneath -- the count, Start N
-            stories, Hold, Kill, Delete selected and Clear -- so it renders
-            only once something is selected, except that the section itself
-            stays mounted whenever the table has rows, because the desk's own
-            walk waits for it.
+            checkbox now (the drawing has no yellow strip where nothing is
+            selected). What is left of the strip is what it always was
+            underneath -- the count, Start N stories, Hold, Kill, Delete
+            selected and Clear -- so it renders only once something is
+            selected. The section itself stays mounted whenever the table has
+            rows, and `:empty` in desk-astra.css keeps the empty amber band
+            off the screen: mounting it costs nothing and the desk's walks
+            still find the bar's presses in the same place after a selection.
           */}
           {selectedDeleteLeads.length > 0 ? (
             <>
