@@ -3,10 +3,11 @@ import { before, beforeEach, describe, it } from "node:test";
 import { getSql } from "../db.ts";
 import { ensureJobsSchema } from "./jobs.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
-import { cleanDraftBatchInput } from "./draft-batch.ts";
+import { cleanDraftBatchInput, visibleDraftBatchItems } from "./draft-batch.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import {
   commitDraftBatchForAuthenticatedEditor,
+  dismissDraftBatchForAuthenticatedEditor,
   ensureDraftBatchSchema,
   parseDraftBatchCompletion,
   readDraftBatchForAuthenticatedEditor,
@@ -66,6 +67,18 @@ async function addLead(
   return row.id;
 }
 
+async function startBatch(leadIds: number[]) {
+  const result = await commitDraftBatchForAuthenticatedEditor(
+    { context, items: leadIds.map((leadId) => ({ leadId })), runtimeSnapshot },
+    { accountRate: false, kick: false },
+  );
+  // `assert.equal` narrows `result.ok` to true, which leaves the refusal
+  // branch typed `never`; this test only ever starts batches it knows are
+  // valid, so the refusal is thrown outright.
+  if (!result.ok) throw new Error("batch refused: " + result.code);
+  return result.batch;
+}
+
 beforeEach(reset);
 
 describe("draft batch validation", () => {
@@ -115,6 +128,45 @@ describe("draft batch validation", () => {
     assert.equal(result.code, "invalid-input");
     assert.doesNotMatch(result.error, /grok/i);
     assert.match(result.error, /Codex, Claude, Local, or saved Custom AI/);
+  });
+});
+
+/*
+  Unit BS. The owner's Queue listed five rows of already-printed stories. What
+  the panel may show is this one rule, so it is tested as a rule: named states
+  drop out, everything else stays.
+*/
+describe("draft batch panel filter", () => {
+  const row = (leadId: number, leadStatus: string | null) => ({ leadId, jobId: leadId * 10, leadStatus });
+
+  it("drops published and killed items and keeps open, drafted and held ones", () => {
+    const kept = visibleDraftBatchItems([
+      row(1, "published"),
+      row(2, "killed"),
+      row(3, "new"),
+      row(4, "drafted"),
+      row(5, "held"),
+    ]);
+    assert.deepEqual(
+      kept.map((item) => item.leadId),
+      [3, 4, 5],
+    );
+  });
+
+  it("keeps every item of a batch that is still running", () => {
+    const items = [
+      { ...row(1, "new"), status: "completed" as const },
+      { ...row(2, "new"), status: "running" as const },
+      { ...row(3, "new"), status: "queued" as const },
+      { ...row(4, "new"), status: "failed" as const },
+    ];
+    // Nothing published or killed here, so the same rule keeps all four and a
+    // running batch is shown exactly as it was.
+    assert.equal(visibleDraftBatchItems(items).length, 4);
+  });
+
+  it("keeps an item whose lead row is gone", () => {
+    assert.equal(visibleDraftBatchItems([row(9, null)]).length, 1);
   });
 });
 
@@ -416,5 +468,114 @@ describe("draft batch transaction and read", () => {
       code: "not-found",
       error: "Draft batch not found.",
     });
+  });
+});
+
+/*
+  Unit BS. Reading the batch has to answer the same question the panel asks:
+  which of these rows is still work? The state of a lead comes back with the
+  job in one read (`batchView`'s left join), so nothing here costs a round trip
+  per item.
+*/
+describe("draft batch item state on read", () => {
+  it("reports each item's current lead state and drops the printed one from the panel", async () => {
+    const printed = await addLead();
+    const open = await addLead();
+    const batch = await startBatch([printed, open]);
+    const before = await readDraftBatchForAuthenticatedEditor(context, batch.id);
+    assert.equal(before.ok, true);
+    if (!before.ok || !before.batch) return;
+    assert.deepEqual(
+      before.batch.items.map((item) => item.leadStatus),
+      ["new", "new"],
+    );
+    assert.equal(visibleDraftBatchItems(before.batch.items).length, 2);
+
+    // The editor prints the first story from its workbench.
+    await (await getSql()).query("update leads set status='published' where id=$1", [printed]);
+
+    const after = await readDraftBatchForAuthenticatedEditor(context, batch.id);
+    assert.equal(after.ok, true);
+    if (!after.ok || !after.batch) return;
+    assert.deepEqual(
+      after.batch.items.map((item) => item.leadStatus),
+      ["published", "new"],
+    );
+    assert.deepEqual(
+      visibleDraftBatchItems(after.batch.items).map((item) => item.leadId),
+      [open],
+    );
+    assert.equal(after.batch.dismissed, false);
+  });
+
+  it("keeps held and drafted items in the panel", async () => {
+    const held = await addLead();
+    const drafted = await addLead();
+    const batch = await startBatch([held, drafted]);
+    const sql = await getSql();
+    await sql.query("update leads set status='held' where id=$1", [held]);
+    await sql.query("update leads set status='drafted' where id=$1", [drafted]);
+    const read = await readDraftBatchForAuthenticatedEditor(context, batch.id);
+    assert.equal(read.ok, true);
+    if (!read.ok || !read.batch) return;
+    assert.equal(visibleDraftBatchItems(read.batch.items).length, 2);
+  });
+});
+
+describe("dismissing a batch panel", () => {
+  it("puts the batch away server-side, survives a reload, and a second Dismiss is harmless", async () => {
+    const batch = await startBatch([await addLead()]);
+    assert.deepEqual(await dismissDraftBatchForAuthenticatedEditor(context, batch.id), {
+      ok: true,
+      batchId: batch.id,
+    });
+    // The Queue reloads with no batchId -- the "latest" read -- and it is the
+    // same dismissed batch, which is what makes the panel stay gone.
+    const latest = await readDraftBatchForAuthenticatedEditor(context);
+    assert.equal(latest.ok, true);
+    if (!latest.ok || !latest.batch) return;
+    assert.equal(latest.batch.id, batch.id);
+    assert.equal(latest.batch.dismissed, true);
+    assert.deepEqual(await dismissDraftBatchForAuthenticatedEditor(context, batch.id), {
+      ok: true,
+      batchId: batch.id,
+    });
+  });
+
+  it("shows the next batch this newsroom starts normally", async () => {
+    const first = await startBatch([await addLead()]);
+    await dismissDraftBatchForAuthenticatedEditor(context, first.id);
+    const second = await startBatch([await addLead()]);
+    assert.notEqual(second.id, first.id);
+    const latest = await readDraftBatchForAuthenticatedEditor(context);
+    assert.equal(latest.ok, true);
+    if (!latest.ok || !latest.batch) return;
+    assert.equal(latest.batch.id, second.id);
+    assert.equal(latest.batch.dismissed, false);
+  });
+
+  it("refuses a foreign batch, a missing batch and a malformed id", async () => {
+    const batch = await startBatch([await addLead()]);
+    assert.deepEqual(
+      await dismissDraftBatchForAuthenticatedEditor(
+        { userId: "foreign", newsroomId: newsroomId + 1 },
+        batch.id,
+      ),
+      { ok: false, code: "not-found", error: "Draft batch not found." },
+    );
+    assert.deepEqual(await dismissDraftBatchForAuthenticatedEditor(context, 999999), {
+      ok: false,
+      code: "not-found",
+      error: "Draft batch not found.",
+    });
+    const malformed = await dismissDraftBatchForAuthenticatedEditor(context, 0);
+    assert.equal(malformed.ok, false);
+    if (!malformed.ok) {
+      assert.equal(malformed.code, "invalid-input");
+      assert.equal(malformed.error, "Draft batch ID must be a positive integer.");
+    }
+    // Nothing was dismissed by any of the refusals.
+    const read = await readDraftBatchForAuthenticatedEditor(context, batch.id);
+    assert.equal(read.ok && read.batch?.dismissed, false);
   });
 });

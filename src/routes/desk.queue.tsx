@@ -23,8 +23,10 @@ import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
 import {
+  dismissDraftBatch,
   getDraftBatch,
   startDraftBatch,
+  visibleDraftBatchItems,
   type DraftBatchRuntime,
 } from "@/lib/news/draft-batch";
 
@@ -200,6 +202,27 @@ function QueuePage() {
       });
     },
   });
+  /*
+   * Unit BS: the Dismiss button on the batch panel. The write is the server's
+   * (`dismiss_draft_batch.dismissed_at`), so a reload agrees and the next
+   * batch this newsroom starts shows normally. The invalidate is what makes
+   * the panel go without a reload.
+   */
+  const dismissBatch = useMutation({
+    mutationFn: (batchId: number) => dismissDraftBatch({ data: { batchId } }),
+    onSuccess: (result) => {
+      if (result?.ok === false) {
+        setBatchNotice({ kind: "err", text: result.error });
+        return;
+      }
+      void qc.invalidateQueries({ queryKey: ["draft-batch"] });
+    },
+    onError: (error) =>
+      setBatchNotice({
+        kind: "err",
+        text: error instanceof Error ? error.message : "That batch did not dismiss.",
+      }),
+  });
   const queueDraft = useMutation({
     mutationFn: (input: { leadId: number; modelChoice: StoryModelChoice; modelEffort?: ModelEffort | null; fromBatch?: boolean }) =>
       draftLead({ data: { leadId: input.leadId, modelChoice: input.modelChoice, modelEffort: input.modelEffort } }),
@@ -304,6 +327,25 @@ function QueuePage() {
       : (filter === "all" ? working : leads.filter((l) => l.status === filter)).sort(
           (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0),
         );
+  /*
+   * Unit BS. What the batch panel may show, decided once, here:
+   *
+   *   - a batch the editor dismissed is not drawn at all;
+   *   - of the rest, only items whose story is still theirs to work
+   *     (`visibleDraftBatchItems` -- published and killed stories drop out);
+   *   - and if that leaves nothing, the panel goes, not just the rows. A
+   *     panel headed "Batch #3" with no list under it is the same bug in a
+   *     quieter costume.
+   *
+   * `Dismiss` is offered only once the batch has finished: a running batch is
+   * shown as it always was, and putting it away mid-run would hide work that
+   * is still arriving.
+   */
+  const currentBatch = batch.data?.ok ? batch.data.batch : null;
+  const batchItems = currentBatch ? visibleDraftBatchItems(currentBatch.items) : [];
+  const batchPanelVisible = Boolean(currentBatch && !currentBatch.dismissed && batchItems.length > 0);
+  const batchRunning = batchItems.some((item) => item.status === "queued" || item.status === "running");
+
   const shownIds = shown.map((lead) => lead.id);
   const selectedDeleteLeads = selectedDeleteLeadIds.filter((leadId) => shownIds.includes(leadId));
   const allShownSelected = shownIds.length > 0 && shownIds.every((leadId) => selectedDeleteLeadIds.includes(leadId));
@@ -440,12 +482,20 @@ function QueuePage() {
           <Notice kind="err">Could not load the latest draft batch.</Notice>
         ) : batch.data && !batch.data.ok ? (
           <Notice kind="err">{batch.data.error}</Notice>
-        ) : batch.data?.ok && batch.data.batch ? (
+        ) : currentBatch && !batchPanelVisible ? (
+          /*
+           * Unit BS: the editor put this batch away, or every story in it has
+           * since been printed or killed. Either way there is no work left to
+           * list, so there is no panel -- not an empty one under a heading
+           * that still says "Batch #3".
+           */
+          null
+        ) : currentBatch ? (
           <div className="lead-list roomy" aria-label="Draft batch results">
             <p className="meta">
-              Batch #{batch.data.batch.id} · {batch.data.batch.runtime.label}
+              Batch #{currentBatch.id} · {currentBatch.runtime.label}
             </p>
-            {batch.data.batch.runtime.runtime === "local" ? (
+            {currentBatch.runtime.runtime === "local" ? (
               <p className="meta">
                 This batch keeps the saved local model shown above.{" "}
                 <Link to="/desk/ops" className="inline-link">
@@ -454,7 +504,7 @@ function QueuePage() {
                 before starting another batch.
               </p>
             ) : null}
-            {batch.data.batch.items.map((item) => {
+            {batchItems.map((item) => {
               const lead = leads.find((candidate) => candidate.id === item.leadId);
                return <DraftBatchResult
                  key={item.jobId}
@@ -468,6 +518,24 @@ function QueuePage() {
                  }}
                />;
             })}
+            {!batchRunning ? (
+              <div className="wire-sum">
+                <InkButton
+                  small
+                  type="button"
+                  disabled={dismissBatch.isPending}
+                  onClick={() => {
+                    setBatchNotice(null);
+                    dismissBatch.mutate(currentBatch.id);
+                  }}
+                >
+                  {dismissBatch.isPending ? "Dismissing…" : "Dismiss"}
+                </InkButton>
+                <p className="meta">
+                  Puts this batch away for good. The next batch you start shows normally.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="meta">No draft batch has been started in this newsroom.</p>
