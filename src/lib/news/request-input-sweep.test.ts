@@ -1101,9 +1101,17 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * the first-owner setup code and its recovery codes, which adds
    * `setupCodeInput` and `recoveryCodeInput` as names. Neither side's change
    * relaxed the check; the list is the union of what is still called.
+   *
+   * Unit CZ-long-lists moved the Queue's and the Sources' window request out of
+   * `desk.ts` into two named readers, `cleanQueueWindow` (`queue-rows.ts`) and
+   * `cleanSourceWindow` (`source-rows.ts`). Both run `cleanListWindow`, which
+   * clamps limit, offset, search and tab, and each clamps its own extras on top
+   * (the Queue's section and sort), so the two names join `cleanOrRaw` and
+   * `cleanPublishId` here: a named cleaner IS the swept form, and a `.validator`
+   * that reaches one of them is not a cast.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanQueueWindow|cleanSourceWindow|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to

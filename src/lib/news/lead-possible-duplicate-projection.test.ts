@@ -15,14 +15,57 @@ const desk = readFileSync(new URL("./desk.ts", import.meta.url), "utf8");
 const leadView = readFileSync(new URL("../../components/desk-leads.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../styles.css", import.meta.url), "utf8");
 
+/*
+ * Unit CZ-long-lists (0.6.81) took the queue projection out of `listLeads` and
+ * put it in `queryLeadRows`, which the Queue's window (`listQueuePage`) reads
+ * too -- one query, one order, so the two answers cannot drift. The queue half
+ * of this pin follows the projection to where it now lives and asserts the
+ * delegation, instead of pinning SQL desk.ts no longer holds: what this test
+ * owes the editor was never "the SELECT sits inside listLeads", it is that the
+ * rows the Queue receives still carry the comparison target.
+ */
+const QUEUE_READER = "queryLeadRows";
+
 function handlerBlock(name: "listLeads" | "getLead", next: string): string {
+  if (name === "listLeads") return queryReaderBlock();
   const start = desk.indexOf(`export const ${name} = createServerFn`);
   const end = desk.indexOf(next, start);
   assert.ok(start >= 0 && end > start, `${name} handler block must be present`);
   return desk.slice(start, end);
 }
 
+/** The shared reader's own block: `queryLeadRows` up to its first caller. */
+function queryReaderBlock(): string {
+  const start = desk.indexOf(`async function ${QUEUE_READER}(`);
+  const end = desk.indexOf("export const listLeads = createServerFn", start);
+  assert.ok(start >= 0 && end > start, `${QUEUE_READER} handler block must be present`);
+  return desk.slice(start, end);
+}
+
+/** A server function's own block, for the delegation check below. */
+function callerBlock(name: string): string {
+  const start = desk.indexOf(`export const ${name} = createServerFn`);
+  const end = desk.indexOf("async function insertLeadWithDraft", start);
+  assert.ok(start >= 0 && end > start, `${name} must be present`);
+  return desk.slice(start, end);
+}
+
 describe("possible-duplicate linkage survives the desk server boundary", () => {
+  it("reads the Queue through the one shared projection, never a second SELECT", () => {
+    // Both responses the Queue draws from -- `listLeads` (the batch dialog, the
+    // Sources kill-pattern gate, the import screen) and `listQueuePage` (the
+    // screen's own 25-row window) -- must go through `queryLeadRows`. A second
+    // query written inline would be a second answer to "which leads are there",
+    // and the projection asserted below is pinned on the reader's block only.
+    for (const name of ["listLeads", "listQueuePage"]) {
+      assert.match(
+        callerBlock(name),
+        new RegExp(`${QUEUE_READER}\\(context\\)`),
+        `${name} must read the shared projection, not its own query`,
+      );
+    }
+  });
+
   it("projects possible_duplicate_of to the queue response", () => {
     const block = handlerBlock("listLeads", "async function insertLeadWithDraft");
     assert.match(
