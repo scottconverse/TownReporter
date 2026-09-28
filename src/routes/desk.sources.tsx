@@ -14,7 +14,11 @@ import {
 } from "@/lib/news/desk";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
+import { myDesk } from "@/lib/news/claim";
+import { getDailyScanPolicy } from "@/lib/news/daily-scan";
+import { modelChoiceLabel } from "@/lib/news/model-choice";
 import {
+  dailyScheduleLabel,
   editorActionError,
   editorFetchError,
   scanCountsLine,
@@ -153,8 +157,27 @@ function SourcesPage() {
       return false;
     },
   });
-  /** The newest run, which is what "Last run" and the pager both read. */
-  const last = scans.data?.rows?.[0];
+  /*
+    What the Daily scan panel's "Runs" and "Model" rows read (Unit
+    CZ-long-lists).
+
+    Both are facts about the SCHEDULE, not about the last run, and both live in
+    the daily scan policy. `getDailyScanPolicy` is owner-gated -- it answers
+    `forbidden` to an editor -- so it is asked for only once `myDesk` has said
+    the reader owns this desk, the same gate `daily-scan-settings.tsx` and
+    `desk.published.tsx` already use. An editor gets the drawing's own default
+    line rather than an empty pair of rows; that is the one case the drawing
+    does not draw and is recorded in SPEC-GAPS-0681 (prefix CZ-long-lists).
+  */
+  const deskRole = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const isOwner = deskRole.data?.role === "owner";
+  const scanPolicyQuery = useQuery({
+    queryKey: ["daily-scan-policy"],
+    queryFn: () => getDailyScanPolicy(),
+    enabled: isOwner,
+  });
+  const scanPolicy =
+    scanPolicyQuery.data && scanPolicyQuery.data.ok ? scanPolicyQuery.data.policy : null;
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const runScanNow = useMutation({
     mutationFn: () => runScan({ data: { modelChoice: "auto", modelEffort: null } }),
@@ -600,34 +623,30 @@ function SourcesPage() {
         <aside className="astra-col">
           {/*
             The Daily scan panel, drawn with a 2px yellow border because on this
-            screen it is the one thing that acts on everything else. Its three
-            rows answer "is the scanner working": how many runs, how many files
-            it can reach, and when it last went out. The design also draws a
-            Model row here; this build records no model on a scan run (ScanRow
-            carries no such column), so the row is absent rather than guessed --
-            the model each job uses lives on Models.
+            screen it is the one thing that acts on everything else.
+
+            Its three rows are the drawing's own (Unit CZ-long-lists): when the
+            scan goes out, how many files it may reach, and which model it will
+            use. "Runs" used to print the number of runs and "Last run" the
+            newest one -- neither is drawn, and the history is the panel below.
+            The schedule and the model both come from the daily scan policy,
+            which only the owner may read; an editor gets the drawing's default.
           */}
           <div className="astra-panel hot">
             <h2 className="astra-panel-h">Daily scan</h2>
             <dl className="astra-kv ruled">
               <dt>Runs</dt>
-              <dd>{scans.data?.total ?? 0}</dd>
+              <dd>{dailyScheduleLabel(scanPolicy)}</dd>
             </dl>
             <dl className="astra-kv ruled">
               <dt>Files up to</dt>
-              <dd>{watch}</dd>
+              <dd>
+                {watch} lead{watch === 1 ? "" : "s"}
+              </dd>
             </dl>
             <dl className="astra-kv ruled">
-              <dt>Last run</dt>
-              <dd>
-                {last
-                  ? last.stalled
-                    ? "Stalled"
-                    : last.finished_at
-                      ? formatDateTime(last.finished_at)
-                      : "Running now"
-                  : "Never"}
-              </dd>
+              <dt>Model</dt>
+              <dd>{scanPolicy ? modelChoiceLabel(scanPolicy.runtime, "scan") : "Automatic"}</dd>
             </dl>
             <p className="astra-note">Scans file leads only. They never draft or publish.</p>
             {scanNotice ? (
@@ -639,15 +658,14 @@ function SourcesPage() {
               <InkButton disabled={runScanNow.isPending} onClick={() => runScanNow.mutate()}>
                 {runScanNow.isPending ? "Starting…" : "Run scan now"}
               </InkButton>
-              <Link to="/desk/scan" className="btn quiet">
-                Open the scan screen
-              </Link>
             </div>
           </div>
           {/*
-            Previous scans. Five, and a link rather than a pager: the Scan
-            screen owns the full history, its paging and its diagnostics, and a
-            second copy of that here would be a second thing to keep right.
+            Previous scans: five rows, and no link. The drawing draws the list
+            and nothing under it (Unit CZ-long-lists removed the "All previous
+            scans" press that used to sit here); the Scan screen is still the
+            desk's own history, reached from the rail, and a second copy of its
+            paging and diagnostics here would be a second thing to keep right.
           */}
           <div className="astra-panel">
             <h2 className="astra-panel-h">Previous scans</h2>
@@ -675,11 +693,6 @@ function SourcesPage() {
                 ))}
               </ul>
             )}
-            <div className="astra-panel-acts">
-              <Link to="/desk/scan" className="btn quiet">
-                All previous scans
-              </Link>
-            </div>
           </div>
         </aside>
       </div>

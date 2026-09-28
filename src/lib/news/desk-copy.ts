@@ -1011,6 +1011,44 @@ export function scanCountsLine(s: {
 }
 
 /**
+ * The Sources rail's "Runs" line: when the daily scan goes out (Unit
+ * CZ-long-lists).
+ *
+ * The drawing draws "Every day, 6:00 a.m." there -- a schedule, not a count --
+ * and the panel used to print the number of runs instead. The time comes from
+ * the daily scan policy's own `localTime`, which is a wall clock in the paper's
+ * timezone, so it is FORMATTED AND NEVER CONVERTED: 06:00 in the record is
+ * "6:00 a.m." on the paper, not 6:00 a.m. wherever the editor happens to be
+ * sitting. It is built by hand rather than with `toLocaleTimeString` for the
+ * same reason `clockLabel` is -- the locale decides the case and the spacing of
+ * "a.m.", and the desk's house style is lowercase with periods.
+ *
+ * `null` is a policy that cannot be read -- a non-owner, or a failed read --
+ * and gets the drawing's own line rather than a blank. Off and paused are
+ * states the drawing does not draw; they say so rather than promise a run that
+ * will not happen (recorded in SPEC-GAPS-0681, prefix CZ-long-lists).
+ */
+export function dailyScheduleLabel(
+  policy: { enabled: boolean; paused: boolean; localTime: string } | null,
+): string {
+  if (!policy) return "Every day, 6:00 a.m.";
+  if (policy.paused) return "Paused";
+  if (!policy.enabled) return "Off";
+  return `Every day, ${clockFromLocalTime(policy.localTime)}`;
+}
+
+/** "06:00" -> "6:00 a.m.". Anything that is not a 24-hour clock comes back
+ *  trimmed and unchanged rather than as "NaN:NaN". */
+export function clockFromLocalTime(localTime: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(localTime.trim());
+  if (!match) return localTime.trim();
+  const hour24 = Number(match[1]);
+  if (hour24 > 23 || Number(match[2]) > 59) return localTime.trim();
+  const hour = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour}:${match[2]} ${hour24 < 12 ? "a.m." : "p.m."}`;
+}
+
+/**
  * Coverage line for one scan run (P0-3).
  *
  * Before migration 0065 a run recorded only sources_fetched, so a clean
