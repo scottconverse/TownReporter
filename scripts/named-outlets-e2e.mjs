@@ -158,7 +158,16 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   });
   const print = page.getByRole("button", { name: /^Publish in / });
   assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
-  await page.getByText("Deal with the named outlet first").waitFor();
+  /*
+    Unit CT part 2 moved this sentence: the old mid-form heading ("Deal with the
+    named outlet first") was replaced by the Checks tab's own block, which counts
+    the reasons and puts a button on each -- so the words this step waits for are
+    the ones the block draws now. The row's chip is the other half of the claim:
+    it names this reason by category. (The string this line used to wait for was
+    deleted by that commit and left the walk red before unit CX2 touched it.)
+  */
+  await page.getByText(/1 thing blocks Publish\. Each row has the press that clears it\./).waitFor();
+  await page.getByText("Blocks Publish", { exact: true }).first().waitFor();
   step("printing is held down, in words, while Denver Post is named and uncovered");
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();
@@ -181,7 +190,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
 }
 
 async function openOutlets() {
-  await page.goto(`${base}/desk/ops#outlets`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/named-outlets`, { waitUntil: "networkidle" });
   await panel().getByRole("heading", { name: "Named outlets" }).waitFor({ timeout: 45_000 });
 }
 

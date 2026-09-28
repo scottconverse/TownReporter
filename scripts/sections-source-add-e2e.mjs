@@ -129,7 +129,7 @@ async function ownTheDesk() {
 }
 
 async function openSections() {
-  await page.goto(`${base}/desk/ops#sections`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/sections`, { waitUntil: "networkidle" });
   await panel().getByRole("heading", { name: "Newspaper sections" }).waitFor({ timeout: 45_000 });
 }
 
@@ -310,7 +310,7 @@ async function leavingInAppIsBlocked() {
   await queueLink().click();
   await dialog.waitFor({ timeout: 30_000 });
   await dialog.getByRole("button", { name: "Leave and discard changes" }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/desk/ops"), { timeout: 30_000 });
+  await page.waitForURL((u) => !u.pathname.endsWith("/desk/ops/sections"), { timeout: 30_000 });
   step("Leave and discard changes goes where the editor asked");
 }
 

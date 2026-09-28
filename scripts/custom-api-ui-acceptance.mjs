@@ -321,9 +321,9 @@ try {
     "an Opinion server-function response exposed the saved API key",
   );
 
-  await page.goto(`${base}/desk/ops`);
-  // The Server page draws every panel on the page at once, so the Daily scan
-  // panel is reached by scrolling its card into view, not by a nav pill.
+  await page.goto(`${base}/desk/ops/daily-scan`);
+  // 0.6.81 (unit CX2): the Daily scan card's panel lives on the card's own
+  // screen now, so it is reached by going there, not by scrolling the page.
   await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const dailyPanel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),

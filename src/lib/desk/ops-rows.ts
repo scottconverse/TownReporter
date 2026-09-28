@@ -46,8 +46,18 @@ import type { RoutineNoticePolicy } from "@/lib/news/routine-notice-policy";
 import type { SectionConfig } from "@/lib/news/section-types";
 import type { TrashRow } from "@/lib/news/trash-store";
 import type { YouTubeKeyState } from "@/lib/news/youtube-data-settings";
-import { automaticLadder, providerEntry } from "@/lib/news/provider-registry";
-import { TRASH_DAYS } from "@/lib/news/trash-store";
+/*
+  The two value imports below are relative, and the `import type` lines above
+  keep the alias, because the unit tests run this module through Node's own
+  type-stripping loader (`scripts/run-tests-safe.mjs`), which erases `import
+  type` but resolves neither `@/` nor an extensionless path. Measured:
+  `node --experimental-strip-types -e "import('@/lib/news/trash-store')"` ->
+  `ERR_MODULE_NOT_FOUND: Cannot find package '@/lib'`; the same specifier
+  written relative resolves. Every other unit-tested module in this tree does
+  the same (`src/lib/news/daily-scan.ts` imports `"../db.ts"`).
+*/
+import { automaticLadder, providerEntry } from "../news/provider-registry.ts";
+import { TRASH_DAYS } from "../news/trash-store.ts";
 
 /** The plain words a drawn row prints when the desk has no value for it. */
 export const NOT_SET = "Not set";

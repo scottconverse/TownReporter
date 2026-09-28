@@ -98,8 +98,8 @@ try {
   await completeFirstRunSetup(page, base);
   console.log("  ok    the first account owns the desk");
 
-  // Server -> Sections (the hash opens the panel directly).
-  await page.goto(`${base}/desk/ops#sections`, { waitUntil: "networkidle" });
+  // Server -> Sections (the card's own screen opens the panel directly).
+  await page.goto(`${base}/desk/ops/sections`, { waitUntil: "networkidle" });
   const panel = page.locator('section[aria-label="Newspaper sections"]');
   await panel.getByRole("heading", { name: "Newspaper sections" }).waitFor({ timeout: 45_000 });
 
@@ -135,7 +135,7 @@ try {
 
   // An unsaved section draft, so the sticky bar is on screen if it exists.
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(`${base}/desk/ops#sections`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/sections`, { waitUntil: "networkidle" });
   await panel.getByRole("heading", { name: "Newspaper sections" }).waitFor({ timeout: 45_000 });
   await panel.getByLabel("New section name").fill("Civic life");
   await panel.getByRole("button", { name: "Add section" }).click();

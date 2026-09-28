@@ -1686,6 +1686,79 @@
   padding-top: 0;
   border-top: 0;
 }
+/* A summary card's name and half-line, at the drawing's size.
+   The drawing sets a card's title at 22px and its half-line at 15px; the
+   shipped `.sec-title` is 16px, which is a panel heading's size, and these two
+   are the card's own heading -- the thing that has to hold a reader's eye at
+   the top of a card that is now two rows and a button rather than an editor.
+   Same face as the rest of the desk (--fd) and the same type scale (--ts), so
+   the density control on the desk chrome still moves them. */
+.desk-ltr.astra .astra-ops-card-title {
+  margin: 0;
+  font-family: var(--fd);
+  font-size: calc(22px * var(--ts));
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.2px;
+  color: var(--fg);
+}
+.desk-ltr.astra .astra-ops-card-sub {
+  margin: 4px 0 0;
+  font-family: var(--fd);
+  font-size: calc(15px * var(--ts));
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--mut);
+}
+/*
+   Unit CX2: the Server page's height, and only the Server page's.
+
+   The drawing is a page of summaries; at 1440 wide it has to fit 2,400px. The
+   rules below are the whole of the difference between "fits" and "does not":
+   the gaps inside a card, between cards, and under the page header, each a few
+   pixels tighter. They are scoped by `data-desk-page="ops"` -- the same switch
+   `stats`, `opinion` and `home` already use -- because `.astra-head` and
+   `.astra-settings-body` are every desk screen's header and grid, and the
+   Server page is the only one drawing twelve cards that each have to stay a
+   summary.
+
+   Nothing here is smaller than it was for a reason of taste: a row is 37px
+   instead of 41px, a card's buttons sit 12px under its last row instead of
+   16px, and a card's padding is 16px instead of 18px -- all still a comfortable
+   read and still the desk's own spacing scale. `--ts` is untouched, so the
+   density control moves every one of these numbers with the type.
+
+   The measured result, owner and editor at 1440 in both themes, is in the
+   unit's report. Nothing else on the desk moves.
+*/
+.desk-ltr.astra[data-desk-page="ops"] .astra-head {
+  margin-bottom: 10px;
+}
+.desk-ltr.astra[data-desk-page="ops"] p.lede {
+  margin-bottom: 16px;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-settings-body {
+  gap: 14px;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-card {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-rows,
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-ladder {
+  margin-top: 10px;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-row {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-rung {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.desk-ltr.astra[data-desk-page="ops"] .astra-ops-card-doors {
+  margin-top: 12px;
+}
 .desk-ltr.astra .astra-settings-body :is(.border, .border-t) {
   border-color: var(--line);
 }

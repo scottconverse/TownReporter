@@ -38,9 +38,9 @@ try {
   step("owner created");
   const n = await nid();
 
-  // The Server page keeps every panel on the page at once (no tab strip), so
-  // reaching Meeting capture is a scroll to its card, not a click.
-  await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
+  // 0.6.81 (unit CX2) gives the Meeting capture card a screen of its own, so
+  // reaching it is a `goto` to that screen, not a scroll to the card.
+  await page.goto(`${base}/desk/ops/meeting-capture`, { waitUntil: "networkidle" });
   await page.locator("#ops-panel-meeting-capture").scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Meeting capture" }).waitFor({ timeout: 20000 });
   step("panel renders");

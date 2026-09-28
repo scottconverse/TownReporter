@@ -414,8 +414,9 @@ async function main() {
   await page.getByRole("heading", { name: "Server", exact: true }).waitFor();
   step("Server page renders");
 
-  // Every Server panel is on the page at once (no tab strip), so reaching the
-  // trash is a scroll to its card, not a click on a jump button.
+  // 0.6.81 (unit CX2): the Server page draws the card, and the card's own
+  // screen is where its controls live, so the trash is reached by going to it.
+  await page.goto(`${base}/desk/ops/recently-deleted`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Recently deleted", exact: true }).first().scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Recently deleted" }).waitFor({ timeout: 20_000 });
   const trashRow = page.locator("li", { hasText: leadHeadline }).first();

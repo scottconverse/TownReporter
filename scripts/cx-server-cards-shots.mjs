@@ -16,9 +16,9 @@
  *
  *   - The card titles in document order, so "in the drawn order" is a list of
  *     strings and not an opinion about a PNG.
- *   - `cx-server-controls.json`: every distinct link and button on the page,
- *     pressed once, with what happened (navigated to X, opened the confirmation
- *     for Y, showed Z). Nothing is confirmed: every confirmation is opened and
+ *   - `cx-server-controls.json`: every distinct link and button on the page and
+ *     on the twelve screens its cards open, pressed once, with what happened
+ *     (navigated to X, opened the confirmation for Y, showed Z). Nothing is confirmed: every confirmation is opened and
  *     then CANCELLED, so no action runs and the desk is not given up. The two
  *     controls that would take the server down are pressed only as far as their
  *     confirmation, which is what the control itself does.
@@ -112,14 +112,33 @@ async function measure(page, label) {
   const rows = await page.evaluate(MIN_FONT_PROBE);
   const min = rows.length ? rows[0].px : null;
   const under = rows.filter((row) => row.px < 14);
+  /*
+    How tall the page is, in the same pass.
+
+    Unit CX2 gave this screen a budget it can be judged against: at 1440 wide,
+    signed in as the owner, `/desk/ops` must be no taller than 2,400px. The
+    audit that found the editors still open measured 18,475px here, so the
+    number is the finding and the screenshot is only the illustration of it --
+    a page can look like twelve cards and still be eighteen thousand pixels
+    long. Read from the document, not from a screenshot, because a full-page
+    screenshot of a page that scrolls inside an element is a picture of the
+    wrong box.
+  */
+  const height = await page.evaluate(() =>
+    Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+    ),
+  );
   measurements.push({
     label,
+    height,
     min,
     underCount: under.length,
     under: under.slice(0, 8),
     top10: rows.slice(0, 10),
   });
-  console.log(`  size  ${label}: smallest ${min}px, ${under.length} under 14px`);
+  console.log(`  size  ${label}: ${height}px tall, smallest ${min}px, ${under.length} under 14px`);
   return under;
 }
 
@@ -167,6 +186,23 @@ async function sweep(page, who) {
       const cards = [...document.querySelectorAll("div.astra-ops-card")];
       return cards.length > 0 && cards.every((c) => c.querySelector("h1, h2, h3"));
     },
+    undefined,
+    { timeout: 30_000 },
+  );
+
+  /*
+    And every card must have stopped loading.
+
+    A card draws `ListSkeleton` (`aria-busy`, src/components/states.tsx:269) until
+    its read answers, and a skeleton is a row of bars, not a row of text -- so a
+    page measured while three cards are still loading is a measurement of the
+    wrong page. The first height this walk took was 2,698px at 1440 light and
+    2,554px at 1440 dark, the same page twice: the light one was measured with
+    the skeletons still up. Waiting for `aria-busy` to clear before the first
+    measurement is what makes the light and dark numbers the same page.
+  */
+  await page.waitForFunction(
+    () => document.querySelectorAll('[aria-busy="true"]').length === 0,
     undefined,
     { timeout: 30_000 },
   );
@@ -275,6 +311,40 @@ const CANCEL_NAMES = [
   "Done",
 ];
 
+/**
+ * The twelve card screens, by URL segment.
+ *
+ * 0.6.81 (unit CX2) split this page in two: `/desk/ops` draws the twelve
+ * summary cards and each card keeps its door button there -- which is what the
+ * card order and the card titles are read from -- while the editor itself lives
+ * on the card's own screen, `/desk/ops/<slug>` (`src/routes/desk.ops_.$card.tsx`,
+ * slugs from `src/lib/desk/ops-cards.ts`). The card's anchor id travels with it,
+ * so `#ops-panel-<x>` still names the same card on either screen.
+ */
+const CARD_SCREENS = [
+  "writing-models",
+  "health",
+  "paper-setup",
+  "recently-deleted",
+  "sections",
+  "daily-scan",
+  "meeting-capture",
+  "youtube",
+  "routine-notices",
+  "named-outlets",
+  "editors-access",
+  "time-budgets",
+];
+
+/**
+ * The screen the press pass is sweeping, so an undo comes back to it.
+ *
+ * `pressAndUndo` puts the page back after a button navigates away. It used to
+ * come back to `/desk/ops` because that was the only page there was; a sweep of
+ * a card's own screen has to come back to that screen instead.
+ */
+let pressPath = "/desk/ops";
+
 async function pressAndUndo(page, press, label, opts = {}) {
   const before = await fingerprint(page);
   const row = { label, before: before.url, action: null, after: null, opened: [], cancelled: null };
@@ -323,14 +393,16 @@ async function pressAndUndo(page, press, label, opts = {}) {
   } else if (after.url !== before.url) {
     // A navigation is not undone by Escape; the `goto` below is the undo, and
     // the table says so rather than claiming a key press did it.
-    row.cancelled = "went back to /desk/ops";
+    row.cancelled = `went back to ${pressPath}`;
   } else if (row.opened.length) {
     await page.keyboard.press("Escape");
     row.cancelled = "Escape";
   }
   if (after.url !== before.url) {
-    await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+    await page.goto(`${base}${pressPath}`, { waitUntil: "domcontentloaded" });
+    if (pressPath === "/desk/ops") {
+      await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+    }
     await page.waitForTimeout(400);
   }
   console.log(`  press ${label}: ${row.action}${row.cancelled ? ` (undone: ${row.cancelled})` : ""}`);
@@ -403,13 +475,19 @@ async function visibleButtons(page) {
  * comes from the `h3` in that `li` -- `src/routes/desk.ops.tsx:379`.
  */
 async function pressOpsActions(page) {
+  /*
+    Only the Health card's own screen has the actions panel (0.6.81, unit CX2);
+    on every other screen there is no row to write, because the panel is not
+    part of that screen -- which is not the same as having been closed on it.
+  */
+  if ((await page.locator("#ops-actions-panel").count()) === 0) return;
   const open = await page.locator("#ops-actions-panel").isVisible().catch(() => false);
   if (!open) {
     controls.push({
       label: "action list",
-      before: "/desk/ops",
+      before: pressPath,
       action: "not on the page: the actions panel was closed before the sweep reached it",
-      after: "/desk/ops",
+      after: pressPath,
       opened: [],
       cancelled: null,
     });
@@ -453,9 +531,9 @@ async function pressOpsActions(page) {
     if (skip) {
       controls.push({
         label: name,
-        before: "/desk/ops",
+        before: pressPath,
         action: `not pressed — ${skip}`,
-        after: "/desk/ops",
+        after: pressPath,
         opened: [],
         cancelled: null,
       });
@@ -465,9 +543,9 @@ async function pressOpsActions(page) {
     if (item.disabled) {
       controls.push({
         label: name,
-        before: "/desk/ops",
+        before: pressPath,
         action: `could not press — the desk draws it disabled (${item.button || "no button"})`,
-        after: "/desk/ops",
+        after: pressPath,
         opened: [],
         cancelled: null,
       });
@@ -480,7 +558,12 @@ async function pressOpsActions(page) {
   }
 }
 
-async function pressEverything(page) {
+/**
+ * `signOut` is false for the twelve card screens and true for the screen the
+ * run ends on: "Sign out" ends the session, so it can only be pressed once,
+ * after everything else has been swept signed in.
+ */
+async function pressEverything(page, signOut) {
   const seen = new Set();
 
   // 1. The four toggles, each pressed in both directions.
@@ -581,7 +664,8 @@ async function pressEverything(page) {
   }
 
   // 5. "Sign out" last, and only if it is still there to press.
-  for (const text of TERMINAL_BUTTONS) {
+  const terminal = signOut ? TERMINAL_BUTTONS : [];
+  for (const text of terminal) {
     const button = page.getByRole("button", { name: text, exact: true }).first();
     if ((await button.count()) === 0) continue;
     await pressAndUndo(page, () => button.click(), `button "${text}"`, { keep: true });
@@ -628,6 +712,9 @@ try {
   await page.setViewportSize({ width: widths[0], height: 1000 });
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+  // The invite form is the Editors & access card's own screen (0.6.81, unit
+  // CX2): the page above is the landing, and the work is on the screen.
+  await page.goto(`${base}/desk/ops/editors-access`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Their email").fill(editorEmail);
   await page.getByRole("button", { name: "Make the invite link" }).click();
   const linkEl = page.locator("p.break-all").filter({ hasText: "/login?invite=" }).first();
@@ -678,28 +765,205 @@ try {
 
   await sweep(editorPage, "editor");
 
-  // --- every control, pressed once ---------------------------------------
+  /*
+    --- the card, opened and used, and the summary that followed -------------
+
+    The press pass below opens every card's buttons, but it puts each one back
+    the way it found it -- a page that only ever undoes proves the controls
+    exist, not that the card is wired to the read behind its summary. This is
+    the other half of the brief's fourth item: open one card the way a reader
+    does (its own door button on the summary), do that card's main action for
+    real, come back through the back link, and read the card again.
+
+    Daily scan is the card. It is owner-only, its main action is one button that
+    writes a setting, and its first row is a word that turns with it ("Off" or a
+    time -> "Paused") -- so a summary that did not re-read would show up in the
+    row, not only in the database. The walk seeds the schedule on the card's own
+    screen and puts the setting back afterwards, so the run can be repeated.
+  */
   await page.setViewportSize({ width: widths[0], height: 1000 });
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+  const scanCard = page
+    .locator("div.astra-ops-card")
+    .filter({ hasText: "Daily scan" })
+    .first();
+  await scanCard.locator("dl.astra-ops-rows").waitFor({ timeout: 30_000 });
+  const runsBefore = (await scanCard.locator("dl.astra-ops-rows").innerText()).trim();
+
+  /*
+    Open the card the way a reader does and stop at the state the screen is
+    really in: past a stale schedule, and with both Pause and Resume settled
+    into exactly one button. Both trips below go through here, so neither can
+    wait on a control the desk is not drawing.
+  */
+  /*
+    The desk announces every write twice: once in the visible paragraph under
+    the buttons, and once in the screen-reader live region (`#desk-announcer`),
+    which is the same words again. Waiting on the words alone matches both, so
+    the wait below names the visible paragraph.
+  */
+  const deskSays = (words) => page.locator("p").filter({ hasText: words }).first();
+
+  /*
+    The seed below runs once per run. The screen's Save writes the whole policy,
+    `paused` included, so seeding again on the way back in would quietly
+    un-pause the schedule the main action just paused -- and the press that
+    follows would sit waiting for a "Resume daily scan" button the screen no
+    longer offers.
+  */
+  let scheduleSeeded = false;
+
+  const openScanSettings = async () => {
+    await scanCard.getByRole("link", { name: "Scan settings" }).click();
+    await page.getByRole("heading", { name: "Daily scan", exact: true }).waitFor({ timeout: 45_000 });
+    /*
+      Seed the schedule through the card's own screen before pressing anything.
+
+      A desk that has never saved its schedule has no `daily_scan_policies` row
+      behind it, and the read reports that absence honestly as revision 0 -- but
+      Pause/Resume write with `where revision = 0`, which matches nothing, so in
+      that state they are refused with the desk's conflict copy ("The schedule
+      changed in another window. Refresh and try again."). Nothing changed, and
+      the desk's own "Reload latest settings" cannot clear it: there is nothing
+      to reload. Measured on a fresh built server (.cx2-scratch/probe-scan.mjs,
+      report below): press Pause -> refused; press the screen's own "Save daily
+      scan" -> "Daily scan settings saved."; press Pause -> "Daily scan paused."
+      and the button turns over. The screen's Save is the row's only writer, and
+      the brief's own words for this step are "the main action once on seeded
+      data" -- so the walk seeds it here, the way the screen does.
+
+      This is not a regression from this unit: `git log main..HEAD --
+      src/lib/news/daily-scan.ts src/components/daily-scan-settings.tsx` lists
+      no commit from this branch, and both files are clean in `git status`.
+    */
+    const saveSchedule = page.getByRole("button", { name: "Save daily scan" });
+    await saveSchedule.waitFor({ timeout: 30_000 });
+    if (!scheduleSeeded && (await saveSchedule.isEnabled())) {
+      await saveSchedule.click();
+      await deskSays("Daily scan settings saved.").waitFor({ timeout: 30_000 });
+      scheduleSeeded = true;
+      console.log("  ok    the schedule was seeded through the screen's own Save");
+    }
+    const reloadLatest = page.getByRole("button", { name: "Reload latest settings" });
+    if (await reloadLatest.count()) {
+      await reloadLatest.click();
+      await deskSays("Latest settings reloaded.").waitFor({ timeout: 30_000 });
+      console.log("  ok    a stale schedule was cleared through the screen's own Reload");
+    }
+    await page
+      .locator('button:has-text("Pause daily scan"), button:has-text("Resume daily scan")')
+      .first()
+      .waitFor({ timeout: 30_000 });
+  };
+
+  /*
+    Press the setting's own button and wait for the other one to take its place.
+
+    The screen's schedule carries a revision guard: a press carrying a revision
+    the database has moved past is refused in the desk's own words ("The
+    schedule changed in another window.") and the desk offers its own way out,
+    "Reload latest settings". The walk takes that offer and presses again,
+    which is exactly what a reader does; a press that lands first time never
+    sees the button.
+  */
+  const pressTheSetting = async (label, other) => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await page.getByRole("button", { name: label }).click();
+      const flipped = page.getByRole("button", { name: other });
+      try {
+        await flipped.waitFor({ timeout: 15_000 });
+        return attempt;
+      } catch {
+        const reloadLatest = page.getByRole("button", { name: "Reload latest settings" });
+        if (!(await reloadLatest.count())) {
+          throw new Error(
+            `pressing "${label}" neither turned the button over nor offered the desk's own Reload`,
+          );
+        }
+        await reloadLatest.click();
+        await deskSays("Latest settings reloaded.").waitFor({ timeout: 30_000 });
+        console.log(
+          `  ok    press ${attempt}: the schedule was behind; taken back through the screen's own Reload`,
+        );
+      }
+    }
+    throw new Error(`"${label}" never turned over, in three presses`);
+  };
+
+  await openScanSettings();
+  /*
+    The screen is the truth about which way the setting points, not the card
+    above it. The row's chip is uppercased by CSS, so "Paused" in the drawing
+    arrives as "PAUSED" in the DOM's text, and a desk that was left paused by an
+    earlier run is resumed rather than paused again -- but the button this step
+    presses is read off the screen that owns the setting.
+  */
+  const wasPaused = (await page.getByRole("button", { name: "Resume daily scan" }).count()) > 0;
+  const action = wasPaused ? "Resume daily scan" : "Pause daily scan";
+  const undo = wasPaused ? "Pause daily scan" : "Resume daily scan";
+  console.log(
+    `  note  Daily scan card before: ${JSON.stringify(runsBefore.replace(/\n/g, " "))}; the screen offers "${action}"`,
+  );
+  const presses = await pressTheSetting(action, undo);
+  await page.getByRole("link", { name: "← Server" }).click();
+  await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+  await scanCard.locator("dl.astra-ops-rows").waitFor({ timeout: 30_000 });
+  const runsAfter = (await scanCard.locator("dl.astra-ops-rows").innerText()).trim();
+  const flipped = /paused/i.test(runsAfter) !== wasPaused;
+  if (runsAfter === runsBefore || !flipped) {
+    throw new Error(
+      `the summary did not follow the card: before ${JSON.stringify(runsBefore)}, after ${JSON.stringify(runsAfter)}`,
+    );
+  }
+  console.log(
+    `  ok    main action: Daily scan ${JSON.stringify(runsBefore.replace(/\n/g, " "))} -> ${JSON.stringify(runsAfter.replace(/\n/g, " "))} through Scan settings -> ${action}${presses > 1 ? ` (after ${presses} presses)` : ""} -> ← Server`,
+  );
+  // Put the setting back, through the same door and the same guard, so the run
+  // leaves the desk where it found it.
+  await openScanSettings();
+  await pressTheSetting(undo, action);
+  await page.getByRole("link", { name: "← Server" }).click();
+  await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+
+  // --- every control, pressed once ---------------------------------------
+  await page.setViewportSize({ width: widths[0], height: 1000 });
   // The sweep left the desk dark; the press pass starts from the same light
   // page the screenshots opened on, set the same way the Aa control sets it.
+  // Set before the first `goto`, so every screen below paints light on load and
+  // no reload is needed to repaint it.
   await page.evaluate(() => localStorage.setItem("townreporter.desk.mode", "light"));
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
   /*
-    Settle before enumerating.
+    The twelve screens the cards open, then the page itself last.
 
-    The first press pass drew a table whose first row read "revealed: Light /
-    Check now / Test / Sign in to Codex ..." -- those were the Writing models
-    card's own controls arriving mid-sweep, not things a button had opened. The
-    card is the slowest on the page (it asks each provider what it can do), so
-    the pass waits for its two doors and then a beat, and the table is taken
-    against a page that has stopped moving.
+    0.6.81 (unit CX2) moved the editors onto their own screens, so "every
+    control" is no longer one page's worth of buttons: each screen is swept the
+    same way. The page is swept last because that is where "Sign out" lives, and
+    signing out ends the run.
   */
-  await page.locator('a[href="/desk/models"]').first().waitFor({ timeout: 30_000 });
-  await page.waitForTimeout(2500);
-  await pressEverything(page);
+  for (const screen of [...CARD_SCREENS.map((slug) => `/desk/ops/${slug}`), "/desk/ops"]) {
+    pressPath = screen;
+    await page.goto(`${base}${pressPath}`, { waitUntil: "domcontentloaded" });
+    if (pressPath === "/desk/ops") {
+      await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
+    }
+    /*
+      Settle before enumerating.
+
+      The first press pass drew a table whose first row read "revealed: Light /
+      Check now / Test / Sign in to Codex ..." -- those were the Writing models
+      card's own controls arriving mid-sweep, not things a button had opened. The
+      card is the slowest on the page (it asks each provider what it can do), so
+      the pass waits for its two doors and then a beat, and the table is taken
+      against a page that has stopped moving. Those two doors are on the Writing
+      models screen, so its own sweep waits for them there too.
+    */
+    if (screen === "/desk/ops" || screen === "/desk/ops/writing-models") {
+      await page.locator('a[href="/desk/models"]').first().waitFor({ timeout: 30_000 });
+    }
+    await page.waitForTimeout(2500);
+    await pressEverything(page, screen === "/desk/ops");
+  }
 
   await editorCtx.close();
 } catch (err) {
@@ -723,13 +987,24 @@ try {
 await browser.close();
 
 const tooSmall = measurements.filter((row) => row.underCount > 0);
+/*
+  The page-height table, in the order the brief asks for it: owner and editor,
+  light and dark, at 1440, 1024 and 390.
+*/
+const heights = measurements.map((row) => ({ label: row.label, height: row.height }));
+const TALLEST_AT_1440 = 2400;
+const overBudget = measurements.filter(
+  (row) => row.label.includes("1440") && row.height > TALLEST_AT_1440,
+);
 const result = {
-  ok: consoleErrors.length === 0 && tooSmall.length === 0,
+  ok: consoleErrors.length === 0 && tooSmall.length === 0 && overBudget.length === 0,
   base,
   outDir,
   cardOrder,
   controls,
   measurements,
+  heights,
+  budget: { width: 1440, max: TALLEST_AT_1440, overBudget: overBudget.map((row) => row.label) },
   consoleErrorCount: consoleErrors.length,
   consoleErrors: consoleErrors.slice(0, 20),
   shotCount: shots.length,
@@ -747,6 +1022,8 @@ console.log(
       cards: { owner: cardOrder.owner?.length, editor: cardOrder.editor?.length },
       controls: controls.length,
       measures: measurements.length,
+      heights,
+      overBudget: overBudget.map((row) => `${row.label} ${row.height}px`),
       under14: tooSmall.length,
       shots: shots.length,
       consoleErrors,
