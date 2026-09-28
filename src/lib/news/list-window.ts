@@ -35,12 +35,13 @@ export const PAGE_SIZE = 25;
 /**
  * The most rows one request may ask for.
  *
- * Not a design rule -- a bound on the request. A caller that asks for more than
- * this is asking for the whole list back under another name, which is the thing
- * the window exists to stop; the screens never ask for more than 25 at a time
- * and grow by 25, so this is only ever reached by a hand-made request.
+ * Not a design rule -- a bound on the request. The screens keep `offset: 0` and
+ * grow a cumulative `limit` by 25 per press, so this must be larger than any
+ * real list or "Show 25 more" stops working (the real Sources list is 1,588
+ * rows). The server already reads the whole filtered list in memory; this only
+ * bounds what one response carries.
  */
-export const WINDOW_MAX = 1000;
+export const WINDOW_MAX = 100_000;
 
 /** The longest search string the desk will carry. A search box, not a query. */
 export const SEARCH_MAX = 200;

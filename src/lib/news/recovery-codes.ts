@@ -142,7 +142,6 @@ export async function generateRecoveryCodes(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
 ): Promise<string[]> {
   await ensureRecoveryCodeTable();
-  const sql = await getSql();
   const codes = Array.from({ length: RECOVERY_CODE_COUNT }, () => randomRecoveryCode());
   // One at a time: scrypt at these parameters wants ~32 MB while it runs, and
   // ten at once is ten of those (the Node thread pool would queue them
@@ -150,13 +149,17 @@ export async function generateRecoveryCodes(
   const hashes: string[] = [];
   for (const code of codes) hashes.push(await hashCode(code));
   // Regenerating invalidates the old set outright, not just "new codes also work".
-  await sql.query(`delete from owner_recovery_code where newsroom_id = $1`, [newsroomId]);
-  for (const hash of hashes) {
-    await sql.query(`insert into owner_recovery_code (newsroom_id, code_hash) values ($1, $2)`, [
-      newsroomId,
-      hash,
-    ]);
-  }
+  // Delete and inserts are one transaction: if any insert fails, the old set
+  // stays valid instead of the owner losing every code and receiving none.
+  await withTransaction(async (tx) => {
+    await tx.query(`delete from owner_recovery_code where newsroom_id = $1`, [newsroomId]);
+    for (const hash of hashes) {
+      await tx.query(`insert into owner_recovery_code (newsroom_id, code_hash) values ($1, $2)`, [
+        newsroomId,
+        hash,
+      ]);
+    }
+  });
   return codes;
 }
 
