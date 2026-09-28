@@ -1056,6 +1056,26 @@ export const leadDuplicateResolutionInput = z.object({
   action: z.enum(["not-a-duplicate", "reopen-prior"]),
 });
 
+/**
+ * `desk.ts` updateLead -- "Edit the lead" (design review note 2, 0.6.80).
+ *
+ * The drawn row's own subtitle is "Change the title, notes or section before
+ * drafting" (`docs/design/handoff-2026-09-26/design/Desk Dialogs.dc.html:152`),
+ * so the fields are exactly those three -- headline (title), why (notes) and
+ * topic (section) -- the same three `fileLeadInput` already carries for a new
+ * lead, at the same bounds. `urls` follows `fileLeadInput`'s own `urls` list
+ * (BW3): a lead can carry more than one source link, and the same cap applies.
+ * There is no `summary` field: leads have no summary column (that is
+ * `drafts.dek`, a different row this dialog does not touch).
+ */
+export const editLeadInput = z.object({
+  id: rowId,
+  headline: z.string().max(LIMITS.leadHeadline),
+  why: z.string().max(LIMITS.leadWhy),
+  topic: z.string().max(LIMITS.leadTopic),
+  urls: z.array(z.string().max(LIMITS.url)).max(LIMITS.importLinks).optional(),
+});
+
 /** `desk.ts:2236` listFollowUps (`input ?? {}`). */
 export const followUpsInput = z.preprocess(
   (v) => (v === undefined || v === null ? {} : v),

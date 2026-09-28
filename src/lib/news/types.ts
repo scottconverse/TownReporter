@@ -97,6 +97,11 @@ export type LeadRow = {
   meeting_video_id?: string | null;
   meeting_artifact_id?: number | null;
   meeting_lead_purpose?: string | null;
+  /** Migration 0105 ("Edit the lead", 0.6.80): when this lead's title, notes
+   * or section was last changed through the edit dialog, and who changed it.
+   * Null for a lead nobody has edited (or edited before 0.6.80). */
+  edited_at?: string | null;
+  edited_by?: string | null;
 };
 
 export type DraftRow = {

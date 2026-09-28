@@ -24,6 +24,7 @@ import {
   draftHistoryInput,
   draftLeadInput,
   draftMeetingReviewInput,
+  editLeadInput,
   editorialDraftInput,
   editorialStartInput,
   editorialText,
@@ -387,6 +388,18 @@ const rows: Row[] = [
     run: leadStatusInput.parse.bind(leadStatusInput),
     valid: { id: 42, status: "held" },
     bad: [{ why: "unknown status", value: { id: 42, status: "archived" } }],
+  },
+  {
+    fn: "desk.ts updateLead",
+    run: editLeadInput.parse.bind(editLeadInput),
+    valid: { id: 42, headline: "The council voted 5-2", why: "It changes the budget", topic: "council", urls: ["https://longmontcolorado.gov/agenda"] },
+    bad: [
+      { why: "oversize headline", value: { id: 42, headline: x(LIMITS.leadHeadline + 1), why: "It changes the budget", topic: "council" } },
+      { why: "oversize why", value: { id: 42, headline: "The council voted 5-2", why: x(LIMITS.leadWhy + 1), topic: "council" } },
+      { why: "oversize topic", value: { id: 42, headline: "The council voted 5-2", why: "It changes the budget", topic: x(LIMITS.leadTopic + 1) } },
+      { why: "missing id", value: { headline: "The council voted 5-2", why: "It changes the budget", topic: "council" } },
+      { why: "too many urls", value: { id: 42, headline: "The council voted 5-2", why: "It changes the budget", topic: "council", urls: Array(LIMITS.importLinks + 1).fill("https://a.example/x") } },
+    ],
   },
   {
     fn: "desk.ts:2236 listFollowUps",
@@ -1103,7 +1116,7 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * `LIMITS.leadHeadline`, called from `desk.ts` in the same shape.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to
