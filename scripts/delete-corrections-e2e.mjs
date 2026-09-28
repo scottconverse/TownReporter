@@ -137,6 +137,69 @@ function step(name) {
   console.log(`  ok    ${name}`);
 }
 
+/**
+ * Open every shut disclosure inside the evidence review.
+ *
+ * Unit CW2 (commit f6953ca1, "the review is the Checks tab's own list") moved
+ * the review onto the Checks tab's drawn list: each row's record checks and
+ * judgment now live inside that row's own shut
+ * `<details class="astra-evidence-more">` (src/components/evidence-check-list.tsx),
+ * and the two extras -- the draft-pass inventory and the editor's add-a-claim
+ * form -- are shut disclosures at the foot of the same list
+ * (src/components/finding-evidence-review.tsx). A browser hides what a shut
+ * disclosure holds, so every control below the fold of the list is invisible
+ * until its disclosure is opened, and both `innerText` and `getByRole` report
+ * that as a missing element rather than as a shut disclosure -- the first run
+ * of this walk after the merge said "91 × locator resolved to hidden", which is
+ * the same fact wearing a locator's clothes.
+ *
+ * This is the press an editor makes, and the same one `scripts/cw-story-shots.mjs`
+ * makes before its own pass looks for a control: click the summary. Called
+ * after every load of the story page, because a page that has just been
+ * navigated to (or reloaded) has every disclosure shut again.
+ */
+async function openShutReviewDisclosures(target = page) {
+  const shut = await target.evaluate(() => {
+    const root = document.querySelector("#finding-evidence-review");
+    if (!root) return [];
+    return [...root.querySelectorAll("details")].flatMap((d, i) => {
+      if (d.open) return [];
+      const box = d.getBoundingClientRect();
+      const style = getComputedStyle(d);
+      if (box.width < 1 || box.height < 1 || style.display === "none" || style.visibility === "hidden") {
+        return [];
+      }
+      return [
+        {
+          i,
+          id: d.id || "",
+          label: (d.querySelector("summary")?.innerText || "details").replace(/\s+/g, " ").trim().slice(0, 70),
+        },
+      ];
+    });
+  });
+  for (const one of shut) {
+    const summary = one.id
+      ? target.locator(`#finding-evidence-review details[id="${one.id}"] > summary`).first()
+      : target.locator("#finding-evidence-review details").nth(one.i).locator("> summary").first();
+    await summary.click({ timeout: 15_000 }).catch(async () => {
+      /*
+        A disclosure the drawing pins open, or one whose summary a rule covers,
+        still has to be read: setting `open` is the same state the press asks
+        for, so the walk continues on the element's real contents either way.
+      */
+      await target.evaluate(
+        (i) => {
+          const d = [...document.querySelectorAll("#finding-evidence-review details")][i];
+          if (d) d.open = true;
+        },
+        one.i,
+      );
+    });
+  }
+  return shut;
+}
+
 async function callObservedAddCorrection(data) {
   if (!addCorrectionUrl) throw new Error("the correction server-function request was not observed");
   const body = JSON.stringify(await toJSONAsync({ data }));
@@ -655,35 +718,27 @@ async function main() {
   );
   const newsroomId = owner.rows[0].newsroom_id;
   /*
-    OWED: re-author the review assertions below for unit CW2 (0.6.81).
+    The assertions below were re-authored for unit CW2 (0.6.81, commit
+    f6953ca1), which moved the review onto the Checks tab's drawn list. Three
+    structural facts drive every selector in this region:
 
-    Everything from here to "a pending evidence keep/remove decision..." was
-    written against the panel as it stood before unit CW2 moved the review onto
-    the Checks tab's drawn list (commit f6953ca1, "the review is the Checks
-    tab's own list"). Three of its selectors describe structure that no longer
-    exists, and they are named here rather than guessed at:
-
-      - `[aria-labelledby="draft-pass-claims-heading"]` (line 686) no longer
-        holds a press. The inventory is a shut disclosure at the end of the
-        list now, and each returned claim's record checks and judgment live on
-        that claim's OWN row above, so `View exact captured version` inside the
-        inventory (lines 692-694) is gone by design.
-      - `[aria-labelledby="manual-claims-heading"]` (line 700) is the form
-        alone. Editor-authored claims are rows of the list; the articles this
-        walk looks for under that heading (lines 709, 740, 749) are not there.
-      - Every finding's judgment controls are inside its row's shut
+      - Each row's body sits inside that row's own SHUT
         `<details id="evidence-detail-*">` (src/components/evidence-check-list.tsx),
-        which a browser hides, so each region needs the disclosure opened
-        first -- `summary` "Record checks and judgment" -- exactly as
-        scripts/cw-story-shots.mjs does when its press pass opens them.
-
-    This walk needs Postgres, so it was NOT RUN by unit CW2 and none of the
-    above was verified by execution. Rewriting assertions that cannot be run
-    would be guessing in a file that CI trusts; the failure is left legible
-    instead, with the fix owed to whoever can run it. The controls themselves
-    are proven working from their new place by scripts/cw-story-shots.mjs --
-    reports/CW2-evidence/buttons.md, 53 controls pressed, `Save judgment` and
-    `View cited captured version` among them.
+        and Playwright hides a shut disclosure from `getByRole`, from
+        `click`/`selectOption`, and from `waitFor`'s default visible state.
+        `openShutReviewDisclosures()` opens every shut visible disclosure under
+        the review before a leg needs to press or wait on one -- the same thing
+        scripts/cw-story-shots.mjs does in its press pass. React does not manage
+        `open`, so an opened disclosure survives re-renders; every new document
+        (reload, second tab) re-shuts them, hence the calls after each reload.
+      - The inventory is a shut extra at the foot of the list (no id, found by
+        the `#draft-pass-claims-heading` it holds). It carries NO controls: the
+        returned claim's record checks and judgment live on that claim's OWN row
+        above, which is where `View exact captured version` is pressed now.
+      - Editor-authored claims are rows of the list too. They are found by the
+        `Manual claim N · <kind>` heading their row renders (uppercased on
+        screen by CSS), and the add-a-claim form is the other shut extra,
+        `#manual-claims-disclosure`.
   */
   const findingFixture = await seedFindingEvidenceReview({
     newsroomId,
@@ -691,6 +746,7 @@ async function main() {
   });
   await page.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
   const review = page.locator("#finding-evidence-review");
+  await openShutReviewDisclosures();
   await review.locator("article").first()
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
@@ -715,21 +771,53 @@ async function main() {
     .getByText("The library board approved the recreation room update Tuesday.")
     .waitFor();
   await capturedText.getByRole("button", { name: "Close captured text" }).click();
-  const claimInventory = review.locator('[aria-labelledby="draft-pass-claims-heading"]');
+  /*
+    The inventory leg, re-authored for unit CW2 (f6953ca1). The returned claim's
+    record checks and judgment moved onto that claim's OWN row of the drawn list
+    above, so `View exact captured version` is no longer inside the inventory --
+    measured 2026-09-28 on the merged tree, the inventory's shut disclosure holds
+    zero controls (artifacts/db2/review-dom.json, details[3].controls = []), and
+    the card is on the claim's row instead, still exactly one of it. The
+    inventory's own job is now the sentence that says where the row is. Both are
+    asserted, because the point of the leg was never the card's address: it is
+    that one shared artifact and capture event render exactly one recorded
+    display, and that an editor reading the inventory is sent to the row holding
+    it. The heading id is the anchor unit CW2 kept -- the `aria-labelledby` this
+    walk used to locate it by is carried by no element in `src/` any more
+    (`grep -rn 'aria-labelledby="draft-pass-claims-heading"' src/` finds none).
+  */
+  const claimInventory = review
+    .locator("details")
+    .filter({ has: page.locator("#draft-pass-claims-heading") });
   await claimInventory
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
   await claimInventory.getByText("1 returned claim", { exact: true }).waitFor();
   await claimInventory.getByText("Returned URL:").waitFor();
-  if ((await claimInventory.getByRole("button", { name: "View exact captured version" }).count()) !== 1)
+  await claimInventory
+    .getByText("This claim’s record checks and judgment are on its own row in the list above.")
+    .waitFor();
+  const returnedClaimRow = review.locator("article").filter({ hasText: "Returned URL:" });
+  if ((await returnedClaimRow.count()) !== 1)
+    throw new Error("expected the returned claim to have exactly one row of its own in the list");
+  if (
+    (await returnedClaimRow.getByRole("button", { name: "View exact captured version" }).count()) !== 1
+  )
     throw new Error("expected one rendered exact-provenance card for the shared artifact and capture event");
-  await claimInventory.getByRole("button", { name: "View exact captured version" }).first().click();
+  await returnedClaimRow.getByRole("button", { name: "View exact captured version" }).first().click();
   await capturedText
     .getByText("The library board approved the recreation room update Tuesday.")
     .waitFor();
   await capturedText.getByRole("button", { name: "Close captured text" }).click();
-  step("the private draft-pass claim inventory shows only its exact captured provenance");
-  const manualClaims = review.locator('[aria-labelledby="manual-claims-heading"]');
+  step("the private draft-pass claim inventory names the claim's own row, which shows only its exact captured provenance");
+  /*
+    The editor's add-a-claim form is one of the two shut extra disclosures at the
+    foot of the list, and it is still the only place the form lives -- so the
+    walk scopes to that disclosure instead of the `aria-labelledby` wrapper CW2
+    removed. The manual claim the form creates is NOT in here: it becomes a row
+    of the list, like every other claim, which is what `manualRow` below reads.
+  */
+  const manualClaims = review.locator("#manual-claims-disclosure");
   await manualClaims.getByLabel("Claim text").fill(
     `TEST FIXTURE: The library recreation room meeting starts at 6 p.m. ${stamp}.`,
   );
@@ -738,7 +826,13 @@ async function main() {
   await manualClaims.getByRole("button", { name: "Add record" }).click();
   await manualClaims.getByRole("button", { name: "Add manual claim" }).click();
   await review.getByText("Manual claim saved.", { exact: true }).waitFor();
-  const manualRow = manualClaims.locator("article").first();
+  /*
+    A save that ADDS a row adds a new `details`, and a new `details` is shut:
+    nothing opened it earlier in this document. Opened here before any press or
+    visible wait on the row the form just created.
+  */
+  await openShutReviewDisclosures();
+  const manualRow = review.locator("article").filter({ hasText: /Manual claim 1 ·/i });
   await manualRow.getByText("TEST FIXTURE: The library recreation room meeting starts at 6 p.m.").waitFor();
   await manualRow
     .getByText("Selected captured record · TEST FIXTURE — Library agenda · corroborating", {
@@ -769,7 +863,8 @@ async function main() {
   await review.getByText("Current evidence review loaded.", { exact: true }).waitFor();
   if (await manualClaims.getByLabel("Claim text").inputValue())
     throw new Error("successful explicit reload did not discard the stale manual claim form");
-  await manualClaims.locator("article").first().getByRole("button", { name: "Edit claim" }).click();
+  await openShutReviewDisclosures();
+  await manualRow.getByRole("button", { name: "Edit claim" }).click();
   await manualClaims.getByLabel("Claim text").fill(
     `TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m. ${stamp}.`,
   );
@@ -778,11 +873,11 @@ async function main() {
   if ((await manualRow.getByLabel("Judgment").inputValue()) !== "unreviewed")
     throw new Error("editing a manual claim did not invalidate its prior judgment");
   await page.reload({ waitUntil: "networkidle" });
-  const persistedManualClaims = page.locator('#finding-evidence-review [aria-labelledby="manual-claims-heading"]');
-  await persistedManualClaims
+  await openShutReviewDisclosures();
+  await manualRow
     .getByText("TEST FIXTURE: The library recreation room meeting starts at 6:30 p.m.")
     .waitFor();
-  if ((await persistedManualClaims.locator("article").first().getByLabel("Judgment").inputValue()) !== "unreviewed")
+  if ((await manualRow.getByLabel("Judgment").inputValue()) !== "unreviewed")
     throw new Error("manual claim judgment did not remain reopened after reload");
   step("an editor-created claim keeps only an explicit owned captured record, refuses a stale open form, and reopens after an edit");
   const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
@@ -798,6 +893,15 @@ async function main() {
   const secondFinding = panels.nth(1);
   const savedRevisionBody = `TEST FIXTURE body: saved revision before judgments ${stamp}.`;
   await page.getByLabel("Story", { exact: true }).fill(savedRevisionBody);
+  /*
+    Editing the draft turns the review stale, and the stale review is a REMOUNT
+    of the whole drawn list -- new row elements, therefore new `details`, and a
+    new `details` is shut. Measured, 2026-09-28: without this call the check
+    below sits 45 s on `locator.isDisabled` for a button that is on screen,
+    because a shut disclosure is not in the accessibility tree `getByRole`
+    matches against.
+  */
+  await openShutReviewDisclosures();
   if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
     throw new Error("unsaved draft revision did not disable finding judgments");
   await page.getByRole("button", { name: "Save edits" }).click();
@@ -811,6 +915,7 @@ async function main() {
       (button) => button.textContent?.trim() === "Save judgment" && !button.disabled,
     );
   });
+  await openShutReviewDisclosures();
   if (await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled())
     throw new Error("saved draft revision left finding judgments disabled");
   step("saving a draft revision refreshes the finding review without a page reload");
@@ -856,6 +961,9 @@ async function main() {
     .getByRole("button", { name: "I checked: keep this evidence" });
   await keepEvidence.click({ noWaitAfter: true });
   await evidenceDecisionHeld;
+  /* Same remount as the draft edit above: the pending decision re-renders the
+     list, and its rows come back shut. */
+  await openShutReviewDisclosures();
   if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
     throw new Error("pending keep/remove evidence decision left finding judgments enabled");
   const refreshedReviewAfterDecision = page.waitForResponse(
@@ -888,6 +996,14 @@ async function main() {
     return input instanceof HTMLSelectElement && !input.disabled;
   });
   step("a pending evidence keep/remove decision disables finding judgments until refresh");
+  /*
+    The decision's own refresh re-renders the whole review, and a shut row hides
+    its controls from `getByRole` (Playwright matches only what the accessibility
+    tree exposes, which a shut disclosure is not). Re-opened here rather than
+    trusted: the open is a no-op when the rows are still open, which is the case
+    this run usually sees.
+  */
+  await openShutReviewDisclosures();
   await firstFinding.getByLabel("Judgment").selectOption("supports");
   await secondFinding.getByLabel("Judgment").selectOption("needs-reporting");
   await secondFinding
@@ -902,6 +1018,7 @@ async function main() {
   await review.getByText("Evidence judgment saved.", { exact: true }).waitFor();
   step("finding B saves after finding A without a stale-token conflict");
   await page.reload({ waitUntil: "networkidle" });
+  await openShutReviewDisclosures();
   const reloadedReview = page.locator("#finding-evidence-review");
   if (
     (await reloadedReview.locator("article").nth(0).getByLabel("Judgment").inputValue()) !==
@@ -946,6 +1063,7 @@ async function main() {
     { timeout: 10_000 },
   );
   await secondTab.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
+  await openShutReviewDisclosures(secondTab);
   const reviewRpcPath = new URL((await initialReviewResponse).url()).pathname;
   const secondReview = secondTab.locator("#finding-evidence-review");
   await secondReview
@@ -1121,6 +1239,7 @@ async function main() {
     [newsroomId, owner.rows[0].user_id, findingFixture.leadId, `fixture-running-${stamp}`],
   );
   await page.reload({ waitUntil: "networkidle" });
+  await openShutReviewDisclosures();
   const queuedReview = page.locator("#finding-evidence-review");
   await page.getByRole("button", { name: "Drafting…", exact: true }).waitFor();
   if (!(await queuedReview.getByRole("button", { name: "Save judgment" }).first().isDisabled()))
