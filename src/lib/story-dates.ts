@@ -466,6 +466,93 @@ function dekClause(dek: string, start: number, end: number): string {
 }
 
 /**
+ * A curated set of verbs that show up in this paper's event lines. Not a POS
+ * tagger -- a short list good enough to tell "Council sets the budget
+ * adoption vote" (a clause with a verb) from "funding hearing packet" (a bare
+ * noun phrase) without one.
+ */
+const KNOWN_VERBS = new Set([
+  "advance",
+  "advances",
+  "approve",
+  "approves",
+  "begin",
+  "begins",
+  "cancel",
+  "cancels",
+  "convene",
+  "convenes",
+  "delay",
+  "delays",
+  "end",
+  "ends",
+  "extend",
+  "extends",
+  "hold",
+  "holds",
+  "host",
+  "hosts",
+  "launch",
+  "launches",
+  "meet",
+  "meets",
+  "open",
+  "opens",
+  "post",
+  "posts",
+  "reopen",
+  "reopens",
+  "resume",
+  "resumes",
+  "reschedule",
+  "reschedules",
+  "return",
+  "returns",
+  "revisit",
+  "revisits",
+  "sets",
+  "set",
+  "start",
+  "starts",
+  "vote",
+  "votes",
+  "weigh",
+  "weighs",
+]);
+
+/** How few words make a line too short to stand alone without a verb. */
+const BARE_FRAGMENT_WORDS = 4;
+
+/**
+ * Is `line` a bare scrap rather than something that reads as a headline?
+ *
+ * Unit BZ, item 6 (owner review, 2026-09-27, "This week" at 1790px): rows
+ * printed fragments lifted verbatim out of a clause -- "funding hearing
+ * packet", "instrument collection drive", "Brighton event", "Applications
+ * Close" -- lower-case scraps and short bare nouns with no verb of their own.
+ * `cleanLine` and its exceptions (title case, the "not a name" carve-out) were
+ * built to keep a clause that reads as an event; they still let these four
+ * through because each is grammatically a clause (a subject and, for
+ * "Applications Close", even a verb). What they are not is a HEADLINE: a
+ * reader who has not read the story cannot tell what "Brighton event" is an
+ * event FOR. A line that opens lower-case reads as torn out of a sentence
+ * (that is the whole reason `cleanLine` strips leading joiners); a short line
+ * with no verb of its own is a label, not a sentence.
+ *
+ * This supersedes the title-case exception `cleanLine` documents for
+ * "Applications Close Sept. 29": that exception was about telling a NAME
+ * (venue, building) from a clause, and it is still right about that -- but a
+ * two-word clause is still too short to stand alone as a row's only text.
+ */
+function isBareFragment(line: string): boolean {
+  const words = line.split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  if (/^[a-z]/.test(words[0])) return true;
+  if (words.length >= BARE_FRAGMENT_WORDS) return false;
+  return !words.some((word) => KNOWN_VERBS.has(plain(word)));
+}
+
+/**
  * What a row prints when the story's own words around the date said nothing.
  *
  * A row read out of the headline itself always keeps the headline: the day came
@@ -601,7 +688,18 @@ function wordedDates(
        so the 1st and the 8th can read differently. */
     const own = eventLine(text, hit.start, hit.end, hit.next, fromHeadline);
     for (const date of hit.days) {
-      const what = own || fallbackLine(date, text, hit.start, hit.end, headline, publishedOn);
+      /*
+        A clause that reads as a bare scrap ("funding hearing packet",
+        "Brighton event") is no better than no clause at all: it is routed
+        through the same fallback an empty `own` already gets, which is what
+        keeps this safe for a story whose headline is about a DIFFERENT day
+        (unit BZ, item 5) -- `fallbackLine` prints the headline only when it
+        names this date or names none at all, and otherwise falls to the
+        dek's own clause for the day, never a scrap AND never the wrong day's
+        headline.
+      */
+      const usable = own && !isBareFragment(own) ? own : "";
+      const what = usable || fallbackLine(date, text, hit.start, hit.end, headline, publishedOn);
       if (what) found.push({ date, what });
     }
   }
