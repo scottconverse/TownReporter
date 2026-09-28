@@ -515,6 +515,19 @@ screens can be walked before anything is promoted. See `docs/staging.md`.
    an editor watch that happen. It prints the open job(s) and stops. Pass
    `-WaitForJobs` to have it poll every 15 seconds, up to 15 minutes, for them
    to clear on their own, or `-Force` to proceed anyway with a loud warning.
+   **Boot-time schema warm-up (0.6.80):** before the restarted server accepts
+   its first request, it runs every module's `ensure*Schema` DDL once (the
+   same batches that used to run lazily on whatever request happened to touch
+   them first). Watch for one `[schema-warmup] <module> <ms>ms <status>` line
+   per module in `logs\` right after start -- `status` is `ran` (it issued
+   DDL, expected right after a release that added or changed a table),
+   `skipped-by-marker` (nothing to do, the normal case), or `failed` (that one
+   module is logged and left for its own first request; it does not stop the
+   server). This is what step 4's stop-the-app window exists to protect
+   against in the first place: a module's first use meeting the nightly
+   backup's lock. `scripts\schema-warmup.mjs` runs the same warm-up standalone
+   (`node scripts\with-app-env.mjs node scripts\schema-warmup.mjs`), for
+   example right after a manual `db:migrate`, without starting the server.
 5. Require the local page, public page, a script named by the served HTML, and
    the published-story count to pass the script's checks. Verify the served
    version matches the approved release. A homepage 200 alone is not proof.

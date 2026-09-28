@@ -196,7 +196,7 @@ function effortFromJob(job: Pick<DeskJob, "model_choice" | "result_json">): Mode
  * lead page waited here. `ensureSchemaOnce` runs them once per database
  * instead; see `paper-settings-read-lock.test.ts` and `questions/BP.md`.
  */
-async function ensureDraftMemoColumn() {
+export async function ensureDeskDraftMemoSchema() {
   const sql = await getSql();
   await ensureSchemaOnce(sql, "desk-draft-memo-columns", [
     "alter table drafts add column if not exists research_json text not null default '{}'",
@@ -642,7 +642,7 @@ export const getLead = createServerFn({ method: "GET" })
   .handler(async ({ context, data: id }) => {
     kickJobs();
     const sql = await getSql();
-    await ensureDraftMemoColumn();
+    await ensureDeskDraftMemoSchema();
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.origin,
@@ -1676,7 +1676,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     (!current ||
       !expectedDraft ||
       evidenceReviewToken(current) === evidenceReviewToken(expectedDraft));
-  await ensureDraftMemoColumn();
+  await ensureDeskDraftMemoSchema();
 
   let urls: string[] = [];
   try {
@@ -2681,7 +2681,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => reportingNotesInput.parse(input))
   .handler(async ({ context, data }) => {
-    await ensureDraftMemoColumn();
+    await ensureDeskDraftMemoSchema();
     return withTransaction(async (sql) => {
       /*
         Pull writes excerpts in the background. Lock the same lead row before
@@ -2725,7 +2725,7 @@ export const pullTodo = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     try {
       await assertRate(context.userId, "pull", owned(context));
-      await ensureDraftMemoColumn();
+      await ensureDeskDraftMemoSchema();
       const sql = await getSql();
       const rows = await sql<{ id: number }>`
         select id from leads

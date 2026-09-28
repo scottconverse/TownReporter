@@ -224,7 +224,7 @@ const SCHEMA = [
  * every caller below is a request path, and the `create table` here used to run
  * on each one. See `paper-settings-read-lock.test.ts` and `questions/BP.md`.
  */
-async function ensureSchema() {
+export async function ensureCustomAiConnectionsSchema() {
   await ensureSchemaOnce(await getSql(), "custom-ai-connections", SCHEMA);
 }
 function encryptionKey(): Buffer {
@@ -271,7 +271,7 @@ const fromRow = (r: Row): StoredCustomAiConnection => ({
 
 export async function listCustomAiConnections(userId: string): Promise<PublicCustomAiConnection[]> {
   const me = await requireEditor(userId);
-  await ensureSchema();
+  await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   return (
     await sql<Row>`select id,newsroom_id,name,base_url,encrypted_api_key,model_id,enabled from custom_ai_connections where newsroom_id=${me.newsroomId} order by name`
@@ -285,7 +285,7 @@ export async function saveCustomAiConnection(
 ): Promise<PublicCustomAiConnection> {
   const me = await requireEditor(userId);
   const value = normalizeConnectionInput(input);
-  await ensureSchema();
+  await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   const id = input.id?.trim() || randomUUID();
   const existing = input.id
@@ -315,7 +315,7 @@ export async function saveCustomAiConnection(
 }
 export async function setCustomAiConnectionEnabled(userId: string, id: string, enabled: boolean) {
   const me = await requireEditor(userId);
-  await ensureSchema();
+  await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   await sql.query(
     `update custom_ai_connections set enabled=$1, updated_at=now() where id=$2 and newsroom_id=$3`,
@@ -324,7 +324,7 @@ export async function setCustomAiConnectionEnabled(userId: string, id: string, e
 }
 export async function deleteCustomAiConnection(userId: string, id: string) {
   const me = await requireEditor(userId);
-  await ensureSchema();
+  await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   await sql.query(`delete from custom_ai_connections where id=$1 and newsroom_id=$2`, [
     id,
@@ -335,7 +335,7 @@ export async function resolveCustomAiChoice(
   newsroomId: number,
   id: string,
 ): Promise<{ baseUrl: string; modelId: string; apiKey: string | null; name?: string }> {
-  await ensureSchema();
+  await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   const row = (
     await sql.query<Row>(
@@ -356,7 +356,7 @@ export async function resolveCustomAiChoice(
 }
 async function ownedConnection(userId: string, id: string): Promise<StoredCustomAiConnection> {
   const me = await requireEditor(userId);
-  await ensureSchema();
+  await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   const row = (
     await sql.query<Row>(`select * from custom_ai_connections where id=$1 and newsroom_id=$2`, [

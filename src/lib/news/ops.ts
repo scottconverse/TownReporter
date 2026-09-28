@@ -61,6 +61,12 @@ const DESK_RATE_SCHEMA = [
  * all see each other; at the boundary that can reject a request one early,
  * which is the safe direction for a cost ceiling.
  */
+/** `desk_rate`, once per database. See `assertRate` and `DESK_RATE_SCHEMA` above. */
+export async function ensureDeskRateSchema(): Promise<void> {
+  const sql = await getSql();
+  await ensureSchemaOnce(sql, "desk-rate", DESK_RATE_SCHEMA);
+}
+
 export async function assertRate(
   userId: string,
   action: string,
@@ -68,7 +74,7 @@ export async function assertRate(
 ) {
   const cap = HOURLY[action] ?? 20;
   const sql = await getSql();
-  await ensureSchemaOnce(sql, "desk-rate", DESK_RATE_SCHEMA);
+  await ensureDeskRateSchema();
   await sql`
     insert into desk_rate (user_id, action, newsroom_id) values (${userId}, ${action}, ${newsroomId})
   `;
@@ -100,6 +106,12 @@ const AUDIT_EVENTS_SCHEMA = [
   "alter table audit_events add column if not exists subject_id integer",
 ];
 
+/** `audit_events`, once per database. See `audit` and `AUDIT_EVENTS_SCHEMA` above. */
+export async function ensureAuditEventsSchema(): Promise<void> {
+  const sql = await getSql();
+  await ensureSchemaOnce(sql, "audit-events", AUDIT_EVENTS_SCHEMA);
+}
+
 export async function audit(
   userId: string,
   action: string,
@@ -108,7 +120,7 @@ export async function audit(
   subject?: { kind: string; id: number },
 ) {
   const sql = await getSql();
-  await ensureSchemaOnce(sql, "audit-events", AUDIT_EVENTS_SCHEMA);
+  await ensureAuditEventsSchema();
   await sql`
     insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id)
     values (${userId}, ${action}, ${detail.slice(0, 500)}, ${newsroomId}, ${subject?.kind ?? null}, ${subject?.id ?? null})

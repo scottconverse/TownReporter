@@ -49,6 +49,31 @@ export async function ensureViewsSchema() {
 }
 
 /**
+ * `audit_events` is created by migration 0005 and re-ensured by `audit()`
+ * (ops.ts), but a newsroom that has never published under a changed section
+ * has never written one -- and the stats read below must not be the thing
+ * that fails a stats page. The shape below is the migrated one (0005 plus
+ * 0012's `newsroom_id`), the same one `audit()` ends up with, so the count is
+ * answerable at zero. Separate marker name from `ops.ts`'s `ensureAuditEventsSchema`
+ * on purpose -- this read path must not depend on `audit()` having run first.
+ */
+export async function ensureViewsStatsAuditEventsSchema(): Promise<void> {
+  const sql = await getSql();
+  await ensureSchemaOnce(sql, "views-stats-audit-events", [
+    `
+    create table if not exists audit_events (
+      id serial primary key,
+      user_id text not null,
+      action text not null,
+      detail text not null default '',
+      created_at timestamptz not null default now(),
+      newsroom_id integer not null default 1
+    )
+  `,
+  ]);
+}
+
+/**
  * Whether `target` is something worth counting: the literal 'site', or a
  * story slug that is a REAL, currently published story in this newsroom.
  * Guards against an arbitrary target minting a brand-new bucket for anyone
@@ -179,25 +204,7 @@ export async function getViewStats(userId: string): Promise<ViewStats> {
     order by coalesce(sum(pv.count), 0) desc, a.slug asc
   `;
 
-  /*
-    `audit_events` is created by migration 0005 and re-ensured by `audit()`,
-    but a newsroom that has never published under a changed section has never
-    written one -- and this read must not be the thing that fails a stats page.
-    The shape below is the migrated one (0005 plus 0012's `newsroom_id`), the
-    same one `audit()` ends up with, so the count is answerable at zero.
-  */
-  await ensureSchemaOnce(sql, "views-stats-audit-events", [
-    `
-    create table if not exists audit_events (
-      id serial primary key,
-      user_id text not null,
-      action text not null,
-      detail text not null default '',
-      created_at timestamptz not null default now(),
-      newsroom_id integer not null default 1
-    )
-  `,
-  ]);
+  await ensureViewsStatsAuditEventsSchema();
   const [overrides] = await sql<{ c: number | null }>`
     select count(*)::int as c from audit_events
     where action = 'section-override' and newsroom_id = ${newsroomId}
