@@ -333,6 +333,35 @@ function OpinionPage() {
         receipts at the end. They are drafts until you publish one, and a published piece is never
         edited — a correction runs as a dated note above it.
       </p>
+      {/*
+        CY item 8. These two live regions are the page's, not card one's. They
+        used to sit in the AI card's action row, which was fine while that card
+        was a form standing open -- but the card is a shut door now, and the
+        only row this page had for "Filed as a draft" (the paste card reports
+        through the same spans, desk.opinion.tsx:169) went shut with it. The
+        walk that files a pasted piece says so out loud
+        (scripts/paste-editorial-e2e.mjs:110).
+
+        They stay in the document whether or not there is anything to say, which
+        is what UIUX-03 asks for: a live region has to exist before its content
+        changes, or the announcement is often never made.
+      */}
+      <div className="astra-notices">
+        <span
+          role="alert"
+          aria-live="assertive"
+          aria-atomic="true"
+          className="text-sm text-rust"
+        >
+          {notice?.kind === "error" ? notice.text : ""}
+          {notice?.kind === "error" && looksLikeProviderAuthFailure(notice.authDetail) ? (
+            <ProviderSignInButton detail={notice.authDetail} />
+          ) : null}
+        </span>
+        <span role="status" aria-live="polite" aria-atomic="true" className="text-sm text-muted">
+          {notice && notice.kind !== "error" ? notice.text : ""}
+        </span>
+      </div>
       <div className="astra-2col wide">
         {/*
           CY item 8. The drawing draws the AI intake as a *door*, not as an open
@@ -427,25 +456,6 @@ function OpinionPage() {
                   ? "Checking…"
                   : "Write an editorial"}
             </InkButton>
-            <span
-              role="alert"
-              aria-live="assertive"
-              aria-atomic="true"
-              className="text-sm text-rust"
-            >
-              {notice?.kind === "error" ? notice.text : ""}
-              {notice?.kind === "error" && looksLikeProviderAuthFailure(notice.authDetail) ? (
-                <ProviderSignInButton detail={notice.authDetail} />
-              ) : null}
-            </span>
-            <span
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              className="text-sm text-muted"
-            >
-              {notice && notice.kind !== "error" ? notice.text : ""}
-            </span>
             {/*
               CY item 8: a shut door needs a way back. Card two has had a
               "Cancel" on its own disclosure since it was built; this is the

@@ -5513,6 +5513,15 @@
   gap: 8px;
   min-width: 0;
 }
+
+/* CY item 8: on Opinion the band is always in the document (UIUX-03: a live
+   region has to exist before its content changes), and both spans are empty
+   until there is something to say. Two empty children still pay the 8px gap,
+   so the band measures 8px of nothing between the lede and the cards; with no
+   words in it, the gap goes. The elements stay -- only the space does not. */
+.desk-ltr.astra .astra-notices:not(:has(> :not(:empty))) {
+  gap: 0;
+}
 .desk-ltr.astra .astra-notices > * { margin: 0; }
 
 /* The open file sits on the page background, not on the rail's panel fill. */
