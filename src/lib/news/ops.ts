@@ -1,4 +1,4 @@
-import { ensureSchemaOnce, getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 const HOURLY: Record<string, number> = {
@@ -121,6 +121,27 @@ export async function audit(
 ) {
   const sql = await getSql();
   await ensureAuditEventsSchema();
+  await auditWithSql(sql, userId, action, detail, newsroomId, subject);
+}
+
+/**
+ * `audit()`, writing through a caller-supplied `Sql` -- for a caller that is
+ * already inside a transaction and needs the event to commit, or roll back,
+ * with the rest of its work (Unit CR, 0.6.81: redeeming a recovery code).
+ * `audit()` itself cannot join such a transaction: it resolves its own
+ * `getSql()`, which on the PGlite backend is a different connection, so its
+ * insert would survive a rollback of the caller's. Callers using this must
+ * have ensured the schema themselves (`ensureAuditEventsSchema()`), which
+ * cannot run inside the transaction -- it is DDL.
+ */
+export async function auditWithSql(
+  sql: Sql,
+  userId: string,
+  action: string,
+  detail: string,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+  subject?: { kind: string; id: number },
+) {
   await sql`
     insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id)
     values (${userId}, ${action}, ${detail.slice(0, 500)}, ${newsroomId}, ${subject?.kind ?? null}, ${subject?.id ?? null})

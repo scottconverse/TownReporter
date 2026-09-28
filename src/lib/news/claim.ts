@@ -258,6 +258,10 @@ export const redeemMyRecoveryCode = createServerFn({ method: "POST" })
       return { ok: false as const, error: result.reason };
     }
     recoveryRedeemAttempts.recordSuccess(ip);
-    await audit(result.ownerUserId, "recovery-code-used", "owner recovery code redeemed; temporary password issued");
+    // The "recovery-code-used" audit event is written by `redeemRecoveryCode`
+    // itself, in the same transaction as the burn and the password change
+    // (review finding 2, Unit CR 0.6.81). Auditing here instead would put it
+    // outside that transaction, where a failure could not be rolled back and
+    // the owner would lose the desk the code was meant to recover.
     return { ok: true as const, tempPassword: result.tempPassword };
   });

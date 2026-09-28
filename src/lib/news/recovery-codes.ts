@@ -26,13 +26,15 @@
   change their password from the desk afterward (the existing account
   settings already have a change-password control; this does not add a new
   one). Nothing here touches Better Auth's session or cookie machinery, and
-  no plaintext password or code is ever logged -- `logRecoveryCodeUse` records
-  only who and when.
+  no plaintext password or code is ever logged -- the audit event records only
+  who and when, in the same transaction as the burn and the password change
+  (review finding 2; see `redeemRecoveryCode`).
 */
 
 import { hashPassword } from "better-auth/crypto";
-import { getSql } from "../db.ts";
+import { getSql, withTransaction } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { auditWithSql, ensureAuditEventsSchema } from "./ops.ts";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -157,17 +159,60 @@ export async function redeemRecoveryCode(rawCode: string): Promise<RecoveryRedem
   }
   const tempPassword = `${randomGroup()}${randomGroup()}`.toLowerCase();
   const newHash = await hashPassword(tempPassword);
-  // Burn first: if two requests race the same code, only the winner of this
-  // UPDATE proceeds to actually change the password.
-  const burned = await sql.query<{ id: number }>(
-    `update owner_recovery_code set used_at = now(), used_by = $2
-     where id = $1 and used_at is null returning id`,
-    [match.id, ownerUserId],
-  );
-  if (!burned[0]) return { ok: false, reason: "That recovery code was already used." };
-  await sql.query(
-    `update "account" set "password" = $1, "updatedAt" = now() where id = $2`,
-    [newHash, account[0].id],
-  );
+
+  /*
+    Review finding 2 (P1), Unit CR 0.6.81. Burning the code, replacing the
+    password, and writing the audit event are one unit of work. They used to be
+    three: the burn and the password here, the audit in the caller afterwards.
+    An audit that threw then left the owner with a consumed code, a password
+    they were never shown, and no way back in -- a lost desk, the exact failure
+    this feature exists to prevent. Now a failure anywhere rolls back all three
+    and the caller gets `ok: false`, so the code is still live and the old
+    password still works.
+
+    The reads above stay outside the transaction: they are lookups, and the
+    only race that matters is the burn, which the UPDATE's `used_at is null`
+    guard decides inside it. `ensureAuditEventsSchema()` is DDL and runs before
+    the transaction; the event itself is written through the transaction's own
+    connection (see `auditWithSql`).
+  */
+  await ensureAuditEventsSchema();
+
+  let burned = false;
+  try {
+    burned = await withTransaction(async (tx) => {
+      const burnedRow = await tx.query<{ id: number }>(
+        `update owner_recovery_code set used_at = now(), used_by = $2
+         where id = $1 and used_at is null returning id`,
+        [match.id, ownerUserId],
+      );
+      // Lost the race for this code: nothing else has happened yet, so there is
+      // nothing to undo and the transaction commits empty.
+      if (!burnedRow[0]) return false;
+      await tx.query(`update "account" set "password" = $1, "updatedAt" = now() where id = $2`, [
+        newHash,
+        account[0].id,
+      ]);
+      await auditWithSql(
+        tx,
+        ownerUserId,
+        "recovery-code-used",
+        "owner recovery code redeemed; temporary password issued",
+        match.newsroom_id,
+      );
+      return true;
+    });
+  } catch (err) {
+    console.error(
+      "[recovery-codes] redemption rolled back; the code is still unused and the old password still works:",
+      err,
+    );
+    return {
+      ok: false,
+      reason:
+        "Could not complete the recovery just now. Nothing was changed -- your code still works and your old password still works.",
+    };
+  }
+  if (!burned) return { ok: false, reason: "That recovery code was already used." };
   return { ok: true, tempPassword, ownerUserId };
 }

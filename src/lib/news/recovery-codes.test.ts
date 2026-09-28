@@ -52,6 +52,57 @@ async function reset() {
   );
 }
 
+/** `audit_events` in the shape `audit()` writes to, so the module's own ensure is a no-op. */
+const AUDIT_TABLE = `
+  create table if not exists audit_events (
+    id serial primary key,
+    user_id text not null,
+    action text not null,
+    detail text not null default '',
+    created_at timestamptz not null default now(),
+    newsroom_id integer not null default 1,
+    subject_kind text,
+    subject_id integer
+  )
+`;
+
+/**
+ * Rebuild `audit_events` so that the redemption event cannot be written, the
+ * way an unwritable audit table behaves in production (a check constraint here
+ * because it is the one failure the rest of the schema tolerates).
+ */
+async function unmakeAuditTable() {
+  const sql = await getSql();
+  await sql.query(`drop table if exists audit_events`);
+  await sql.query(
+    `create table audit_events (
+       id serial primary key,
+       user_id text not null,
+       action text not null check (action <> 'recovery-code-used'),
+       detail text not null default '',
+       created_at timestamptz not null default now(),
+       newsroom_id integer not null default 1,
+       subject_kind text,
+       subject_id integer
+     )`,
+  );
+}
+
+async function restoreAuditTable() {
+  const sql = await getSql();
+  await sql.query(`drop table if exists audit_events`);
+  await sql.query(AUDIT_TABLE);
+}
+
+async function ownerPassword(): Promise<string | undefined> {
+  const sql = await getSql();
+  const rows = await sql.query<{ password: string }>(
+    `select password from "account" where "userId" = $1 and "providerId" = 'credential'`,
+    [OWNER_ID],
+  );
+  return rows[0]?.password;
+}
+
 describe("owner recovery codes", () => {
   it("generates 10 codes, stores only hashes, and reports the right remaining count", async () => {
     await reset();
@@ -81,6 +132,49 @@ describe("owner recovery codes", () => {
     assert.equal(await recoveryCodesRemaining(1), RECOVERY_CODE_COUNT - 1);
     const second = await redeemRecoveryCode(code);
     assert.equal(second.ok, false);
+  });
+
+  /*
+    Review finding 2 (P1). The redemption used to burn the code and replace the
+    password first and audit afterwards, in the caller. When the audit failed
+    the request errored -- so the owner never saw the temporary password, the
+    old password was already gone, and the code read as used: a lost desk.
+
+    The contract asserted here is the one the review asked for: if the audit
+    cannot be written, NOTHING changed -- the code is still live and the old
+    password still works.
+  */
+  it("an unwritable audit row rolls the whole redemption back", async () => {
+    await reset();
+    const [code] = await generateRecoveryCodes(1);
+    const before = await ownerPassword();
+
+    await unmakeAuditTable();
+    let result: Awaited<ReturnType<typeof redeemRecoveryCode>>;
+    try {
+      result = await redeemRecoveryCode(code);
+    } finally {
+      await restoreAuditTable();
+    }
+
+    assert.equal(
+      result.ok,
+      false,
+      "the redemption must not report success when the audit row it promises cannot be written",
+    );
+    assert.equal(await recoveryCodesRemaining(1), RECOVERY_CODE_COUNT, "the code must not be burned");
+    assert.equal(await ownerPassword(), before, "the old password must still be the one that works");
+
+    // And the code still redeems, for real, once the audit table is healthy.
+    const retry = await redeemRecoveryCode(code);
+    assert.equal(retry.ok, true, "the code must still be usable after the failed attempt");
+    assert.notEqual(await ownerPassword(), before, "the retry did set the temporary password");
+    const sql = await getSql();
+    const audited = await sql.query<{ c: number }>(
+      `select count(*)::int as c from audit_events where action = 'recovery-code-used' and user_id = $1`,
+      [OWNER_ID],
+    );
+    assert.equal(audited[0]?.c, 1, "the successful redemption wrote its audit event");
   });
 
   it("regenerating invalidates every old code, not just adds new ones", async () => {
