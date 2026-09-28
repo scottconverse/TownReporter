@@ -90,11 +90,45 @@ test("both source registry import controls have accessible names", async () => {
   );
 });
 
-test("the story editor's own-note and follow-up inputs have accessible names", async () => {
+test("the story editor names its own note, and its manual ask fields are retired", async () => {
   const story = await readFile(new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
-  assert.match(story, /placeholder="Who — e\.g\. City Manager's office"[\s\S]{0,100}aria-label="Who owes a response"/);
-  assert.match(story, /placeholder="For what — one line"[\s\S]{0,100}aria-label="What response is needed"/);
-  assert.match(story, /placeholder="Your own line — a call to make, a record to pull"[\s\S]{0,100}aria-label="Add a reporting note"/);
+  assert.match(
+    story,
+    /placeholder="Your own line — a call to make, a record to pull"[\s\S]{0,100}aria-label="Add a reporting note"/,
+    "the editor's own note is the one input this page still draws, and it keeps its accessible name",
+  );
+  /*
+    Unit CU (0.6.81) retired the manual follow-up workflow, so this pin follows
+    the change rather than the markup it removed -- the move BJ4 (0eb1f248) made
+    when Phase 2c took the two source-registry controls into the dialog. The two
+    fields this test used to name (placeholder "Who — e.g. City Manager's
+    office" / name "Who owes a response", and placeholder "For what — one line"
+    / name "What response is needed") belonged to the story page's "Add a
+    follow-up" form, and that form is gone by decision: "Follow-ups are AI
+    agents ... not a list of people to call" (DECISIONS.md:38) and "No human
+    'seek a response' step anywhere" (DECISIONS.md:44), with the open manual rows
+    closed by `migrations/0106_retire_manual_follow_ups.sql`. No screen reader can
+    reach either field any more, so asserting their names would pin markup the
+    product deliberately does not have. What the pin still owes the reader is
+    that the fields stay gone and that the page records where they stood.
+  */
+  for (const gone of [
+    "Who owes a response",
+    "What response is needed",
+    "Who — e.g. City Manager's office",
+    "For what — one line",
+  ]) {
+    assert.equal(
+      story.includes(gone),
+      false,
+      `"${gone}" is back on the story page; the manual ask is retired (DECISIONS.md:44, migrations/0106)`,
+    );
+  }
+  assert.match(
+    story,
+    /the "People who still need to respond" section stood[\s\S]{0,40}?here/,
+    "the page must say where the manual-ask block stood, so the removal stays a decision and not an accident",
+  );
 });
 
 
