@@ -74,6 +74,14 @@ export const Route = createFileRoute("/")({
         oldest: deps.sort === "oldest",
         ...(area ? { area } : {}),
         ...(deps.view === "saved" ? { saved: [] } : {}),
+        /*
+          The edition read skips opinion (unit BZ, item 9). The lead and the
+          ruled grid are the paper's reporting; an unsigned editorial printed
+          there took the Opinion box's own story -- the newest opinion the paper
+          has -- off the box. A listing screen is a search across the whole
+          paper, opinion included, so this predicate is the edition's alone.
+        */
+        ...(listing ? {} : { notTopic: "opinion" }),
       },
     });
     if (listing) return { listing: page, river: null, opinion: null, week: [], region: [] };
@@ -82,12 +90,18 @@ export const Route = createFileRoute("/")({
     /*
       The opinion band is above the river, so its story is read here -- once --
       both to print that band on the server and to keep the piece out of the
-      river. It takes the newest opinion story the top of the page has NOT
-      printed: the band's own piece used to be one of "The latest" rows as well,
-      so the front page carried it twice.
+      river.
+
+      It is the newest opinion piece the paper has published, full stop (unit
+      BZ, item 9). It used to be "the newest the top of the page has NOT
+      printed", which meant a fresh editorial landing in the story grid pushed
+      the box down to a week-old one -- the box would not show the paper's own
+      newest editorial. Since the edition read above now skips opinion, the
+      newest piece is never one the top has printed, and the exclusion has
+      nothing left to exclude.
     */
     const opinion = await readerArticles({
-      data: { topic: "opinion", page: 1, oldest: false, limit: 1, exclude: above },
+      data: { topic: "opinion", page: 1, oldest: false, limit: 1 },
     });
     /*
       "This week". The dated items printed stories carry for the next seven
@@ -180,6 +194,8 @@ function Home() {
     oldest: search.sort === "oldest",
     ...(area ? { area } : {}),
     ...(search.view === "saved" ? { saved: reader.saved } : {}),
+    // The edition read's own predicate; see the loader. A listing has none.
+    ...(listing ? {} : { notTopic: "opinion" }),
   };
   const query = useQuery({
     queryKey: ["reader-archive", args],
@@ -191,18 +207,15 @@ function Home() {
   const stories = data.stories;
   const lead = stories[0];
   /*
-    The band asks the same question the loader asked, with the same exclusion:
-    the top of the page's own stories. A client query without it would refetch
-    the newest opinion piece as soon as the page hydrated and print the story
-    under "The latest" a second time.
+    The band asks the same question the loader asked: the newest opinion piece
+    the paper has published, with no exclusion (unit BZ, item 9). The key holds
+    no story ids for the same reason the query holds no `exclude` -- the answer
+    does not depend on what the top of the page printed, so a client query that
+    refetched it would get the same piece the server rendered.
   */
-  const aboveIds = stories.slice(0, TOP_STORIES).map((s) => s.id);
   const opinion = useQuery({
-    queryKey: ["reader-opinion", aboveIds],
-    queryFn: () =>
-      readerArticles({
-        data: { topic: "opinion", page: 1, oldest: false, limit: 1, exclude: aboveIds },
-      }),
+    queryKey: ["reader-opinion"],
+    queryFn: () => readerArticles({ data: { topic: "opinion", page: 1, oldest: false, limit: 1 } }),
     enabled: !listing,
     initialData: initial.opinion ?? undefined,
   });

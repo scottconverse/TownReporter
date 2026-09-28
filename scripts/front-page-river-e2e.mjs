@@ -66,12 +66,29 @@ const SEEDED = 40;
  */
 const ABOVE = 7;
 /**
- * Two opinion pieces. The first sits inside the top seven, where the opinion
- * band would print it a second time; the second sits below, and is the newest
- * opinion piece left for the band once the top seven are excluded.
+ * Two opinion pieces, and the shape unit BZ item 9 gave the page.
+ *
+ * The newest is story 3 (`OPINION_NEWEST`): the opinion band prints it. It sits
+ * INSIDE the top seven's range on purpose -- the number that used to matter is
+ * the one that must not matter any more. The band used to take "the newest
+ * opinion the top has NOT printed", so a piece here pushed the box down to the
+ * older one; since the edition read skips opinion, the band takes the newest
+ * piece the paper has, and this one is it.
+ *
+ * The older (`OPINION_OLDER`, story 20) is below the fold, so the river has an
+ * opinion piece in it -- Latest stories still lists opinion (item 9).
  */
-const OPINION_IN_TOP = 3;
-const OPINION_BAND = 20;
+const OPINION_NEWEST = 3;
+const OPINION_OLDER = 20;
+/**
+ * The seven the top of the page prints: the lead and the six cells of the ruled
+ * grid. NEWS ONLY -- the edition read passes `notTopic: "opinion"`
+ * (`src/routes/index.tsx`), so the top seven are the seven newest stories that
+ * are not opinion, which is 1..8 less the band's own piece.
+ */
+const TOP = [1, 2, 4, 5, 6, 7, 8];
+/** The newest story in the river, and therefore what the top of the page stops at. */
+const RIVER_FIRST = 9;
 /** The river's rows: the paper, less the top seven, less the band's piece. */
 const RIVER = SEEDED - ABOVE - 1; // 32
 /**
@@ -179,7 +196,7 @@ async function seedThePaper() {
   // every count below is exact.
   await pg.query("delete from articles");
   for (let n = 1; n <= SEEDED; n += 1) {
-    const topic = n === OPINION_IN_TOP || n === OPINION_BAND ? "opinion" : "council";
+    const topic = n === OPINION_NEWEST || n === OPINION_OLDER ? "opinion" : "council";
     await pg.query(
       `insert into articles (user_id, slug, headline, dek, body, topic, source_urls, status, published_at)
        values ('river-e2e', $1, $2, $3, $4, $5, '[]', 'published',
@@ -384,11 +401,11 @@ async function theServerRenderedHtmlPrintsEveryStoryOnce(browser) {
 async function theHtmlCarriesTheRiverRowsAndTheArchiveLink() {
   const html = await (await fetch(`${base}/`)).text();
   const missing = [];
-  for (let n = ABOVE + 1; n <= ABOVE + LISTED; n += 1) {
+  for (let n = RIVER_FIRST; n < RIVER_FIRST + LISTED; n += 1) {
     if (!html.includes(headline(n))) missing.push(headline(n));
   }
   if (missing.length) throw new Error(`the server-rendered HTML is missing ${missing.join(", ")}`);
-  for (let n = 1; n <= ABOVE; n += 1) {
+  for (const n of TOP) {
     if (!html.includes(headline(n))) throw new Error(`the top of the page lost ${headline(n)}`);
   }
   /*
@@ -405,8 +422,8 @@ async function theHtmlCarriesTheRiverRowsAndTheArchiveLink() {
   if (html.includes("Load more stories"))
     throw new Error("the front page still carries the removed Load more stories control");
   if (html.includes("A DRAFT THAT MUST NOT PRINT")) throw new Error("the draft reached the front page");
-  const newest = html.indexOf(headline(ABOVE + 1));
-  const older = html.indexOf(headline(ABOVE + LISTED));
+  const newest = html.indexOf(headline(RIVER_FIRST));
+  const older = html.indexOf(headline(RIVER_FIRST + LISTED - 1));
   if (newest < 0 || older < 0 || newest > older)
     throw new Error("the river rows are not newest first in the HTML");
   step(
@@ -438,13 +455,19 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
   await waitForRows(LISTED, `the river prints ${LISTED} rows, server-rendered, and no more`);
 
   const first = (await page.locator(".river .newsrow h3").first().innerText()).trim();
-  if (first !== headline(ABOVE + 1))
-    throw new Error(`the river starts at ${first}, not ${headline(ABOVE + 1)}`);
+  if (first !== headline(RIVER_FIRST))
+    throw new Error(`the river starts at ${first}, not ${headline(RIVER_FIRST)}`);
 
   /*
     The seven the river leaves out: the lead and the six cells of the ruled grid
     under it. Each is printed once up there, and none of them appears again
     inside the river.
+
+    The opinion piece at the top of the paper's range is NOT one of them -- it
+    is the band's own card, and the lead and the grid are news (unit BZ item 9).
+    So the check is over 1..8: every one of `TOP` printed exactly once above, and
+    the newest opinion piece printed once as well, in the band's card and not in
+    the top -- which the selector read just below this loop pins down.
 
     The region band prints nothing in this walk: the seeds carry no `area`, and a
     null area reads as the home town (`src/lib/story-area.ts`), so "Around the
@@ -453,11 +476,33 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
   */
   const top = await printedHeadlines();
   const above = [];
-  for (let n = 1; n <= ABOVE; n += 1) {
+  for (let n = 1; n < RIVER_FIRST; n += 1) {
     const printed = top.filter((h) => h === headline(n)).length;
-    if (printed !== 1) throw new Error(`${headline(n)} is printed ${printed}x above the river`);
-    above.push(headline(n));
+    /*
+      A story printed above the river is either a card of the top seven or the
+      band's own piece: the census reads `.opinionpanel` too, and item 9 puts
+      the newest opinion there rather than in the lead or the grid.
+    */
+    const want = TOP.includes(n) || n === OPINION_NEWEST ? 1 : 0;
+    if (printed !== want)
+      throw new Error(
+        `${headline(n)} is printed ${printed}x above the river; expected ${want}`,
+      );
+    if (want) above.push(headline(n));
   }
+  /*
+    ...and it is in the band, not in the top. The census cannot say WHICH card
+    a story was printed in, so the two selectors are read directly: the lead
+    and the six cells are news, and the newest opinion piece is not one of
+    them (unit BZ item 9). The band's own step reads its `<h3>` separately.
+  */
+  const topCards = (await page.locator(".lead h3, .storycell h3").allInnerTexts()).map((h) =>
+    h.trim(),
+  );
+  if (topCards.includes(headline(OPINION_NEWEST)))
+    throw new Error(
+      `the lead or the grid prints ${headline(OPINION_NEWEST)}, an opinion piece; the top is news`,
+    );
   const river = await page.locator(".river .newsrow h3").allInnerTexts();
   const repeated = river.filter((h) => above.includes(h.trim()));
   if (repeated.length) throw new Error(`the river repeats ${repeated.join(", ")}`);
@@ -483,24 +528,32 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
 }
 
 /**
- * The band takes an opinion story the top of the page has not printed.
+ * The band takes the newest opinion piece the paper has published.
+ *
+ * Unit BZ, item 9 changed what this measures. The band used to take "the newest
+ * opinion story the top of the page has NOT printed" -- an exclusion, so a
+ * fresh editorial landing in the story grid pushed the box down to an older
+ * one, and the paper's own newest editorial was not the one the box showed. The
+ * front page's edition read now leaves opinion out of the lead and the grid
+ * (`notTopic: "opinion"`), so the newest piece is never one the top printed and
+ * the box takes it. The seeded newest opinion piece sits inside the top seven's
+ * range precisely so this step fails if that ever stops being true.
  *
  * `main:src/routes/index.tsx:328` wrapped it in `<section class="opinionband">`;
  * the redesign makes it an `<aside class="opinionpanel">`
- * (`src/routes/index.tsx:536`), which is the shape the prototype draws -- the
- * band's own heading over one headline link and "All opinion →"
+ * (`src/routes/index.tsx`), which is the shape the prototype draws -- the band's
+ * own heading over one headline link and "All opinion →"
  * (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html:80-82`). The `<h3>`
- * headline this step reads is the same `<h3>` in both, so the assertion is
- * unchanged; only the hook moved.
+ * headline this step reads is the same `<h3>` in both.
  */
-async function theOpinionBandTakesAnOpinionStoryTheTopHasNotPrinted() {
+async function theOpinionBandTakesTheNewestOpinionPiece() {
   await page.getByRole("heading", { level: 2, name: "Opinion" }).waitFor({ timeout: 30_000 });
   const shown = (await page.locator(".opinionpanel h3").innerText()).trim();
-  if (shown !== headline(OPINION_BAND))
+  if (shown !== headline(OPINION_NEWEST))
     throw new Error(
-      `the opinion band prints ${shown}; ${headline(OPINION_BAND)} is the newest opinion story the top seven do not carry`,
+      `the opinion band prints ${shown}; ${headline(OPINION_NEWEST)} is the newest opinion piece the paper has published`,
     );
-  step(`the opinion band prints ${shown}, not the opinion story the top of the page already carries`);
+  step(`the opinion band prints ${shown}, the newest opinion piece the paper has`);
 }
 
 /**
@@ -539,14 +592,14 @@ async function theArchiveCarriesTheRestOfThePaper() {
     await page.waitForTimeout(400);
   }
   const missing = [];
-  for (let n = ABOVE + 1; n <= SEEDED; n += 1) {
+  for (let n = RIVER_FIRST; n <= SEEDED; n += 1) {
     if (!seen.has(headline(n))) missing.push(headline(n));
   }
   if (missing.length)
     throw new Error(`the archive never printed ${missing.length} of the paper's stories: ${missing.join(", ")}`);
   if ([...seen].some((h) => h.includes("DRAFT THAT MUST NOT PRINT")))
     throw new Error("the draft is on the archive");
-  step(`paging the archive reaches every one of the ${SEEDED - ABOVE} stories below the front page`);
+  step(`paging the archive reaches every one of the ${SEEDED - RIVER_FIRST + 1} stories below the front page`);
 
   /*
     And the front page itself did not carry them: the six rows plus the top.
@@ -554,9 +607,9 @@ async function theArchiveCarriesTheRestOfThePaper() {
     kept for the page it is still true on.
   */
   const onFront = [];
-  const frontPage = new Set([...Array(ABOVE).keys()].map((i) => i + 1));
-  frontPage.add(OPINION_BAND);
-  for (let n = ABOVE + 1; n <= ABOVE + LISTED; n += 1) frontPage.add(n);
+  const frontPage = new Set(TOP);
+  frontPage.add(OPINION_NEWEST);
+  for (let n = RIVER_FIRST; n < RIVER_FIRST + LISTED; n += 1) frontPage.add(n);
   for (let n = 1; n <= SEEDED; n += 1) {
     if (frontPage.has(n)) continue;
     if (printedOnTheFrontPage.includes(headline(n))) onFront.push(headline(n));
@@ -644,7 +697,13 @@ async function theScreenshots(browser, main) {
  *
  * So the claims measured here are: the panel is ABSENT, the whole region band
  * is ABSENT (this paper's three stories are all home-ground and none of them is
- * left over as an opinion piece), and the lead fills the row it sits in.
+ * an opinion piece), and the lead fills the row it sits in.
+ *
+ * The three kept stories are 1, 2 and 4 -- NOT 1, 2 and 3: story 3 is the
+ * opinion piece (unit BZ item 9), and keeping it would put a card in the
+ * Opinion band and leave only one story for the grid. The paper this step
+ * describes is the one the walk was written against, three news stories with
+ * nothing left over.
  *
  * `clientWidth` is the row's inside width: the 1px rules between the columns
  * are the row's own background showing through a gap, not a border, so a lead
@@ -655,7 +714,7 @@ async function theScreenshots(browser, main) {
 async function aThreeStoryPaperPrintsThreeCardsAndNoRiver() {
   const pg = await globalThis.__pgliteInstance__;
   await pg.query(
-    `delete from articles where slug not in ('river-e2e-1','river-e2e-2','river-e2e-3')`,
+    `delete from articles where slug not in ('river-e2e-1','river-e2e-2','river-e2e-4')`,
   );
   await page.goto(`${base}/`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { level: 2, name: headline(1) }).waitFor({ timeout: 30_000 });
@@ -700,7 +759,7 @@ async function main() {
     await theServerRenderedHtmlPrintsEveryStoryOnce(browser);
     await theHtmlCarriesTheRiverRowsAndTheArchiveLink();
     await theFrontPageRendersTheTopAndTheRiverRows();
-    await theOpinionBandTakesAnOpinionStoryTheTopHasNotPrinted();
+    await theOpinionBandTakesTheNewestOpinionPiece();
     await theArchiveCarriesTheRestOfThePaper();
     await theListIsReadableWithNoJavaScript(browser, page);
     await theScreenshots(browser, page);
