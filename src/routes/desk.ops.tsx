@@ -279,10 +279,10 @@ function OpsPage() {
           </OpsCard>
           <OpsCard id={PANEL_ANCHORS["Server health"]}>
             {known && !isOwner ? (
-              <ReadOnlyNote>
+              <ReadOnlyCard title="Health">
                 Only the owner can read this machine&rsquo;s health, its logs and the buttons that
                 restart things. Ask the owner if a check looks wrong.
-              </ReadOnlyNote>
+              </ReadOnlyCard>
             ) : (
               <>
               <section className="mt-12">
@@ -458,10 +458,10 @@ function OpsPage() {
 
           <OpsCard id={PANEL_ANCHORS["Paper identity"]}>
             {known && !isOwner ? (
-              <ReadOnlyNote>
+              <ReadOnlyCard title="Paper setup">
                 Only the owner can change the paper&rsquo;s name, town, state, timezone and starting
                 watch list.
-              </ReadOnlyNote>
+              </ReadOnlyCard>
             ) : (
               <PaperSetup />
             )}
@@ -473,10 +473,10 @@ function OpsPage() {
 
           <OpsCard id={PANEL_ANCHORS.Sections}>
             {known && !isOwner ? (
-              <ReadOnlyNote>
+              <ReadOnlyCard title="Newspaper sections">
                 Only the owner can add, rename, hide or retire a section. The sections themselves
                 are the rail on every desk page and the headings on the public paper.
-              </ReadOnlyNote>
+              </ReadOnlyCard>
             ) : (
               <SectionsSetup />
             )}
@@ -484,10 +484,10 @@ function OpsPage() {
 
           <OpsCard id={PANEL_ANCHORS["Daily scan"]}>
             {known && !isOwner ? (
-              <ReadOnlyNote>
+              <ReadOnlyCard title="Daily scan">
                 Only the owner can change when the daily scan runs and how much it may read. It
                 runs for the whole paper, once.
-              </ReadOnlyNote>
+              </ReadOnlyCard>
             ) : (
               <DailyScanSettings />
             )}
@@ -495,10 +495,10 @@ function OpsPage() {
 
           <OpsCard id={PANEL_ANCHORS["Meeting capture"]}>
             {known && !isOwner ? (
-              <ReadOnlyNote>
+              <ReadOnlyCard title="Meeting capture">
                 Only the owner can configure meeting capture. The card is here so the page still
                 says what the desk watches.
-              </ReadOnlyNote>
+              </ReadOnlyCard>
             ) : (
               <MeetingCaptureSettings />
             )}
@@ -514,10 +514,10 @@ function OpsPage() {
 
           <OpsCard id={PANEL_ANCHORS["Named outlets"]}>
             {known && !isOwner ? (
-              <ReadOnlyNote>
+              <ReadOnlyCard title="Named outlets">
                 Only the owner can change the named outlets and their overrides. Everything the
                 desk writes still uses them.
-              </ReadOnlyNote>
+              </ReadOnlyCard>
             ) : (
               <NamedOutletsSetup />
             )}
@@ -529,10 +529,10 @@ function OpsPage() {
                 {isOwner ? (
                   <InviteAnEditor />
                 ) : (
-                  <ReadOnlyNote>
+                  <ReadOnlyCard title="Invite an editor">
                     Only the owner can invite an editor or hand the newsroom over. Your own way out
                     is below.
-                  </ReadOnlyNote>
+                  </ReadOnlyCard>
                 )}
                 {/*
                   Never owner-only: this is the control an editor uses to LEAVE,
@@ -546,7 +546,15 @@ function OpsPage() {
           </OpsCard>
 
           <OpsCard id={PANEL_ANCHORS["Time budgets"]}>
-            <TimeBudgets />
+            {known && !isOwner ? (
+              <ReadOnlyCard title="Time budgets">
+                Only the owner can read or change how long one answer from each model may take.
+                The limits the owner sets stand for everyone, so the desk still gives up on an
+                answer at the same moment on your screen and theirs.
+              </ReadOnlyCard>
+            ) : (
+              <TimeBudgets />
+            )}
           </OpsCard>
         </div>
       </div>
@@ -593,19 +601,38 @@ function OpsCard({
 /**
  * What a card says to an editor who is not the owner.
  *
- * Unit CX item 4. Four of these cards read something only the owner may read
- * (this machine's health, the writing models' sign-ins, the time budgets, the
- * meeting settings), and the server refuses the read rather than trusting the
- * UI to hide it. Before, the card drew its loading skeleton and stayed there:
- * "◉UNKNOWN" over grey bars, which reads as a broken page rather than a
- * permission. One plain sentence is the honest answer, and it is a sentence an
- * editor can act on -- ask the owner.
+ * Unit CX item 4. Eight of these cards read something only the owner may read
+ * (this machine's health, the writing models' sign-ins, the paper's setup, the
+ * sections, the daily scan policy, meeting capture, the named outlets, the time
+ * budgets), and the server refuses the read rather than trusting the UI to hide
+ * it. Before, the card drew its loading skeleton and stayed there: "◉UNKNOWN"
+ * over grey bars, which reads as a broken page rather than a permission. One
+ * plain sentence is the honest answer, and it is a sentence an editor can act
+ * on -- ask the owner.
  */
 function ReadOnlyNote({ children }: { children: React.ReactNode }) {
   return (
     <p className="mt-2 max-w-2xl text-base text-ink-2" data-testid="ops-read-only">
       {children}
     </p>
+  );
+}
+
+/**
+ * A whole card's body, for someone who may not read the card.
+ *
+ * Unit CX item 4: the card keeps the name the drawing gives it, and its body
+ * is one plain sentence. Without the title an editor's Server page is a grid
+ * of unlabelled sentences -- you cannot tell "Daily scan" from "Meeting
+ * capture" -- and without the sentence it is a skeleton. Both halves matter:
+ * the drawing draws a named card with a body.
+ */
+function ReadOnlyCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mt-12">
+      <SecHead title={title} />
+      <ReadOnlyNote>{children}</ReadOnlyNote>
+    </section>
   );
 }
 
@@ -708,15 +735,18 @@ function WritingModels({ isOwner, known }: { isOwner: boolean; known: boolean })
   });
 
   /**
-   * Which time fields belong under which sign-in row. Both Codex models are
-   * the one Codex login; Claude Opus is the one Claude login.
+   * Which providers this machine has that draw no sign-in row of their own.
+   *
+   * This is the list the block at the foot of the card explains. It is NOT a
+   * list of time fields any more: since unit CX the timeouts have their own
+   * card ("Time budgets"), and a card that says where to change a number is
+   * not allowed to also offer a second box that changes it.
    */
-  const timesFor = (provider: string) =>
-    (times.data ?? []).filter((row) =>
-      provider === "codex"
-        ? row.kind === "codex"
-        : row.kind === "claude-code" || row.kind === "anthropic",
-    );
+  const gatewayRows = (times.data ?? []).filter(
+    (row) =>
+      !["claude-code", "anthropic", "codex", "xai-oauth"].includes(row.kind) &&
+      row.availableOnThisMachine,
+  );
 
   /*
     Arriving from a failed draft, the panel is the whole reason for the trip —
@@ -810,7 +840,15 @@ function WritingModels({ isOwner, known }: { isOwner: boolean; known: boolean })
               key={s.provider}
               status={s}
               onNote={setNote}
-              times={timesFor(s.provider)}
+              /*
+                Unit CX: the per-call timeout used to be drawn here, under the
+                sign-in row it belongs to, AND in the Time budgets card that the
+                drawing gives the numbers their own home. Two boxes, one stored
+                number, so an operator could change it in one place and read the
+                old value in the other. The Time budgets card owns it now; this
+                one lists the models and their sign-ins and nothing else.
+              */
+              times={[]}
               chip={<WritingModelChip status={s} />}
             />
           ))}
@@ -824,27 +862,24 @@ function WritingModels({ isOwner, known }: { isOwner: boolean; known: boolean })
             Providers with no sign-in row of their own.
 
             A configured gateway (LLM_BASE_URL) has no login to manage here -- it
-            is an endpoint the operator pointed at -- but it is the door a local
-            model comes through today, and a local model is the exact case that
-            needs a longer per-call ceiling. Without this block the one provider
-            that most needs its timeout raised would be the one provider with no
-            field. Shown only when the machine actually has it.
+            is an endpoint the operator pointed at -- and this block is what says
+            so, so a model the desk is drafting through does not look missing
+            from the list above.
+
+            It used to carry the provider's per-call timeout as well. Unit CX
+            took that out: the Time budgets card draws a field for every provider
+            on this machine, including these, so the field here was the second
+            box for a number that has one home. Shown only when the machine
+            actually has such a provider.
           */}
-          {(times.data ?? [])
-            .filter(
-              (row) =>
-                !["claude-code", "anthropic", "codex", "xai-oauth"].includes(row.kind) &&
-                row.availableOnThisMachine,
-            )
-            .map((row) => (
-              <div key={row.providerId} className="astra-panel">
-                <h3 className="font-display text-lg font-semibold">{row.label}</h3>
-                <p className="mt-1 text-sm text-ink-2">
-                  {row.detail}. No sign-in to manage here: this one is configured by the operator.
-                </p>
-                <ProviderTimeField row={row} onNote={setNote} />
-              </div>
-            ))}
+          {gatewayRows.map((row) => (
+            <div key={row.providerId} className="astra-panel">
+              <h3 className="font-display text-lg font-semibold">{row.label}</h3>
+              <p className="mt-1 text-sm text-ink-2">
+                {row.detail}. No sign-in to manage here: this one is configured by the operator.
+              </p>
+            </div>
+          ))}
           <LocalModelCatalogTable onNote={setNote} />
           <p className="mt-4 max-w-2xl text-sm text-muted">
             These are the command-line tools TownReporter drafts with. Being signed in to claude.ai

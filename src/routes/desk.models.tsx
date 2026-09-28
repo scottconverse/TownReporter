@@ -635,6 +635,27 @@ function JobRow({
   };
   const kind = jobStatusKind(facts);
 
+  /*
+    Unit CX item 3: the word the empty first choice carries.
+
+    Nothing saved is not the word "Default" to the editor reading the row -- it
+    is the model the desk will actually run, and the drawing names a model in
+    every cell (`Desk Models.dc.html`: "Codex Sol · sign-in", "qwen3 32B · LM
+    Studio"). The STORED value is still "" (the desk's own default is what
+    resolves it), so only the option's word changes: the resolved model's own
+    label, from the same `resolveJobModel` answer the chip underneath reads, so
+    the box and the chip cannot name two different models.
+
+    Two cases keep the slot's own word, because naming a model there would be a
+    claim rather than an answer: a row that is not running on the desk's
+    default (the editor saved a choice, and the saved value is what the box
+    holds), and a row where nothing could be resolved at all.
+  */
+  const defaultFirstLabel =
+    facts.fromDefault && resolvedSaved.providerId
+      ? modelChoiceLabel(resolvedSaved.providerId, surface)
+      : jobSlotEmptyLabel("first");
+
   return (
     <div
       style={{
@@ -666,7 +687,7 @@ function JobRow({
             label={`First choice for ${job?.label ?? jobKey}`}
             value={draft.first.providerId}
             options={menu}
-            emptyLabel={jobSlotEmptyLabel("first")}
+            emptyLabel={defaultFirstLabel}
             disabled={disabled}
             onChange={(next) =>
               onPatch(jobKey, "first", {
