@@ -39,7 +39,8 @@
        the walk's job (a real PGlite, a real row, a real draft) and unit BK's.
 
   Nothing in this file reaches a model: the add-to flow is pressed in `update`
-  mode, which `ADD_TO_MODES` marks `ai: false`.
+  mode, which `ADD_TO_MODES` marks `ai: false`, and the headline flow types its
+  own line rather than asking for suggestions.
 */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -381,7 +382,7 @@ const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx",
   "./editor-dialog-bodies": bodiesUrl,
   "./editor-dialog-forms": formsUrl,
 });
-const { AddToStoryDialog } = await import(editorDialogsUrl);
+const { AddToStoryDialog, HeadlineDialog } = await import(editorDialogsUrl);
 
 /* --------------------------------------------------------------- the harness */
 
@@ -453,15 +454,21 @@ const text = (node) => (node.value !== "" ? node.value : (node.defaultValue ?? "
 
 /* ------------------------------------------------------------------- static */
 
-test("the story page mounts the add-to dialog, on the drawn press and the drawn rule", async () => {
+test("the story page mounts both dialogs, on the drawn presses and the drawn rule", async () => {
   const story = await source("src/routes/desk.story.$leadId.tsx");
-  const name = "AddToStoryDialog";
-  assert.match(story, new RegExp(`import \\{[^}]*${name}`), `the story page must import ${name}`);
-  assert.match(story, new RegExp(`<${name}\\b`), `the story page must mount <${name}>`);
+  for (const name of ["AddToStoryDialog", "HeadlineDialog"]) {
+    assert.match(story, new RegExp(`import \\{[^}]*${name}`), `the story page must import ${name}`);
+    assert.match(story, new RegExp(`<${name}\\b`), `the story page must mount <${name}>`);
+  }
   assert.match(
     story,
     /<AddToStoryDialog[\s\S]{0,200}?leadId=\{id\}/,
     "the add-to dialog takes the lead it is adding to",
+  );
+  assert.match(
+    story,
+    /<HeadlineDialog[\s\S]{0,200}?current=\{headline\}/,
+    "the headline dialog opens on the headline the box is showing",
   );
   /*
     The drawn label, spelled the way the drawing spells it. A "+ Add story" or
@@ -484,6 +491,27 @@ test("the story page mounts the add-to dialog, on the drawn press and the drawn 
     parsed back into a body would be a second, worse copy of the body.
   */
   assert.match(story, /onSaved=\{\(after\) => \{/, "the add-to dialog hands the screen its bytes");
+  assert.match(
+    story,
+    /onSaved=\{\(saved\) => \{[\s\S]{0,400}?setHeadline\(saved\)/,
+    "the chosen headline lands in the box",
+  );
+  /*
+    One list, not two. The inline suggestions are drawn only on the printed
+    path, where the dialog is not: `chooseHeadline` writes the DRAFT's headline
+    while a printed story shows the article's own field, so the dialog is not
+    the right control there and the press keeps doing what it does today.
+  */
+  assert.match(
+    story,
+    /\{onPaper && headlineSuggestions\.length > 0 \? \(/,
+    "the inline suggestions are the printed story's, and only its",
+  );
+  assert.match(
+    story,
+    /if \(onPaper\) suggest\.mutate\(\);\s*else setHeadlineOpen\(true\);/,
+    "a draft's Suggest press opens the drawn dialog; a printed story's does not",
+  );
 });
 
 test("the article page keeps the drawn corrections block", async () => {
@@ -571,6 +599,54 @@ test("a refused add-to stays open, keeps the box, and lands nothing", async () =
   assert.equal(closed, 0, "a refusal does not close the dialog");
   assert.deepEqual(savedBodies, [], "a refusal lands nothing");
   assert.equal(text(field("textarea")), "The council voted on Tuesday.", "the editor's words stay");
+  await page.close();
+});
+
+test("the headline dialog saves the line the editor typed, and hands it to the box", async () => {
+  actions.__reset();
+  const landed = [];
+  let closed = 0;
+  const page = await mount(
+    React.createElement(HeadlineDialog, {
+      leadId: 7,
+      current: "Council approves the fee rise",
+      open: true,
+      onClose: () => closed++,
+      onDone: () => {},
+      onSaved: (headline) => landed.push(headline),
+    }),
+  );
+  assert.match(lastLayer().textContent, /Pick a suggestion, keep yours, or type a new one/);
+  assert.equal(button("Use this headline").disabled, false, "keeping the current line is a real press");
+
+  await page.typeInto(field("input"), "Council approves the fee rise, 5-2");
+  await page.click(button("Use this headline"));
+  const calls = actions.calls.filter((c) => c.fn === "chooseHeadline");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].data, { id: 7, headline: "Council approves the fee rise, 5-2" });
+  assert.deepEqual(landed, ["Council approves the fee rise, 5-2"], "the box gets the saved line");
+  assert.equal(closed, 1);
+  await page.close();
+});
+
+test("a headline too short to save is refused before the press, not by the desk", async () => {
+  actions.__reset();
+  const page = await mount(
+    React.createElement(HeadlineDialog, {
+      leadId: 7,
+      current: "",
+      open: true,
+      onClose: () => {},
+      onDone: () => {},
+    }),
+  );
+  assert.equal(button("Use this headline").disabled, true, "an empty headline cannot be saved");
+  await page.typeInto(field("input"), "Short");
+  assert.equal(button("Use this headline").disabled, true, "under eight characters is still not a headline");
+  assert.match(lastLayer().textContent, /Write a headline, or pick one of the suggestions\./);
+  await page.typeInto(field("input"), "Long enough to print");
+  assert.equal(button("Use this headline").disabled, false);
+  assert.deepEqual(actions.calls, [], "no call was made while the dialog was refusing");
   await page.close();
 });
 

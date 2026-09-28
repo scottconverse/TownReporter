@@ -94,7 +94,7 @@ import {
 import { KillDialog } from "@/components/dialogs/KillDialog";
 import { RedraftDialog } from "@/components/dialogs/RedraftDialog";
 import { CompareVersionsDialog } from "@/components/dialogs/CompareVersionsDialog";
-import { AddToStoryDialog } from "@/components/dialogs";
+import { AddToStoryDialog, HeadlineDialog } from "@/components/dialogs";
 import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
 import { jobProgressView } from "@/lib/news/job-progress";
 import {
@@ -309,12 +309,14 @@ function StoryPage() {
   const [redraftOpen, setRedraftOpen] = useState(false);
   const [compareVersionsOpen, setCompareVersionsOpen] = useState(false);
   /*
-    Unit CP: the drawn "+ Add to story" dialog had no press on this page at all.
-    The press in the action row opens it (`Desk Story.dc.html:114`); it writes
-    through the server function it always called, and nothing about this
-    screen's own save path changes.
+    Unit CP: the two drawn dialogs that had no press on this page. The "+ Add to
+    story" press in the action row opens the first, the "Suggest headlines"
+    press beside the headline box opens the second (`Desk Story.dc.html:114` and
+    `:97`). Both write through the server functions they always called; nothing
+    about this screen's own save path changes.
   */
   const [addToOpen, setAddToOpen] = useState(false);
+  const [headlineOpen, setHeadlineOpen] = useState(false);
   /*
     "Preview viewed" is a checklist item in the drawing, not a gate: opening the
     preview is a thing this session has done or has not, and the publish button
@@ -1993,17 +1995,37 @@ function StoryPage() {
                   rest of the desk uses. Nothing is applied without a click --
                   the options appear below the box and one of them has to be
                   chosen.
+
+                  Unit CP item 2: on a draft workbench this press opens the drawn
+                  Headline dialog instead (`Desk Story.dc.html:97`, whose
+                  `doHeads` action is "headlines"). The dialog's own "Suggest 3
+                  more" is the same `suggestHeadlines` call this button used to
+                  make, and the line its "Use this headline" saves comes back
+                  through `onSaved` to land in this box -- which is why the inline
+                  list below is now drawn on the published path only. A printed
+                  story keeps this press as it was: the dialog writes the *draft's*
+                  headline, and what a printed story shows is the article's own
+                  field, saved by "Save headline" above.
                 */}
                 <button
                   type="button"
                   className="btn"
                   disabled={suggest.isPending || waiting}
-                  onClick={() => suggest.mutate()}
+                  onClick={() => {
+                    if (onPaper) suggest.mutate();
+                    else setHeadlineOpen(true);
+                  }}
                 >
                   {suggest.isPending ? "Asking the story model…" : "Suggest headlines"}
                 </button>
               </div>
-              {headlineSuggestions.length > 0 ? (
+              {/*
+                Unit CP item 2: the inline list stays for a published story,
+                whose press still fills it. On a draft the dialog holds the
+                suggestions, so this list cannot appear at the same time as the
+                dialog that replaced it.
+              */}
+              {onPaper && headlineSuggestions.length > 0 ? (
                 <ul className="astra-headline-options" aria-label="Suggested headlines">
                   {headlineSuggestions.map((option) => (
                     <li key={option}>
@@ -2708,10 +2730,10 @@ function StoryPage() {
         onKilled={afterLeadChange}
       />
       {/*
-        Unit CP item 1: the dialog that was built and drawn but had no press
-        anywhere on the desk. Mounted here for the same reason the three above
-        are -- it portals itself to the body, so where it sits in this tree
-        decides nothing about where it appears.
+        Unit CP items 1 and 2: the two dialogs that were built and drawn but had
+        no press anywhere on the desk. Mounted here for the same reason the
+        three above are -- each portals itself to the body, so where it sits in
+        this tree decides nothing about where it appears.
       */}
       <AddToStoryDialog
         leadId={id}
@@ -2730,6 +2752,22 @@ function StoryPage() {
         }}
         onDone={(note) => {
           setMsg(note);
+          void afterLeadChange();
+        }}
+      />
+      <HeadlineDialog
+        leadId={id}
+        current={headline}
+        open={headlineOpen}
+        onClose={() => setHeadlineOpen(false)}
+        onSaved={(saved) => {
+          // The chosen line lands in the page's own box, where "Save edits"
+          // already knows how to keep it; the dialog has written the same line
+          // to the draft, so the two agree.
+          setHeadline(saved);
+        }}
+        onDone={(note) => {
+          setHeadlineNote(note);
           void afterLeadChange();
         }}
       />

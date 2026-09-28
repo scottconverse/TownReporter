@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Browser acceptance for the drawn "Add to this story" dialog unit CP mounted
- * on the story workbench, walked end to end on the built server and the real
- * desk UI.
+ * Browser acceptance for the two drawn desk dialogs unit CP mounted on the
+ * story workbench, walked end to end on the built server and the real desk UI.
  *
- * WHAT WAS WRONG. The dialog was built, drawn and exported, and no screen
- * rendered it: `grep -rn "AddToStoryDialog" src/routes` found nothing that
- * mounted it, so "Add to this story" (`Desk Story.dc.html:114`, wired to the
- * `add-to` action at `:172`) was unreachable from the desk an editor uses.
+ * WHAT WAS WRONG. Both dialogs were built, drawn and exported, and no screen
+ * rendered either one: `grep -rn "AddToStoryDialog\|HeadlineDialog" src/routes`
+ * found the barrel and the component's own definition and nothing that mounted
+ * them, so "Add to this story" (`Desk Story.dc.html:114`, wired to the `add-to`
+ * action at `:172`) and the Headline dialog (`:97`, action `headlines`) were
+ * unreachable from the desk an editor uses.
  *
  * WHAT THIS WALK PROVES, on the built server and the real page:
  *
@@ -22,25 +23,30 @@
  *      note), so the next **Save edits** cannot write the older body back over
  *      them. That last part is the whole point of the wiring: it is asserted by
  *      pressing Save edits afterwards and re-reading the row.
- *   5. Zero console errors. Every step here is a press an editor makes; a desk
+ *   5. **Suggest headlines** opens the drawn Headline dialog on a draft, its
+ *      "Use this headline" writes the line into the draft AND lands it in the
+ *      page's headline box.
+ *   6. Zero console errors. Every step here is a press an editor makes; a desk
  *      that reaches any of them through a thrown error is a desk that shows the
  *      editor a broken page.
  *
- * NO MODEL IS REACHED, and that is enforced rather than assumed. The mode the
- * walk chooses is "Add as an update at the top" (`ai: false` --
- * `performWeaveIntoStory` reaches `deps.chat` on the `weave` branch alone). The
- * provider ladder is left pointed at an address nothing answers and at two CLI
- * paths that do not exist, and `ANTHROPIC_API_KEY` is cleared, so a press that
- * did reach for a model would fail loudly instead of quietly spending money on
- * this machine.
+ * NO MODEL IS REACHED, and that is enforced rather than assumed. The walk
+ * presses only the two no-model paths: the add-to mode it chooses is "Add as an
+ * update at the top" (`ai: false` -- `performWeaveIntoStory` reaches `deps.chat`
+ * on the `weave` branch alone), and the headline dialog is used by TYPING a
+ * line, never by pressing "Suggest 3 more" (which is the only press there that
+ * calls `suggestHeadlines`). The provider ladder is left pointed at an address
+ * nothing answers and at two CLI paths that do not exist, and `ANTHROPIC_API_KEY`
+ * is cleared, so a press that did reach for a model would fail loudly instead of
+ * quietly spending money on this machine.
  *
  * The server under test must be BUILT (`npm run build`); this walk imports
  * `.output/server/index.mjs` itself.
  *
  *   node scripts/cp-desk-dialogs-walk.mjs
  *
- * Screenshots (light and dark) land in `reports/CP-evidence/` of the oversight
- * checkout, overridable with `CP_SHOTS_OUT_DIR`.
+ * Screenshots (light and dark, one per dialog) land in `reports/CP-evidence/`
+ * of the oversight checkout, overridable with `CP_SHOTS_OUT_DIR`.
  */
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -54,8 +60,19 @@ const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** This walk's own listen port; see scripts/integration-ports-are-unique.test.mjs. */
 const PORT_CP_DESK_DIALOGS = 3540;
-/** Where the model would be if anything could reach one: nothing listens here. */
-const PORT_NO_MODEL = 3541;
+/**
+ * Where the model would be if anything could reach one: nothing listens here.
+ *
+ * 3551, not 3541, and the reason is measured rather than tidy. This walk was
+ * first written with 3541 reserved for silence; on 2026-09-27 that port was
+ * found LISTENING -- an orphaned `npm start` chain (`bash -> npm start -> node
+ * .output/server/index.mjs`, `netstat -ano` -> PID 49828, whose parent was
+ * already gone) that nobody's task claimed and this walk does not stop. The
+ * precondition below caught it and refused to run, which is the check doing its
+ * job: a reserved port is only reserved if it was checked. 3551 answers nothing
+ * (`netstat` clean) and no other walk in `scripts/` names it.
+ */
+const PORT_NO_MODEL = 3551;
 
 const base = checkedUrl(`http://127.0.0.1:${PORT_CP_DESK_DIALOGS}`);
 const outDir = checkedOutputPath(
@@ -81,8 +98,12 @@ const DRAFT_BODY =
  *  fixed point of the storage pass and the page's box can be compared exactly. */
 const ADD_MATERIAL =
   "The clerk confirmed the hearing is set for Oct. 8 at 7 p.m. in the council chamber.";
-let page;
+/** What the editor types into "Or write a new one". */
+const NEW_HEADLINE = "Council sets the Olson annexation hearing for Oct. 8";
+/** The line the dark pass types and then cancels: it must never be saved. */
+const DARK_HEADLINE = "A headline the dark pass cancelled";
 
+let page;
 let currentLeadId = 0;
 const done = [];
 const facts = [];
@@ -448,15 +469,75 @@ async function saveEditsKeepsTheAddition() {
   step("Save edits after the add does not write the older body back");
 }
 
+/** 5. The headline dialog, opened by the drawn press, used once. */
+async function theHeadlineDialogSavesTheTypedLine() {
+  const press = page.getByRole("button", { name: "Suggest headlines", exact: true });
+  await press.waitFor({ timeout: 30_000 });
+  await press.click();
+  await dialog().waitFor({ timeout: 20_000 });
+  const text = await dialog().innerText();
+  assert.match(text, /^Headline$/m, "the drawn Headline dialog opens");
+  assert.match(text, /Pick a suggestion, keep yours, or type a new one\./, "with its subtitle");
+  assert.match(
+    text,
+    /No suggestions yet\. Press Suggest 3 more\./,
+    "and no suggestion list: this walk asks no model",
+  );
+  assert.match(text, /Nothing changes until you press Use this headline\./, "and the drawn foot note");
+
+  const save = dialog().getByRole("button", { name: "Use this headline", exact: true });
+  /*
+    Live from the start, and that is right: the standing choice is "Keep mine",
+    so a press with nothing typed keeps the line the story already has. What the
+    editor must not be able to do is save a fragment -- the drawn rule is the
+    same eight characters the desk checks server-side.
+  */
+  assert.equal(await save.isEnabled(), true, "the standing Keep-mine choice can be saved");
+  const typed = dialog().getByLabel("Or write a new one");
+  await typed.fill("Olson");
+  assert.equal(await save.isEnabled(), false, "a five-character fragment is refused before the desk sees it");
+  const refusal = await dialog().innerText();
+  assert.match(refusal, /Write a headline, or pick one of the suggestions\./, "and it says why");
+  await typed.fill(NEW_HEADLINE);
+  assert.equal(await save.isEnabled(), true, "the typed line is enough to save");
+  const sizes = await smallestSizesInTheDialog();
+  assert.deepEqual(
+    sizes.offenders,
+    [],
+    `nothing in the headline dialog draws under 14px (smallest ${sizes.smallest}px)`,
+  );
+  facts.push({ headlineDialogFloor: `${sizes.smallest}px` });
+  shots.push(await shot(dialog(), "cp-headline-light.png"));
+
+  await save.click();
+  const saved = await waitForTruth("the draft to take the new headline", async () => {
+    const row = await draftRow("headline, headline_source");
+    return row.headline === NEW_HEADLINE ? row : null;
+  });
+  assert.equal(saved.headline_source, "editor", "the save stamps whose headline this is");
+  await waitForTruth("the dialog to close", async () =>
+    (await page.locator(".astra-modal").count()) === 0 ? true : null,
+  );
+  await waitForTruth("the chosen line to land in the page's own box", async () =>
+    (await headlineBox().inputValue()) === NEW_HEADLINE ? true : null,
+  );
+  const said = await page.locator("body").innerText();
+  assert.match(said, /Headline saved: /, "the save is said out loud");
+  const body = (await draftRow("body")).body;
+  assert.ok(body.includes(ADD_MATERIAL), "and the headline save left the body alone");
+  facts.push({ savedHeadline: saved.headline, headlineSource: saved.headline_source });
+  step("the Headline dialog saves the typed line into the draft and the page's box");
+}
+
 /**
- * 5. The add-to dialog again in dark, on the desk's own toggle.
+ * 6. The same two dialogs, in dark, on the desk's own toggle.
  *
- * This pass is for the eye, and it writes nothing: the press used is exactly
- * the review press that saves nothing, and the dialog is dismissed with Cancel.
- * What the page looked like is the evidence; the row is asserted unchanged
- * afterwards so "the dark pass saved nothing" is a fact too.
+ * This pass is for the eye, and it writes nothing: the add-to review press is
+ * exactly the press that saves nothing, and both dialogs are dismissed with
+ * Cancel. What the page looked like is the evidence; the row is asserted
+ * unchanged afterwards so "the dark pass saved nothing" is a fact too.
  */
-async function theDarkPassShowsTheAddToDialog() {
+async function theDarkPassShowsBothDialogs() {
   await page.getByRole("button", { name: "Switch to dark appearance" }).click();
   await waitForTruth("the desk to go dark", async () =>
     (await page.evaluate(() => document.documentElement.dataset.appearance ?? "")) === "desk-dark"
@@ -464,6 +545,7 @@ async function theDarkPassShowsTheAddToDialog() {
       : null,
   );
   const bodyBefore = (await draftRow("body")).body;
+  const headlineBefore = (await draftRow("headline")).headline;
 
   const row = page.locator(".astra-story-actions");
   shots.push(await shot(row, "cp-action-row-dark.png"));
@@ -476,21 +558,38 @@ async function theDarkPassShowsTheAddToDialog() {
   await waitForTruth("the compare to be drawn in dark", async () =>
     (await compareColumns()).length === 2 ? true : null,
   );
-  const sizes = await smallestSizesInTheDialog();
+  const darkSizes = { "add-to dialog": await smallestSizesInTheDialog() };
   shots.push(await shot(dialog(), "cp-add-to-dark.png"));
   await dialog().getByRole("button", { name: "Cancel", exact: true }).click();
   await waitForTruth("the add-to dialog to be dismissed", async () =>
     (await page.locator(".astra-modal").count()) === 0 ? true : null,
   );
 
-  assert.equal((await draftRow("body")).body, bodyBefore, "the dark pass saved no body");
-  assert.deepEqual(
-    sizes.offenders,
-    [],
-    `nothing in the dark add-to dialog draws under 14px (smallest ${sizes.smallest}px)`,
+  await page.getByRole("button", { name: "Suggest headlines", exact: true }).click();
+  await dialog().waitFor({ timeout: 20_000 });
+  await dialog().getByLabel("Or write a new one").fill(DARK_HEADLINE);
+  darkSizes["headline dialog"] = await smallestSizesInTheDialog();
+  shots.push(await shot(dialog(), "cp-headline-dark.png"));
+  await dialog().getByRole("button", { name: "Cancel", exact: true }).click();
+  await waitForTruth("the headline dialog to be dismissed", async () =>
+    (await page.locator(".astra-modal").count()) === 0 ? true : null,
   );
-  facts.push({ darkAddToFloor: `${sizes.smallest}px` });
-  step("dark shows the same dialog, and the cancelled press saved nothing");
+
+  assert.equal((await draftRow("body")).body, bodyBefore, "the dark pass saved no body");
+  assert.equal(
+    (await draftRow("headline")).headline,
+    headlineBefore,
+    "and no headline: Cancel means cancel",
+  );
+  for (const [which, sizes] of Object.entries(darkSizes)) {
+    assert.deepEqual(
+      sizes.offenders,
+      [],
+      `nothing in the dark ${which} draws under 14px (smallest ${sizes.smallest}px)`,
+    );
+    facts.push({ darkFloor: `${which} ${sizes.smallest}px` });
+  }
+  step("dark shows the same two dialogs, and the cancelled presses saved nothing");
 }
 
 async function shot(locator, name) {
@@ -524,7 +623,8 @@ async function main() {
     await theReviewPressWritesNothing();
     await theConfirmPressSavesWhatWasShown();
     await saveEditsKeepsTheAddition();
-    await theDarkPassShowsTheAddToDialog();
+    await theHeadlineDialogSavesTheTypedLine();
+    await theDarkPassShowsBothDialogs();
     assert.deepEqual(consoleErrors, [], "the desk reached all of this without a console error");
   } catch (err) {
     await dump(err);

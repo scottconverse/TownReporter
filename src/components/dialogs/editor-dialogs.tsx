@@ -1097,6 +1097,15 @@ export type HeadlineDialogProps = {
   open: boolean;
   onClose: () => void;
   onDone?: (note: string) => void;
+  /**
+   * Unit CP: the line "Use this headline" saved, handed to the screen.
+   *
+   * The screen's headline box is where a chosen headline lands -- the same box
+   * the inline suggestions used to fill -- so the dialog has to say which line
+   * it wrote. A note string the screen then parses would be a note that can
+   * drift from what was saved.
+   */
+  onSaved?: (headline: string) => void;
 };
 
 /**
@@ -1107,10 +1116,19 @@ export type HeadlineDialogProps = {
  * The drawn foot note names a model and an elapsed time; `suggestHeadlines`
  * returns neither, so the foot keeps the half that is true.
  *
- * Mounted by: the story screen's headline field. Props: `leadId`, `current`,
- * `open`, `onClose`, `onDone`.
+ * Mounted by: the story screen, opened by the "Suggest headlines" press beside
+ * its headline box (`Desk Story.dc.html:97`, whose `doHeads` action is
+ * "headlines"). Props: `leadId`, `current`, `open`, `onClose`, `onDone`,
+ * `onSaved`.
  */
-export function HeadlineDialog({ leadId, current, open, onClose, onDone }: HeadlineDialogProps) {
+export function HeadlineDialog({
+  leadId,
+  current,
+  open,
+  onClose,
+  onDone,
+  onSaved,
+}: HeadlineDialogProps) {
   const press = usePress();
   const factory = React.useCallback(() => headlineInitial(current), [current]);
   const [state, set] = useDialogState<HeadlineState>(factory, open, press.clear);
@@ -1142,6 +1160,7 @@ export function HeadlineDialog({ leadId, current, open, onClose, onDone }: Headl
       const written = headlineChoice(state);
       const saved = await chooseHeadline({ data: { id: leadId, headline: written } });
       if (!saved.ok) return { problem: saved.error };
+      onSaved?.(saved.headline);
       return done(`Headline saved: ${saved.headline}`);
     });
 
