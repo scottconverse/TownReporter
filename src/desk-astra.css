@@ -2119,14 +2119,68 @@
   background: var(--surface);
   padding: 22px;
 }
-.desk-ltr.astra[data-desk-page="dark"] .nightpanel {
-  --bg: var(--surface);
-  --fg: #e8e6e1;
-  --fg2: #bdbab3;
-  --a: #e6c35c;
-  --adeep: #e8e6e1;
-  --sel: #e6c35c;
-  --line: #3b3631;
+/*
+  /desk/dark's captured-page panel -- the open file's text under the rail -- is
+  a `.reader`, the public paper's own reader class. Its stylesheet is imported
+  globally (`src/routes/__root.tsx:14`) and its block declares a light palette
+  on the panel element itself (`src/reader-astra.css:24-40`: `--bg` #fffdf7,
+  `--ink` #111111, `--line` #d8d3c4, `--teal` #111111, ...). A declaration made
+  on the element cannot be outranked by an inherited value, so those literals
+  shadowed the desk's themed tokens for the panel's whole subtree -- while the
+  panel's own classes went on painting from the desk's tokens
+  (`src/styles.css:1615-1630`). In dark mode that is `--adeep` and `--mut` text
+  on the reader's cream ground: 1.23:1 for `.read-kind`, 1.9:1 for `.read-url`,
+  both caught by `scripts/contrast-audit.mjs`'s reader section. The panel is
+  inside the desk, so it follows the desk the way every other desk surface does.
+
+  The values are resolved on the shell, not on the panel. `.reader` also
+  re-declares the desk's own vocabulary on the panel element
+  (`src/reader-astra.css:1695-1710`: `--color-rule: var(--line)`,
+  `--color-paper-2: var(--soft)`, `--color-paper: var(--bg)`), so the obvious
+  spelling of this re-point -- `--line: var(--color-rule)` on `.reader` -- is a
+  cycle on that one element, and the guaranteed-invalid value it computes to
+  takes every `border: 1px solid var(--line)` in the panel down with it: the
+  border declarations become invalid at computed-value time and the panel
+  paints borderless. The `--desk-page-*` names below are declared on the shell,
+  where `--bg`/`--surface`/`--line` still mean the desk's and are substituted
+  once (`src/desk-astra.css:21-57`); the panel inherits those literals, and
+  nothing on the panel declares the `--desk-page-*` names.
+
+  Each one is the reader's own light literal, so light is unchanged by
+  construction -- `--bg` #fffdf7, `--surface`/`--bg2` #f6f2e7, `--fg` #111111,
+  `--mut` #3a3a3a, `--line` #d8d3c4, `--adeep` #111111, `--danger` #b3261e, and
+  `--fd` the same stack (`src/desk-astra.css:21-40` against
+  `src/reader-astra.css:25-40`) -- while dark reads the same ten names from the
+  night block. Ten names is what `.reader` declares that a rule in the panel's
+  subtree can read (`--bg` on `.reader`/`.reader-index`/`.read-full`, `--ink` on
+  base text and the focus outline, `--line` on all three borders, `--teal` on
+  `a:hover`, `--fd` on `.read-title`/`.read-doc-title`). The four left alone
+  (`--a`, `--sel`, `--ok`, `--warn`) are read only by `.reader .btn` /
+  `.reader .tag` / `.reader .iconbtn` rules, and the capture's survey of this
+  screen lists no visible element painting from them.
+*/
+.desk-ltr.astra[data-desk-page="dark"] {
+  --desk-page-ground: var(--bg);
+  --desk-page-surface: var(--surface);
+  --desk-page-surface-2: var(--bg2);
+  --desk-page-ink: var(--fg);
+  --desk-page-muted: var(--mut);
+  --desk-page-rule: var(--line);
+  --desk-page-accent-ink: var(--adeep);
+  --desk-page-danger: var(--danger);
+  --desk-page-display: var(--fd);
+}
+.desk-ltr.astra[data-desk-page="dark"] .reader {
+  --bg: var(--desk-page-ground);
+  --surface: var(--desk-page-surface);
+  --ink: var(--desk-page-ink);
+  --muted: var(--desk-page-muted);
+  --line: var(--desk-page-rule);
+  --teal: var(--desk-page-accent-ink);
+  --soft: var(--desk-page-surface-2);
+  --warm: var(--desk-page-surface-2);
+  --danger: var(--desk-page-danger);
+  --fd: var(--desk-page-display);
 }
 .desk-ltr.astra[data-desk-page="dark"] .tipbox.top {
   margin: 0 0 24px;
