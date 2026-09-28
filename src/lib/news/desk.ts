@@ -385,7 +385,6 @@ export const listLeads = createServerFn({ method: "GET" })
     >`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
-             l.edited_at, l.edited_by,
              -- "import" = read out of a report the editor pasted; null = not
              -- recorded. The Queue shows the Imported badge off this.
              l.origin,
