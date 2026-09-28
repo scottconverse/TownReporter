@@ -516,25 +516,6 @@
   font-size: 14px;
   line-height: 1.45;
 }
-.reader .trustbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  padding: 18px 3px;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
-  color: var(--muted);
-}
-.reader .trustbar span {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-}
-.reader .trustbar svg {
-  color: var(--teal);
-  width: 17px;
-}
 .reader .sectionhead {
   display: flex;
   align-items: center;
@@ -1389,16 +1370,6 @@
   .reader .record-list p {
     font-size: 14px;
   }
-  .reader .trustbar {
-    font-size: 14px;
-    align-items: start;
-  }
-  .reader .trustbar > span:nth-child(2) {
-    display: none;
-  }
-  .reader .trustbar .textlink {
-    font-size: 14px;
-  }
   .reader .content-grid {
     grid-template-columns: 1fr;
     padding-top: 31px;
@@ -1873,11 +1844,6 @@
   padding: 30px 0 45px;
   border-top: 1px solid var(--line);
 }
-.reader .riverintro {
-  font-size: 14px;
-  color: var(--muted);
-  margin: -12px 0 6px;
-}
 .reader .river .newsrow h3 {
   font-size: 20px;
 }
@@ -2016,7 +1982,6 @@
    gutter and never inside a column. */
 .reader .ledgerow,
 .reader .storygrid,
-.reader .trustbar,
 .reader .regionband,
 .reader .river,
 .reader .aboutstrip,
@@ -2664,16 +2629,6 @@
   color: var(--muted);
 }
 
-/* ---------------------------------------------------------------------------
-   The line under the grid. It is the only band that is a sentence rather than
-   a story, so it keeps the 1px rule and nothing else.
-   --------------------------------------------------------------------------- */
-.reader .trustbar {
-  padding: 14px var(--px);
-  border-top: 1px solid var(--grid);
-  border-bottom: 1px solid var(--grid);
-  font-size: 14px;
-}
 
 /* ---------------------------------------------------------------------------
    Around the region, beside Opinion.

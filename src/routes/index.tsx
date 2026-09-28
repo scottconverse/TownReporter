@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ArrowRight, FileText, Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import { PaperShell } from "@/components/paper-chrome";
 import { ReaderRow, SaveStory } from "@/components/reader-controls";
 import { DatesPanel } from "@/components/paper/dates-panel";
@@ -572,16 +572,6 @@ function Home() {
               </Link>
             </div>
           ) : null}
-          <div className="trustbar">
-            <span>
-              <FileText aria-hidden />
-              Reporting you can trace to the record.
-            </span>
-            <span>Corrections in the open.</span>
-            <Link className="textlink" to="/how-we-report">
-              How we report <ArrowRight aria-hidden />
-            </Link>
-          </div>
           {/*
             "Around the region" beside "Opinion": the places this paper
             covers beyond the home town, and the paper's own voice. Both are
@@ -646,9 +636,6 @@ function Home() {
                   All stories <ArrowRight aria-hidden />
                 </Link>
               </div>
-              <p className="riverintro">
-                Every story we have published, newest first, as it went to press.
-              </p>
               {/*
                 `datebox={false}`: the row's own meta line under the headline
                 already carries the date, and the front page printed it twice --
