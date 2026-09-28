@@ -87,18 +87,23 @@ try {
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
   /*
     The story screen's own confirm, and not the one the reasons block now draws
-    with the same words. Unit CT's "every reason at the top of the Checks tab,
-    each with its button" (5368d336, part 1 of this branch, before this unit's
-    first commit) put an "I checked: keep this evidence" button inside
+    with the same words. Two units met here and both found the same collision:
+    Unit CT's "every reason at the top of the Checks tab, each with its button"
+    (5368d336) put an "I checked: keep this evidence" button inside
     `[aria-label="Reasons Publish is off"]`, so the bare role query resolves to
-    two elements and Playwright's strict mode refuses it. The walk is about the
-    evidence block below the story body, not the reasons list, so the ancestor
-    is excluded rather than the query narrowed to `.nth(0)`/`.nth(1)` -- a
-    position would break again the moment the reasons list grows a second row.
+    two elements and Playwright's strict mode refuses it. Unit CY (today's rail)
+    excluded that ancestor by name; Unit DA (article and front page) scoped the
+    query to `.publish-blocked`, the way the sentence above and the link pressed
+    below are already scoped. The container scope is kept because it is the
+    scope this walk already uses for this block -- and it holds the same
+    guarantee: the reasons list is drawn inside `#inspector-checks`
+    (`astra-blocker-list`, `src/routes/desk.story.$leadId.tsx:1676`), which is
+    outside `.publish-blocked`. Neither is a `.nth(0)`/`.nth(1)` position, so
+    neither breaks the moment the reasons list grows a second row.
   */
-  const confirmEvidence = page.locator(
-    'xpath=//button[normalize-space(.)="I checked: keep this evidence"][not(ancestor::*[@aria-label="Reasons Publish is off"])]',
-  );
+  const confirmEvidence = page
+    .locator(".publish-blocked")
+    .getByRole("button", { name: "I checked: keep this evidence" });
   await confirmEvidence.waitFor({ state: "visible" });
   const originalViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
