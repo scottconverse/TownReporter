@@ -2,12 +2,20 @@ import { StoryBody } from "@/components/story-body";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
 import {
   publishBlockers,
-  publishBlockedSummary,
+  publishGateNote,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { EvidenceCheckList } from "@/components/evidence-check-list";
+import {
+  citedCaptureCount,
+  evidenceCheckRows,
+  evidenceRanLine,
+} from "@/lib/news/evidence-check-list";
+import { getFindingEvidenceReview } from "@/lib/news/finding-evidence-review";
+import { readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -352,6 +360,24 @@ function StoryPage() {
       return status === "queued" || status === "running" ? 2_000 : false;
     },
     refetchIntervalInBackground: true,
+  });
+
+  /*
+    The checks the desk recorded for this draft, read here as well as in the
+    Reporting tab's panel (unit CW).
+
+    Same query key and same call as `FindingEvidenceReviewPanel`, so React Query
+    serves both from one request and one cache entry -- the list on the Checks
+    tab and the panel that edits the judgments can never disagree about what was
+    found. `retry: false` and the panel's error branch are the same choice: a
+    failed read is reported where the claims would be, not retried behind the
+    editor's back.
+  */
+  const evidenceQuery = useQuery({
+    queryKey: ["finding-evidence-review", id, data?.evidenceToken],
+    queryFn: () => getFindingEvidenceReview({ data: { leadId: id } }),
+    enabled: Boolean(data?.draft?.id),
+    retry: false,
   });
 
   const previousJobError =
@@ -802,6 +828,21 @@ function StoryPage() {
       return parseStyleRecord(research?.styleAudit)?.note ?? "";
     } catch {
       return "";
+    }
+  }, [data?.draft?.research_json]);
+  /*
+    When the desk last ran the evidence check on this draft. It is written into
+    the draft's own research record by the reconcile job that does the checking
+    (`evidenceReconciledAt`), so the drawn "Ran 8:14 a.m." reads off the record
+    rather than off the moment this browser happened to open the page.
+  */
+  const evidenceCheckedAt = useMemo(() => {
+    try {
+      const research = JSON.parse(data?.draft?.research_json ?? "{}") as Record<string, unknown>;
+      const ran = research?.evidenceReconciledAt;
+      return typeof ran === "string" ? ran : null;
+    } catch {
+      return null;
     }
   }, [data?.draft?.research_json]);
 
@@ -1429,6 +1470,75 @@ function StoryPage() {
     const details = document.getElementById("evidence-review")?.closest("details");
     if (details) details.open = true;
   };
+  /*
+    ── The drawn Checks-tab list (unit CW) ─────────────────────────────────────
+    The screen this replaces said "Review names, claims and supporting records"
+    and gave two paragraphs and two links; it never said which claim had been
+    checked, what the desk found, or where the record was. The list below is
+    every row of that answer, built from the review the Reporting panel already
+    saves judgments against -- one request, one cache entry, no second read of
+    the same facts.
+
+    `readNameCheck` on the draft's own record is the same name check
+    `DeskNameCheck` renders above it; the style row's count is the same
+    measurement the Style check section acts on. Where the drawing writes
+    something with nothing behind it (the per-run capture count, "Confirm
+    spelling"), the row is drawn without it and the divergence is a CW line in
+    `design/SPEC-GAPS-0681.md`.
+  */
+  const recordedEvidence = evidenceQuery.data?.ok ? evidenceQuery.data.review : null;
+  const evidenceRan = evidenceRanLine({
+    checkedAt: evidenceCheckedAt,
+    modelLabel: reconcileStatus.data?.modelChoice
+      ? modelChoiceLabel(reconcileStatus.data.modelChoice)
+      : "",
+    captures: recordedEvidence
+      ? citedCaptureCount(
+          recordedEvidence.rows,
+          recordedEvidence.claimRows,
+          recordedEvidence.manualClaimRows,
+        )
+      : 0,
+  });
+  /*
+    Not memoised on purpose. It is a walk over a handful of rows with string
+    joins, and every hook on this page has to sit above the loading guards --
+    a `useMemo` here would be a hook called after an early return, which is a
+    bug the linter is right to refuse. `evidenceCheckedAt` and `styleNote`
+    above are memos only because they parse JSON.
+  */
+  const evidenceRows = recordedEvidence
+    ? evidenceCheckRows({
+        rows: recordedEvidence.rows,
+        claimRows: recordedEvidence.claimRows,
+        manualClaimRows: recordedEvidence.manualClaimRows,
+        openClaims,
+        nameCheck: readNameCheck(data.draft?.research_json),
+        styleFindings: styleCheck.findings,
+      })
+    : [];
+  /*
+    The style row's press is the style section's own repair button, focused and
+    scrolled to -- a row is a way to the work, never a second implementation of
+    it. The button stays grey with its own stated reason until a finding is
+    ticked, which is why this focuses rather than presses.
+  */
+  const focusStyleFix = () => {
+    const el = document.querySelector<HTMLElement>("#style-fix-act .btn");
+    el?.scrollIntoView({ block: "center" });
+    el?.focus();
+  };
+  /*
+    "Compare checked vs. previous version" (the drawing's footer press) is the
+    Compare-versions dialog that only has anything to show once an evidence
+    check left two versions behind. Before that the press falls back to the
+    Reporting panel, which is where the two decisions and the integrity notes
+    live.
+  */
+  const openCompareChecked = () => {
+    if (evidenceReview) setCompareVersionsOpen(true);
+    else openEvidenceReview();
+  };
   const actOnBlocker = (target: PublishBlockerTarget) => {
     const focus = (selector: string) => {
       const el = document.querySelector<HTMLElement>(selector);
@@ -1681,8 +1791,34 @@ function StoryPage() {
               things; the drawing calls this list "Evidence check".
             */}
             <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
-            <h2>Evidence check</h2>
-            <p className="meta">Review names, claims and supporting records for this draft.</p>
+            {data.draft ? (
+              <EvidenceCheckList
+                ranLine={evidenceRan}
+                rows={evidenceRows}
+                compareLabel={evidenceReview ? "Compare checked vs. previous version" : ""}
+                onCompare={openCompareChecked}
+                onStylePress={focusStyleFix}
+              />
+            ) : (
+              <section className="astra-evidence" aria-label="Evidence check">
+                <h2 className="astra-evidence-title">Evidence check</h2>
+                <p className="meta">Checks appear after the first draft.</p>
+              </section>
+            )}
+            {/*
+              The name check keeps its own panel under the list (unit CW): the
+              list carries one name row with the count and the first reason, and
+              this is the full answer -- every name, its source, the written
+              records -- for the row that sends the editor here.
+
+              The two prose blocks that used to sit here ("Claims & evidence",
+              "Claims of absence") are gone: the drawing does not have them, and
+              both were a paragraph and a link to the same panel the list now
+              names row by row. "Claims of absence" is not lost with them --
+              every still-unconfirmed absence is a row of the list, worded the
+              same way the Reporting tab words it, and the same unticked gate
+              item still blocks Publish and says so at the top of this tab.
+            */}
             {data.draft ? (
               <DeskNameCheck
                 research={data.draft.research_json}
@@ -1693,46 +1829,6 @@ function StoryPage() {
             ) : (
               <p>Name checks appear after the first draft.</p>
             )}
-            <div className="astra-check-action">
-              <h3>Claims & evidence</h3>
-              <p>
-                {evidenceStale
-                  ? "The story changed. Review its evidence."
-                  : "Open the reporting trail and supporting sources."}
-              </p>
-              <a
-                href="#finding-evidence-review"
-                className="btn"
-                onClick={() => {
-                  /*
-                    The panel this promises lives in the Reporting tab, and the
-                    notes it sits in are behind a closed `<details>`. Opening the
-                    details without switching tabs left the editor on the Checks
-                    tab with the panel hidden in another one -- the same empty
-                    landing the button was reported for, one layer up. The
-                    sibling "Open reporting notes" button below has always done
-                    both; this one now does too.
-                  */
-                  openEvidenceReview();
-                }}
-              >
-                Review claims and sources
-              </a>
-            </div>
-            <div className="astra-check-action">
-              <h3>Claims of absence</h3>
-              <p>
-                {openClaims.length
-                  ? `${openClaims.length} claim${openClaims.length === 1 ? " needs" : "s need"} your confirmation.`
-                  : "No outstanding claims of absence."}
-              </p>
-              <button
-                className="btn"
-                onClick={() => openEvidenceReview()}
-              >
-                Open reporting notes
-              </button>
-            </div>
           </section>
           <section
             id="inspector-sources"
@@ -2428,7 +2524,7 @@ function StoryPage() {
               <p className="note-one">
                 You do not have to act on any of this. Nothing here publishes anything.
               </p>
-              <div className="style-fix-act">
+              <div className="style-fix-act" id="style-fix-act">
                 <InkButton
                   disabled={
                     !styleTickedIds.length ||
@@ -2733,14 +2829,19 @@ function StoryPage() {
 
                     It used to name the first reason only, one at a time, in
                     small text at the far right of this row: the owner read it
-                    as stray text and never found the button it pointed at. It
-                    counts now, and the one press it offers is the list at the
-                    top of the Checks tab, where every reason has its own
-                    button (unit CT).
+                    as stray text and never found the button it pointed at.
+
+                    Unit CW puts the drawing's own sentence here: the first
+                    reason, said as the press that clears it -- "Confirm the
+                    claim to publish." -- above the same press to the list at
+                    the top of the Checks tab, where every reason has its own
+                    sentence and its own button. The count CT put here still
+                    runs, at the head of that list, which is the one place it
+                    was ever acted on.
                   */}
                   {blockers.length > 0 ? (
                     <span className="note publish-blocked">
-                      {publishBlockedSummary(blockers)}.{" "}
+                      {publishGateNote(blockers)}{" "}
                       <button
                         type="button"
                         className="inline-link"
@@ -2754,7 +2855,10 @@ function StoryPage() {
                         Review
                       </button>
                     </span>
-                  ) : null}
+                  ) : (
+                    /* The drawing's other half: nothing stands in the way. */
+                    <span className="note">All checks done.</span>
+                  )}
                 </>
               )
             ) : null}

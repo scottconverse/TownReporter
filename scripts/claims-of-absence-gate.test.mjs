@@ -66,24 +66,32 @@ test("a disabled Publish says why, in words, not just opacity", () => {
     the first reason only, at the far right of the bottom bar. The owner's
     story had five reasons and four of them turned the button off with nothing
     said at all, and the one sentence that did print was read as stray text.
-    The replacement is stronger, not weaker, and this test follows it: the bar
-    counts the reasons and offers one press to the list at the top of the
+    The replacement was stronger, not weaker, and this test followed it: the
+    bar counts the reasons and offers one press to the list at the top of the
     Checks tab, where each reason has its own sentence and its own button.
+
+    0.6.81 (unit CW) changed the bar's words to the drawn ones -- "Confirm the
+    claim to publish." -- so this assertion follows the screen. What it no
+    longer pins on the bar is the count; the count did not go anywhere, it is
+    the heading of the list this press opens ("3 things block Publish. Each row
+    has the press that clears it."), and that is asserted where it renders, in
+    `src/components/publish-blockers.test.ts`. The reason is still rendered
+    beside the button, still in words, and the press is still there.
   */
   assert.match(
     story,
-    /publish-blocked">\s*\{publishBlockedSummary\(blockers\)\}/,
-    "the reason must be rendered beside the button",
+    /publish-blocked">\s*\{publishGateNote\(blockers\)\}/,
+    "the reason must be rendered beside the button, in words",
   );
   assert.match(
     story,
-    /\{publishBlockedSummary\(blockers\)\}\.\{" "\}[\s\S]{0,700}?Review/,
-    "the count must offer the press that opens the list",
+    /\{publishGateNote\(blockers\)\}\{" "\}[\s\S]{0,700}?Review/,
+    "the reason must offer the press that opens the list",
   );
   assert.match(
     blockersLib,
     /export function publishBlockedSummary[\s\S]{0,300}?thing(?:s)? blocks Publish/,
-    "the reasons must be counted in words",
+    "the reasons must still be counted in words",
   );
   assert.match(
     styles,

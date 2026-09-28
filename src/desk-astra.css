@@ -1353,6 +1353,115 @@
   gap: 10px;
 }
 
+/*
+  The drawn Evidence check list (unit CW): one row per claim, the chip in the
+  left column and the sentence, the secondary line and the row's press stacked
+  in the right one. It is the shape unit CT gave the blocker list above it, on
+  purpose -- the drawing draws both the same and an editor reads them the same
+  way -- with one extra line per row for what the check compared against.
+
+  Four chips, and every pair is one `scripts/contrast-audit.mjs` already
+  asserts on this panel: `--ok` and `--warn` text on the surface, `--danger`
+  text (the notice's dashed shape, so "could not check" is a different shape
+  and not only a different color), and `--bg` on the `--fg` fill for the
+  drawing's solid "the check ran and found nothing" chip.
+*/
+.desk-ltr.astra .astra-evidence {
+  margin-top: 18px;
+}
+.desk-ltr.astra .astra-evidence-title {
+  font: 800 calc(20px * var(--ts))/1.3 var(--fd);
+  margin: 0;
+  color: var(--fg);
+}
+.desk-ltr.astra .astra-evidence-ran {
+  margin: 2px 0 6px;
+  font-size: calc(15px * var(--ts));
+  line-height: 1.4;
+  color: var(--mut);
+}
+.desk-ltr.astra .astra-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.desk-ltr.astra .astra-evidence-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-evidence-chip {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: start;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  line-height: 1.4;
+  padding: 2px 8px;
+  white-space: nowrap;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-evidence-chip.is-warn {
+  border: 2px solid var(--warn);
+  color: var(--warn);
+}
+.desk-ltr.astra .astra-evidence-chip.is-fail {
+  border: 2px dashed var(--danger);
+  color: var(--danger);
+}
+.desk-ltr.astra .astra-evidence-chip.is-ink {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+.desk-ltr.astra .astra-evidence-what {
+  grid-column: 2;
+  margin: 0;
+  font-weight: 700;
+  font-size: calc(16px * var(--ts));
+  line-height: 1.3;
+  color: var(--fg);
+}
+.desk-ltr.astra .astra-evidence-note {
+  grid-column: 2;
+  margin: 0;
+  font-size: calc(15px * var(--ts));
+  line-height: 1.4;
+  color: var(--mut);
+}
+.desk-ltr.astra .astra-evidence-acts {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+/* Four classes, not three: `.desk-ltr.astra .astra-inspector .btn` above sets
+   this panel's own padding and text size, and a shorter selector here lost to
+   it. The `quiet` arm is the drawn light press (1px line) and the plain one is
+   the drawn heavy press (2px ink, from the `.btn` base). */
+.desk-ltr.astra .astra-inspector .astra-evidence-act {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+}
+.desk-ltr.astra .astra-inspector .astra-evidence-compare {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 14px;
+  padding: 0 12px;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  border: 2px solid var(--fg);
+}
+
 .desk-ltr.astra .astra-check-action p {
   margin: 8px 0 12px;
   color: var(--mut);
