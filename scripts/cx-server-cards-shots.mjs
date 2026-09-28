@@ -778,8 +778,8 @@ try {
     Daily scan is the card. It is owner-only, its main action is one button that
     writes a setting, and its first row is a word that turns with it ("Off" or a
     time -> "Paused") -- so a summary that did not re-read would show up in the
-    row, not only in the database. The walk seeds the schedule on the card's own
-    screen and puts the setting back afterwards, so the run can be repeated.
+    row, not only in the database. The walk presses the setting on the card's own
+    screen and puts it back afterwards, so the run can be repeated.
   */
   await page.setViewportSize({ width: widths[0], height: 1000 });
   await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
@@ -806,45 +806,31 @@ try {
   const deskSays = (words) => page.locator("p").filter({ hasText: words }).first();
 
   /*
-    The seed below runs once per run. The screen's Save writes the whole policy,
-    `paused` included, so seeding again on the way back in would quietly
-    un-pause the schedule the main action just paused -- and the press that
-    follows would sit waiting for a "Resume daily scan" button the screen no
-    longer offers.
-  */
-  let scheduleSeeded = false;
+    The seed this function used to do is gone -- Unit CX3 (0.6.81) is what took
+    it out, and the comment left in its place is the record of why it was here.
 
+    It pressed the screen's own "Save daily scan" before pressing Pause, because
+    a desk that has never saved its schedule has no `daily_scan_policies` row
+    behind it: the read reports that absence honestly as revision 0, while Pause
+    and Resume wrote with `where revision = 0`, which matches no row, so a fresh
+    desk was refused in the desk's own conflict words ("The schedule changed in
+    another window. Refresh and try again.") about a change nobody had made.
+    Measured then on a fresh built server: press Pause -> refused; press the
+    screen's Save -> "Daily scan settings saved."; press Pause -> "Daily scan
+    paused." and the button turned over. `setDailyScanPaused` now reads 0 as what
+    it is -- the read's words for "there is no row" -- and writes the hold, so
+    the first press in this section is the desk's first write of its own
+    schedule. That is the whole of this section's proof of the fix: a refusal
+    draws no "Pause daily scan" button for the wait below, so `pressTheSetting`
+    throws rather than passing quietly. The screen's Save keeps its coverage --
+    the sweep of every card screen presses it later on.
+
+    Seeding again on the way back in would also have un-paused the schedule the
+    main action had just paused, which is the other reason the seed ran once.
+  */
   const openScanSettings = async () => {
     await scanCard.getByRole("link", { name: "Scan settings" }).click();
     await page.getByRole("heading", { name: "Daily scan", exact: true }).waitFor({ timeout: 45_000 });
-    /*
-      Seed the schedule through the card's own screen before pressing anything.
-
-      A desk that has never saved its schedule has no `daily_scan_policies` row
-      behind it, and the read reports that absence honestly as revision 0 -- but
-      Pause/Resume write with `where revision = 0`, which matches nothing, so in
-      that state they are refused with the desk's conflict copy ("The schedule
-      changed in another window. Refresh and try again."). Nothing changed, and
-      the desk's own "Reload latest settings" cannot clear it: there is nothing
-      to reload. Measured on a fresh built server (.cx2-scratch/probe-scan.mjs,
-      report below): press Pause -> refused; press the screen's own "Save daily
-      scan" -> "Daily scan settings saved."; press Pause -> "Daily scan paused."
-      and the button turns over. The screen's Save is the row's only writer, and
-      the brief's own words for this step are "the main action once on seeded
-      data" -- so the walk seeds it here, the way the screen does.
-
-      This is not a regression from this unit: `git log main..HEAD --
-      src/lib/news/daily-scan.ts src/components/daily-scan-settings.tsx` lists
-      no commit from this branch, and both files are clean in `git status`.
-    */
-    const saveSchedule = page.getByRole("button", { name: "Save daily scan" });
-    await saveSchedule.waitFor({ timeout: 30_000 });
-    if (!scheduleSeeded && (await saveSchedule.isEnabled())) {
-      await saveSchedule.click();
-      await deskSays("Daily scan settings saved.").waitFor({ timeout: 30_000 });
-      scheduleSeeded = true;
-      console.log("  ok    the schedule was seeded through the screen's own Save");
-    }
     const reloadLatest = page.getByRole("button", { name: "Reload latest settings" });
     if (await reloadLatest.count()) {
       await reloadLatest.click();
@@ -906,6 +892,16 @@ try {
     `  note  Daily scan card before: ${JSON.stringify(runsBefore.replace(/\n/g, " "))}; the screen offers "${action}"`,
   );
   const presses = await pressTheSetting(action, undo);
+  /*
+    And the desk's own words for the write, which is the sentence CX3 is about:
+    a landed press says "Daily scan paused." / "Daily scan resumed.", where a
+    refusal says "The schedule changed in another window. Refresh and try
+    again." Waiting for the right one is what tells the two apart here -- the
+    button turning over is the same proof from the other side.
+  */
+  const announced = wasPaused ? "Daily scan resumed." : "Daily scan paused.";
+  await deskSays(announced).waitFor({ timeout: 30_000 });
+  console.log(`  ok    the desk answered in its own words: "${announced}"`);
   await page.getByRole("link", { name: "← Server" }).click();
   await page.getByRole("heading", { name: "Server", exact: true }).waitFor({ timeout: 45_000 });
   await scanCard.locator("dl.astra-ops-rows").waitFor({ timeout: 30_000 });
