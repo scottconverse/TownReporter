@@ -27,6 +27,7 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
+import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea } from "../story-area.ts";
 import { disclosureLine } from "./import-stories.ts";
 import { findDuplicate } from "./import-review.ts";
@@ -43,6 +44,7 @@ import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   addSourceInput,
+  artifactIdInput,
   bulkSourceInput,
   correctionInput,
   draftEditInput,
@@ -776,6 +778,46 @@ export const getLead = createServerFn({ method: "GET" })
         job,
       }),
     };
+  });
+
+/**
+ * The whole transcript behind a meeting story, for the editor to read.
+ *
+ * The id is the ONLY thing this server function accepts. The path the bytes
+ * come from is read from the `meeting_transcript_artifacts` row inside
+ * `loadTranscriptView`, scoped to the caller's newsroom, so a caller cannot
+ * name a file even by accident -- there is no field here to name one with.
+ * `artifact_type='transcript'` is part of the row's identity rather than a
+ * filter added here, so this view and the download route resolve the artifact
+ * the same way.
+ */
+export const getTranscriptView = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((artifactId: unknown) => artifactIdInput.parse(artifactId))
+  .handler(async ({ context, data: artifactId }) => {
+    const { loadTranscriptView } = await import("./meeting-transcript-view.server.ts");
+    const sql = await getSql();
+    try {
+      const view = await loadTranscriptView(sql, {
+        newsroomId: owned(context),
+        artifactId,
+      });
+      return {
+        ok: true as const,
+        view,
+        downloadUrl: transcriptDownloadUrl(view.artifactId),
+      };
+    } catch (error) {
+      /*
+        A refusal is a page, not a crash. "This transcript belongs to another
+        newsroom" is something an editor can be told plainly; an error boundary
+        would say the desk broke.
+      */
+      if (error instanceof TranscriptViewRefused) {
+        return { ok: false as const, reason: error.reason, message: error.message };
+      }
+      throw error;
+    }
   });
 
 export const listMemory = createServerFn({ method: "GET" })
