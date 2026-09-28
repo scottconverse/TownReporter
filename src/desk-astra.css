@@ -5737,3 +5737,92 @@
     padding: 14px 18px;
   }
 }
+
+/*
+  The meeting transcript reader (src/routes/desk.transcript.$artifactId.tsx).
+
+  A page for reading a long document, which the desk did not have one of. The
+  measure is capped in `ch` so a caption line stays a line rather than a
+  screen-wide smear on a wide monitor, and every size is expressed on the same
+  `calc(<rem> * var(--ts))` scale as the rest of the desk -- the 0.875rem floor
+  is the desk's minimum, so the editor's Normal/Large choice moves this page
+  with everything else and nothing here can fall under 14px.
+
+  The per-line layout is `flex` with the timestamp un-shrinkable: a wrapped
+  timestamp would read as two stamps, and the clock is the one thing on the
+  line that must stay exactly where a citation says it is.
+*/
+.desk-ltr .transcript-head {
+  margin: 12px 0 0;
+  max-width: 74ch;
+}
+.desk-ltr .transcript-title {
+  font-size: calc(1.25rem * var(--ts));
+  color: var(--fg);
+  margin: 0 0 6px;
+}
+.desk-ltr .transcript-file-facts {
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  padding: 10px 12px;
+  max-width: 74ch;
+}
+.desk-ltr .transcript-path,
+.desk-ltr .transcript-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: calc(0.875rem * var(--ts));
+  overflow-wrap: anywhere;
+}
+.desk-ltr .transcript-path {
+  color: var(--fg);
+  margin: 0 0 4px;
+}
+.desk-ltr .transcript-lines {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  max-width: 88ch;
+}
+.desk-ltr .transcript-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  font-size: calc(0.875rem * var(--ts));
+  color: var(--fg);
+}
+.desk-ltr .transcript-line:first-child {
+  border-top: 0;
+}
+.desk-ltr .transcript-stamp {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.desk-ltr .transcript-text {
+  text-wrap: pretty;
+}
+.desk-ltr .transcript-plaintext {
+  width: 100%;
+  max-width: 88ch;
+  min-height: 240px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: calc(0.875rem * var(--ts));
+  line-height: 1.5;
+}
+
+/* The row the "Open transcript" button and the video link share, so the two
+   doors sit together and wrap as a pair on a phone. */
+.desk-ltr .transcript-doors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+}

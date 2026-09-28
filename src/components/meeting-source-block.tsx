@@ -2,6 +2,41 @@ import { useEffect, useState } from "react";
 import type { ReportingNotes } from "@/lib/news/notes";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import { affectedMeetingSegmentIndexes, meetingCitationUrl, meetingCitationsFor, meetingClock } from "@/components/meeting-source-block-utils";
+import { transcriptViewPath } from "@/lib/news/meeting-transcript-view";
+
+/**
+ * The way out of the excerpt list and into the tape.
+ *
+ * The block above this is the draft's own citations -- twenty excerpts out of
+ * an hour of meeting. An editor checking one of them needs the sentence before
+ * it and the one after, which means the whole transcript, which means a page
+ * that prints it. This is the door: `Open transcript` opens the stored
+ * transcript for the artifact this draft cites in a new tab (so the story the
+ * editor is reading stays where it was), and the video link sits beside it so
+ * the same check can be made against the recording itself.
+ *
+ * Both are plain links to editor-only surfaces: the transcript page inherits
+ * the `/desk` gate, and the video is YouTube. Neither carries a path or an id
+ * the reader of this page could substitute for another newsroom's -- the
+ * artifact id is the one already recorded on this draft's own link row.
+ */
+function TranscriptLinks({ artifactId, videoId }: { artifactId?: number | null; videoId?: string | null }) {
+  if (!artifactId && !videoId) return null;
+  return (
+    <p className="note-one transcript-doors">
+      {artifactId ? (
+        <a className="btn quiet small" href={transcriptViewPath(artifactId)} target="_blank" rel="noreferrer">
+          Open transcript
+        </a>
+      ) : null}
+      {videoId ? (
+        <a className="meeting-citation-time" href={meetingCitationUrl(videoId, 0)} target="_blank" rel="noreferrer">
+          Watch the video
+        </a>
+      ) : null}
+    </p>
+  );
+}
 
 /**
  * "Where this came from" -- the block that makes a meeting story checkable.
@@ -33,6 +68,13 @@ export function MeetingSourceBlock({
   const citations = usedEvidence?.citations ?? [];
   const meeting = usedEvidence?.meeting ?? notes.meeting;
   const videoId = meeting?.videoId;
+  /*
+    The artifact to open. `usedEvidence` carries the link row's artifact, which
+    is the one the citations resolve against, and `notes.meeting` carries the
+    artifact the lead was captured with -- the fallback an older draft needs,
+    where the link row predates the writer that now fills it.
+  */
+  const artifactId = usedEvidence?.artifactId ?? notes.meeting?.artifactId ?? null;
   const hasRevision = Boolean(usedEvidence?.newerTranscriptExists || usedEvidence?.revisionNotice);
   const affectedIndexes = affectedMeetingSegmentIndexes(usedEvidence?.revisionNotice);
   const affected = citations.filter((citation) => !affectedIndexes.length || affectedIndexes.includes(citation.segmentIndex));
@@ -154,6 +196,7 @@ export function MeetingSourceBlock({
             {meeting?.title ? ` ${meeting.title}.` : ""}
             {" "}These are the exact persisted citations used by this draft.
           </p>
+          <TranscriptLinks artifactId={artifactId} videoId={videoId} />
           <ul className="meeting-citations">
             {citations.map((c) => (
               <li key={`${c.segmentIndex}-${c.item}`}>
@@ -176,6 +219,13 @@ export function MeetingSourceBlock({
           This lead has transcript material, but the current draft has no complete persisted used-citation record. Publishing will remain blocked until it is redrafted from the current recording.
         </p>
       )}
+      {/*
+        The same door on the branch where the draft has no citation record. A
+        blocked draft is exactly when an editor wants to read the tape -- the
+        citations are gone, so the transcript is the only thing left to check
+        the prose against.
+      */}
+      {!citations.length ? <TranscriptLinks artifactId={artifactId} videoId={videoId} /> : null}
       {candidates.length ? (
         <details>
           <summary>Transcript material considered ({candidates.length})</summary>

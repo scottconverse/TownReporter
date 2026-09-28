@@ -27,6 +27,7 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
+import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea } from "../story-area.ts";
 import { disclosureLine } from "./import-stories.ts";
 import { findDuplicate } from "./import-review.ts";
@@ -40,9 +41,11 @@ import {
   type PublishedMeetingReview,
 } from "./meeting-article-revision.ts";
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
+import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   addSourceInput,
+  artifactIdInput,
   bulkSourceInput,
   correctionInput,
   draftEditInput,
@@ -776,6 +779,46 @@ export const getLead = createServerFn({ method: "GET" })
         job,
       }),
     };
+  });
+
+/**
+ * The whole transcript behind a meeting story, for the editor to read.
+ *
+ * The id is the ONLY thing this server function accepts. The path the bytes
+ * come from is read from the `meeting_transcript_artifacts` row inside
+ * `loadTranscriptView`, scoped to the caller's newsroom, so a caller cannot
+ * name a file even by accident -- there is no field here to name one with.
+ * `artifact_type='transcript'` is part of the row's identity rather than a
+ * filter added here, so this view and the download route resolve the artifact
+ * the same way.
+ */
+export const getTranscriptView = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((artifactId: unknown) => artifactIdInput.parse(artifactId))
+  .handler(async ({ context, data: artifactId }) => {
+    const { loadTranscriptView } = await import("./meeting-transcript-view.server.ts");
+    const sql = await getSql();
+    try {
+      const view = await loadTranscriptView(sql, {
+        newsroomId: owned(context),
+        artifactId,
+      });
+      return {
+        ok: true as const,
+        view,
+        downloadUrl: transcriptDownloadUrl(view.artifactId),
+      };
+    } catch (error) {
+      /*
+        A refusal is a page, not a crash. "This transcript belongs to another
+        newsroom" is something an editor can be told plainly; an error boundary
+        would say the desk broke.
+      */
+      if (error instanceof TranscriptViewRefused) {
+        return { ok: false as const, reason: error.reason, message: error.message };
+      }
+      throw error;
+    }
   });
 
 export const listMemory = createServerFn({ method: "GET" })
@@ -2157,7 +2200,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   // Discovery exclusions are not citation rules: a watched page or a root
   // dashboard can be the substantive primary record. Preserve the reporter's
   // explicit citations, including an empty list, without adding lead seeds.
-  const sourceUrls = JSON.stringify(sanitizePublicUrls(reported.source_urls));
+  //
+  // The one URL added here is the recording a meeting draft was written from.
+  // The writer is given the tape as supplied material and the URL sits on the
+  // lead, so nothing carried it into the draft's own list -- the published
+  // story of a council meeting named no source at all, because the only copy
+  // of the video URL was on `leads.source_urls`. A reader checking the story
+  // against the recording is the whole point of drafting from it.
+  const sourceUrls = JSON.stringify(
+    meetingDraftSourceUrls(reported.source_urls, meetingMaterial?.videoUrl),
+  );
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance);
   const unansweredJson = JSON.stringify(reported.unanswered);

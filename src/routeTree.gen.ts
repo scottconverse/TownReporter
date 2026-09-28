@@ -21,6 +21,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ApiReadRouteImport } from './routes/api/read'
+import { Route as ApiTranscriptFileRouteImport } from './routes/api/transcript-file'
 import { Route as ApiViewRouteImport } from './routes/api/view'
 import { Route as ArticlesSlugRouteImport } from './routes/articles.$slug'
 import { Route as DeskIndexRouteImport } from './routes/desk.index'
@@ -44,6 +45,7 @@ import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
 import { Route as DeskStoryLeadIdRouteImport } from './routes/desk.story.$leadId'
+import { Route as DeskTranscriptArtifactIdRouteImport } from './routes/desk.transcript.$artifactId'
 import { Route as DeskStoryDraftDraftIdRouteImport } from './routes/desk.story.draft.$draftId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -104,6 +106,11 @@ const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
 const ApiReadRoute = ApiReadRouteImport.update({
   id: '/api/read',
   path: '/api/read',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTranscriptFileRoute = ApiTranscriptFileRouteImport.update({
+  id: '/api/transcript-file',
+  path: '/api/transcript-file',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiViewRoute = ApiViewRouteImport.update({
@@ -221,6 +228,12 @@ const DeskStoryLeadIdRoute = DeskStoryLeadIdRouteImport.update({
   path: '/story/$leadId',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskTranscriptArtifactIdRoute =
+  DeskTranscriptArtifactIdRouteImport.update({
+    id: '/transcript/$artifactId',
+    path: '/transcript/$artifactId',
+    getParentRoute: () => DeskRoute,
+  } as any)
 const DeskStoryDraftDraftIdRoute = DeskStoryDraftDraftIdRouteImport.update({
   id: '/story/draft/$draftId',
   path: '/story/draft/$draftId',
@@ -240,6 +253,7 @@ export interface FileRoutesByFullPath {
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/read': typeof ApiReadRoute
+  '/api/transcript-file': typeof ApiTranscriptFileRoute
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -263,6 +277,7 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
+  '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRoutesByTo {
@@ -277,6 +292,7 @@ export interface FileRoutesByTo {
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/read': typeof ApiReadRoute
+  '/api/transcript-file': typeof ApiTranscriptFileRoute
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -300,6 +316,7 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
+  '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRoutesById {
@@ -316,6 +333,7 @@ export interface FileRoutesById {
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/read': typeof ApiReadRoute
+  '/api/transcript-file': typeof ApiTranscriptFileRoute
   '/api/view': typeof ApiViewRoute
   '/articles/$slug': typeof ArticlesSlugRoute
   '/desk/dark': typeof DeskDarkRoute
@@ -339,6 +357,7 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
+  '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
   '/desk/story/draft/$draftId': typeof DeskStoryDraftDraftIdRoute
 }
 export interface FileRouteTypes {
@@ -356,6 +375,7 @@ export interface FileRouteTypes {
     | '/robots.txt'
     | '/sitemap.xml'
     | '/api/read'
+    | '/api/transcript-file'
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
@@ -379,6 +399,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/cron/monitors'
     | '/desk/story/$leadId'
+    | '/desk/transcript/$artifactId'
     | '/desk/story/draft/$draftId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -393,6 +414,7 @@ export interface FileRouteTypes {
     | '/robots.txt'
     | '/sitemap.xml'
     | '/api/read'
+    | '/api/transcript-file'
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
@@ -416,6 +438,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/cron/monitors'
     | '/desk/story/$leadId'
+    | '/desk/transcript/$artifactId'
     | '/desk/story/draft/$draftId'
   id:
     | '__root__'
@@ -431,6 +454,7 @@ export interface FileRouteTypes {
     | '/robots.txt'
     | '/sitemap.xml'
     | '/api/read'
+    | '/api/transcript-file'
     | '/api/view'
     | '/articles/$slug'
     | '/desk/dark'
@@ -454,6 +478,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/cron/monitors'
     | '/desk/story/$leadId'
+    | '/desk/transcript/$artifactId'
     | '/desk/story/draft/$draftId'
   fileRoutesById: FileRoutesById
 }
@@ -470,6 +495,7 @@ export interface RootRouteChildren {
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiReadRoute: typeof ApiReadRoute
+  ApiTranscriptFileRoute: typeof ApiTranscriptFileRoute
   ApiViewRoute: typeof ApiViewRoute
   ArticlesSlugRoute: typeof ArticlesSlugRoute
   EvidenceVersionIdRoute: typeof EvidenceVersionIdRoute
@@ -562,6 +588,13 @@ declare module '@tanstack/react-router' {
       path: '/api/read'
       fullPath: '/api/read'
       preLoaderRoute: typeof ApiReadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/transcript-file': {
+      id: '/api/transcript-file'
+      path: '/api/transcript-file'
+      fullPath: '/api/transcript-file'
+      preLoaderRoute: typeof ApiTranscriptFileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/view': {
@@ -725,6 +758,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskStoryLeadIdRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/transcript/$artifactId': {
+      id: '/desk/transcript/$artifactId'
+      path: '/transcript/$artifactId'
+      fullPath: '/desk/transcript/$artifactId'
+      preLoaderRoute: typeof DeskTranscriptArtifactIdRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/story/draft/$draftId': {
       id: '/desk/story/draft/$draftId'
       path: '/story/draft/$draftId'
@@ -753,6 +793,7 @@ interface DeskRouteChildren {
   DeskStatsRoute: typeof DeskStatsRoute
   DeskIndexRoute: typeof DeskIndexRoute
   DeskStoryLeadIdRoute: typeof DeskStoryLeadIdRoute
+  DeskTranscriptArtifactIdRoute: typeof DeskTranscriptArtifactIdRoute
   DeskStoryDraftDraftIdRoute: typeof DeskStoryDraftDraftIdRoute
 }
 
@@ -774,6 +815,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskStatsRoute: DeskStatsRoute,
   DeskIndexRoute: DeskIndexRoute,
   DeskStoryLeadIdRoute: DeskStoryLeadIdRoute,
+  DeskTranscriptArtifactIdRoute: DeskTranscriptArtifactIdRoute,
   DeskStoryDraftDraftIdRoute: DeskStoryDraftDraftIdRoute,
 }
 
@@ -792,6 +834,7 @@ const rootRouteChildren: RootRouteChildren = {
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiReadRoute: ApiReadRoute,
+  ApiTranscriptFileRoute: ApiTranscriptFileRoute,
   ApiViewRoute: ApiViewRoute,
   ArticlesSlugRoute: ArticlesSlugRoute,
   EvidenceVersionIdRoute: EvidenceVersionIdRoute,

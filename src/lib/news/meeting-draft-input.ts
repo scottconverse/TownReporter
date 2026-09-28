@@ -1,4 +1,5 @@
 import type { ReportingNotes } from "./notes.ts";
+import { sanitizePublicUrls } from "./schema.ts";
 
 /**
  * Turns a captured meeting into the drafting input the desk already understands.
@@ -96,6 +97,26 @@ export function meetingEvidenceBlock(material: MeetingDraftMaterial): string {
     }
   }
   return out.join("\n");
+}
+
+/**
+ * The URLs a draft records as its sources: the writer's own citations, plus the
+ * recording whenever the draft was written from one.
+ *
+ * The recording has to be added rather than left to the writer. It is handed to
+ * the writer as supplied material and it sits on the lead, so nothing carried it
+ * into the draft's `source_urls` -- and a meeting story whose reader-facing
+ * source list names no source at all is a story a reader cannot check, on the
+ * one kind of story that is nothing but a recording. The URL is put through
+ * `sanitizePublicUrls` with everything else and de-duplicated there, so a writer
+ * that already cited the video does not produce it twice.
+ */
+export function meetingDraftSourceUrls(
+  cited: unknown,
+  videoUrl: string | null | undefined,
+): string[] {
+  const list = Array.isArray(cited) ? cited : [];
+  return sanitizePublicUrls(videoUrl ? [...list, videoUrl] : list);
 }
 
 /**

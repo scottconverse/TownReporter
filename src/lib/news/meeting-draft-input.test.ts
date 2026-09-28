@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { meetingClock, meetingDraftNotes, meetingEvidenceBlock, type MeetingDraftMaterial } from "./meeting-draft-input.ts";
+import { meetingClock, meetingDraftNotes, meetingDraftSourceUrls, meetingEvidenceBlock, type MeetingDraftMaterial } from "./meeting-draft-input.ts";
 import { emptyNotes } from "./notes.ts";
 
 /**
@@ -68,6 +68,29 @@ describe("meeting draft input", () => {
     assert.equal(notes.researchScope, "supplied");
     assert.deepEqual(notes.suppliedUrls, ["https://www.youtube.com/watch?v=L1AnMLsLwtk"]);
     assert.match(notes.scratch, /MEETING: City Council Regular Session/);
+  });
+
+  it("puts the recording in the draft's source list, once", () => {
+    /*
+      The reader's Sources block reads the draft's `source_urls`. A meeting
+      story is written from the recording, so that list must name the recording
+      -- the writer's own citation of it, when it made one, and the lead's URL
+      when it did not, never both.
+    */
+    const cited = ["https://longmontcitycouncil.org/agenda-2026-09-15"];
+    assert.deepEqual(meetingDraftSourceUrls(cited, base.videoUrl), [
+      "https://longmontcitycouncil.org/agenda-2026-09-15",
+      "https://www.youtube.com/watch?v=L1AnMLsLwtk",
+    ]);
+    // A writer that already cited the video does not get it twice.
+    assert.deepEqual(meetingDraftSourceUrls([base.videoUrl], base.videoUrl), [base.videoUrl]);
+    // No meeting: the writer's list is passed through untouched.
+    assert.deepEqual(meetingDraftSourceUrls(cited, null), cited);
+    assert.deepEqual(meetingDraftSourceUrls(cited, "  "), cited);
+    // The same guard as everywhere else: a non-http literal is not a source.
+    assert.deepEqual(meetingDraftSourceUrls(["javascript:alert(1)", 7], base.videoUrl), [
+      base.videoUrl,
+    ]);
   });
 
   it("keeps the editor's own notes when assembling the meeting material", () => {

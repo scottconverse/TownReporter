@@ -14,6 +14,9 @@ import { InkButton } from "@/components/desk-chrome";
 import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 import { groupDisplayCaptures } from "@/lib/news/finding-evidence-display";
+import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
+import { citationResolution, meetingCitationUrl, meetingClock } from "@/components/meeting-source-block-utils";
+import { transcriptViewPath } from "@/lib/news/meeting-transcript-view";
 
 type JudgmentDraft = {
   value: FindingJudgment;
@@ -83,15 +86,99 @@ function draftsFrom(review: FindingEvidenceReview): Record<string, JudgmentDraft
   );
 }
 
+/**
+ * The transcript half of "Claims & evidence".
+ *
+ * For a meeting story this is the half that has anything in it. The panel below
+ * reviews URL-receipt claims, and a draft written from YouTube captions has
+ * none -- its `source_urls` is empty and the citations it actually used are
+ * segment indexes into a transcript, so the editor pressed "Review claims and
+ * sources" and landed on an empty box. Showing the citations here is the same
+ * data the notes' "Where this came from" block shows, at the address the button
+ * promises to take them to.
+ *
+ * The evidence object is the one the story route already loads through
+ * `loadDraftMeetingEvidence` (src/lib/news/meeting-draft-transcript-link.ts:60)
+ * and passes to `MeetingSourceBlock`; this renders the same rows, not a second
+ * read of the tape.
+ */
+function TranscriptCitationEvidence({ evidence }: { evidence: DraftMeetingEvidence }) {
+  const citations = evidence.citations;
+  const videoId = evidence.meeting.videoId;
+  return (
+    <div className="mt-4 border border-rule bg-paper-2 p-4" role="region" aria-label="Transcript citations">
+      <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+        Meeting transcript citations
+      </p>
+      <p className="mt-2 max-w-3xl text-sm text-muted">
+        This draft was written from the meeting recording
+        {evidence.meeting.date ? ` of ${evidence.meeting.date}` : ""}
+        {evidence.meeting.title ? ` (${evidence.meeting.title})` : ""}. The passages below are the
+        transcript citations this draft recorded — the evidence a meeting story actually rests on.
+      </p>
+      <p className="mt-2 flex flex-wrap items-center gap-2">
+        <a
+          className="btn quiet small"
+          href={transcriptViewPath(evidence.artifactId)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open transcript
+        </a>
+        <a
+          className="inline-link"
+          href={meetingCitationUrl(videoId, 0)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Watch the video
+        </a>
+      </p>
+      {citations.length ? (
+        <ul className="mt-3 space-y-3">
+          {citations.map((citation) => (
+            <li key={`${citation.segmentIndex}-${citation.item}`} className="border-l border-rule pl-3">
+              <p className="text-sm font-medium text-ink">
+                Item {citation.item || "unlabelled"}
+                {" · "}
+                <a
+                  className="inline-link"
+                  href={meetingCitationUrl(videoId, citation.timestampSeconds)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {meetingClock(citation.timestampSeconds)}
+                </a>
+              </p>
+              <blockquote className="mt-1 border-l-2 border-rust pl-3 text-sm text-ink-2">
+                {citation.excerpt}
+              </blockquote>
+              <p className="mt-1 text-sm text-muted">{citationResolution(evidence, citation)}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-muted">
+          This draft has transcript material but no persisted citation record, so there is nothing to
+          review here. Publishing stays blocked until it is redrafted from the current recording.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function FindingEvidenceReviewPanel({
   leadId,
   reviewRevision,
   currentDraft,
+  meetingEvidence = null,
   disabled = false,
 }: {
   leadId: number;
   reviewRevision: string;
   currentDraft: CurrentDraft;
+  /** The draft's transcript citations, when it has any. See `TranscriptCitationEvidence`. */
+  meetingEvidence?: DraftMeetingEvidence | null;
   disabled?: boolean;
 }) {
   const qc = useQueryClient();
@@ -433,11 +520,19 @@ export function FindingEvidenceReviewPanel({
         </Notice>
       ) : null}
 
-      {review && review.rows.length === 0 ? (
+      {/*
+        A meeting draft has no URL-receipt claims, so this block is the whole
+        answer for it: the citations it used, each with its timestamp and
+        whether it still resolves. Rendered beside the finding rows rather than
+        instead of them, because a draft can have both.
+      */}
+      {meetingEvidence ? <TranscriptCitationEvidence evidence={meetingEvidence} /> : null}
+
+      {review && review.rows.length === 0 && !meetingEvidence ? (
         <div className="mt-4 border border-rule bg-paper-2 p-4" role="status">
-          <p className="font-medium text-ink">No recorded findings for this draft.</p>
-          <p className="mt-1 text-sm text-muted">
-            This review does not inventory every claim in the story.
+          <p className="text-sm text-ink">
+            This draft has no recorded findings and no transcript citations, so there is nothing to
+            review here. This review does not inventory every claim in the story.
           </p>
         </div>
       ) : null}
