@@ -1602,6 +1602,16 @@ function StoryPage() {
                 href="#finding-evidence-review"
                 className="btn"
                 onClick={() => {
+                  /*
+                    The panel this promises lives in the Reporting tab, and the
+                    notes it sits in are behind a closed `<details>`. Opening the
+                    details without switching tabs left the editor on the Checks
+                    tab with the panel hidden in another one -- the same empty
+                    landing the button was reported for, one layer up. The
+                    sibling "Open reporting notes" button below has always done
+                    both; this one now does too.
+                  */
+                  setInspector("reporting");
                   const details = document.getElementById("evidence-review")?.closest("details");
                   if (details) details.open = true;
                 }}
