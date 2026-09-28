@@ -14,7 +14,7 @@ import { ViewBeacon } from "@/components/view-beacon";
 import { readerArticles } from "@/lib/news/reader-public";
 import { thisWeekDates } from "@/lib/news/story-dates-public";
 import { storyDateRows } from "@/lib/story-dates";
-import { opinionHeadlineDisplay } from "@/lib/news/editorial";
+import { headlineWithTag, opinionHeadlineDisplay } from "@/lib/news/editorial";
 import { HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
 import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
@@ -400,7 +400,7 @@ function Home() {
                   <SectionTag topic={lead.topic}>{sectionName(lead.topic)}</SectionTag>
                   <h2 className="leadhead">
                     <Link to="/articles/$slug" params={{ slug: lead.slug }}>
-                      {lead.headline}
+                      {headlineWithTag(lead.topic, lead.headline)}
                     </Link>
                   </h2>
                   <p className="dek">{lead.dek}</p>
@@ -436,7 +436,7 @@ function Home() {
                   <StoryCell
                     key={s.id}
                     section={sectionName(s.topic)}
-                    title={s.headline}
+                    title={headlineWithTag(s.topic, s.headline)}
                     date={formatShortDate(s.published_at)}
                     read={String(readMinutes(s.body))}
                     slug={s.slug}
@@ -542,7 +542,12 @@ function Home() {
                 order, where the date is the thing you scan.
               */}
               {listed.map((s) => (
-                <ReaderRow key={s.id} story={s} datebox={false} />
+                <ReaderRow
+                  key={s.id}
+                  story={s}
+                  datebox={false}
+                  title={headlineWithTag(s.topic, s.headline)}
+                />
               ))}
             </section>
           )}
