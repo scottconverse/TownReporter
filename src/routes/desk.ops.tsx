@@ -1114,8 +1114,9 @@ function InviteAnEditor() {
 /**
  * Owner recovery codes (Unit CJ, 0.6.80).
  *
- * Pattern copied from CivicCast's admin recovery codes: 10 one-time codes,
- * shown once, with an explicit "I saved these" confirm before the download
+ * Pattern matched to CivicCast's admin recovery codes (see recovery-codes.ts
+ * for the file:line search and the one deliberate count difference): one-time
+ * codes, shown once, with an explicit "I saved these" confirm before the download
  * button and the raw list disappear from state -- there is no "show them
  * again" here on purpose, matching the codes themselves (each one-time).
  * Owner-only: `myRecoveryCodesStatus`/`regenerateRecoveryCodes` both 403 a

@@ -4,10 +4,15 @@
   Owner decision, 2026-09-27: "a set of 'i lost this setup code' codes after
   the owner is done and set up (like civiccast creates for the admin)."
 
-  Pattern copied from CivicCast's admin recovery codes (see the report for the
-  file:line search): 10 one-time codes, shown once, stored only as SHA-256
-  hashes, each usable exactly once, and regenerating invalidates every code
-  that came before it.
+  Pattern matched to CivicCast's admin recovery codes
+  (civiccast/installer/station_state.py:57,661,1033,1267-1287,1375-1376 in
+  the civiccast-native checkout): one-time codes, stored only as salted
+  hashes, consumed by removing the matched hash from the list (never a
+  separate "used" flag), and a redeemed code replaces the admin/owner
+  password rather than signing anyone in directly. One deliberate
+  difference: CivicCast prints 8 codes (`_RECOVERY_CODE_COUNT = 8`); this
+  uses 10, per the task's own explicit fallback count ("10 codes, shown
+  once...") rather than matching CivicCast's number exactly.
 
   Smallest safe path for what redeeming a code actually DOES, chosen after
   reading `src/lib/auth/server.ts` and `src/lib/auth/account-lockout.server.ts`:
