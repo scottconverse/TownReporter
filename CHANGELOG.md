@@ -1,6 +1,12 @@
 # Changelog
 
-Current software version: **0.6.80**. Publication state is recorded by GitHub.
+Current software version: **0.6.81**. Publication state is recorded by GitHub.
+
+## 0.6.81 — 2026-09-28
+
+- Every HTML page now tells every cache to revalidate, so a release cannot be outlived by the bytes it replaced. The front page's lead gap is closed and "This week" names each event once; a meeting story's transcript opens in full, with every timestamp a link into the video; the story workbench is the drawn screen; every reason Publish is off is listed with its own button; Dark Desk has an honest light theme; the Server screen is the drawn summary cards with each editor one door away; Today and its rail match the drawing at laptop widths; long lists render 25 at a time with Show 25 more and the Queue's selection bar; the article's "How we reported this" band is a band of the page and the front page's trust strip is gone; the first-owner setup code and recovery codes return, salted and transactional; the manual follow-up workflow is retired, open rows marked dropped with nothing deleted; the desk dialogs the drawing drew now have their press; and the "Keep reading" band's missing gutter and empty cells were fixed. Two additive migrations, 0106 and 0107. Full detail in [the release guide](docs/releases/0.6.81.md).
+
+The packaged release note names `v0.6.81` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.80 — 2026-09-27
 
