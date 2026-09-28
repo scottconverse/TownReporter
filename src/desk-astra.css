@@ -5861,6 +5861,45 @@
   color: var(--mut);
 }
 
+/*
+  STORY DETAILS (unit CW2).
+
+  `Desk Story.dc.html` draws no Topic, no Geography, no named-outlet record and
+  no Pulled notes: its main column ends at the action row. The page still owes
+  every one of those fields, so they live in this one disclosure, shut by
+  default and directly under the action row -- out of the drawn column's way,
+  in one press of the editor's.
+
+  It is a rule-and-label row, not a box: the drawn column has no card here, and
+  a filled box under the action row would put a panel back where the audit
+  found one. The marker stays (the UA's triangle) because it is the only thing
+  that says "there is more behind this" without a sentence.
+*/
+.desk-ltr.astra .astra-story-details {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-story-details > summary {
+  cursor: pointer;
+  min-height: 28px;
+  color: var(--adeep);
+  font: 700 calc(14px * var(--ts))/28px var(--fd);
+}
+.desk-ltr.astra .astra-story-details > summary:hover,
+.desk-ltr.astra .astra-story-details > summary:focus-visible {
+  color: var(--a);
+}
+.desk-ltr.astra .astra-story-details[open] > summary {
+  margin-bottom: 14px;
+}
+.desk-ltr.astra .astra-story-details > summary::after {
+  content: " ▸";
+}
+.desk-ltr.astra .astra-story-details[open] > summary::after {
+  content: " ▾";
+}
+
 /* The sticky publish bar: the last thing on the page and the first thing in
    reach, with the gates that stand between the draft and the paper. */
 .desk-ltr.astra .astra-publish-bar {
