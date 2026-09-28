@@ -593,8 +593,8 @@ export const fileLead = createServerFn({ method: "POST" })
 /**
  * Whether a story about to be filed looks like one the paper already has.
  *
- * Unit BW5. The one-story paste panel warned "already published as ..." with a
- * link to the story, computed from the Queue's own loaded lists
+ * Unit BW5. The one-story paste panel warned that the paste looked like one the
+ * paper already had, with a link to the story, computed from the Queue's own loaded lists
  * (`findDuplicate`, `import-review.ts:322`, over `listLeads` + `listPublishedDesk`)
  * -- and the drawn dialog holds no such lists, so the warning went with the
  * panel. This is that lookup, asked by the dialog that needs it.
