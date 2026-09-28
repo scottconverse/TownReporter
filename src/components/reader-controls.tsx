@@ -12,6 +12,7 @@ import { sendTrustEvent } from "@/components/read-beacon-send";
 import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
+import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
 import { readReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
@@ -339,7 +340,7 @@ export function ReaderRow({
         <Link to="/articles/$slug" params={{ slug: story.slug }}>
           <h3>{title ?? story.headline}</h3>
         </Link>
-        {description && <p>{story.dek}</p>}
+        {description && <p>{dekOrFallback(story.dek, story.body)}</p>}
         <div className="meta">
           <span>{formatShortDate(story.published_at)}</span>
           <span className="dot" />
