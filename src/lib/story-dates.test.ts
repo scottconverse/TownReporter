@@ -424,9 +424,9 @@ describe("the story's own words (unit BX2)", () => {
       const headline =
         "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D";
       assert.deepEqual(
-        collectStoryDates([
-          story({ slug: "ranked", headline, published_on: "2026-09-25" }),
-        ]).map((i) => [i.date, i.what]),
+        collectStoryDates([story({ slug: "ranked", headline, published_on: "2026-09-25" })]).map(
+          (i) => [i.date, i.what],
+        ),
         [
           ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
           ["2026-10-03", "Brighton event for 3C and 3D"],
@@ -474,10 +474,9 @@ describe("the story's own words (unit BX2)", () => {
       ],
     ] as const) {
       assert.deepEqual(
-        collectStoryDates([story({ slug, headline: text, published_on: "2026-09-27" })]).map((i) => [
-          i.date,
-          i.what,
-        ]),
+        collectStoryDates([story({ slug, headline: text, published_on: "2026-09-27" })]).map(
+          (i) => [i.date, i.what],
+        ),
         [[date, printed ?? text]],
         `printed the headline for: ${text}`,
       );
@@ -673,7 +672,7 @@ describe("a row the headline is not about (unit BZ, item 5)", () => {
  * the sentence carrying the date -- and the headline is the last resort, for a
  * day whose words are genuinely a scrap or whose sentence is too long to print.
  */
-describe('a row title must read as a headline, not a bare fragment (unit BZ, item 6)', () => {
+describe("a row title must read as a headline, not a bare fragment (unit BZ, item 6)", () => {
   const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
     slug: "story",
     section: "council",
@@ -698,6 +697,34 @@ describe('a row title must read as a headline, not a bare fragment (unit BZ, ite
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
       [["2026-10-01", "The board has posted a funding hearing packet ahead of the meeting"]],
+    );
+  });
+
+  it('keeps "St." with its name and drops the word that introduced the date (0.6.82)', () => {
+    const items = collectStoryDates([
+      story({
+        slug: "open-houses",
+        headline: "St. Vrain lists upcoming school open houses beginning Oct. 1",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-01", "St. Vrain lists upcoming school open houses"]],
+    );
+  });
+
+  it('reads "Main St." at the end of a sentence as the end (0.6.82, Codex P2)', () => {
+    const headline = "Crews repave Main St. The council meets Oct. 1 on the budget";
+    const items = collectStoryDates([
+      story({ slug: "main-st", headline, published_on: "2026-09-27" }),
+    ]);
+    // The headline itself is an allowed fallback (rule c); a clause built across
+    // the two sentences ("Crews repave Main St. The council meets on the budget")
+    // is not.
+    assert.ok(
+      items.every((i) => i.what === headline || !/Main St/.test(i.what)),
+      `the Oct. 1 row must not reach back into the previous sentence: ${JSON.stringify(items)}`,
     );
   });
 
@@ -784,8 +811,7 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
       story({
         slug: "housing",
         headline: HOUSING_HEADLINE,
-        dek:
-          "The Oct. 8 regular meeting is cancelled, while agency funding hearings remain listed for Oct. 1 and Oct. 15.",
+        dek: "The Oct. 8 regular meeting is cancelled, while agency funding hearings remain listed for Oct. 1 and Oct. 15.",
         published_on: "2026-09-27",
       }),
     ]);
@@ -812,8 +838,7 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
       story({
         slug: "housing-later",
         headline: HOUSING_HEADLINE,
-        dek:
-          "The Oct. 8 regular meeting is cancelled; funding hearings remain listed for Oct. 22.",
+        dek: "The Oct. 8 regular meeting is cancelled; funding hearings remain listed for Oct. 22.",
         published_on: "2026-09-27",
       }),
     ]);
@@ -834,8 +859,7 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
       story({
         slug: "budget-hearing",
         headline,
-        dek:
-          "The plan goes to an Oct. 12 Public Hearing Set while, separately, the budget vote follows.",
+        dek: "The plan goes to an Oct. 12 Public Hearing Set while, separately, the budget vote follows.",
         published_on: "2026-09-27",
       }),
     ]);
@@ -922,8 +946,7 @@ describe("the five strings the review quoted (unit CV, item 2)", () => {
         slug: "staged",
         headline:
           "Longmont Housing Board Cancels Oct. 8 Regular Meeting; Funding Hearings Still Listed",
-        dek:
-          "The Oct. 8 regular meeting is cancelled, while agency funding hearings remain listed for Oct. 1 and Oct. 15.",
+        dek: "The Oct. 8 regular meeting is cancelled, while agency funding hearings remain listed for Oct. 1 and Oct. 15.",
         published_on: "2026-09-27",
       }),
       [["2026-10-08", "Longmont Housing Board Cancels Regular Meeting"]],

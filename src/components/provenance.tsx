@@ -79,7 +79,7 @@ export function ProvenanceBlock({
         {items.map((item, index) => (
           <SourceCard
             key={item.url || `${item.title}-${index}`}
-            role={item.role && item.role !== "source" ? item.role : "Source"}
+            role={item.role && item.role !== "source" ? item.role.replace(/[-_]+/g, " ") : "Source"}
             title={item.title}
             host={hostOf(item)}
             {...(item.document_date ? { documentDate: item.document_date } : {})}

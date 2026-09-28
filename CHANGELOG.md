@@ -1,6 +1,10 @@
 # Changelog
 
-Current software version: **0.6.81**. Publication state is recorded by GitHub.
+Current software version: **0.6.82**. Publication state is recorded by GitHub.
+
+## 0.6.82 — 2026-09-28
+
+- Fixes from the 0.6.81 live walk: Tonight's edition rows print the names chip once; the Queue's "Looks already printed" chip wraps instead of widening the desk; "This week" keeps "St." with its name and never ends a name on "beginning"; source cards print their role in words ("Announcing source").
 
 ## 0.6.81 — 2026-09-28
 

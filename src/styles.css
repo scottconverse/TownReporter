@@ -1096,6 +1096,8 @@
 .desk-ltr .chip.st-exhausted {border-style:dotted;border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .chip.dup {border-style:dashed;border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .lead-flags .chip.dup {margin:0}
+/* 0.6.82: the "Looks already printed: <headline>" chip wraps; unwrapped it pushed the desk 400px wide. */
+.desk-ltr .chip.dup {white-space:normal;max-width:100%;overflow-wrap:anywhere;text-align:left}
 .desk-ltr .chip.seen-again {border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .lead-flags .chip.seen-again {margin:0}
 /* The scan filed this lead under a section the model never chose. Dashed

@@ -100,9 +100,11 @@ function PublishedPage() {
   const [corrFixBySlug, setCorrFixBySlug] = useState<Record<string, boolean>>({});
   const [corrBodyBySlug, setCorrBodyBySlug] = useState<Record<string, string>>({});
   // Working / done / failed, and why, for the wording suggestion only.
-  const [wordingFor, setWordingFor] = useState<
-    { slug: string; kind: "working" | "ok" | "err"; text: string } | null
-  >(null);
+  const [wordingFor, setWordingFor] = useState<{
+    slug: string;
+    kind: "working" | "ok" | "err";
+    text: string;
+  } | null>(null);
   const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   // Which story is asking to be taken off the paper. Null when none is.
   const [killFor, setKillFor] = useState<string | null>(null);
@@ -139,13 +141,15 @@ function PublishedPage() {
       post that actually happened, not the one the next render would make.
     */
     mutationFn: (input: { slug: string; fixing: boolean }) =>
-      addCorrection({ data: {
-        articleSlug: input.slug,
-        body: (corrBySlug[input.slug] ?? "").trim(),
-        meetingReviewId: corrReviewFor[input.slug],
-        alsoFixBody: input.fixing,
-        storyBody: input.fixing ? (corrBodyBySlug[input.slug] ?? "") : undefined,
-      } }),
+      addCorrection({
+        data: {
+          articleSlug: input.slug,
+          body: (corrBySlug[input.slug] ?? "").trim(),
+          meetingReviewId: corrReviewFor[input.slug],
+          alsoFixBody: input.fixing,
+          storyBody: input.fixing ? (corrBodyBySlug[input.slug] ?? "") : undefined,
+        },
+      }),
     onSuccess: (res, input) => {
       const { slug } = input;
       if (res.ok) {
@@ -208,11 +212,13 @@ function PublishedPage() {
    */
   const suggestWording = useMutation({
     mutationFn: (slug: string) =>
-      suggestCorrectionWording({ data: {
-        articleSlug: slug,
-        wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
-        isRight: (corrRightBySlug[slug] ?? "").trim(),
-      } }),
+      suggestCorrectionWording({
+        data: {
+          articleSlug: slug,
+          wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
+          isRight: (corrRightBySlug[slug] ?? "").trim(),
+        },
+      }),
     onMutate: (slug) => {
       setWordingFor({ slug, kind: "working", text: "Writing a correction note…" });
     },
@@ -248,11 +254,13 @@ function PublishedPage() {
    */
   const useTemplate = useMutation({
     mutationFn: (slug: string) =>
-      suggestCorrectionTemplate({ data: {
-        articleSlug: slug,
-        wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
-        isRight: (corrRightBySlug[slug] ?? "").trim(),
-      } }),
+      suggestCorrectionTemplate({
+        data: {
+          articleSlug: slug,
+          wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
+          isRight: (corrRightBySlug[slug] ?? "").trim(),
+        },
+      }),
     onSuccess: (res, slug) => {
       if (res.ok) {
         setCorrBySlug((prev) => ({ ...prev, [slug]: res.wording }));
@@ -278,15 +286,20 @@ function PublishedPage() {
 
   const resolveTranscript = useMutation({
     mutationFn: (input: {
-      reviewId: number; slug: string; resolution: "still-accurate" | "correction-required";
+      reviewId: number;
+      slug: string;
+      resolution: "still-accurate" | "correction-required";
       acceptedArtifactId: number;
-    }) => resolveMeetingArticleReview({ data: {
-      reviewId: input.reviewId,
-      resolution: input.resolution,
-      acceptedArtifactId: input.acceptedArtifactId,
-      note: (reviewNotes[input.reviewId] ?? "").trim(),
-      confirmedSegmentIndices: reviewChecks[input.reviewId] ?? [],
-    } }),
+    }) =>
+      resolveMeetingArticleReview({
+        data: {
+          reviewId: input.reviewId,
+          resolution: input.resolution,
+          acceptedArtifactId: input.acceptedArtifactId,
+          note: (reviewNotes[input.reviewId] ?? "").trim(),
+          confirmedSegmentIndices: reviewChecks[input.reviewId] ?? [],
+        },
+      }),
     onSuccess: (res, input) => {
       if (!res.ok) {
         setNote({ kind: "err", text: res.error });
@@ -294,9 +307,10 @@ function PublishedPage() {
       }
       setNote({
         kind: "ok",
-        text: input.resolution === "still-accurate"
-          ? "Transcript revision reviewed. The published story remains unchanged."
-          : "Marked for correction. Write and publish the correction below.",
+        text:
+          input.resolution === "still-accurate"
+            ? "Transcript revision reviewed. The published story remains unchanged."
+            : "Marked for correction. Write and publish the correction below.",
       });
       if (input.resolution === "correction-required") {
         setCorrReviewFor((previous) => ({ ...previous, [input.slug]: input.reviewId }));
@@ -304,14 +318,15 @@ function PublishedPage() {
       }
       void qc.invalidateQueries({ queryKey: ["published-desk"] });
     },
-    onError: (error) => setNote({
-      kind: "err",
-      text:
-        editorActionError(
-          error instanceof Error ? error.message : "",
-          "save the transcript review",
-        ) ?? "Could not save the transcript review.",
-    }),
+    onError: (error) =>
+      setNote({
+        kind: "err",
+        text:
+          editorActionError(
+            error instanceof Error ? error.message : "",
+            "save the transcript review",
+          ) ?? "Could not save the transcript review.",
+      }),
   });
 
   /**
@@ -384,7 +399,9 @@ function PublishedPage() {
       if (!res.ok) {
         setNote({
           kind: "err",
-          text: editorActionError(res.error, "change that headline") ?? "Could not change that headline.",
+          text:
+            editorActionError(res.error, "change that headline") ??
+            "Could not change that headline.",
         });
         return;
       }
@@ -408,11 +425,15 @@ function PublishedPage() {
   const rows = published.data?.rows ?? [];
   const pubTotal = published.data?.total ?? 0;
   const pubCounts = published.data?.counts;
-  const transcriptReviews = rows.flatMap((article) => article.transcriptReviews.map((review) => ({
-    id: review.id,
-    headline: article.headline,
-    status: review.status,
-  })).filter((review) => review.status === "pending" || review.status === "correction-required"));
+  const transcriptReviews = rows.flatMap((article) =>
+    article.transcriptReviews
+      .map((review) => ({
+        id: review.id,
+        headline: article.headline,
+        status: review.status,
+      }))
+      .filter((review) => review.status === "pending" || review.status === "correction-required"),
+  );
 
   /*
     The four filters the design draws above the list, and the search box beside
@@ -467,12 +488,18 @@ function PublishedPage() {
       </p>
       {transcriptReviews.length > 0 ? (
         <Notice kind="err">
-          <b>Priority: {transcriptReviews.length} published transcript {transcriptReviews.length === 1 ? "review needs" : "reviews need"} attention.</b>{" "}
+          <b>
+            Priority: {transcriptReviews.length} published transcript{" "}
+            {transcriptReviews.length === 1 ? "review needs" : "reviews need"} attention.
+          </b>{" "}
           {transcriptReviews.map((review, index) => (
             <span key={review.id}>
               {index > 0 ? " · " : ""}
               <a href={`#transcript-review-${review.id}`} className="inline-link">
-                {review.headline}{review.status === "correction-required" ? " — correction required" : " — review evidence"}
+                {review.headline}
+                {review.status === "correction-required"
+                  ? " — correction required"
+                  : " — review evidence"}
               </a>
             </span>
           ))}
@@ -568,9 +595,7 @@ function PublishedPage() {
             <span>Corrections</span>
             <span>Actions</span>
           </div>
-          {shownRows.length === 0 ? (
-            <p className="wire-sum">Nothing matches that filter.</p>
-          ) : null}
+          {shownRows.length === 0 ? <p className="wire-sum">Nothing matches that filter.</p> : null}
           {shownRows.map((p) => (
             <div key={p.id} className="astra-row pub">
               <div className="astra-cell">
@@ -602,8 +627,8 @@ function PublishedPage() {
                 {headFor === p.slug ? (
                   <div className="corr-form head-edit">
                     <label htmlFor={`pub-head-${p.slug}`}>
-                      Type the headline this story should read instead. The link does not change,
-                      so nothing that points here breaks. The paper keeps a record of the old words.
+                      Type the headline this story should read instead. The link does not change, so
+                      nothing that points here breaks. The paper keeps a record of the old words.
                     </label>
                     <textarea
                       id={`pub-head-${p.slug}`}
@@ -640,96 +665,196 @@ function PublishedPage() {
                 {p.transcriptReviews.map((review) => {
                   if (review.status === "verified" || review.status === "corrected") {
                     return (
-                      <section id={`transcript-review-${review.id}`} key={review.id} className="pub-corr" aria-labelledby={`transcript-review-title-${review.id}`}>
+                      <section
+                        id={`transcript-review-${review.id}`}
+                        key={review.id}
+                        className="pub-corr"
+                        aria-labelledby={`transcript-review-title-${review.id}`}
+                      >
                         <h3 id={`transcript-review-title-${review.id}`}>
-                          Transcript review history — {review.status === "verified" ? "marked still accurate" : "correction published"}
+                          Transcript review history —{" "}
+                          {review.status === "verified"
+                            ? "marked still accurate"
+                            : "correction published"}
                         </h3>
                         <p>
-                          The published article remains tied to artifact A ({review.priorArtifact.sha256.slice(0, 12)}…).
-                          The review concerned artifact B ({review.currentArtifact.sha256.slice(0, 12)}…).
+                          The published article remains tied to artifact A (
+                          {review.priorArtifact.sha256.slice(0, 12)}…). The review concerned
+                          artifact B ({review.currentArtifact.sha256.slice(0, 12)}…).
                         </p>
                         <p>
-                          Completed {review.resolvedAt ? formatShortDate(review.resolvedAt) : "at an unrecorded time"}
-                          {review.resolvedBy ? ` by editor account ${review.resolvedBy}` : "; reviewer not recorded"}.
+                          Completed{" "}
+                          {review.resolvedAt
+                            ? formatShortDate(review.resolvedAt)
+                            : "at an unrecorded time"}
+                          {review.resolvedBy
+                            ? ` by editor account ${review.resolvedBy}`
+                            : "; reviewer not recorded"}
+                          .
                         </p>
-                        {review.resolutionNote ? <p><b>Editor note:</b> {review.resolutionNote}</p> : null}
+                        {review.resolutionNote ? (
+                          <p>
+                            <b>Editor note:</b> {review.resolutionNote}
+                          </p>
+                        ) : null}
                         {review.status === "verified" ? (
                           review.acceptedEvidence ? (
                             <details>
-                              <summary>Accepted artifact B evidence ({review.acceptedEvidence.citations.length} citations · SHA-256 {review.acceptedEvidence.artifactSha256.slice(0, 12)}…)</summary>
+                              <summary>
+                                Accepted artifact B evidence (
+                                {review.acceptedEvidence.citations.length} citations · SHA-256{" "}
+                                {review.acceptedEvidence.artifactSha256.slice(0, 12)}…)
+                              </summary>
                               <ul className="meeting-citations">
                                 {review.acceptedEvidence.citations.map((citation) => (
                                   <li key={citation.segmentIndex}>
-                                    <p><b>Segment {citation.segmentIndex}</b> · {Math.floor(citation.timestampSeconds / 60)}:{String(Math.floor(citation.timestampSeconds % 60)).padStart(2, "0")}</p>
+                                    <p>
+                                      <b>Segment {citation.segmentIndex}</b> ·{" "}
+                                      {Math.floor(citation.timestampSeconds / 60)}:
+                                      {String(Math.floor(citation.timestampSeconds % 60)).padStart(
+                                        2,
+                                        "0",
+                                      )}
+                                    </p>
                                     <p>{citation.excerpt}</p>
-                                    <p className="meta">Caption segment SHA-256 {citation.captionSha256}</p>
+                                    <p className="meta">
+                                      Caption segment SHA-256 {citation.captionSha256}
+                                    </p>
                                   </li>
                                 ))}
                               </ul>
                             </details>
-                          ) : <p role="alert">Accepted artifact B evidence is unavailable or malformed; consult the review record before relying on this history.</p>
+                          ) : (
+                            <p role="alert">
+                              Accepted artifact B evidence is unavailable or malformed; consult the
+                              review record before relying on this history.
+                            </p>
+                          )
                         ) : null}
                       </section>
                     );
                   }
                   const checked = reviewChecks[review.id] ?? [];
-                  const allChecked = review.citations.length > 0 && review.citations.every((c) => c.currentSegmentIndex != null && checked.includes(c.segmentIndex));
+                  const allChecked =
+                    review.citations.length > 0 &&
+                    review.citations.every(
+                      (c) => c.currentSegmentIndex != null && checked.includes(c.segmentIndex),
+                    );
                   return (
-                    <section id={`transcript-review-${review.id}`} key={review.id} className="pub-corr" aria-labelledby={`transcript-review-${review.id}`}>
-                      <h3 id={`transcript-review-${review.id}`}>Transcript changed — evidence review required</h3>
+                    <section
+                      id={`transcript-review-${review.id}`}
+                      key={review.id}
+                      className="pub-corr"
+                      aria-labelledby={`transcript-review-${review.id}`}
+                    >
+                      <h3 id={`transcript-review-${review.id}`}>
+                        Transcript changed — evidence review required
+                      </h3>
                       <p>
-                        This story was published from artifact {review.priorArtifact.id} ({review.priorArtifact.sha256.slice(0, 12)}…).
-                        The current recording is artifact {review.currentArtifact.id} ({review.currentArtifact.sha256.slice(0, 12)}…).
-                        The published story and its original evidence have not been changed.
+                        This story was published from artifact {review.priorArtifact.id} (
+                        {review.priorArtifact.sha256.slice(0, 12)}…). The current recording is
+                        artifact {review.currentArtifact.id} (
+                        {review.currentArtifact.sha256.slice(0, 12)}…). The published story and its
+                        original evidence have not been changed.
                       </p>
-                      {review.citations.length ? review.citations.map((citation) => (
-                        <div key={citation.segmentIndex} className="meeting-review-citation">
-                          <p><b>Segment {citation.segmentIndex}</b>{citation.timestampSeconds == null ? "" : ` · ${Math.floor(citation.timestampSeconds / 60)}:${String(Math.floor(citation.timestampSeconds % 60)).padStart(2, "0")}`}</p>
-                          <p><b>Published evidence:</b> {citation.oldExcerpt ?? "The original excerpt is unavailable; inspect artifact A directly."}</p>
-                          <p>
-                            <b>Current evidence{citation.currentSegmentIndex == null ? " comparison unavailable" : ` (artifact ${review.currentArtifact.id}, segment ${citation.currentSegmentIndex}${citation.currentTimestampSeconds == null ? "" : ` · ${Math.floor(citation.currentTimestampSeconds / 60)}:${String(Math.floor(citation.currentTimestampSeconds % 60)).padStart(2, "0")}`})`}:</b>{" "}
-                            {citation.currentExcerpt ?? "No segment was found near the published citation timestamp. Inspect artifact B directly; this citation cannot be confirmed as still accurate yet."}
-                          </p>
-                          <label>
-                            <input
-                              type="checkbox"
-                              disabled={citation.currentSegmentIndex == null}
-                              checked={checked.includes(citation.segmentIndex)}
-                              onChange={(event) => setReviewChecks((previous) => ({
-                                ...previous,
-                                [review.id]: event.target.checked
-                                  ? [...new Set([...(previous[review.id] ?? []), citation.segmentIndex])]
-                                  : (previous[review.id] ?? []).filter((value) => value !== citation.segmentIndex),
-                              }))}
-                            />
-                            I checked this citation against the current recording.
-                          </label>
-                        </div>
-                      )) : <p>No direct citation comparison is available. Treat this as correction work.</p>}
+                      {review.citations.length ? (
+                        review.citations.map((citation) => (
+                          <div key={citation.segmentIndex} className="meeting-review-citation">
+                            <p>
+                              <b>Segment {citation.segmentIndex}</b>
+                              {citation.timestampSeconds == null
+                                ? ""
+                                : ` · ${Math.floor(citation.timestampSeconds / 60)}:${String(Math.floor(citation.timestampSeconds % 60)).padStart(2, "0")}`}
+                            </p>
+                            <p>
+                              <b>Published evidence:</b>{" "}
+                              {citation.oldExcerpt ??
+                                "The original excerpt is unavailable; inspect artifact A directly."}
+                            </p>
+                            <p>
+                              <b>
+                                Current evidence
+                                {citation.currentSegmentIndex == null
+                                  ? " comparison unavailable"
+                                  : ` (artifact ${review.currentArtifact.id}, segment ${citation.currentSegmentIndex}${citation.currentTimestampSeconds == null ? "" : ` · ${Math.floor(citation.currentTimestampSeconds / 60)}:${String(Math.floor(citation.currentTimestampSeconds % 60)).padStart(2, "0")}`})`}
+                                :
+                              </b>{" "}
+                              {citation.currentExcerpt ??
+                                "No segment was found near the published citation timestamp. Inspect artifact B directly; this citation cannot be confirmed as still accurate yet."}
+                            </p>
+                            <label>
+                              <input
+                                type="checkbox"
+                                disabled={citation.currentSegmentIndex == null}
+                                checked={checked.includes(citation.segmentIndex)}
+                                onChange={(event) =>
+                                  setReviewChecks((previous) => ({
+                                    ...previous,
+                                    [review.id]: event.target.checked
+                                      ? [
+                                          ...new Set([
+                                            ...(previous[review.id] ?? []),
+                                            citation.segmentIndex,
+                                          ]),
+                                        ]
+                                      : (previous[review.id] ?? []).filter(
+                                          (value) => value !== citation.segmentIndex,
+                                        ),
+                                  }))
+                                }
+                              />
+                              I checked this citation against the current recording.
+                            </label>
+                          </div>
+                        ))
+                      ) : (
+                        <p>
+                          No direct citation comparison is available. Treat this as correction work.
+                        </p>
+                      )}
                       <textarea
                         rows={2}
                         value={reviewNotes[review.id] ?? ""}
-                        onChange={(event) => setReviewNotes((previous) => ({ ...previous, [review.id]: event.target.value }))}
+                        onChange={(event) =>
+                          setReviewNotes((previous) => ({
+                            ...previous,
+                            [review.id]: event.target.value,
+                          }))
+                        }
                         placeholder="What did you verify, or what needs correction?"
                         aria-label={`Transcript review note for ${p.headline}`}
                       />
                       <div className="row-acts static">
                         <InkButton
-                          disabled={!allChecked || !(reviewNotes[review.id] ?? "").trim() || resolveTranscript.isPending}
-                          onClick={() => resolveTranscript.mutate({
-                            reviewId: review.id, slug: p.slug, resolution: "still-accurate",
-                            acceptedArtifactId: review.currentArtifact.id,
-                          })}
+                          disabled={
+                            !allChecked ||
+                            !(reviewNotes[review.id] ?? "").trim() ||
+                            resolveTranscript.isPending
+                          }
+                          onClick={() =>
+                            resolveTranscript.mutate({
+                              reviewId: review.id,
+                              slug: p.slug,
+                              resolution: "still-accurate",
+                              acceptedArtifactId: review.currentArtifact.id,
+                            })
+                          }
                         >
                           Still accurate — close review
                         </InkButton>
                         <InkButton
                           tone="quiet"
-                          disabled={!(reviewNotes[review.id] ?? "").trim() || resolveTranscript.isPending}
-                          onClick={() => resolveTranscript.mutate({
-                            reviewId: review.id, slug: p.slug, resolution: "correction-required",
-                            acceptedArtifactId: review.currentArtifact.id,
-                          })}
+                          disabled={
+                            !(reviewNotes[review.id] ?? "").trim() || resolveTranscript.isPending
+                          }
+                          onClick={() =>
+                            resolveTranscript.mutate({
+                              reviewId: review.id,
+                              slug: p.slug,
+                              resolution: "correction-required",
+                              acceptedArtifactId: review.currentArtifact.id,
+                            })
+                          }
                         >
                           Needs correction
                         </InkButton>
@@ -806,10 +931,7 @@ function PublishedPage() {
                       </InkButton>
                     </div>
                     {wordingFor?.slug === p.slug ? (
-                      <p
-                        className="meta"
-                        role={wordingFor.kind === "err" ? "alert" : "status"}
-                      >
+                      <p className="meta" role={wordingFor.kind === "err" ? "alert" : "status"}>
                         {wordingFor.text}
                       </p>
                     ) : null}
@@ -859,8 +981,8 @@ function PublishedPage() {
                     {corrFixBySlug[p.slug] === true ? (
                       <>
                         <label htmlFor={`pub-corr-body-${p.slug}`}>
-                          The story text as it should read. The link does not change, and the
-                          paper keeps the words that printed.
+                          The story text as it should read. The link does not change, and the paper
+                          keeps the words that printed.
                         </label>
                         <textarea
                           id={`pub-corr-body-${p.slug}`}
@@ -923,7 +1045,8 @@ function PublishedPage() {
                   <span className="astra-row-meta">None</span>
                 )}
                 {p.transcriptReviews.some(
-                  (review) => review.status === "pending" || review.status === "correction-required",
+                  (review) =>
+                    review.status === "pending" || review.status === "correction-required",
                 ) ? (
                   <span className="astra-chip warn">Review needed</span>
                 ) : null}
@@ -945,7 +1068,9 @@ function PublishedPage() {
                   onClick={() => {
                     // Seed the box with the words on the paper, so pressing
                     // Edit twice is never a way to lose them.
-                    setHeadBySlug((prev) => (prev[p.slug] ? prev : { ...prev, [p.slug]: p.headline }));
+                    setHeadBySlug((prev) =>
+                      prev[p.slug] ? prev : { ...prev, [p.slug]: p.headline },
+                    );
                     setHeadFor(headFor === p.slug ? null : p.slug);
                   }}
                 >
@@ -1010,7 +1135,9 @@ function PublishedPage() {
                       (review) =>
                         review.status === "pending" || review.status === "correction-required",
                     ) ? (
-                      <a href={`#transcript-review-${p.transcriptReviews.find((review) => review.status === "pending" || review.status === "correction-required")?.id}`}>
+                      <a
+                        href={`#transcript-review-${p.transcriptReviews.find((review) => review.status === "pending" || review.status === "correction-required")?.id}`}
+                      >
                         Go to the evidence review
                       </a>
                     ) : null}
@@ -1071,44 +1198,54 @@ function PublishedPage() {
       )}
 
       <div id="beat-memory" />
-      <SecHead
-        title="Beat memory"
-        count={memory.data?.length ?? 0}
-        sub="What the drafting AI is told we already covered, so the paper doesn't repeat itself."
-      />
-      <table className="ltable">
-        <thead>
-          <tr>
-            <th>Entity</th>
-            <th>Last angle</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(memory.data ?? []).map((m) => (
-            <tr key={m.id} className="lead-tr">
-              <td className="td-hl" data-label="Entity">
-                <span className="src-t">{m.entity}</span>
-              </td>
-              <td className="td-meta wide" data-label="Last angle">
-                {m.last_angle}
-              </td>
-              <td className="td-meta" data-label="Updated">
-                {formatShortDate(m.updated_at)}
-              </td>
-            </tr>
-          ))}
-          {/* A header-only table read as broken, not empty (UX-002). */}
-          {(memory.data ?? []).length === 0 ? (
+      {/*
+        0.6.82: the drawing's Published screen ends at the list. Beat memory is
+        a working feature the drawing does not show, so it stays one press away,
+        closed, instead of adding 80 rows (10,000 px) under the list.
+      */}
+      <details className="beat-memory">
+        <summary className="astra-note">
+          Beat memory ({memory.data?.length ?? 0}) — what the drafting AI is told we already covered
+        </summary>
+        <SecHead
+          title="Beat memory"
+          count={memory.data?.length ?? 0}
+          sub="What the drafting AI is told we already covered, so the paper doesn't repeat itself."
+        />
+        <table className="ltable">
+          <thead>
             <tr>
-              <td className="td-meta" colSpan={3}>
-                Nothing tracked yet. Beat memory fills in once a story publishes and mentions an
-                entity.
-              </td>
+              <th>Entity</th>
+              <th>Last angle</th>
+              <th>Updated</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {(memory.data ?? []).map((m) => (
+              <tr key={m.id} className="lead-tr">
+                <td className="td-hl" data-label="Entity">
+                  <span className="src-t">{m.entity}</span>
+                </td>
+                <td className="td-meta wide" data-label="Last angle">
+                  {m.last_angle}
+                </td>
+                <td className="td-meta" data-label="Updated">
+                  {formatShortDate(m.updated_at)}
+                </td>
+              </tr>
+            ))}
+            {/* A header-only table read as broken, not empty (UX-002). */}
+            {(memory.data ?? []).length === 0 ? (
+              <tr>
+                <td className="td-meta" colSpan={3}>
+                  Nothing tracked yet. Beat memory fills in once a story publishes and mentions an
+                  entity.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </details>
     </DeskShell>
   );
 }

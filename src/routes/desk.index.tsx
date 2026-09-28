@@ -96,16 +96,6 @@ const OPEN_KEY = "townreporter.dark.openId";
 
 type DraftRow = Awaited<ReturnType<typeof listDraftsDesk>>[number];
 
-/** The tone a state chip is drawn in: the words carry the state, the border
- *  carries the tone. Same mapping as the Drafts screen. */
-function stateTone(state: DeskDraftState): string {
-  if (state.failed) return "d-danger";
-  if (state.running) return "d-run";
-  if (state.needsYou) return "d-warn";
-  if (state.key === "ready") return "d-ok";
-  return "d-quiet";
-}
-
 /**
  * "Saturday, Sep 26" in the paper's own timezone.
  *
@@ -1060,7 +1050,6 @@ function DeskHome() {
                     panel so two drafts' chips can be compared at a glance.
                   */}
                   <span className="today-edition-chips">
-                    <span className={"chip " + stateTone(state)}>{state.label}</span>
                     <span className={"chip " + chips.evidence.tone}>{chips.evidence.text}</span>
                     <span className={"chip " + chips.names.tone}>{chips.names.text}</span>
                     <span className={"chip " + chips.section.tone}>{chips.section.text}</span>
