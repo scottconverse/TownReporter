@@ -52,6 +52,9 @@ export function EditLeadDialog({
   const [links, setLinks] = useState(() => parseUrlList(sourceUrls).join("\n"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /* Set when the lead saved but its story draft kept its own words (the
+     draft was already worked on). The dialog stays open to say so. */
+  const [notice, setNotice] = useState("");
 
   function close() {
     onOpenChange(false);
@@ -74,6 +77,7 @@ export function EditLeadDialog({
     setTopic(initialTopic || "council");
     setLinks(parseUrlList(sourceUrls).join("\n"));
     setError("");
+    setNotice("");
   }
 
   const trimmedHeadline = headline.trim();
@@ -100,6 +104,10 @@ export function EditLeadDialog({
         return;
       }
       await onSaved?.();
+      if (res.message) {
+        setNotice(`The lead is saved. ${res.message}`);
+        return;
+      }
       onOpenChange(false);
     } catch {
       setError("The edit did not reach the desk. The lead is unchanged.");
@@ -116,9 +124,9 @@ export function EditLeadDialog({
       subtitle="Change the title, notes or section before drafting."
       footNote="Cancel leaves the lead exactly as it was."
       cancelLabel="Cancel"
-      primaryLabel="Save changes"
-      onPrimary={() => void save()}
-      primaryDisabled={!canSave}
+      primaryLabel={notice ? "Close" : "Save changes"}
+      onPrimary={() => (notice ? close() : void save())}
+      primaryDisabled={notice ? false : !canSave}
       primaryTone="solid"
     >
       <label className="astra-field">
@@ -171,6 +179,11 @@ export function EditLeadDialog({
       {trimmedHeadline.length > 0 && trimmedHeadline.length < 8 ? (
         <p className="astra-modal-alert" role="alert">
           Headline needs a full sentence.
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="astra-modal-note" role="status">
+          {notice}
         </p>
       ) : null}
       {error ? (
