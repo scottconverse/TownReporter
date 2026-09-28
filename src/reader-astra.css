@@ -1978,13 +1978,22 @@
 }
 /* The bands that reach the viewport edge. Only ever written on an element that
    is a direct child of `.wrap`, so the negative margin always lands on the
-   gutter and never inside a column. */
+   gutter and never inside a column.
+
+   `.evidence` and `.articlefoot` joined this list in unit DA2. They used to sit
+   inside `.articlebody` -- the story column, 680px wide -- because the article
+   grid puts everything it is handed in column 2. The drawing has both of them
+   edge to edge on the page, so both are direct children of `main.wrap` now
+   (siblings of `<article>`, before `#related`), and they need the same negative
+   gutter as the front page's bands. */
 .reader .ledgerow,
 .reader .storygrid,
 .reader .regionband,
 .reader .river,
 .reader .aboutstrip,
-.reader .keepreading {
+.reader .keepreading,
+.reader .evidence,
+.reader .articlefoot {
   margin-inline: calc(-1 * var(--px));
 }
 /* The front page's own h1: the edition title is the dateline in the top bar,
@@ -2999,24 +3008,39 @@
 }
 
 /* ---------------------------------------------------------------------------
-   "How we reported this". It lives inside the story column, so it is ruled,
-   never bled: a negative margin there would open into the layout gaps and
-   stop, which is worse than not bleeding at all.
+   "How we reported this". A band of the page, not of the story column: the
+   drawing puts it edge to edge, under the body and the disclosure, with its
+   rule on the gutter. It is a direct child of `main.wrap` (see the band list
+   above), so it bleeds the way the front page's bands do, and its own
+   `padding-inline` is what puts the records back on the reading measure.
+
+   The header is one baseline row: the yellow "Follow the evidence" chip sits
+   inline to the LEFT of the heading, which is how the drawing has it. It used
+   to be a block above the heading.
    --------------------------------------------------------------------------- */
 .reader .evidence {
-  margin-top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 36px var(--px) 40px;
+  margin-top: 0;
   border-top: 3px solid var(--grid);
-  padding-top: 22px;
+}
+.reader .evidence .evidencehead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
 }
 .reader .evidence .evidencehead .kicker {
-  display: block;
   font-family: var(--fd);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 8px;
+  background: var(--yel);
+  color: #111;
+  padding: 2px 8px;
 }
 .reader .evidence .evidencehead h2 {
   font-family: var(--fd);
@@ -3024,7 +3048,7 @@
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -1px;
-  margin-bottom: 18px;
+  margin: 0;
 }
 .reader .evidence .evidenceform {
   font-family: var(--fd);
@@ -3033,13 +3057,16 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 14px;
+  margin: 0;
 }
 .reader .sourcegrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--grid);
+  /* The drawing closes the grid with its own hairline, so an odd last card
+     does not end in a gap where the empty cell would have been. */
+  border: 1px solid var(--grid);
 }
 .reader .sourcegrid > .sourcecard-new {
   background: var(--bg);
@@ -3101,86 +3128,63 @@
   color: var(--muted);
   margin: 0;
 }
-.reader .findingblock {
-  margin-top: 30px;
-  border-top: 3px solid var(--grid);
-  padding-top: 22px;
-}
-.reader .findingtitle {
-  font-family: var(--fd);
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.7px;
-  margin-bottom: 6px;
-}
-.reader .findinglist {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.reader .findinglist > li {
-  padding: 18px 0;
-  border-top: 1px solid var(--grid);
-}
-.reader .evidence .findinglist p {
-  font-family: var(--serif);
-  font-size: 17px;
-  line-height: 1.6;
-  color: var(--ink);
-}
-.reader .evidence p.findingsource {
-  font-family: var(--fd);
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--muted);
-  margin-top: 8px;
-  word-break: break-all;
-}
+/* The "What TownReporter found" appendix. Its `.findingblock`, `.findingtitle`,
+   `.findinglist` and `.findingsource` rules were removed in unit DA2 with the
+   markup: the drawing has no such block, and every row it printed was already
+   a card above it (see `provenance.tsx`). Recorded in `SPEC-GAPS-0681.md`. */
 .reader .evidence p.trustline {
   font-family: var(--fd);
   font-size: 14px;
   line-height: 1.6;
   color: var(--muted);
-  margin-top: 24px;
+  margin: 0;
   border-top: 1px solid var(--grid);
   padding-top: 14px;
 }
-/* The disclosure sits at the head of `#sources`, above the records it points
-   at: a 4px yellow rule, the sentence, and no box. */
-.reader .evidence p.ai-disclosure {
-  font-family: var(--fd);
-  font-size: 14px;
-  line-height: 1.6;
+/* The disclosure closes the story column, which is where the drawing puts it:
+   the last thing in the body, over a 3px rule the width of the reading
+   measure, in the secondary ink. It used to sit at the head of `#sources` on a
+   4px yellow rule; the records it points at are a band of the page now, and a
+   rule inside them would read as part of the first card. */
+.reader .articlebody p.ai-disclosure {
+  margin: 0.4em 0 0;
+  padding: 16px 0 0;
+  border-top: 3px solid var(--grid);
+  font-size: 0.85em;
+  line-height: 1.55;
   color: var(--muted);
-  border-left: 4px solid var(--yel);
-  padding: 2px 0 2px 14px;
-  margin: 0 0 22px;
   background: transparent;
 }
 
 /* ---------------------------------------------------------------------------
    The foot of the story: corrections beside the reprint panel, as two halves
-   of one ruled band. In the yellow half the ink is fixed #111, as everywhere a
-   yellow ground is used.
+   of one ruled band, edge to edge like the evidence band above it. In the
+   yellow half the ink is fixed #111, as everywhere a yellow ground is used.
+
+   The band bleeds (see the band list above), so each half carries the gutter
+   as its own padding: the container's padding would be where the 1px `--grid`
+   divider is painted, and the divider has to land between the halves, not
+   around them.
    --------------------------------------------------------------------------- */
 .reader .articlefoot {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--grid);
-  margin-top: 36px;
+  border-top: 3px solid var(--grid);
+  margin-top: 0;
 }
 .reader .articlefoot > .sources {
   border-top: 0;
-  padding: 24px 24px 26px;
+  padding: 32px var(--px) 36px;
   margin-top: 0;
   background: var(--bg);
 }
 .reader .articlefoot > .sources h2 {
   font-family: var(--fd);
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 800;
-  letter-spacing: -0.7px;
+  letter-spacing: -0.56px;
 }
 .reader .articlefoot > .sources > p {
   font-family: var(--serif);
@@ -3206,6 +3210,21 @@
   font-size: 16px;
   line-height: 1.55;
   margin-top: 6px;
+}
+/* "File a correction →" is the black button in the drawing: `--ink` ground,
+   `--bg` label. `.btn.primary` is the page's yellow button and was what this
+   printed before unit DA2 -- on a white half of a band that now spans the
+   page, the yellow was the loudest thing on the article. The hover keeps the
+   page's convention of inverting to the outline. */
+.reader .articlefoot > .sources > .btn.primary {
+  margin-top: 6px;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+.reader .articlefoot > .sources > .btn.primary:hover {
+  background: transparent;
+  color: var(--ink);
 }
 .reader .articlefoot .sharepanel {
   background: var(--yel);
@@ -3527,6 +3546,7 @@
    below the byline bar, but they must not land under it either. */
 .reader .articlebody [id],
 .reader .sources[id],
+.reader .evidence[id],
 .reader .keepreading[id] {
   scroll-margin-top: 24px;
 }
