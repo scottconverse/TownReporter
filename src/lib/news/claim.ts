@@ -77,10 +77,12 @@ export const claimDesk = createServerFn({ method: "POST" })
  * verify the typed code (rate-limited, 5/15min per IP -- `setup-code.ts`),
  * and only on a match call `requireEditor(userId, { bypassSetupCodeGate: true
  * })`, which still runs the same one-transaction, index-backed claim
- * `claimOwner` always has. The code is burned only once that claim actually
- * lands (`held[0]` below), never merely for typing it correctly, so a caller
- * whose claim lost a race to another request in flight does not burn a code
- * that never bought anything.
+ * `claimOwner` always has. `burnSetupCode()` runs only AFTER that call
+ * returns successfully, never merely for typing the code correctly -- if
+ * `requireEditor` throws (this request lost the race to claim the desk), the
+ * catch below turns it into a plain refusal and the code is left untouched,
+ * so a caller who lost the race has not burned a code that never bought
+ * anything.
  *
  * When no code is pending (`isSetupCodeRequired()` is false -- nothing to
  * verify, including every existing install with an owner already) this falls
