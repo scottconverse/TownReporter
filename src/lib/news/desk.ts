@@ -3555,6 +3555,22 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   );
   const row = drafts[0];
   if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
+  /*
+    A STORY NEVER PRINTS WITH A HOLE WHERE ITS DEK BELONGS (0.6.80).
+    Nothing upstream requires one -- a pasted story is filed with `dek: ""`
+    (`paste-one-story.ts:178`) and a report's own model can omit the "why it
+    matters" paragraph a dek comes from (`import-review.ts:2111`) -- so this is
+    the one gate every reported story passes through before it prints. The
+    workbench already has a dek field (`desk.story.draft.$draftId.tsx:259`);
+    refusing here, not earlier, lets the editor fill it any time before this
+    click.
+  */
+  if (!row.dek || !row.dek.trim()) {
+    return {
+      ok: false as const,
+      error: "Add a dek, the one-line summary under the headline, before you publish.",
+    };
+  }
   if (evidenceNeedsReview(row, row.body))
     return {
       ok: false as const,
