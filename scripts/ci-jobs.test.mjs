@@ -34,6 +34,10 @@ const CLAIMERS = [
   "scripts/scan-desk-e2e.mjs",
   "scripts/sources-desk-e2e.mjs",
   "scripts/claim-sources-pull-walk.mjs",
+  // Unit CR (0.6.81): creates the first account, and its whole subject is what
+  // the owner sees when the setup code is wrong -- so it needs a desk with a
+  // PENDING code, which is a virgin desk by definition.
+  "scripts/first-owner-setup-code-walk.mjs",
 ];
 
 test("each desk-claiming walk exists and is referenced by CI", () => {

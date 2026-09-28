@@ -145,7 +145,24 @@ function Login() {
 
     That is the whole argument for the walk existing.
   */
-  if (user && !claim.isPending) return <Navigate to="/desk" />;
+  /*
+    Unit CR (0.6.81): the redirect waits for the desk to actually be claimed.
+
+    This guard used to fire on the session alone (`user && !claim.isPending`),
+    and that is what stranded the owner whose setup code was wrong: the account
+    is created before the claim is attempted, so the refusal arrives with a live
+    session and an unclaimed desk. The guard fired in the same render that
+    showed the error, unmounting the error, the setup field and the typed
+    address together -- and /desk refuses an unclaimed owner, so the browser
+    bounced straight back here, which redirected again. A loop with no screen
+    on which to retype the code.
+
+    An unclaimed desk with a session is not a visitor to send onward; it is an
+    owner mid-claim, and this form is the only place that claim can be retried
+    (see `onEmailSignUp`). Every other arrival -- an owner revisiting /login, an
+    invited editor, a dev-fallback user -- is claimed, and redirects as before.
+  */
+  if (user && !claim.isPending && claimed) return <Navigate to="/desk" />;
 
   async function finishEmail(data?: unknown, headers?: Headers | null) {
     storePreviewBearer(tokenFromResult(data, headers));
@@ -216,6 +233,34 @@ function Login() {
     setError(null);
     if (claimed && !invited) {
       setError(taken.api);
+      return;
+    }
+    /*
+      Unit CR (0.6.81): already signed in, desk still unclaimed -- this submit
+      is a CLAIM RETRY, not a signup.
+
+      It is the state a wrong setup code leaves behind (the account is created
+      first, the claim is attempted after), and the state a reload during that
+      refusal leaves behind. The account exists and the session is live, so
+      there is nothing to sign up for: the one thing missing is the code. The
+      password fields may well be empty by now -- they were only ever proof for
+      a signup that has already happened -- so this branch is checked before
+      them, and retries the claim with whatever code is in the field. Re-running
+      signup here instead would fail with "account exists", fall into
+      `onEmailSignIn`, and take a different path than the one under test.
+    */
+    if (user) {
+      if (claim.data?.tokenRequired && !invited && setupCode.trim().length === 0) {
+        setError("Enter the setup code printed when this desk was installed.");
+        return;
+      }
+      setBusy("email-up");
+      try {
+        await finishEmail();
+      } catch (err) {
+        setBusy(null);
+        setError(failMessage(err, "Could not claim the desk"));
+      }
       return;
     }
     if (password.length < 8) {
