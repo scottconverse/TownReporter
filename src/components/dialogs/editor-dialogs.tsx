@@ -782,6 +782,17 @@ export type AddToStoryDialogProps = {
   open: boolean;
   onClose: () => void;
   onDone?: (note: string) => void;
+  /**
+   * Unit CP: the exact body the confirm press saved, handed to the screen.
+   *
+   * The screen around this dialog keeps its own copy of the draft's body in a
+   * box, and that box only takes the server's copy when the draft it is
+   * looking at changes. A landed add would otherwise leave the box showing the
+   * pre-weave text -- and the page's own "Save edits" would then write that
+   * older body back over the weave. The screen gets the saved bytes, not a
+   * note about them, so it cannot land the wrong thing.
+   */
+  onSaved?: (body: string) => void;
 };
 
 /**
@@ -794,16 +805,36 @@ export type AddToStoryDialogProps = {
  * read -- which is the design's own foot note, kept as a property of the forms
  * layer rather than of this component's discipline.
  *
- * Mounted by: the story screen (`/desk/story/$leadId`) in its Material panel.
- * Props: `leadId`, `open`, `onClose`, `onDone`.
+ * Mounted by: the story screen (`/desk/story/$leadId`), from the "+ Add to
+ * story" press in its action row (`Desk Story.dc.html:114` wires that press to
+ * the `add-to` action). Props: `leadId`, `open`, `onClose`, `onDone`,
+ * `onSaved`.
  */
-export function AddToStoryDialog({ leadId, open, onClose, onDone }: AddToStoryDialogProps) {
+export function AddToStoryDialog({
+  leadId,
+  open,
+  onClose,
+  onDone,
+  onSaved,
+}: AddToStoryDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<AddToState>(addToInitial, open, press.clear);
   const [names, setNames] = React.useState<string[]>([]);
+  /*
+    What the review press answered as the story AS IT IS (`answer.before`, the
+    draft's stored body). Held here rather than in `AddToState` because it is
+    the desk's answer about the story, not something the editor typed: the
+    compare's "Now" column has to show the story the change lands on. It used
+    to be drawn from `state.material`, which printed the paragraph the editor
+    had just pasted under the heading "Now" -- a compare that compared nothing.
+  */
+  const [before, setBefore] = React.useState("");
 
   React.useEffect(() => {
-    if (open) setNames([]);
+    if (open) {
+      setNames([]);
+      setBefore("");
+    }
   }, [open]);
 
   const done = (text: string): PressAnswer => {
@@ -830,12 +861,14 @@ export function AddToStoryDialog({ leadId, open, onClose, onDone }: AddToStoryDi
       if (!answer.ok) return { problem: answer.error };
       if (!confirm) {
         set({ reviewed: answer.after });
+        setBefore(answer.before);
         return {
           note:
             answer.notice ??
             `Nothing saved yet. Read it above, then press Add to save exactly this text.`,
         };
       }
+      onSaved?.(answer.after);
       return done(
         `Saved. The story is ${answer.after.length} characters now${answer.documents ? `, with ${answer.documents} document${answer.documents === 1 ? "" : "s"} attached` : ""}.`,
       );
@@ -866,7 +899,7 @@ export function AddToStoryDialog({ leadId, open, onClose, onDone }: AddToStoryDi
         set={set}
         problem={press.problem ?? addToProblem(state)}
         note={press.note}
-        review={state.reviewed === null ? null : { before: state.material.trim(), after: state.reviewed }}
+        review={state.reviewed === null ? null : { before, after: state.reviewed }}
         documentNames={names}
         onFiles={onFiles}
         Choice={Choice}

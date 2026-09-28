@@ -94,6 +94,7 @@ import {
 import { KillDialog } from "@/components/dialogs/KillDialog";
 import { RedraftDialog } from "@/components/dialogs/RedraftDialog";
 import { CompareVersionsDialog } from "@/components/dialogs/CompareVersionsDialog";
+import { AddToStoryDialog } from "@/components/dialogs";
 import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
 import { jobProgressView } from "@/lib/news/job-progress";
 import {
@@ -307,6 +308,13 @@ function StoryPage() {
   const [killOpen, setKillOpen] = useState(false);
   const [redraftOpen, setRedraftOpen] = useState(false);
   const [compareVersionsOpen, setCompareVersionsOpen] = useState(false);
+  /*
+    Unit CP: the drawn "+ Add to story" dialog had no press on this page at all.
+    The press in the action row opens it (`Desk Story.dc.html:114`); it writes
+    through the server function it always called, and nothing about this
+    screen's own save path changes.
+  */
+  const [addToOpen, setAddToOpen] = useState(false);
   /*
     "Preview viewed" is a checklist item in the drawing, not a gate: opening the
     preview is a thing this session has done or has not, and the publish button
@@ -2391,6 +2399,32 @@ function StoryPage() {
                 Compare
               </button>
             ) : null}
+            {/*
+              Unit CP item 1: the drawn "+ Add to story", which had no press on
+              this page at all. `Desk Story.dc.html:114` draws it in the draft
+              editor's own row, between "Check draft against evidence" and
+              "Redraft…", and `:172` wires it to the `add-to` action; this row is
+              the desk's version of that one, so it sits in the same place here.
+
+              Drawn only where it can act. The gate is the one the presses either
+              side of it use -- `!locked && !onPaper`, the page's "not killed and
+              not published" rule (`locked` at the top of this component is
+              `status === "killed"`, `onPaper` is `status === "published"` or a
+              published slug) -- plus `data.draft`, because the weave the dialog
+              runs has nothing to add to without one: `performWeaveIntoStory`
+              answers "This lead has no draft to add to yet." The drawing agrees
+              with that last condition: its row is drawn inside a draft that
+              already has a body.
+            */}
+            {data.draft && !locked && !onPaper ? (
+              <InkButton
+                tone="ghost"
+                disabled={waiting || reconcileActive}
+                onClick={() => setAddToOpen(true)}
+              >
+                + Add to story
+              </InkButton>
+            ) : null}
             {!locked && !onPaper ? (
               <>
                 <InkButton
@@ -2672,6 +2706,32 @@ function StoryPage() {
         open={killOpen}
         onOpenChange={setKillOpen}
         onKilled={afterLeadChange}
+      />
+      {/*
+        Unit CP item 1: the dialog that was built and drawn but had no press
+        anywhere on the desk. Mounted here for the same reason the three above
+        are -- it portals itself to the body, so where it sits in this tree
+        decides nothing about where it appears.
+      */}
+      <AddToStoryDialog
+        leadId={id}
+        open={addToOpen}
+        onClose={() => setAddToOpen(false)}
+        onSaved={(after) => {
+          /*
+            The dialog saved the body on the server; this page's box holds its
+            own copy, and the effect that seeds that box only takes the server's
+            copy when the draft it is looking at changes. Without this the box
+            would keep the pre-weave text and the next "Save edits" would write
+            it back over the weave. `stripReporterNotebook` is the same
+            treatment every other seed of this box applies.
+          */
+          setBody(stripReporterNotebook(after));
+        }}
+        onDone={(note) => {
+          setMsg(note);
+          void afterLeadChange();
+        }}
       />
       <RedraftDialog
         open={redraftOpen}
