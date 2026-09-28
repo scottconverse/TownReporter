@@ -114,6 +114,8 @@ const deskCopyStub = inlineModule(`
   export function kindFromSourceUrl() { return "official"; }
   /* Redesign phase 2a: the shell counts Queue from openLeads(). */
   export function openLeads(leads) { return leads ?? []; }
+  /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
+  export function pileForStatus() { return "desk"; }
   export function tierFromKind() { return "A"; }
   /*
     The add box's catch runs this on a failure (0.6.67). No click can happen in
@@ -136,6 +138,12 @@ const deskServerStub = inlineModule(`
     ["recent-story-work"] query the desk already polls for its job cards.
   */
   export async function listRecentStoryWork() { return []; }
+  /*
+    CY item 6 added the nav's Opinion, Follow-ups and Dark Desk counts to the
+    shell. This render is about the page below the shell, not the counts, so
+    the three reads answer empty and the nav prints nothing.
+  */
+  export async function listFollowUps() { return []; }
   export async function addSource() {
     return { ok: false, error: "not called in a static render" };
   }
@@ -191,6 +199,14 @@ const DESK_CHROME_IMPORTS = {
   "@/lib/news/desk-copy": deskCopyStub,
   "@/lib/news/desk": deskServerStub,
   "@/lib/news/opinion": opinionStub,
+  /*
+    CY item 6 put the Dark Desk and Follow-ups nav counts in the shell, so
+    desk-chrome.tsx now imports these two modules. Nothing here reads them.
+  */
+  "@/lib/news/dark": inlineModule("export async function listInvestigations() { return []; }"),
+  "@/lib/news/follow-up-copy": inlineModule(
+    "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
+  ),
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
   "@/components/desk-jobs": deskJobsUrl,
   "@/lib/appearance-context": appearanceContextStub,

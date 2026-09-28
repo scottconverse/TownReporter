@@ -221,19 +221,9 @@
   padding: 2px 8px;
   line-height: 1.6;
 }
-/* Unit BN2, item 5: the rail's "+ New story", at the top of the nav. Sized like
-   the nav rows it sits above (`.astra-nav` below), so the rail reads as one
-   column of targets; the margins are the ones this rule already carried. */
-.desk-ltr.astra .astra-new {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 8px 10px;
-  gap: 8px;
-  min-height: 44px;
-  font-size: calc(15px * var(--ts));
-  font-weight: 800;
-}
+/* CY item 6 removed the rail's "+ New story" and with it the `.astra-new` rule
+   that sized it (Unit BN2, item 5). The phone bar's "+ New" keeps its own
+   `.astra-bar-new` rule further down. */
 .desk-ltr.astra .astra-navigation {
   display: flex;
   flex-direction: column;
@@ -295,19 +285,9 @@
   margin-top: auto;
   padding-top: 22px;
 }
-.desk-ltr.astra .astra-account {
-  border-top: 1px solid var(--line);
-  margin-top: 16px;
-  padding: 14px 5px 0;
-  font-size: calc(14px * var(--ts));
-}
-.desk-ltr.astra .astra-account > div {
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.desk-ltr.astra .astra-account .text-sm {
-  font-size: calc(14px * var(--ts));
-}
+/* CY item 6 removed the rail's account block, and with it the `.astra-account`
+   rules. Sign out stays on the Server page (`LeaveEditorControl`) and on the
+   public paper's chrome. */
 /* Dark/Light and "Aa Large" sit side by side, each taking half the column
    (design: a `display:flex;gap:6px` row of two `flex:1` controls). */
 .desk-ltr.astra .astra-foot-row {
