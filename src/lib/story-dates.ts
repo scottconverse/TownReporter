@@ -466,6 +466,195 @@ function dekClause(dek: string, start: number, end: number): string {
 }
 
 /**
+ * A curated set of verbs that show up in this paper's event lines. Not a POS
+ * tagger -- a short list good enough to tell "Council sets the budget
+ * adoption vote" (a clause with a verb) from "funding hearing packet" (a bare
+ * noun phrase) without one.
+ */
+const KNOWN_VERBS = new Set([
+  "advance",
+  "advances",
+  "approve",
+  "approves",
+  "begin",
+  "begins",
+  "cancel",
+  "cancels",
+  "convene",
+  "convenes",
+  "delay",
+  "delays",
+  "end",
+  "ends",
+  "extend",
+  "extends",
+  "hold",
+  "holds",
+  "host",
+  "hosts",
+  "launch",
+  "launches",
+  "meet",
+  "meets",
+  "open",
+  "opens",
+  "post",
+  "posts",
+  "reopen",
+  "reopens",
+  "resume",
+  "resumes",
+  "reschedule",
+  "reschedules",
+  "return",
+  "returns",
+  "revisit",
+  "revisits",
+  "sets",
+  "set",
+  "start",
+  "starts",
+  "vote",
+  "votes",
+  "weigh",
+  "weighs",
+]);
+
+/** How few words make a line too short to stand alone without a verb. */
+const BARE_FRAGMENT_WORDS = 4;
+
+/**
+ * The words a line cannot END on: an article, a conjunction, or a preposition.
+ *
+ * A line that stops on one of these stops on the joint to the next word -- "the
+ * meeting is cancelled, while agency funding hearings remain listed for" is not
+ * a sentence that ran out, it is a sentence cut off -- which is what a line
+ * lifted out of a longer one looks like when the cut is made by punctuation and
+ * a word cap rather than by grammar (unit CN, item 2: the staged 0.6.80 row
+ * "8 regular meeting is cancelled, while agency funding hearings remain listed
+ * for"). `cleanLine` already refuses such a line for the clause it extracts,
+ * because it truncates at `STOP_WORDS` and strips trailing `JOINERS`; the list
+ * is repeated here for the lines that never went through it (`dekClause`, and
+ * `own` for the conjunctions `STOP_WORDS` does not carry -- "and", "while").
+ */
+const TRAILING_FUNCTION_WORDS = new Set([
+  // Articles.
+  "a",
+  "an",
+  "the",
+  // Conjunctions. These are the words that matter for a line `cleanLine`
+  // produced: it truncates at `STOP_WORDS` (the prepositions and the
+  // auxiliaries) and strips the trailing `JOINERS` ("and", "or"), but it
+  // carries no conjunction, so "Public Hearing Set while" is a line only this
+  // list can catch.
+  "and",
+  "or",
+  "but",
+  "nor",
+  "yet",
+  "so",
+  "plus",
+  "while",
+  "when",
+  "as",
+  "because",
+  "if",
+  "that",
+  "than",
+  "though",
+  "unless",
+  "until",
+  "whether",
+  // Prepositions that cannot also be the particle a phrasal verb ends on. "up",
+  // "out", "off", "down", "over" and "through" are deliberately absent: "the
+  // instrument drive kicks off" and "applications close out" are lines that END
+  // there and read as lines, and refusing one costs a row its own text.
+  "about",
+  "above",
+  "across",
+  "after",
+  "against",
+  "along",
+  "among",
+  "around",
+  "at",
+  "before",
+  "behind",
+  "below",
+  "beneath",
+  "beside",
+  "between",
+  "beyond",
+  "by",
+  "despite",
+  "during",
+  "except",
+  "for",
+  "from",
+  "inside",
+  "into",
+  "near",
+  "of",
+  "on",
+  "outside",
+  "past",
+  "since",
+  "to",
+  "toward",
+  "towards",
+  "under",
+  "upon",
+  "with",
+  "within",
+  "without",
+]);
+
+/**
+ * Is `line` a bare scrap rather than something that reads as a headline?
+ *
+ * Unit BZ, item 6 (owner review, 2026-09-27, "This week" at 1790px): rows
+ * printed fragments lifted verbatim out of a clause -- "funding hearing
+ * packet", "instrument collection drive", "Brighton event", "Applications
+ * Close" -- lower-case scraps and short bare nouns with no verb of their own.
+ * `cleanLine` and its exceptions (title case, the "not a name" carve-out) were
+ * built to keep a clause that reads as an event; they still let these four
+ * through because each is grammatically a clause (a subject and, for
+ * "Applications Close", even a verb). What they are not is a HEADLINE: a
+ * reader who has not read the story cannot tell what "Brighton event" is an
+ * event FOR. A line that opens lower-case reads as torn out of a sentence
+ * (that is the whole reason `cleanLine` strips leading joiners); a short line
+ * with no verb of its own is a label, not a sentence.
+ *
+ * This supersedes the title-case exception `cleanLine` documents for
+ * "Applications Close Sept. 29": that exception was about telling a NAME
+ * (venue, building) from a clause, and it is still right about that -- but a
+ * two-word clause is still too short to stand alone as a row's only text.
+ *
+ * Unit CN, item 2 (owner review, 2026-09-27) adds the two shapes a line takes
+ * when it is CUT OUT of a longer sentence rather than lifted from it, neither
+ * of which the tests above catch because a cut line can still open on a capital
+ * and can still be long:
+ *
+ *  - it opens on a digit. The panel prints the day in its own column, so a line
+ *    that opens on a day number is a line that starts in the middle of a date
+ *    expression -- the live row began "8 regular meeting is cancelled", which is
+ *    the tail of "cancelled Oct. 8 regular meeting" with the "Oct." left behind
+ *    by the punctuation cut `dekClause` makes. (`cleanLine` already refuses this
+ *    shape for `own`; this is the same rule for the lines it never saw.)
+ *  - it ends on a function word -- an article, a conjunction, a preposition --
+ *    because a sentence does not end there. See `TRAILING_FUNCTION_WORDS`.
+ */
+function isBareFragment(line: string): boolean {
+  const words = line.split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  if (/^[a-z]/.test(words[0])) return true;
+  if (/^\d/.test(words[0])) return true;
+  if (TRAILING_FUNCTION_WORDS.has(plain(words[words.length - 1]))) return true;
+  if (words.length >= BARE_FRAGMENT_WORDS) return false;
+  return !words.some((word) => KNOWN_VERBS.has(plain(word)));
+}
+
+/**
  * What a row prints when the story's own words around the date said nothing.
  *
  * A row read out of the headline itself always keeps the headline: the day came
@@ -477,6 +666,18 @@ function dekClause(dek: string, start: number, end: number): string {
  *
  * `text` is the words the row was read out of, which is the dek for every row
  * that can reach the last branch.
+ *
+ * Unit CN, item 2. The dek's own clause is the last text a row can fall to, and
+ * it is cut out of the dek by punctuation alone (`dekClause`, deliberately
+ * without the clean-line test), so it can be exactly the shape unit CN adds to
+ * `isBareFragment`: the staged 0.6.80 page's Thu Oct. 1 row read "8 regular
+ * meeting is cancelled, while agency funding hearings remain listed for" -- the
+ * clause for the 1st cut at the word cap, with the day number of the 8th left
+ * in front of it. The headline is refused for that day (it is about the 8th),
+ * so the row has nothing that is about the 1st to print: it is dropped, the
+ * same outcome unit BZ item 5 gives a day the dek has no clause for, rather than
+ * printing a sentence cut in half. A row whose headline IS about this day -- or
+ * names no day at all -- never reaches this test; it keeps the headline.
  */
 function fallbackLine(
   date: string,
@@ -490,7 +691,8 @@ function fallbackLine(
   if (!said) return "A date this story names";
   const named = daysNamed(said, publishedOn);
   if (named.length === 0 || named.includes(date)) return said;
-  return dekClause(text, start, end);
+  const clause = dekClause(text, start, end);
+  return isBareFragment(clause) ? "" : clause;
 }
 
 /**
@@ -601,7 +803,18 @@ function wordedDates(
        so the 1st and the 8th can read differently. */
     const own = eventLine(text, hit.start, hit.end, hit.next, fromHeadline);
     for (const date of hit.days) {
-      const what = own || fallbackLine(date, text, hit.start, hit.end, headline, publishedOn);
+      /*
+        A clause that reads as a bare scrap ("funding hearing packet",
+        "Brighton event") is no better than no clause at all: it is routed
+        through the same fallback an empty `own` already gets, which is what
+        keeps this safe for a story whose headline is about a DIFFERENT day
+        (unit BZ, item 5) -- `fallbackLine` prints the headline only when it
+        names this date or names none at all, and otherwise falls to the
+        dek's own clause for the day, never a scrap AND never the wrong day's
+        headline.
+      */
+      const usable = own && !isBareFragment(own) ? own : "";
+      const what = usable || fallbackLine(date, text, hit.start, hit.end, headline, publishedOn);
       if (what) found.push({ date, what });
     }
   }
