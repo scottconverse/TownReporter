@@ -5,6 +5,7 @@ import { inputClass } from "@/components/desk-chrome-utils";
 import {
   getMeetingSettingsFn,
   saveMeetingSettingsFn,
+  meetingSettingsFailureMessage,
   type MeetingRetentionMode,
 } from "@/lib/news/meeting-settings";
 import { runMeetingsNow, forceRecaptureMeeting, stopMeetingsNow, resumeStoppedMeetingsNow, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
@@ -17,7 +18,16 @@ import { runMeetingsNow, forceRecaptureMeeting, stopMeetingsNow, resumeStoppedMe
 */
 export function MeetingCaptureSettings() {
   const qc = useQueryClient();
-  const settings = useQuery({ queryKey: ["meeting-settings"], queryFn: () => getMeetingSettingsFn() });
+  const settings = useQuery({
+    queryKey: ["meeting-settings"],
+    queryFn: () => getMeetingSettingsFn(),
+    // A non-owner is refused by the server every time -- retrying the same
+    // refused request just delays the owner-only message behind React
+    // Query's default backoff, so a non-owner watched "Loading meeting
+    // capture settings" for several seconds before the panel ever told them
+    // why (design review note 10). There is nothing to retry into.
+    retry: false,
+  });
 
   const [channels, setChannels] = useState<string[] | null>(null);
   const [storageRoot, setStorageRoot] = useState<string | null>(null);
@@ -79,8 +89,7 @@ export function MeetingCaptureSettings() {
   if (settings.isError) {
     return (
       <p role="alert" className="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-        The desk could not read the meeting capture settings. Reload the page to try again — nothing
-        was changed.
+        {meetingSettingsFailureMessage(settings.error)}
       </p>
     );
   }

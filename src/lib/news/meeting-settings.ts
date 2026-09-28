@@ -66,10 +66,30 @@ export function youtubeChannelRejectionReason(raw: string): string | null {
   return null;
 }
 
+/**
+ * The exact refusal text `getMeetingSettingsFn` throws for a non-owner.
+ * Exported so the settings panel (design review note 10) can show this
+ * sentence specifically, rather than a generic load-failure message, without
+ * hardcoding a second copy of the string that could drift from this one.
+ */
+export const MEETING_SETTINGS_OWNER_ONLY_MESSAGE = "Only the owner can configure meeting capture.";
+
 async function ownedNewsroomId(userId: string): Promise<number> {
   const me = await requireEditor(userId);
-  if (me.role !== "owner") throw new ForbiddenError("Only the owner can configure meeting capture.");
+  if (me.role !== "owner") throw new ForbiddenError(MEETING_SETTINGS_OWNER_ONLY_MESSAGE);
   return me.newsroomId;
+}
+
+/**
+ * What the settings panel should say for a failed `getMeetingSettingsFn`
+ * call. The owner-only refusal gets its own sentence (and the panel renders
+ * no form); anything else gets a generic, non-committal failure sentence,
+ * since we don't know whether local state would be safe to edit.
+ */
+export function meetingSettingsFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === MEETING_SETTINGS_OWNER_ONLY_MESSAGE) return MEETING_SETTINGS_OWNER_ONLY_MESSAGE;
+  return "The desk could not read the meeting capture settings. Reload the page to try again — nothing was changed.";
 }
 
 export const getMeetingSettingsFn = createServerFn({ method: "GET" })
