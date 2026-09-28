@@ -3,6 +3,13 @@ import { meetingClock, meetingEvidenceBlock } from "./meeting-draft-input.ts";
 
 export type LoadedMeetingDraftMaterial = {
   evidence: string;
+  /**
+   * The recording, as a URL a reader can open. Computed here rather than read
+   * off the lead, so a draft written from a meeting whose lead carries no
+   * YouTube link still records the video it came from -- see
+   * `meetingDraftSourceUrls`.
+   */
+  videoUrl: string;
   meeting: { videoId: string; title: string; date: string | null; artifactId: number };
   citations: {
     item: string;
@@ -148,6 +155,7 @@ export async function loadMeetingDraftMaterial(
 
   return {
     evidence,
+    videoUrl,
     meeting: { videoId: input.videoId, title, date, artifactId: input.artifactId },
     citations,
   };

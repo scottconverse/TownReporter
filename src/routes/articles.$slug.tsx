@@ -340,9 +340,24 @@ function ArticlePage() {
 
   const dekText = dekOrFallback(article.dek, article.body);
   const sources = parseUrlList(article.source_urls);
-  const provenance = article.provenance?.length
-    ? article.provenance
-    : sources.map((url) => ({
+  /*
+    Every URL the story cites reaches "Sources & public records", including the
+    ones the provenance records do not cover.
+
+    This used to be either/or: a story with any provenance record printed those
+    and silently dropped the rest of its `source_urls`; only a story with none
+    fell through to the URL list. A meeting story is exactly the shape that
+    broke -- it is written from a recording, so its one source is the video, and
+    a single captured document anywhere in the story was enough to hide it.
+    Records first, then the cited URLs they do not already name.
+  */
+  const recordedProvenance = article.provenance ?? [];
+  const recordedUrls = new Set(recordedProvenance.map((item) => item.url).filter(Boolean));
+  const provenance = [
+    ...recordedProvenance,
+    ...sources
+      .filter((url) => !recordedUrls.has(url))
+      .map((url) => ({
         title: url,
         organization: "",
         document_date: "",
@@ -353,7 +368,8 @@ function ArticlePage() {
         capture_event_id: null,
         disappeared: false,
         role: "source",
-      }));
+      })),
+  ];
   const more = related.filter((a) => a.slug !== slug).slice(0, 3);
   const sectionName = sections.find((s) => s.key === article.topic)?.name ?? article.topic;
   const isOpinion = article.topic === "opinion";

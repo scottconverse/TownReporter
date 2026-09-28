@@ -46,6 +46,19 @@ describe("meeting draft material", () => {
     assert.deepEqual(result.citations.map((row) => row.item), ["4", "4", "8"]);
     assert.equal(result.meeting.artifactId, 7);
     assert.ok(calls.some((query) => /meeting_transcript_segments/.test(query)));
+    // The recording is returned as a URL, not only as an id: it is what the
+    // draft puts in its `source_urls` so the reader's Sources block names the
+    // tape. With no URL on the lead the canonical watch URL is derived.
+    assert.equal(result.videoUrl, "https://www.youtube.com/watch?v=video-1");
+
+    const fromLead = await loadMeetingDraftMaterial(sql, {
+      newsroomId: 1,
+      artifactId: 7,
+      videoId: "video-1",
+      fallbackTitle: "Fallback",
+      videoUrl: "https://www.youtube.com/watch?v=video-1&t=90s",
+    });
+    assert.equal(fromLead.videoUrl, "https://www.youtube.com/watch?v=video-1&t=90s");
   });
 
   it("fails closed when the canonical artifact or aligned spans are missing", async () => {

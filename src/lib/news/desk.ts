@@ -41,6 +41,7 @@ import {
   type PublishedMeetingReview,
 } from "./meeting-article-revision.ts";
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
+import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   addSourceInput,
@@ -2199,7 +2200,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   // Discovery exclusions are not citation rules: a watched page or a root
   // dashboard can be the substantive primary record. Preserve the reporter's
   // explicit citations, including an empty list, without adding lead seeds.
-  const sourceUrls = JSON.stringify(sanitizePublicUrls(reported.source_urls));
+  //
+  // The one URL added here is the recording a meeting draft was written from.
+  // The writer is given the tape as supplied material and the URL sits on the
+  // lead, so nothing carried it into the draft's own list -- the published
+  // story of a council meeting named no source at all, because the only copy
+  // of the video URL was on `leads.source_urls`. A reader checking the story
+  // against the recording is the whole point of drafting from it.
+  const sourceUrls = JSON.stringify(
+    meetingDraftSourceUrls(reported.source_urls, meetingMaterial?.videoUrl),
+  );
   const notes = reported.integrity_notes;
   const provenanceJson = JSON.stringify(reported.provenance);
   const unansweredJson = JSON.stringify(reported.unanswered);
