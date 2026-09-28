@@ -85,7 +85,20 @@ try {
     .getByText(/The story changed after its evidence was gathered/)
     .waitFor({ timeout: 30_000 });
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
-  const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  /*
+    The story screen's own confirm, and not the one the reasons block now draws
+    with the same words. Unit CT's "every reason at the top of the Checks tab,
+    each with its button" (5368d336, part 1 of this branch, before this unit's
+    first commit) put an "I checked: keep this evidence" button inside
+    `[aria-label="Reasons Publish is off"]`, so the bare role query resolves to
+    two elements and Playwright's strict mode refuses it. The walk is about the
+    evidence block below the story body, not the reasons list, so the ancestor
+    is excluded rather than the query narrowed to `.nth(0)`/`.nth(1)` -- a
+    position would break again the moment the reasons list grows a second row.
+  */
+  const confirmEvidence = page.locator(
+    'xpath=//button[normalize-space(.)="I checked: keep this evidence"][not(ancestor::*[@aria-label="Reasons Publish is off"])]',
+  );
   await confirmEvidence.waitFor({ state: "visible" });
   const originalViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });

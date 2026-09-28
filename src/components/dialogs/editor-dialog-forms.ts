@@ -699,7 +699,14 @@ export function darkRequest(state: DarkFileState) {
       title: state.question.trim(),
       budget: hopsForLimit(limit.key),
     },
-    run: { paste: state.tip.trim(), modelChoice: state.model === "auto" ? undefined : state.model },
+    /*
+      Unit CY item 9: the dialog draws an Effort select beside the model, so
+      both halves travel together. `modelPick` is the same helper the other
+      surfaces use, which means "auto" still sends nothing at all (the server's
+      own resolution, `defaultModelEffort`, is what an untouched row means) and
+      a pick the row cannot carry is still dropped rather than half-sent.
+    */
+    run: { paste: state.tip.trim(), ...modelPick("dark", state.model, state.effort) },
     limit: limit.key,
   };
 }

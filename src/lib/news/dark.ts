@@ -2111,6 +2111,15 @@ export const runDarkDesk = createServerFn({ method: "POST" })
         investigationId: data.investigationId,
         choice: probe.ok ? probe.choice : asked,
         automatic: asked === "auto",
+        /*
+          Unit CY item 9: the effort the Start-a-file dialog's select showed.
+          It travels beside the model for the same reason the model does --
+          a row the editor turned that the run never sees is a control that
+          does nothing. `executeDarkRun` revalidates it against the resolved
+          choice (`effortForChoice`), so a level this provider does not offer
+          is dropped, not sent.
+        */
+        modelEffort: data.modelEffort ?? null,
       },
       owned(context),
     );

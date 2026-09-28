@@ -11,7 +11,7 @@ import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
 import { LeadFlags } from "@/components/desk-leads";
-import { formatAge } from "@/lib/paper";
+import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
@@ -39,7 +39,12 @@ import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dial
   same, and that is where this dialog has been mounted since phase 2b.
 */
 import { KillDialog } from "@/components/dialogs/KillDialog";
-import { cardResultLine, matchesFollowUpFilter, parseFinding } from "@/lib/news/follow-up-copy";
+import {
+  cardResultLine,
+  isAgentKind,
+  matchesFollowUpFilter,
+  parseFinding,
+} from "@/lib/news/follow-up-copy";
 import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
   NO_SECTION,
@@ -60,7 +65,6 @@ import {
   editorStatus,
   flakyFailureCopy,
   followUpsRailCopy,
-  investigationStopKind,
   nearDuplicate,
   openLeads,
   parseFailedSources,
@@ -239,7 +243,15 @@ function DeskHome() {
     queryKey: ["follow-up-findings"],
     queryFn: () => listFollowUpFindings({ data: {} }),
   });
-  /** Working agents, by the Follow-ups screen's own definition of "active". */
+  /*
+    Working agents, by the Follow-ups screen's own definition of "active".
+
+    One query serves both counts on this page: Unit CY's rail pile ("Waiting on
+    an AI follow-up") and Unit CU's panel count ("N active"). `listFollowUps`
+    returns agent rows only since CU retired the manual asks, so the same list
+    answers both -- and reading it once is what keeps the two numbers from
+    drifting apart.
+  */
   const liveFollowUps = (followUps.data ?? []).filter((row) =>
     matchesFollowUpFilter(row, "active"),
   ).length;
@@ -452,14 +464,21 @@ function DeskHome() {
   const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error);
   const invs = investigations.data ?? [];
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
-  const aside = invs.filter((r) => pileForStatus(r.status) === "aside");
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, invs));
-  const errStops = onDesk.filter((i) => investigationStopKind(i) === "error");
-  const roundStops = onDesk.filter((i) => investigationStopKind(i) === "round");
-  const drafted = allLeads.filter((l) => l.status === "drafted").length;
-  const scanStale =
-    last?.error ||
-    (last?.started_at && Date.now() - new Date(last.started_at).getTime() > 24 * 3600_000);
+  /*
+    CY item 3. "Waiting on an AI follow-up": a live agent that has not reported
+    yet. `matchesFollowUpFilter(row, "active")` is the Follow-ups screen's own
+    definition of live, and `last_state !== "found"` is the whole difference
+    between this pile and the findings list above it. It reads the one
+    `followUps` query the rail's count above also reads -- see that query's own
+    note -- so the two numbers on this page cannot disagree.
+  */
+  const waitingOnFollowUp = (followUps.data ?? []).filter(
+    (row) =>
+      isAgentKind(row.agent_kind) &&
+      matchesFollowUpFilter(row, "active") &&
+      row.last_state !== "found",
+  ).length;
   const printed = published.data ?? [];
 
   /*
@@ -544,49 +563,6 @@ function DeskHome() {
     })
     .sort((a, b) => a.rank - b.rank || a.s.title.localeCompare(b.s.title))
     .slice(0, 6);
-
-  const needs: { t: string; to: string; openDark?: number; quiet?: boolean }[] = [];
-  if (drafted)
-    needs.push({
-      t: `${drafted} draft${drafted > 1 ? "s" : ""} on the desk`,
-      to: "/desk/drafts",
-    });
-  if (errStops.length) {
-    needs.push({
-      t: `${errStops.length} Dark Desk file${errStops.length === 1 ? "" : "s"} stopped on an error — what it found is saved`,
-      to: "/desk/dark",
-      openDark: errStops[0]!.id,
-    });
-  }
-  if (proposed.length) {
-    needs.push({
-      t: `${proposed.length} suggested source${proposed.length === 1 ? "" : "s"} await${proposed.length === 1 ? "s" : ""} review`,
-      to: "/desk/sources",
-    });
-  }
-  if (officialFail.length) {
-    needs.push({
-      t: `${officialFail.length} official source${officialFail.length === 1 ? "" : "s"} failing to fetch`,
-      to: "/desk/sources",
-    });
-  }
-  if (scanStale && last?.error) {
-    needs.push({
-      t:
-        last.sources_fetched > 0
-          ? "Last scan fetched sources but did not file leads"
-          : "Last scan failed",
-      to: "/desk/scan",
-    });
-  } else if (scanStale) needs.push({ t: "No scan in the last day", to: "/desk/scan", quiet: true });
-  if (roundStops.length) {
-    needs.push({
-      t: `${roundStops.length} Dark Desk file${roundStops.length === 1 ? "" : "s"} ready for another round`,
-      to: "/desk/dark",
-      openDark: roundStops[0]!.id,
-      quiet: true,
-    });
-  }
 
   /*
     TODAY'S WORK, counted from what the desk already knows. Nothing here is a
@@ -901,7 +877,18 @@ function DeskHome() {
       title="Good morning. Here’s today’s paper."
       kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
       actions={
-        <>
+        /*
+          CY item 1. The drawing's header is a
+          `display:flex;flex-wrap:wrap;justify-content:space-between` row: the
+          date and headline, then the three create buttons -- and the drawing
+          renders the buttons on a SECOND line, starting at the left, because
+          the row wraps ("Desk Command.dc.html" lines 17-28). The shell's
+          `.ov-head` is that same row, so the wrap is not the problem; sitting
+          at the right end until it wraps is. `width:100%` puts the row on its
+          own line at every width, so the drawn left start holds however long
+          the headline runs, and `.today-create` starts it at the left.
+        */
+        <div className="today-create">
           {/*
             Unit BN, item 2: the drawn Add-a-lead dialog (phase 4), in the
             drawn secondary style -- `tone="ghost"` is the mapping's plain
@@ -941,7 +928,7 @@ function DeskHome() {
           <Link to="/desk/opinion" className="btn">
             + Opinion
           </Link>
-        </>
+        </div>
       }
     >
       {/*
@@ -1545,28 +1532,26 @@ function DeskHome() {
             </div>
           </Dialog>
 
-          {needs.length > 0 ? (
-            <div className="needs">
-              <span className="needs-label">Needs you</span>
-              {needs.map((n) => (
-                <Link
-                  key={n.t}
-                  to={n.to}
-                  className={"needs-item" + (n.quiet ? " quiet" : "")}
-                  onClick={() => {
-                    if (n.openDark == null) return;
-                    try {
-                      sessionStorage.setItem(OPEN_KEY, String(n.openDark));
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                >
-                  {n.t}
-                </Link>
-              ))}
-            </div>
-          ) : null}
+          {/*
+            CY item 2: the "Needs you" panel is not in the drawing, so Today no
+            longer draws it. Where each item it linked is reachable from:
+
+              drafts on the desk        → Drafts (/desk/drafts)
+              Dark Desk file stopped    → Dark Desk, the Open files pile and the
+                                          file's own Decide row (/desk/dark)
+              suggested sources         → Sources & scan, the suggested block
+                                          (/desk/sources) -- and still on Today,
+                                          in the wire panel's own disclosure
+              failing sources           → Sources & scan, and still on Today in
+                                          the same disclosure
+              scan stale / failed       → the wire panel's own scan line
+
+            Two of the five therefore never left Today at all. The rest are
+            recorded in design/SPEC-GAPS-0681.md, and the panel's CSS
+            (`.needs` in styles.css) is left alone because no other screen
+            draws it either -- it is now unreferenced markup that a later unit
+            can sweep.
+          */}
           {bootFailed ? (
             <ScreenError
               message={
@@ -1692,6 +1677,18 @@ function DeskHome() {
                       const dup = nearDuplicate(l, printed);
                       const held = l.status === "held";
                       const done = held || l.status === "killed";
+                      /*
+                        CY item 4. The drawn evidence cell: the squares and the
+                        count, at the head of the meta line (Desk
+                        Command.dc.html:118-121). `source_urls` is the desk's own
+                        record of what the lead was read out of -- the same
+                        field, counted the same way, that the Queue's row prints
+                        (desk-leads.tsx:155). The drawing's cell adds "· 1 could
+                        not open"; the desk has no per-lead failure figure
+                        anywhere (desk-leads.tsx:147-155), so that half is
+                        dropped rather than invented, exactly as on the Queue.
+                      */
+                      const sources = parseUrlList(l.source_urls).length;
                       return (
                         /*
                         The drawn compact row: `52px | 1fr | auto` -- score
@@ -1708,7 +1705,27 @@ function DeskHome() {
                           key={l.id}
                         >
                           <Score v={l.newsworthiness ?? 0} />
-                          <div>
+                          <div className="today-lead-main">
+                            {/*
+                              CY item 4. The drawn row opens with its chip line
+                              -- NEW / HELD / ≈ PRINTED, then the warnings -- and
+                              the headline sits under it (Desk
+                              Command.dc.html:112-116). It was last on the row,
+                              below the meta line, which is the opposite end.
+                            */}
+                            <div className="today-lead-chips">
+                              {/*
+                                The status chip and the possible-duplicate chip
+                                used to be drawn here as well, and `LeadFlags`
+                                draws both of them from the same fields -- so the
+                                row printed NEW twice, stacked, which is what the
+                                BF3 side-by-side caught against the drawing's one
+                                chip line. One row, one chip, and it is the
+                                component both screens render, so the two screens
+                                cannot drift on what the desk has found.
+                              */}
+                              <LeadFlags lead={l} dup={dup} />
+                            </div>
                             <Link
                               to="/desk/story/$leadId"
                               params={{ leadId: String(l.id) }}
@@ -1721,24 +1738,23 @@ function DeskHome() {
                             </Link>
                             <p className="today-lead-why">{l.why}</p>
                             <div className="today-lead-row2">
+                              {/*
+                                CY item 4, the drawn evidence cell. It is the
+                                Queue's own `.ev-squares`, so the two screens
+                                cannot draw the same count two ways.
+                              */}
+                              <span className="today-lead-evidence">
+                                <span className="ev-squares" aria-hidden="true">
+                                  {Array.from({ length: Math.min(sources, 10) }, (_, i) => (
+                                    <i key={i} />
+                                  ))}
+                                </span>
+                                <b>{sources} opened</b>
+                              </span>
                               <span className="meta">
                                 {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
                               </span>
-                              {/*
-                                The status chip and the possible-duplicate chip
-                                used to be drawn here as well, and `LeadFlags`
-                                two lines down draws both of them from the same
-                                fields -- so the row printed NEW twice, stacked,
-                                which is what the BF3 side-by-side caught against
-                                the drawing's one chip line. One row, one chip,
-                                and it is the component both screens render.
-                              */}
                             </div>
-                            {/*
-                            Same component the Queue's row renders, so the two
-                            screens cannot drift on what the desk has found.
-                          */}
-                            <LeadFlags lead={l} dup={dup} />
                           </div>
                           <span className="today-lead-side">
                             {done ? (
@@ -1904,36 +1920,51 @@ function DeskHome() {
           </section>
 
           <section className="nightpanel gc-darkdesk">
-            <SecHead
-              title="Dark Desk"
-              sub="Never prints on its own"
-              aside={
-                <Link to="/desk/dark" className="np-link">
-                  Open Dark Desk →
-                </Link>
-              }
-            />
+            <SecHead title="Dark Desk" sub="Never prints on its own" />
             {darkErr ? <p className="note err">{darkErr}</p> : null}
             {/*
-                As drawn: the three piles with their counts, then one way in.
-                The items themselves (start digging, open a file) sit behind the
-                disclosure below -- nothing the panel could do is gone, it is
-                just not three cards deep in a rail panel.
+                CY item 3. The piles by their drawn names, each a label, the
+                sentence that says what is in it, and the count:
+                Open files / Signals to review / Waiting on an AI follow-up.
+
+                The rows are NOT links any more. The drawing gives the panel one
+                way in -- a full-width "Open Dark Desk →" under the piles -- and
+                three more links to the same screen beside it made four doors
+                where the design draws one. `Open Dark Desk →` moved down out of
+                the section head for the same reason.
+
+                What the panel used to count as "Set aside" is not gone: that is
+                Dark Desk's own third pile on its own screen (/desk/dark), which
+                owns the list. The items themselves (start digging, open a file)
+                sit behind the disclosure below -- nothing the panel could do is
+                gone, it is just not three cards deep in a rail panel.
               */}
             <div className="dd-piles">
-              <Link to="/desk/dark" className="dd-pile">
-                <span className="dd-pile-label">To look at</span>
-                <span className="dd-pile-count">{inbox.length}</span>
-              </Link>
-              <Link to="/desk/dark" className="dd-pile">
-                <span className="dd-pile-label">On the desk</span>
+              <div className="dd-pile">
+                <span className="dd-pile-text">
+                  <span className="dd-pile-label">Open files</span>
+                  <span className="dd-pile-note">Reading records</span>
+                </span>
                 <span className="dd-pile-count">{onDesk.length}</span>
-              </Link>
-              <Link to="/desk/dark" className="dd-pile">
-                <span className="dd-pile-label">Set aside</span>
-                <span className="dd-pile-count">{aside.length}</span>
-              </Link>
+              </div>
+              <div className="dd-pile">
+                <span className="dd-pile-text">
+                  <span className="dd-pile-label">Signals to review</span>
+                  <span className="dd-pile-note">From the wire and watched pages</span>
+                </span>
+                <span className="dd-pile-count">{inbox.length}</span>
+              </div>
+              <div className="dd-pile">
+                <span className="dd-pile-text">
+                  <span className="dd-pile-label">Waiting on an AI follow-up</span>
+                  <span className="dd-pile-note">AI watching for a statement or record</span>
+                </span>
+                <span className="dd-pile-count">{waitingOnFollowUp}</span>
+              </div>
             </div>
+            <Link to="/desk/dark" className="dd-open">
+              Open Dark Desk →
+            </Link>
             {inbox.length === 0 && onDesk.length === 0 ? (
               <p className="wire-sum">
                 Nothing new tonight.{" "}

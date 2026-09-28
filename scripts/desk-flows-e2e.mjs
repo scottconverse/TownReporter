@@ -183,6 +183,15 @@ async function main() {
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
 
+  // CY item 8: the AI intake is a shut card now, the way the drawing draws it,
+  // so the form inside it -- the picker, the subject box, the button -- is only
+  // in the document once the card is opened. Every assertion below is
+  // unchanged; this is the one press that gets to them. The card is opened
+  // before anything is typed, so UIUX-05 still means what it says.
+  await page.getByRole("button", { name: /Have the AI write an editorial/ }).click();
+  await page.getByLabel("Writing model").waitFor();
+  step("Opinion's AI card opens the form");
+
   // Opinion uses the shared native provider registry, with Sol selected by default.
   const opinionModel = page.getByLabel("Writing model");
   await assertSharedModelPicker(opinionModel, "codex-frontier", "Opinion");

@@ -139,6 +139,10 @@ const deskCopyStub = inlineModule(`
   export function openLeads(leads) {
     return (leads ?? []).filter((l) => l.status !== "killed" && l.status !== "published");
   }
+  /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
+  export function pileForStatus() {
+    return "desk";
+  }
   export function createEditorCopy() {
     return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
   }
@@ -199,9 +203,20 @@ const { DeskShell } = await import(
       "@/lib/news/desk-copy": deskCopyStub,
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
-        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; }",
+        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; } export async function listFollowUps() { return []; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
+      /*
+        CY item 6 put the Dark Desk and Follow-ups nav counts in the shell, so
+        desk-chrome.tsx now imports these two modules. The size test does not
+        look at the numbers, only at type; the specifiers still have to resolve.
+      */
+      "@/lib/news/dark": inlineModule(
+        "export async function listInvestigations() { return []; }",
+      ),
+      "@/lib/news/follow-up-copy": inlineModule(
+        "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
+      ),
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
       "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,

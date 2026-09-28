@@ -221,19 +221,9 @@
   padding: 2px 8px;
   line-height: 1.6;
 }
-/* Unit BN2, item 5: the rail's "+ New story", at the top of the nav. Sized like
-   the nav rows it sits above (`.astra-nav` below), so the rail reads as one
-   column of targets; the margins are the ones this rule already carried. */
-.desk-ltr.astra .astra-new {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 8px 10px;
-  gap: 8px;
-  min-height: 44px;
-  font-size: calc(15px * var(--ts));
-  font-weight: 800;
-}
+/* CY item 6 removed the rail's "+ New story" and with it the `.astra-new` rule
+   that sized it (Unit BN2, item 5). The phone bar's "+ New" keeps its own
+   `.astra-bar-new` rule further down. */
 .desk-ltr.astra .astra-navigation {
   display: flex;
   flex-direction: column;
@@ -295,19 +285,9 @@
   margin-top: auto;
   padding-top: 22px;
 }
-.desk-ltr.astra .astra-account {
-  border-top: 1px solid var(--line);
-  margin-top: 16px;
-  padding: 14px 5px 0;
-  font-size: calc(14px * var(--ts));
-}
-.desk-ltr.astra .astra-account > div {
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.desk-ltr.astra .astra-account .text-sm {
-  font-size: calc(14px * var(--ts));
-}
+/* CY item 6 removed the rail's account block, and with it the `.astra-account`
+   rules. Sign out stays on the Server page (`LeaveEditorControl`) and on the
+   public paper's chrome. */
 /* Dark/Light and "Aa Large" sit side by side, each taking half the column
    (design: a `display:flex;gap:6px` row of two `flex:1` controls). */
 .desk-ltr.astra .astra-foot-row {
@@ -2302,8 +2282,10 @@
    per-source board. Both panels scope their own palette; these are the drawn
    rows inside them.
 --------------------------------------------------------------------------- */
-/* One pile, one line: the name, then its count at 24px. The whole line is the
-   way into Dark Desk, so it is a link, not a label with a link beside it. */
+/* One pile, one line: the name over the sentence that says what is in it, and
+   the count at 24px on the right (Desk Command.dc.html, the Dark Desk rail
+   block). The line is not a link -- the panel's one way in is `.dd-open`
+   below it, which is the only door the drawing draws. */
 .desk-ltr.astra .dd-piles {
   display: flex;
   flex-direction: column;
@@ -2317,14 +2299,40 @@
   padding: 10px 0;
   border-top: 1px solid var(--line);
   color: inherit;
-  text-decoration: none;
+}
+.desk-ltr.astra .dd-pile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* min-width:0 because the drawn label "Waiting on an AI follow-up" is longer
+     than the rail is wide: the column must wrap it, not push the count out. */
+  min-width: 0;
 }
 .desk-ltr.astra .dd-pile-label {
   font: 700 calc(16px * var(--ts)) var(--fd);
 }
+.desk-ltr.astra .dd-pile-note {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
 .desk-ltr.astra .dd-pile-count {
+  flex: none;
   font: 800 calc(24px * var(--ts)) var(--fd);
   line-height: 1;
+}
+/* The panel's one way in: full width under the piles, its label at the left
+   edge, which is where the drawing's `display:flex` (no justify-content) puts
+   it. */
+.desk-ltr.astra .dd-open {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 0 14px;
+  border: 2px solid currentcolor;
+  color: inherit;
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  text-decoration: none;
 }
 .desk-ltr.astra .dd-more {
   margin-top: 10px;
@@ -3163,6 +3171,29 @@
   display: flex;
   border: 1px solid var(--line);
 }
+/* CY item 1. The drawing's header row wraps its three create buttons onto a
+   second line and starts them at the LEFT (Desk Command.dc.html, the header
+   block: a `flex-wrap:wrap;justify-content:space-between` row of headline,
+   then buttons). `.ov-head` is that same row and `.head-acts` is its
+   right-hand item, so with room on the line the buttons sit at the right
+   until they wrap.
+
+   `flex-basis:100%` on `.head-acts` gives it a line of its own at every
+   width; alone on that line the row's `space-between` starts it at the left,
+   which is the drawn position. Scoped with `:has(.today-create)` to Today's
+   own wrapper, so a screen that uses the shell's action slot differently --
+   the Queue's two presses, which the drawing does put on the header line --
+   keeps the layout it has. */
+.desk-ltr.astra .head-acts:has(.today-create) {
+  flex-basis: 100%;
+}
+.desk-ltr.astra .today-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
 .desk-ltr.astra .today-seg {
   display: flex;
   align-items: center;
@@ -3197,13 +3228,41 @@
   color: var(--fg);
 }
 .desk-ltr.astra .today-lead {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px 18px;
   align-items: start;
   padding: 18px 12px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
+}
+/*
+  CY item 5. The drawn row is a grid -- `52px minmax(0,1fr) auto`, score then
+  the title block then the presses (Desk Command.dc.html:112) -- and that is
+  exactly how it was built. The `auto` column is the presses, and at 1280 they
+  measured 342px of a 556px row, so `minmax(0, 1fr)` gave the middle column the
+  102px that was left over, with `overflow: visible` painting the headline and
+  the why line outside their own box. At 1100 the middle column was 40px; at
+  1024 it was 0px, and the lead's text was not narrow, it was absent. The grid
+  had no way to say "this does not fit": an explicit third column cannot wrap.
+
+  So the row is a wrapping flex line instead, and the middle column carries a
+  12rem flex-basis. Basis is what the wrap decision is made on, so the presses
+  move to their own line exactly when 52 + 192 + their own width + the gaps
+  stop fitting the row -- no breakpoint, and the same rule holds at every
+  width, under Large text, and with the nav collapsed. 12rem and not more
+  because the basis is also the floor the middle column can never go under,
+  and it has to stay small enough that the score badge keeps the title beside
+  it on a phone: 52 + 192 = 244, which still fits a 320px screen. Below 700
+  the presses are put on their own line outright, flush left (the media block
+  at the foot of this file): that is the phone shape, and it is unchanged.
+
+  What the drawing does NOT draw is the wrapped state -- it is a fixed-width
+  canvas with the presses on the row. Recorded in design/SPEC-GAPS-0681.md.
+*/
+.desk-ltr.astra .today-lead-main {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 .desk-ltr.astra .today-lead.sel {
   background: var(--surface);
@@ -3212,6 +3271,39 @@
 }
 .desk-ltr.astra .today-lead.acted {
   opacity: 0.6;
+}
+/* CY item 4. The drawn row opens with its chip line and the headline sits under
+   it (Desk Command.dc.html:112-116). `.lead-flags` defaults to the Queue's
+   right-hand badge rail -- a right-aligned column, 11rem wide (styles.css:1201)
+   -- so this line lays it out again as the wrapping left-hand row the drawing
+   draws, and only for Today's rows. */
+.desk-ltr.astra .today-lead-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.desk-ltr.astra .today-lead-chips .lead-flags {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: none;
+}
+/* CY item 4. The evidence cell at the head of the meta line: the squares, then
+   the count in ink (Desk Command.dc.html:118-121). The squares are the Queue's
+   own `.ev-squares`; only the count's weight and colour are Today's. */
+.desk-ltr.astra .today-lead-evidence {
+  display: inline-flex;
+  align-items: center;
+  font: 700 calc(14px * var(--ts)) var(--fd);
+  color: var(--fg);
+}
+/* The row's own gap is the drawing's meter-to-count space, so the margin the
+   Queue needs (its meter sits on a line of its own) comes off here. */
+.desk-ltr.astra .today-lead-evidence .ev-squares {
+  margin-right: 0;
 }
 .desk-ltr.astra .today-lead-hl {
   font: 700 calc(19px * var(--ts)) var(--fd);
@@ -3267,7 +3359,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  /* The drawn gap in this line: 6px between wrapped rows, 12px between the
+     evidence cell and the meta text beside it (Desk Command.dc.html:118). */
+  gap: 6px 12px;
   margin-top: 10px;
 }
 
@@ -3779,11 +3873,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .desk-ltr.astra .today-lead {
-    grid-template-columns: 52px minmax(0, 1fr);
     padding: 16px 8px;
   }
   .desk-ltr.astra .today-lead-side {
-    grid-column: 1 / -1;
+    /* The phone shape, and now guaranteed rather than implied: a 100% basis
+       puts the presses on their own line whatever the row measures, flush
+       left, the way the drawing's phone frame draws them. It used to be
+       `grid-column: 1 / -1`, which stopped meaning anything when CY item 5
+       turned this row into a wrapping flex line. */
+    flex: 1 1 100%;
+    justify-content: flex-start;
     align-items: flex-start;
   }
   .desk-ltr.astra .drafts-row,
@@ -5542,6 +5641,15 @@
   gap: 8px;
   min-width: 0;
 }
+
+/* CY item 8: on Opinion the band is always in the document (UIUX-03: a live
+   region has to exist before its content changes), and both spans are empty
+   until there is something to say. Two empty children still pay the 8px gap,
+   so the band measures 8px of nothing between the lede and the cards; with no
+   words in it, the gap goes. The elements stay -- only the space does not. */
+.desk-ltr.astra .astra-notices:not(:has(> :not(:empty))) {
+  gap: 0;
+}
 .desk-ltr.astra .astra-notices > * { margin: 0; }
 
 /* The open file sits on the page background, not on the rail's panel fill. */
@@ -5616,6 +5724,38 @@
    topbar is pinned, so the box needs to clear it. */
 .desk-ltr.astra .astra-jump {
   scroll-margin-top: 92px;
+}
+
+/* CY item 8: the Opinion AI intake is a shut card that opens the form, as the
+   drawing draws it (a whole-card `<a>`). The heading text is the press target,
+   stretched over the card so the whole drawn box is clickable; the readiness
+   notice below keeps its own controls above the stretch. */
+.desk-ltr.astra .astra-panel-open { position: relative; }
+.desk-ltr.astra .astra-card-link {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* The ring belongs on the card, not on the two words inside it: the button's
+   hit area is the whole box, so the focus ring is the whole box too. Same
+   `:has(> :focus-visible)` shape the queue's tick boxes use (line 3578). */
+.desk-ltr.astra .astra-card-link:focus-visible { outline: none; }
+.desk-ltr.astra .astra-panel-open:has(.astra-card-link:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+.desk-ltr.astra .astra-panel-open > [role="alert"],
+.desk-ltr.astra .astra-panel-open > [role="status"] {
+  position: relative;
 }
 
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */

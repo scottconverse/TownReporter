@@ -282,6 +282,10 @@ try {
 
   const opinionMarker = `CUSTOM_OPINION_DOCUMENT_MARKER_${Date.now()}`;
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
+  // CY item 8: the AI intake is a shut card now, as the drawing draws it, so
+  // the uploader inside it exists only after the card is opened. The rest of
+  // this block is unchanged.
+  await page.getByRole("button", { name: /Have the AI write an editorial/ }).click();
   await page.getByLabel("Attach documents").setInputFiles({
     name: "custom-opinion-source.txt",
     mimeType: "text/plain",

@@ -1230,11 +1230,22 @@ export const slugInput = z.string().max(LIMITS.slug);
  */
 export const artifactIdInput = z.coerce.number().int().positive().max(2_147_483_647);
 
-/** `dark.ts:2039` runDarkDesk (`dark.ts:1848` cuts a paste at 14,000). */
+/**
+ * `dark.ts:2039` runDarkDesk (`dark.ts:1848` cuts a paste at 14,000).
+ *
+ * Unit CY item 9: `modelEffort` joins `modelChoice`, because the Start-a-file
+ * dialog now draws an Effort select beside the model and the first round is
+ * where that pick is spent. It is `modelEffortLoose` -- the same nullable,
+ * never-throwing field the other AI inputs use -- so a value the resolved
+ * model does not offer is dropped rather than refused, and `executeDarkRun`
+ * already accepts it (`dark.ts:1882` threads `opts.modelEffort` into
+ * `reasoningEffort`).
+ */
 export const darkRunInput = z.object({
   paste: z.string().max(LIMITS.darkPaste),
   investigationId: rowId.optional(),
   modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.optional(),
 });
 
 /** `dark.ts:2067` openDarkInvestigation. */

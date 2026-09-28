@@ -499,7 +499,14 @@ const rows: Row[] = [
   {
     fn: "dark.ts:2039 runDarkDesk",
     run: darkRunInput.parse.bind(darkRunInput),
-    valid: { paste: "Who signed the 2019 annexation agreement?", investigationId: 12, modelChoice: "claude" },
+    // Unit CY item 9 added modelEffort to this shape; the sweep exercises it
+    // beside the model, which is the only way the dialog ever sends it.
+    valid: {
+      paste: "Who signed the 2019 annexation agreement?",
+      investigationId: 12,
+      modelChoice: "claude",
+      modelEffort: "high",
+    },
     bad: [
       { why: "oversize paste", value: { paste: x(LIMITS.darkPaste + 1) } },
       { why: "negative investigationId", value: { paste: "p", investigationId: -12 } },

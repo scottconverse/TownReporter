@@ -193,6 +193,13 @@ function choiceSet(
  * (`modelChoicesFor`), not the four the reference happened to draw: the
  * assignment page and this row must agree on the vocabulary, or the pick lands
  * somewhere the server cannot resolve.
+ *
+ * The row is Model and Effort on every dialog, which is how the reference draws
+ * it: `Desk Dialogs.dc.html:89-93` is one shared `hasModel` block carrying both
+ * selects, and every entry with a `model` gets it -- including dark-file. The
+ * `showEffort` flag that used to drop the second select for the Dark Desk
+ * dialog went when item 9 made the effort reach that run, leaving it a
+ * parameter no caller set.
  */
 function modelRow(
   rows: readonly { value: string; label: string }[],
@@ -200,7 +207,6 @@ function modelRow(
   effort: string | null,
   onValue: (v: string) => void,
   onEffort: (v: string) => void,
-  showEffort = true,
 ): ReactNode {
   const auto = !value || value === "auto";
   return createElement(
@@ -217,28 +223,19 @@ function modelRow(
       },
       ...rows.map((r) => createElement("option", { key: r.value, value: r.value }, r.label)),
     ),
-    /*
-      The Dark Desk run takes a model and no effort (`darkRunInput`), so that
-      dialog's row is drawn without the second select rather than with one whose
-      value is thrown away.
-    */
-    showEffort
-      ? createElement("span", { className: "astra-model-row-label" }, "Effort")
-      : null,
-    showEffort
-      ? createElement(
-          "select",
-          {
-            className: "astra-input",
-            value: effort ?? "high",
-            "aria-label": "Effort",
-            disabled: auto,
-            title: auto ? "Automatic sets the effort too" : undefined,
-            onChange: (e: { target: { value: string } }) => onEffort(e.target.value),
-          },
-          ...EFFORT_OPTIONS.map((v) => createElement("option", { key: v, value: v }, v)),
-        )
-      : null,
+    createElement("span", { className: "astra-model-row-label" }, "Effort"),
+    createElement(
+      "select",
+      {
+        className: "astra-input",
+        value: effort ?? "high",
+        "aria-label": "Effort",
+        disabled: auto,
+        title: auto ? "Automatic sets the effort too" : undefined,
+        onChange: (e: { target: { value: string } }) => onEffort(e.target.value),
+      },
+      ...EFFORT_OPTIONS.map((v) => createElement("option", { key: v, value: v }, v)),
+    ),
     createElement(
       "span",
       { className: "astra-model-row-note" },
@@ -818,7 +815,21 @@ export function DarkFileBody(p: DarkFileBodyProps): ReactNode {
       (key) => set({ limit: key }),
       p.Choice,
     ),
-    modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), false),
+    /*
+      Unit CY item 9: the Drawing draws this dialog with an Effort select, and
+      the desk had none.
+
+      `Desk Dialogs.dc.html:89-93` is one shared `hasModel` block and it carries
+      both selects together; the dark-file entry at `:142` sets
+      `model: "Claude Opus - sign-in"`, so that block is what renders for this
+      dialog. This body called `modelRow` with the flag that suppressed the
+      effort half, and `darkRequest`'s `run` sent the model alone
+      (editor-dialog-forms.ts:677), so the pick had nowhere to land. The run
+      itself already took an effort -- `executeDarkRun` has threaded
+      `opts.modelEffort` into `reasoningEffort` since it was written
+      (src/lib/news/dark.ts:1882) -- so the wire, not the runner, was the gap.
+    */
+    modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
     message(p.problem, "warn"),
     message(p.note, "ok"),
   );
