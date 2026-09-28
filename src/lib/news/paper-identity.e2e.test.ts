@@ -14,6 +14,22 @@ import {
   withDatabase,
   type ChildProcess,
 } from "../test-support/pg-admin.ts";
+import { readFileSync } from "node:fs";
+
+/**
+ * Unit CJ (0.6.80): same file `scripts/first-run-setup-step.mjs` reads --
+ * duplicated inline (a few lines) rather than imported, so this typed test
+ * project does not pull an untyped .mjs walk helper into its strict
+ * typecheck. No special server-side path for this caller: it reads the same
+ * file `installer/Install.ps1` tells a human operator to read.
+ */
+async function fillPendingSetupCodeIfPresent(page: Page): Promise<void> {
+  const field = page.getByLabel("Setup code", { exact: true });
+  if ((await field.count()) === 0) return;
+  const root = process.env.TOWNREPORTER_DATA_ROOT?.trim() || join(process.cwd(), ".townreporter-data");
+  const code = readFileSync(join(root, "logs", "SETUP-CODE.txt"), "utf8").trim();
+  await field.fill(code);
+}
 
 /**
  * CITY-SETUP slice B+final proof: a paper set up as a DIFFERENT city, through
@@ -139,6 +155,11 @@ if (dbProbe.ok) {
     await page.getByLabel("Email").fill(OWNER_EMAIL);
     await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByLabel("Confirm password").fill(PASSWORD);
+    // Unit CJ (0.6.80): fill the setup code if this fresh install is gating
+    // on one -- reads the same file `installer/Install.ps1` tells the
+    // operator to read (`scripts/first-run-setup-step.mjs`), no special
+    // server-side path for this caller.
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
 
     // The owner lands straight on the first-run setup gate (desk.index's

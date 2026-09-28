@@ -10,7 +10,7 @@ import { OPS_ACTIONS, type OpsActionId } from "@/lib/ops/actions";
 import { installAction } from "@/lib/ops/install-display";
 import { formatAgo, overallState, type HealthState } from "@/lib/ops/health";
 import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/news/trash";
-import { inviteEditor, myDesk } from "@/lib/news/claim";
+import { inviteEditor, myDesk, myRecoveryCodesStatus, regenerateRecoveryCodes } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
 import { SectionsSetup } from "@/components/sections-setup";
@@ -458,6 +458,7 @@ function OpsPage() {
               id={PANEL_ANCHORS["Editors & access"]}
             >
               <InviteAnEditor />
+              <RecoveryCodesPanel />
               <GiveUpTheDesk />
             </div>
           </div>
@@ -1105,6 +1106,132 @@ function InviteAnEditor() {
           What happens next: they click the link, set a password, and appear on this page as an
           editor. They cannot invite others or give up the desk.
         </p>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Owner recovery codes (Unit CJ, 0.6.80).
+ *
+ * Pattern matched to CivicCast's admin recovery codes (see recovery-codes.ts
+ * for the file:line search and the one deliberate count difference): one-time
+ * codes, shown once, with an explicit "I saved these" confirm before the download
+ * button and the raw list disappear from state -- there is no "show them
+ * again" here on purpose, matching the codes themselves (each one-time).
+ * Owner-only: `myRecoveryCodesStatus`/`regenerateRecoveryCodes` both 403 a
+ * non-owner server-side; this component also just returns null for one, the
+ * same shape `InviteAnEditor` above uses.
+ */
+function RecoveryCodesPanel() {
+  const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const status = useQuery({
+    queryKey: ["recovery-codes-status"],
+    queryFn: () => myRecoveryCodesStatus(),
+    enabled: me.data?.role === "owner",
+  });
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const mint = useMutation({
+    mutationFn: () => regenerateRecoveryCodes(),
+    onSuccess: (r) => {
+      setErr(null);
+      setSaved(false);
+      setCodes(r.codes);
+      void qc.invalidateQueries({ queryKey: ["recovery-codes-status"] });
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "Could not generate recovery codes."),
+  });
+  if (me.data?.role !== "owner") return null;
+
+  function downloadCodes() {
+    if (!codes) return;
+    const blob = new Blob(
+      [
+        `TownReporter recovery codes\n` +
+          `Generated ${new Date().toISOString()}\n` +
+          `Each code works once. Keep this file somewhere safe, off this machine.\n\n` +
+          codes.join("\n") +
+          "\n",
+      ],
+      { type: "text/plain" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "townreporter-recovery-codes.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <section className="mt-16 border-t border-rule pt-8" id="astra-recovery-codes">
+      <SecHead
+        title="Recovery codes"
+        sub="If you lose the password to this account, one of these codes gets you back in: it sets a one-time temporary password on your account, which you use to sign in and then change. Each code works once. Generating a new set retires the old one immediately."
+      />
+      <div className="mt-4 max-w-2xl space-y-3">
+        <p className="text-sm text-muted">
+          {codes
+            ? // A fresh set was just minted this screen -- all of it is unused,
+              // even before the status query's background refetch lands.
+              `${codes.length} of ${codes.length} unused codes remain from the current set.`
+            : status.data
+              ? `${status.data.remaining} of 10 unused codes remain from the current set.`
+              : "Checking your current codes…"}
+        </p>
+        {err ? <p className="text-sm text-rust">{err}</p> : null}
+        {!codes ? (
+          <InkButton disabled={mint.isPending} onClick={() => mint.mutate()}>
+            {mint.isPending
+              ? "Generating…"
+              : status.data && status.data.remaining > 0
+                ? "Generate new recovery codes (retires the old set)"
+                : "Generate recovery codes"}
+          </InkButton>
+        ) : (
+          <div className="border border-rule bg-paper-2 p-3">
+            <p className="astra-label">Shown once — save these now</p>
+            <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">
+              {codes.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+            <label className="mt-3 flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={saved}
+                onChange={(e) => setSaved(e.target.checked)}
+              />
+              I saved these somewhere safe.
+            </label>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <InkButton tone="quiet" disabled={!saved} onClick={downloadCodes}>
+                Download as .txt
+              </InkButton>
+              <InkButton
+                tone="quiet"
+                disabled={!saved}
+                onClick={() => {
+                  setCodes(null);
+                  setSaved(false);
+                }}
+              >
+                Done
+              </InkButton>
+            </div>
+            {!saved ? (
+              <p className="mt-2 text-sm text-muted">
+                Confirm you saved these before leaving this screen — they will not be shown again.
+              </p>
+            ) : null}
+          </div>
+        )}
       </div>
     </section>
   );
