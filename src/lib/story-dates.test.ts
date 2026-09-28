@@ -486,3 +486,98 @@ describe("the story's own words (unit BX2)", () => {
     );
   });
 });
+
+/**
+ * Unit BZ, item 5: a row's line must be about the day the row is on.
+ *
+ * The audit's case is the live front page's Thu Oct. 1 row, whose line was the
+ * headline "Longmont Housing Board Cancels Oct. 8 Regular Meeting; ..." under a
+ * row about the 1st: the story named Oct. 1 in its dek (a funding hearing) and
+ * Oct. 8 in its headline (a cancelled regular meeting), and -- in the audit's
+ * own words -- "a clause that failed the clean-line test falls back to the
+ * headline", so the reader got a sentence about the 8th under the 1st.
+ *
+ * The headline and dek below are written to that case rather than recovered
+ * from it: the live story's own text is not in this repo (`grep` for "Housing
+ * Board" over every tracked file finds it in the audit note and nowhere else),
+ * and the audit quotes the headline only to its ellipsis. What the dek is
+ * written to is the mechanism the audit names: its clause for the 1st is one
+ * the clean-line test refuses, which is why the old code printed the headline.
+ */
+describe("a row the headline is not about (unit BZ, item 5)", () => {
+  const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
+    slug: "story",
+    section: "council",
+    records: [],
+    ...over,
+  });
+  /** The desk's headline for the cancelled meeting, quoted as the audit quotes it. */
+  const HOUSING_HEADLINE =
+    "Longmont Housing Board Cancels Oct. 8 Regular Meeting; Funding Hearings Still On";
+
+  it("gives a day the headline is not about the dek's own clause for it", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "housing",
+        headline: HOUSING_HEADLINE,
+        // The 1st's clause is all-capital, which `cleanLine` reads as a NAME and
+        // refuses; the 8th is named by the headline, which the row keeps.
+        dek: "Oct. 1 Funding Hearing Packet Posted; Oct. 8 Regular Meeting Cancelled.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what, i.slug]),
+      [
+        ["2026-10-01", "Funding Hearing Packet Posted", "housing"],
+        ["2026-10-08", "Regular Meeting", "housing"],
+      ],
+      "the 1st printed words about the 8th",
+    );
+  });
+
+  it("keeps the headline for a day the headline names, or one it names at all", () => {
+    // The normal case, and the live one: the desk's own meal-pickup headline
+    // names Oct. 2, its clause is a NAME rather than an event, and the row
+    // prints the headline -- which is about the day it is on.
+    const meal = "Longmont Senior Center to begin free meal pickups Oct. 2";
+    assert.deepEqual(
+      collectStoryDates([story({ slug: "meal", headline: meal, published_on: "2026-09-27" })]).map(
+        (i) => [i.date, i.what],
+      ),
+      [["2026-10-02", meal]],
+    );
+    // A row read out of the dek whose headline names NO day keeps the headline:
+    // the rule is about a headline that is about another day, not about one that
+    // happens to name none.
+    const dateless = story({
+      slug: "fee",
+      headline: "Council weighs the fee schedule",
+      dek: "A hearing is set for Oct. 6; the vote comes later.",
+      published_on: "2026-09-27",
+    });
+    assert.deepEqual(
+      collectStoryDates([dateless]).map((i) => [i.date, i.what]),
+      [["2026-10-06", "Council weighs the fee schedule"]],
+    );
+  });
+
+  it("drops a day the dek gives no clause for rather than printing another day's words", () => {
+    // A dek that names the day and nothing else leaves one word when the date is
+    // taken out -- a fragment, not a line -- so the row goes rather than being
+    // printed under the headline's Oct. 8 sentence.
+    const items = collectStoryDates([
+      story({
+        slug: "posted",
+        headline: HOUSING_HEADLINE,
+        dek: "Posted Oct. 1.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-08", "Regular Meeting"]],
+      "a day with no clause of its own was printed anyway",
+    );
+  });
+});

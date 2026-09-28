@@ -54,6 +54,19 @@
  * nothing in the sentence marks which is which; the headline and the dek are
  * where a story names the date it is about. See the unit report.
  *
+ * UNIT BZ, ITEM 5. The headline is the last line a row falls back to, and it is
+ * not always about the day the row is on. The live front page's Thu Oct. 1 row
+ * printed "Longmont Housing Board Cancels Oct. 8 Regular Meeting; Funding
+ * Hearings Still On", because the story named Oct. 1 in its dek and Oct. 8 in
+ * its headline, and the dek's own clause for the 1st was not clean enough to
+ * print as a line. A reader could take that row for a cancellation on the 1st.
+ * So a row prints the headline only for a day the headline names -- or for a
+ * story whose headline names no day at all, where it is still the story's own
+ * words -- and a day the headline is not about takes the dek's own clause for
+ * that day instead, with the date taken out of it. A day the dek gives no such
+ * clause for is dropped: a missing row is worth more than a row that sends the
+ * reader to the wrong day.
+ *
  * The premise of these panels is written up in full in
  * `questions/BD-redesign-phase1-paper.md`. Nothing in this schema records a
  * cancelled event, which is why `cancelled` exists on the row and is never set
@@ -220,6 +233,8 @@ const CONJUNCTIONS = new Set(["and", "or", "but", "nor", "yet", "so", "plus"]);
 const EVENT_WORDS = 6;
 /** How many words a line written BEFORE its date may run; longer is a headline. */
 const BEFORE_WORDS = 6;
+/** How many words a dek clause may run when it is the row's last resort. */
+const CLAUSE_WORDS = 12;
 /**
  * How far behind its own story a worded day with no year may sit before it is
  * read as the coming year's. A story filed in December that says "Jan. 5"
@@ -386,8 +401,8 @@ function clauseStart(text: string, start: number): number {
 }
 
 /**
- * The event line for one date: the words around it when they are clean, and the
- * story's headline when they are not.
+ * The event line for one date: the words around it when they are clean, and
+ * nothing at all when they are not.
  *
  * `next` is where the following date in the same text begins, so a line never
  * runs into the next date's own words ("canvassing day and Oct. 3" gives the
@@ -395,20 +410,87 @@ function clauseStart(text: string, start: number): number {
  * only when it is short and whole ("Applications Close Sept. 29"); a long one
  * is just the headline with the date taken out of it, and the headline is what
  * gets printed.
+ *
+ * What a row with no line of its own prints is the caller's question, not this
+ * function's: `fallbackLine` answers it, and the answer depends on the day the
+ * row is on (unit BZ, item 5).
  */
 function eventLine(
   text: string,
   start: number,
   end: number,
   next: number,
-  headline: string,
   fromHeadline: boolean,
 ): string {
   const after = cleanLine(text.slice(end, next), EVENT_WORDS, fromHeadline);
   if (after) return after;
   const before = cleanLine(text.slice(clauseStart(text, start), start), BEFORE_WORDS + 99, fromHeadline);
   if (before && before.split(" ").length <= BEFORE_WORDS) return before;
-  return headline.trim() || "A date this story names";
+  return "";
+}
+
+/**
+ * The dek's own clause for a day, with the date expression taken out of it.
+ *
+ * Unit BZ, item 5. This is what a row prints when the story's words around the
+ * date were not clean enough to be a line and the headline is about another
+ * day: the clause the day sits in, as the desk wrote it for that day.
+ *
+ * The clause is bounded the way a line is -- by the punctuation `CLAUSE_BREAK`
+ * names, on both sides of the date -- so it can never run across a semicolon
+ * into what the dek says next, and it cannot swallow a second date's own clause.
+ * What is taken off is the date expression itself: the panel prints the day in
+ * its own column, and the line is what the day is about.
+ *
+ * The words are deliberately NOT put through `cleanLine`. The only reason this
+ * path exists is that the clean-line test refused them; asking it again would
+ * refuse them again and leave the row with nothing, which is the outcome this
+ * path is here to avoid. The one test kept is `cleanLine`'s own floor -- fewer
+ * than two words is a fragment, not a line -- so a clause that is nothing but
+ * the date and one word gives `""`, and the row is dropped. The word cap is a
+ * bound on the panel rather than a reading: a clause longer than it is cut at a
+ * word boundary.
+ */
+function dekClause(dek: string, start: number, end: number): string {
+  const from = clauseStart(dek, start);
+  const stop = dek.slice(end).search(CLAUSE_BREAK);
+  const words = `${dek.slice(from, start)} ${dek.slice(end, stop < 0 ? dek.length : end + stop)}`
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[\s,;:.!?–—-]+/, "")
+    .replace(/[\s,;:.!?–—-]+$/, "")
+    .split(" ")
+    .filter(Boolean);
+  if (words.length < 2) return "";
+  return words.slice(0, CLAUSE_WORDS).join(" ");
+}
+
+/**
+ * What a row prints when the story's own words around the date said nothing.
+ *
+ * A row read out of the headline itself always keeps the headline: the day came
+ * from the headline, so the headline is about it by construction. A row read
+ * out of the dek keeps the headline only when the headline names this day too,
+ * or names no day at all (unit BZ, item 5). A headline that names only OTHER
+ * days is refused, and the day falls back to the dek's own clause for it --
+ * `""` when the dek has none, which drops the row.
+ *
+ * `text` is the words the row was read out of, which is the dek for every row
+ * that can reach the last branch.
+ */
+function fallbackLine(
+  date: string,
+  text: string,
+  start: number,
+  end: number,
+  headline: string,
+  publishedOn: string,
+): string {
+  const said = headline.trim();
+  if (!said) return "A date this story names";
+  const named = daysNamed(said, publishedOn);
+  if (named.length === 0 || named.includes(date)) return said;
+  return dekClause(text, start, end);
 }
 
 /**
@@ -440,13 +522,71 @@ function readDayTail(text: string, from: number): { end: number; more: number[] 
   }
 }
 
+/** One day of a date expression, on the year the expression names or implies. */
+function dayOn(
+  day: number,
+  month: number,
+  writtenYear: string | undefined,
+  publishedOn: string,
+): string {
+  // A written year is the date's own and is never second-guessed.
+  if (writtenYear) return dayOf(day, month, Number(writtenYear));
+  const year = Number(publishedOn.slice(0, 4));
+  const candidate = dayOf(day, month, year);
+  return candidate && candidate < addDays(publishedOn, -ROLL_DAYS)
+    ? dayOf(day, month, year + 1)
+    : candidate;
+}
+
+/**
+ * Every month-name date expression in `text`, with the days it names resolved
+ * against `publishedOn`.
+ *
+ * `days` is every day the expression names, in the order it names them: a list
+ * ("Oct. 1 and 8") is two, a range ("Oct. 1-2") is one, because a range names
+ * its first day. `start` and `end` bound the expression itself, which is what
+ * the words around it -- and the row's fallback line -- are read from. A text
+ * with no month-name date in it is no expressions at all.
+ */
+function scanDates(
+  text: string,
+  publishedOn: string,
+): { start: number; end: number; next: number; days: string[] }[] {
+  if (!text || !publishedOn) return [];
+  const matches = [...text.matchAll(WORDED_DAY)];
+  return matches.map((match, i) => {
+    const start = match.index ?? 0;
+    /* The whole expression, not just its first day: "Oct. 1-2" ends after the
+       2 and "Oct. 1 and 8" after the 8, so neither tail is read as the line. */
+    const tail = readDayTail(text, start + match[0].length);
+    const month = monthNumber(match[1]);
+    // The day the expression does not name is the calendar's to refuse
+    // ("Oct. 1 and 32"), and it is dropped here rather than carried on.
+    const days = [Number(match[2]), ...tail.more]
+      .map((day) => dayOn(day, month, match[3], publishedOn))
+      .filter(Boolean);
+    return {
+      start,
+      end: tail.end,
+      next: i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length,
+      days,
+    };
+  });
+}
+
+/** The days a text names in its own words, resolved the way its rows are. */
+function daysNamed(text: string, publishedOn: string): string[] {
+  return scanDates(text, publishedOn).flatMap((hit) => hit.days);
+}
+
 /**
  * The dates a printed story names in its own words, with a line for each.
  *
  * `publishedOn` is the story's own calendar day and resolves a date that names
- * no year; `headline` is what an event line falls back to. Nothing here reads a
- * value the story does not carry: a text with no month-name date in it returns
- * nothing at all.
+ * no year; `headline` is what a row with no line of its own falls back to, for
+ * this day only. Nothing here reads a value the story does not carry: a text
+ * with no month-name date in it returns nothing at all, and a day whose row has
+ * nothing to print returns no row.
  */
 function wordedDates(
   text: string,
@@ -454,34 +594,15 @@ function wordedDates(
   headline: string,
   fromHeadline: boolean,
 ): { date: string; what: string }[] {
-  if (!text || !publishedOn) return [];
-  const matches = [...text.matchAll(WORDED_DAY)];
   const found: { date: string; what: string }[] = [];
-  for (let i = 0; i < matches.length; i += 1) {
-    const match = matches[i];
-    const start = match.index ?? 0;
-    /* The whole expression, not just its first day: "Oct. 1-2" ends after the
-       2 and "Oct. 1 and 8" after the 8, so neither tail is read as the line. */
-    const tail = readDayTail(text, start + match[0].length);
-    const end = tail.end;
-    const next = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
-    const month = monthNumber(match[1]);
-    /** One day of this expression, on the year the expression names or implies. */
-    const on = (day: number): string => {
-      // A written year is the date's own and is never second-guessed.
-      if (match[3]) return dayOf(day, month, Number(match[3]));
-      const year = Number(publishedOn.slice(0, 4));
-      const candidate = dayOf(day, month, year);
-      return candidate && candidate < addDays(publishedOn, -ROLL_DAYS)
-        ? dayOf(day, month, year + 1)
-        : candidate;
-    };
-    const what = eventLine(text, start, end, next, headline, fromHeadline);
-    for (const day of [Number(match[2]), ...tail.more]) {
-      const date = on(day);
-      // One row per day the expression names; the day it does not name is the
-      // calendar's to refuse ("Oct. 1 and 32"), and a range's first day alone.
-      if (date) found.push({ date, what });
+  for (const hit of scanDates(text, publishedOn)) {
+    /* The line is answered once per expression and then per day: one expression
+       may name several days ("Oct. 1 and 8") and the fallback is about the day,
+       so the 1st and the 8th can read differently. */
+    const own = eventLine(text, hit.start, hit.end, hit.next, fromHeadline);
+    for (const date of hit.days) {
+      const what = own || fallbackLine(date, text, hit.start, hit.end, headline, publishedOn);
+      if (what) found.push({ date, what });
     }
   }
   return found;
