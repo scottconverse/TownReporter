@@ -33,7 +33,7 @@ import {
 import { HOLD_CHOICES } from "../../lib/news/kill-reasons.ts";
 import {
   SECTION_REQUIRED,
-  duplicateNote,
+  duplicateNoteAfterSave,
   type DuplicateWarning,
 } from "../../lib/news/import-review.ts";
 import {
@@ -555,13 +555,18 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
  * The paste tab's confirmation and its duplicate warning, in ONE live region.
  *
  * Unit BW5. The old panel drew these as a single `role="status"` paragraph --
- * the sentence that the story was added, then `duplicateNote`'s warning, then
- * the link to the story it means ("Read the printed one" to `/articles/$slug`,
- * or "Open the one on the desk" to `/desk/story/$leadId` when the match is a
+ * the sentence that the story was added, then the duplicate warning, then the
+ * link to the story it means ("Read the printed one" to `/articles/$slug`, or
+ * "Open the one on the desk" to `/desk/story/$leadId` when the match is a
  * lead, `desk.index.tsx:1532-1551`). One paragraph and not two because that is
  * what the panel did and what the walk reads: the warning arrives with the
  * confirmation, as part of the sentence the editor is already reading, and
  * never in place of it -- the story IS filed, and saying so comes first.
+ *
+ * Unit CA, note 6: the warning is `duplicateNoteAfterSave`'s now, and not the
+ * review screen's `duplicateNote`. Both stories exist by the time this draws,
+ * so the sentence names the match instead of offering a decision that has
+ * already been made. The link stays, and it is drawn where it always was.
  *
  * The link is a plain anchor and not a router `Link` for the reason this file
  * is a `.ts` (see the note above `NewStoryBody`): every other dialog link to
@@ -578,7 +583,7 @@ function savedWithDuplicate(note: string | null, warning: DuplicateWarning): Rea
     { className: "astra-msg ok", role: "status" },
     note ?? "",
     note ? " " : null,
-    duplicateNote(warning),
+    duplicateNoteAfterSave(warning),
     where
       ? [
           " ",
