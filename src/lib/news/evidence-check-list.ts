@@ -70,13 +70,18 @@ export type EvidenceRowAction =
  * (`FindingEvidenceRow.key` and its two siblings), which is what the judgment
  * save takes.
  *
- * A row with no `ref` -- a claim of absence, the name row, the style row -- is
- * a row the desk measures but does not judge, so it opens to nothing.
+ * A row with no `ref` -- a claim of absence, the name row -- is a row the desk
+ * measures but does not judge, so it opens to nothing. The style row is the one
+ * row that opens to something which is not a judgment (unit CW2): the page's
+ * own Style check section, which the route hands to the panel as markup because
+ * it holds the tick state and the repair mutation. Its `id` is always
+ * `STYLE_ROW_KEY`, so its disclosure comes out as `evidence-detail-style`.
  */
 export type EvidenceRowRef =
   | { kind: "finding"; id: string }
   | { kind: "claim"; id: string }
-  | { kind: "manual"; id: string };
+  | { kind: "manual"; id: string }
+  | { kind: "style"; id: string };
 
 export type EvidenceListRow = {
   key: string;
@@ -90,6 +95,13 @@ export type EvidenceListRow = {
   /** The review row behind this list row, or null when there is none. */
   ref: EvidenceRowRef | null;
 };
+
+/**
+ * The style row's key, and the whole of its ref's `id` (unit CW2). It is a
+ * constant because two places have to agree on it: the model pushes the row
+ * with it, and the page's style press names the row's disclosure by it.
+ */
+export const STYLE_ROW_KEY = "style";
 
 /**
  * The DOM id of one list row's disclosure (unit CW2).
@@ -324,13 +336,20 @@ export function evidenceCheckRows(input: {
   const styleIssues = input.styleFindings.length;
   if (styleIssues > 0) {
     list.push({
-      key: "style",
+      key: STYLE_ROW_KEY,
       chip: `! Style: ${styleIssues} issue${styleIssues === 1 ? "" : "s"}`,
       tone: "warn",
       what: "Style check (measured in code)",
       note: input.styleFindings[0]!.message,
       action: { kind: "style", label: "Fix these with the model" },
-      ref: null,
+      /*
+        The style row opens (unit CW2): the drawn row's press is a way to the
+        work, and the work -- the tick list and the repair press -- is the
+        page's Style check section, which is the row's disclosure body now
+        rather than a section further down the main column the drawing does
+        not draw.
+      */
+      ref: { kind: "style", id: STYLE_ROW_KEY },
     });
   }
 

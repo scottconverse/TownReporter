@@ -512,6 +512,13 @@ export type EvidenceListInputs = {
   nameCheck: NameCheck | null;
   /** Every finding this draft's audit raises, fixes and reviews together. */
   styleFindings: readonly DraftAuditFinding[];
+  /**
+   * The page's Style check section (unit CW2), which the style row opens into.
+   * It is markup from the route rather than a second implementation here
+   * because the tick state and the repair mutation it needs are the page's:
+   * this panel draws the row, and the row is a way to that one section.
+   */
+  styleDetail: ReactNode;
   /** The drawn footer press, or "" when there is no checked version to compare. */
   compareLabel: string;
   onCompare: () => void;
@@ -795,16 +802,23 @@ export function FindingEvidenceReviewPanel({
       ? citedCaptureCount(review.rows, review.claimRows, review.manualClaimRows)
       : 0,
   });
-  const listRows: EvidenceListRow[] = review
-    ? evidenceCheckRows({
-        rows: review.rows,
-        claimRows: review.claimRows,
-        manualClaimRows: review.manualClaimRows,
-        openClaims: list.openClaims,
-        nameCheck: list.nameCheck,
-        styleFindings: list.styleFindings,
-      })
-    : [];
+  /*
+    Three of the list's rows -- the claims of absence, the name row and the
+    style row -- are measurements the page holds itself and not rows of the
+    review, so they are drawn whether or not the review has arrived; the review
+    only adds the findings and the claims it holds. With no review at all (a
+    draft that has never been checked) the list is then exactly those three,
+    which is what the page measured, and the style row keeps the repair press
+    where the drawing puts it.
+  */
+  const listRows: EvidenceListRow[] = evidenceCheckRows({
+    rows: review?.rows ?? [],
+    claimRows: review?.claimRows ?? [],
+    manualClaimRows: review?.manualClaimRows ?? [],
+    openClaims: list.openClaims,
+    nameCheck: list.nameCheck,
+    styleFindings: list.styleFindings,
+  });
 
   /*
     A list row's key is the review row's own key -- the one the judgment save
@@ -852,6 +866,13 @@ export function FindingEvidenceReviewPanel({
    * disclosure at all.
    */
   const renderRowDetail = (row: EvidenceListRow): ReactNode => {
+    /*
+      The style row (unit CW2) is the one row that opens into something which is
+      not a judgment: the page's Style check section, handed in as markup. It is
+      checked before the review is, because the section is the page's own -- it
+      is there whether or not a check has run.
+    */
+    if (row.ref?.kind === "style") return list.styleDetail;
     const source = review;
     if (!source) return null;
     const at = reviewRowAt.get(row.key);

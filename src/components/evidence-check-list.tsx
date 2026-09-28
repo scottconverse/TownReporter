@@ -16,12 +16,13 @@ import { evidenceDetailId, type EvidenceListRow } from "../lib/news/evidence-che
  *
  * `detail` (unit CW2) is the one thing that does not come from the row's data:
  * the body of the disclosure a row opens into -- the record checks and the
- * judgment controls for a row that has a review row behind it. It is a render
- * prop rather than markup here because the state and the mutations those
- * controls need belong to whoever owns the review, and rendering them from the
- * row alone would mean a second implementation of the same judgment. A row
- * whose `detail` comes back empty gets no disclosure at all: a shut `details`
- * that opens to nothing is a press that does nothing.
+ * judgment controls for a row that has a review row behind it, and the page's
+ * own Style check section for the style row. It is a render prop rather than
+ * markup here because the state and the mutations those controls need belong to
+ * whoever owns the review, and rendering them from the row alone would mean a
+ * second implementation of the same judgment. A row whose `detail` comes back
+ * empty gets no disclosure at all: a shut `details` that opens to nothing is a
+ * press that does nothing.
  */
 export function EvidenceCheckList({
   ranLine,
@@ -96,7 +97,15 @@ export function EvidenceCheckList({
                   above stays the way to the record.
                 */
                 <details className="astra-evidence-more" id={evidenceDetailId(row.key)}>
-                  <summary>Record checks and judgment</summary>
+                  {/*
+                    The style row opens into the page's Style check section, not
+                    into a judgment, so its summary says what it opens (unit
+                    CW2). Every other row opens into its own record checks and
+                    judgment controls.
+                  */}
+                  <summary>
+                    {row.ref?.kind === "style" ? "Style check" : "Record checks and judgment"}
+                  </summary>
                   <div className="astra-evidence-more-body">{body}</div>
                 </details>
               ) : null}

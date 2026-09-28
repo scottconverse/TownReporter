@@ -12,9 +12,11 @@ import {
   captureIsReadable,
   citedCaptureCount,
   evidenceCheckRows,
+  evidenceDetailId,
   evidenceRanLine,
   judgmentChip,
   openRecordAction,
+  STYLE_ROW_KEY,
 } from "./evidence-check-list.ts";
 
 /**
@@ -356,6 +358,23 @@ describe("evidenceCheckRows", () => {
     assert.equal(rows[0]!.what, "Style check (measured in code)");
     assert.equal(rows[0]!.note, "This sentence runs 41 words.");
     assert.deepEqual(rows[0]!.action, { kind: "style", label: "Fix these with the model" });
+  });
+
+  /*
+    Unit CW2. The style row opens, because the section its press reaches is that
+    row's disclosure body now -- the section is not drawn anywhere else on the
+    page. Its ref is the one id a press outside the list has to name, and the
+    row's key and the id must not drift apart: the press opens
+    `evidenceDetailId(STYLE_ROW_KEY)` and nothing else.
+  */
+  it("gives the style row the ref that opens the page's own Style check section", () => {
+    const rows = base({
+      styleFindings: [
+        { severity: "fix", code: "long-sentence", paragraph: 0, sentence: 0, message: "One.", snippet: "" },
+      ],
+    });
+    assert.deepEqual(rows[0]!.ref, { kind: "style", id: STYLE_ROW_KEY });
+    assert.equal(evidenceDetailId(rows[0]!.key), "evidence-detail-style");
   });
 
   it("says issue, not issues, for one", () => {

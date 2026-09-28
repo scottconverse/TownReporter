@@ -81,6 +81,7 @@ import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
+import { evidenceDetailId, STYLE_ROW_KEY } from "@/lib/news/evidence-check-list";
 import {
   modelChoiceLabel,
   rememberedStoryModelChoice,
@@ -1545,8 +1546,18 @@ function StoryPage() {
     scrolled to -- a row is a way to the work, never a second implementation of
     it. The button stays grey with its own stated reason until a finding is
     ticked, which is why this focuses rather than presses.
+
+    Unit CW2: the section is the style row's own disclosure body now
+    (`#evidence-detail-style`), so the press opens that disclosure first --
+    a browser will not scroll to or focus anything inside a shut <details>, and
+    a press that opened nothing would read as a dead press. Both the row and the
+    section are in the Checks tab, so the tab is already the one on screen.
   */
   const focusStyleFix = () => {
+    const more = document.getElementById(
+      evidenceDetailId(STYLE_ROW_KEY),
+    ) as HTMLDetailsElement | null;
+    if (more) more.open = true;
     const el = document.querySelector<HTMLElement>("#style-fix-act .btn");
     el?.scrollIntoView({ block: "center" });
     el?.focus();
@@ -1711,6 +1722,96 @@ function StoryPage() {
     onKeepChecked: keepCheckedVersion,
     onRestoreOriginal: restoreOriginalVersion,
   };
+
+  /*
+    STYLE CHECK (unit CW2).
+
+    The section the style row opens into. It is built here, in the route, and
+    handed to the checks panel as markup, because everything it needs -- the
+    tick state, the audit's findings and the repair mutation -- is this page's;
+    the panel draws the row that is the way to it. Nothing else draws this
+    section: `Desk Story.dc.html`'s page ends at the action row, and its style
+    repair press lives on the style row of the Evidence check list.
+  */
+  const styleDetail = data.draft ? (
+    <section className="note-sec" aria-label="Style check">
+      <p className="side-label">Style check</p>
+      {styleFixes.length ? (
+        <>
+          <p className="note-one">
+            {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix. Tick the
+            ones you want the model to take on:
+          </p>
+          <ul className="meeting-citations">
+            {styleRows
+              .filter((row) => row.finding.severity === "fix")
+              .map((row) => (
+                <StyleFindingRow
+                  key={row.id}
+                  finding={row.finding}
+                  ticked={styleTickOverrides[row.id] ?? true}
+                  onTick={(ticked) => toggleStyleTick(row.id, ticked)}
+                />
+              ))}
+          </ul>
+        </>
+      ) : (
+        <p className="note-one">Nothing to fix.</p>
+      )}
+      {styleReviews.length ? (
+        <details>
+          <summary>
+            {styleReviews.length} thing{styleReviews.length === 1 ? "" : "s"} to read, not
+            to fix
+          </summary>
+          <ul className="meeting-citations">
+            {styleRows
+              .filter((row) => row.finding.severity === "review")
+              .map((row) => (
+                <StyleFindingRow
+                  key={row.id}
+                  finding={row.finding}
+                  ticked={styleTickOverrides[row.id] ?? false}
+                  onTick={(ticked) => toggleStyleTick(row.id, ticked)}
+                />
+              ))}
+          </ul>
+        </details>
+      ) : null}
+      <p className="note-one">
+        You do not have to act on any of this. Nothing here publishes anything.
+      </p>
+      <div className="style-fix-act" id="style-fix-act">
+        <InkButton
+          disabled={
+            !styleTickedIds.length ||
+            locked ||
+            onPaper ||
+            waiting ||
+            fixStyle.isPending ||
+            save.isPending ||
+            reviewEvidence.isPending ||
+            reconcileActive
+          }
+          onClick={() => fixStyle.mutate()}
+        >
+          {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
+        </InkButton>
+        {/* Why it is off, in words. Empty when it is on, so nothing sits
+            beside a live button saying nothing. */}
+        {styleFixReason ? (
+          <p className="note-one style-fix-why">{styleFixReason}</p>
+        ) : null}
+      </div>
+      <p className="note-one">
+        One pass with the model the picker is set to. It is given the ticked findings above
+        and the draft, and returns the draft with those problems fixed. It may not change a
+        quotation, a number, a name or a link — a rewrite that does is refused and your text
+        is kept. The result is saved as a draft revision, never published.
+      </p>
+      {styleNote ? <p className="note-one">{styleNote}</p> : null}
+    </section>
+  ) : null;
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
@@ -1907,6 +2008,7 @@ function StoryPage() {
                   openClaims,
                   nameCheck: readNameCheck(data.draft?.research_json),
                   styleFindings: styleCheck.findings,
+                  styleDetail,
                   compareLabel: evidenceReview ? "Compare checked vs. previous version" : "",
                   onCompare: openCompareChecked,
                   onStylePress: focusStyleFix,
@@ -2638,12 +2740,27 @@ function StoryPage() {
       </div>
       {/*
         The evidence check's own block, under the row: its progress, its
-        dirty note, its finished notice and the review panel. The drawing
-        puts the job cards here, and the row above only has space for a
-        button. See `reconcileControlProps`.
+        dirty note, its finished notice. The drawing puts the job cards here,
+        and the row above only has space for a button. See
+        `reconcileControlProps`.
+
+        Unit CW2: `review` is withheld from this instance. That panel -- the
+        before/after comparison under the heading "Evidence check results",
+        with its two decisions -- is the one the Checks tab's compare press
+        opens as the Compare-versions dialog, on the same two functions, so
+        drawing it here as well printed the same decision twice and ran the
+        page thousands of pixels past the action row the drawing ends at. The
+        job's progress, its failure notice and its "Reload checked draft"
+        press all stay: those are the check's own state, and the drawing has
+        them.
       */}
       {data.draft && !locked && !onPaper ? (
-        <DraftReconcileControl {...reconcileControlProps} render="notes" />
+        <DraftReconcileControl
+          {...reconcileControlProps}
+          render="notes"
+          review={null}
+          reviewOpen={false}
+        />
       ) : null}
       {/*
         "A full JobCard under the actions while a check or redraft runs"
@@ -2868,85 +2985,14 @@ function StoryPage() {
               </Field>
             </details>
           ) : null}
-          {data.draft ? (
-            <section className="note-sec" aria-label="Style check">
-              <p className="side-label">Style check</p>
-              {styleFixes.length ? (
-                <>
-                  <p className="note-one">
-                    {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix. Tick the
-                    ones you want the model to take on:
-                  </p>
-                  <ul className="meeting-citations">
-                    {styleRows
-                      .filter((row) => row.finding.severity === "fix")
-                      .map((row) => (
-                        <StyleFindingRow
-                          key={row.id}
-                          finding={row.finding}
-                          ticked={styleTickOverrides[row.id] ?? true}
-                          onTick={(ticked) => toggleStyleTick(row.id, ticked)}
-                        />
-                      ))}
-                  </ul>
-                </>
-              ) : (
-                <p className="note-one">Nothing to fix.</p>
-              )}
-              {styleReviews.length ? (
-                <details>
-                  <summary>
-                    {styleReviews.length} thing{styleReviews.length === 1 ? "" : "s"} to read, not
-                    to fix
-                  </summary>
-                  <ul className="meeting-citations">
-                    {styleRows
-                      .filter((row) => row.finding.severity === "review")
-                      .map((row) => (
-                        <StyleFindingRow
-                          key={row.id}
-                          finding={row.finding}
-                          ticked={styleTickOverrides[row.id] ?? false}
-                          onTick={(ticked) => toggleStyleTick(row.id, ticked)}
-                        />
-                      ))}
-                  </ul>
-                </details>
-              ) : null}
-              <p className="note-one">
-                You do not have to act on any of this. Nothing here publishes anything.
-              </p>
-              <div className="style-fix-act" id="style-fix-act">
-                <InkButton
-                  disabled={
-                    !styleTickedIds.length ||
-                    locked ||
-                    onPaper ||
-                    waiting ||
-                    fixStyle.isPending ||
-                    save.isPending ||
-                    reviewEvidence.isPending ||
-                    reconcileActive
-                  }
-                  onClick={() => fixStyle.mutate()}
-                >
-                  {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
-                </InkButton>
-                {/* Why it is off, in words. Empty when it is on, so nothing sits
-                    beside a live button saying nothing. */}
-                {styleFixReason ? (
-                  <p className="note-one style-fix-why">{styleFixReason}</p>
-                ) : null}
-              </div>
-              <p className="note-one">
-                One pass with the model the picker is set to. It is given the ticked findings above
-                and the draft, and returns the draft with those problems fixed. It may not change a
-                quotation, a number, a name or a link — a rewrite that does is refused and your text
-                is kept. The result is saved as a draft revision, never published.
-              </p>
-              {styleNote ? <p className="note-one">{styleNote}</p> : null}
-            </section>
-          ) : null}
+          {/*
+            The Style check section used to be drawn here, at the bottom of
+            the main column (unit CW2). It is the style row's own disclosure
+            body now -- `#evidence-detail-style` in the Checks tab list --
+            because the drawing's page ends at the action row and its style
+            row is the only place the drawing puts the repair press. It is
+            built as `styleDetail` below and handed to the panel.
+          */}
           {/*
             The evidence review used to be mounted here, at the bottom of the
             page's main column (unit CW2). It is on the Checks tab now, where
