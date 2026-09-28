@@ -1,17 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useMemo, useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
   listScans,
-  listSources,
+  listSourcesPage,
   reviewSuggestedSources,
   runScan,
   setSourceStatus,
 } from "@/lib/news/desk";
+import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import {
   editorActionError,
@@ -46,17 +47,57 @@ function SourcesPage() {
   const search = Route.useSearch();
   const [sourceTab, setSourceTab] = useState<string>(search.tab ?? "accepted");
   const qc = useQueryClient();
+  /*
+    The search box the design draws beside the group filters, and the window the
+    brief puts on this list (Unit CZ-long-lists).
+
+    SOURCES IS THE LONGEST LIST ON THE DESK -- 1,588 suggested rows, some
+    15,872px -- and every one of them used to be laid out. The screen now holds
+    one page: the server applies the tab and this search, then cuts the first
+    `sourcesShown` rows, so what arrives is a page rather than a list.
+
+    THE SEARCH IS THE SERVER'S NOW. It used to run here over the rows already
+    loaded, which was cheap while every row was loaded; with a window it would
+    only ever search the page on screen, so a source filed below the fold would
+    be unfindable. It goes to the server, and it is deferred so a fast typist
+    sends one request per pause rather than one per letter.
+
+    THE COUNTS COME WITH THE PAGE, counted over every source -- see
+    `source-rows.ts`. A count taken here would be a count of the page, and the
+    pills and "Files up to" both promise the size of the list.
+  */
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourcesShown, setSourcesShown] = useState(PAGE_SIZE);
+  const deferredSourceQuery = useDeferredValue(sourceQuery);
   const {
-    data: sources = [],
+    data: sourcesPage,
     isPending,
     isError: listIsError,
     error: listError,
     refetch: refetchSources,
     isRefetching: refetchingSources,
   } = useQuery({
-    queryKey: ["sources"],
-    queryFn: () => listSources(),
+    queryKey: ["sources", sourceTab, deferredSourceQuery, sourcesShown],
+    queryFn: () =>
+      listSourcesPage({
+        data: {
+          limit: sourcesShown,
+          offset: 0,
+          filter: sourceTab,
+          search: deferredSourceQuery,
+        },
+      }),
+    placeholderData: keepPreviousData,
   });
+  /*
+    A stable empty array for the frames before the first page arrives. Written
+    as a `useMemo` rather than a bare `?? []` because `killCounts` below is a
+    memo over this array, and a fresh literal on every render would recompute
+    the kill-pattern count on every render.
+  */
+  const sources = useMemo(() => sourcesPage?.rows ?? [], [sourcesPage]);
+  const sourcesTotal = sourcesPage?.total ?? 0;
+  const counts = sourcesPage?.counts;
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   /*
     The row the dialog just added, which is drawn with the tint.
@@ -93,10 +134,6 @@ function SourcesPage() {
   );
   const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
-  // The search box the design draws beside the group filters. Client-side over
-  // the rows already loaded: the watch list is a few hundred rows at most and
-  // filtering it server-side would put a round trip on every keystroke.
-  const [sourceQuery, setSourceQuery] = useState("");
   const { formatDateTime } = usePaperDateFormatters();
   /*
     The right column: what the scan last did, and "Run scan now".
@@ -244,15 +281,12 @@ function SourcesPage() {
   ];
 
   /*
-    "On watch" is two statuses, not one.
-
-    A paused source is still on the watch list -- it is the same row, held, and
-    the drawing's row carries Resume rather than Accept for exactly that reason.
-    So the tab counts both and shows both, while `watch` below counts only the
-    rows the scanner may actually read (`daily-scan.ts` and `runScan` both ask
-    for `status = 'accepted'`), which is what "Files up to" means.
+    "On watch" is two statuses, not one -- a paused source is still on the watch
+    list, held, which is why the drawing's paused row carries Resume rather than
+    Accept. That rule, and the difference between the two-status tab and the
+    accepted-only "Files up to", moved to `source-rows.ts` with the rest of the
+    screen's narrowing when the window did: the server now has to know both.
   */
-  const onWatch = (s: SourceRow) => s.status === "accepted" || s.status === "paused";
   /*
     Which watch rows have a kill pattern under them (BJ3 item 3).
 
@@ -276,7 +310,7 @@ function SourcesPage() {
     against the panel's fresh read, and the panel wins, because the panel is
     what prints.
   */
-  const killPatternWanted = sources.some(onWatch);
+  const killPatternWanted = (counts?.accepted ?? 0) > 0;
   const leadsForKills = useQuery({
     queryKey: ["leads"],
     queryFn: () => listLeads(),
@@ -285,9 +319,10 @@ function SourcesPage() {
   const killCounts = useMemo(
     () =>
       badSourceKillsBySource(
-        // Recomputed from `sources` inside the memo rather than from the
-        // filtered `watchRows`, because that array is new on every render and
-        // would make the memo recompute every render.
+        // Recomputed from the page inside the memo rather than from the rows
+        // the section renders, because that array is new on every render and
+        // would make the memo recompute every render. A page is the right
+        // scope: the count only ever draws on a row that is on the screen.
         sources
           .filter((s) => s.status === "accepted" || s.status === "paused")
           .map((s) => ({ id: s.id, url: s.url })),
@@ -299,8 +334,12 @@ function SourcesPage() {
     How many pages the scanner is allowed to read. This is the "files up to"
     the design puts in the Daily scan panel, and it is the same number the Scan
     screen computes for its own run. Paused rows are deliberately not in it.
+
+    It comes from the server's whole-list count, not from the rows on screen:
+    the panel is answering "how many files can the scanner reach", which does
+    not change when the editor turns a page.
   */
-  const watch = sources.filter((s) => s.status === "accepted").length;
+  const watch = counts?.watching ?? 0;
 
   return (
     <DeskShell title="Sources" kicker="What the desk watches, and whether it could check" hideTitle>
@@ -399,10 +438,11 @@ function SourcesPage() {
                 >
                   {g.k === "accepted" ? "On watch" : g.k === "proposed" ? "Suggested" : "Rejected"}
                   {" · "}
-                  {
-                    sources.filter((s) => (g.k === "accepted" ? onWatch(s) : s.status === g.k))
-                      .length
-                  }
+                  {g.k === "accepted"
+                    ? (counts?.accepted ?? 0)
+                    : g.k === "proposed"
+                      ? (counts?.proposed ?? 0)
+                      : (counts?.rejected ?? 0)}
                 </button>
               ))}
               {/*
@@ -419,7 +459,7 @@ function SourcesPage() {
                 onClick={() => setSourceTab("unchecked")}
               >
                 Could not check{" · "}
-                {sources.filter((s) => onWatch(s) && s.last_error != null).length}
+                {counts?.unchecked ?? 0}
               </button>
             </div>
           </div>
@@ -442,25 +482,34 @@ function SourcesPage() {
       ) : isPending && sources.length === 0 ? (
         <ListSkeleton rows={5} />
       ) : (
-        groups.map((g) => {
+        <>
+          {groups.map((g) => {
           /*
             "Could not check" shows the accepted group, narrowed to the rows
             that carry a fetch error, so it is the same table with the same
             actions -- Accept and Drop stay where they are, because a source
             that cannot be read may still be worth dropping.
+
+            The rows ARE the page: the tab and the search box were applied on
+            the server (`listSourcesPage`), which is where they have to be now
+            that the screen holds a window rather than the whole list. So the
+            only group with rows is the one this tab names.
           */
           const forTab = sourceTab === "unchecked" ? "accepted" : sourceTab;
           if (g.k !== forTab) return null;
-          const rows = sources
-            .filter((s) => (g.k === "accepted" ? onWatch(s) : s.status === g.k))
-            .filter((s) => (sourceTab === "unchecked" ? s.last_error != null : true))
-            .filter((s) => {
-              const q = sourceQuery.trim().toLowerCase();
-              if (!q) return true;
-              return [s.title, s.url, s.kind, s.tier].some((value) =>
-                (value ?? "").toLowerCase().includes(q),
-              );
-            });
+          const rows = sources;
+          /*
+            The heading's number is the whole tab, not the page. The pills
+            above read the same counts, so the two agree at every page.
+          */
+          const tabTotal =
+            sourceTab === "unchecked"
+              ? (counts?.unchecked ?? 0)
+              : sourceTab === "accepted"
+                ? (counts?.accepted ?? 0)
+                : sourceTab === "proposed"
+                  ? (counts?.proposed ?? 0)
+                  : (counts?.rejected ?? 0);
           return (
                 <section
                   key={g.k}
@@ -469,7 +518,7 @@ function SourcesPage() {
                 >
               <SecHead
                 title={sourceTab === "unchecked" ? "Could not check" : g.title}
-                count={rows.length}
+                count={tabTotal}
                 sub={
                   sourceTab === "unchecked"
                     ? "On the watch list, and the last pass could not read them. A source the scanner cannot fetch is not yet a source."
@@ -480,7 +529,7 @@ function SourcesPage() {
                 <p className="wire-sum">
                   {sourceTab === "unchecked"
                     ? "Every source on the watch list was readable on the last pass."
-                    : sourceQuery.trim()
+                    : deferredSourceQuery.trim()
                       ? "No source on this list matches that search."
                       : "Nothing on watch yet — add a URL above."}
                 </p>
@@ -523,7 +572,29 @@ function SourcesPage() {
               )}
             </section>
           );
-        })
+          })}
+          {/*
+            The list is windowed (Unit CZ-long-lists), so the footer says how
+            much of this tab is on the screen and offers the next page. Not
+            drawn: the handoff's only list footer is the Queue's own "Load
+            more" (Desk Screens.dc.html:67), and the brief names this button,
+            so this is the brief's wording. Recorded in SPEC-GAPS-0681.md.
+          */}
+          {sourcesTotal > 0 ? (
+            <div className="astra-list-foot">
+              <span>{showingLine(sources.length, sourcesTotal, "sources")}</span>
+              {sources.length < sourcesTotal ? (
+                <button
+                  type="button"
+                  className="astra-list-more"
+                  onClick={() => setSourcesShown((n) => n + PAGE_SIZE)}
+                >
+                  Show {PAGE_SIZE} more
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </>
       )}
         </div>
         <aside className="astra-col">
@@ -799,6 +870,12 @@ function SuggestedSources({
     },
   });
 
+  /*
+    `rows` is the page, not the list (Unit CZ-long-lists). So "Select all 25"
+    selects the rows on the screen and says so -- which is what the label has
+    always done, since it prints the number it will pick. Selecting across a
+    window would need the other tabs' rows, which the screen no longer holds.
+  */
   const visible = who === "all" ? rows : rows.filter((r) => suggesterKey(r.proposed_by) === who);
   const allPicked = visible.length > 0 && visible.every((r) => selected.includes(r.id));
   const togglePicked = (id: number) =>

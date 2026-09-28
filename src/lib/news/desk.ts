@@ -28,6 +28,7 @@ import {
 import { reportAndDraft } from "./report";
 import { cleanListWindow, takeWindow } from "./list-window.ts";
 import { cleanQueueWindow, queueCounts, queueNeedle, queueSelect } from "./queue-rows.ts";
+import { cleanSourceWindow, selectSourceRows, sourceCounts } from "./source-rows.ts";
 import {
   DESK_DRAFT_FILTERS,
   deskDraftFilterCounts,
@@ -230,12 +231,19 @@ export const bootstrapDesk = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-export const listSources = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    await ensureSeeds(context.userId, owned(context));
-    const sql = await getSql();
-    return sql<SourceRow>`
+/**
+ * Every source the newsroom has, in the order the watch list draws them.
+ *
+ * Extracted from `listSources` by Unit CZ-long-lists so the Sources SCREEN's
+ * window can narrow this list without a second copy of the SQL drifting from
+ * it. The order is the rule and is the reason this is one read rather than
+ * two: proposed first (they are a review queue, newest first within it), then
+ * accepted, then paused, then rejected, and by id inside each group.
+ */
+async function querySourceRows(context: { userId: string; newsroomId: number }) {
+  await ensureSeeds(context.userId, owned(context));
+  const sql = await getSql();
+  return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
@@ -270,6 +278,39 @@ export const listSources = createServerFn({ method: "GET" })
         case when status = 'proposed' then id end desc,
         id asc
     `;
+}
+
+/**
+ * Every source, for the callers that need the whole list rather than a page:
+ * the Today screen's rail, the scan settings dialog, the routine-notice
+ * permissions dialog and the editor dialogs all ask "which sources are there".
+ */
+export const listSources = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => querySourceRows(context));
+
+/**
+ * One page of the Sources screen (Unit CZ-long-lists).
+ *
+ * The watch list is the desk's longest list -- 1,588 suggested rows, some
+ * 15,872px -- and the screen used to lay every one of them out. The window has
+ * to be cut AFTER the tab and the search box, not in SQL: "Suggested" is a
+ * status filter, but "Could not check" is a computed one (`status = 'accepted'
+ * or 'paused'` AND `last_error is not null`), so a SQL limit would page the
+ * unfiltered list and show rows the tab does not hold.
+ *
+ * `counts` is taken over every source rather than the page, because the pills
+ * promise the size of the list and "Files up to" promises the size of the
+ * watch list -- a page-scoped count would read 25 the moment a window
+ * appeared.
+ */
+export const listSourcesPage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanSourceWindow(input))
+  .handler(async ({ context, data }) => {
+    const all = await querySourceRows(context);
+    const matched = selectSourceRows(all, data);
+    return { ...takeWindow(matched, data.offset, data.limit), counts: sourceCounts(all) };
   });
 
 async function upsertSource(
