@@ -475,8 +475,15 @@ describe("two editors on one story", () => {
         workers" disclosure now (the drawing draws those two buttons at the foot
         of the card and gives the Actions panel no other door), so the owner
         opens it the way a reader does before pressing Run.
+
+        Unit CX2 then moved that disclosure off `/desk/ops` and behind the
+        Health card's own screen: the summary page draws the card's rows and a
+        "Restart workers" DOOR (`ops-cards.ts:130`), and the disclosure itself
+        is in `HealthPanel`, which `/desk/ops/health` renders
+        (`desk.ops_.$card.tsx:101`). The card keeps its anchor there, so the
+        owner walks to the card screen and presses the same button.
       */
-      await ownerPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
+      await ownerPage.goto(`${BASE_URL}/desk/ops/health`, { waitUntil: "domcontentloaded" });
       await ownerPage.getByRole("button", { name: "Restart workers", exact: true }).click();
       const row = ownerPage.locator("li", { hasText: "Apply database migrations" });
       const pending = ownerPage.waitForRequest(
