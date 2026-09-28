@@ -34,8 +34,9 @@ import type { LocalCatalog } from "../news/local-models.ts";
   30 days" is a count of what is in the trash, and the only way to know the
   card is not printing a mock is to hand the builder a real shape and read the
   row back. Every fixture below is the real type; the ones worth naming are the
-  ladder, which comes from the registry the runs read, and the six rows that
-  must say "Not set" on any machine.
+  ladder, which comes from the registry the runs read, and the one row that
+  must say "Not set" on any machine (YouTube's "Transcripts" -- CX3 wired the
+  other five that used to, and the cases here assert what they print now).
 */
 
 const row = (rows: OpsRow[], label: string): OpsRow => {
@@ -123,22 +124,26 @@ describe("Server card rows (CX2)", () => {
 
   it("fills every drawn row from a real read, and says Not set only where there is none", () => {
     /*
-      The six rows with no read behind them are the only rows in the product
+      The rows with no read behind them are the only rows in the product
       allowed to print "Not set". A row that acquires a real value and keeps
       the plain words would be worse than a missing read: it would look like an
       answer. The list is read from the module so this test cannot drift from
       the reasons recorded there.
+
+      Five rows left this list in CX3 (0.6.81) because they had a source all
+      along -- the backup's own state file, the failed-job window, the capture
+      record's timestamp, the paper-wide override count, the live invite count
+      -- and the cases below assert the values they now print. YouTube's
+      "Transcripts" is the one that stayed, and the `why` there names the
+      probe: the source does not exist, which is a different claim from "the
+      row has no read here".
     */
     const bare = DRAWN_ROWS_WITHOUT_A_READ.map((entry) => `${entry.card}/${entry.row}`);
-    assert.deepEqual(bare, [
-      "health/Last backup",
-      "health/Errors in 24 h",
-      "youtube/Transcripts",
-      "meeting-capture/Last capture",
-      "named-outlets/Overrides",
-      "editors-access/Invites open",
-    ]);
+    assert.deepEqual(bare, ["youtube/Transcripts"]);
     for (const entry of DRAWN_ROWS_WITHOUT_A_READ) assert.ok(entry.why.length > 40, entry.row);
+    /* And the one that stayed is a row the drawing really draws. */
+    const card = OPS_CARDS.find((c) => c.key === "youtube");
+    assert.ok(card?.rows.includes("Transcripts"));
   });
 
   it("Health: the drawn four rows, with the state in words and in tone", () => {
@@ -147,6 +152,14 @@ describe("Server card rows (CX2)", () => {
       { id: "db-rows", label: "Contents", state: "ok", value: "1 published · 0 drafts" },
       { id: "disk", label: "Disk", state: "ok", value: "142.3 GB free of 476.8 GB" },
       { id: "jobs", label: "Work queue", state: "warn", value: "1 running" },
+      { id: "backup", label: "Last backup", state: "ok", value: "4h ago", note: "3 local backups on disk" },
+      {
+        id: "errors-24h",
+        label: "Errors in 24 h",
+        state: "warn",
+        value: "2",
+        note: "Failed desk jobs in the last 24 hours. Open the work queue to see which.",
+      },
     ];
     const rows = healthRows({ checks });
     assert.deepEqual(
@@ -159,11 +172,50 @@ describe("Server card rows (CX2)", () => {
     assert.equal(value(rows, "Disk"), "142.3 GB free of 476.8 GB");
     /* The drawing draws Disk plain; a healthy row does not shout. */
     assert.equal(row(rows, "Disk").tone, "plain");
-    assert.equal(value(rows, "Last backup"), NOT_SET);
-    assert.equal(value(rows, "Errors in 24 h"), NOT_SET);
+    /* CX3: the last two rows print the checks behind them, not "Not set". */
+    assert.equal(value(rows, "Last backup"), "4h ago");
+    assert.equal(row(rows, "Last backup").tone, "plain", "a backup that succeeded is not a chip");
+    assert.equal(row(rows, "Last backup").help, "3 local backups on disk");
+    assert.equal(value(rows, "Errors in 24 h"), "2");
+    assert.equal(row(rows, "Errors in 24 h").tone, "warn");
+    assert.equal(row(rows, "Errors in 24 h").help, "Failed desk jobs in the last 24 hours. Open the work queue to see which.");
     /* The checks the drawing does not draw are not lost -- they are on the
        card's own screen -- but they are not rows here. */
     assert.equal(rows.length, 4);
+  });
+
+  it("Health: a backup and an error count that answered 'nothing yet' are not 'Not set'", () => {
+    /*
+      The bug CX3 fixes, in one case: a fresh desk's backup row must print what
+      the desk knows -- that no backup is on record -- not the words for "no
+      read here". Same for a day with nothing failing, which prints a real 0.
+    */
+    const rows = healthRows({
+      checks: [
+        { id: "db", label: "Database", state: "ok", value: "1 published" },
+        {
+          id: "backup",
+          label: "Last backup",
+          state: "unknown",
+          value: "No backup on record",
+          note: "The nightly backup writes logs\\backup-state.json the first time it runs (ops\\backup.ps1). Nothing has written it here.",
+        },
+        { id: "errors-24h", label: "Errors in 24 h", state: "ok", value: "0", note: "No desk job has failed in the last 24 hours." },
+      ],
+    });
+    assert.equal(value(rows, "Last backup"), "No backup on record");
+    assert.notEqual(value(rows, "Last backup"), NOT_SET);
+    /* An unknown state is a sentence, not a chip: the drawing draws the row plain. */
+    assert.equal(row(rows, "Last backup").tone, "plain");
+    assert.match(row(rows, "Last backup").help ?? "", /ops\\backup\.ps1/);
+    assert.equal(value(rows, "Errors in 24 h"), "0");
+    assert.equal(row(rows, "Errors in 24 h").tone, "plain");
+    /* A health read that carried neither check is the one case left that says
+       "Not set", because it is a read with no reading rather than a desk with
+       no fact. */
+    const bare = healthRows({ checks: [{ id: "db", label: "Database", state: "ok", value: "x" }] });
+    assert.equal(value(bare, "Last backup"), NOT_SET);
+    assert.equal(value(bare, "Errors in 24 h"), NOT_SET);
   });
 
   it("Health: a down database and a full disk say so in words and tone", () => {
@@ -241,10 +293,24 @@ describe("Server card rows (CX2)", () => {
     assert.equal(clockText("  "), NOT_SET);
   });
 
-  it("Meeting capture: the watched bodies are the channels on the settings", () => {
-    const rows = meetingCaptureRows({ channels: ["a", "b", "c"] } as never);
+  it("Meeting capture: the watched bodies are the channels, and the capture time is the record's own", () => {
+    const now = new Date("2026-09-28T12:00:00.000Z");
+    const rows = meetingCaptureRows(
+      { channels: ["a", "b", "c"], lastCaptureAt: "2026-09-26T12:00:00.000Z" } as never,
+      now,
+    );
     assert.equal(value(rows, "Bodies watched"), "3");
-    assert.equal(value(rows, "Last capture"), NOT_SET);
+    assert.equal(value(rows, "Last capture"), "2d ago");
+    /* The hover carries the read's own timestamp, unrounded. */
+    assert.equal(row(rows, "Last capture").help, "2026-09-26T12:00:00.000Z");
+    /*
+      A desk whose records carry no capture time has an ANSWER -- "None yet" --
+      not a missing read, and not a time invented from the row's created_at
+      (captured_at is nullable, migrations/0067).
+    */
+    const empty = meetingCaptureRows({ channels: [], lastCaptureAt: null } as never, now);
+    assert.equal(value(empty, "Last capture"), "None yet");
+    assert.equal(row(empty, "Last capture").help, undefined);
   });
 
   it("YouTube: the key row prints the desk's own sentence for the key's state", () => {
@@ -295,30 +361,41 @@ describe("Server card rows (CX2)", () => {
 
   it("Named outlets: the stored list wins, and an empty stored list means none", () => {
     const shipped = [{ name: "a" }, { name: "b" }] as never;
-    assert.equal(value(namedOutletsRows({ stored: null, shipped } as never), "Outlets"), "2");
-    assert.equal(value(namedOutletsRows({ stored: [{ name: "a" }] as never, shipped } as never), "Outlets"), "1");
-    assert.equal(value(namedOutletsRows({ stored: [], shipped } as never), "Outlets"), "0");
-    assert.equal(value(namedOutletsRows({ stored: null, shipped } as never), "Overrides"), NOT_SET);
+    assert.equal(value(namedOutletsRows({ stored: null, shipped, overrides: 0 } as never), "Outlets"), "2");
+    assert.equal(
+      value(namedOutletsRows({ stored: [{ name: "a" }] as never, shipped, overrides: 0 } as never), "Outlets"),
+      "1",
+    );
+    assert.equal(value(namedOutletsRows({ stored: [], shipped, overrides: 0 } as never), "Outlets"), "0");
+    /* CX3: the count is the paper's own override rows (append-only,
+       migrations/0086), not either of the two per-draft reads in desk.ts. */
+    assert.equal(value(namedOutletsRows({ stored: null, shipped, overrides: 2 } as never), "Overrides"), "2");
+    assert.equal(value(namedOutletsRows({ stored: null, shipped, overrides: 0 } as never), "Overrides"), "0");
+    assert.notEqual(value(namedOutletsRows({ stored: null, shipped, overrides: 0 } as never), "Overrides"), NOT_SET);
   });
 
   it("Editors & access: the owner is the account that holds the desk", () => {
-    const rows = editorsAccessRows({ owner: { email: "owner@example.com", name: "Scott C." } });
+    const rows = editorsAccessRows({ owner: { email: "owner@example.com", name: "Scott C." }, invitesOpen: 1 });
     assert.equal(value(rows, "Owner"), "owner@example.com");
     /* The name is the row's longer answer, not a second value. */
     assert.equal(row(rows, "Owner").help, "Scott C.");
-    assert.equal(value(rows, "Invites open"), NOT_SET);
+    /* CX3: the live invite links, counted by the read. */
+    assert.equal(value(rows, "Invites open"), "1");
   });
 
   it("Editors & access: a desk with no owner row says Not set rather than a blank", () => {
-    const rows = editorsAccessRows({ owner: null });
+    const rows = editorsAccessRows({ owner: null, invitesOpen: 0 });
     assert.equal(value(rows, "Owner"), NOT_SET);
     assert.equal(row(rows, "Owner").help, undefined);
+    /* "Not set" belongs to the owner row alone: no invites open is a real 0. */
+    assert.equal(value(rows, "Invites open"), "0");
   });
 
   it("Editors & access: an account with no name still prints its address", () => {
-    const rows = editorsAccessRows({ owner: { email: "  owner@example.com ", name: null } });
+    const rows = editorsAccessRows({ owner: { email: "  owner@example.com ", name: null }, invitesOpen: 3 });
     assert.equal(value(rows, "Owner"), "owner@example.com");
     assert.equal(row(rows, "Owner").help, undefined);
+    assert.equal(value(rows, "Invites open"), "3");
   });
 
   it("secondsText and perCallText: the drawing's two shapes, and a range when they differ", () => {

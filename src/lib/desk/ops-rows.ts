@@ -12,8 +12,12 @@
     1. A row prints a value only where a read really has one. Where the desk has
        never stored the fact, the row prints `NOT_SET` -- never a zero, never a
        dash that reads as a zero -- and the row is named in
-       `DRAWN_ROWS_WITHOUT_A_READ` (ops-cards.ts) and in the unit's report. Six
-       of the drawing's rows are in that list; the reasons are recorded there.
+       `DRAWN_ROWS_WITHOUT_A_READ` (ops-cards.ts) and in the unit's report. One
+       of the drawing's rows is in that list; the reason is recorded there. The
+       other five that were, until unit CX3, all had a source on this machine
+       and now read it -- a row that says "Not set" about a fact the desk has
+       written down is worse than a missing read, because it looks like an
+       answer.
 
     2. A builder is called only with data that arrived. The page shows a
        skeleton while a read is in flight and the read's own error while it
@@ -68,6 +72,7 @@ import type { ChipTone } from "@/components/status-chip";
 */
 import { automaticLadder, providerEntry, type ProviderEntry } from "../news/provider-registry.ts";
 import { TRASH_DAYS } from "../news/trash-store.ts";
+import { formatAgo } from "../ops/health.ts";
 
 /** The plain words a drawn row prints when the desk has no value for it. */
 export const NOT_SET = "Not set";
@@ -125,6 +130,17 @@ export function healthRows(health: OpsHealth): OpsRow[] {
   const check = (id: string) => health.checks.find((c) => c.id === id);
   const database = check("db");
   const disk = check("disk");
+  /*
+    The two rows the drawing draws after Disk, from the two checks CX3 added to
+    the health read: `backup` (the backup's own state file, ops/lib-backup.ps1)
+    and `errors-24h` (failed desk jobs in the last day). Both are written to say
+    what they know when they know nothing -- "No backup on record", "no
+    successful backup yet" -- so this card does not have to turn an answer into
+    "Not set". `NOT_SET` remains only for a health read that carried no such
+    check at all, which is a read with no reading rather than a desk with none.
+  */
+  const backup = check("backup");
+  const errors = check("errors-24h");
   return [
     {
       label: "Database",
@@ -138,8 +154,18 @@ export function healthRows(health: OpsHealth): OpsRow[] {
       tone: tone(disk?.state),
       help: disk?.note || undefined,
     },
-    { label: "Last backup", value: NOT_SET, tone: "plain" },
-    { label: "Errors in 24 h", value: NOT_SET, tone: "plain" },
+    {
+      label: "Last backup",
+      value: backup?.value ?? NOT_SET,
+      tone: tone(backup?.state),
+      help: backup?.note || undefined,
+    },
+    {
+      label: "Errors in 24 h",
+      value: errors?.value ?? NOT_SET,
+      tone: tone(errors?.state),
+      help: errors?.note || undefined,
+    },
   ];
 }
 
@@ -208,16 +234,27 @@ export function dailyScanRows(policy: DailyScanPolicy): OpsRow[] {
  * Meeting capture: how many bodies are watched, and when the desk last
  * recorded one.
  *
- * The second value is `NOT_SET` on purpose and is named in
- * `DRAWN_ROWS_WITHOUT_A_READ`: no read returns the capture time itself. The
- * settings read says what the desk watches, and `listMeetingActivity` orders by
- * capture time but selects the video's `published` date -- printing that under
- * "Last capture" would put a publication date where a recording time belongs.
+ * The second value is the read's own `lastCaptureAt` -- `max(captured_at)` over
+ * `meeting_capture_records`, the moment a capture started. Nothing else on this
+ * machine holds it: `listMeetingActivity` orders by that column but selects the
+ * video's `published` date, which is a publication date where a recording time
+ * belongs. `captured_at` is nullable (migrations/0067), so a desk whose records
+ * all lack one reads "None yet" rather than a time invented from `created_at`
+ * -- the read answered, it answered "nothing recorded", and that is a different
+ * fact from "no read here".
  */
-export function meetingCaptureRows(settings: MeetingOperatorSettings): OpsRow[] {
+export function meetingCaptureRows(settings: MeetingOperatorSettings, now = new Date()): OpsRow[] {
+  const last = settings.lastCaptureAt;
   return [
     { label: "Bodies watched", value: String(settings.channels.length), tone: "plain" },
-    { label: "Last capture", value: NOT_SET, tone: "plain" },
+    {
+      label: "Last capture",
+      value: last ? formatAgo(last, now) : "None yet",
+      tone: "plain",
+      /* The read's own timestamp, unrounded: the row says how long ago, the
+         hover says exactly when. */
+      help: last || undefined,
+    },
   ];
 }
 
@@ -229,6 +266,10 @@ export function meetingCaptureRows(settings: MeetingOperatorSettings): OpsRow[] 
  * with a sentence instead (`YouTubeKeyState.wording`). That sentence is what
  * the row prints -- it is the desk's own words for this exact state, so the
  * card and the key screen cannot describe the same key two ways.
+ *
+ * "Transcripts" is the one drawn row left on `NOT_SET` (unit CX3, and the one
+ * entry in `DRAWN_ROWS_WITHOUT_A_READ`): this machine stores no YouTube
+ * transcript and no transcript test result to read. See the entry's `why`.
  */
 export function youtubeRows(state: YouTubeKeyState): OpsRow[] {
   return [
@@ -274,16 +315,32 @@ export function routineNoticeRows(policy: RoutineNoticePolicy, automation: Routi
   ];
 }
 
-/** Named outlets: how many the paper credits. Overrides are per draft. */
+/**
+ * Named outlets: how many the paper credits, and how many overrides it holds.
+ *
+ * Overrides are per draft where they act -- both reads inside `desk.ts` are
+ * scoped to one `draft_id`, which is what the publish gate needs -- but the
+ * table is this paper's record and is append-only by trigger
+ * (migrations/0086), so the paper-wide count is a fact the desk has and the row
+ * prints it. A paper with none prints 0: the table answered.
+ */
 export function namedOutletsRows(read: NamedOutletRead): OpsRow[] {
   const outlets = read.stored ?? read.shipped;
   return [
     { label: "Outlets", value: String(outlets.length), tone: "plain" },
-    { label: "Overrides", value: NOT_SET, tone: "plain" },
+    { label: "Overrides", value: String(read.overrides), tone: "plain" },
   ];
 }
 
-/** Editors & access: the owner account, and the invites that are open. */
+/**
+ * Editors & access: the owner account, and the invites that are open.
+ *
+ * "Invites open" is the count of doors that are actually open -- minted, unused,
+ * unexpired, the same predicate `signupOpenFor` acts on -- so a used or expired
+ * link is not counted as one. 0 is an answer, not an absence: this desk has no
+ * invite waiting. "Not set" stays on the owner row, where it means the one thing
+ * it should: there is no account holding the desk to print.
+ */
 export function editorsAccessRows(access: NewsroomAccess): OpsRow[] {
   const owner = access.owner;
   return [
@@ -293,7 +350,7 @@ export function editorsAccessRows(access: NewsroomAccess): OpsRow[] {
       tone: "plain",
       help: owner?.name?.trim() || undefined,
     },
-    { label: "Invites open", value: NOT_SET, tone: "plain" },
+    { label: "Invites open", value: String(access.invitesOpen), tone: "plain" },
   ];
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import {
   ensureNewsroomSchema,
+  ensureInviteSchema,
   isGrokPreviewHost,
   ForbiddenError,
   deskIsClaimed,
@@ -94,6 +95,33 @@ describe("who owns the desk", () => {
     assert.notEqual(access.owner?.email, CONTACT_EMAIL);
   });
 
+  /*
+    "Invites open" is the count of doors that are actually open: minted,
+    unused, unexpired. A used invite and an expired one are not doors, and the
+    card must not print them as if they were.
+  */
+  it("counts the invite links that are still open, and only those", async () => {
+    const sql = await getSql();
+    await sql`delete from newsroom_members`;
+    await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${OWNER}, 'owner', 1)`;
+    await ensureInviteSchema();
+    await sql`delete from editor_invites`;
+    assert.equal((await readNewsroomAccess(OWNER)).invitesOpen, 0, "a fresh desk has none open");
+
+    await sql`insert into editor_invites (newsroom_id, email, token_hash, expires_at)
+              values (1, ${"open@example.com"}, ${"a".repeat(64)}, now() + interval '1 day')`;
+    await sql`insert into editor_invites (newsroom_id, email, token_hash, expires_at, used_at)
+              values (1, ${"used@example.com"}, ${"b".repeat(64)}, now() + interval '1 day', now())`;
+    await sql`insert into editor_invites (newsroom_id, email, token_hash, expires_at)
+              values (1, ${"late@example.com"}, ${"c".repeat(64)}, now() - interval '1 day')`;
+    assert.equal(
+      (await readNewsroomAccess(OWNER)).invitesOpen,
+      1,
+      "only the live link counts; a used or expired one is not an open door",
+    );
+    await sql`delete from editor_invites`;
+  });
+
   it("refuses anyone who is not the owner, and answers Not set for an owner whose account is gone", async () => {
     const sql = await getSql();
     await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${EDITOR}, 'editor', 1)`;
@@ -109,7 +137,7 @@ describe("who owns the desk", () => {
     */
     await sql`delete from newsroom_members`;
     await sql`insert into newsroom_members (user_id, role, newsroom_id) values ('access-ghost', 'owner', 1)`;
-    assert.deepEqual(await readNewsroomAccess("access-ghost"), { owner: null });
+    assert.deepEqual(await readNewsroomAccess("access-ghost"), { owner: null, invitesOpen: 0 });
     await sql`delete from newsroom_members`;
     await sql`delete from "user" where id in (${OWNER}, ${EDITOR})`;
     assert.equal(await deskIsClaimed(), false);

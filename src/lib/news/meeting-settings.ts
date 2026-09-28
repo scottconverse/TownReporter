@@ -38,6 +38,18 @@ export type MeetingOperatorSettings = {
   sizeCapBytes: number;
   /** Unit R: whether speech-to-text is available on this server at all. */
   speechToText: MeetingSpeechToTextStatus;
+  /**
+   * When the desk last recorded a meeting, as the capture record's own time.
+   *
+   * `meeting_capture_records.captured_at`, which is the moment the capture
+   * started -- the fact the Server card's "Last capture" row asks for. Nothing
+   * else on this machine holds it: `listMeetingActivity` orders by this column
+   * but selects the video's `published` date for display, so a reader of that
+   * list cannot tell a publication date from a recording time. `null` on a
+   * desk that has recorded nothing, which the row prints as "None yet" -- the
+   * source exists and answered, so "Not set" would be a lie about this machine.
+   */
+  lastCaptureAt: string | null;
 };
 
 const RETENTION_MODES: MeetingRetentionMode[] = ["media", "audio-only", "transcript-only"];
@@ -105,6 +117,16 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
       [newsroomId],
     );
     /*
+      The last capture, from the records themselves. `captured_at` is nullable
+      (migrations/0067), so a row with none contributes nothing to the max --
+      and a desk whose rows all lack one reads "Not set" rather than a time
+      invented from `created_at`.
+    */
+    const captureRows = await sql.query<{ last_capture_at: string | null }>(
+      "select max(captured_at)::text as last_capture_at from meeting_capture_records where newsroom_id=$1",
+      [newsroomId],
+    );
+    /*
       Unit R: the operator has to be able to see whether speech-to-text is
       available BEFORE wondering why a captionless meeting stayed audio-only.
       Both modules are loaded inside the handler for the reason the note above
@@ -146,6 +168,7 @@ export const getMeetingSettingsFn = createServerFn({ method: "GET" })
       durationCapSeconds: Number(rows[0]?.duration_cap_seconds ?? DEFAULT_CAPTURE_CAPS.durationCapSeconds),
       sizeCapBytes: Number(rows[0]?.size_cap_bytes ?? DEFAULT_CAPTURE_CAPS.sizeCapBytes),
       speechToText,
+      lastCaptureAt: captureRows[0]?.last_capture_at ?? null,
     };
   });
 

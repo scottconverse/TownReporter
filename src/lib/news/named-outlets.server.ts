@@ -63,6 +63,16 @@ export type NamedOutletRead = {
   stored: NamedOutlet[] | null;
   /** The shipped list, so the panel can show what "built-in" means. */
   shipped: NamedOutlet[];
+  /**
+   * Every override this newsroom has on record, all time.
+   *
+   * The two reads inside desk.ts are scoped to one draft (`where draft_id`),
+   * which is what the publish gate needs; the paper-wide count is this one,
+   * and the table is append-only by trigger (migrations/0086), so it does not
+   * shrink and "all time" is the honest wording. A count over a newsroom with
+   * no overrides is 0, not an absence: the table answered.
+   */
+  overrides: number;
 };
 
 /**
@@ -96,11 +106,17 @@ export async function readNamedOutlets(userId: string): Promise<NamedOutletRead>
     limit 1
   `;
   const row = rows[0];
+  const [counts] = await sql<{ overrides: number }>`
+    select count(*)::int as overrides
+    from named_outlet_overrides
+    where newsroom_id = ${me.newsroomId}
+  `;
   return {
     canEdit: me.role === "owner",
     revision: row?.named_outlets_revision ?? 0,
     stored: asNamedOutlets(row?.named_outlets) ?? null,
     shipped: shippedOutlets(),
+    overrides: counts?.overrides ?? 0,
   };
 }
 

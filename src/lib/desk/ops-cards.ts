@@ -288,14 +288,22 @@ export function opsCardBySlug(slug: string): OpsCardDef | undefined {
 /**
  * The drawn rows with no reading behind them on this machine.
  *
- * The drawing draws every card from one afternoon on one machine. Six of its
- * rows name a fact this app has never stored or never reads back -- there is no
- * backup schedule, no 24-hour error count, no remembered transcript test, no
- * per-paper override count, no capture time on any read, and no count of open
- * invites -- so those rows render the plain "Not set" and are named here, and
- * in the unit's report, instead of being filled with a number that would be
- * invented or a row that would silently disappear from a card the drawing
- * gives four rows.
+ * The drawing draws every card from one afternoon on one machine. One of its
+ * rows names a fact this app does not store at all: YouTube's "Transcripts".
+ * It renders the plain "Not set" and is named here, and in the unit's report,
+ * instead of being filled with a number that would be invented or a row that
+ * would silently disappear from a card the drawing gives two rows.
+ *
+ * Five others were on this list until unit CX3 (0.6.81) found the source each
+ * one already had and wired it: "Last backup" reads the backup's own state file
+ * (ops/lib-backup.ps1 -> logs/backup-state.json), "Errors in 24 h" counts
+ * failed desk jobs over the last day, "Last capture" reads the capture record's
+ * own `captured_at`, "Overrides" counts this paper's append-only override rows,
+ * and "Invites open" counts the live invite links. A row that says "Not set"
+ * about a fact the desk has written down is worse than a missing read: it looks
+ * like an answer. The old `why` on the backup row was the failure mode this
+ * note now guards against -- a grep over `src/` reported as a fact about the
+ * machine, when the answer was in `ops/` the whole time.
  *
  * Each `why` names the probe that settled it, because "this app has no such
  * read" is a claim about the source, not about the drawing, and it has to be
@@ -303,33 +311,8 @@ export function opsCardBySlug(slug: string): OpsCardDef | undefined {
  */
 export const DRAWN_ROWS_WITHOUT_A_READ: readonly { card: OpsCardKey; row: string; why: string }[] = [
   {
-    card: "health",
-    row: "Last backup",
-    why: "TownReporter has no backup schedule and stores no last-backup time: a grep for last_backup / lastBackup / backup_at over src/ returns no file.",
-  },
-  {
-    card: "health",
-    row: "Errors in 24 h",
-    why: "desk_jobs records failed runs, but no read counts them over a window, and inventing one here would be a second source of truth for the work queue.",
-  },
-  {
     card: "youtube",
     row: "Transcripts",
-    why: "The Test button's answer lives in memory for the length of that click (youtube-key.tsx:90-98); nothing stores the last transcript test result to read back.",
-  },
-  {
-    card: "meeting-capture",
-    row: "Last capture",
-    why: "No read returns meeting_capture_records.captured_at -- listMeetingActivity orders by it but selects the video's published date instead -- so the row could only print a video's publication date as the moment the desk recorded it.",
-  },
-  {
-    card: "named-outlets",
-    row: "Overrides",
-    why: "An override clears one outlet for one draft, and both reads of named_outlet_overrides (desk.ts:3430, :3738) are scoped to a single draft_id; there is no paper-wide count to print.",
-  },
-  {
-    card: "editors-access",
-    row: "Invites open",
-    why: "Invites are minted one link at a time (inviteEditor) and the count of live invites is never read by any screen: claim.ts exports only inviteEditor and inviteState.",
+    why: "No YouTube transcript is stored to read back: every transcript table in migrations/ is a meeting table (0069, 0070, 0078-0085), the YouTube read's own type (youtube-data-api.server.ts:446, YouTubeKeyState) carries hasKey / source / wording / unitsToday / unitsLimit / quotaBlockedToday and no transcript field, and the Test button's answer is component state (youtube-key.tsx:52, useState) that is gone when the page is.",
   },
 ];
