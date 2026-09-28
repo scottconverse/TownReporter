@@ -166,23 +166,33 @@ function FollowUpsPage() {
   });
 
   return (
-    <DeskShell title="Follow-ups" kicker="AI agents working on open questions">
+    <DeskShell
+      title="Follow-ups"
+      kicker="AI agents working on open questions"
+      /*
+        CY item 7: "+ New AI follow-up" in the page header, at the right-hand
+        end, where the drawing puts it (Desk Screens.dc.html:364,
+        `follow: [["+ New AI follow-up", primary]]`). It used to sit at the
+        right-hand end of the filters row because `DeskShell` had no action
+        slot then; it has one now (desk-chrome.tsx:169, rendered as
+        `.head-acts` inside `.ov-head`), so the button moves up into the drawn
+        place and the filters row goes back to being the filters.
+      */
+      actions={<AddFollowUpButton label="+ New AI follow-up" tone="solid" small={false} />}
+    >
       {/*
         The intro is the drawing's, sentence for sentence, and the last sentence
         is the screen's most important one: nothing an agent does can print.
+        CY item 7 restored the clause the drawing opens its second sentence
+        with -- "finds something, it adds the finding ... and flags it here"
+        (Desk Screens.dc.html:73); the desk had "tells you here".
       */}
       <p className="fu-intro mt-8">
         Questions the AI keeps working on for you: re-checking pages, searching public records,
-        watching for the next agenda. When an agent finds something it adds the finding to the
-        story’s reporting notes and tells you here. It never publishes.
+        watching for the next agenda. When an agent finds something, it adds the finding to the
+        story’s reporting notes and flags it here. It never publishes.
       </p>
 
-      {/*
-        The reference puts "+ New AI follow-up" up in the page header. `DeskShell`
-        has no action slot there and `desk-chrome.tsx` belongs to lane 3, so the
-        button sits at the right-hand end of the filters row -- the list's own
-        control bar -- rather than in the header. Named in the report.
-      */}
       <div className="fu-filters mt-4" role="group" aria-label="Filter follow-ups">
         {FOLLOW_UP_FILTERS.map((key) => (
           <button
@@ -197,9 +207,6 @@ function FollowUpsPage() {
               : `${FOLLOW_UP_FILTER_LABELS[key]} · ${counts.get(key) ?? 0}`}
           </button>
         ))}
-        <span className="ml-auto">
-          <AddFollowUpButton label="+ New AI follow-up" tone="solid" small={false} />
-        </span>
       </div>
 
       <div className="mt-6">
