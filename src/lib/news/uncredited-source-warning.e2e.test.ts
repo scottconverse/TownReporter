@@ -72,6 +72,21 @@ const OUTLET_URL = "https://www.timescall.com/2026/08/28/front-range-rail-sales-
 const OUTLET_NAME = "Longmont Times-Call";
 const UNCREDITED_BODY =
   "The board acted on the sales tax Thursday, after weeks of debate over the ballot language.";
+/*
+  Seeded non-empty since 0.6.81 integration. This fixture used to seed
+  `dek = ''`, and Publish then never armed: `performPublish` has refused a
+  lead-bound draft with an empty dek since 0.6.80 (unit CK), the desk says so
+  as the first row of "Reasons Publish is off", and the button's disabled
+  state is `blockers.length > 0` (unit CT). confirmSection() waits for an
+  enabled "Publish in <section>" button, so this test spent its whole 45s
+  budget on a draft the desk was right to refuse. Measured, not inferred: a
+  probe against this exact fixture showed "" -> `disabled: true` with the dek
+  row as the ONLY blocker, and a one-line dek written to the row alone ->
+  `disabled: false`, no blocker rows at all (see the run's report). The dek is
+  incidental to what this test checks -- the warning is about the body's
+  attribution -- so the fixture now looks like a real drafted story.
+*/
+const DEK = "The vote changes what voters will read on the November ballot.";
 const CREDITED_BODY =
   "The Longmont Times-Call reported Thursday that the board acted on the sales tax, " +
   "after weeks of debate over the ballot language.";
@@ -207,11 +222,12 @@ describe("the uncredited-source publish warning, rendered", () => {
       leadId = leadRes.rows[0].id;
       await db.query(
         `insert into drafts (user_id, lead_id, headline, dek, body, topic, source_urls)
-         values ($1, $2, $3, '', $4, 'council', $5)`,
+         values ($1, $2, $3, $4, $5, 'council', $6)`,
         [
           userId,
           leadId,
           "Board acts on sales tax after weeks of debate",
+          DEK,
           UNCREDITED_BODY,
           JSON.stringify([OUTLET_URL]),
         ],

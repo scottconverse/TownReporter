@@ -1,4 +1,4 @@
-import { ensureOwnerSetupCode } from "../../src/lib/news/setup-code.ts";
+import { ensureOwnerSetupCode } from "../../src/lib/news/setup-code.server.ts";
 
 /**
  * Generate (or clear) the first-owner setup code at boot (Unit CJ, 0.6.80).

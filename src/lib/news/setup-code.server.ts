@@ -16,6 +16,22 @@
   token and that `claimOwner(userId)` takes no second argument. This module
   is a one-directional dependency of `membership.ts` (via `isSetupCodeRequired`)
   so there is no import cycle, and it never imports back.
+
+  `.server.ts` since Unit DB1 (0.6.81 integration). It was `setup-code.ts`,
+  and two of its importers -- `membership.ts` and `claim.ts` -- are reachable
+  from the client graph (every route in `routeTree.gen.ts` is eagerly
+  imported, and `routes/evidence.$versionId.tsx` reaches `membership.ts`
+  through `evidence.ts`). So the browser evaluated this module, and the
+  `node:fs` import below is not something a browser can evaluate: `npm run
+  dev` died on `/login` and `/desk` with "Module \"node:fs\" has been
+  externalized for browser compatibility", the page never left "Opening…",
+  and CI's `smoke-dev` job failed with it. The suffix is the repository's own
+  convention for a module the client must not evaluate (`stats-reports.server.ts`,
+  `model-request-commit.server.ts`, ...) and TanStack Start's import-protection
+  plugin denies every module named with that suffix in the client environment,
+  so every importer is covered from now on, including ones added later. It
+  reads and writes the operator's own disk and holds a rate-limit bucket:
+  server-only was always what it was.
 */
 
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";

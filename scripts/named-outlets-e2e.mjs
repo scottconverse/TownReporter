@@ -159,7 +159,34 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   });
   const print = page.getByRole("button", { name: /^Publish in / });
   assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
-  await page.getByText("Deal with the named outlet first").waitFor();
+  /*
+    Unit CT part 2 (b16a07b5) deleted the mid-form heading this line used to
+    wait for -- "Deal with the named outlet first" -- and moved the reasons to
+    the top of the Checks tab, one row each with its own press. So the words
+    pinned here are the ones the block draws now: its own summary, which counts
+    the reasons and promises every row a press, and the named-outlet row
+    itself, chip and sentence, which is the desk naming this reason by
+    category and then by name. `#publish-blockers` sits on the tab the page
+    opens on (the inspector defaults to "checks"), so the row is on screen and
+    not merely in the DOM -- `scripts/publish-blockers-walk.mjs` reads the same
+    three parts of that block the same way.
+
+    The count moves the number AND the verb: publishBlockedSummary says
+    "1 thing blocks Publish" and "3 things block Publish", so the one-blocker
+    case this walk reaches is not the plural row-count spelling that
+    `publish-blockers-walk.mjs` pins. A pattern of `things? block Publish`
+    reads naturally and matches the plural only, and a wait on it against this
+    page times out with the sentence sitting in `body.innerText` -- the pin has
+    to accept either spelling.
+  */
+  await page
+    .getByText(/\d+ things? blocks? Publish\. Each row has the press that clears it\./)
+    .waitFor({ timeout: 45_000 });
+  const reason = page.locator('#publish-blockers [data-blocker="outlet:Denver Post"]');
+  await reason.getByText("Blocks Publish", { exact: true }).waitFor({ timeout: 45_000 });
+  await reason
+    .getByText("The body names Denver Post and this draft's Sources do not show it.")
+    .waitFor({ timeout: 45_000 });
   step("printing is held down, in words, while Denver Post is named and uncovered");
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();

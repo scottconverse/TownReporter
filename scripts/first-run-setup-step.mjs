@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Same path `setup-code.ts` writes to -- see `dataRoot()`/`setupCodeFilePath()`.
+ * Same path `setup-code.server.ts` writes to -- see `dataRoot()`/`setupCodeFilePath()`.
  *
  * Resolution order, and why it is not just `process.cwd()`:
  *
@@ -32,7 +32,7 @@ import { join } from "node:path";
  *      cwd, which is why the Windows install job died with
  *      "SETUP-CODE.txt could not be read: ENOENT" -- the file was never in
  *      `D:\a\TownReporter\TownReporter\.townreporter-data`.
- *   2. `TOWNREPORTER_DATA_ROOT` -- what `setup-code.ts` itself prefers, so a
+ *   2. `TOWNREPORTER_DATA_ROOT` -- what `setup-code.server.ts` itself prefers, so a
  *      job that exports it (or a walk that sets it before importing the
  *      built server, the way the self-booting walks set PORT) needs nothing
  *      from the caller.

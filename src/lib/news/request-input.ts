@@ -801,7 +801,7 @@ export const claimToken = z.string().max(LIMITS.evidenceToken).catch("");
 export const claimEmail = z.string().max(LIMITS.email).catch("");
 /**
  * Unit CJ (0.6.80): the first-owner setup code, typed with or without
- * dashes. `setup-code.ts` normalizes and hashes it; this only bounds size
+ * dashes. `setup-code.server.ts` normalizes and hashes it; this only bounds size
  * before it reaches that check, same shape as `claimToken` above.
  */
 export const setupCodeInput = z.string().max(LIMITS.setupCode).catch("");

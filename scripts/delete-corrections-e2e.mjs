@@ -809,7 +809,20 @@ async function main() {
       response.request().method() === "POST" &&
       response.request().headers()["x-tsr-serverfn"] === "true",
   );
-  const keepEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  /*
+    Scoped to the blockers list, not the whole page: this desk now draws TWO
+    controls with this label -- the publish-blockers row (Unit CT part 1 made
+    that list the one source of truth for why Publish is off) and the older
+    stale-evidence note further down the page, whose button calls the very same
+    mutation. Unscoped, the click is a strict-mode violation (2026-09-28:
+    'resolved to 2 elements', one '.astra-blocker-act', one '.btn.solid'). The
+    walk means the blockers row: it is what the desk presents as the reason
+    Publish is off, and its alt action ("See the evidence review") is the panel
+    this step then inspects for the refreshed findings.
+  */
+  const keepEvidence = page
+    .getByLabel("Reasons Publish is off")
+    .getByRole("button", { name: "I checked: keep this evidence" });
   await keepEvidence.click({ noWaitAfter: true });
   await evidenceDecisionHeld;
   if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
@@ -1009,7 +1022,21 @@ async function main() {
   await page.goto(`${base}/desk/story/${findingFixture.legacyLeadId}`, {
     waitUntil: "networkidle",
   });
-  await page.getByText("No recorded findings for this draft.").waitFor();
+  /*
+    Unit CO part 2 (61eec4f6) replaced this panel's empty-state line: the old
+    `No recorded findings for this draft.` became one sentence about findings
+    AND transcript citations, because a meeting draft has no URL-receipt claims
+    at all and an empty panel read as a broken one. The pin here still held the
+    retired words -- measured, 2026-09-28: `grep -rn "No recorded findings for
+    this draft."` finds them in this walk and nowhere in `src/`, and the CI walk
+    sat on them for the full 45s with the panel on screen
+    (src/components/finding-evidence-review.tsx:531-537 renders the new copy).
+  */
+  await page
+    .getByText(
+      "This draft has no recorded findings and no transcript citations, so there is nothing to review here. This review does not inventory every claim in the story.",
+    )
+    .waitFor();
   await page.goto(`${base}/desk/story/${findingFixture.malformedLeadId}`, {
     waitUntil: "networkidle",
   });
@@ -1376,12 +1403,48 @@ async function main() {
   // the same function, so there is exactly one place this can go wrong again.
   await seedLocatorFinding(slug);
   await page.goto(articleUrl, { waitUntil: "domcontentloaded" });
-  await page.getByText(findingText).waitFor({ timeout: 20_000 });
-  step("the finding itself prints on the restored story's page");
 
-  await page.getByRole("link", { name: "Captured record" }).waitFor({ timeout: 10_000 });
-  step("the reader gets the real way into the source, a link to the captured record");
+  /*
+    Unit DA2 (748bf80b) removed the story page's "What TownReporter found"
+    appendix, and this walk's last two pins lived inside it. DA2's own commit
+    message says why: every row the appendix printed -- the finding's text, its
+    URL, its press -- is already a card in the band above it, because
+    `SourceCard` prints "Current source" and "View captured version" from the
+    same row's `source_urls[0]` and `artifact_version_ids[0]`.
 
+    Measured at the failure, 2026-09-28, from this walk's own dump of the page
+    it was standing on: it renders the seeded row as a source card reading
+    "SOURCE / Meeting recording / youtube.com / Current source / View captured
+    version", and the finding's sentence `TownReporter listened to the Aug. 18
+    meeting recording <stamp>.` appears nowhere on it. So the two pins are
+    re-stated against the card the reader actually gets. The claim is
+    unchanged, and the artifact version is still asserted, because only the
+    STORED provenance row carries a `version_id` -- the URL-only fallback
+    (`provenanceFromUrls`) renders a card with no such link, so a card without
+    one would mean the finding's own binding never reached the page.
+  */
+  const findingCard = page.locator(".sourcecard-new").filter({ hasText: "Meeting recording" });
+  await findingCard.waitFor({ timeout: 20_000 });
+  step("the finding's own captured record reaches the restored story's page");
+
+  const capturedRecord = findingCard.getByRole("link", { name: "View captured version" });
+  await capturedRecord.waitFor({ timeout: 10_000 });
+  const capturedHref = (await capturedRecord.getAttribute("href")) ?? "";
+  if (!capturedHref.includes("/evidence/8801")) {
+    throw new Error(
+      `the finding's captured record did not link to its own artifact version (href: ${capturedHref})`,
+    );
+  }
+  step("the reader gets the real way into the source, a link to the captured record itself");
+
+  /*
+    With the appendix gone the finding's text no longer prints on this page at
+    all, so this check is a backstop now rather than the load-bearing proof it
+    was: the strip itself is covered in `src/lib/news/evidence.public.test.ts`
+    (a locator never survives `resolvePublicFindings`), and the fence on what a
+    reader may see is `src/lib/news/public-evidence-boundary.test.ts`. It still
+    runs here because a leak is a leak on whichever surface it reaches.
+  */
   const pageText = await page.locator("body").innerText();
   if (pageText.includes(locatorText) || /char:\d+-\d+/.test(pageText)) {
     throw new Error("a raw transcript locator reached the article page");

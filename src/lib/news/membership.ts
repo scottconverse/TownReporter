@@ -27,12 +27,12 @@
 
   0.6.80 update: the operator asked for that window closed after all, with a
   DIFFERENT mechanism than the one removed above -- a fresh, per-install,
-  one-time code (see setup-code.ts), never shipped with the product, stored
+  one-time code (see setup-code.server.ts), never shipped with the product, stored
   only as a hash, rate-limited, and burned on use. It is not a return of the
   shared secret this file argues against: there is nothing to guess (80 bits,
   generated at boot), nothing to carry for the product's lifetime (one install,
   one code, gone after first use), and an install that already has an owner
-  never has one pending. `requireEditor` below asks setup-code.ts one question
+  never has one pending. `requireEditor` below asks setup-code.server.ts one question
   -- is a code pending? -- and refuses to auto-claim while the answer is yes;
   only `claim.ts`'s explicit, code-verified path may claim past that gate.
 */
@@ -40,7 +40,7 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import type { Sql } from "../db.ts";
 import { deskTakenLoginCopy } from "./desk-copy.ts";
-import { isSetupCodeRequired } from "./setup-code.ts";
+import { isSetupCodeRequired } from "./setup-code.server.ts";
 
 export const DEFAULT_NEWSROOM_ID = 1;
 
@@ -231,7 +231,7 @@ export async function claimFirstOwner(userId: string): Promise<EditorContext | n
  * First signed-in user on an empty desk becomes owner. Later identities are 403.
  *
  * `bypassSetupCodeGate` is set ONLY by `claim.ts`'s `claimDeskWithCode`, after
- * it has already verified the caller's setup code through `setup-code.ts`.
+ * it has already verified the caller's setup code through `setup-code.server.ts`.
  * Every other caller -- `deskMiddleware`, every desk route -- calls this with
  * no second argument, so simply visiting `/desk` can never silently claim an
  * unclaimed desk while a setup code is pending (Unit CJ, 0.6.80). On an

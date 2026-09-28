@@ -167,7 +167,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Build identity could not be recorded.' }
 & "$PSScriptRoot\Start.ps1" -DataRoot $DataRoot -NoBrowser:$NoBrowser
 Write-Host "Installed. Your persistent data and logs are in $DataRoot"
 # Unit CJ (0.6.80): a fresh, ownerless desk generates a one-time setup code at
-# boot (see src/lib/news/setup-code.ts) and only the account that types it can
+# boot (see src/lib/news/setup-code.server.ts) and only the account that types it can
 # become the owner. Start.ps1 has already waited for readiness above, so the
 # file is there by now on a truly fresh install. An install that already had
 # an owner (an upgrade, or a re-run of Install.ps1 on existing data) never

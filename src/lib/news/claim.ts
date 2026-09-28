@@ -14,7 +14,7 @@ import {
   leaveAsEditor,
 } from "./membership";
 import { claimEmail, claimToken, recoveryCodeInput, setupCodeInput } from "./request-input.ts";
-import { burnSetupCode, isSetupCodeRequired, verifySetupCode } from "./setup-code.ts";
+import { burnSetupCode, isSetupCodeRequired, verifySetupCode } from "./setup-code.server.ts";
 import {
   generateRecoveryCodes,
   recoveryCodesRemaining,
@@ -78,7 +78,7 @@ export const claimDesk = createServerFn({ method: "POST" })
  * Claim an unclaimed desk THROUGH the first-owner setup code (Unit CJ, 0.6.80).
  *
  * The one path allowed to claim while `isSetupCodeRequired()` is true:
- * verify the typed code (rate-limited, 5/15min per IP -- `setup-code.ts`),
+ * verify the typed code (rate-limited, 5/15min per IP -- `setup-code.server.ts`),
  * and only on a match call `requireEditor(userId, { bypassSetupCodeGate: true
  * })`, which still runs the same one-transaction, index-backed claim
  * `claimOwner` always has. `burnSetupCode()` runs only AFTER that call

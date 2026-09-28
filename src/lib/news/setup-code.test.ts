@@ -20,7 +20,7 @@ import {
   isSetupCodeRequired,
   setupCodeFilePath,
   verifySetupCode,
-} from "./setup-code.ts";
+} from "./setup-code.server.ts";
 
 async function reset() {
   await ensureNewsroomSchema();
@@ -204,7 +204,7 @@ describe("first-owner setup code", () => {
         }
         if (!entry.endsWith(".ts") && !entry.endsWith(".tsx")) continue;
         if (entry.includes(".test.")) continue;
-        if (entry === "setup-code.ts") continue; // the definition itself
+        if (entry === "setup-code.server.ts") continue; // the definition itself
         const text = readFileSync(childUrl, "utf8");
         if (text.includes("forceSetupCodeSatisfiedForTests")) {
           offenders.push(childUrl.pathname);

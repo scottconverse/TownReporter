@@ -9,14 +9,14 @@ import { ensureStoryDocuments } from "./story-documents.server.ts";
 import {
   clearSetupCodeOverrideForTests,
   forceSetupCodeSatisfiedForTests,
-} from "./setup-code.ts";
+} from "./setup-code.server.ts";
 
 /*
   Unit CJ (0.6.80): this file's `requireEditor(userId)` call (line ~264)
   predates the first-owner setup-code gate and wants a plain auto-claim on a
   fresh desk, same as first-owner-race.test.ts. Scoped to this file's own
   before/after so the process-global override cannot leak into another test
-  file sharing the same `node --test` process (see setup-code.ts).
+  file sharing the same `node --test` process (see setup-code.server.ts).
 */
 before(() => forceSetupCodeSatisfiedForTests());
 after(() => clearSetupCodeOverrideForTests());
