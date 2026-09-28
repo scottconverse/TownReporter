@@ -28,6 +28,12 @@ import {
 import { reportAndDraft } from "./report";
 import { cleanListWindow, takeWindow } from "./list-window.ts";
 import {
+  DESK_DRAFT_FILTERS,
+  deskDraftFilterCounts,
+  deskDraftMatchesFilter,
+  deskDraftState,
+} from "./desk-drafts.ts";
+import {
   PUBLISHED_FILTERS,
   publishedFilterCounts,
   publishedMatches,
@@ -2566,122 +2572,164 @@ export const listRecentStoryWork = createServerFn({ method: "GET" })
   newest row is the same "the draft on this desk" rule `listLeads` already uses
   for `story_headline`. A lead with two draft rows is one story, not two.
 */
+async function queryDraftRows(context: { newsroomId: number }) {
+  const { ensureJobsSchema } = await import("./jobs.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  return sql<{
+    id: number;
+    lead_id: number;
+    headline: string;
+    dek: string | null;
+    topic: string | null;
+    form: string | null;
+    updated_at: string;
+    /** Has any prose been written into this draft row yet? See the CTE note. */
+    has_body: boolean;
+    lead_status: string;
+    origin: string | null;
+    newsworthiness: number | null;
+    why: string | null;
+    model_headline: string | null;
+    headline_source: string | null;
+    job_status: string | null;
+    job_stage: string | null;
+    job_started_at: string | null;
+    job_updated_at: string | null;
+    job_model_choice: string | null;
+    job_error: string | null;
+    evidence_required: boolean;
+    evidence_decision: string | null;
+    evidence_checked_at: string | null;
+    imported_text: boolean;
+    name_check_complete: boolean;
+    names_checked_at: string | null;
+    names_unresolved: number;
+  }>`
+    with latest_draft as (
+      select distinct on (d.lead_id)
+             d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
+             d.model_headline, d.headline_source, d.updated_at,
+             /*
+               IS THERE ANY PROSE YET?
+
+               fileLead inserts a draft row alongside the lead (see
+               insertLeadWithDraft) with body = '', so a lead filed by hand
+               has a draft from the moment it is filed. Without this fact
+               every such row fell through deskDraftState to its last branch
+               and announced "Ready to check", which put unwritten leads on
+               the Publish step and in Tonight's edition -- the desk telling
+               an editor two stories were ready to print when nothing had
+               been written. The boolean is projected rather than the body,
+               so no prose is pulled across the wire.
+             */
+             coalesce(nullif(btrim(d.body), ''), '') <> '' as has_body,
+             l.headline as lead_headline, l.status as lead_status, l.origin,
+             l.newsworthiness, l.why,
+             /*
+               research_json is a text column (migration 0010) and is always
+               written with JSON.stringify. It is projected to jsonb HERE, in
+               the query, so the handful of small keys this screen reads --
+               the evidence review's required/decision, the imported-text
+               flag and the name check -- do not drag the whole memo,
+               including the archived original draft body inside
+               evidenceReview.original, across the wire on every poll.
+             */
+             coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
+      from drafts d
+      join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
+      where d.newsroom_id = ${owned(context)}
+        -- "Everything not yet printed": a killed lead, or one already
+        -- published, is not a draft on the desk.
+        and l.status in ('new','drafted','held')
+      order by d.lead_id, d.updated_at desc, d.id desc
+    )
+    select v.id, v.lead_id,
+           coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
+           v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
+           v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
+           jb.status as job_status, jb.stage as job_stage,
+           jb.started_at as job_started_at, jb.updated_at as job_updated_at,
+           jb.model_choice as job_model_choice,
+           -- The failed row prints WHY it stopped ("Codex quota reached"),
+           -- which is the one thing a "Draft failed" chip cannot say. The job
+           -- writes it to desk_jobs.error (jobs.ts, 800 chars max).
+           jb.error as job_error,
+           -- coalesce(..., false): a missing key makes ->> NULL, and
+           -- NULL = 'true' is NULL rather than false, which would arrive on
+           -- the desk as a third value where the row means "no".
+           coalesce((v.research->'evidenceReview'->>'required') = 'true', false) as evidence_required,
+           v.research->'evidenceReview'->>'decision' as evidence_decision,
+           -- When the reconciliation pass last ran (draft-reconcile.server.ts
+           -- stamps this key), and when the name check last ran. The row prints
+           -- "checked 8:02 a.m." off these two; a row with neither says nothing
+           -- rather than a time it does not have.
+           v.research->>'evidenceReconciledAt' as evidence_checked_at,
+           v.research->'nameCheck'->>'checkedAt' as names_checked_at,
+           coalesce((v.research->>'importedText') = 'true', false) as imported_text,
+           coalesce((v.research->'nameCheck'->>'complete') = 'true', false) as name_check_complete,
+           case when jsonb_typeof(v.research->'nameCheck'->'rows') = 'array'
+             then (select count(*)::int from jsonb_array_elements(v.research->'nameCheck'->'rows') r
+                    where r->>'status' = 'unresolved')
+             else 0 end as names_unresolved
+    from latest_draft v
+    left join lateral (
+      select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
+      from desk_jobs j
+      where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
+      order by j.id desc limit 1
+    ) jb on true
+    -- Newest work first: the draft an editor just touched is the one they
+    -- came back for. A running job moves its own updated_at heartbeat, so
+    -- a story being written right now holds the top of the list while it is
+    -- being written.
+    order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
+  `;
+}
+
+/*
+  The whole drafts list, for the readers that need all of it: Today counts
+  writing/needing-you/ready across every draft to draw its four steps, so a
+  windowed list would make those numbers describe the page rather than the desk.
+
+  The `limit 60` this query used to carry is gone, and the two facts it hid are
+  the reason. `deskDraftFilterCounts` counts what a pill would SHOW, and a count
+  taken over the 60 newest drafts is not that count once a desk has more; and
+  the Drafts screen's own window (below) is the bound that matters now, because
+  it is the one that decides what crosses the wire. The query reads every draft
+  row for the newsroom exactly as the queue, sources and published queries
+  already read their tables.
+*/
 export const listDraftsDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const { ensureJobsSchema } = await import("./jobs.ts");
-    await ensureJobsSchema();
-    const sql = await getSql();
-    return sql<{
-      id: number;
-      lead_id: number;
-      headline: string;
-      dek: string | null;
-      topic: string | null;
-      form: string | null;
-      updated_at: string;
-      /** Has any prose been written into this draft row yet? See the CTE note. */
-      has_body: boolean;
-      lead_status: string;
-      origin: string | null;
-      newsworthiness: number | null;
-      why: string | null;
-      model_headline: string | null;
-      headline_source: string | null;
-      job_status: string | null;
-      job_stage: string | null;
-      job_started_at: string | null;
-      job_updated_at: string | null;
-      job_model_choice: string | null;
-      job_error: string | null;
-      evidence_required: boolean;
-      evidence_decision: string | null;
-      evidence_checked_at: string | null;
-      imported_text: boolean;
-      name_check_complete: boolean;
-      names_checked_at: string | null;
-      names_unresolved: number;
-    }>`
-      with latest_draft as (
-        select distinct on (d.lead_id)
-               d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
-               d.model_headline, d.headline_source, d.updated_at,
-               /*
-                 IS THERE ANY PROSE YET?
+  .handler(({ context }) => queryDraftRows(context));
 
-                 fileLead inserts a draft row alongside the lead (see
-                 insertLeadWithDraft) with body = '', so a lead filed by hand
-                 has a draft from the moment it is filed. Without this fact
-                 every such row fell through deskDraftState to its last branch
-                 and announced "Ready to check", which put unwritten leads on
-                 the Publish step and in Tonight's edition -- the desk telling
-                 an editor two stories were ready to print when nothing had
-                 been written. The boolean is projected rather than the body,
-                 so no prose is pulled across the wire.
-               */
-               coalesce(nullif(btrim(d.body), ''), '') <> '' as has_body,
-               l.headline as lead_headline, l.status as lead_status, l.origin,
-               l.newsworthiness, l.why,
-               /*
-                 research_json is a text column (migration 0010) and is always
-                 written with JSON.stringify. It is projected to jsonb HERE, in
-                 the query, so the handful of small keys this screen reads --
-                 the evidence review's required/decision, the imported-text
-                 flag and the name check -- do not drag the whole memo,
-                 including the archived original draft body inside
-                 evidenceReview.original, across the wire on every poll.
-               */
-               coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
-        from drafts d
-        join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
-        where d.newsroom_id = ${owned(context)}
-          -- "Everything not yet printed": a killed lead, or one already
-          -- published, is not a draft on the desk.
-          and l.status in ('new','drafted','held')
-        order by d.lead_id, d.updated_at desc, d.id desc
-      )
-      select v.id, v.lead_id,
-             coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
-             v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
-             v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
-             jb.status as job_status, jb.stage as job_stage,
-             jb.started_at as job_started_at, jb.updated_at as job_updated_at,
-             jb.model_choice as job_model_choice,
-             -- The failed row prints WHY it stopped ("Codex quota reached"),
-             -- which is the one thing a "Draft failed" chip cannot say. The job
-             -- writes it to desk_jobs.error (jobs.ts, 800 chars max).
-             jb.error as job_error,
-             -- coalesce(..., false): a missing key makes ->> NULL, and
-             -- NULL = 'true' is NULL rather than false, which would arrive on
-             -- the desk as a third value where the row means "no".
-             coalesce((v.research->'evidenceReview'->>'required') = 'true', false) as evidence_required,
-             v.research->'evidenceReview'->>'decision' as evidence_decision,
-             -- When the reconciliation pass last ran (draft-reconcile.server.ts
-             -- stamps this key), and when the name check last ran. The row prints
-             -- "checked 8:02 a.m." off these two; a row with neither says nothing
-             -- rather than a time it does not have.
-             v.research->>'evidenceReconciledAt' as evidence_checked_at,
-             v.research->'nameCheck'->>'checkedAt' as names_checked_at,
-             coalesce((v.research->>'importedText') = 'true', false) as imported_text,
-             coalesce((v.research->'nameCheck'->>'complete') = 'true', false) as name_check_complete,
-             case when jsonb_typeof(v.research->'nameCheck'->'rows') = 'array'
-               then (select count(*)::int from jsonb_array_elements(v.research->'nameCheck'->'rows') r
-                      where r->>'status' = 'unresolved')
-               else 0 end as names_unresolved
-      from latest_draft v
-      left join lateral (
-        select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
-        from desk_jobs j
-        where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
-        order by j.id desc limit 1
-      ) jb on true
-      -- Newest work first: the draft an editor just touched is the one they
-      -- came back for. A running job moves its own updated_at heartbeat, so
-      -- a story being written right now holds the top of the list while it is
-      -- being written.
-      order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
-      limit 60
-    `;
+/**
+ * The Drafts screen's window (Unit CZ-long-lists).
+ *
+ * "Everything not yet printed" is a growing list on a real desk, and the screen
+ * drew every row of it. This returns the pill's match cut to the page the editor
+ * asked for, plus the true total and the pill counts.
+ *
+ * The filter is the state machine in `desk-drafts.ts`, not a column -- "Needs
+ * you" is "a name to review OR evidence to check", "Yours" is whether the editor
+ * wrote the headline -- so it runs here, over the rows, before the page is cut.
+ * `deskDraftState` is called with no elapsed time on purpose: the elapsed
+ * argument only changes a running row's LABEL ("Writing · 2:18"), while the
+ * state key, `running`, `failed`, `needsYou` and `yours` -- everything the
+ * filter reads -- are decided by facts alone. The screen still computes its own
+ * states with the real clock, because the label is the row's words.
+ */
+export const listDraftsDeskPage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanListWindow(input, DESK_DRAFT_FILTERS, "all"))
+  .handler(async ({ context, data }) => {
+    const all = await queryDraftRows(context);
+    const states = all.map((row) => deskDraftState(row));
+    const counts = deskDraftFilterCounts(states);
+    const matched = all.filter((_, index) => deskDraftMatchesFilter(states[index], data.filter));
+    const { rows, total } = takeWindow(matched, data.offset, data.limit);
+    return { rows, total, counts };
   });
 
 export const writeStoryFromInput = createServerFn({ method: "POST" })
