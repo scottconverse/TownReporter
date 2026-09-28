@@ -974,6 +974,64 @@ export function auditDraft(input: { headline: string; dek: string; body: string;
   };
 }
 
+/*
+  ── Naming a finding over the wire ──────────────────────────────────────────
+
+  "Fix these with the model" sends the editor's TICKS, not findings. The page
+  sends the id of each ticked finding and nothing else about it; the server
+  looks that id up in an audit it produced itself from the text being repaired
+  and refuses an id it cannot find. So no client-supplied message, position or
+  snippet ever reaches the prompt, and a made-up id is a refusal rather than a
+  free-form instruction to a model on the editor's bill.
+
+  The id is derived from the finding, never stored with it: `research_json`
+  holds records written by earlier builds, and a finding that arrived without
+  an id is not a finding this code should drop. `paragraph.sentence.code` is
+  unique except where one sentence produces two findings of the same code (two
+  filler terms, two paste artifacts), which the occurrence number settles. The
+  code is kebab-case and the two positions are integers, so `#` cannot occur
+  inside either half.
+*/
+const findingBase = (finding: DraftAuditFinding): string =>
+  `${finding.paragraph}.${finding.sentence}.${finding.code}`;
+
+/** The id of the `occurrence`-th finding with this position and code, from 1. */
+export function findingId(finding: DraftAuditFinding, occurrence = 1): string {
+  return `${findingBase(finding)}#${occurrence}`;
+}
+
+/** Every finding under the id the page sends for it, in the audit's own order. */
+export function findingsWithIds(result: DraftAuditResult): Array<{ id: string; finding: DraftAuditFinding }> {
+  const seen = new Map<string, number>();
+  return result.findings.map((finding) => {
+    const base = findingBase(finding);
+    const occurrence = (seen.get(base) ?? 0) + 1;
+    seen.set(base, occurrence);
+    return { id: findingId(finding, occurrence), finding };
+  });
+}
+
+/**
+ * The findings these ids name, in audit order, and the ids this audit does not
+ * have. An id that does not appear is `unknown` rather than ignored: a silent
+ * drop would hand the model a shorter list than the editor ticked and say
+ * nothing about it.
+ */
+export function findingsByIds(
+  result: DraftAuditResult,
+  ids: readonly string[],
+): { findings: DraftAuditFinding[]; unknown: string[] } {
+  const wanted = new Set(ids);
+  const findings: DraftAuditFinding[] = [];
+  const matched = new Set<string>();
+  for (const { id, finding } of findingsWithIds(result)) {
+    if (!wanted.has(id)) continue;
+    findings.push(finding);
+    matched.add(id);
+  }
+  return { findings, unknown: [...new Set(ids)].filter((id) => !matched.has(id)) };
+}
+
 /**
  * The line the story page prints above the list. Kept here, beside the
  * findings, so the wording and the count cannot drift apart.

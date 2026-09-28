@@ -188,6 +188,21 @@ export const LIMITS = {
    * (`draft-edit.server.ts:15`), never stored.
    */
   draftEvidenceToken: 24_000_000,
+  /**
+   * One tick box's finding id, `findingId` in `draft-audit.ts`:
+   * `<paragraph>.<sentence>.<code>#<occurrence>`. The longest code in the
+   * audit is under 30 characters and the numbers are small, so 64 is roughly
+   * double the longest id an audit can produce.
+   */
+  styleFindingId: 64,
+  /**
+   * How many findings one "Fix these with the model" press may tick. The audit
+   * reports at most one finding per sentence per code, and the repair sends
+   * only the first `maxFindingsSent` (12) of them; 60 is the whole list for
+   * any draft short enough to read. A bound is needed because the ids are a
+   * client-supplied array and every one is looked up.
+   */
+  styleFindingIds: 60,
   /** A named outlet, e.g. "Longmont Leader". */
   outlet: 200,
   /** `legal-removal-store.ts:458` case ref regex allows exactly 120. */
@@ -1320,15 +1335,27 @@ export const draftEditInput = z.object({
 });
 
 /**
- * "Fix these with the model": the text on screen, plus the dials for the one
- * call it may make. The effort is the loose one -- the registry is allowed to
- * reinterpret it, and a value it will not take must not refuse the press.
+ * "Fix these with the model": the text on screen, the ticked findings, plus the
+ * dials for the one call it may make. The effort is the loose one -- the
+ * registry is allowed to reinterpret it, and a value it will not take must not
+ * refuse the press.
+ *
+ * `findingIds` carries IDS, never findings. The page ticks rows the audit
+ * produced and sends back `findingId` strings; `draft-audit.server.ts` looks
+ * each one up in its own audit of this same text and refuses an id it did not
+ * produce. A message the client made up can therefore never reach the prompt.
+ * `.min(1)` because a press that names nothing has nothing to send, and the
+ * page disables the button on the same rule.
  */
 export const draftStyleFixInput = draftEditInput
   .omit({ evidenceDecision: true, evidenceToken: true })
   .extend({
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortLoose.optional(),
+    findingIds: z
+      .array(z.string().max(LIMITS.styleFindingId))
+      .min(1)
+      .max(LIMITS.styleFindingIds),
   });
 
 /** `opinion.ts:370` fileWrittenEditorial (`opinion.ts:376` refuses over 400,000). */
