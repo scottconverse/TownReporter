@@ -701,6 +701,20 @@ describe('a row title must read as a headline, not a bare fragment (unit BZ, ite
     );
   });
 
+  it('keeps "St." with its name and drops the word that introduced the date (0.6.82)', () => {
+    const items = collectStoryDates([
+      story({
+        slug: "open-houses",
+        headline: "St. Vrain lists upcoming school open houses beginning Oct. 1",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-01", "St. Vrain lists upcoming school open houses"]],
+    );
+  });
+
   it('never prints "instrument collection drive" as a row', () => {
     const headline = "Oct. 1-2 instrument collection drive";
     const items = collectStoryDates([

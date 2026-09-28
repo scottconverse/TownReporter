@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.81](docs/releases/0.6.81.md).** Every HTML page now tells every cache to revalidate, so a release cannot be outlived by the bytes it replaced. The front page's lead gap is closed and "This week" names each event once; a meeting story's transcript opens in full, with every timestamp a link into the video; the story workbench is the drawn screen; every reason Publish is off is listed with its own button; Dark Desk has an honest light theme; the Server screen is the drawn summary cards with each editor one door away; Today and its rail match the drawing at laptop widths; long lists render 25 at a time with Show 25 more and the Queue's selection bar; the article's "How we reported this" band is a band of the page and the front page's trust strip is gone; the first-owner setup code and recovery codes return, salted and transactional; the manual follow-up workflow is retired, open rows marked dropped with nothing deleted; the desk dialogs the drawing drew now have their press; and the "Keep reading" band's missing gutter and empty cells were fixed. Two additive migrations, 0106 and 0107. GitHub remains the authority for publication state. [0.6.80 release guide](docs/releases/0.6.80.md) · [Changelog](CHANGELOG.md).
+**Current software version: [0.6.82](docs/releases/0.6.82.md).** Fixes from the 0.6.81 live walk: Tonight's edition rows print the names chip once; the Queue's "Looks already printed" chip wraps instead of widening the desk; "This week" keeps "St." with its name and never ends a name on "beginning"; source cards print their role in words ("Announcing source").
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.81 release guide](docs/releases/0.6.81.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.82 release guide](docs/releases/0.6.82.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 

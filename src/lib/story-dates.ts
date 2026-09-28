@@ -268,6 +268,30 @@ const TIME_WORDS = 12;
 const ROLL_DAYS = 62;
 /** Where a clause stops: the punctuation a printed sentence breaks on. */
 const CLAUSE_BREAK = /[;:.—–!?,]/;
+/**
+ * Short forms whose full stop is not the end of a clause. 0.6.82: the live
+ * front page printed "Vrain lists upcoming school open houses" because the
+ * stop in "St. Vrain" was read as a sentence break.
+ */
+const ABBREVIATIONS = new Set([
+  "st", "mt", "ft", "mr", "mrs", "ms", "dr", "jr", "sr", "no", "ave", "blvd",
+  "rd", "co", "inc", "corp", "gov", "sen", "rep", "hwy", "u.s", "u.s.a",
+]);
+/** True when the "." at `i` closes a short form ("St.") or an initial ("J."). */
+function abbreviationStop(text: string, i: number): boolean {
+  if (text[i] !== ".") return false;
+  const word = /([A-Za-z.]+)$/.exec(text.slice(Math.max(0, i - 8), i))?.[1] ?? "";
+  if (!word) return false;
+  if (/^[A-Z]$/.test(word)) return true;
+  return ABBREVIATIONS.has(word.toLowerCase().replace(/^\.+/, ""));
+}
+/** The first clause break in `text` that is not a short form's stop. */
+function clauseStop(text: string): number {
+  for (let i = 0; i < text.length; i += 1) {
+    if (CLAUSE_BREAK.test(text[i]) && !abbreviationStop(text, i)) return i;
+  }
+  return -1;
+}
 /** Words a name never begins or ends on: it would be hanging off a sentence. */
 const JOINERS = new Set([
   "a",
@@ -287,6 +311,15 @@ const JOINERS = new Set([
   "their",
   "to",
   "with",
+  // A name never ends on the word that introduced its date ("open houses
+  // beginning Oct. 1" prints "open houses", not "open houses beginning").
+  "after",
+  "before",
+  "beginning",
+  "ending",
+  "starting",
+  "through",
+  "until",
 ]);
 /** A word as this module compares it: lowercase, with its punctuation off. */
 function plain(word: string): string {
@@ -337,7 +370,7 @@ function clockNear(text: string, start: number, end: number): string {
 /** Where the sentence or clause the date sits in begins. */
 function clauseStart(text: string, start: number): number {
   for (let i = start - 1; i >= 0; i -= 1) {
-    if (";:.—–!?.".includes(text[i])) return i + 1;
+    if (";:.—–!?.".includes(text[i]) && !abbreviationStop(text, i)) return i + 1;
   }
   return 0;
 }
@@ -380,7 +413,7 @@ function clauseName(text: string, hit: DateHit): string {
     dropped by the joiner test below rather than stranded.
   */
   const tail = text.slice(hit.end, hit.next).replace(CLOCK, " ");
-  const stop = tail.search(CLAUSE_BREAK);
+  const stop = clauseStop(tail);
   const left =
     clause >= hit.prev
       ? text.slice(clause, hit.start).replace(CLOCK, " ").split(/\s+/).filter(Boolean)
