@@ -394,7 +394,16 @@ async function fileQueueLead(headline, why) {
   await form.getByLabel("Why now").fill(why);
   await form.getByRole("button", { name: "File lead", exact: true }).click();
   await expect(page).toHaveURL(/\/desk\/story\/\d+$/);
-  await expect(page.getByRole("textbox", { name: "Headline", exact: true })).toHaveValue(headline);
+  /*
+    The story page's headline box is labelled with the drawn words (unit CW),
+    "Headline · yours", so the box's accessible name is that whole label --
+    the same rule desk-chrome.tsx records for the old "Edit" span. The
+    assertion is unchanged: the box the walking editor lands in holds the
+    headline they filed.
+  */
+  await expect(page.getByRole("textbox", { name: "Headline · yours", exact: true })).toHaveValue(
+    headline,
+  );
 }
 
 async function persistSuppliedScope(headline, why) {

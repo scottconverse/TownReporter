@@ -2294,6 +2294,50 @@
   color: var(--mut);
   margin-bottom: 8px;
 }
+/*
+  The label row of a field that carries an `aside` (unit CW): the drawn
+  "Headline · yours        A redraft will not replace it", and the drawn
+  "Story                 Saved 8:20 a.m.".
+
+  The label is no longer a child of `.f` here, so `.f > label` above does not
+  reach it and it would fall back to inline; this puts the two on one row and
+  keeps the same 8px gap under them that every other field's label has. The
+  aside takes the right edge with its own auto margin, which means the label
+  needs none of its own -- the drawing puts them at opposite ends of one line,
+  not next to each other.
+
+  No field that passes `htmlFor` without an `aside` gets this wrapper, so this
+  is the only shape that changes.
+*/
+.desk-ltr.astra .f-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  margin-bottom: 8px;
+}
+.desk-ltr.astra .f-head > label {
+  display: block;
+  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--mut);
+}
+.desk-ltr.astra .f-aside {
+  margin-left: auto;
+  text-align: right;
+  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--mut);
+}
+/* The drawn right edge survives the narrow screens: the aside drops to its own
+   row rather than squeezing the label or overflowing the box. */
+@media (max-width: 720px) {
+  .desk-ltr.astra .f-head > .f-aside {
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+}
 .desk-ltr.astra .story-composer-heading {
   display: block;
 }
@@ -5753,9 +5797,29 @@
   font-weight: 700;
   color: var(--fg2);
 }
-.desk-ltr.astra .astra-wb-writer .astra-save-state {
-  margin-left: auto;
-  margin-right: 0;
+/*
+  The writer row's two drawn lines (unit CW): "● Ready" and "Last draft: Codex
+  Sol, 7:48 a.m.".
+
+  The readiness dot is the one colored word in this row, and it is colored for
+  the same reason the Checks tab's chips are: "this writer can run" and "this
+  writer cannot" must not look alike at a glance. Its two colors are the tokens
+  the rest of the desk uses for those two answers, so nothing here invents a
+  palette. The last-draft line is muted -- it is a record of what happened, not
+  a state anyone has to act on.
+*/
+.desk-ltr.astra .astra-wb-ready {
+  font-family: var(--fd);
+  font-weight: 700;
+}
+.desk-ltr.astra .astra-wb-ready-ok {
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-wb-ready-warn {
+  color: var(--warn);
+}
+.desk-ltr.astra .astra-wb-last {
+  color: var(--mut);
 }
 
 /*
@@ -5776,9 +5840,25 @@
   border: 1px solid currentColor;
   font: 700 calc(14px * var(--ts)) var(--fd);
 }
+/*
+  The save line at the head of the Story field (unit CW). `.astra-wb-saved` is
+  the drawn green "Saved 8:20 a.m."; the two tones the drawing does not draw
+  are here because the line must never be green when it is not true -- an
+  editor with unsaved text is told so in the warn color, and a story already on
+  the paper is not a draft at all (`saveState` in `lib/news/writer-bar.ts`).
+*/
 .desk-ltr.astra .astra-wb-saved {
   color: var(--ok);
   font-weight: 700;
+}
+.desk-ltr.astra .astra-wb-saved-ok {
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-wb-saved-warn {
+  color: var(--warn);
+}
+.desk-ltr.astra .astra-wb-saved-mut {
+  color: var(--mut);
 }
 
 /* The sticky publish bar: the last thing on the page and the first thing in

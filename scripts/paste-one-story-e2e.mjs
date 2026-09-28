@@ -388,9 +388,15 @@ async function theEditorEditsASentence(bodyField) {
     .filter({ hasText: "Unsaved changes" })
     .waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "Save edits", exact: true }).click();
+  /*
+    `/^Saved/` and not the string "Saved": a string in `hasText` is matched
+    case-insensitively as a substring, and the drawn save line reads "Saved 8:20
+    a.m." (unit CW) -- but "Unsaved changes" also contains "Saved", and that is
+    the state this wait exists to leave.
+  */
   await page
     .locator(".astra-save-state")
-    .filter({ hasText: "Saved draft" })
+    .filter({ hasText: /^Saved/ })
     .waitFor({ timeout: 45_000 });
   must(
     (await bodyField.inputValue()).includes(AFTER_EDIT),
@@ -995,9 +1001,10 @@ async function main() {
     must(Boolean(movedTo?.value), `the story editor offered no other section: ${JSON.stringify(topics)}`);
     await page.locator("#story-topic select").selectOption(movedTo.value);
     await page.getByRole("button", { name: "Save edits", exact: true }).click();
+    // `/^Saved/`: see the note on the first save wait above.
     await page
       .locator(".astra-save-state")
-      .filter({ hasText: "Saved draft" })
+      .filter({ hasText: /^Saved/ })
       .waitFor({ timeout: 45_000 });
     must(
       (await secondBody.inputValue()) === SECOND_BODY,

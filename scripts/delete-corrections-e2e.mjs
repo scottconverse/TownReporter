@@ -481,11 +481,11 @@ async function main() {
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with the revised fee schedule.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
 
   await page.getByLabel("Headline").fill(leadHeadline);
-  await page.getByLabel("Dek").fill("Revised fee schedule");
-  await page.getByLabel("Body").fill(body);
+  await page.getByLabel("Summary").fill("Revised fee schedule");
+  await page.getByLabel("Story", { exact: true }).fill(body);
   // The section is a claim a person confirms, like the sources above it; the
   // desk's Publish button stays disabled until an editor reads it and says so.
   // 0.6.67 puts the section on the button itself -- "Publish in <section>" --
@@ -765,7 +765,7 @@ async function main() {
   const firstFinding = panels.nth(0);
   const secondFinding = panels.nth(1);
   const savedRevisionBody = `TEST FIXTURE body: saved revision before judgments ${stamp}.`;
-  await page.getByLabel("Body").fill(savedRevisionBody);
+  await page.getByLabel("Story", { exact: true }).fill(savedRevisionBody);
   if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
     throw new Error("unsaved draft revision did not disable finding judgments");
   await page.getByRole("button", { name: "Save edits" }).click();
@@ -874,7 +874,7 @@ async function main() {
   await reloadedReview
     .getByText("A contradiction needs cited contrary captured evidence and a reason.")
     .waitFor();
-  await page.getByLabel("Body").fill(`TEST FIXTURE unsaved body ${stamp}`);
+  await page.getByLabel("Story", { exact: true }).fill(`TEST FIXTURE unsaved body ${stamp}`);
   if (
     !(await reloadedReview
       .locator("article")
@@ -884,7 +884,7 @@ async function main() {
   )
     throw new Error("unsaved draft did not disable judgment save");
   await page
-    .getByLabel("Body")
+    .getByLabel("Story", { exact: true })
     .fill(savedRevisionBody);
   step("restored the exact saved draft before stale-review conflict checks");
   const secondTab = await context.newPage();

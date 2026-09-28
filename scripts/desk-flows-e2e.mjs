@@ -347,7 +347,7 @@ async function main() {
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with a hearing date.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("a lead can be filed by hand");
 
   await page.getByRole("button", { name: /Model & research/ }).click();

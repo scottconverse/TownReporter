@@ -40,9 +40,16 @@ export async function confirmSectionAndWaitForPublishable(page, { publishable = 
   const saveState = page.locator(".astra-save-state");
   if ((await saveState.filter({ hasText: "Unsaved changes" }).count()) > 0) {
     await page.getByRole("button", { name: "Save edits", exact: true }).click();
-    // The desk's own word that the server took it -- a click that lands before
-    // hydration does nothing, and a walk clicks faster than a person.
-    await saveState.filter({ hasText: "Saved draft" }).waitFor({ timeout: 45_000 });
+    /*
+      The desk's own word that the server took it -- a click that lands before
+      hydration does nothing, and a walk clicks faster than a person.
+
+      `/^Saved/` and not the string "Saved": the line now says "Saved 8:20
+      a.m." once the draft has a stamp (unit CW's drawn save line), and a
+      string in `hasText` is a CASE-INSENSITIVE SUBSTRING, so "Saved" would
+      also match "Unsaved changes" -- the very state this wait exists to leave.
+    */
+    await saveState.filter({ hasText: /^Saved/ }).waitFor({ timeout: 45_000 });
   }
   if (!publishable) return;
   /*

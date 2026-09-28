@@ -34,6 +34,7 @@ import {
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { writerIsReady } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
 
@@ -358,17 +359,26 @@ export function ModelPicker(props: Props) {
     queryFn: () => providerAvailability(),
     staleTime: 5 * 60 * 1000,
   });
+  /*
+    The rule itself lives in `lib/news/writer-bar.ts` (unit CW), because the
+    drawer's own "● Ready" line asks the same question this menu asks about
+    each option -- "can this writer run?" -- and the two must not be able to
+    answer it differently. It is called here with this component's own queries:
+    the shared availability map, and the connection behind a `custom:<id>`.
+
+    Undecided (still loading, or the query failed) counts as available so the
+    picker never locks up over a slow network call -- the preflight check on
+    the actual run is the backstop that refuses before spending anything either
+    way (see commitStoryDraftForAuthenticatedEditor).
+  */
   function isAvailable(value: string): boolean {
-    if (value === "auto") return true;
-    if (isCustomModelChoice(value)) {
-      const connection = connections.data?.find((row) => `custom:${row.id}` === value);
-      return Boolean(connection?.enabled && connection.modelId);
-    }
-    // Undecided (still loading, or the query failed) defaults to available
-    // so the picker never locks up over a slow network call -- the
-    // preflight check on the actual run is the backstop that refuses
-    // before spending anything either way (see commitStoryDraftForAuthenticatedEditor).
-    return availability.data ? availability.data[value] !== false : true;
+    return writerIsReady({
+      choice: value,
+      availability: availability.data,
+      customConnection: isCustomModelChoice(value)
+        ? (connections.data?.find((row) => `custom:${row.id}` === value) ?? null)
+        : null,
+    });
   }
   const unavailable = options.filter(
     (option) => option.value !== "auto" && !isAvailable(option.value),

@@ -95,6 +95,22 @@ import {
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { providerAvailability } from "@/lib/news/provider-availability";
+import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
+import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+/*
+  The Writer / Effort bar's own lines (unit CW): the readiness dot, the
+  last-draft line and the save line under the Story label. Each is derived,
+  and each refuses to say something the desk did not record -- see the
+  module's own note on what "● Ready" is about.
+*/
+import {
+  lastDraftLine,
+  lastDraftWhen,
+  readinessDot,
+  saveState,
+  writerIsReady,
+} from "@/lib/news/writer-bar";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
   DraftReconcileControl,
@@ -380,11 +396,54 @@ function StoryPage() {
     retry: false,
   });
 
+  /*
+    Whether the writer the editor has chosen can actually run, for the drawn
+    "● Ready" dot (unit CW).
+
+    Both reads are `ModelPicker`'s own, under its own query keys, so the bar
+    above the panel and the panel's option list are served from one cache entry
+    and can never answer the question differently -- and opening the panel
+    costs no extra request, since the panel reads what is already here.
+  */
+  const writerAvailability = useQuery({
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+    queryFn: () => providerAvailability(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const writerConnections = useQuery({
+    queryKey: ["custom-ai-connections"],
+    queryFn: () => getCustomAiConnectionsFn(),
+    staleTime: 15_000,
+  });
+
   const previousJobError =
     !waiting && !msg && data?.job?.status === "failed"
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
   const draftProblem = msg || previousJobError;
+
+  /*
+    The writer row's derived words (unit CW).
+
+    `readiness` is about the writer -- can the chosen model run on this server?
+    -- not about the draft: the drawing itself shows "● Ready" above a sticky
+    bar reading "Review 1 name to publish.", so the dot cannot mean "this may
+    print". `lastDraft` is the one line the drawing draws about the draft in
+    hand, and it is empty unless the desk recorded a draft job that finished:
+    an hour nobody wrote down is not an hour this bar may print.
+  */
+  const readiness = readinessDot(
+    writerIsReady({
+      choice: modelChoice,
+      availability: writerAvailability.data,
+      customConnection:
+        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
+    }),
+  );
+  const lastDraft = lastDraftLine({
+    modelLabel: data?.job?.model_choice ? modelChoiceLabel(data.job.model_choice) : "",
+    when: lastDraftWhen(data?.job?.finished_at),
+  });
 
   useEffect(() => {
     if (!modelResearchOpen) return;
@@ -1379,6 +1438,19 @@ function StoryPage() {
   const hasUnsavedDraftEdits = Boolean(
     savedDraftFields && !draftFieldsMatch(savedDraftFields, { headline, dek, body, topic }),
   );
+  /*
+    The line at the head of the Story editor: the drawn green "Saved 8:20 a.m.".
+
+    It keeps the class the walks already wait on (`confirm-section-step.mjs`
+    and `paste-one-story-e2e.mjs` wait for the desk's word that the server took
+    an edit), and it now carries the hour of the save the desk actually made --
+    the saved draft's own `updated_at` -- rather than the bare word.
+  */
+  const saveLine = saveState({
+    published: onPaper,
+    dirty: hasUnsavedDraftEdits,
+    when: lastDraftWhen(data?.draft?.updated_at),
+  });
   const reconcileActive =
     reconcile.isPending ||
     reconcileStatus.data?.status === "queued" ||
@@ -1625,6 +1697,53 @@ function StoryPage() {
     },
     { label: `${previewSeen ? "✓" : "!"} Preview viewed`, done: previewSeen },
   ];
+
+  /*
+    The evidence check's props, in one place because the drawn action row needs
+    two halves of it apart (unit CW).
+
+    `Desk Story.dc.html:112` draws "Check draft against evidence" second in the
+    row, between "Save edits" and "+ Add to story" -- and everything this
+    control has to say afterwards (progress, the dirty note, the finished
+    notice, the review panel) is a block. The row asks for `render="button"`;
+    the block lands under the row, where the drawing puts the job cards. Two
+    instances, one set of props, so the two halves can never be told different
+    things about the same check.
+  */
+  const reconcileControlProps = {
+    status: reconcileStatus.data,
+    active: reconcileActive,
+    disabled: waiting || reconcileActive || savePending || hasUnsavedDraftEdits,
+    dirty: hasUnsavedDraftEdits,
+    note: reconcileNote,
+    noteError: reconcileNoteError,
+    noteWarning: reconcileNoteWarning,
+    checkedDraftReady,
+    checkedDraftStale,
+    modelLabel: modelChoiceLabel(reconcileStatus.data?.modelChoice ?? modelChoice),
+    review: evidenceReview,
+    reviewOpen: evidenceReviewOpen,
+    onStart: () => reconcile.mutate(),
+    onReload: () => {
+      const resultDraftId = reconcileStatus.data?.resultDraftId;
+      if (!resultDraftId) return;
+      const originalDraftId = reconcileStatus.data?.draftId;
+      if (!originalDraftId) return;
+      setEvidenceReviewOpen(true);
+      void applyCheckedDraft(resultDraftId, originalDraftId, undefined, true).catch((cause) => {
+        setReconcileNote(
+          editorActionError(
+            cause instanceof Error ? cause.message : "",
+            "load the checked draft",
+          ) ?? "The checked draft could not be loaded.",
+        );
+        setReconcileNoteError(true);
+        setReconcileNoteWarning(false);
+      });
+    },
+    onKeepChecked: keepCheckedVersion,
+    onRestoreOriginal: restoreOriginalVersion,
+  };
 
   return (
     <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
@@ -1925,12 +2044,23 @@ function StoryPage() {
 
         <section className="story-work">
           {/*
-            The writer row (Desk Story.dc.html): who is being asked, and how the
-            draft in front of the editor stands. The drawing's two selects -- the
-            model and its effort -- are today's "Model & research" toggle and the
-            panel it opens, kept as they are, and the save state moves up here
-            from the action row so the answer to "did my last edit stick?" is the
-            first thing on the surface rather than the last.
+            The writer row (Desk Story.dc.html): "Writer | <the model> | Effort
+            | ● Ready | Last draft: Codex Sol, 7:48 a.m.".
+
+            The drawing's first two words are the model and its effort, drawn
+            as two selects. The desk's picker owns both, and it owns the exact
+            model id the effort list depends on (`ModelPicker` resolves it
+            itself), so this row does not try to re-render the drawn value: the
+            first press is the one that already exists -- "Model & research ·
+            <model>", opening the panel that holds both selects -- and the
+            second is a way into the same panel from the Effort side. What the
+            row adds is the two things the drawing says about this draft: the
+            dot, which is about the writer (see `readiness`), and the hour the
+            last draft finished.
+
+            The save state moved from here to the head of the Story editor,
+            where the drawing writes it: it is a sentence about the text below
+            it, not about the model above it.
           */}
           <div className="astra-wb-writer">
             <span className="astra-wb-writer-label">Writer</span>
@@ -1943,14 +2073,24 @@ function StoryPage() {
             >
               Model & research · {modelChoiceLabel(modelChoice)}
             </button>
+            <button
+              className="btn quiet"
+              type="button"
+              aria-expanded={modelResearchOpen}
+              aria-controls="story-model-research"
+              onClick={() => setModelResearchOpen(true)}
+            >
+              Effort…
+            </button>
+            <span className={`astra-wb-ready astra-wb-ready-${readiness.tone}`} role="status">
+              {readiness.label}
+            </span>
+            {lastDraft ? <span className="astra-wb-last">{lastDraft}</span> : null}
             {retiredModelNote ? (
               <p className="note" role="status">
                 {retiredModelNote}
               </p>
             ) : null}
-            <span className="astra-save-state" role="status">
-              {onPaper ? "Published story" : hasUnsavedDraftEdits ? "Unsaved changes" : "Saved draft"}
-            </span>
           </div>
           {!locked && !onPaper ? (
             <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
@@ -2138,7 +2278,11 @@ function StoryPage() {
                 -- same slug, same link, with the headline it replaced written
                 down against the editor's name (see `savePublishedHeadline`).
               */}
-              <Field label="Headline" htmlFor="story-headline">
+              <Field
+                label="Headline · yours"
+                htmlFor="story-headline"
+                aside="A redraft will not replace it"
+              >
                 <div className="astra-headline-box">
                   <textarea
                     id="story-headline"
@@ -2250,8 +2394,18 @@ function StoryPage() {
                   {headlineNote}
                 </p>
               ) : null}
-              <Field label="Dek">
+              {/*
+                The dek, under the drawing's own name for it: SUMMARY.
+
+                The class and the id stay `.astra-dek`/`story-dek`, because
+                both are already the page's names for this field (`paste-one-
+                story-e2e.mjs` fills `.astra-dek.directly`, and the auto-resize
+                above selects it by class). Only the words the editor reads
+                change.
+              */}
+              <Field label="Summary" htmlFor="story-dek">
                 <textarea
+                  id="story-dek"
                   rows={2}
                   className="astra-dek"
                   value={dek}
@@ -2428,8 +2582,35 @@ function StoryPage() {
                   ) : null}
                 </div>
               ) : null}
-              <Field label="Body">
+              {/*
+                The body, under the drawing's own name for it: STORY -- with
+                the save line at the head of the label row, which is where the
+                drawing writes "Saved 8:20 a.m.".
+
+                The line is passed as `aside` and not written inside the label:
+                a browser builds a control's accessible name out of the whole
+                text inside its <label>, so "Saved 8:20 a.m." inside it would
+                make this box's name "Story Saved 8:20 a.m." and break every
+                walk that asks for the box by name. See `Field`'s own note.
+
+                It keeps the class the walks already wait on
+                (`.astra-save-state`), so what those walks are watching for --
+                the desk's word that the server took an edit -- is unchanged.
+              */}
+              <Field
+                label="Story"
+                htmlFor="story-body"
+                aside={
+                  <span
+                    className={`astra-save-state astra-wb-saved astra-wb-saved-${saveLine.tone}`}
+                    role="status"
+                  >
+                    {saveLine.label}
+                  </span>
+                }
+              >
                 <textarea
+                  id="story-body"
                   ref={bodyField}
                   className="astra-story-body"
                   rows={16}
@@ -2572,47 +2753,43 @@ function StoryPage() {
             />
           ) : null}
     <div className="work-bar astra-story-actions">
-            {body && (
+            {/*
+              THE DRAWN ACTION ROW (unit CW).
+
+              `Desk Story.dc.html:112` draws, in this order: Save edits ⌘S |
+              Check draft against evidence | + Add to story | Redraft… |
+              Preview as reader. This row is those five presses in that order,
+              each still wired to the server function it always called -- save,
+              the reconcile job, the add-to-story dialog, the redraft dialog,
+              the preview. The desk's own extras (the jump into the inspector,
+              the two comparison presses) follow them, because the drawing has
+              no equivalent and a working press is not dropped to match a
+              picture.
+
+              Tone is the drawing's: the three presses that change what is
+              saved are the heavy 2px ink (`.btn`), the two that only look are
+              the light 1px rule (`.btn.quiet`).
+            */}
+            {data.draft && !locked && !onPaper ? (
               <InkButton
                 tone="ghost"
-                onClick={() => {
-                  setPreviewSeen(true);
-                  preview.current?.showModal();
-                }}
+                disabled={save.isPending || reconcileActive}
+                onClick={() => save.mutate()}
               >
-                Preview
-              </InkButton>
-            )}
-            <a className="btn astra-checks-jump" href="#story-inspector">
-              Checks & sources
-            </a>
-            {/*
-              Unit BH2 decision 6: the drawn `dialog-12-compare.png`, opened by a
-              press of its own. It only exists once an evidence check has left two
-              versions behind -- before that there is nothing to compare, and the
-              inline "Evidence check results" panel in the inspector still holds
-              the same two decisions for anyone who reads it there.
-            */}
-            {evidenceReview ? (
-              <InkButton tone="ghost" onClick={() => setCompareVersionsOpen(true)}>
-                Compare versions
+                Save edits
+                {/*
+                  The drawn ⌘S chip, aria-hidden so the press's accessible name
+                  stays exactly "Save edits" -- the walks ask for it by that
+                  name (`getByRole("button", { name: "Save edits", exact: true })`)
+                  and a name of "Save edits ⌘S" would stop matching.
+                */}
+                <span className="astra-wb-kbd" aria-hidden="true">
+                  ⌘S
+                </span>
               </InkButton>
             ) : null}
-            {/*
-              Unit AK item 5: the press that opens the side-by-side view. It used
-              to be a link on the Queue that opened the other lead's page, which
-              had no comparison on it at all.
-            */}
-            {comparePair ? (
-              <button
-                className="btn"
-                type="button"
-                aria-expanded={compareShown}
-                aria-controls="lead-compare"
-                onClick={() => setCompareOpen(!compareShown)}
-              >
-                Compare
-              </button>
+            {data.draft && !locked && !onPaper ? (
+              <DraftReconcileControl {...reconcileControlProps} render="button" />
             ) : null}
             {/*
               Unit CP item 1: the drawn "+ Add to story", which had no press on
@@ -2643,6 +2820,16 @@ function StoryPage() {
             {!locked && !onPaper ? (
               <>
                 <InkButton
+                  /*
+                    The drawing's tone rule, applied to this press too: the three
+                    presses that change what is saved are the heavy 2px ink
+                    (`.btn`), the two that only look are the light 1px rule
+                    (`.btn.quiet`). "Redraft" only exists beside a draft that has
+                    a body, and beside a body it is one of the light ones -- the
+                    drawn fifth press. "Draft with AI" has no draft to sit beside
+                    and is the only way forward, so it stays the heavy one.
+                  */
+                  tone={data.draft?.body ? "quiet" : "solid"}
                   disabled={waiting || reconcileActive}
                   onClick={() => {
                     if (waiting) return;
@@ -2666,57 +2853,71 @@ function StoryPage() {
                         ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
                         : "Drafting…"
                       : data.draft?.body
-                        ? "Redraft"
+                        ? /*
+                            The drawn ellipsis, aria-hidden so the press's
+                            accessible name stays exactly "Redraft" -- the walks
+                            ask for it by that name.
+                          */
+                          <>
+                            Redraft
+                            <span aria-hidden="true">…</span>
+                          </>
                         : "Draft with AI"}
                 </InkButton>
               </>
             ) : null}
-            {data.draft && !locked && !onPaper ? (
-              <>
-                <InkButton
-                  tone="ghost"
-                  disabled={save.isPending || reconcileActive}
-                  onClick={() => save.mutate()}
-                >
-                  Save edits
-                </InkButton>
-                <DraftReconcileControl
-                  status={reconcileStatus.data}
-                  active={reconcileActive}
-                  disabled={waiting || reconcileActive || savePending || hasUnsavedDraftEdits}
-                  dirty={hasUnsavedDraftEdits}
-                  note={reconcileNote}
-                  noteError={reconcileNoteError}
-                  noteWarning={reconcileNoteWarning}
-                  checkedDraftReady={checkedDraftReady}
-                  checkedDraftStale={checkedDraftStale}
-                  modelLabel={modelChoiceLabel(reconcileStatus.data?.modelChoice ?? modelChoice)}
-                  review={evidenceReview}
-                  reviewOpen={evidenceReviewOpen}
-                  onStart={() => reconcile.mutate()}
-                  onReload={() => {
-                    const resultDraftId = reconcileStatus.data?.resultDraftId;
-                    if (!resultDraftId) return;
-                    const originalDraftId = reconcileStatus.data?.draftId;
-                    if (!originalDraftId) return;
-                    setEvidenceReviewOpen(true);
-                    void applyCheckedDraft(resultDraftId, originalDraftId, undefined, true).catch((cause) => {
-                      setReconcileNote(
-                        editorActionError(
-                          cause instanceof Error ? cause.message : "",
-                          "load the checked draft",
-                        ) ?? "The checked draft could not be loaded.",
-                      );
-                      setReconcileNoteError(true);
-                      setReconcileNoteWarning(false);
-                    });
-                  }}
-                  onKeepChecked={keepCheckedVersion}
-                  onRestoreOriginal={restoreOriginalVersion}
-                />
-              </>
+            {body ? (
+              <InkButton
+                tone="quiet"
+                onClick={() => {
+                  setPreviewSeen(true);
+                  preview.current?.showModal();
+                }}
+              >
+                Preview as reader
+              </InkButton>
+            ) : null}
+            <a className="btn astra-checks-jump" href="#story-inspector">
+              Checks & sources
+            </a>
+            {/*
+              Unit BH2 decision 6: the drawn `dialog-12-compare.png`, opened by a
+              press of its own. It only exists once an evidence check has left two
+              versions behind -- before that there is nothing to compare, and the
+              inline "Evidence check results" panel in the inspector still holds
+              the same two decisions for anyone who reads it there.
+            */}
+            {evidenceReview ? (
+              <InkButton tone="quiet" onClick={() => setCompareVersionsOpen(true)}>
+                Compare versions
+              </InkButton>
+            ) : null}
+            {/*
+              Unit AK item 5: the press that opens the side-by-side view. It used
+              to be a link on the Queue that opened the other lead's page, which
+              had no comparison on it at all.
+            */}
+            {comparePair ? (
+              <button
+                className="btn"
+                type="button"
+                aria-expanded={compareShown}
+                aria-controls="lead-compare"
+                onClick={() => setCompareOpen(!compareShown)}
+              >
+                Compare
+              </button>
             ) : null}
           </div>
+          {/*
+            The evidence check's own block, under the row: its progress, its
+            dirty note, its finished notice and the review panel. The drawing
+            puts the job cards here, and the row above only has space for a
+            button. See `reconcileControlProps`.
+          */}
+          {data.draft && !locked && !onPaper ? (
+            <DraftReconcileControl {...reconcileControlProps} render="notes" />
+          ) : null}
           {/*
             "A full JobCard under the actions while a check or redraft runs"
             (phase 2b, item 1). Two cards, because this page runs two jobs: the

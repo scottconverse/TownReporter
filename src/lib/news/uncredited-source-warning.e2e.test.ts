@@ -157,7 +157,9 @@ async function confirmSection(page: Page) {
   const saveState = page.locator(".astra-save-state");
   if ((await saveState.filter({ hasText: "Unsaved changes" }).count()) > 0) {
     await page.getByRole("button", { name: "Save edits", exact: true }).click();
-    await saveState.filter({ hasText: "Saved draft" }).waitFor({ timeout: 45_000 });
+    // `/^Saved/` and not "Saved": a string in `hasText` is a case-insensitive
+    // substring, and the save line now reads "Saved 8:20 a.m." -- see unit CW.
+    await saveState.filter({ hasText: /^Saved/ }).waitFor({ timeout: 45_000 });
   }
   await page.waitForFunction(
     () =>
@@ -205,9 +207,9 @@ describe("the uncredited-source publish warning, rendered", () => {
     }
 
     await page.goto(`${BASE_URL}/desk/story/${leadId}`, { waitUntil: "domcontentloaded" });
-    await page.getByLabel("Body").waitFor();
+    await page.getByLabel("Story", { exact: true }).waitFor();
     assert.equal(
-      await page.getByLabel("Body").inputValue(),
+      await page.getByLabel("Story", { exact: true }).inputValue(),
       UNCREDITED_BODY,
       "the seeded draft body never loaded into the workbench",
     );
@@ -229,7 +231,7 @@ describe("the uncredited-source publish warning, rendered", () => {
     // Naming the outlet in the body, live, must clear the warning without
     // re-arming Publish -- `uncredited` is derived from React state on every
     // render, not re-fetched from the draft row on disk.
-    await page.getByLabel("Body").fill(CREDITED_BODY);
+    await page.getByLabel("Story", { exact: true }).fill(CREDITED_BODY);
     await page
       .getByText(new RegExp(`The body never names ${OUTLET_NAME}`))
       .waitFor({ state: "detached", timeout: 15_000 });

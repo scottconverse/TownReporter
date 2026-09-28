@@ -61,10 +61,10 @@ try {
   const url = page.getByLabel(/source|link|url/i).first();
   await url.fill(SOURCE);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("filed a lead carrying a source URL");
 
-  await page.getByLabel("Body").fill(
+  await page.getByLabel("Story", { exact: true }).fill(
     "The water board posted the Kimbark packet on Tuesday. A hearing follows on the 14th.",
   );
   await page.getByRole("button", { name: /^Save/ }).first().click();

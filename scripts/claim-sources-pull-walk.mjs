@@ -348,7 +348,7 @@ async function fileTheLead() {
   await page.getByLabel("Why now").fill("A claim in the packet needs its own source read.");
   await page.getByLabel(/source|link|url/i).first().fill(CLAIM_URL);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   step("filed a lead whose own source URL is the claim's");
 }
 

@@ -259,7 +259,7 @@ async function fileTwoLeads() {
     await page.getByLabel("Why now").fill("Filed by the batch-panel walk.");
     await page.getByRole("button", { name: "File lead" }).click();
     // Filing lands on the story workbench; the Queue is where the batch is run.
-    await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+    await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   }
   step("two leads are filed");
 }
@@ -293,9 +293,9 @@ async function printTheFirstStory() {
   const href = await row.locator("a.hl-link").getAttribute("href");
   assert.match(href ?? "", /^\/desk\/story\/\d+$/, "the row opens its story workbench");
   await row.locator("a.hl-link").click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   await page.getByLabel("Headline").fill(`Water tower inspection backlog ${stamp}`);
-  await page.getByLabel("Dek").fill("The city has not inspected the tower since 2019.");
+  await page.getByLabel("Summary").fill("The city has not inspected the tower since 2019.");
   /*
     The section a draft files under is read by a person before it prints, and a
     batch draft's section came from the model. Picking it here is that read.

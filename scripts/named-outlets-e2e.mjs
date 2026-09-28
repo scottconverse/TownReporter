@@ -138,11 +138,11 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
 
   await page.getByLabel("Headline").fill(headline);
-  await page.getByLabel("Dek").fill(why);
-  await page.getByLabel("Body").fill(body);
+  await page.getByLabel("Summary").fill(why);
+  await page.getByLabel("Story", { exact: true }).fill(body);
   // The section still has to be saved before the server will read the body
   // against the Sources -- the notice below is computed from the saved draft --
   // but the Publish button is down on purpose from here (0.6.67: pressing it

@@ -97,11 +97,11 @@ async function main() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
 
   await page.getByLabel("Headline").fill(headline);
-  await page.getByLabel("Dek").fill(why);
-  await page.getByLabel("Body").fill(body);
+  await page.getByLabel("Summary").fill(why);
+  await page.getByLabel("Story", { exact: true }).fill(body);
   /*
     The editor confirms the section before printing. The section the drafter
     picked is a claim about the story the same way its sources are, and the
