@@ -16,7 +16,7 @@
  */
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 const base = checkedUrl(process.env.SOURCES_BASE_URL || "http://127.0.0.1:3200").replace(/\/$/, "");
@@ -42,7 +42,6 @@ try {
   await page.getByLabel("Email").fill(process.env.E2E_DESK_EMAIL ?? `sources-${stamp}@townreporter.test`);
   await page.getByLabel("Password", { exact: true }).fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
   await page.getByLabel("Confirm password").fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
-  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);

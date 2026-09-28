@@ -12,38 +12,6 @@
   counts when its value SURVIVES a pause, and the save is retried once,
   because a submit clicked before hydration is a click into dead HTML.
 */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
-/** Same path `setup-code.ts` writes to -- see `dataRoot()`/`setupCodeFilePath()`. */
-export function pendingSetupCodePath() {
-  const root = process.env.TOWNREPORTER_DATA_ROOT?.trim() || join(process.cwd(), ".townreporter-data");
-  return join(root, "logs", "SETUP-CODE.txt");
-}
-
-/**
- * Unit CJ (0.6.80): fill the first-owner setup code if the login form is
- * showing the field. Test-only in the sense that it is only ever CALLED from
- * a walk script, but it reaches no special server code path at all -- it
- * reads the exact file a human operator is told to read
- * (`installer/Install.ps1`'s closing message), and types it into the exact
- * field a human operator would. There is nothing here for production to
- * "ignore": the server has no separate branch for this caller.
- */
-export async function fillPendingSetupCodeIfPresent(page) {
-  const field = page.getByLabel("Setup code", { exact: true });
-  if ((await field.count()) === 0) return;
-  let code = "";
-  try {
-    code = readFileSync(pendingSetupCodePath(), "utf8").trim();
-  } catch (err) {
-    throw new Error(
-      `Setup code field is showing but ${pendingSetupCodePath()} could not be read: ${err}`,
-    );
-  }
-  await field.fill(code);
-}
-
 export async function completeFirstRunSetup(page, base, opts = {}) {
   // An obviously-fake town, so "Longmont" in a test artifact always means a
   // real leak and never this fixture -- an audit lost time on exactly that.

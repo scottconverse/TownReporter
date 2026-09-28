@@ -16,7 +16,7 @@
   entirely to show the desk then refuses.
 */
 
-import { after, before, describe, it, mock } from "node:test";
+import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import type { PGlite } from "@electric-sql/pglite";
 import { getSql } from "../db.ts";
@@ -29,23 +29,8 @@ import {
   readMyDesk,
   requireEditor,
 } from "./membership.ts";
-import {
-  clearSetupCodeOverrideForTests,
-  forceSetupCodeSatisfiedForTests,
-} from "./setup-code.ts";
 
 const CLAIMANTS = ["race-a", "race-b", "race-c", "race-d"];
-
-/*
-  Unit CJ (0.6.80) added a setup-code gate in front of `requireEditor`'s
-  auto-claim, which this file predates: every test here wants a plain race
-  or index test on a truly fresh desk, with no code in the picture at all.
-  The override is process-global and test-only (see setup-code.ts) -- scoped
-  to this file's `before`/`after` so it cannot leak into another test file
-  that shares the same `node --test` process.
-*/
-before(() => forceSetupCodeSatisfiedForTests());
-after(() => clearSetupCodeOverrideForTests());
 
 /** The one PGlite instance this process's `getSql()` is pointed at. */
 function pgliteInstance(): Promise<PGlite> {

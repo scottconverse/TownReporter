@@ -2,7 +2,7 @@
 /** Browser regression for the Story workspace's model and research controls. */
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.STORY_CONTROLS_BASE_URL || "http://127.0.0.1:3491")
   .replace(/\/$/, "");
@@ -20,7 +20,6 @@ try {
   await page.getByLabel("Email").fill(`story-controls-${stamp}@townreporter.test`);
   await page.getByLabel("Password", { exact: true }).fill("story-controls-e2e-pass");
   await page.getByLabel("Confirm password").fill("story-controls-e2e-pass");
-  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor();
   await completeFirstRunSetup(page, base);

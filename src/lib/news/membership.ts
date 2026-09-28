@@ -24,23 +24,11 @@
 
   The trade, stated in the README: on a fresh public deployment the first
   person to reach /login owns the desk. Sign in first.
-
-  0.6.80 update: the operator asked for that window closed after all, with a
-  DIFFERENT mechanism than the one removed above -- a fresh, per-install,
-  one-time code (see setup-code.ts), never shipped with the product, stored
-  only as a hash, rate-limited, and burned on use. It is not a return of the
-  shared secret this file argues against: there is nothing to guess (80 bits,
-  generated at boot), nothing to carry for the product's lifetime (one install,
-  one code, gone after first use), and an install that already has an owner
-  never has one pending. `requireEditor` below asks setup-code.ts one question
-  -- is a code pending? -- and refuses to auto-claim while the answer is yes;
-  only `claim.ts`'s explicit, code-verified path may claim past that gate.
 */
 
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import type { Sql } from "../db.ts";
 import { deskTakenLoginCopy } from "./desk-copy.ts";
-import { isSetupCodeRequired } from "./setup-code.ts";
 
 export const DEFAULT_NEWSROOM_ID = 1;
 
@@ -227,22 +215,8 @@ export async function claimFirstOwner(userId: string): Promise<EditorContext | n
   });
 }
 
-/**
- * First signed-in user on an empty desk becomes owner. Later identities are 403.
- *
- * `bypassSetupCodeGate` is set ONLY by `claim.ts`'s `claimDeskWithCode`, after
- * it has already verified the caller's setup code through `setup-code.ts`.
- * Every other caller -- `deskMiddleware`, every desk route -- calls this with
- * no second argument, so simply visiting `/desk` can never silently claim an
- * unclaimed desk while a setup code is pending (Unit CJ, 0.6.80). On an
- * install that never had a pending code (the live paper, any install that
- * already has an owner), `isSetupCodeRequired()` is false and this behaves
- * exactly as before.
- */
-export async function requireEditor(
-  userId: string,
-  opts?: { bypassSetupCodeGate?: boolean },
-): Promise<EditorContext> {
+/** First signed-in user on an empty desk becomes owner. Later identities are 403. */
+export async function requireEditor(userId: string): Promise<EditorContext> {
   const oneOwnerIndex = await ensureNewsroomSchema();
   const sql = await getSql();
   const mine = await sql<{ role: string; newsroom_id: number }>`
@@ -251,8 +225,7 @@ export async function requireEditor(
   if (mine[0]?.role === "owner" || mine[0]?.role === "editor") {
     return { role: mine[0].role, newsroomId: mine[0].newsroom_id ?? DEFAULT_NEWSROOM_ID };
   }
-  const gateOpen = Boolean(opts?.bypassSetupCodeGate) || !(await isSetupCodeRequired());
-  if (oneOwnerIndex && gateOpen) {
+  if (oneOwnerIndex) {
     try {
       const claimed = await claimFirstOwner(userId);
       if (claimed) return claimed;
@@ -281,12 +254,6 @@ export async function requireEditor(
     throw new ForbiddenError(
       "This desk cannot hand out an owner right now: its one-owner index is missing. " +
         "The server log names what to repair.",
-    );
-  }
-  if (!gateOpen) {
-    throw new ForbiddenError(
-      "This desk requires the one-time setup code before anyone can become its owner. " +
-        "Enter it on the sign-in page.",
     );
   }
   throw new ForbiddenError();

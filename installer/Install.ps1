@@ -166,25 +166,6 @@ if ($nativeExit -ne 0) { throw "Build failed. No new app was started. Read $Data
 if ($LASTEXITCODE -ne 0) { throw 'Build identity could not be recorded.' }
 & "$PSScriptRoot\Start.ps1" -DataRoot $DataRoot -NoBrowser:$NoBrowser
 Write-Host "Installed. Your persistent data and logs are in $DataRoot"
-# Unit CJ (0.6.80): a fresh, ownerless desk generates a one-time setup code at
-# boot (see src/lib/news/setup-code.ts) and only the account that types it can
-# become the owner. Start.ps1 has already waited for readiness above, so the
-# file is there by now on a truly fresh install. An install that already had
-# an owner (an upgrade, or a re-run of Install.ps1 on existing data) never
-# writes this file -- silently correct, nothing to print.
-$setupCodePath = Join-Path $DataRoot 'logs\SETUP-CODE.txt'
-if (Test-Path -LiteralPath $setupCodePath) {
-  $setupCode = (Get-Content -LiteralPath $setupCodePath -Raw).Trim()
-  Write-Host ''
-  Write-Host '=========================================================='
-  Write-Host "  FIRST-OWNER SETUP CODE (one time): $setupCode"
-  Write-Host "  Also saved at: $setupCodePath"
-  Write-Host '  You will be asked for this code when you create the'
-  Write-Host '  first editor account in the browser. It is deleted once'
-  Write-Host '  used, and this message will not be shown again.'
-  Write-Host '=========================================================='
-  Write-Host ''
-}
 Write-Host 'Create your editor account in the browser, name your paper, then run Configure AI.cmd or sign in to a supported AI provider on the Server page.'
 
 } finally { $lifecycle.ReleaseMutex(); $lifecycle.Dispose() }

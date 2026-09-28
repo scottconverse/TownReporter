@@ -5,13 +5,7 @@ import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inputClass } from "@/components/desk-chrome-utils";
 import { inkGhost, inkSolid } from "@/components/desk-chrome-utils";
 import { usePaper } from "@/lib/paper-context-state";
-import {
-  acceptEditorInvite,
-  claimDeskWithCode,
-  deskClaimState,
-  inviteState,
-  redeemMyRecoveryCode,
-} from "@/lib/news/claim";
+import { acceptEditorInvite, deskClaimState, inviteState } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -82,10 +76,6 @@ function Login() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [name, setName] = useState("");
-  // Unit CJ (0.6.80): the first-owner setup code. Only rendered/required when
-  // `claim.data.tokenRequired` is true -- a fresh install with a pending
-  // code. An install that already has an owner never shows this field.
-  const [setupCode, setSetupCode] = useState("");
   const claim = useQuery({ queryKey: ["desk-claim"], queryFn: () => deskClaimState() });
   const claimed = claim.isError || Boolean(claim.data?.claimed);
   /*
@@ -150,31 +140,18 @@ function Login() {
   async function finishEmail(data?: unknown, headers?: Headers | null) {
     storePreviewBearer(tokenFromResult(data, headers));
     await authClient.getSession();
+    /*
+      No claim call here any more. The setup token is gone (see
+      membership.ts), and first-account-owns is `requireEditor`'s job on the
+      first desk request. Calling claimDesk from the form was only ever the
+      token path.
+    */
     if (invited && invite) {
       // Burn the invite and take the editor seat before the desk asks who we are.
       const seated = await acceptEditorInvite({ data: invite });
       if (!seated.ok) {
         setBusy(null);
         setError(seated.error);
-        return;
-      }
-    } else if (!claimed) {
-      // Covers both a fresh signup AND the documented retry path ("submit
-      // again with the same email and password" after a signup whose claim
-      // call did not complete) -- either way the desk is still unclaimed, so
-      // this is the explicit, code-checked attempt to claim it.
-      /*
-        Unit CJ (0.6.80): the desk no longer auto-claims itself just because
-        an account was created and the account fell through to /desk --
-        `requireEditor` refuses to hand out an owner while a setup code is
-        pending. This is the one explicit call allowed to claim through that
-        gate (or, when no code is pending -- every existing install -- to
-        claim exactly as before).
-      */
-      const claimResult = await claimDeskWithCode({ data: setupCode });
-      if (!claimResult.ok) {
-        setBusy(null);
-        setError(claimResult.error);
         return;
       }
     }
@@ -224,10 +201,6 @@ function Login() {
     }
     if (password !== confirm) {
       setError("Passwords do not match.");
-      return;
-    }
-    if (claim.data?.tokenRequired && !invited && setupCode.trim().length === 0) {
-      setError("Enter the setup code printed when this desk was installed.");
       return;
     }
     setBusy("email-up");
@@ -389,33 +362,6 @@ function Login() {
               />
             </label>
           ) : null}
-          {mode === "create" && !invited && claim.data?.tokenRequired ? (
-            <label className="block text-sm">
-              Setup code
-              <input
-                className={inputClass + " mt-1"}
-                autoComplete="off"
-                autoCapitalize="characters"
-                required
-                value={setupCode}
-                onChange={(e) => setSetupCode(e.target.value)}
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                aria-describedby="setup-code-hint"
-              />
-            </label>
-          ) : null}
-          {mode === "create" && !invited && claim.data?.tokenRequired ? (
-            // Kept OUTSIDE the <label> above on purpose: text inside a
-            // <label> becomes part of the field's accessible name, which
-            // would make `getByLabel("Setup code", { exact: true })` -- the
-            // same lookup the walk scripts and this file's own tests use --
-            // stop matching. `aria-describedby` still associates it for
-            // assistive tech, same shape as the invite email hint above.
-            <span id="setup-code-hint" className="-mt-1.5 block text-xs text-muted">
-              Printed once at install, in the server log and in the data
-              folder&rsquo;s <code>logs/SETUP-CODE.txt</code>.
-            </span>
-          ) : null}
           <p className="text-xs text-muted">At least 8 characters. Stored only on this desk.</p>
           <div className="flex flex-col gap-2">
             <button type="submit" disabled={busy !== null} className={inkSolid}>
@@ -443,8 +389,6 @@ function Login() {
           </div>
         </form>
         )}
-
-        {mode === "signin" && !claim.isPending ? <RecoveryCodeSignIn /> : null}
 
         {showGrokOAuth() && !claim.isPending ? (
           <div className="space-y-2 border-t border-rule pt-4">
@@ -489,86 +433,5 @@ function Login() {
         </Link>
       </div>
     </main>
-  );
-}
-
-/**
- * "I lost this setup code" for the owner who cannot sign in at all any more
- * (Unit CJ, 0.6.80). Deliberately unauthenticated on the server side --
- * `redeemMyRecoveryCode` -- because signing in is exactly what this screen
- * exists for when it is impossible. Success sets a one-time temporary
- * password on the owner's own account and shows it once; it does not sign
- * anyone in automatically.
- */
-function RecoveryCodeSignIn() {
-  const [open, setOpen] = useState(false);
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className="text-sm text-muted underline"
-        onClick={() => setOpen(true)}
-      >
-        Lost your password? Use a recovery code.
-      </button>
-    );
-  }
-
-  return (
-    <div className="space-y-2 border-t border-rule pt-4">
-      <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Recovery code</p>
-      {tempPassword ? (
-        <div className="border border-rule bg-paper-2 p-3 text-sm">
-          <p>
-            One-time temporary password: <span className="font-mono">{tempPassword}</span>
-          </p>
-          <p className="mt-2 text-muted">
-            Sign in with it above, then change your password from the desk.
-          </p>
-        </div>
-      ) : (
-        <>
-          <label className="block text-sm">
-            Recovery code
-            <input
-              className={inputClass + " mt-1"}
-              autoComplete="off"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="XXXX-XXXX"
-            />
-          </label>
-          {error ? <p className="text-sm text-rust">{error}</p> : null}
-          <button
-            type="button"
-            disabled={busy || !code.trim()}
-            className={inkGhost}
-            onClick={async () => {
-              setBusy(true);
-              setError(null);
-              try {
-                const result = await redeemMyRecoveryCode({ data: code });
-                if (!result.ok) {
-                  setError(result.error);
-                } else {
-                  setTempPassword(result.tempPassword);
-                }
-              } catch (err) {
-                setError(failMessage(err, "That did not work."));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? "Checking…" : "Use this code"}
-          </button>
-        </>
-      )}
-    </div>
   );
 }

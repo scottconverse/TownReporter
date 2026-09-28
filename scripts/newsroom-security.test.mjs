@@ -301,13 +301,6 @@ test("every server function in src/ is gated, or is named on the public allowlis
     // yet. Takes an unguessable 64-hex token, compares only its hash, and
     // reveals nothing about any address unless the token itself is valid.
     "src/lib/news/claim.ts::inviteState",
-    // Unit CJ (0.6.80): redeeming an owner recovery code. Deliberately
-    // public -- the owner calling this has, by definition, lost the ability
-    // to sign in at all, so there is no session to gate it on. Rate-limited
-    // by IP (5/15min, `recoveryRedeemAttempts` in claim.ts) before the code
-    // is even looked up, and the code itself is a 40-bit-per-group secret
-    // compared only by hash, one-time, burned on first use.
-    "src/lib/news/claim.ts::redeemMyRecoveryCode",
     // The public evidence trail behind a published story -- readable by anyone
     // who can read the story itself.
     "src/lib/news/evidence.ts::getPublicEvidence",
