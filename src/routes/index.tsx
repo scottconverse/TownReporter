@@ -15,6 +15,7 @@ import { readerArticles } from "@/lib/news/reader-public";
 import { thisWeekDates } from "@/lib/news/story-dates-public";
 import { storyDateRows } from "@/lib/story-dates";
 import { opinionHeadlineDisplay } from "@/lib/news/editorial";
+import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
 import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
@@ -403,7 +404,7 @@ function Home() {
                       {lead.headline}
                     </Link>
                   </h2>
-                  <p className="dek">{lead.dek}</p>
+                  <p className="dek">{dekOrFallback(lead.dek, lead.body)}</p>
                   <div className="meta">
                     <span>{formatShortDate(lead.published_at)}</span>
                     <span className="dot" />
@@ -515,7 +516,7 @@ function Home() {
                     */}
                     <h3>{opinionHeadlineDisplay(featuredOpinion.headline)}</h3>
                   </Link>
-                  <p>{featuredOpinion.dek}</p>
+                  <p>{dekOrFallback(featuredOpinion.dek, featuredOpinion.body)}</p>
                   <Link className="textlink" to="/" search={{ topic: "opinion" }}>
                     All opinion <ArrowRight aria-hidden />
                   </Link>
