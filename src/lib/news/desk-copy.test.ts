@@ -1129,10 +1129,17 @@ describe("the Server page tells a point-and-click operator what its buttons do",
    * Paper setup Save, Invite an editor, or Give up the desk actually do.
    * Does it warn you? Where does the invited person put this code?" These
    * are source-shape checks -- there is no request whose response is "the
-   * words on the Server page" -- reading desk.ops.tsx directly is the
-   * check. No database needed, so it always runs.
+   * words on the Server page" -- reading the source of the cards directly
+   * is the check. No database needed, so it always runs.
+   *
+   * Unit CX2 moved these three editors off `/desk/ops` and behind the cards'
+   * own screens at `/desk/ops/<card>`; the components live in
+   * `src/components/ops-panels.tsx` now, and Paper setup and Invite an editor
+   * picked up the `-Panel` suffix their neighbours already had. The copy under
+   * test did not change -- only the file it is written in did -- so this check
+   * follows the copy rather than the file it used to be in.
    */
-  const ops = readFileSync(new URL("../../routes/desk.ops.tsx", import.meta.url), "utf8");
+  const ops = readFileSync(new URL("../../components/ops-panels.tsx", import.meta.url), "utf8");
   // JSX text wraps across source lines the way the paragraphs above are
   // written; the browser collapses that whitespace when it renders, so the
   // check does the same rather than requiring every phrase to fall on one
@@ -1141,7 +1148,7 @@ describe("the Server page tells a point-and-click operator what its buttons do",
 
   it("Paper setup explains what Save writes, and answers the watch-list question truthfully", () => {
     const block = flatten(
-      ops.slice(ops.indexOf("function PaperSetup("), ops.indexOf("function InviteAnEditor(")),
+      ops.slice(ops.indexOf("function PaperSetupPanel("), ops.indexOf("function DarkDeskCounty(")),
     );
     for (const phrase of [
       "writes every field",
@@ -1157,7 +1164,7 @@ describe("the Server page tells a point-and-click operator what its buttons do",
 
   it("Invite an editor says up front that nothing gets emailed", () => {
     const block = flatten(
-      ops.slice(ops.indexOf("function InviteAnEditor("), ops.indexOf("function GiveUpTheDesk(")),
+      ops.slice(ops.indexOf("function InviteAnEditorPanel("), ops.indexOf("function RecoveryCodesPanel(")),
     );
     assert.ok(
       block.includes("does not send email"),
@@ -1167,7 +1174,7 @@ describe("the Server page tells a point-and-click operator what its buttons do",
 
   it("Invite an editor says what happens once the person has the link", () => {
     const block = flatten(
-      ops.slice(ops.indexOf("function InviteAnEditor("), ops.indexOf("function GiveUpTheDesk(")),
+      ops.slice(ops.indexOf("function InviteAnEditorPanel("), ops.indexOf("function RecoveryCodesPanel(")),
     );
     assert.ok(
       block.includes("What happens next"),
