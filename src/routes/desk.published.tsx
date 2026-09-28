@@ -1,19 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useDeferredValue, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   addCorrection,
   deleteArticle,
   listMemory,
-  listPublishedDesk,
+  listPublishedDeskPage,
   resolveMeetingArticleReview,
   suggestCorrectionTemplate,
   suggestCorrectionWording,
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import { editorActionError } from "@/lib/news/desk-copy";
+import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { getViewStatsFn } from "@/lib/news/views";
 import { myDesk } from "@/lib/news/claim";
 import { restoreTrashItem } from "@/lib/news/trash";
@@ -25,7 +26,43 @@ function PublishedPage() {
   const { formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const deskRole = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
-  const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
+  // Which of the design's four filters is on. "All" is the list as it was.
+  const [pubFilter, setPubFilter] = useState<"all" | "week" | "corrections" | "opinion">("all");
+  const [pubQuery, setPubQuery] = useState("");
+  /*
+    How much of the list is asked for, and growing by one page per press. The
+    real desk holds more published stories than the drawing ever saw (214 rows,
+    17,615 px of them), so the screen asks the server for 25 at a time instead of
+    fetching and drawing every one. `pubShown` is the whole window from the top
+    -- "Show 25 more" widens it rather than fetching the next page into a second
+    place -- which keeps the rows already on screen where the reader left them.
+  */
+  const [pubShown, setPubShown] = useState(PAGE_SIZE);
+  /*
+    The search box is deferred so a fast typist does not fire a request per
+    keystroke: the box keeps up with the typing and the query follows a beat
+    behind. It has to be a request at all because the filter runs before the
+    window is cut -- searching only the 25 rows already drawn would report no
+    matches for a story that is simply further down the list.
+  */
+  const deferredPubQuery = useDeferredValue(pubQuery);
+  /*
+    The window, not the list. The key carries the filter, the search and how far
+    the reader has opened it, so each combination is cached on its own and going
+    back to a filter already looked at is instant; `keepPreviousData` holds the
+    rows on screen while the next window is in flight, so pressing a pill or
+    typing does not blank the table. The bare `["published-desk"]` prefix is
+    still the invalidation key every other screen uses, and a prefix match still
+    catches this one.
+  */
+  const published = useQuery({
+    queryKey: ["published-desk", pubFilter, deferredPubQuery, pubShown],
+    queryFn: () =>
+      listPublishedDeskPage({
+        data: { limit: pubShown, offset: 0, filter: pubFilter, search: deferredPubQuery },
+      }),
+    placeholderData: keepPreviousData,
+  });
   const {
     isError: pubIsError,
     error: pubError,
@@ -83,9 +120,6 @@ function PublishedPage() {
   const [undo, setUndo] = useState<number | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<number, string>>({});
   const [reviewChecks, setReviewChecks] = useState<Record<number, number[]>>({});
-  // Which of the design's four filters is on. "All" is the list as it was.
-  const [pubFilter, setPubFilter] = useState<"all" | "week" | "corrections" | "opinion">("all");
-  const [pubQuery, setPubQuery] = useState("");
   /*
     Post the correction, and -- when the editor asked for it -- the story text
     that goes with it.
@@ -369,7 +403,11 @@ function PublishedPage() {
       }),
   });
 
-  const rows = published.data ?? [];
+  // The window the server sent: the rows to draw, how many matched in total,
+  // and what each pill counts over the whole list rather than over this page.
+  const rows = published.data?.rows ?? [];
+  const pubTotal = published.data?.total ?? 0;
+  const pubCounts = published.data?.counts;
   const transcriptReviews = rows.flatMap((article) => article.transcriptReviews.map((review) => ({
     id: review.id,
     headline: article.headline,
@@ -377,43 +415,18 @@ function PublishedPage() {
   })).filter((review) => review.status === "pending" || review.status === "correction-required"));
 
   /*
-    The four filters the design draws above the list.
+    The four filters the design draws above the list, and the search box beside
+    them, are decided in `src/lib/news/published-rows.ts`.
 
-    "Opinion" reads the row's `topic`, which is where an editorial's kind lands
-    on the printed article: `publishEditorial` writes `d.topic || "opinion"`
-    (opinion.ts:292) and every other writer of a published editorial writes the
-    literal "opinion" too, while a reported story's topic is its section. The
-    desk has no separate "is this an editorial" column on the printed row, and
-    adding one would be a migration for a filter, which the brief rules out.
-
-    "This week" is the last seven days against the row's own timestamp rather
-    than the paper's edition date, because that is what an editor means by it
-    when they are looking for what just went out.
+    They used to run here, over a list the screen had fetched whole, and they
+    moved for one reason: a 25-row window is only correct if the filter runs
+    BEFORE the page is cut, so the same predicates now run on the server. The
+    reasoning behind each one -- "Opinion" reading the row's `topic`, "This week"
+    measuring the last seven days against the row's own timestamp -- is recorded
+    there, beside the code that does it, and each has a test that needs no
+    database. What is left here is the window itself.
   */
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  /*
-    The design draws a search box beside the four filters. The list is already
-    on the page -- /desk/published loads published rows in one read -- so the
-    search is a filter over what is loaded, the same as the one on Sources, and
-    never a second round trip. Headline and the kicker above it are what an
-    editor has to hand when they are looking for a story they remember.
-  */
-  const pubNeedle = pubQuery.trim().toLowerCase();
-  const shownRows = rows.filter((p) => {
-    if (pubNeedle && !`${p.headline} ${p.topic ?? ""}`.toLowerCase().includes(pubNeedle)) {
-      return false;
-    }
-    switch (pubFilter) {
-      case "week":
-        return p.published_at != null && Date.parse(p.published_at) >= weekAgo;
-      case "corrections":
-        return p.corrections.length > 0;
-      case "opinion":
-        return (p.topic ?? "").trim().toLowerCase() === "opinion";
-      default:
-        return true;
-    }
-  });
+  const shownRows = rows;
 
   return (
     <DeskShell title="Published" kicker="The record of what printed" hideTitle>
@@ -503,9 +516,16 @@ function PublishedPage() {
           <div className="astra-toolbar">
             <div className="astra-seg" role="group" aria-label="Which stories to show">
               {(["all", "week", "corrections", "opinion"] as const).map((key) => {
+                /*
+                  Only "All" carries a number, which is how the drawing prints
+                  the row ("All · 214", the other three bare). It counts the
+                  whole list, not the page: a pill reading "All · 25" because 25
+                  is as many rows as are loaded is the bug the window would
+                  otherwise introduce.
+                */
                 const label =
                   key === "all"
-                    ? `All · ${rows.length}`
+                    ? `All · ${pubCounts?.all ?? rows.length}`
                     : key === "week"
                       ? "This week"
                       : key === "corrections"
@@ -999,6 +1019,35 @@ function PublishedPage() {
               </div>
             </div>
           ))}
+          {/*
+            The long-list footer. The real desk holds 214 published stories and
+            drawing every one made a 17,615 px page nobody designed; the screen
+            now asks the server for 25 at a time and this is where the reader
+            asks for the next 25.
+
+            Pagination is not drawn for any of the four lists -- the design only
+            ever showed short ones -- so this borrows the Queue's drawn footer
+            (see `.astra-list-foot`) and the button's words come from the brief
+            rather than the drawing, which says "Load more" on the one footer it
+            does draw. Both are recorded in SPEC-GAPS-0681.md.
+
+            It sits above the note below so the note stays the screen's last
+            word, where the drawing puts it.
+          */}
+          {pubTotal > 0 ? (
+            <div className="astra-list-foot">
+              <span>{showingLine(rows.length, pubTotal, "published stories")}</span>
+              {rows.length < pubTotal ? (
+                <button
+                  type="button"
+                  className="astra-list-more"
+                  onClick={() => setPubShown((n) => n + PAGE_SIZE)}
+                >
+                  Show {PAGE_SIZE} more
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {/*
             The drawing's line under the table (`desk-19-published-dark.png`
             prints it in the gap after the last row, above whatever follows).

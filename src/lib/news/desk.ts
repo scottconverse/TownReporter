@@ -26,6 +26,14 @@ import {
   sanitizePublicUrls,
 } from "./schema";
 import { reportAndDraft } from "./report";
+import { cleanListWindow, takeWindow } from "./list-window.ts";
+import {
+  PUBLISHED_FILTERS,
+  publishedFilterCounts,
+  publishedMatches,
+  publishedNeedle,
+  publishedWeekAgo,
+} from "./published-rows.ts";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea } from "../story-area.ts";
@@ -4409,62 +4417,95 @@ export const getDraftHistoryItem = createServerFn({ method: "GET" })
     };
   });
 
+async function queryPublishedRows(context: { newsroomId: number }): Promise<DeskPublishedRow[]> {
+  const sql = await getSql();
+  const arts = await sql<{
+    id: number;
+    slug: string;
+    headline: string;
+    dek: string;
+    topic: string;
+    published_at: string;
+    lead_id: number | null;
+    lead_score: number | null;
+    body: string | null;
+  }>`
+    select a.id, a.slug, a.headline, a.dek, a.topic, a.published_at, a.lead_id,
+      a.body, l.newsworthiness as lead_score
+    from articles a
+    left join leads l on l.id = a.lead_id
+    where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
+    order by a.published_at desc nulls last, a.id desc
+  `;
+  if (!arts.length) return [] as DeskPublishedRow[];
+  const corrs = await sql<{ article_id: number | null; body: string; created_at: string }>`
+    select article_id, body, created_at
+    from corrections
+    where newsroom_id = ${owned(context)} and article_id is not null
+    order by created_at asc
+  `;
+  const byArt = new Map<number, { date: string; body: string }[]>();
+  for (const c of corrs) {
+    if (c.article_id == null) continue;
+    const list = byArt.get(c.article_id) ?? [];
+    list.push({ date: c.created_at, body: c.body });
+    byArt.set(c.article_id, list);
+  }
+  const reviews = await loadPublishedMeetingReviews(sql, owned(context));
+  const reviewsByArticle = new Map<number, PublishedMeetingReview[]>();
+  for (const review of reviews) {
+    const list = reviewsByArticle.get(review.article.id) ?? [];
+    list.push(review);
+    reviewsByArticle.set(review.article.id, list);
+  }
+  return arts.map((a) => ({
+    ...a,
+    lead_score: a.lead_score == null ? null : Number(a.lead_score),
+    /*
+      `articles.body` is nullable in the schema and every path that publishes
+      writes it, but the desk must not hand a component a null where it
+      expects the story's words: an editor-opening box seeded from null would
+      read as "this story has no text".
+    */
+    body: String(a.body ?? ""),
+    corrections: byArt.get(a.id) ?? [],
+    transcriptReviews: reviewsByArticle.get(a.id) ?? [],
+  }));
+}
+
+/**
+ * The whole published list, for the readers that genuinely need all of it:
+ * the Queue's near-duplicate matching, `desk.legal-removals`' article picker,
+ * the import screen and Today. The Published SCREEN does not call this any
+ * more -- it calls `listPublishedDeskPage` below, which sends it 25 rows.
+ */
 export const listPublishedDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const sql = await getSql();
-    const arts = await sql<{
-      id: number;
-      slug: string;
-      headline: string;
-      dek: string;
-      topic: string;
-      published_at: string;
-      lead_id: number | null;
-      lead_score: number | null;
-      body: string | null;
-    }>`
-      select a.id, a.slug, a.headline, a.dek, a.topic, a.published_at, a.lead_id,
-        a.body, l.newsworthiness as lead_score
-      from articles a
-      left join leads l on l.id = a.lead_id
-      where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
-      order by a.published_at desc nulls last, a.id desc
-    `;
-    if (!arts.length) return [] as DeskPublishedRow[];
-    const corrs = await sql<{ article_id: number | null; body: string; created_at: string }>`
-      select article_id, body, created_at
-      from corrections
-      where newsroom_id = ${owned(context)} and article_id is not null
-      order by created_at asc
-    `;
-    const byArt = new Map<number, { date: string; body: string }[]>();
-    for (const c of corrs) {
-      if (c.article_id == null) continue;
-      const list = byArt.get(c.article_id) ?? [];
-      list.push({ date: c.created_at, body: c.body });
-      byArt.set(c.article_id, list);
-    }
-    const reviews = await loadPublishedMeetingReviews(sql, owned(context));
-    const reviewsByArticle = new Map<number, PublishedMeetingReview[]>();
-    for (const review of reviews) {
-      const list = reviewsByArticle.get(review.article.id) ?? [];
-      list.push(review);
-      reviewsByArticle.set(review.article.id, list);
-    }
-    return arts.map((a) => ({
-      ...a,
-      lead_score: a.lead_score == null ? null : Number(a.lead_score),
-      /*
-        `articles.body` is nullable in the schema and every path that publishes
-        writes it, but the desk must not hand a component a null where it
-        expects the story's words: an editor-opening box seeded from null would
-        read as "this story has no text".
-      */
-      body: String(a.body ?? ""),
-      corrections: byArt.get(a.id) ?? [],
-      transcriptReviews: reviewsByArticle.get(a.id) ?? [],
-    }));
+  .handler(({ context }) => queryPublishedRows(context));
+
+/**
+ * The Published screen's window (Unit CZ-long-lists).
+ *
+ * The real desk holds 214 printed stories -- 17,615 px of them, drawn as a list
+ * of seven. This returns the pill-and-search match cut to the page the editor
+ * has asked for, plus the true total and the pill counts, so the screen can say
+ * "Showing 25 of 214" and a pill can count the list rather than the page.
+ *
+ * The filter runs HERE, before the cut, which is why it lives in
+ * `published-rows.ts` as a named decision rather than inline in the route: a
+ * window cut before the filter would show whichever 25 rows happened to sort
+ * first instead of the 25 the editor asked for.
+ */
+export const listPublishedDeskPage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanListWindow(input, PUBLISHED_FILTERS, "all"))
+  .handler(async ({ context, data }) => {
+    const all = await queryPublishedRows(context);
+    const weekAgo = publishedWeekAgo(Date.now());
+    const needle = publishedNeedle(data.search);
+    const matched = all.filter((row) => publishedMatches(row, data.filter, needle, weekAgo));
+    const { rows, total } = takeWindow(matched, data.offset, data.limit);
+    return { rows, total, counts: publishedFilterCounts(all, weekAgo) };
   });
 
 /**

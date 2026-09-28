@@ -4788,6 +4788,47 @@
   color: var(--fg2);
   margin: 0;
 }
+/*
+  The long-list footer: "Showing 25 of 214 published stories" and the plain
+  "Show 25 more" button beside it.
+
+  Copied from the Queue's drawn footer (`Desk Screens.dc.html`), which is the
+  only one of the four lists the design draws a footer for: a
+  `justify-content:space-between` row, 15px in the second ink, with a 44px
+  bordered button on the right. The other three screens borrow it so one list
+  does not page differently from the next.
+
+  `.astra-list-more` is a button rather than the drawing's `<a href="#">` -- it
+  asks the server for more rows, it does not navigate -- but it keeps the
+  drawn box so it sits where the design puts it.
+*/
+.desk-ltr.astra .astra-list-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 16px;
+  font-size: calc(15px * var(--ts));
+  color: var(--fg2);
+}
+.desk-ltr.astra .astra-list-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 2px solid var(--fg);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: calc(15px * var(--ts));
+  font-weight: 700;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-list-more:hover {
+  background: var(--hover);
+}
 .desk-ltr.astra .astra-question {
   font-family: var(--fd);
   font-weight: 800;
