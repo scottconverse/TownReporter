@@ -84,7 +84,21 @@ try {
     .getByText(/The story changed after its evidence was gathered/)
     .waitFor({ timeout: 30_000 });
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
-  const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  /*
+    This label is on the page twice, and the assertion is the same one either
+    way: the evidence decision has to be reachable from the screen that says
+    Publish is off. Unit CT's drawn list of reasons carries it
+    (BeforeYouCanPublish, src/components/publish-blockers.ts:187), and so does
+    the notice this walk is about -- the one that links to #evidence-review --
+    at src/routes/desk.story.$leadId.tsx:2192. Both are the same mutation, the
+    `keep` press the evidence review itself calls. The press is scoped to that
+    notice (the element the walk already clicks the "Review claims and sources"
+    link out of, and the one the label was on before the reasons list existed),
+    so neither copy can shadow the other.
+  */
+  const confirmEvidence = page
+    .locator(".publish-blocked")
+    .getByRole("button", { name: "I checked: keep this evidence" });
   await confirmEvidence.waitFor({ state: "visible" });
   const originalViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });

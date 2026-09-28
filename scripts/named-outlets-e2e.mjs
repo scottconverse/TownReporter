@@ -158,7 +158,16 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   });
   const print = page.getByRole("button", { name: /^Publish in / });
   assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
-  await page.getByText("Deal with the named outlet first").waitFor();
+  /*
+    Unit CW replaced the old gate note ("Deal with the named outlet first") with
+    the drawn bar's own sentence -- the first reason, said as the press that
+    clears it (`publishGateNote`, src/lib/news/publish-blockers.ts:248, drawn as
+    "Review 1 name to publish." at `Desk Story.dc.html:183`). The assertion is
+    the one the walk always made -- printing is held down IN WORDS, and the
+    words name this draft's own reason -- so it now pins the drawn copy, which
+    is also the label on the "Override Denver Post" press the walk clicks next.
+  */
+  await page.getByText("Override Denver Post to publish.").waitFor({ timeout: 45_000 });
   step("printing is held down, in words, while Denver Post is named and uncovered");
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();
