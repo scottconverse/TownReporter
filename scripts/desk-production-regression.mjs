@@ -33,7 +33,7 @@ import { chromium } from "playwright";
 import pg from "pg";
 import { writeFileSync } from "node:fs";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import {
   assertNoMutatingRequests,
   assertNoSideEffects,
@@ -162,6 +162,7 @@ async function signIn() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base, { name: "ProdReg Ledger", city: "ProdRegville", state: "Wyoming" });

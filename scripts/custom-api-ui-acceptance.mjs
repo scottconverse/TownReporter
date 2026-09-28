@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 // Disposable in-memory built-server check. Never point this at a real newsroom.
 const base = process.env.CUSTOM_API_UI_BASE;
@@ -160,6 +160,7 @@ try {
   if (await create.count()) {
     await page.getByLabel("Name", { exact: true }).fill("Isolated API UI");
     await page.getByLabel("Confirm password", { exact: true }).fill("isolated-api-ui-only-2026");
+    await fillPendingSetupCodeIfPresent(page);
     await create.click();
   } else {
     await page.getByRole("button", { name: /Sign in/i }).click();

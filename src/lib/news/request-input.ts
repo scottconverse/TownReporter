@@ -73,6 +73,8 @@ export const LIMITS = {
   /** A URL the paper prints or fetches. */
   url: 500,
   email: 320,
+  /** Unit CJ (0.6.80): "XXXX-XXXX-XXXX-XXXX" typed by hand, dashes optional. */
+  setupCode: 40,
   watchlistEntries: 50,
   seedTitle: 200,
   channelOrKeywordEntries: 50,
@@ -797,6 +799,14 @@ export function cleanOrRaw<T>(schema: z.ZodType): (raw: unknown) => T {
 /** `String(v ?? "")`: junk already became "", so an oversize token does too. */
 export const claimToken = z.string().max(LIMITS.evidenceToken).catch("");
 export const claimEmail = z.string().max(LIMITS.email).catch("");
+/**
+ * Unit CJ (0.6.80): the first-owner setup code, typed with or without
+ * dashes. `setup-code.ts` normalizes and hashes it; this only bounds size
+ * before it reaches that check, same shape as `claimToken` above.
+ */
+export const setupCodeInput = z.string().max(LIMITS.setupCode).catch("");
+/** An owner recovery code, same bound rationale as `setupCodeInput`. */
+export const recoveryCodeInput = z.string().max(LIMITS.setupCode).catch("");
 
 /* --- desk.ts (29 rows) --------------------------------------------------- */
 

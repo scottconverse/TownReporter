@@ -34,7 +34,7 @@ import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { chromium } from "playwright";
 import { checkedUrl, checkedOutputPath } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /** This walk's own port, above the range the e2e walks register. */
 const PORT_STATS_SHOTS = 8098;
@@ -308,6 +308,7 @@ async function signIn(page) {
   if (fresh) {
     await page.getByLabel("Name").fill("Stats Shots Owner");
     await page.getByLabel("Confirm password").fill(PASSWORD);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();

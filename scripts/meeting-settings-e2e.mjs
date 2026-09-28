@@ -5,6 +5,7 @@
 */
 import { chromium } from "playwright";
 import { Client } from "pg";
+import { fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = (process.env.N1_BASE_URL || "http://127.0.0.1:3500").replace(/\/$/, "");
 const dbUrl = process.env.DATABASE_URL;
@@ -42,6 +43,7 @@ try {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45000 });
   step("owner created");

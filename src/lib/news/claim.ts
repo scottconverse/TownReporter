@@ -1,3 +1,4 @@
+import { getRequest } from "@tanstack/react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "../db.ts";
@@ -8,16 +9,46 @@ import {
   createInvite,
   deskIsClaimed,
   readMyDesk,
+  requireEditor,
   ForbiddenError,
   leaveAsEditor,
 } from "./membership";
-import { claimEmail, claimToken } from "./request-input.ts";
+import { claimEmail, claimToken, recoveryCodeInput, setupCodeInput } from "./request-input.ts";
+import { burnSetupCode, isSetupCodeRequired, verifySetupCode } from "./setup-code.ts";
+import {
+  generateRecoveryCodes,
+  recoveryCodesRemaining,
+  redeemRecoveryCode,
+} from "./recovery-codes.ts";
+import { createAccountLockout } from "@/lib/auth/account-lockout.server";
+import { audit } from "./ops.ts";
+
+/**
+ * The IP the setup-code and recovery-code throttles key on -- same headers
+ * `src/lib/auth/server.ts` already documents for the sign-in throttle
+ * (`cf-connecting-ip` from the Cloudflare Tunnel edge, `x-forwarded-for` as
+ * the fallback for any other front end). Neither caller here has a session
+ * yet, so there is no user id to key on instead.
+ */
+function callerIp(): string {
+  try {
+    const headers = getRequest().headers;
+    return (
+      headers.get("cf-connecting-ip")?.trim() ||
+      headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "unknown"
+    );
+  } catch {
+    return "unknown";
+  }
+}
 
 export const deskClaimState = createServerFn({ method: "GET" }).handler(async () => {
-  // tokenRequired stays in the shape, always false: the setup token is gone
-  // (see membership.ts). Kept so an older client bundle cannot crash on a
-  // missing field mid-deploy.
-  return { claimed: await deskIsClaimed(), tokenRequired: false };
+  // tokenRequired now answers for real (Unit CJ, 0.6.80): true only while a
+  // fresh install has a pending, unconsumed setup code. An install that
+  // already has an owner -- the live paper included -- never has one, so
+  // this stays false there exactly as it always has.
+  return { claimed: await deskIsClaimed(), tokenRequired: await isSetupCodeRequired() };
 });
 
 /** Signed-in visitor's desk role. Does not auto-claim. */
@@ -33,6 +64,47 @@ export const claimDesk = createServerFn({ method: "POST" })
   .validator((token: unknown) => claimToken.parse(token))
   .handler(async ({ context }) => {
     try {
+      const editor = await claimOwner(context.userId);
+      return { ok: true as const, role: editor.role, newsroomId: editor.newsroomId };
+    } catch (err) {
+      if (err instanceof ForbiddenError) {
+        return { ok: false as const, error: err.message };
+      }
+      throw err;
+    }
+  });
+
+/**
+ * Claim an unclaimed desk THROUGH the first-owner setup code (Unit CJ, 0.6.80).
+ *
+ * The one path allowed to claim while `isSetupCodeRequired()` is true:
+ * verify the typed code (rate-limited, 5/15min per IP -- `setup-code.ts`),
+ * and only on a match call `requireEditor(userId, { bypassSetupCodeGate: true
+ * })`, which still runs the same one-transaction, index-backed claim
+ * `claimOwner` always has. `burnSetupCode()` runs only AFTER that call
+ * returns successfully, never merely for typing the code correctly -- if
+ * `requireEditor` throws (this request lost the race to claim the desk), the
+ * catch below turns it into a plain refusal and the code is left untouched,
+ * so a caller who lost the race has not burned a code that never bought
+ * anything.
+ *
+ * When no code is pending (`isSetupCodeRequired()` is false -- nothing to
+ * verify, including every existing install with an owner already) this falls
+ * straight through to the ordinary `claimOwner`, so it is safe to call
+ * unconditionally from the login form regardless of which mode the desk is in.
+ */
+export const claimDeskWithCode = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((code: unknown) => setupCodeInput.parse(code))
+  .handler(async ({ context, data: code }) => {
+    try {
+      if (await isSetupCodeRequired()) {
+        const check = await verifySetupCode(code, callerIp());
+        if (!check.ok) return { ok: false as const, error: check.reason };
+        const editor = await requireEditor(context.userId, { bypassSetupCodeGate: true });
+        await burnSetupCode();
+        return { ok: true as const, role: editor.role, newsroomId: editor.newsroomId };
+      }
       const editor = await claimOwner(context.userId);
       return { ok: true as const, role: editor.role, newsroomId: editor.newsroomId };
     } catch (err) {
@@ -128,4 +200,80 @@ export const acceptEditorInvite = createServerFn({ method: "POST" })
       if (err instanceof ForbiddenError) return { ok: false as const, error: err.message };
       throw err;
     }
+  });
+
+/*
+  Owner recovery codes (Unit CJ, 0.6.80). Mechanics in recovery-codes.ts;
+  this is the RPC boundary: owner-only for minting/counting, and the
+  redemption call is the one deliberately-public exception (see the
+  allowlist comment in `scripts/newsroom-security.test.mjs`) because the
+  owner asking for it has, by definition, lost the ability to sign in.
+*/
+
+const recoveryRedeemAttempts = createAccountLockout({ maxAttempts: 5, windowSeconds: 900 });
+
+/** Owner-only: mint a fresh set of 10 codes, invalidating the old set. */
+export const regenerateRecoveryCodes = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const me = await requireEditor(context.userId);
+    if (me.role !== "owner") {
+      throw new ForbiddenError("Only the owner can generate recovery codes.");
+    }
+    const codes = await generateRecoveryCodes(me.newsroomId);
+    await audit(
+      context.userId,
+      "recovery-codes-regenerated",
+      `${codes.length} new codes minted`,
+      me.newsroomId,
+    );
+    return { codes };
+  });
+
+/** Owner-only: how many of the current set are still unused. Never the codes themselves. */
+export const myRecoveryCodesStatus = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const me = await requireEditor(context.userId);
+    if (me.role !== "owner") {
+      throw new ForbiddenError("Only the owner can see recovery-code status.");
+    }
+    return { remaining: await recoveryCodesRemaining(me.newsroomId) };
+  });
+
+/**
+ * Redeem a recovery code. Deliberately unauthenticated: this exists for the
+ * owner who cannot sign in at all any more. Rate-limited by IP (5/15min,
+ * same shape as the sign-in throttle in `account-lockout.server.ts`) before
+ * the code is even looked up, so this cannot be used to grind the hash space.
+ *
+ * On success this does NOT sign the caller in -- it sets a fresh one-time
+ * temporary password on the owner's account and hands it back once. The
+ * owner still has to go sign in with it, same as they would with any
+ * password, and is expected to change it from the desk afterward.
+ */
+export const redeemMyRecoveryCode = createServerFn({ method: "POST" })
+  .validator((code: unknown) => recoveryCodeInput.parse(code))
+  .handler(async ({ data: code }) => {
+    const ip = callerIp();
+    const decision = recoveryRedeemAttempts.check(ip);
+    if (decision.blocked) {
+      const minutes = Math.max(1, Math.ceil(decision.retryAfterSeconds / 60));
+      return {
+        ok: false as const,
+        error: `Too many attempts. Try again in about ${minutes} minute(s).`,
+      };
+    }
+    const result = await redeemRecoveryCode(code);
+    if (!result.ok) {
+      recoveryRedeemAttempts.recordFailure(ip);
+      return { ok: false as const, error: result.reason };
+    }
+    recoveryRedeemAttempts.recordSuccess(ip);
+    // The "recovery-code-used" audit event is written by `redeemRecoveryCode`
+    // itself, in the same transaction as the burn and the password change
+    // (review finding 2, Unit CR 0.6.81). Auditing here instead would put it
+    // outside that transaction, where a failure could not be rolled back and
+    // the owner would lose the desk the code was meant to recover.
+    return { ok: true as const, tempPassword: result.tempPassword };
   });
