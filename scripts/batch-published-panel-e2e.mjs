@@ -44,7 +44,7 @@ import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { confirmSectionAndWaitForPublishable, openStoryDetails } from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen ports, registered with
@@ -300,6 +300,11 @@ async function printTheFirstStory() {
     The section a draft files under is read by a person before it prints, and a
     batch draft's section came from the model. Picking it here is that read.
   */
+  /*
+    Unit CW2 moved the section picker into the shut "Story details" disclosure,
+    so it has to be opened before it can be read -- see openStoryDetails.
+  */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic-select");
   const values = await topic.locator("option").evaluateAll((nodes) => nodes.map((n) => n.value));
   await topic.selectOption(values.includes("council") ? "council" : values[0]);

@@ -83,6 +83,26 @@ const skip = dbProbe.ok ? false : dbProbe.reason;
  * button that is still gated would be measuring the gate, not the publish.
  */
 async function sectionOnTheButton(page: Page): Promise<{ name: string; key: string }> {
+  /*
+    Unit CW2 (0.6.81) moved the section select into the shut "Story details"
+    disclosure under the action row, where the drawing puts the fields the
+    drawing does not draw. A shut `<details>` hides its content from the page --
+    the field is in the DOM and never visible -- so this opens it the way a
+    person would before reading it. Same step as `openStoryDetails` in
+    scripts/confirm-section-step.mjs, which the browser walks share.
+  */
+  const details = page.locator("main#desk details#story-details").first();
+  if (
+    (await details.count()) > 0 &&
+    !(await details.evaluate((element) => (element as HTMLDetailsElement).open))
+  ) {
+    await details.locator("summary").first().click();
+    await page.waitForFunction(
+      () => (document.getElementById("story-details") as HTMLDetailsElement | null)?.open === true,
+      null,
+      { timeout: 15_000 },
+    );
+  }
   await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
   await page.waitForFunction(
     () =>

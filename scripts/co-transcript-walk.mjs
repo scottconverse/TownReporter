@@ -412,7 +412,19 @@ try {
    * 3. The Claims & evidence panel on a meeting story.
    * ------------------------------------------------------------------ */
   await page.goto(`${base}/desk/story/${seedFacts.leadId}`, { waitUntil: "networkidle" });
-  await page.getByRole("link", { name: "Review claims and sources" }).first().click();
+  /*
+    The Checks tab, by its own id (unit CW2). This used to click "Review claims
+    and sources" and let the link do the navigating, because the panel lived in
+    the Reporting tab's notes and that link switched tabs on the way. Unit CW2
+    moved the review onto the Checks tab, where it is the body of the drawn
+    Evidence check list; the one such link left on the page belongs to the
+    stale-evidence notice and still means the *reporting* notes, which is a
+    different place now. So the walk names the tab the panel is on instead of
+    going through a link that has moved out from under it. What the walk is
+    here for -- the citations, their timestamps and their state -- is
+    unchanged.
+  */
+  await page.locator("#inspector-tab-checks").click();
   const panel = page.locator("#finding-evidence-review");
   await panel.waitFor({ timeout: 30_000 });
   await page.waitForTimeout(500);

@@ -153,6 +153,22 @@ if (dbProbe.ok) {
  * scripts/confirm-section-step.mjs, which the browser walks share.
  */
 async function confirmSection(page: Page) {
+  /* Unit CW2: the section select moved into the shut "Story details"
+     disclosure, so the field is in the DOM and never visible until the
+     disclosure is opened -- the same opening step the browser walks take,
+     `openStoryDetails` in scripts/confirm-section-step.mjs. */
+  const details = page.locator("main#desk details#story-details").first();
+  if (
+    (await details.count()) > 0 &&
+    !(await details.evaluate((element) => (element as HTMLDetailsElement).open))
+  ) {
+    await details.locator("summary").first().click();
+    await page.waitForFunction(
+      () => (document.getElementById("story-details") as HTMLDetailsElement | null)?.open === true,
+      null,
+      { timeout: 15_000 },
+    );
+  }
   await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
   const saveState = page.locator(".astra-save-state");
   if ((await saveState.filter({ hasText: "Unsaved changes" }).count()) > 0) {

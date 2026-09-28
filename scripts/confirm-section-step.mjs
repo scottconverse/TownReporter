@@ -29,7 +29,9 @@
   computed from the saved body -- but waiting for an enabled Publish button
   would wait for a state that walk exists to disprove.
 */
+
 export async function confirmSectionAndWaitForPublishable(page, { publishable = true } = {}) {
+  await openStoryDetails(page);
   const block = page.locator("#story-topic");
   await block.waitFor({ state: "visible", timeout: 45_000 });
   /*
@@ -65,5 +67,49 @@ export async function confirmSectionAndWaitForPublishable(page, { publishable = 
       ),
     null,
     { timeout: 45_000 },
+  );
+}
+
+/**
+ * Open the story screen's "Story details" disclosure (unit CW2, 0.6.81).
+ *
+ * `Desk Story.dc.html` draws no Topic, no Geography and no pulled-notes record
+ * under the Story editor, so those fields -- the section this helper exists to
+ * confirm among them -- moved into one shut `<details id="story-details">`
+ * directly under the action row. A shut `<details>` hides its content from the
+ * screen, so `#story-topic` is in the DOM but not visible, and every wait or
+ * click on it hangs on a healthy desk. The page opens the disclosure itself
+ * when one of its own controls needs the field (see `openStoryDetails` in
+ * desk.story.$leadId.tsx); a walk has no such control, so it opens the
+ * disclosure the way a person would, by pressing its summary.
+ *
+ * Silent and idempotent on a page that has no such disclosure -- a story with
+ * no draft yet -- so callers keep their own assertion: the `#story-topic` wait
+ * below still fails, with the message that names the real problem.
+ */
+export async function openStoryDetails(page) {
+  /*
+    Wait for the disclosure to be attached before deciding it is not there.
+
+    `page.goto`/`waitForURL` resolve on the navigation, not on the workbench
+    having drawn: a walk that clicks a link to a story and opens the disclosure
+    on the very next line otherwise asks the page it is LEAVING (script
+    import-stories-e2e.mjs measured exactly this -- `#story-topic` resolved
+    hidden 89 times against a desk whose disclosure was shut). The bounded wait
+    is swallowed because a story with no draft yet carries no disclosure at
+    all, and that page's caller must still fail with its own message.
+  */
+  const details = page.locator("details#story-details").first();
+  await details.waitFor({ state: "attached", timeout: 20_000 }).catch(() => {});
+  if ((await details.count()) === 0) return;
+  if (await details.evaluate((element) => element.open)) return;
+  await details.locator("summary").first().click();
+  /* The element's own `open`, not a timeout's word for it: a click that lands
+     before hydration toggles nothing, and the wait below would report the
+     still-shut field rather than the click that did not take. */
+  await page.waitForFunction(
+    () => document.getElementById("story-details")?.open === true,
+    null,
+    { timeout: 15_000 },
   );
 }

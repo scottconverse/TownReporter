@@ -56,6 +56,7 @@ import { chromium } from "playwright";
 import { fromCrossJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { openStoryDetails } from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -353,6 +354,9 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
     "the headline line is repeated as the draft body's first line",
   );
 
+  /* Unit CW2: the section picker lives in the shut "Story details" disclosure
+     now, so the walk opens it before it reads -- see openStoryDetails. */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic select");
   const topicValue = await topic.inputValue();
   if (sectionChoice) {
@@ -481,6 +485,9 @@ async function publishIt() {
     (await page.getByText(/Section confirmed for this saved draft/).count()) === 0,
     "the pasted story arrived with its section already confirmed, so nothing was confirmed here",
   );
+  /* Opened before it is read: the section block is inside the shut "Story
+     details" disclosure since unit CW2 (see openStoryDetails). */
+  await openStoryDetails(page);
   const said = ((await page.locator("#story-topic").innerText()) ?? "").replace(/\s+/g, " ");
   must(
     said.includes("The Publish button names") &&
@@ -996,6 +1003,9 @@ async function main() {
     const { body: secondBody } = await theDraftHoldsThePasteWordForWord(sectionTwo, SECOND_LINE);
     await page.locator(".astra-headline").fill(SECOND_TITLE);
     await page.locator(".astra-dek").fill(PASTE_DEK);
+    /* The disclosure again: retitling and moving a section is the same read of
+       the same field. Idempotent, so it does nothing when it is already open. */
+    await openStoryDetails(page);
     const topics = await optionsOf(page.locator("#story-topic select"));
     const movedTo = topics.find((o) => o.value && o.value !== sectionTwo.value && o.value !== "opinion");
     must(Boolean(movedTo?.value), `the story editor offered no other section: ${JSON.stringify(topics)}`);

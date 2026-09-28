@@ -12,7 +12,15 @@
  *   3. a side-by-side of the two for every shape, so the regions can be read
  *      against each other without opening two files;
  *   4. the region order read off both pages and asserted to be the same one;
- *   5. every button on the seeded screen pressed once, with what happened.
+ *   5. every button on the seeded screen pressed once, with what happened --
+ *      including the ones unit CW2 moved behind a shut disclosure, which the
+ *      pass opens first because a control that is not on the screen cannot be
+ *      pressed honestly;
+ *   6. the sticky publish bar read against the viewport at the top, the middle
+ *      and the end of the document, at all three widths, with a viewport
+ *      capture of each (unit CW2: a full-page capture cannot show this);
+ *   7. the height of the page at 1440 wide with every disclosure shut, against
+ *      the brief's 2,600px.
  *
  * The desk this runs against is a dev server on 127.0.0.1:8090 with PGlite in
  * memory -- started and stopped by whoever runs this file, by PID. This file
@@ -51,6 +59,7 @@ const outDir = checkedOutputPath(
 mkdirSync(resolve(outDir, "drawing"), { recursive: true });
 mkdirSync(resolve(outDir, "real"), { recursive: true });
 mkdirSync(resolve(outDir, "side-by-side"), { recursive: true });
+mkdirSync(resolve(outDir, "scroll"), { recursive: true });
 
 const SEED_PATH = "/api/dev-seed";
 const DRAWING = pathToFileURL(
@@ -298,8 +307,18 @@ try {
     address reading `/desk` for a moment before the redirect lands. Waiting for
     one of the two real controls is the question that has an answer either way.
   */
+  /*
+    `/^Queue/`, not `exact: "Queue"`: the rail link carries its own count once
+    the desk holds anything, so its accessible name reads "Queue1" and an exact
+    match finds nothing -- which reads here as "the desk did not answer" and
+    sent a run down the login path against a page that was already signed in.
+    The prefix still names the rail link and nothing else: the only other
+    `Queue…` link is a search result inside a shut dialog, which the role query
+    does not see. `.first()` keeps a second one from turning the probe into a
+    strict-mode throw swallowed by the `catch` below.
+  */
   const atDesk = async () => {
-    const queue = page.getByRole("link", { name: "Queue", exact: true });
+    const queue = page.getByRole("link", { name: /^Queue/ }).first();
     const heading = page.getByRole("heading", { name: /Create the desk|Editor sign-in/ });
     for (let i = 0; i < 40; i += 1) {
       if (await queue.isVisible().catch(() => false)) return "desk";
@@ -330,8 +349,10 @@ try {
       await page.getByLabel("Password", { exact: true }).fill(password);
       await page.getByRole("button", { name: "Sign in with email" }).click();
       /* Loud: a sign-in that silently did not take would file 12 captures of the
-         login page under the story screen's name. */
-      await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
+         login page under the story screen's name. Same prefix as the probe
+         above, for the same reason: the rail link is named "Queue1" whenever
+         the desk is not empty, and this desk never is by the time it is asked. */
+      await page.getByRole("link", { name: /^Queue/ }).first().waitFor({ timeout: 45_000 });
       console.log("  ok    signed in to an existing desk");
     }
     await page.context().storageState({ path: statePath });
@@ -427,6 +448,119 @@ try {
     }
   }
   console.log(`  ok    all ${report.regions.verdict.length} shapes show the drawn regions in the drawn order`);
+
+  /* ── the sticky bar, at every scroll position ─────────────────────────── */
+  /*
+    The drawing keeps the dark publish bar on the bottom edge of the viewport at
+    every scroll position, not at the bottom of the document (unit CW2, item 6).
+    A full-page capture cannot show that: it paints a `position: sticky` element
+    wherever the capture happened to reach, which is why `shotReal` hides the
+    chrome for those. So this reads the bar's own rectangle against the viewport
+    at the top, the middle and the end of the document, at all three widths, and
+    keeps a viewport capture of each. Three questions per shot, and the third is
+    the one the brief asks: the bar is there, it is `sticky`, and its whole box
+    is inside the viewport -- a bar hanging off the bottom edge would pass a test
+    for "the element exists" and fail an editor.
+  */
+  const STICKY = [];
+  for (const { width, height } of WIDTHS) {
+    await page.setViewportSize({ width, height });
+    await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+    await page.evaluate(() => {
+      localStorage.setItem("townreporter.desk.mode", "light");
+      localStorage.setItem("townreporter.desk.textsize", "normal");
+    });
+    await page.goto(`${base}${storyPath}`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1800);
+    const span = await page.evaluate(() => ({
+      doc: document.documentElement.scrollHeight,
+      view: window.innerHeight,
+    }));
+    const spots = [
+      { at: "top", y: 0 },
+      { at: "middle", y: Math.max(0, Math.round((span.doc - span.view) / 2)) },
+      { at: "end", y: Math.max(0, span.doc - span.view) },
+    ];
+    for (const spot of spots) {
+      await page.evaluate((y) => window.scrollTo(0, y), spot.y);
+      await page.waitForTimeout(500);
+      const seen = await page.evaluate(() => {
+        const bar = document.getElementById("astra-publish-bar");
+        if (!bar) return { found: false };
+        const r = bar.getBoundingClientRect();
+        const s = getComputedStyle(bar);
+        return {
+          found: true,
+          top: Math.round(r.top),
+          bottom: Math.round(r.bottom),
+          height: Math.round(r.height),
+          view: window.innerHeight,
+          inView: r.height > 1 && r.top >= -1 && r.bottom <= window.innerHeight + 1,
+          position: s.position,
+          scrolled: Math.round(window.scrollY),
+        };
+      });
+      if (!seen.found) throw new Error(`no #astra-publish-bar on ${storyPath} at ${width}px`);
+      if (!seen.inView) {
+        throw new Error(
+          `the publish bar is not on the screen at ${width}px, scrolled to the ${spot.at}: ` +
+            `rect ${seen.top}..${seen.bottom} of a ${seen.view}px viewport`,
+        );
+      }
+      const file = resolve(outDir, "scroll", `sticky-${width}-${spot.at}.png`);
+      await page.screenshot({ path: file, animations: "disabled" });
+      STICKY.push({ width, at: spot.at, file, ...seen });
+      console.log(
+        `  stick sticky-${width}-${spot.at}  ${seen.position} at ${seen.top}..${seen.bottom}` +
+          ` of ${seen.view} (scrolled ${seen.scrolled}px)`,
+      );
+    }
+  }
+  report.sticky = STICKY;
+
+  /* ── the height, with everything shut ─────────────────────────────────── */
+  /*
+    The brief's number (unit CW2, item 7): at 1440 wide, light, Standard desk
+    text, with every disclosure closed, the page is no taller than 2,600px. The
+    page has just been walked with its disclosures open, so they are forced shut
+    first and the count of what was forced is recorded -- a page measured with a
+    disclosure open is not the page the brief names.
+  */
+  const TALLEST = 2600;
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    localStorage.setItem("townreporter.desk.mode", "light");
+    localStorage.setItem("townreporter.desk.textsize", "normal");
+  });
+  await page.goto(`${base}${storyPath}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  const shutAll = await page.evaluate(() => {
+    const all = [...document.querySelectorAll("main#desk details")];
+    let forced = 0;
+    for (const d of all) {
+      if (d.open) {
+        d.open = false;
+        forced += 1;
+      }
+    }
+    return { total: all.length, forced };
+  });
+  await page.waitForTimeout(400);
+  const tall = await page.evaluate(() => ({
+    doc: document.documentElement.scrollHeight,
+    viewport: window.innerHeight,
+  }));
+  report.height = { ...tall, disclosures: shutAll, limit: TALLEST };
+  console.log(
+    `  height ${tall.doc}px at 1440 with ${shutAll.total} disclosures shut` +
+      ` (${shutAll.forced} were open and were shut) — limit ${TALLEST}px`,
+  );
+  if (tall.doc > TALLEST) {
+    throw new Error(
+      `the page at 1440 with every disclosure shut is ${tall.doc}px, over the brief's ${TALLEST}px`,
+    );
+  }
 
   /* ── side by side ─────────────────────────────────────────────────────── */
   const composer = await browser.newPage({ viewport: { width: 1200, height: 900 } });
@@ -583,8 +717,90 @@ try {
     );
   }
 
+  /*
+    A shut disclosure hides its controls from `nextTarget`: `show()` is what
+    keeps a control that is not on the screen from being pressed, and everything
+    unit CW2 moved below the editor now lives inside one of these. A pass that
+    skipped them would report the moved controls as gone, which is the one thing
+    the brief asks it not to do -- so before it looks for a control it opens
+    every shut disclosure, one at a time, by clicking its summary: the same
+    press an editor makes, and the only one that makes the controls inside
+    legible. `innerText` of a shut disclosure is empty, so a label read before
+    the open would be the element's class names (`button.inline-link`), which
+    is what the first run of this pass recorded. Each open is a row of the
+    table; a disclosure whose summary will not take a click is opened by
+    setting `open` and the row says so.
+  */
+  async function openShutDisclosures(passName, recorded) {
+    const shut = await page.evaluate(() => {
+      const out = [];
+      const all = [...document.querySelectorAll("main#desk details")];
+      for (let i = 0; i < all.length; i += 1) {
+        const d = all[i];
+        if (d.open) continue;
+        const r = d.getBoundingClientRect();
+        const s = getComputedStyle(d);
+        if (r.width < 1 || r.height < 1 || s.display === "none" || s.visibility === "hidden") {
+          continue;
+        }
+        const summary = d.querySelector("summary");
+        out.push({
+          i,
+          id: d.id || "",
+          label: (summary?.innerText || "details").replace(/\s+/g, " ").trim().slice(0, 70),
+        });
+      }
+      return out;
+    });
+    let opened = 0;
+    for (const one of shut) {
+      /*
+        Opened again on every scan, not once per pass: a press that changes the
+        URL sends the pass back to the story page, and a page that has just
+        been loaded has every disclosure shut again. Recording is once per
+        disclosure -- the second opening of the same one is the same fact.
+      */
+      const key = `${one.id || one.label}#disclosure`;
+      const fresh = !recorded.has(key);
+      recorded.add(key);
+      const loc = one.id
+        ? page.locator(`main#desk details[id="${one.id}"]`).locator("summary").first()
+        : page.locator("main#desk details").nth(one.i).locator("summary").first();
+      let result = "opened the shut disclosure so what it holds could be pressed";
+      try {
+        await loc.click({ timeout: 6000 });
+      } catch {
+        await page.evaluate((i) => {
+          const d = [...document.querySelectorAll("main#desk details")][i];
+          if (d) d.open = true;
+        }, one.i);
+        result = "opened by setting open — its summary would not take a click";
+      }
+      await page.waitForTimeout(600);
+      const held = await page.evaluate(
+        (i) =>
+          [...document.querySelectorAll("main#desk details")][i]?.querySelectorAll(
+            'button, a[role="button"], .btn',
+          ).length ?? 0,
+        one.i,
+      );
+      if (fresh) {
+        presses.push({
+          pass: passName,
+          id: key,
+          label: one.label,
+          state: "opened",
+          result: `${result} (${held} controls inside)`,
+        });
+      }
+      opened += 1;
+    }
+    return opened;
+  }
+
   async function pressPass(sel, passName) {
     const done = new Set();
+    const recordedOpens = new Set();
     let pressed = 0;
     /*
       Every press may reveal controls (a tab, a dialog) and every control gets
@@ -592,6 +808,7 @@ try {
       growth, not the expected length -- the pass ends when nothing is left.
     */
     for (let guard = 0; guard < 600; guard += 1) {
+      await openShutDisclosures(passName, recordedOpens);
       const target = await nextTarget(sel, done);
       if (!target) break;
       done.add(target.id);
@@ -674,12 +891,23 @@ try {
       }
     }
     const off = presses.filter((r) => r.pass === passName && r.state === "off").length;
+    const shut = presses.filter((r) => r.pass === passName && r.state === "opened").length;
     console.log(
-      `  press ${passName}: ${pressed} pressed` + (off ? `, ${off} off and left off` : ""),
+      `  press ${passName}: ${pressed} pressed` +
+        (shut ? `, ${shut} disclosures opened` : "") +
+        (off ? `, ${off} off and left off` : ""),
     );
   }
 
   await pressPass(STORY_SEL, "story page");
+  /*
+    The chrome pass is taken on `/desk` rather than on whatever the story pass
+    ended on. `CHROME_SEL` is the rail and the topbar, which sit outside the
+    story column; on a story page the only one of them on the screen is the skip
+    link, so a pass taken there records one row and calls it the chrome.
+  */
+  await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
   await pressPass(CHROME_SEL, "desk chrome");
 
   report.presses = presses;
@@ -706,8 +934,15 @@ try {
       "A press that turns a confirm on is answered with Escape so the next press",
       "is a real one. A control the desk refuses is recorded as `off` and not",
       "forced — the reason it is off is the finding. `buttons.json` also carries",
-      "each control's identity (its words plus which of that name it is). The",
-      "desk chrome is the last pass.",
+      "each control's identity (its words plus which of that name it is).",
+      "",
+      "Unit CW2 moved the judgment controls, the draft-pass inventory and the",
+      "editor-authored claims behind shut disclosures, and a shut disclosure's",
+      "controls are not on the screen, so the pass opens every one of them first",
+      "and records the opening as its own row (`opened`). A row's label is read",
+      "after that open: a shut disclosure reports no text at all, so a label read",
+      "before it would be the element's class names. The desk chrome is the last",
+      "pass, and it is taken on `/desk`, where the chrome is.",
       "",
       "| # | press | where | state | what happened |",
       "| --- | --- | --- | --- | --- |",
