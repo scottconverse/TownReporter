@@ -230,26 +230,28 @@ describe("the story's own words (unit BX2)", () => {
       items.map((i) => [i.date, i.what]),
       [
         /*
-          Unit BZ, item 6 (owner review, 2026-09-27): "Applications Close",
-          "funding hearing packet" and "public hearing and second reading" were
-          bare scraps -- a reader who has not read the story cannot tell what
-          they are about. Each now falls back to the story's own headline
-          (`isBareFragment`, `story-dates.ts`) instead of printing the clause
-          alone.
+          Unit CV, item 2. Each row now names its own event instead of reprinting
+          a whole headline over every day the story mentions:
+
+          - "hiring" is the one case left on the headline. The story's clause for
+            Sept. 29 is "Applications Close" -- two words, no verb the fragment
+            test knows -- and rule (c) prints the headline, which names the 29th,
+            so it is about the day the row is on.
+          - "class" and "ranked" take rule (a): their headlines name the day, so
+            the row is the headline's own clause for it minus the date.
+          - "packet" takes rule (b): its headline names no day, and the sentence
+            carrying the 1st ("The board has posted an Oct. 1 funding hearing
+            packet ahead of the meeting.") is complete inside the word bound.
+          - "reading" stays on the headline: its dek clause for Oct. 6 runs to
+            sixteen words, past the bound, and its headline names no day.
         */
         [
           "2026-09-29",
           "Longmont Hiring Director of Power Delivery and Operations; Applications Close Sept. 29",
         ],
-        [
-          "2026-09-29",
-          "Longmont Public Media lists beginner DaVinci Resolve editing class for Sept. 29",
-        ],
-        ["2026-10-01", "Housing And Human Services Board Posts Funding Hearing Packet"],
-        [
-          "2026-10-03",
-          "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D",
-        ],
+        ["2026-09-29", "Longmont Public Media lists beginner DaVinci Resolve editing class"],
+        ["2026-10-01", "The board has posted a funding hearing packet ahead of the meeting"],
+        ["2026-10-03", "Brighton event for 3C and 3D"],
         ["2026-10-06", "Council Weighs Rate Study Ahead Of Public Hearing"],
       ],
     );
@@ -269,14 +271,15 @@ describe("the story's own words (unit BX2)", () => {
       collectStoryDates([source], { from: "2026-09-27", days: 7 }).map((i) => i.date),
       ["2026-10-03"],
     );
-    // Both are bare scraps (unit BZ, item 6) and fall back to the one headline
-    // that names both days -- the same text on both rows is the honest limit
-    // of a single headline covering two events, not a bug.
+    // Unit CV, item 2, rule (a): the headline names both days, so each row is
+    // the headline's own clause for its own day -- the 26th owns "canvassing
+    // day" and the 3rd owns "Brighton event for 3C and 3D". Two rows, two
+    // different events, where the old code printed the one headline twice.
     assert.deepEqual(
       collectStoryDates([source]).map((i) => [i.date, i.what]),
       [
-        ["2026-09-26", headline],
-        ["2026-10-03", headline],
+        ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
+        ["2026-10-03", "Brighton event for 3C and 3D"],
       ],
     );
   });
@@ -306,8 +309,9 @@ describe("the story's own words (unit BX2)", () => {
       ["2026-08-01"],
     );
     // A written year is the date's own and is never rolled. Its line is the
-    // headline: "hearing" is what is left of the sentence once the stop words
-    // after it are cut, and one word is a fragment, not a line (unit BX3).
+    // sentence the date sits in, with the date expression taken out (unit CV,
+    // item 2, rule (b)): "Records for the hearing are posted" is complete, and
+    // the year between the day and the noun it belongs to goes with the date.
     assert.deepEqual(
       collectStoryDates([
         story({
@@ -316,7 +320,7 @@ describe("the story's own words (unit BX2)", () => {
           published_on: "2026-12-15",
         }),
       ]).map((i) => [i.date, i.what]),
-      [["2026-10-08", "Records for the Oct. 8, 2026 hearing are posted"]],
+      [["2026-10-08", "Records for the hearing are posted"]],
     );
   });
 
@@ -414,8 +418,8 @@ describe("the story's own words (unit BX2)", () => {
       );
     }
     // The tail reader does not run a date into the next one: two rows, one for
-    // each day, both falling back to the one headline that names both (unit
-    // BZ, item 6 -- both scraps are bare).
+    // each day, and -- since unit CV, item 2 -- each row naming its own event
+    // out of the headline's own clause for its day.
     {
       const headline =
         "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D";
@@ -424,8 +428,8 @@ describe("the story's own words (unit BX2)", () => {
           story({ slug: "ranked", headline, published_on: "2026-09-25" }),
         ]).map((i) => [i.date, i.what]),
         [
-          ["2026-09-26", headline],
-          ["2026-10-03", headline],
+          ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
+          ["2026-10-03", "Brighton event for 3C and 3D"],
         ],
       );
     }
@@ -443,6 +447,15 @@ describe("the story's own words (unit BX2)", () => {
     // the words before it are the sentence's subject, and the STOP_WORDS loop
     // cut the verb phrase off it. It printed that name until unit BX3.
     //
+    // Unit CV, item 2 changes what the third one prints, and only the third:
+    // the headline NAMES Oct. 2, so rule (a) builds the row out of the
+    // headline's own clause for that date -- "Longmont Senior Center to begin
+    // free meal pickups", the whole subject and its verb phrase, with the date
+    // expression (which the panel prints in its own column) taken out. The
+    // first two still print the headline: "Longmont Senior Center" and "Clark
+    // Centennial Park" are names of places, three words with no verb, and rule
+    // (b) refuses them as fragments.
+    //
     // The Clark Centennial Park source string is NOT in this repo -- grep for
     // it over every tracked file finds it only in the design handoff's rendered
     // front page, which carries the row ("Growing Shade tree pickup, Clark
@@ -450,26 +463,32 @@ describe("the story's own words (unit BX2)", () => {
     // Daily.dc.html:130`) and not the story text behind it. So Sat 3 is the
     // sanctioned shape, and the row the handoff prints is what the shape is
     // trying to reach.
-    for (const [slug, text, date] of [
-      ["meal-dek", "on Oct. 2 at the Longmont Senior Center", "2026-10-02"],
-      ["tree-shape", "Oct. 3 at Clark Centennial Park", "2026-10-03"],
-      ["meal-real", "Longmont Senior Center to begin free meal pickups Oct. 2", "2026-10-02"],
+    for (const [slug, text, date, printed] of [
+      ["meal-dek", "on Oct. 2 at the Longmont Senior Center", "2026-10-02", null],
+      ["tree-shape", "Oct. 3 at Clark Centennial Park", "2026-10-03", null],
+      [
+        "meal-real",
+        "Longmont Senior Center to begin free meal pickups Oct. 2",
+        "2026-10-02",
+        "Longmont Senior Center to begin free meal pickups",
+      ],
     ] as const) {
       assert.deepEqual(
         collectStoryDates([story({ slug, headline: text, published_on: "2026-09-27" })]).map((i) => [
           i.date,
           i.what,
         ]),
-        [[date, text]],
+        [[date, printed ?? text]],
         `printed the headline for: ${text}`,
       );
     }
     // The desk's own title case still tells a clause ("Applications Close")
-    // from a name ("Longmont Senior Center") -- `cleanLine`'s exception above
-    // is unchanged. But unit BZ, item 6 (owner review, 2026-09-27) found that a
-    // two-word clause is still too short to stand alone as a row's only text:
-    // "Applications Close" does not say applications for WHAT, so it is a bare
-    // fragment (`isBareFragment`) and falls back to the headline.
+    // from a name ("Longmont Senior Center"). But unit BZ, item 6 (owner review,
+    // 2026-09-27) found that a two-word clause is still too short to stand alone
+    // as a row's only text: "Applications Close" does not say applications for
+    // WHAT, so it is a bare fragment (`isBareFragment`). Under unit CV, item 2
+    // rule (c) the row falls to the headline -- which is safe here because the
+    // headline names Sept. 29, the day the row is on.
     assert.deepEqual(
       collectStoryDates([
         story({
@@ -486,8 +505,10 @@ describe("the story's own words (unit BX2)", () => {
         ],
       ],
     );
-    // A line left as a fragment of a longer sentence is refused too, and a
-    // headline that only capitalizes because headlines do is not a name.
+    // A line left as a fragment of a longer sentence is refused too, and the row
+    // keeps the sentence it was cut from instead (unit CV, item 2, rule (b)):
+    // the date is a date the story names, and the words around it are a
+    // complete clause rather than a scrap.
     assert.deepEqual(
       collectStoryDates([
         story({
@@ -496,7 +517,7 @@ describe("the story's own words (unit BX2)", () => {
           published_on: "2026-12-15",
         }),
       ]).map((i) => [i.date, i.what]),
-      [["2026-10-08", "Records for the Oct. 8, 2026 hearing are posted"]],
+      [["2026-10-08", "Records for the hearing are posted"]],
     );
   });
 
@@ -510,13 +531,13 @@ describe("the story's own words (unit BX2)", () => {
       }),
     ]);
     // The front page splits the day into the panel's two columns and links the
-    // row back to the story whose words named it. "public hearing and second
-    // reading" is a bare fragment (unit BZ, item 6: it starts lower-case) and
-    // falls back to the headline, which names no day of its own and so is safe
-    // to print for this one.
+    // row back to the story whose words named it. The row's text is the sentence
+    // the date sits in (unit CV, item 2, rule (b)) -- twelve words, the bound
+    // the brief sets, and a complete clause rather than the bare scrap "public
+    // hearing and second reading" the old cut left.
     assert.deepEqual(
       storyDateRows(items).map((r) => [r.dow, r.day, r.what, r.slug]),
-      [["Tue", "6", "Council takes up the rate study", "reading"]],
+      [["Tue", "6", "The vote sends the plan to a public hearing and second reading", "reading"]],
     );
     // ...and the article page, which IS that story, prints the same row plain.
     assert.deepEqual(
@@ -565,34 +586,40 @@ describe("a row the headline is not about (unit BZ, item 5)", () => {
         published_on: "2026-09-27",
       }),
     ]);
-    // "Regular Meeting" is itself a bare fragment (unit BZ, item 6: two words,
-    // no verb) and falls back the same way an empty clause would -- here to
-    // the headline, which is safe because the headline names Oct. 8, the row's
-    // own day.
+    // The 8th is named by the headline, so unit CV, item 2 rule (a) builds the
+    // row out of the headline's own clause for that date -- "Longmont Housing
+    // Board Cancels Regular Meeting", which is the day's own event with the date
+    // expression taken out, rather than the whole headline with a second day's
+    // business still glued to its tail.
     assert.deepEqual(
       items.map((i) => [i.date, i.what, i.slug]),
       [
         ["2026-10-01", "Funding Hearing Packet Posted", "housing"],
-        ["2026-10-08", HOUSING_HEADLINE, "housing"],
+        ["2026-10-08", "Longmont Housing Board Cancels Regular Meeting", "housing"],
       ],
       "the 1st printed words about the 8th",
     );
   });
 
-  it("keeps the headline for a day the headline names, or one it names at all", () => {
+  it("names the event in the words the day's own clause gives", () => {
     // The normal case, and the live one: the desk's own meal-pickup headline
-    // names Oct. 2, its clause is a NAME rather than an event, and the row
-    // prints the headline -- which is about the day it is on.
+    // names Oct. 2, so the row is the headline's clause for that date (unit CV,
+    // item 2, rule (a)) -- the subject and its verb phrase, no date.
     const meal = "Longmont Senior Center to begin free meal pickups Oct. 2";
     assert.deepEqual(
       collectStoryDates([story({ slug: "meal", headline: meal, published_on: "2026-09-27" })]).map(
         (i) => [i.date, i.what],
       ),
-      [["2026-10-02", meal]],
+      [["2026-10-02", "Longmont Senior Center to begin free meal pickups"]],
     );
-    // A row read out of the dek whose headline names NO day keeps the headline:
-    // the rule is about a headline that is about another day, not about one that
-    // happens to name none.
+    // A row read out of the dek whose headline names NO day falls to rule (b):
+    // the sentence carrying the 6th is "A hearing is set for Oct. 6", and what
+    // it prints is that sentence with the date expression taken out. The line
+    // keeps a subject and a verb, so it is a clause rather than the fragment the
+    // brief forbids -- the date it no longer carries is the thing the panel
+    // prints in its own day column, and rule (c)'s headline is only the answer
+    // when no clause reads at all. `isBareFragment` records why refusing a line
+    // for ending on its verb was tried and taken back out.
     const dateless = story({
       slug: "fee",
       headline: "Council weighs the fee schedule",
@@ -601,7 +628,7 @@ describe("a row the headline is not about (unit BZ, item 5)", () => {
     });
     assert.deepEqual(
       collectStoryDates([dateless]).map((i) => [i.date, i.what]),
-      [["2026-10-06", "Council weighs the fee schedule"]],
+      [["2026-10-06", "A hearing is set"]],
     );
   });
 
@@ -617,25 +644,34 @@ describe("a row the headline is not about (unit BZ, item 5)", () => {
         published_on: "2026-09-27",
       }),
     ]);
-    // "Regular Meeting" is a bare fragment (unit BZ, item 6) and falls back to
-    // the headline, which is about Oct. 8 -- the row's own day.
+    // "Posted" is the whole of the 1st's clause once the date comes out of it,
+    // and one word is a fragment, not a name (unit CV, item 2: "never output a
+    // fragment"). The 8th keeps the headline's own clause for it.
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
-      [["2026-10-08", HOUSING_HEADLINE]],
+      [["2026-10-08", "Longmont Housing Board Cancels Regular Meeting"]],
       "a day with no clause of its own was printed anyway",
     );
   });
 });
 
 /**
- * Unit BZ, item 6: a row title must read as a headline.
+ * Unit BZ, item 6, kept under unit CV, item 2: a row title must not be a fragment.
  *
  * Owner review of the staged front page at 1790px (2026-09-27): "This week"
  * printed lower-case scraps and bare nouns lifted from a clause -- a reader
  * who has not read the story cannot tell what "Brighton event" is an event
  * FOR, or what is closing in "Applications Close". Each of the four exact
- * fragments the review named is its own test here, against the real headline
- * and dek text that produced it.
+ * fragments the review named is still its own test here, against the real
+ * headline and dek text that produced it.
+ *
+ * What changed is what prints INSTEAD. Until unit CV the answer was always the
+ * story's headline, which is where the designer's second complaint came from:
+ * the same headline over every day a story mentions names no event in
+ * particular ("one row per event, with a short complete event name"). The
+ * clause rules now run first -- the headline's own clause for that date, then
+ * the sentence carrying the date -- and the headline is the last resort, for a
+ * day whose words are genuinely a scrap or whose sentence is too long to print.
  */
 describe('a row title must read as a headline, not a bare fragment (unit BZ, item 6)', () => {
   const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
@@ -645,7 +681,7 @@ describe('a row title must read as a headline, not a bare fragment (unit BZ, ite
     ...over,
   });
 
-  it('falls back to the headline for "funding hearing packet"', () => {
+  it('never prints "funding hearing packet" as a row', () => {
     const headline = "Housing And Human Services Board Posts Funding Hearing Packet";
     const items = collectStoryDates([
       story({
@@ -655,44 +691,57 @@ describe('a row title must read as a headline, not a bare fragment (unit BZ, ite
         published_on: "2026-09-26",
       }),
     ]);
+    // Rule (b): the dek's sentence for the 1st is complete and inside the word
+    // bound, so the row is that sentence -- the scrap with the verb and subject
+    // it was missing, and an article mended at the join ("an" becomes "a" in
+    // front of "funding").
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
-      [["2026-10-01", headline]],
+      [["2026-10-01", "The board has posted a funding hearing packet ahead of the meeting"]],
     );
   });
 
-  it('falls back to the headline for "instrument collection drive"', () => {
+  it('never prints "instrument collection drive" as a row', () => {
     const headline = "Oct. 1-2 instrument collection drive";
     const items = collectStoryDates([
       story({ slug: "drive", headline, published_on: "2026-09-27" }),
     ]);
+    // The headline is nothing but the date expression and the scrap, so there
+    // is no clause to build from and rule (c) prints the headline: a reader
+    // sees the whole line rather than three bare words out of it.
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
       [["2026-10-01", headline]],
     );
   });
 
-  it('falls back to the headline for "Brighton event"', () => {
+  it('never prints "Brighton event" as a row', () => {
     const headline =
       "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D";
     const items = collectStoryDates([
       story({ slug: "ranked", headline, published_on: "2026-09-25" }),
     ]);
+    // Rule (a) both times: the headline names both days, and each row is the
+    // headline's clause for its own -- "canvassing day" for the 26th, and for
+    // the 3rd the "Brighton event for 3C and 3D" the review could not read.
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
       [
-        ["2026-09-26", headline],
-        ["2026-10-03", headline],
+        ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
+        ["2026-10-03", "Brighton event for 3C and 3D"],
       ],
     );
   });
 
-  it('falls back to the headline for "Applications Close"', () => {
+  it('never prints "Applications Close" as a row', () => {
     const headline =
       "Longmont Hiring Director of Power Delivery and Operations; Applications Close Sept. 29";
     const items = collectStoryDates([
       story({ slug: "hiring", headline, published_on: "2026-09-27" }),
     ]);
+    // Rule (a) finds "Applications Close" and rule (b) cannot mend it -- two
+    // words, no verb the fragment test knows -- so the row takes the headline,
+    // which names the 29th and is therefore about the day it is on.
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
       [["2026-09-29", headline]],
@@ -707,12 +756,13 @@ describe('a row title must read as a headline, not a bare fragment (unit BZ, ite
  * read "8 regular meeting is cancelled, while agency funding hearings remain
  * listed for" -- the tail of a longer sentence, stopping on the word "for". Two
  * shapes reach the panel that way, one at each end of the line: a line that
- * opens on a day NUMBER, left there when the punctuation `dekClause` breaks on
- * cut the "Oct." away from its own day, and a line that ENDS on a function word,
- * because a sentence does not end on the joint to its next word. Both are
- * checked in `isBareFragment`, and the cut line is refused when it is the dek's
- * own clause as well (`fallbackLine`), so a day whose only text is a cut
- * sentence goes rather than being printed under a headline about another day.
+ * opens on a day NUMBER, left there when the punctuation `clauseName` cuts on
+ * separates the "Oct." from its own day, and a line that ENDS on a function
+ * word, because a sentence does not end on the joint to its next word. Both are
+ * checked in `isBareFragment`, and since unit CV, item 2 that test is the last
+ * word on every name the three rules produce -- so a day whose only text is a
+ * cut sentence goes, rather than being printed under a headline about another
+ * day or handed a fragment to print.
  */
 describe("a This week row that is a sentence cut in half (unit CN, item 2)", () => {
   const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
@@ -747,9 +797,11 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
     );
     // Two more rows came out of that one sentence before this fix: an Oct. 1 row
     // reading the cut sentence, and an Oct. 15 row reading "1 and" (the tail of
-    // "Oct. 1 and" with the month cut off it). Both are gone; the day the story
-    // is actually about has its own headline.
-    assert.deepEqual(rows, [["2026-10-08", HOUSING_HEADLINE]]);
+    // "Oct. 1 and" with the month cut off it). Both are gone. The one row left
+    // is the day the story is actually about, and since unit CV, item 2 its
+    // text is the headline's own clause for that date rather than the headline
+    // with the second day's business still on its tail.
+    assert.deepEqual(rows, [["2026-10-08", "Longmont Housing Board Cancels Regular Meeting"]]);
   });
 
   it("drops a day whose clause for it stops on a preposition", () => {
@@ -767,7 +819,7 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
     ]);
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
-      [["2026-10-08", HOUSING_HEADLINE]],
+      [["2026-10-08", "Longmont Housing Board Cancels Regular Meeting"]],
       "a clause cut off at a preposition was printed as a row's only text",
     );
   });
@@ -791,6 +843,273 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
       items.map((i) => [i.date, i.what]),
       [["2026-10-12", headline]],
       "a line cut off at a conjunction was printed as the row's text",
+    );
+  });
+});
+
+/**
+ * Unit CV, item 2: the five strings the owner review quoted, and the row each
+ * one prints now.
+ *
+ * The review of the staged 0.6.81 front page (2026-09-28) read the "This week"
+ * list as phrases lifted out of stories rather than names: "Applications Close",
+ * "Brighton event", "funding hearing packet", "instrument collection drive", and
+ * the tail of a sentence, "8 regular meeting is cancelled, while agency funding
+ * hearings remain listed for". The same extraction feeds "Dates in this story".
+ * Each case is written against the story that produced the live row, so the
+ * table is the before/after the report prints.
+ */
+describe("the five strings the review quoted (unit CV, item 2)", () => {
+  const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
+    slug: "story",
+    section: "council",
+    records: [],
+    ...over,
+  });
+
+  const cases: [string, StoryDateSource, [string, string][]][] = [
+    [
+      "Applications Close",
+      story({
+        slug: "hiring",
+        headline:
+          "Longmont Hiring Director of Power Delivery and Operations; Applications Close Sept. 29",
+        published_on: "2026-09-27",
+      }),
+      [
+        [
+          "2026-09-29",
+          "Longmont Hiring Director of Power Delivery and Operations; Applications Close Sept. 29",
+        ],
+      ],
+    ],
+    [
+      "Brighton event",
+      story({
+        slug: "ranked",
+        headline:
+          "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D",
+        published_on: "2026-09-27",
+      }),
+      [
+        ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
+        ["2026-10-03", "Brighton event for 3C and 3D"],
+      ],
+    ],
+    [
+      "funding hearing packet",
+      story({
+        slug: "packet",
+        headline: "Housing And Human Services Board Posts Funding Hearing Packet",
+        dek: "The board has posted an Oct. 1 funding hearing packet ahead of the meeting.",
+        published_on: "2026-09-27",
+      }),
+      [["2026-10-01", "The board has posted a funding hearing packet ahead of the meeting"]],
+    ],
+    [
+      "instrument collection drive",
+      story({
+        slug: "drive",
+        headline: "Growing Shade Tree Program Sets Fall Pickup",
+        dek: "The Oct. 1-2 instrument collection drive returns to Clark Centennial Park.",
+        published_on: "2026-09-27",
+      }),
+      [["2026-10-01", "The instrument collection drive returns to Clark Centennial Park"]],
+    ],
+    [
+      "8 regular meeting is cancelled, while agency funding hearings remain listed for",
+      story({
+        slug: "staged",
+        headline:
+          "Longmont Housing Board Cancels Oct. 8 Regular Meeting; Funding Hearings Still Listed",
+        dek:
+          "The Oct. 8 regular meeting is cancelled, while agency funding hearings remain listed for Oct. 1 and Oct. 15.",
+        published_on: "2026-09-27",
+      }),
+      [["2026-10-08", "Longmont Housing Board Cancels Regular Meeting"]],
+    ],
+  ];
+
+  for (const [quoted, source, expected] of cases) {
+    it(`prints a name rather than ${quoted}`, () => {
+      const rows = collectStoryDates([source]).map((i) => [i.date, i.what]);
+      assert.equal(
+        rows.some((row) => row[1] === quoted),
+        false,
+        `the quoted string was still a whole row: ${quoted}`,
+      );
+      assert.deepEqual(rows, expected);
+    });
+  }
+});
+
+/**
+ * Unit CV, item 3: the time beside the name.
+ *
+ * The design's example is "Funding hearing: Education agencies, 6 p.m." -- a
+ * sentence-case name with the time the story gives on the end. The clock comes
+ * out of the clause it was read from, because the row prints it itself.
+ */
+describe("the time the story gives (unit CV, item 3)", () => {
+  const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
+    slug: "story",
+    section: "council",
+    records: [],
+    ...over,
+  });
+
+  it("prints the clock once, with the name, when it sits by the date", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "agencies",
+        headline: "Education Agencies Funding Hearing",
+        dek: "The hearing for education agencies is set for Oct. 6 at 6 p.m.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    // Not "…is set for at 6 p, 6 p.m.": the clock's own words are out of the
+    // clause before the clause's end is looked for, and the row appends them
+    // once.
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-06", "The hearing for education agencies is set, 6 p.m."]],
+    );
+  });
+
+  it("reads a clock written straight after the date as a time, not a second day", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "agencies2",
+        headline: "Education Agencies Funding Hearing Set",
+        dek: "Education agencies get their funding hearing Oct. 6, 6 p.m. at the civic center.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    // The list-tail reader would take the clock's hour as the next day of the
+    // expression ("Oct. 6 and 6"), which left the row printing the stump "p".
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-06", "Education agencies get their funding hearing, 6 p.m."]],
+    );
+  });
+
+  it("leaves a clock in another sentence to the event it belongs to", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "agencies3",
+        headline: "Education Agencies Funding Hearing",
+        dek: "The hearing for education agencies is set for Oct. 6. The doors open at 6 p.m.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-06", "The hearing for education agencies is set"]],
+    );
+  });
+});
+
+/**
+ * Unit CV, item 1: one row per story per day, and one row per event.
+ *
+ * The review found two entries on Thu Oct. 1 pointing at the same Housing board
+ * story. A story's day and a story's event may not be printed twice, and where
+ * two rows collide the more specific one stays -- a record the newsroom kept
+ * over the story's own words.
+ */
+describe("one row per event (unit CV, item 1)", () => {
+  const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
+    slug: "story",
+    section: "council",
+    records: [],
+    ...over,
+  });
+
+  it("prints a day once for a story that names it twice", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "both",
+        headline: "Council Reviews the Oct. 1 Funding Hearing Packet",
+        dek: "The Oct. 1 funding hearing packet goes to the council.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-01", "Council Reviews the Funding Hearing Packet"]],
+    );
+  });
+
+  it("keeps the record and drops the story's own words for the same day", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "rec",
+        headline: "Council Reviews the Oct. 1 Funding Hearing Packet",
+        dek: "The Oct. 1 funding hearing packet goes to the council.",
+        records: [
+          {
+            title: "Funding hearing packet",
+            document_date: "2026-10-01",
+            organization: "https://example.test/housing",
+          },
+        ],
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what, i.note]),
+      [["2026-10-01", "Funding hearing packet", "example.test"]],
+    );
+  });
+
+  it("prints an event once for the paper when two stories name it in the same words", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "same-one",
+        headline: "Rate Study Heads To Council",
+        dek: "The plan goes to the Oct. 6 public hearing and second reading.",
+        published_on: "2026-09-27",
+      }),
+      story({
+        slug: "same-two",
+        headline: "Council Sets The Rate Study Vote",
+        dek: "The plan goes to the Oct. 6 public hearing and second reading.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what, i.slug]),
+      [["2026-10-06", "The plan goes to the public hearing and second reading", "same-one"]],
+    );
+  });
+
+  it("prints the Housing story's Oct. 1 once, in its record's words", () => {
+    // The review's own duplicate: two Oct. 1 entries out of one Housing board
+    // story. The record the newsroom kept is the more specific row for the day.
+    const items = collectStoryDates([
+      story({
+        slug: "week-housing-cv",
+        headline: "Housing And Human Services Board Posts Funding Hearing Packet",
+        dek: "The board has posted an Oct. 1 funding hearing packet ahead of the meeting.",
+        records: [
+          {
+            title: "Oct. 1 Funding Hearing Packet",
+            document_date: "2026-10-01",
+            organization: "Housing and Human Services Advisory Board",
+          },
+        ],
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what, i.note]),
+      [
+        [
+          "2026-10-01",
+          "Oct. 1 Funding Hearing Packet",
+          "Housing and Human Services Advisory Board",
+        ],
+      ],
     );
   });
 });
