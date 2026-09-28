@@ -218,6 +218,23 @@ async function main() {
   if (offered !== 1) {
     throw new Error(`the finished piece offers ${offered} Publishes on its row; expected 1`);
   }
+  /*
+    0.6.80 (CK): publishing refuses an empty dek, and a pasted piece files
+    none. The row's press says so in words and prints nothing. The editor then
+    writes the dek (the full editor's Dek field; here written to the draft
+    directly, the way this walk seeds its other rows) and presses again.
+  */
+  await rowPublish.click();
+  await page.getByText(/Add a dek, the one-line summary under the headline/).waitFor({ timeout: 30_000 });
+  step("a piece with no dek is refused in words from its own row");
+  const dekClient = new Client({ connectionString: dbUrl });
+  await dekClient.connect();
+  const dekSet = await dekClient.query(
+    `update drafts set dek = 'Why this piece matters, in one line.' where headline = $1 and newsroom_id = 1`,
+    [`A real editorial ${stamp}`],
+  );
+  await dekClient.end();
+  if (dekSet.rowCount !== 1) throw new Error(`the dek went to ${dekSet.rowCount} drafts; expected 1`);
   await rowPublish.click();
   await page.getByText(/On the paper\. See it under Published/).waitFor({ timeout: 30_000 });
 

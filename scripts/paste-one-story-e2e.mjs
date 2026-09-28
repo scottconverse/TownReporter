@@ -373,9 +373,16 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
   return { headline, body };
 }
 
-/** The editor rewrites one sentence and saves it, as desk work. */
+/*
+  0.6.80 (CK): publishing refuses an empty dek, and a paste files none, so the
+  editor writes one here as desk work -- the same act the refusal asks for.
+*/
+const PASTE_DEK = "The council set its next steps after a long public hearing.";
+
+/** The editor rewrites one sentence, writes the dek, and saves it, as desk work. */
 async function theEditorEditsASentence(bodyField) {
   await bodyField.fill(BODY.replace(BEFORE_EDIT, AFTER_EDIT));
+  await page.locator(".astra-dek").fill(PASTE_DEK);
   await page
     .locator(".astra-save-state")
     .filter({ hasText: "Unsaved changes" })
@@ -982,6 +989,7 @@ async function main() {
     );
     const { body: secondBody } = await theDraftHoldsThePasteWordForWord(sectionTwo, SECOND_LINE);
     await page.locator(".astra-headline").fill(SECOND_TITLE);
+    await page.locator(".astra-dek").fill(PASTE_DEK);
     const topics = await optionsOf(page.locator("#story-topic select"));
     const movedTo = topics.find((o) => o.value && o.value !== sectionTwo.value && o.value !== "opinion");
     must(Boolean(movedTo?.value), `the story editor offered no other section: ${JSON.stringify(topics)}`);
