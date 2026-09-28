@@ -48,8 +48,17 @@ const ROW_LIMIT = 12;
  * this fix was not asked for. Six is still the fewer of the two: a panel that
  * prints fewer than it is given is honest, and it is what balances the lead
  * column at both 1790 and 1440px (measured, `reports/CL-front-page-0681.md`).
+ *
+ * Unit CN, item 1(a) (owner review, 2026-09-27): six rows was still 214px too
+ * many at 1790px. Five is what the owner asked to try, and five is the count
+ * that leaves the panel within 40px of the lead column at 1790 and 1440 once
+ * the lead carries its own rows under the button (item 1(b), `ALSO_ROWS` in
+ * `routes/index.tsx`) -- measured, `reports/CN-front-gap-and-clause.md`. The
+ * drawing's six is a placeholder count in a drawing whose lead column also
+ * carries no such rows; the panel's job is to say what is dated this week, and
+ * five rows say it.
  */
-const FRONT_WEEK_LIMIT = 6;
+const FRONT_WEEK_LIMIT = 5;
 
 /** The paper's own calendar day for an instant -- the day a reader is living in. */
 function localDay(timezone: string, now: Date): string {

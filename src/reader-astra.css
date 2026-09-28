@@ -2279,9 +2279,27 @@
   background: var(--grid);
   border-bottom: 3px solid var(--grid);
 }
-.reader .ledgerow > .lead {
+/* The row's left-hand grid item is the COLUMN, not the lead article: the lead
+   and the paper's next stories under it are two things, and each one is its
+   own story in this page's markup (unit CN, item 1(b); `river-e2e` reads a
+   card's stories, so the rows sit beside `.lead` rather than inside it). The
+   padding is the column's, which is what keeps the rows and the lead's own
+   button on the same left edge. */
+.reader .ledgerow > .leadcolumn {
   background: var(--bg);
   padding: 32px var(--px) 36px;
+}
+/* The lead carries no box of its own inside the column: the column above has
+   the padding. This is not decoration. `.reader .lead { padding: 39px 42px
+   34px }` earlier in this file is the pre-redesign `.hero` layout's rule, and
+   it is still there because nothing else needed it changed; the lead used to
+   be the row's grid item, whose own three-class rule beat it. Now that the
+   column is the item, the old rule is the only thing setting the article's
+   padding, and it would put the lead's text 42px inside the rows that sit
+   under it (measured: the column grew 85px at 1790px and the two columns read
+   85px apart). */
+.reader .leadcolumn > .lead {
+  padding: 0;
 }
 /* The panel is the ink block in BOTH themes, and it is stated here rather than
    left to the `.datespanel` rule below: this selector carries three classes to
@@ -2322,31 +2340,34 @@
    `inline-block` is blockified, and a stretched one would paint the yellow
    label across the whole column instead of its own words. */
 @media (min-width: 901px) {
-  .reader .ledgerow.solo > .lead {
+  .reader .ledgerow.solo > .leadcolumn > .lead {
     display: grid;
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
     column-gap: 56px;
     align-items: start;
   }
-  .reader .ledgerow.solo > .lead > .sectiontag {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .sectiontag {
     grid-area: 1 / 1 / 2 / 2;
     justify-self: start;
   }
-  .reader .ledgerow.solo > .lead > .leadhead {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .leadhead {
     grid-area: 2 / 1 / 4 / 2;
     max-width: none;
   }
-  .reader .ledgerow.solo > .lead > .dek {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .dek {
     grid-area: 1 / 2 / 3 / 3;
     margin-top: 0;
     max-width: none;
   }
-  .reader .ledgerow.solo > .lead > .meta {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .meta {
     grid-area: 3 / 2 / 4 / 3;
   }
-  .reader .ledgerow.solo > .lead > .leadbottom {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .leadbottom {
     grid-area: 4 / 1 / 5 / 3;
   }
+  /* The column's own rows (unit CN, item 1(b)) need no placement here: they
+     are a block under the lead's two-column grid, so they already run the
+     whole width the way the button's row does. */
 }
 .reader .lead h2.leadhead {
   font-family: var(--fd);
@@ -2378,6 +2399,63 @@
 }
 .reader .lead .leadbottom {
   margin-top: 26px;
+}
+/*
+   The lead column's own rows, under the lead (unit CN, item 1(b)).
+
+   The lead and "This week" are one grid row, so the column's box is always as
+   tall as the panel; these rows are what the column has to say with the
+   paper's next news rather than with blank paper. They are the grid cell
+   itself -- same markup, same `.storysec` / `h3` / `.storymeta` classes, so
+   the kicker still links to its section and a `misc` story still reserves its
+   empty kicker line -- laid out as COMPACT rows: the owner's own words for
+   them ("compact rows under the lead's 'Read the story' button: section tag,
+   headline link, date · min read"). The three fields sit on one line, the
+   headline flexing between the kicker and the line, which wraps to a second
+   line rather than crowding when the column is narrow. No type goes below the
+   handoff's 14px floor: the kicker and the line stay at the cell's 14px, the
+   headline comes down from the cell's 23px to 17px.
+
+   The block's height is not decoration. Measured at 1790px (`reports/
+   CN-front-gap-and-clause.md`), five rows in the panel end 97px below the
+   lead's button; two of these rows plus the block's own margin are 91px, which
+   is what puts the two columns within the owner's 40px. The three-line cell
+   the first attempt used was 95px a row, and two of those overshot the panel by
+   136px -- the balance the owner asked for is only reachable with a row this
+   size, which is why these are one line and not three.
+*/
+.reader .leadalso {
+  margin-top: 22px;
+}
+.reader .leadcolumn .leadalso .storycell {
+  display: flex;
+  /* The grid cell stacks its three fields (`flex-direction: column`, further
+     down this file); these rows put them on one line. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--grid);
+}
+/* Each of these carries one class more than the grid cell's own rule, which
+   is further down this file and would otherwise win on a tie. */
+.reader .leadcolumn .leadalso .storysec {
+  margin-bottom: 0;
+}
+.reader .leadcolumn .leadalso h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 17px;
+  line-height: 1.3;
+}
+.reader .leadcolumn .leadalso .storymeta {
+  margin-top: 0;
+  margin-left: auto;
+  padding-top: 0;
+  /* "Sep 27, 2026 · 1 min read" is one unbreakable line at the row's end. */
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
@@ -3430,7 +3508,7 @@
   .reader .lead .dek {
     font-size: 18px;
   }
-  .reader .ledgerow > .lead,
+  .reader .ledgerow > .leadcolumn,
   .reader .ledgerow > .datespanel {
     padding: 24px var(--px) 26px;
   }
