@@ -936,7 +936,16 @@ export type DarkFileDialogProps = {
    * file, and it may start the first round with the material and the model the
    * editor chose in this dialog.
    */
-  onOpened?: (investigationId: number, run: { paste: string; modelChoice?: string }) => void;
+  /*
+    Unit CY item 9: the run handoff carries the effort as well as the model,
+    because the dialog now draws both and the first round is what spends it.
+    `modelEffort` is optional exactly as `modelChoice` is: an untouched row
+    sends neither, and the screen falls back to the surface default.
+  */
+  onOpened?: (
+    investigationId: number,
+    run: { paste: string; modelChoice?: string; modelEffort?: string | null },
+  ) => void;
 };
 
 /**

@@ -61,11 +61,20 @@ describe("Start a Dark Desk file dialog", () => {
     assert.match(selectedCard(render({ limit: "deep" })), /Deep · up to 100 records, 8 hours or \$15/);
   });
 
-  it("draws a model row and no effort select, because the run takes a model and no effort", () => {
+  it("draws the model row's Effort select too, the way the reference draws that block", () => {
+    // Unit CY item 9, flipped from "no effort select". The reference draws
+    // Model and Effort together in one shared `hasModel` block
+    // (Desk Dialogs.dc.html:89-93) and the dark-file entry renders it
+    // (`:142`, `:187`), so the row this dialog draws without the second select
+    // was the one drawn thing it was missing. The assertion now stands on the
+    // drawn pair and on the disabled-Automatic shape: an untouched row means
+    // the desk's own default, which the note says out loud.
     const html = render({});
     assert.match(html, /aria-label="Model"/);
-    assert.ok(!html.includes('aria-label="Effort"'), "darkRunInput takes no effort");
+    assert.match(html, /aria-label="Effort"/);
     assert.match(html, /Automatic, per job in Server → Models/);
+    assert.match(render({ model: named!.value, effort: "high" }), /<option value="high" selected/);
+    assert.match(html, /title="Automatic sets the effort too"/);
   });
 
   it("refuses the press until the question and the starting point are real", () => {
@@ -97,14 +106,19 @@ describe("Start a Dark Desk file dialog", () => {
     assert.equal(req.run.paste, "The 2024 audit");
   });
 
-  it("sends a model only when the editor named one", () => {
+  it("sends a model, and the effort beside it, only when the editor named one", () => {
     assert.ok(named, "modelRowFor offers a named model beside Automatic");
     const picked = darkRequest(state({ question: "Where did the money go?", tip: "The 2024 audit", model: named!.value, effort: "high" }));
     assert.equal(picked.run.modelChoice, named!.value);
-    // No effort anywhere: the run's input has no such field.
-    assert.ok(!("modelEffort" in picked.run));
+    // Unit CY item 9, flipped from `assert.ok(!("modelEffort" in picked.run))`:
+    // the run's input carries the effort now (request-input.ts darkRunInput),
+    // because the dialog draws the select and this is where its value goes.
+    // It travels through `modelPick`, so it is present exactly when the model
+    // is -- never on a row left on Automatic.
+    assert.equal(picked.run.modelEffort, "high");
     const auto = darkRequest(state({ question: "Where did the money go?", tip: "The 2024 audit" }));
     assert.equal(auto.run.modelChoice, undefined);
+    assert.ok(!("modelEffort" in auto.run), "Automatic sends no effort: the desk's own default stands");
   });
 
   it("falls back to Standard for a limit the desk does not offer", () => {
