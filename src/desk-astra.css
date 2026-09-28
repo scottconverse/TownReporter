@@ -3249,6 +3249,29 @@
   font-size: calc(14px * var(--ts));
   color: var(--fg2);
 }
+/*
+  The step's one press, as Desk Command v3.2 draws it: the label wraps inside
+  its own box rather than being cut off, the press stretches the card's full
+  content box, and `margin-top: auto` rides it down to the card's bottom edge
+  so the two cards sharing a row keep their presses on one line whatever the
+  count above them measures.
+
+  The drawing's button is `display: flex` with no `justify-content`, so a
+  stretched label sits at the LEFT of it; the desk's own `.btn` centers, and
+  this rule is where the drawn left edge wins. `white-space` and `padding`
+  both override `.desk-ltr .btn` (styles.css:1036), whose `nowrap` is what the
+  drawing's btnStyle exists to undo -- "Pick leads"'s press is why the property
+  is in the drawing at all.
+*/
+.desk-ltr.astra .today-step .btn {
+  white-space: normal;
+  line-height: 1.2;
+  padding: 8px 12px;
+  align-self: stretch;
+  margin-top: auto;
+  justify-content: flex-start;
+  text-align: left;
+}
 
 .desk-ltr.astra .today-running {
   display: grid;
@@ -4083,15 +4106,40 @@
   font-weight: 800;
 }
 
+/*
+  THE LAPTOP WIDTH (Desk Command v3.2). Below 1320 the drawing stops holding
+  the rail beside the work column and lays it UNDER instead -- grid areas
+  "nav main" / "nav rail" over `230px minmax(0,1fr)` -- and takes the four
+  step cards to two per row while it is there: four cards in a 1320 wide
+  strip are four cards of squeezed label. Measured on the drawing at 1319,
+  its strip is `503px 503px` and its press is 471px, the card's full content
+  box. The strip's two-per-row rule is the `max-width: 860px` one this file
+  used to carry, moved up to the drawn 1320.
+*/
+@media (max-width: 1319px) {
+  /*
+    In the drawing the rail is a root-level grid child carrying its own
+    `--railPad: 0 32px 40px`; here it is inside `.deskmain`, whose padding
+    already IS that pad -- the rail's panels line up with the main column's
+    own content box, and the page's foot comes from the same place every other
+    desk screen's does. The drawn pad is therefore satisfied in effect;
+    repeating it here would inset the rail 32px further than the column above
+    it, which is the one thing that pad exists to prevent. The alignment is
+    measured rather than assumed -- reports/CY2-evidence/mid-widths.json
+    records rail left/right against the work column's at every width.
+  */
+  .desk-ltr.astra .desk-home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .today-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Fewer columns, same words, as the screen narrows. */
 @media (max-width: 1100px) {
   .desk-ltr.astra .today-cards,
   .desk-ltr.astra .today-running {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 860px) {
-  .desk-ltr.astra .today-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

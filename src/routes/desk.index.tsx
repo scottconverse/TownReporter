@@ -627,7 +627,7 @@ function DeskHome() {
       name: "Draft",
       count: writingNow,
       unit: "writing now",
-      act: "Watch progress",
+      act: "Watch drafts",
       to: "/desk/drafts",
     },
     {
@@ -643,7 +643,7 @@ function DeskHome() {
       name: "Publish",
       count: readyToPrint,
       unit: "ready to print",
-      act: "Tonight’s edition",
+      act: "Review edition",
       to: "/desk",
       hash: "tonight",
     },
