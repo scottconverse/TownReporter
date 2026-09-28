@@ -274,16 +274,53 @@ const CLAUSE_BREAK = /[;:.—–!?,]/;
  * stop in "St. Vrain" was read as a sentence break.
  */
 const ABBREVIATIONS = new Set([
-  "st", "mt", "ft", "mr", "mrs", "ms", "dr", "jr", "sr", "no", "ave", "blvd",
-  "rd", "co", "inc", "corp", "gov", "sen", "rep", "hwy", "u.s", "u.s.a",
+  "st",
+  "mt",
+  "ft",
+  "mr",
+  "mrs",
+  "ms",
+  "dr",
+  "jr",
+  "sr",
+  "no",
+  "ave",
+  "blvd",
+  "rd",
+  "co",
+  "inc",
+  "corp",
+  "gov",
+  "sen",
+  "rep",
+  "hwy",
+  "u.s",
+  "u.s.a",
 ]);
-/** True when the "." at `i` closes a short form ("St.") or an initial ("J."). */
+/** Titles that always sit before a name: their stop never ends a sentence. */
+const TITLES = new Set(["mr", "mrs", "ms", "dr", "sen", "rep", "gov", "no"]);
+/**
+ * True when the "." at `i` closes a short form ("St.") or an initial ("J.")
+ * inside a sentence. A short form can also end a sentence ("on Main St. The
+ * hearing..."): when the next word is capitalised, a street-type short form
+ * that follows a capitalised word ("Main St.", "Hover Ave.") is read as the
+ * sentence's end, while one that opens a name ("St. Vrain", "the St. Vrain
+ * district") is not.
+ */
 function abbreviationStop(text: string, i: number): boolean {
   if (text[i] !== ".") return false;
   const word = /([A-Za-z.]+)$/.exec(text.slice(Math.max(0, i - 8), i))?.[1] ?? "";
   if (!word) return false;
   if (/^[A-Z]$/.test(word)) return true;
-  return ABBREVIATIONS.has(word.toLowerCase().replace(/^\.+/, ""));
+  const key = word.toLowerCase().replace(/^\.+/, "");
+  if (!ABBREVIATIONS.has(key)) return false;
+  if (TITLES.has(key)) return true;
+  const nextIsCapital = /^\s+[A-Z]/.test(text.slice(i + 1, i + 4));
+  if (!nextIsCapital) return true;
+  const before = text.slice(Math.max(0, i - word.length - 30), i - word.length);
+  const previousWord = /([A-Za-z]+)\W*$/.exec(before)?.[1] ?? "";
+  const opensName = ["st", "mt", "ft"].includes(key) && !/^[A-Z]/.test(previousWord);
+  return opensName;
 }
 /** The first clause break in `text` that is not a short form's stop. */
 function clauseStop(text: string): number {
@@ -418,7 +455,10 @@ function clauseName(text: string, hit: DateHit): string {
     clause >= hit.prev
       ? text.slice(clause, hit.start).replace(CLOCK, " ").split(/\s+/).filter(Boolean)
       : [];
-  const right = tail.slice(0, stop < 0 ? tail.length : stop).split(/\s+/).filter(Boolean);
+  const right = tail
+    .slice(0, stop < 0 ? tail.length : stop)
+    .split(/\s+/)
+    .filter(Boolean);
   const words = [...left, ...right];
   if (left.length && right.length) {
     const at = left.length - 1;
@@ -891,7 +931,11 @@ const WORDED_RANK = 1;
 
 /** A row's text as an event key: case and punctuation set aside. */
 function eventKey(what: string): string {
-  return what.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+  return what
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function collectStoryDates(
