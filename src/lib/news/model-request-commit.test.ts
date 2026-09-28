@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { getSql } from "../db.ts";
@@ -6,6 +6,20 @@ import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { ensureNewsroomSchema, requireEditor } from "./membership.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import { ensureStoryDocuments } from "./story-documents.server.ts";
+import {
+  clearSetupCodeOverrideForTests,
+  forceSetupCodeSatisfiedForTests,
+} from "./setup-code.ts";
+
+/*
+  Unit CJ (0.6.80): this file's `requireEditor(userId)` call (line ~264)
+  predates the first-owner setup-code gate and wants a plain auto-claim on a
+  fresh desk, same as first-owner-race.test.ts. Scoped to this file's own
+  before/after so the process-global override cannot leak into another test
+  file sharing the same `node --test` process (see setup-code.ts).
+*/
+before(() => forceSetupCodeSatisfiedForTests());
+after(() => clearSetupCodeOverrideForTests());
 import {
   commitOpinionForAuthenticatedEditor,
   commitScanForAuthenticatedEditor,

@@ -7,7 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { verifyBuild } from "./install-build-manifest.mjs";
 
@@ -208,6 +208,7 @@ async function main() {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
     await completeFirstRunSetup(page, base);
