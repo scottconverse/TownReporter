@@ -64,7 +64,6 @@ import {
   editorStatus,
   flakyFailureCopy,
   followUpsRailCopy,
-  investigationStopKind,
   nearDuplicate,
   openLeads,
   parseFailedSources,
@@ -477,12 +476,6 @@ function DeskHome() {
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
   const aside = invs.filter((r) => pileForStatus(r.status) === "aside");
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, invs));
-  const errStops = onDesk.filter((i) => investigationStopKind(i) === "error");
-  const roundStops = onDesk.filter((i) => investigationStopKind(i) === "round");
-  const drafted = allLeads.filter((l) => l.status === "drafted").length;
-  const scanStale =
-    last?.error ||
-    (last?.started_at && Date.now() - new Date(last.started_at).getTime() > 24 * 3600_000);
   const printed = published.data ?? [];
 
   /*
@@ -567,49 +560,6 @@ function DeskHome() {
     })
     .sort((a, b) => a.rank - b.rank || a.s.title.localeCompare(b.s.title))
     .slice(0, 6);
-
-  const needs: { t: string; to: string; openDark?: number; quiet?: boolean }[] = [];
-  if (drafted)
-    needs.push({
-      t: `${drafted} draft${drafted > 1 ? "s" : ""} on the desk`,
-      to: "/desk/drafts",
-    });
-  if (errStops.length) {
-    needs.push({
-      t: `${errStops.length} Dark Desk file${errStops.length === 1 ? "" : "s"} stopped on an error — what it found is saved`,
-      to: "/desk/dark",
-      openDark: errStops[0]!.id,
-    });
-  }
-  if (proposed.length) {
-    needs.push({
-      t: `${proposed.length} suggested source${proposed.length === 1 ? "" : "s"} await${proposed.length === 1 ? "s" : ""} review`,
-      to: "/desk/sources",
-    });
-  }
-  if (officialFail.length) {
-    needs.push({
-      t: `${officialFail.length} official source${officialFail.length === 1 ? "" : "s"} failing to fetch`,
-      to: "/desk/sources",
-    });
-  }
-  if (scanStale && last?.error) {
-    needs.push({
-      t:
-        last.sources_fetched > 0
-          ? "Last scan fetched sources but did not file leads"
-          : "Last scan failed",
-      to: "/desk/scan",
-    });
-  } else if (scanStale) needs.push({ t: "No scan in the last day", to: "/desk/scan", quiet: true });
-  if (roundStops.length) {
-    needs.push({
-      t: `${roundStops.length} Dark Desk file${roundStops.length === 1 ? "" : "s"} ready for another round`,
-      to: "/desk/dark",
-      openDark: roundStops[0]!.id,
-      quiet: true,
-    });
-  }
 
   /*
     TODAY'S WORK, counted from what the desk already knows. Nothing here is a
@@ -924,7 +874,18 @@ function DeskHome() {
       title="Good morning. Here’s today’s paper."
       kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
       actions={
-        <>
+        /*
+          CY item 1. The drawing's header is a
+          `display:flex;flex-wrap:wrap;justify-content:space-between` row: the
+          date and headline, then the three create buttons -- and the drawing
+          renders the buttons on a SECOND line, starting at the left, because
+          the row wraps ("Desk Command.dc.html" lines 17-28). The shell's
+          `.ov-head` is that same row, so the wrap is not the problem; sitting
+          at the right end until it wraps is. `width:100%` puts the row on its
+          own line at every width, so the drawn left start holds however long
+          the headline runs, and `.today-create` starts it at the left.
+        */
+        <div className="today-create">
           {/*
             Unit BN, item 2: the drawn Add-a-lead dialog (phase 4), in the
             drawn secondary style -- `tone="ghost"` is the mapping's plain
@@ -964,7 +925,7 @@ function DeskHome() {
           <Link to="/desk/opinion" className="btn">
             + Opinion
           </Link>
-        </>
+        </div>
       }
     >
       {/*
@@ -1568,28 +1529,26 @@ function DeskHome() {
             </div>
           </Dialog>
 
-          {needs.length > 0 ? (
-            <div className="needs">
-              <span className="needs-label">Needs you</span>
-              {needs.map((n) => (
-                <Link
-                  key={n.t}
-                  to={n.to}
-                  className={"needs-item" + (n.quiet ? " quiet" : "")}
-                  onClick={() => {
-                    if (n.openDark == null) return;
-                    try {
-                      sessionStorage.setItem(OPEN_KEY, String(n.openDark));
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                >
-                  {n.t}
-                </Link>
-              ))}
-            </div>
-          ) : null}
+          {/*
+            CY item 2: the "Needs you" panel is not in the drawing, so Today no
+            longer draws it. Where each item it linked is reachable from:
+
+              drafts on the desk        → Drafts (/desk/drafts)
+              Dark Desk file stopped    → Dark Desk, the Open files pile and the
+                                          file's own Decide row (/desk/dark)
+              suggested sources         → Sources & scan, the suggested block
+                                          (/desk/sources) -- and still on Today,
+                                          in the wire panel's own disclosure
+              failing sources           → Sources & scan, and still on Today in
+                                          the same disclosure
+              scan stale / failed       → the wire panel's own scan line
+
+            Two of the five therefore never left Today at all. The rest are
+            recorded in design/SPEC-GAPS-0681.md, and the panel's CSS
+            (`.needs` in styles.css) is left alone because no other screen
+            draws it either -- it is now unreferenced markup that a later unit
+            can sweep.
+          */}
           {bootFailed ? (
             <ScreenError
               message={

@@ -3109,6 +3109,29 @@
   display: flex;
   border: 1px solid var(--line);
 }
+/* CY item 1. The drawing's header row wraps its three create buttons onto a
+   second line and starts them at the LEFT (Desk Command.dc.html, the header
+   block: a `flex-wrap:wrap;justify-content:space-between` row of headline,
+   then buttons). `.ov-head` is that same row and `.head-acts` is its
+   right-hand item, so with room on the line the buttons sit at the right
+   until they wrap.
+
+   `flex-basis:100%` on `.head-acts` gives it a line of its own at every
+   width; alone on that line the row's `space-between` starts it at the left,
+   which is the drawn position. Scoped with `:has(.today-create)` to Today's
+   own wrapper, so a screen that uses the shell's action slot differently --
+   the Queue's two presses, which the drawing does put on the header line --
+   keeps the layout it has. */
+.desk-ltr.astra .head-acts:has(.today-create) {
+  flex-basis: 100%;
+}
+.desk-ltr.astra .today-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
 .desk-ltr.astra .today-seg {
   display: flex;
   align-items: center;
