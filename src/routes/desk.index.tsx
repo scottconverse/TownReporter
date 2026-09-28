@@ -15,7 +15,6 @@ import { formatAge } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
-  dropFollowUp,
   draftLead,
   importFinishedStories,
   listDraftsDesk,
@@ -27,14 +26,11 @@ import {
   listPublishedDesk,
   listScans,
   listSources,
-  nudgeFollowUp,
-  recordFollowUpReply,
   runScan,
   setLeadStatus,
   setSourceStatus,
   writeStoryFromInput,
 } from "@/lib/news/desk";
-import { FollowUpItem } from "@/components/follow-up-item";
 import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
 /*
   Unit BW, item 2: the drawn Kill dialog (phase 2b, `dialog-09-kill.png`) is
@@ -43,7 +39,7 @@ import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dial
   same, and that is where this dialog has been mounted since phase 2b.
 */
 import { KillDialog } from "@/components/dialogs/KillDialog";
-import { cardResultLine, parseFinding } from "@/lib/news/follow-up-copy";
+import { cardResultLine, matchesFollowUpFilter, parseFinding } from "@/lib/news/follow-up-copy";
 import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
   NO_SECTION,
@@ -211,23 +207,29 @@ function DeskHome() {
   const worth = useQuery({ queryKey: ["worth-a-look"], queryFn: () => listWorthALook() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const memory = useQuery({ queryKey: ["memory"], queryFn: () => listMemory() });
+  /*
+    The two halves of the rail's follow-ups panel, and they are now the same
+    half: `listFollowUps` hands back agents only (0.6.81, unit CU -- the manual
+    asks it used to include, and the reply/nudge/drop mutations that wrote to
+    them, are gone; see DECISIONS.md:38 and :44), and this query reads it for
+    the panel's own count. The list itself is the findings query below.
+  */
   const followUps = useQuery({
-    queryKey: ["follow-ups", "open"],
-    queryFn: () => listFollowUps({ data: { status: "open" } }),
+    queryKey: ["follow-ups", "agents"],
+    queryFn: () => listFollowUps({ data: {} }),
   });
   /*
     THE RAIL'S OWN HALF OF THE FOLLOW-UPS PANEL (README "1. Today", rail:
     "the latest AI follow-up results").
 
     A different question from the query above, and a different server
-    function: `listFollowUps` is what the desk has asked a person to chase,
-    and this is what the AI agents have already found and are still working.
-    It reads `last_state` and `finding_json` rather than the story's notes, so
-    a finding an editor deleted from the notes does not come back here. The
-    query is its own key -- `["follow-up-findings"]` is not a child of
-    `["follow-ups"]`, so a prefix invalidation reaches one and not the other --
-    and the reply/drop/nudge mutations below refresh both, because dropping or
-    answering a row takes it out of this list as well.
+    function: `listFollowUps` is every agent the desk has, and this is what the
+    AI agents have already found and are still working -- the rows with a
+    `last_state` of `found`. It reads `last_state` and `finding_json` rather
+    than the story's notes, so a finding an editor deleted from the notes does
+    not come back here. The query is its own key -- `["follow-up-findings"]` is
+    not a child of `["follow-ups"]`, so a prefix invalidation reaches one and
+    not the other.
 
     It never publishes and nothing behind it can: a finding is a note and a
     state. Phase 6 (lane 2) wrote the server function; mounting it on Today is
@@ -237,35 +239,10 @@ function DeskHome() {
     queryKey: ["follow-up-findings"],
     queryFn: () => listFollowUpFindings({ data: {} }),
   });
-  const replyFollowUp = useMutation({
-    mutationFn: (input: { id: number; replyText: string; repliedOn: string }) =>
-      recordFollowUpReply({ data: input }),
-    onSuccess: (res) => {
-      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-      void qc.invalidateQueries({ queryKey: ["follow-up-findings"] });
-      announceToDesk(
-        res?.ok
-          ? "Reply recorded."
-          : (res && "error" in res && res.error) || "Could not save that reply.",
-      );
-    },
-  });
-  const nudgeFollow = useMutation({
-    mutationFn: (id: number) => nudgeFollowUp({ data: { id } }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-      void qc.invalidateQueries({ queryKey: ["follow-up-findings"] });
-      announceToDesk("Nudge stamped.");
-    },
-  });
-  const dropFollow = useMutation({
-    mutationFn: (id: number) => dropFollowUp({ data: { id } }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-      void qc.invalidateQueries({ queryKey: ["follow-up-findings"] });
-      announceToDesk("Follow-up dropped.");
-    },
-  });
+  /** Working agents, by the Follow-ups screen's own definition of "active". */
+  const liveFollowUps = (followUps.data ?? []).filter((row) =>
+    matchesFollowUpFilter(row, "active"),
+  ).length;
 
   const setStatus = useMutation({
     mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
@@ -1835,9 +1812,7 @@ function DeskHome() {
             <SecHead
               title="AI follow-ups"
               count={
-                followUps.isError || (followUps.data ?? []).length === 0
-                  ? undefined
-                  : `${followUps.data?.length ?? 0} active`
+                followUps.isError || liveFollowUps === 0 ? undefined : `${liveFollowUps} active`
               }
               aside={
                 <Link to="/desk/follow-ups" className="np-link">
@@ -1846,12 +1821,14 @@ function DeskHome() {
               }
             />
             {/*
-                Phase 6 is where the AI does this work; today the panel shows
-                the follow-ups that exist -- the ones the desk has already
-                asked about -- and says so rather than showing an empty
-                promise. `followUpsRailCopy` carries that sentence.
+                The query's failure sentence, and only on failure: a panel that
+                shows "no findings" because its list could not be fetched reads
+                as a quiet desk rather than a broken one. `followUpsRailCopy`
+                carries the line.
               */}
-            <p className="rail-note">{followUpsRailCopy(false)}</p>
+            {followUpsRailCopy(followUps.isError) ? (
+              <p className="rail-note">{followUpsRailCopy(followUps.isError)}</p>
+            ) : null}
             {/*
               Unit BN, item 2: the drawn panel's own content -- README "1.
               Today", rail: "the latest AI follow-up results".
@@ -1915,24 +1892,15 @@ function DeskHome() {
                 );
               })
             )}
-            {followUps.isError || (followUps.data ?? []).length === 0
-              ? null
-              : (followUps.data ?? [])
-                  .slice(0, 3)
-                  .map((f) => (
-                    <FollowUpItem
-                      key={f.id}
-                      item={f}
-                      onReply={(replyText, repliedOn) =>
-                        replyFollowUp.mutate({ id: f.id, replyText, repliedOn })
-                      }
-                      onNudge={() => nudgeFollow.mutate(f.id)}
-                      onDrop={() => dropFollow.mutate(f.id)}
-                      nudging={nudgeFollow.isPending}
-                      dropping={dropFollow.isPending}
-                      replying={replyFollowUp.isPending}
-                    />
-                  ))}
+            {/*
+              Unit CU (0.6.81): the manual asks were drawn under the findings,
+              each one a `FollowUpItem` with Record reply, Nudge and Drop. They
+              are gone; DECISIONS.md:38/:44 retire the whole human
+              "seek a response" step, and `listFollowUps` no longer returns a
+              row without an `agent_kind`, so there was nothing left to draw.
+              The rows themselves are kept by
+              migrations/0106_retire_manual_follow_ups.sql.
+            */}
           </section>
 
           <section className="nightpanel gc-darkdesk">

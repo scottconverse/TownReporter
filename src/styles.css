@@ -1292,18 +1292,19 @@
 .desk-ltr .wire-row {font-size:calc(0.875rem * var(--ts));margin:6px 0 0}
 .desk-ltr .wire-warn {font-size:calc(0.875rem * var(--ts));color:var(--warn);margin:6px 0 0}
 /*
-  The Follow-ups object (Direction A stage 1). One item: who · what · due ·
-  the story link, matching the anatomy in build-notes' "Follow-ups" section.
-  `.text-warn` is the one place overdue is ALSO stated in words ("Overdue N
-  days") -- color never carries the meaning alone.
+  Unit CU (0.6.81): the Follow-ups object's manual anatomy (who · what · due ·
+  the story link, with `.followup-reply-form` for the reply/nudge fields and
+  `.text-warn` for an overdue due date) is retired with the manual workflow --
+  DECISIONS.md:38/:44. Three rules went with it: `.followup-reply-form`,
+  `.followup-item.done` (only the deleted FollowUpItem set `done`) and
+  `.text-warn` (only the deleted due label used it). `.followup-item` /
+  `.followup-who` / `.followup-what` stay: Today's rail draws its follow-up
+  findings rows with them (desk.index.tsx), as it has since unit BN.
 */
 .desk-ltr .followup-item {padding:14px 0;border-bottom:1px solid var(--line)}
 .desk-ltr .followup-item:last-child {border-bottom:none}
-.desk-ltr .followup-item.done {opacity:.7}
 .desk-ltr .followup-who {font-family:var(--fd);font-weight:700;font-size:calc(0.9375rem * var(--ts));margin:0}
 .desk-ltr .followup-what {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:4px 0 0}
-.desk-ltr .text-warn {color:var(--warn);font-weight:700}
-.desk-ltr .followup-reply-form {margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .desk-ltr .mem-e {font-family:var(--fd);font-weight:700}
 /*
   Beat memory (Direction A stage 1): each entity is one line -- title only,

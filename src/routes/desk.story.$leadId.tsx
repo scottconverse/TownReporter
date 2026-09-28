@@ -20,22 +20,17 @@ import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrom
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
-  createFollowUp,
-  dropFollowUp,
   draftLead,
   fixDraftStyle,
   getLead,
   getDraftHistoryItem,
   listDraftHistory,
   listPullJobs,
-  listFollowUps,
-  nudgeFollowUp,
   publishLead,
   pullTodo,
   resolveDraftMeetingReview,
   continuePullJob,
   overrideNamedOutlet,
-  recordFollowUpReply,
   resolveLeadDuplicate,
   saveDraft,
   saveReportingNotes,
@@ -45,7 +40,6 @@ import {
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
-import { FollowUpItem } from "@/components/follow-up-item";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
@@ -67,7 +61,6 @@ import {
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
-  followUpsRailCopy,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -2993,37 +2986,17 @@ function ReportingNotesPane({
   }, [leadId, qc, terminalPulls]);
 
   /*
-    "People who still need to respond" (Direction A stage 1, the Follow-ups
-    object). Today this is the only place a follow-up is created; the rail
-    on /desk and /desk/follow-ups both read the same rows.
+    Unit CU (0.6.81): this is where "People who still need to respond" stood --
+    the story's own manual follow-ups, read by `listFollowUps`, and the only
+    place in the app a manual ask could still be created ("Add a follow-up",
+    who/what/due). The manual workflow is retired (DECISIONS.md:38, :44): the
+    query, the three form fields, the `addFollowUp` mutation and the reply /
+    nudge / drop writes are all gone, and `listFollowUps` returns agents only.
+    Nothing replaces the section here; the story's agents are on
+    /desk/follow-ups, and their findings reach Today's rail through
+    `listFollowUpFindings`, which joins the lead. Rows already written are kept
+    by migrations/0106_retire_manual_follow_ups.sql.
   */
-  const followUps = useQuery({
-    queryKey: ["follow-ups", "lead", leadId],
-    queryFn: () => listFollowUps({ data: { limit: 50 } }),
-  });
-  const leadFollowUps = (followUps.data ?? []).filter((f) => f.lead_id === leadId);
-  const [addingFollowUp, setAddingFollowUp] = useState(false);
-  const [fuWho, setFuWho] = useState("");
-  const [fuWhat, setFuWhat] = useState("");
-  const [fuDue, setFuDue] = useState("");
-  const addFollowUp = useMutation({
-    mutationFn: () =>
-      createFollowUp({
-        data: { leadId, who: fuWho.trim(), what: fuWhat.trim(), dueOn: fuDue || null },
-      }),
-    onSuccess: (res) => {
-      if (res?.ok) {
-        setFuWho("");
-        setFuWhat("");
-        setFuDue("");
-        setAddingFollowUp(false);
-        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-        announceToDesk("Follow-up added.");
-      } else {
-        announceToDesk((res && "error" in res && res.error) || "Could not add that follow-up.");
-      }
-    },
-  });
 
   const save = useMutation({
     mutationFn: (input: { add?: string; toggle?: number; todos: ReportingNotes["todo"] }) =>
@@ -3392,95 +3365,14 @@ function ReportingNotesPane({
           ) : null}
         </>
       )}
-      <div className="note-sec">
-        <p className="side-label">People who still need to respond</p>
-        {followUpsRailCopy(followUps.isError) ? (
-          <p className="note-one">{followUpsRailCopy(followUps.isError)}</p>
-        ) : leadFollowUps.length === 0 ? (
-          <p className="note-one">No one owes you an answer on this story right now.</p>
-        ) : (
-          leadFollowUps.map((f) => (
-            <FollowUpItem
-              key={f.id}
-              item={f}
-              onReply={
-                f.status === "open"
-                  ? (replyText, repliedOn) => {
-                      // The server appends the reply to this lead's own
-                      // "found" notes too; refresh both.
-                      void recordFollowUpReply({ data: { id: f.id, replyText, repliedOn } }).then(
-                        () => {
-                          void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-                          void qc.invalidateQueries({ queryKey: ["lead", leadId] });
-                          announceToDesk("Reply recorded.");
-                        },
-                      );
-                    }
-                  : undefined
-              }
-              onDrop={
-                f.status === "open"
-                  ? () => {
-                      void dropFollowUp({ data: { id: f.id } }).then(() => {
-                        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-                        announceToDesk("Follow-up dropped.");
-                      });
-                    }
-                  : undefined
-              }
-              onNudge={
-                f.status === "open"
-                  ? () => {
-                      void nudgeFollowUp({ data: { id: f.id } }).then(() => {
-                        void qc.invalidateQueries({ queryKey: ["follow-ups"] });
-                        announceToDesk("Nudge stamped.");
-                      });
-                    }
-                  : undefined
-              }
-            />
-          ))
-        )}
-        {!locked ? (
-          addingFollowUp ? (
-            <div className="note-add followup-reply-form">
-              <input
-                value={fuWho}
-                onChange={(e) => setFuWho(e.target.value)}
-                placeholder="Who — e.g. City Manager's office"
-                aria-label="Who owes a response"
-              />
-              <input
-                value={fuWhat}
-                onChange={(e) => setFuWhat(e.target.value)}
-                placeholder="For what — one line"
-                aria-label="What response is needed"
-              />
-              <input
-                type="date"
-                value={fuDue}
-                onChange={(e) => setFuDue(e.target.value)}
-                aria-label="Due date"
-              />
-              <InkButton
-                small
-                tone="ghost"
-                disabled={!fuWho.trim() || !fuWhat.trim() || addFollowUp.isPending}
-                onClick={() => addFollowUp.mutate()}
-              >
-                Save
-              </InkButton>
-              <InkButton small tone="quiet" onClick={() => setAddingFollowUp(false)}>
-                Cancel
-              </InkButton>
-            </div>
-          ) : (
-            <InkButton small tone="ghost" onClick={() => setAddingFollowUp(true)}>
-              Add a follow-up
-            </InkButton>
-          )
-        ) : null}
-      </div>
+      {/*
+        Unit CU (0.6.81): the "People who still need to respond" section stood
+        here -- `FollowUpItem` per manual ask with Record reply / Nudge / Drop,
+        and the "Add a follow-up" form (who, what, due) under it. Removed
+        whole: DECISIONS.md:44 retires the human "seek a response" step, so
+        there is no ask to write and no reply to record. The rows are kept by
+        migrations/0106_retire_manual_follow_ups.sql.
+      */}
       {!locked ? (
         <div className="note-add">
           <input

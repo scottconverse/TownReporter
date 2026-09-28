@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { AddFollowUpButton } from "@/components/add-follow-up-button";
-import { DeskShell, SecHead } from "@/components/desk-chrome";
+import { DeskShell } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
 import { FollowUpCard } from "@/components/follow-up-card";
 import {
@@ -11,17 +11,13 @@ import {
   type FollowUpDialogInitial,
   type FollowUpDialogInput,
 } from "@/components/follow-up-dialog";
-import { FollowUpItem } from "@/components/follow-up-item";
 import { jobForFollowUp, useFollowUpJobs } from "@/components/follow-up-jobs";
 import { ScreenError } from "@/components/states";
 import {
   createAiFollowUp,
-  dropFollowUp,
   followUpAction,
   listFollowUps,
   listFollowUpStoryOptions,
-  nudgeFollowUp,
-  recordFollowUpReply,
   updateAiFollowUp,
 } from "@/lib/news/desk";
 import { cancelStoryJob } from "@/lib/news/job-progress";
@@ -42,11 +38,14 @@ export const Route = createFileRoute("/desk/follow-ups")({ component: FollowUpsP
  * The Follow-ups screen, as the redesign draws it: the agents working on open
  * questions, one card each, filtered by what they are doing.
  *
- * The list is the EXISTING `listFollowUps`, unfiltered, and this screen splits
- * it: a row with an `agent_kind` is an agent (drawn by `FollowUpCard`), a row
- * without one is a manual ask (drawn by `FollowUpItem`, which is what every
- * version of this screen has drawn it with, and is why 0101 kept the old
- * columns). The agents are the new thing here, not the replacement.
+ * Unit CU (0.6.81): this screen used to split the list it read -- a row with an
+ * `agent_kind` was an agent (drawn by `FollowUpCard`), a row without one was a
+ * manual ask (drawn by the retired `FollowUpItem`, under a "Manual asks" head,
+ * with Record reply / Nudge / Drop). The manual half is gone: DECISIONS.md:38
+ * says follow-ups are AI agents, not a list of people to call, and :44 says
+ * there is no human "seek a response" step anywhere. `listFollowUps` now filters
+ * `agent_kind is not null` server-side, so the split here had nothing left to
+ * split -- every row this screen receives is an agent.
  *
  * Two reads of its own: the rows, and the runs in flight
  * (`useFollowUpJobs`), because a running card embeds the live Job.
@@ -74,31 +73,23 @@ function FollowUpsPage() {
     void qc.invalidateQueries({ queryKey: ["follow-up-jobs"] });
   };
 
-  const { agents, manual } = useMemo(() => {
-    const rows = list.data ?? [];
-    return {
-      agents: rows.filter((row) => isAgentKind(row.agent_kind)),
-      manual: rows.filter((row) => !isAgentKind(row.agent_kind)),
-    };
-  }, [list.data]);
-
   /*
     A run in flight floats to the top of whatever filter is on: it is the one
     card whose contents change while the editor is looking at them, and the only
     one with a progress bar worth finding. The rest keep the query's order.
   */
   const visible = useMemo(
-    () => agents.filter((row) => matchesFollowUpFilter(row, filter)).sort(runningFirst),
-    [agents, filter],
+    () => (list.data ?? []).filter((row) => matchesFollowUpFilter(row, filter)).sort(runningFirst),
+    [list.data, filter],
   );
 
   const counts = useMemo(() => {
     const out = new Map<FollowUpFilter, number>();
     for (const key of FOLLOW_UP_FILTERS) {
-      out.set(key, agents.filter((row) => matchesFollowUpFilter(row, key)).length);
+      out.set(key, (list.data ?? []).filter((row) => matchesFollowUpFilter(row, key)).length);
     }
     return out;
-  }, [agents]);
+  }, [list.data]);
 
   const action = useMutation({
     mutationFn: (input: {
@@ -140,29 +131,6 @@ function FollowUpsPage() {
     },
     onError: (err) =>
       announceToDesk(err instanceof Error ? err.message : "Could not cancel that run."),
-  });
-
-  const reply = useMutation({
-    mutationFn: (input: { id: number; replyText: string; repliedOn: string }) =>
-      recordFollowUpReply({ data: input }),
-    onSuccess: (res) => {
-      invalidate();
-      announceToDesk(res.ok ? "Reply recorded." : res.error);
-    },
-  });
-  const nudge = useMutation({
-    mutationFn: (id: number) => nudgeFollowUp({ data: { id } }),
-    onSuccess: () => {
-      invalidate();
-      announceToDesk("Nudge stamped.");
-    },
-  });
-  const drop = useMutation({
-    mutationFn: (id: number) => dropFollowUp({ data: { id } }),
-    onSuccess: () => {
-      invalidate();
-      announceToDesk("Follow-up dropped.");
-    },
   });
 
   return (
@@ -243,40 +211,15 @@ function FollowUpsPage() {
       </div>
 
       {/*
-        The manual asks. The reference draws the agent screen and not this half,
-        but these rows exist and the old screen showed them; hiding an editor's
-        own asks behind a redesign would lose them. They keep the anatomy they
-        have always had. Shown on the working filter only, because the other
-        three filters name an outcome an agent has and a manual ask does not.
+        Unit CU (0.6.81): the "Manual asks" section stood here -- the editor's own
+        asks, each drawn by `FollowUpItem` with Record reply, Nudge and Drop. It
+        is gone with the component, the three mutations above it and the server
+        functions behind them; DECISIONS.md:44 is the reason there is no "seek a
+        response" step left to take. Rows the old screen showed are not lost --
+        migrations/0106_retire_manual_follow_ups.sql keeps every one of them and
+        drops the open ones, and `listFollowUps` no longer hands a manual row to
+        any screen.
       */}
-      {filter === "active" && manual.length > 0 ? (
-        <section className="mt-8">
-          <SecHead
-            title="Manual asks"
-            count={manual.length}
-            sub="Who you asked, what they owe, and when it’s due."
-          />
-          <div className="mt-4">
-            {manual.map((row) => (
-              <FollowUpItem
-                key={row.id}
-                item={row}
-                onReply={
-                  row.status === "open"
-                    ? (replyText, repliedOn) => reply.mutate({ id: row.id, replyText, repliedOn })
-                    : undefined
-                }
-                onNudge={row.status === "open" ? () => nudge.mutate(row.id) : undefined}
-                onDrop={row.status === "open" ? () => drop.mutate(row.id) : undefined}
-                nudging={nudge.isPending}
-                dropping={drop.isPending}
-                replying={reply.isPending}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
       {dialog ? (
         <FollowUpDialog
           mode={dialog.mode}
