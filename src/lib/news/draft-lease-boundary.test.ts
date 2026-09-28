@@ -250,7 +250,8 @@ it("legacy manual drafts still inherit their lead citations at publication", asy
   const { sql, userId, leadId, job } = await fixture(98209);
   const seeds = ["https://records.example.gov/meeting"];
   await sql.query("update leads set source_urls=$1 where id=$2", [JSON.stringify(seeds), leadId]);
-  await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,source_urls,research_json) values($1,$2,$3,'Manual draft','The meeting is Tuesday.','council','[]','{}')", [userId, job.newsroom_id, leadId]);
+  // 0.6.80 (CK): publishing refuses an empty dek, so the legacy draft carries one.
+  await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,research_json) values($1,$2,$3,'Manual draft','The council meets Tuesday.','The meeting is Tuesday.','council','[]','{}')", [userId, job.newsroom_id, leadId]);
   await confirmSection(userId, job.newsroom_id, leadId);
   const published = await performPublish({ userId, newsroomId: job.newsroom_id }, leadId);
   assert.equal(published.ok, true);
