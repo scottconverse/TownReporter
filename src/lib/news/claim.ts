@@ -15,7 +15,11 @@ import {
 } from "./membership";
 import { claimEmail, claimToken, recoveryCodeInput, setupCodeInput } from "./request-input.ts";
 import { burnSetupCode, isSetupCodeRequired, verifySetupCode } from "./setup-code.ts";
-import { generateRecoveryCodes, recoveryCodesRemaining, redeemRecoveryCode } from "./recovery-codes.ts";
+import {
+  generateRecoveryCodes,
+  recoveryCodesRemaining,
+  redeemRecoveryCode,
+} from "./recovery-codes.ts";
 import { createAccountLockout } from "@/lib/auth/account-lockout.server";
 import { audit } from "./ops.ts";
 
@@ -217,7 +221,12 @@ export const regenerateRecoveryCodes = createServerFn({ method: "POST" })
       throw new ForbiddenError("Only the owner can generate recovery codes.");
     }
     const codes = await generateRecoveryCodes(me.newsroomId);
-    await audit(context.userId, "recovery-codes-regenerated", `${codes.length} new codes minted`, me.newsroomId);
+    await audit(
+      context.userId,
+      "recovery-codes-regenerated",
+      `${codes.length} new codes minted`,
+      me.newsroomId,
+    );
     return { codes };
   });
 
@@ -250,7 +259,10 @@ export const redeemMyRecoveryCode = createServerFn({ method: "POST" })
     const decision = recoveryRedeemAttempts.check(ip);
     if (decision.blocked) {
       const minutes = Math.max(1, Math.ceil(decision.retryAfterSeconds / 60));
-      return { ok: false as const, error: `Too many attempts. Try again in about ${minutes} minute(s).` };
+      return {
+        ok: false as const,
+        error: `Too many attempts. Try again in about ${minutes} minute(s).`,
+      };
     }
     const result = await redeemRecoveryCode(code);
     if (!result.ok) {

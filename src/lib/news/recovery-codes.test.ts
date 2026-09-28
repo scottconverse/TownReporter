@@ -6,6 +6,7 @@
 */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { getSql } from "../db.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import {
@@ -162,8 +163,16 @@ describe("owner recovery codes", () => {
       false,
       "the redemption must not report success when the audit row it promises cannot be written",
     );
-    assert.equal(await recoveryCodesRemaining(1), RECOVERY_CODE_COUNT, "the code must not be burned");
-    assert.equal(await ownerPassword(), before, "the old password must still be the one that works");
+    assert.equal(
+      await recoveryCodesRemaining(1),
+      RECOVERY_CODE_COUNT,
+      "the code must not be burned",
+    );
+    assert.equal(
+      await ownerPassword(),
+      before,
+      "the old password must still be the one that works",
+    );
 
     // And the code still redeems, for real, once the audit table is healthy.
     const retry = await redeemRecoveryCode(code);
@@ -181,7 +190,11 @@ describe("owner recovery codes", () => {
     await reset();
     const first = await generateRecoveryCodes(1);
     const second = await generateRecoveryCodes(1);
-    assert.equal(await recoveryCodesRemaining(1), RECOVERY_CODE_COUNT, "still exactly one live set");
+    assert.equal(
+      await recoveryCodesRemaining(1),
+      RECOVERY_CODE_COUNT,
+      "still exactly one live set",
+    );
     // None of the first set redeems any more.
     for (const code of first.slice(0, 3)) {
       const result = await redeemRecoveryCode(code);
@@ -190,6 +203,53 @@ describe("owner recovery codes", () => {
     // The new set does.
     const result = await redeemRecoveryCode(second[0]);
     assert.equal(result.ok, true);
+  });
+
+  /*
+    Review finding 3 (P1). Codes were stored as a bare SHA-256 of the code --
+    unsalted, and a 40-bit code space. Anyone with a copy of the database can
+    guess offline at hash speed (the whole space is about 2^40) and walk away
+    with the owner's desk. The stored value must be the same salted, slow
+    hash Better Auth uses for passwords, so a copy of the DB is no longer a
+    cheaper attack than the live, rate-limited endpoint.
+  */
+  it("stores salted slow hashes, not a bare SHA-256 of the code", async () => {
+    await reset();
+    const codes = await generateRecoveryCodes(1);
+    const sql = await getSql();
+    const rows = await sql.query<{ code_hash: string }>(
+      `select code_hash from owner_recovery_code where newsroom_id = 1`,
+    );
+    assert.equal(rows.length, RECOVERY_CODE_COUNT);
+
+    for (const row of rows) {
+      assert.match(
+        row.code_hash,
+        /^[0-9a-f]{32}:[0-9a-f]{128}$/,
+        `expected a salted scrypt hash (salt:key), got ${row.code_hash.slice(0, 24)}...`,
+      );
+    }
+    assert.equal(
+      new Set(rows.map((r) => r.code_hash)).size,
+      RECOVERY_CODE_COUNT,
+      "the per-hash salt must make every stored value distinct",
+    );
+
+    // The exact attack the finding describes: a stolen copy of the database,
+    // and a guess hashed for comparison. No stored row may equal that.
+    const naive = createHash("sha256")
+      .update(codes[0]!.toUpperCase().replace(/[^0-9A-Z]/g, ""))
+      .digest("hex");
+    assert.ok(
+      !rows.some((r) => r.code_hash === naive),
+      "a stored code hash is the unsalted SHA-256 of the code",
+    );
+
+    // And a real code still redeems through the slow hash.
+    const result = await redeemRecoveryCode(codes[0]!);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.ownerUserId, OWNER_ID);
+    assert.equal(await recoveryCodesRemaining(1), RECOVERY_CODE_COUNT - 1);
   });
 
   it("a wrong code is refused without touching the real set", async () => {

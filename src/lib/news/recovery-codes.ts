@@ -31,7 +31,7 @@
   (review finding 2; see `redeemRecoveryCode`).
 */
 
-import { hashPassword } from "better-auth/crypto";
+import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { getSql, withTransaction } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { auditWithSql, ensureAuditEventsSchema } from "./ops.ts";
@@ -50,20 +50,65 @@ function randomGroup(): string {
   return out;
 }
 
-/** One recovery code: two groups of four, e.g. "K7QP-3M9X". 40 bits each. */
+/** One recovery code: two groups of four, e.g. "K7QP-3M9X". 40 bits in total. */
 export function randomRecoveryCode(): string {
   const g = randomGroup();
   return `${g.slice(0, 4)}-${g.slice(4, 8)}`;
 }
 
-async function sha256Hex(text: string): Promise<string> {
-  const data = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+/**
+ * The stored form of a code: the same salted, slow hash Better Auth uses for
+ * passwords (`hashPassword` from `better-auth/crypto` -- scrypt, N=16384,
+ * r=16, p=1, a random 16-byte salt per hash, written as `salt:key`).
+ *
+ * Review finding 3 (Unit CR, 0.6.81). These were a bare, unsalted SHA-256 of
+ * the code, and a code is 40 bits. Two groups of four Crockford characters is
+ * a comfortable thing to read off a printed sheet, but it is 2^40 guesses --
+ * and against an unsalted SHA-256 that is a trivial offline sweep from any
+ * stolen copy of the database, no rate limit and no server involved. The
+ * salted slow hash makes each guess cost a full scrypt, so a database copy is
+ * no longer a cheaper attack than the live, throttled endpoint (5 attempts /
+ * 15 min per IP). The 40-bit code length is kept deliberately: it is the
+ * entropy the format was specified with, and the hash is what the finding is
+ * about. Verification stays constant-time per candidate (see below).
+ */
+async function hashCode(raw: string): Promise<string> {
+  return hashPassword(normalize(raw));
+}
+
+/**
+ * Constant-time-in-shape verification: every unused row is verified, the match
+ * is remembered rather than returned, and there is no early exit -- so the
+ * work does not depend on which code (if any) matched, and the loop cannot
+ * become an oracle for a row's position.
+ *
+ * A row whose hash is not in `salt:key` form (Better Auth's verifier throws on
+ * those; an install that briefly ran the reverted 0.6.80 build may hold old
+ * SHA-256 rows) is treated as a non-match instead of failing the whole call.
+ */
+async function matchesAny(
+  candidates: { id: number; newsroom_id: number; code_hash: string }[],
+  raw: string,
+) {
+  const normalized = normalize(raw);
+  let match: { id: number; newsroom_id: number } | undefined;
+  for (const row of candidates) {
+    let ok = false;
+    try {
+      ok = await verifyPassword({ hash: row.code_hash, password: normalized });
+    } catch {
+      ok = false;
+    }
+    if (ok && !match) match = { id: row.id, newsroom_id: row.newsroom_id };
+  }
+  return match;
 }
 
 function normalize(raw: string): string {
-  return raw.trim().toUpperCase().replace(/[^0-9A-Z]/g, "");
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, "");
 }
 
 const RECOVERY_CODE_DDL = `
@@ -77,7 +122,7 @@ const RECOVERY_CODE_DDL = `
   )
 `;
 
-/** Defensive fallback: migrations/0105 is the real schema source (see db.ts). */
+/** Defensive fallback: migrations/0106 is the real schema source (see db.ts). */
 async function ensureRecoveryCodeTable() {
   const sql = await getSql();
   await sql.query(RECOVERY_CODE_DDL).catch(() => {});
@@ -99,14 +144,18 @@ export async function generateRecoveryCodes(
   await ensureRecoveryCodeTable();
   const sql = await getSql();
   const codes = Array.from({ length: RECOVERY_CODE_COUNT }, () => randomRecoveryCode());
-  const hashes = await Promise.all(codes.map((c) => sha256Hex(normalize(c))));
+  // One at a time: scrypt at these parameters wants ~32 MB while it runs, and
+  // ten at once is ten of those (the Node thread pool would queue them
+  // anyway). This is a once-in-an-install button, not a hot path.
+  const hashes: string[] = [];
+  for (const code of codes) hashes.push(await hashCode(code));
   // Regenerating invalidates the old set outright, not just "new codes also work".
   await sql.query(`delete from owner_recovery_code where newsroom_id = $1`, [newsroomId]);
   for (const hash of hashes) {
-    await sql.query(
-      `insert into owner_recovery_code (newsroom_id, code_hash) values ($1, $2)`,
-      [newsroomId, hash],
-    );
+    await sql.query(`insert into owner_recovery_code (newsroom_id, code_hash) values ($1, $2)`, [
+      newsroomId,
+      hash,
+    ]);
   }
   return codes;
 }
@@ -124,8 +173,7 @@ export async function recoveryCodesRemaining(
 }
 
 export type RecoveryRedemption =
-  | { ok: true; tempPassword: string; ownerUserId: string }
-  | { ok: false; reason: string };
+  { ok: true; tempPassword: string; ownerUserId: string } | { ok: false; reason: string };
 
 /**
  * Redeem a recovery code: find the owner it belongs to, set a fresh random
@@ -137,12 +185,12 @@ export type RecoveryRedemption =
 export async function redeemRecoveryCode(rawCode: string): Promise<RecoveryRedemption> {
   await ensureRecoveryCodeTable();
   const sql = await getSql();
-  const hash = await sha256Hex(normalize(rawCode ?? ""));
-  const row = await sql.query<{ id: number; newsroom_id: number }>(
-    `select id, newsroom_id from owner_recovery_code where code_hash = $1 and used_at is null`,
-    [hash],
+  // The salted hash cannot be looked up by value, so the code is verified
+  // against each unused row in turn -- at most ten of them.
+  const candidates = await sql.query<{ id: number; newsroom_id: number; code_hash: string }>(
+    `select id, newsroom_id, code_hash from owner_recovery_code where used_at is null`,
   );
-  const match = row[0];
+  const match = await matchesAny(candidates, rawCode ?? "");
   if (!match) return { ok: false, reason: "That recovery code is not valid, or was already used." };
   const owner = await sql.query<{ user_id: string }>(
     `select user_id from newsroom_members where newsroom_id = $1 and role = 'owner' limit 1`,
