@@ -43,29 +43,43 @@
  * The year of a worded date comes from the story's own publish day, not from
  * the window: a story published in December that says "Jan. 5" means the coming
  * January, so a day more than ~two months behind the story it was printed in
- * rolls to the next year, and a written year always wins over both. Each item
- * carries a short event line -- the words around the date when those words are
- * clean ("Applications close", "public hearing and second reading", "Brighton
- * event") and the story's headline when they are not -- and every item links to
- * the story it was read out of.
+ * rolls to the next year, and a written year always wins over both. Every item
+ * links to the story it was read out of.
+ *
+ * THE EVENT NAME (unit CV, item 2). A row's text has to name the event in plain
+ * words. Until this unit it was "the words around the date when those words are
+ * clean", which is what produced the entries the design review could not use:
+ * "Applications Close", "Brighton event", "funding hearing packet", "instrument
+ * collection drive". The name is now the first of three answers that reads as a
+ * complete phrase -- the headline's own clause for the date (rule a), then the
+ * clause the date sits in (rule b), then the story's headline (rule c). A phrase
+ * that is a scrap -- one that opens mid-sentence or on a day number, ends on a
+ * function word, or carries no capital word at all -- is REFUSED rather than
+ * trimmed, and a day no rule can name is dropped rather than printed as scraps.
+ * A clock time the story gives next to the date ("6 p.m.") is carried with the
+ * name, written the way the design writes it (unit CV, item 3).
  *
  * The body is deliberately NOT read. A body names the dates of the reporting
  * ("a Sept. 12 staff report") as often as it names the date of an event, and
  * nothing in the sentence marks which is which; the headline and the dek are
  * where a story names the date it is about. See the unit report.
  *
- * UNIT BZ, ITEM 5. The headline is the last line a row falls back to, and it is
- * not always about the day the row is on. The live front page's Thu Oct. 1 row
+ * UNIT BZ, ITEM 5. The headline is the last answer a row falls to, and it is not
+ * always about the day the row is on. The live front page's Thu Oct. 1 row
  * printed "Longmont Housing Board Cancels Oct. 8 Regular Meeting; Funding
  * Hearings Still On", because the story named Oct. 1 in its dek and Oct. 8 in
- * its headline, and the dek's own clause for the 1st was not clean enough to
- * print as a line. A reader could take that row for a cancellation on the 1st.
- * So a row prints the headline only for a day the headline names -- or for a
- * story whose headline names no day at all, where it is still the story's own
- * words -- and a day the headline is not about takes the dek's own clause for
- * that day instead, with the date taken out of it. A day the dek gives no such
- * clause for is dropped: a missing row is worth more than a row that sends the
- * reader to the wrong day.
+ * its headline, and the dek's own words for the 1st were not clean enough to
+ * print. A reader could take that row for a cancellation on the 1st. So a row
+ * prints the headline only for a day the headline names -- or for a story whose
+ * headline names no day at all, where it is still the story's own words -- and a
+ * day the headline is not about is answered by its own clause or dropped. A
+ * missing row is worth more than a row that sends the reader to the wrong day.
+ *
+ * UNIT CV, ITEM 1. A story prints one row per calendar day, and one row per
+ * event however many stories name it. Two rows that name the same day from the
+ * same story collapse to the more specific of the two, and two rows whose text
+ * reads the same once punctuation and case are set aside are one event and print
+ * once (`collectStoryDates`).
  *
  * The premise of these panels is written up in full in
  * `questions/BD-redesign-phase1-paper.md`. Nothing in this schema records a
@@ -223,18 +237,28 @@ const WORDED_DAY =
  * that opens on the 1st is printed on the 1st) and a list names a day per
  * number, which is why the range tail is consumed and thrown away while the
  * list tail is consumed and kept.
+ *
+ * A number with a meridiem after it is a CLOCK, not the next day of the list:
+ * "the hearing is Oct. 6, 6 p.m." names one day. Read as a list it extended the
+ * expression over the clock's hour, which left the row printing the stump "p"
+ * where the time had been (unit CV, item 3, measured).
  */
 const RANGE_TAIL = /^\s*[-–—]\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?/;
-const LIST_TAIL = /^\s*(?:,|and\b|&)\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?/;
-/** Words that never OPEN a line: they join it to something already said. */
-const CONJUNCTIONS = new Set(["and", "or", "but", "nor", "yet", "so", "plus"]);
-
-/** How many words an event line carries before it stops. */
-const EVENT_WORDS = 6;
-/** How many words a line written BEFORE its date may run; longer is a headline. */
-const BEFORE_WORDS = 6;
-/** How many words a dek clause may run when it is the row's last resort. */
-const CLAUSE_WORDS = 12;
+const LIST_TAIL =
+  /^\s*(?:,|and\b|&)\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?(?!\s*(?::\d{2})?\s*[ap]\.?\s?m\b)/;
+/**
+ * How many words a row's event name may run (unit CV, item 2).
+ *
+ * The brief's own bound: "a phrase ... within ~12 words around the date". A
+ * phrase longer than this is a sentence the panel would be reprinting, and the
+ * row falls to the story's headline instead.
+ */
+const NAME_WORDS = 12;
+/**
+ * How far from the date a clock may sit and still be the date's own time (unit
+ * CV, item 3).
+ */
+const TIME_WORDS = 12;
 /**
  * How far behind its own story a worded day with no year may sit before it is
  * read as the coming year's. A story filed in December that says "Jan. 5"
@@ -242,9 +266,9 @@ const CLAUSE_WORDS = 12;
  * "Aug. 1" plainly does mean this year's August.
  */
 const ROLL_DAYS = 62;
-/** Where an event line stops: the punctuation a printed sentence breaks on. */
+/** Where a clause stops: the punctuation a printed sentence breaks on. */
 const CLAUSE_BREAK = /[;:.—–!?,]/;
-/** Words that never begin or end an event line on their own. */
+/** Words a name never begins or ends on: it would be hanging off a sentence. */
 const JOINERS = new Set([
   "a",
   "an",
@@ -264,132 +288,50 @@ const JOINERS = new Set([
   "to",
   "with",
 ]);
-/**
- * A verb an event line cannot open with -- "are posted" is not a line about
- * anything, so a line that opens with one is no line at all.
- */
-const AUXILIARIES = new Set([
-  "are",
-  "be",
-  "been",
-  "being",
-  "can",
-  "could",
-  "had",
-  "has",
-  "have",
-  "is",
-  "may",
-  "might",
-  "must",
-  "should",
-  "was",
-  "were",
-  "will",
-  "would",
-]);
-/**
- * A word that opens a trailing phrase or a new clause, past which an event line
- * does not run: "Brighton event for 3C and 3D" is the Brighton event, and "the
- * Oct. 8, 2026 hearing are posted" is the hearing.
- */
-const STOP_WORDS = new Set([
-  "about",
-  "across",
-  "after",
-  "ahead",
-  "as",
-  "at",
-  "before",
-  "behind",
-  "by",
-  "during",
-  "for",
-  "from",
-  "in",
-  "into",
-  "near",
-  "of",
-  "on",
-  "over",
-  "through",
-  "to",
-  "under",
-  "until",
-  "with",
-  ...AUXILIARIES,
-]);
-
-/** A word as an event line compares it: lowercase, with its punctuation off. */
+/** A word as this module compares it: lowercase, with its punctuation off. */
 function plain(word: string): string {
   return word.toLowerCase().replace(/[^\w'-]/g, "");
 }
 
-/** Every word of `line` opens on a capital letter ("Clark Centennial Park"). */
-function allCapitalized(line: string): boolean {
-  const words = line.split(/\s+/).filter(Boolean);
-  return words.length > 1 && words.every((word) => /^[A-Z]/.test(word));
+/**
+ * A clock time in a story's words: "6 p.m.", "6:30 p.m.", "7am".
+ *
+ * Unit CV, item 3. The design prints a time beside the name when the story
+ * gives one ("Free senior meal pickups begin, 3 p.m."), and the story is the
+ * only place the time can come from. Only the shapes this paper writes are read
+ * -- an hour, an optional minute, a meridiem -- because a bare number near a
+ * date is a day, a year or a street number far more often than a time.
+ */
+const CLOCK = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\.?(?![\w.])/gi;
+
+/** The clock as the design writes it: "6 p.m.", "6:30 p.m.". */
+function clockOf(match: RegExpMatchArray): string {
+  return `${Number(match[1])}${match[2] ? `:${match[2]}` : ""} ${match[3].toLowerCase()}.m.`;
 }
 
 /**
- * The words around a date, cut down to one line a panel can print.
+ * The clock time the story gives for a date, or `""`.
  *
- * `raw` is the piece of the sentence the date sits in; the line ends at the
- * first punctuation mark, drops a leading joiner ("to an Oct. 6 hearing" reads
- * "hearing"), stops before a word that opens a trailing phrase or a new clause
- * ("Brighton event for 3C and 3D" reads "Brighton event") and drops a trailing
- * joiner ("canvassing day and Oct. 3" reads "canvassing day").
- *
- * A line that is left as a single joiner, that opens on a verb, or that is a
- * fragment of one -- what is left of a longer sentence -- is no line at all.
- * Unit BX3 sharpened this: the live front page printed "-2 instrument
- * collection drive" and "8 regular meeting", each the tail of a date the reader
- * had stopped short of reading, so a line that opens on a digit, a dash, a
- * comma or a conjunction is refused, and so is one of fewer than two words.
- *
- * `fromHeadline` is where `raw` was cut from, and it decides one case: a line
- * whose every word opens on a capital letter reads as a NAME -- a place, a
- * building, a body -- and not as what happens there ("at the Longmont Senior
- * Center", "Oct. 3 at Clark Centennial Park" both print the story's headline
- * now). The exception is a headline's own title case, which is the desk's
- * style rather than a signal: "Applications Close Sept. 29" is a clause about
- * what happens, every word capital only because a headline is written that way,
- * and it stays.
- *
- * Unit BX3 sharpened the exception to the exception. It used to be an all-cap
- * line cut from a headline, full stop, and that kept the live paper's worst
- * line: the real headline "Longmont Senior Center to begin free meal pickups
- * Oct. 2" printed the venue on Fri 2, because the STOP_WORDS loop cut the
- * sentence at "to" and left a bare subject behind. An all-cap line is now kept
- * only when nothing was cut off it -- "Applications Close" is the whole clause,
- * while "Longmont Senior Center" is what is left of one whose verb phrase was
- * cut away, which is a NAME. A line we reached by stripping a preposition is a
- * place whatever it was cut from -- the phrase is the preposition's object.
+ * The clock has to sit in the date's own sentence -- no `.`, `!` or `?` between
+ * them -- and within `TIME_WORDS` words of the date expression, on either side.
+ * "Pickups begin at 3 p.m. and run through the winter", printed under a
+ * headline that names Oct. 2, is that date's time (the headline carries no full
+ * stop, so the two are one sentence); a clock in the paragraph after the date's
+ * sentence is some other event's. Of the clocks that qualify, the nearest wins.
  */
-function cleanLine(raw: string, maxWords: number, fromHeadline: boolean): string {
-  const stop = raw.search(CLAUSE_BREAK);
-  let words = (stop < 0 ? raw : raw.slice(0, stop)).trim().split(/\s+/).filter(Boolean);
-  let stripped = false;
-  while (words.length > 1 && JOINERS.has(plain(words[0]))) {
-    words = words.slice(1);
-    stripped = true;
+function clockNear(text: string, start: number, end: number): string {
+  let best = "";
+  let bestGap = Number.POSITIVE_INFINITY;
+  for (const match of text.matchAll(CLOCK)) {
+    const at = match.index ?? 0;
+    const between = at >= end ? text.slice(end, at) : text.slice(at, start);
+    if (/[.!?]/.test(between)) continue;
+    const gap = between.split(/\s+/).filter(Boolean).length;
+    if (gap > TIME_WORDS || gap >= bestGap) continue;
+    bestGap = gap;
+    best = clockOf(match);
   }
-  if (words.length > 0 && AUXILIARIES.has(plain(words[0]))) return "";
-  let truncated = false;
-  for (let i = 1; i < words.length; i += 1) {
-    if (STOP_WORDS.has(plain(words[i]))) {
-      words = words.slice(0, i);
-      truncated = true;
-      break;
-    }
-  }
-  while (words.length > 1 && JOINERS.has(plain(words[words.length - 1]))) words.pop();
-  const line = words.slice(0, maxWords).join(" ").replace(/[\s,;:.—–!?-]+$/, "").trim();
-  if (words.length < 2) return "";
-  if (/^[\d\-,;:.–—]/.test(line)) return "";
-  if (CONJUNCTIONS.has(plain(words[0]))) return "";
-  if (allCapitalized(line) && !(fromHeadline && !stripped && !truncated)) return "";
-  return line;
+  return best;
 }
 
 /** Where the sentence or clause the date sits in begins. */
@@ -400,69 +342,99 @@ function clauseStart(text: string, start: number): number {
   return 0;
 }
 
+/** One date expression, as `scanDates` found it, with its two neighbours. */
+type DateHit = { start: number; end: number; prev: number; next: number; days: string[] };
+
 /**
- * The event line for one date: the words around it when they are clean, and
- * nothing at all when they are not.
+ * The clause a date sits in, with the date expression itself taken out.
  *
- * `next` is where the following date in the same text begins, so a line never
- * runs into the next date's own words ("canvassing day and Oct. 3" gives the
- * 26th its line and the 3rd its own). A line written BEFORE the date is used
- * only when it is short and whole ("Applications Close Sept. 29"); a long one
- * is just the headline with the date taken out of it, and the headline is what
- * gets printed.
+ * Unit CV, item 2, rule (b). The clause is bounded by the punctuation
+ * `CLAUSE_BREAK` names and by the neighbouring date expressions: it stops at
+ * whichever comes first, so it can never run across a semicolon into what the
+ * story says next, and it can never swallow a second date's own words. A date
+ * that follows another date in the same clause has no words of its own on its
+ * left -- the words in between are the earlier date's, as in "...schedules
+ * Sept. 26 canvassing day and Oct. 3 Brighton event...", where the 26th owns
+ * "canvassing day" and the 3rd owns "Brighton event" -- so `prev` cuts `left`
+ * away in that case, and the name is what the story says AFTER the date.
  *
- * What a row with no line of its own prints is the caller's question, not this
- * function's: `fallbackLine` answers it, and the answer depends on the day the
- * row is on (unit BZ, item 5).
+ * The panel prints the day in its own column, which is why the date expression
+ * is what comes out. What remains is mended at the join (an article left
+ * disagreeing with the word the date was keeping it from: "posted an Oct. 1 ...
+ * packet" reads "posted a ... packet"), loses a trailing function word and --
+ * unless it is the sentence's own opening -- a leading joiner, and may still be
+ * a scrap: `phraseName` is the test for that, kept separate so a scrap costs the
+ * row its words rather than the day.
  */
-function eventLine(
-  text: string,
-  start: number,
-  end: number,
-  next: number,
-  fromHeadline: boolean,
-): string {
-  const after = cleanLine(text.slice(end, next), EVENT_WORDS, fromHeadline);
-  if (after) return after;
-  const before = cleanLine(text.slice(clauseStart(text, start), start), BEFORE_WORDS + 99, fromHeadline);
-  if (before && before.split(" ").length <= BEFORE_WORDS) return before;
-  return "";
+function clauseName(text: string, hit: DateHit): string {
+  const clause = clauseStart(text, hit.start);
+  /*
+    The clock the story gives for this date is printed by the row itself (unit
+    CV, item 3: "free meal pickups, 3 p.m."), so its own words are not part of
+    the clause. Left in, "the hearing for education agencies is set for Oct. 6 at
+    6 p.m." printed "…is set for at 6 p, 6 p.m." -- the time twice, and a stump of
+    it where the clause was cut. The clock comes out of the tail BEFORE the
+    clause's end is looked for, because the full stops inside "p.m." are
+    themselves a clause break; taking the clock out first also makes the word
+    before it the clause's own end, so the "for" the date was the object of is
+    dropped by the joiner test below rather than stranded.
+  */
+  const tail = text.slice(hit.end, hit.next).replace(CLOCK, " ");
+  const stop = tail.search(CLAUSE_BREAK);
+  const left =
+    clause >= hit.prev
+      ? text.slice(clause, hit.start).replace(CLOCK, " ").split(/\s+/).filter(Boolean)
+      : [];
+  const right = tail.slice(0, stop < 0 ? tail.length : stop).split(/\s+/).filter(Boolean);
+  const words = [...left, ...right];
+  if (left.length && right.length) {
+    const at = left.length - 1;
+    if (plain(words[at]) === "a" || plain(words[at]) === "an") {
+      words[at] = /^[aeiou]/i.test(right[0]) ? "an" : "a";
+    }
+  }
+  while (words.length > 1 && JOINERS.has(plain(words[words.length - 1]))) words.pop();
+  /*
+    The leading joiner is dropped only when the clause was CUT out of a sentence
+    and the word in front of it is the joint to words the row is not printing
+    ("...schedules Sept. 26 canvassing day and Oct. 3 Brighton event" -- the 26th
+    must not inherit the "and"). A clause whose first word is the sentence's own
+    first word keeps it even when it is an article: "The board has posted an Oct.
+    1 funding hearing packet" is the complete sentence rule (b) is looking for,
+    and taking its "The" away leaves a line that opens lower-case, which
+    `phraseName` then refuses as a fragment -- costing the day its own words for
+    no reason a reader could see.
+  */
+  const opensSentence = clause === 0 && hit.start > 0;
+  if (!opensSentence) {
+    while (words.length > 1 && JOINERS.has(plain(words[0]))) words.shift();
+  }
+  return words
+    .join(" ")
+    .replace(/[\s,;:.!?–—-]+$/, "")
+    .trim();
 }
 
 /**
- * The dek's own clause for a day, with the date expression taken out of it.
+ * `clause` as a row's name, or `""` when it is not one.
  *
- * Unit BZ, item 5. This is what a row prints when the story's words around the
- * date were not clean enough to be a line and the headline is about another
- * day: the clause the day sits in, as the desk wrote it for that day.
- *
- * The clause is bounded the way a line is -- by the punctuation `CLAUSE_BREAK`
- * names, on both sides of the date -- so it can never run across a semicolon
- * into what the dek says next, and it cannot swallow a second date's own clause.
- * What is taken off is the date expression itself: the panel prints the day in
- * its own column, and the line is what the day is about.
- *
- * The words are deliberately NOT put through `cleanLine`. The only reason this
- * path exists is that the clean-line test refused them; asking it again would
- * refuse them again and leave the row with nothing, which is the outcome this
- * path is here to avoid. The one test kept is `cleanLine`'s own floor -- fewer
- * than two words is a fragment, not a line -- so a clause that is nothing but
- * the date and one word gives `""`, and the row is dropped. The word cap is a
- * bound on the panel rather than a reading: a clause longer than it is cut at a
- * word boundary.
+ * The text a reader sees has to read as a complete phrase (unit CV, item 2:
+ * "never output a fragment"). It starts at a word boundary with a capital --
+ * the clause's own first word, or the nearest name inside it, since a clause
+ * read out of the middle of a sentence carries the words before the name too --
+ * and it is refused outright when what is left is a scrap. `isBareFragment` is
+ * the judgement: it opens lower-case or on a digit, or ends on a function word,
+ * or is too short to stand without a verb of its own. The word bound is the
+ * brief's own "~12 words around the date"; a clause longer than that is a
+ * sentence the panel would be reprinting, and the row falls to the headline.
  */
-function dekClause(dek: string, start: number, end: number): string {
-  const from = clauseStart(dek, start);
-  const stop = dek.slice(end).search(CLAUSE_BREAK);
-  const words = `${dek.slice(from, start)} ${dek.slice(end, stop < 0 ? dek.length : end + stop)}`
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^[\s,;:.!?–—-]+/, "")
-    .replace(/[\s,;:.!?–—-]+$/, "")
-    .split(" ")
-    .filter(Boolean);
-  if (words.length < 2) return "";
-  return words.slice(0, CLAUSE_WORDS).join(" ");
+function phraseName(clause: string): string {
+  const words = clause.split(/\s+/).filter(Boolean);
+  const opening = words.findIndex((word) => /^[A-Z]/.test(word));
+  if (opening < 0) return "";
+  if (words.length - opening > NAME_WORDS) return "";
+  const line = words.slice(opening).join(" ");
+  return isBareFragment(line) ? "" : line;
 }
 
 /**
@@ -524,29 +496,26 @@ const KNOWN_VERBS = new Set([
 const BARE_FRAGMENT_WORDS = 4;
 
 /**
- * The words a line cannot END on: an article, a conjunction, or a preposition.
+ * The words a name cannot END on: an article, a conjunction, or a preposition.
  *
- * A line that stops on one of these stops on the joint to the next word -- "the
+ * A name that stops on one of these stops on the joint to the next word -- "the
  * meeting is cancelled, while agency funding hearings remain listed for" is not
- * a sentence that ran out, it is a sentence cut off -- which is what a line
+ * a sentence that ran out, it is a sentence cut off -- which is what a clause
  * lifted out of a longer one looks like when the cut is made by punctuation and
  * a word cap rather than by grammar (unit CN, item 2: the staged 0.6.80 row
  * "8 regular meeting is cancelled, while agency funding hearings remain listed
- * for"). `cleanLine` already refuses such a line for the clause it extracts,
- * because it truncates at `STOP_WORDS` and strips trailing `JOINERS`; the list
- * is repeated here for the lines that never went through it (`dekClause`, and
- * `own` for the conjunctions `STOP_WORDS` does not carry -- "and", "while").
+ * for"). `clauseName` drops a trailing `JOINERS` word itself, so this list is
+ * what catches the rest of them -- "and", "while" and the other conjunctions a
+ * clause can stop on, which no list of joiners carries.
  */
 const TRAILING_FUNCTION_WORDS = new Set([
   // Articles.
   "a",
   "an",
   "the",
-  // Conjunctions. These are the words that matter for a line `cleanLine`
-  // produced: it truncates at `STOP_WORDS` (the prepositions and the
-  // auxiliaries) and strips the trailing `JOINERS` ("and", "or"), but it
-  // carries no conjunction, so "Public Hearing Set while" is a line only this
-  // list can catch.
+  // Conjunctions. A clause the desk wrote can stop on one of these when the cut
+  // is made by a word cap rather than by grammar, and "Public Hearing Set while"
+  // reads as a sentence that was cut off.
   "and",
   "or",
   "but",
@@ -610,25 +579,21 @@ const TRAILING_FUNCTION_WORDS = new Set([
 ]);
 
 /**
- * Is `line` a bare scrap rather than something that reads as a headline?
+ * Is `line` a bare scrap rather than something that reads as a name?
  *
  * Unit BZ, item 6 (owner review, 2026-09-27, "This week" at 1790px): rows
  * printed fragments lifted verbatim out of a clause -- "funding hearing
  * packet", "instrument collection drive", "Brighton event", "Applications
  * Close" -- lower-case scraps and short bare nouns with no verb of their own.
- * `cleanLine` and its exceptions (title case, the "not a name" carve-out) were
- * built to keep a clause that reads as an event; they still let these four
- * through because each is grammatically a clause (a subject and, for
- * "Applications Close", even a verb). What they are not is a HEADLINE: a
- * reader who has not read the story cannot tell what "Brighton event" is an
- * event FOR. A line that opens lower-case reads as torn out of a sentence
- * (that is the whole reason `cleanLine` strips leading joiners); a short line
- * with no verb of its own is a label, not a sentence.
+ * What they are not is a HEADLINE: a reader who has not read the story cannot
+ * tell what "Brighton event" is an event FOR. A line that opens lower-case
+ * reads as torn out of a sentence (that is the whole reason `clauseName` strips
+ * leading joiners); a short line with no verb of its own is a label, not a
+ * sentence.
  *
- * This supersedes the title-case exception `cleanLine` documents for
- * "Applications Close Sept. 29": that exception was about telling a NAME
- * (venue, building) from a clause, and it is still right about that -- but a
- * two-word clause is still too short to stand alone as a row's only text.
+ * Unit BZ, item 6 also refused the two-word clause "Applications Close Sept.
+ * 29": it reads as a clause, but a two-word phrase is still too short to stand
+ * alone as a row's only text.
  *
  * Unit CN, item 2 (owner review, 2026-09-27) adds the two shapes a line takes
  * when it is CUT OUT of a longer sentence rather than lifted from it, neither
@@ -639,60 +604,36 @@ const TRAILING_FUNCTION_WORDS = new Set([
  *    that opens on a day number is a line that starts in the middle of a date
  *    expression -- the live row began "8 regular meeting is cancelled", which is
  *    the tail of "cancelled Oct. 8 regular meeting" with the "Oct." left behind
- *    by the punctuation cut `dekClause` makes. (`cleanLine` already refuses this
- *    shape for `own`; this is the same rule for the lines it never saw.)
+ *    by the punctuation cut.
  *  - it ends on a function word -- an article, a conjunction, a preposition --
  *    because a sentence does not end there. See `TRAILING_FUNCTION_WORDS`.
+ *
+ * Unit CV, item 2 keeps this as the final test on every name the three rules
+ * produce (`phraseName`): the brief's "never output a fragment" is this
+ * function, applied after the date has been taken out of the clause.
+ *
+ * Tried and removed, unit CV: refusing a short line that ENDS on a word in
+ * `KNOWN_VERBS`, on the reading that the date was the verb's object and the line
+ * has lost it ("Council meets Oct. 1"). It refuses a shape it cannot see. "Oct.
+ * 1 Funding Hearing Packet Posted" ends on the participle of a line whose object
+ * sits in front of it, so the whole Oct. 1 row of a story that names two days
+ * disappeared from the panel -- measured, not theorised: `story-dates.test.ts`,
+ * "gives a day the headline is not about the dek's own clause for it". The same
+ * test refuses "Council sets the budget adoption vote", whose last word is the
+ * noun "vote". Telling those from "Council meets" needs the part of speech, and
+ * a line with a subject and a verb is not the fragment the brief forbids -- the
+ * live fragment was "Applications Close", which has no subject at all and is
+ * caught below by the word count.
  */
 function isBareFragment(line: string): boolean {
   const words = line.split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   if (/^[a-z]/.test(words[0])) return true;
   if (/^\d/.test(words[0])) return true;
-  if (TRAILING_FUNCTION_WORDS.has(plain(words[words.length - 1]))) return true;
+  const last = plain(words[words.length - 1]);
+  if (TRAILING_FUNCTION_WORDS.has(last)) return true;
   if (words.length >= BARE_FRAGMENT_WORDS) return false;
   return !words.some((word) => KNOWN_VERBS.has(plain(word)));
-}
-
-/**
- * What a row prints when the story's own words around the date said nothing.
- *
- * A row read out of the headline itself always keeps the headline: the day came
- * from the headline, so the headline is about it by construction. A row read
- * out of the dek keeps the headline only when the headline names this day too,
- * or names no day at all (unit BZ, item 5). A headline that names only OTHER
- * days is refused, and the day falls back to the dek's own clause for it --
- * `""` when the dek has none, which drops the row.
- *
- * `text` is the words the row was read out of, which is the dek for every row
- * that can reach the last branch.
- *
- * Unit CN, item 2. The dek's own clause is the last text a row can fall to, and
- * it is cut out of the dek by punctuation alone (`dekClause`, deliberately
- * without the clean-line test), so it can be exactly the shape unit CN adds to
- * `isBareFragment`: the staged 0.6.80 page's Thu Oct. 1 row read "8 regular
- * meeting is cancelled, while agency funding hearings remain listed for" -- the
- * clause for the 1st cut at the word cap, with the day number of the 8th left
- * in front of it. The headline is refused for that day (it is about the 8th),
- * so the row has nothing that is about the 1st to print: it is dropped, the
- * same outcome unit BZ item 5 gives a day the dek has no clause for, rather than
- * printing a sentence cut in half. A row whose headline IS about this day -- or
- * names no day at all -- never reaches this test; it keeps the headline.
- */
-function fallbackLine(
-  date: string,
-  text: string,
-  start: number,
-  end: number,
-  headline: string,
-  publishedOn: string,
-): string {
-  const said = headline.trim();
-  if (!said) return "A date this story names";
-  const named = daysNamed(said, publishedOn);
-  if (named.length === 0 || named.includes(date)) return said;
-  const clause = dekClause(text, start, end);
-  return isBareFragment(clause) ? "" : clause;
 }
 
 /**
@@ -746,20 +687,19 @@ function dayOn(
  *
  * `days` is every day the expression names, in the order it names them: a list
  * ("Oct. 1 and 8") is two, a range ("Oct. 1-2") is one, because a range names
- * its first day. `start` and `end` bound the expression itself, which is what
- * the words around it -- and the row's fallback line -- are read from. A text
- * with no month-name date in it is no expressions at all.
+ * its first day. `start` and `end` bound the expression itself, `prev` and
+ * `next` the expressions either side of it, which is what the words around a
+ * date -- its clause -- are read from. A text with no month-name date in it is
+ * no expressions at all.
  */
-function scanDates(
-  text: string,
-  publishedOn: string,
-): { start: number; end: number; next: number; days: string[] }[] {
+function scanDates(text: string, publishedOn: string): DateHit[] {
   if (!text || !publishedOn) return [];
   const matches = [...text.matchAll(WORDED_DAY)];
+  /* The whole expression, not just its first day: "Oct. 1-2" ends after the 2
+     and "Oct. 1 and 8" after the 8, so neither tail is read as the words. */
+  const ends = matches.map((match) => readDayTail(text, (match.index ?? 0) + match[0].length).end);
   return matches.map((match, i) => {
     const start = match.index ?? 0;
-    /* The whole expression, not just its first day: "Oct. 1-2" ends after the
-       2 and "Oct. 1 and 8" after the 8, so neither tail is read as the line. */
     const tail = readDayTail(text, start + match[0].length);
     const month = monthNumber(match[1]);
     // The day the expression does not name is the calendar's to refuse
@@ -770,52 +710,69 @@ function scanDates(
     return {
       start,
       end: tail.end,
+      prev: i > 0 ? ends[i - 1] : 0,
       next: i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length,
       days,
     };
   });
 }
 
-/** The days a text names in its own words, resolved the way its rows are. */
-function daysNamed(text: string, publishedOn: string): string[] {
-  return scanDates(text, publishedOn).flatMap((hit) => hit.days);
-}
-
 /**
- * The dates a printed story names in its own words, with a line for each.
+ * The dates a printed story names in its own words, with a name for each.
  *
  * `publishedOn` is the story's own calendar day and resolves a date that names
- * no year; `headline` is what a row with no line of its own falls back to, for
- * this day only. Nothing here reads a value the story does not carry: a text
- * with no month-name date in it returns nothing at all, and a day whose row has
- * nothing to print returns no row.
+ * no year. `ctx` is the story as a whole, which is what the three rules are
+ * answered from (unit CV, item 2), in order:
+ *
+ *  (a) the headline names this day: the name is the headline's own clause for
+ *      it, with the date taken out ("...Cancels Oct. 8 Regular Meeting..." reads
+ *      "Longmont Housing Board Cancels Regular Meeting"); and if that clause is
+ *      a scrap, the whole headline is the answer instead, because the day came
+ *      out of it and it is about this day by construction;
+ *  (b) otherwise the clause the date sits in -- the headline's or the dek's --
+ *      with the date taken out ("The board has posted a funding hearing packet
+ *      ahead of the meeting");
+ *  (c) otherwise the story's headline, and only when the headline is about this
+ *      day or names no day at all (unit BZ, item 5: a day the headline is not
+ *      about is answered by its own clause or dropped, never by the wrong day's
+ *      headline).
+ *
+ * A day none of the three can name is dropped rather than printed as a scrap --
+ * the brief's own "never output a fragment" -- and a clock the story gives for
+ * the day is carried with the name (unit CV, item 3).
+ *
+ * Nothing here reads a value the story does not carry: a text with no
+ * month-name date in it returns nothing at all, and a day whose row has nothing
+ * to print returns no row.
  */
 function wordedDates(
   text: string,
-  publishedOn: string,
-  headline: string,
   fromHeadline: boolean,
+  publishedOn: string,
+  ctx: { headline: string; headlineHits: DateHit[]; whole: string; offset: number },
 ): { date: string; what: string }[] {
   const found: { date: string; what: string }[] = [];
   for (const hit of scanDates(text, publishedOn)) {
-    /* The line is answered once per expression and then per day: one expression
-       may name several days ("Oct. 1 and 8") and the fallback is about the day,
-       so the 1st and the 8th can read differently. */
-    const own = eventLine(text, hit.start, hit.end, hit.next, fromHeadline);
+    /* The name is answered per day, not per expression: one expression may name
+       several days ("Oct. 1 and 8"), and whether the headline is about a day is
+       a question about that day. */
     for (const date of hit.days) {
-      /*
-        A clause that reads as a bare scrap ("funding hearing packet",
-        "Brighton event") is no better than no clause at all: it is routed
-        through the same fallback an empty `own` already gets, which is what
-        keeps this safe for a story whose headline is about a DIFFERENT day
-        (unit BZ, item 5) -- `fallbackLine` prints the headline only when it
-        names this date or names none at all, and otherwise falls to the
-        dek's own clause for the day, never a scrap AND never the wrong day's
-        headline.
-      */
-      const usable = own && !isBareFragment(own) ? own : "";
-      const what = usable || fallbackLine(date, text, hit.start, hit.end, headline, publishedOn);
-      if (what) found.push({ date, what });
+      const inHeadline = ctx.headlineHits.find((named) => named.days.includes(date));
+      // Rule (a), then rule (b) -- which is the same clause again when the text
+      // IS the headline and the headline named this day, and would only refuse
+      // itself a second time.
+      let what = inHeadline ? phraseName(clauseName(ctx.headline, inHeadline)) : "";
+      if (!what && !(fromHeadline && inHeadline)) what = phraseName(clauseName(text, hit));
+      if (!what) {
+        // Rule (c). A headline that names some OTHER day is not this row's to
+        // print (unit BZ, item 5).
+        const said = ctx.headline.trim();
+        const names = ctx.headlineHits.length > 0;
+        what = said && (!names || inHeadline) ? said : "";
+      }
+      if (!what) continue;
+      const clock = clockNear(ctx.whole, ctx.offset + hit.start, ctx.offset + hit.end);
+      found.push({ date, what: clock ? `${what}, ${clock}` : what });
     }
   }
   return found;
@@ -886,35 +843,58 @@ export function hostOnly(organization: string): string {
  * named is still a date the reader can check.
  *
  * A story is read twice: its records first, then its own printed words (unit
- * BX2). One calendar day is printed once per story, so a story whose headline
- * and record both name Oct. 1 gives the day to its record -- the record's own
- * title is the better line -- and a story that names the same day twice in its
- * headline and its dek gives it once.
+ * BX2). One calendar day is printed once per story, and one event once for the
+ * whole paper (unit CV, item 1). A story whose headline and record both name
+ * Oct. 1 gives the day to its record -- a record is a dated thing the newsroom
+ * kept, which is the more specific answer for that day -- and a story that
+ * names the same day twice in its headline and its dek, or two stories that name
+ * the same event, print it once. Where two rows collide the more specific one is
+ * the row that stays.
  */
+
+/** How specific a row is: a record the newsroom kept, then a story's words. */
+const RECORD_RANK = 2;
+const WORDED_RANK = 1;
+
+/** A row's text as an event key: case and punctuation set aside. */
+function eventKey(what: string): string {
+  return what.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
 export function collectStoryDates(
   sources: StoryDateSource[],
   { from, days, limit = 12 }: { from?: string; days?: number; limit?: number } = {},
 ): StoryDateItem[] {
   const to = from && days !== undefined ? addDays(from, days) : "";
   const items: StoryDateItem[] = [];
-  /** The rows already printed, wherever they came from. */
-  const seenRows = new Set<string>();
-  /** The days already printed for one story. */
-  const seenDays = new Set<string>();
-  const take = (source: StoryDateSource, date: string, what: string, note: string) => {
-    if (!date) return;
+  /** The row holding each day of each story, and each event of the paper. */
+  const heldDays = new Map<string, { at: number; rank: number }>();
+  const heldEvents = new Map<string, { at: number; rank: number }>();
+  /** The rows a more specific row has displaced, by their place in `items`. */
+  const displaced = new Set<number>();
+  const take = (
+    source: StoryDateSource,
+    date: string,
+    what: string,
+    note: string,
+    rank: number,
+  ) => {
+    if (!date || !what) return;
     if (from && date < from) return;
     if (to && date >= to) return;
-    const day = `${source.slug}|${date}`;
-    if (seenDays.has(day)) return;
-    seenDays.add(day);
-    const key = `${date}|${what}|${note}`;
-    if (seenRows.has(key)) return;
-    seenRows.add(key);
+    const day = heldDays.get(`${source.slug}|${date}`);
+    if (day && day.rank >= rank && !displaced.has(day.at)) return;
+    const event = heldEvents.get(`${date}|${eventKey(what)}`);
+    if (event && event.rank >= rank && !displaced.has(event.at)) return;
+    const at = items.length;
     const item: StoryDateItem = { date, what };
     if (note) item.note = note;
     if (source.slug) item.slug = source.slug;
     items.push(item);
+    if (day) displaced.add(day.at);
+    if (event) displaced.add(event.at);
+    heldDays.set(`${source.slug}|${date}`, { at, rank });
+    heldEvents.set(`${date}|${eventKey(what)}`, { at, rank });
   };
   for (const source of sources) {
     for (const record of source.records) {
@@ -924,20 +904,32 @@ export function collectStoryDates(
         structuredDate(record.document_date, from ?? ""),
         record.title.trim() || "A record we kept",
         hostOnly(record.organization),
+        RECORD_RANK,
       );
     }
-    // The story's own words, read against its own publish day.
+    // The story's own words, read against its own publish day. The headline is
+    // scanned once for the story: it is what rule (a) takes a name from, and
+    // what decides whether rule (c) may print it at all.
     const publishedOn = source.published_on ?? "";
     const headline = source.headline ?? "";
+    const dek = source.dek ?? "";
+    const ctx = {
+      headline,
+      headlineHits: scanDates(headline, publishedOn),
+      whole: dek ? `${headline} ${dek}` : headline,
+      offset: 0,
+    };
     for (const worded of [
-      ...wordedDates(headline, publishedOn, headline, true),
-      ...wordedDates(source.dek ?? "", publishedOn, headline, false),
+      ...wordedDates(headline, true, publishedOn, ctx),
+      ...wordedDates(dek, false, publishedOn, { ...ctx, offset: headline.length + 1 }),
     ]) {
-      take(source, worded.date, worded.what, "");
+      take(source, worded.date, worded.what, "", WORDED_RANK);
     }
   }
-  items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  return items.slice(0, limit);
+  return items
+    .filter((_, at) => !displaced.has(at))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .slice(0, limit);
 }
 
 /**
