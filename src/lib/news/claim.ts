@@ -8,6 +8,7 @@ import {
   createInvite,
   deskIsClaimed,
   readMyDesk,
+  readNewsroomAccess,
   ForbiddenError,
   leaveAsEditor,
 } from "./membership";
@@ -24,6 +25,17 @@ export const deskClaimState = createServerFn({ method: "GET" }).handler(async ()
 export const myDesk = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => readMyDesk(context.userId));
+
+/**
+ * Owner-only: the account that holds this newsroom.
+ *
+ * Server > Editors & access reads this for its "Owner" row. Deliberately not
+ * `getPaperConfigForEditor`: that answers with the paper's Contact address,
+ * which is a different fact (see `readNewsroomAccess`).
+ */
+export const deskAccess = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => readNewsroomAccess(context.userId));
 
 export const claimDesk = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

@@ -245,13 +245,12 @@ export const OPS_CARDS: readonly OpsCardDef[] = [
     panelTitle: "Invite an editor",
     sub: "Who else can write for this paper, and the link that adds another.",
     /*
-      Owner-only because of the "Owner" row, not because of the button. The
-      editor's email comes off `getPaperConfigForEditor`, which is owner-only,
-      and `PaperSetup()` returns null for anyone else -- so an editor reading
-      these two rows would read "Not set" where the desk does have a value and
-      simply will not show it. The door stays open to everyone: an editor needs
-      it to hand the newsroom back (LeaveEditorControl), which is why the note
-      below promises exactly that.
+      Owner-only because of the "Owner" row, not because of the button. Both
+      rows are owner-only reads (`readNewsroomAccess`, and the invite count),
+      and a reader who may not have them would read "Not set" where the desk
+      does have a value and simply will not show it. The door stays open to
+      everyone: an editor needs it to hand the newsroom back
+      (LeaveEditorControl), which is why the note below promises exactly that.
     */
     ownerOnly: true,
     rows: ["Owner", "Invites open"],

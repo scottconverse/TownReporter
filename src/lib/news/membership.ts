@@ -440,6 +440,41 @@ export async function claimOwner(userId: string): Promise<EditorContext> {
   return requireEditor(userId);
 }
 
+/**
+ * Who owns this newsroom: the ACCOUNT, not the paper's contact address.
+ *
+ * Server > Editors & access printed `paper_settings.editor_email` under
+ * "Owner", and that is a field the owner types by hand on Paper setup -- a
+ * forwarding address, a blank, or something else entirely. The account that
+ * actually holds the desk is the `newsroom_members` row with role 'owner',
+ * joined to its `"user"` row: the same join `readMyDesk`, `createInvite` and
+ * the leave flow already use. Read that way, the card cannot print an address
+ * with no account behind it, and it prints the name the account signed up with
+ * as the row's longer answer.
+ *
+ * Owner-only, and refused the same way `createInvite` refuses an editor: the
+ * card is drawn for the owner, and a read that answers anyway would be one
+ * more place a non-owner learns the owner's address from.
+ */
+export type NewsroomAccess = { owner: { email: string; name: string | null } | null };
+
+export async function readNewsroomAccess(userId: string): Promise<NewsroomAccess> {
+  const me = await requireEditor(userId);
+  if (me.role !== "owner") {
+    throw new ForbiddenError("Only the owner can see who owns this newsroom.");
+  }
+  const sql = await getSql();
+  const rows = await sql<{ email: string; name: string | null }>`
+    select u.email, u.name
+    from newsroom_members m
+    join "user" u on u.id = m.user_id
+    where m.newsroom_id = ${me.newsroomId} and m.role = 'owner'
+    limit 1
+  `;
+  const owner = rows[0];
+  return { owner: owner ? { email: owner.email, name: owner.name ?? null } : null };
+}
+
 /** One statement gives the role and claimed flag the same database snapshot. */
 export async function readMyDesk(userId: string) {
   await ensureNewsroomSchema();

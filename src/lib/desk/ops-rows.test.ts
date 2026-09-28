@@ -243,10 +243,24 @@ describe("Server card rows (CX2)", () => {
     assert.equal(value(namedOutletsRows({ stored: null, shipped } as never), "Overrides"), NOT_SET);
   });
 
-  it("Editors & access: the owner is the paper's editor email", () => {
-    const rows = editorsAccessRows({ editorEmail: "owner@example.com" } as never);
+  it("Editors & access: the owner is the account that holds the desk", () => {
+    const rows = editorsAccessRows({ owner: { email: "owner@example.com", name: "Scott C." } });
     assert.equal(value(rows, "Owner"), "owner@example.com");
+    /* The name is the row's longer answer, not a second value. */
+    assert.equal(row(rows, "Owner").help, "Scott C.");
     assert.equal(value(rows, "Invites open"), NOT_SET);
+  });
+
+  it("Editors & access: a desk with no owner row says Not set rather than a blank", () => {
+    const rows = editorsAccessRows({ owner: null });
+    assert.equal(value(rows, "Owner"), NOT_SET);
+    assert.equal(row(rows, "Owner").help, undefined);
+  });
+
+  it("Editors & access: an account with no name still prints its address", () => {
+    const rows = editorsAccessRows({ owner: { email: "  owner@example.com ", name: null } });
+    assert.equal(value(rows, "Owner"), "owner@example.com");
+    assert.equal(row(rows, "Owner").help, undefined);
   });
 
   it("secondsText and perCallText: the drawing's two shapes, and a range when they differ", () => {

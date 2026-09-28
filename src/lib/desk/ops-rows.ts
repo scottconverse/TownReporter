@@ -38,6 +38,7 @@
 import type { HealthCheck, HealthState } from "@/lib/ops/health";
 import type { DailyScanPolicy } from "@/lib/news/daily-scan";
 import type { MeetingOperatorSettings } from "@/lib/news/meeting-settings";
+import type { NewsroomAccess } from "@/lib/news/membership";
 import type { NamedOutletRead } from "@/lib/news/named-outlets.server";
 import type { ProviderTimeSetting } from "@/lib/news/provider-settings";
 import type { PaperConfig } from "@/lib/news/paper-settings";
@@ -273,10 +274,16 @@ export function namedOutletsRows(read: NamedOutletRead): OpsRow[] {
   ];
 }
 
-/** Editors & access: the owner, and the invites that are open. */
-export function editorsAccessRows(config: PaperConfig): OpsRow[] {
+/** Editors & access: the owner account, and the invites that are open. */
+export function editorsAccessRows(access: NewsroomAccess): OpsRow[] {
+  const owner = access.owner;
   return [
-    { label: "Owner", value: config.editorEmail?.trim() || NOT_SET, tone: "plain" },
+    {
+      label: "Owner",
+      value: owner?.email.trim() || NOT_SET,
+      tone: "plain",
+      help: owner?.name?.trim() || undefined,
+    },
     { label: "Invites open", value: NOT_SET, tone: "plain" },
   ];
 }

@@ -56,7 +56,7 @@ import { getYouTubeKeyStateFn } from "@/lib/news/youtube-data-settings";
 import { getOpsHealth } from "@/lib/ops/dashboard";
 import { getProviderTimeSettings } from "@/lib/news/provider-settings";
 import { listTrash } from "@/lib/news/trash";
-import { myDesk } from "@/lib/news/claim";
+import { deskAccess, myDesk } from "@/lib/news/claim";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -122,7 +122,8 @@ function cardForHash(hash: string): OpsCardKey | null {
    `enabled: isOwner` on the owner-only reads, because the server refuses them
    anyway (getOpsHealth, getPaperConfigForEditor, getDailyScanPolicy,
    getRoutineNoticePolicy, getRoutineNoticeAutomation, editorNamedOutlets,
-   getProviderTimeSettings all call assertOwner or return `{ok:false}`), and an
+   deskAccess, getProviderTimeSettings all call assertOwner, throw
+   ForbiddenError or return `{ok:false}`), and an
    editor's page should not fire seven refusals behind a sentence that already
    says whose they are. */
 
@@ -218,6 +219,16 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     queryFn: () => editorNamedOutlets(),
     enabled: isOwner,
   });
+  /*
+    Editors & access reads the owner ACCOUNT (`deskAccess`), not the paper's
+    Contact address. Paper setup's own "Editor email" row is where that address
+    belongs, and it still reads it from `paper`.
+  */
+  const access = useQuery({
+    queryKey: ["desk-access"],
+    queryFn: () => deskAccess(),
+    enabled: isOwner,
+  });
   const times = useQuery({
     queryKey: ["provider-times"],
     queryFn: () => getProviderTimeSettings(),
@@ -259,7 +270,7 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     youtube: bodyOf(youtube, youtubeRows),
     "routine-notices": routine,
     "named-outlets": bodyOf(outlets, namedOutletsRows),
-    "editors-access": bodyOf(paper, editorsAccessRows),
+    "editors-access": bodyOf(access, editorsAccessRows),
     "time-budgets": bodyOf(times, timeBudgetRows),
   };
 }

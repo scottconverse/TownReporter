@@ -7,6 +7,7 @@ import {
   ForbiddenError,
   deskIsClaimed,
   leaveAsEditor,
+  readNewsroomAccess,
 } from "./membership.ts";
 
 describe("newsroom hosts", () => {
@@ -58,6 +59,60 @@ describe("newsroom membership", () => {
     assert.equal(left.some((r) => r.user_id === decoy && r.newsroom_id === 99), true);
     assert.equal(await deskIsClaimed(), false);
     await sql`delete from newsroom_members where user_id = ${decoy}`;
+  });
+});
+
+/*
+  Who owns the desk, against a real PGlite.
+
+  The Server card's "Owner" row used to print `paper_settings.editor_email` --
+  a hand-typed contact address -- so the test that matters is that the read
+  answers with the ACCOUNT's address and name when the paper's Contact field
+  says something else entirely. The `"user"` table is opt-in schema in real
+  deployments, so this file creates the three columns the read needs.
+*/
+describe("who owns the desk", () => {
+  const OWNER = "access-owner";
+  const EDITOR = "access-editor";
+  const CONTACT_EMAIL = "letters@townreporter.example";
+  const OWNER_EMAIL = "scott@townreporter.example";
+
+  it("answers with the owner's account, not the paper's contact address", async () => {
+    await ensureNewsroomSchema();
+    const sql = await getSql();
+    await sql.query(
+      `create table if not exists "user" (id text primary key, email text not null, name text)`,
+    );
+    await sql`delete from newsroom_members`;
+    await sql`delete from "user" where id in (${OWNER}, ${EDITOR})`;
+    await sql`insert into "user" (id, email, name) values (${OWNER}, ${OWNER_EMAIL}, ${"Scott Converse"})`;
+    await sql`insert into "user" (id, email, name) values (${EDITOR}, ${"desk@townreporter.example"}, ${"Desk Editor"})`;
+    await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${OWNER}, 'owner', 1)`;
+
+    const access = await readNewsroomAccess(OWNER);
+    assert.deepEqual(access.owner, { email: OWNER_EMAIL, name: "Scott Converse" });
+    assert.notEqual(access.owner?.email, CONTACT_EMAIL);
+  });
+
+  it("refuses anyone who is not the owner, and answers Not set for an owner whose account is gone", async () => {
+    const sql = await getSql();
+    await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${EDITOR}, 'editor', 1)`;
+    await assert.rejects(() => readNewsroomAccess(EDITOR), (err: unknown) => {
+      assert.ok(err instanceof ForbiddenError);
+      return true;
+    });
+    /*
+      An owner membership whose `"user"` row is gone. Reachable (the account was
+      deleted) and the one case where the read answers null instead of
+      throwing: the desk is held, so the caller is the owner, but there is no
+      address to print -- which is the card's "Not set".
+    */
+    await sql`delete from newsroom_members`;
+    await sql`insert into newsroom_members (user_id, role, newsroom_id) values ('access-ghost', 'owner', 1)`;
+    assert.deepEqual(await readNewsroomAccess("access-ghost"), { owner: null });
+    await sql`delete from newsroom_members`;
+    await sql`delete from "user" where id in (${OWNER}, ${EDITOR})`;
+    assert.equal(await deskIsClaimed(), false);
   });
 });
 
