@@ -1,0 +1,48 @@
+-- Retire the manual follow-up workflow (0.6.81, unit CU).
+--
+-- 0042 made `follow_ups` a list of people to chase; 0101 left those rows in
+-- place as `agent_kind is null` "Manual" cards beside the new AI agents, on
+-- the argument that they were the editor's own asks and hiding them behind a
+-- redesign would lose them. The owner has since decided the other way:
+-- "Follow-ups are AI agents (re-check pages, search records, watch agendas),
+-- not a list of people to call" (DECISIONS.md:38) and "No human 'seek a
+-- response' step anywhere" (DECISIONS.md:44). The app no longer offers a way
+-- to create, reply to, nudge or drop a manual ask, and the three screens that
+-- listed them (Today's rail, /desk/follow-ups, the story page) list agents
+-- only. This migration is the data half: it closes the manual rows that were
+-- still open, so nothing an editor can reach still counts them as work.
+--
+-- WHY 0106 AND NOT 0102. 0102 is a gap in this directory -- it was never
+-- written -- and reusing the number would not be free: scripts/migration-plan.mjs
+-- decides what to apply by sorting filenames with localeCompare and skipping
+-- the names already recorded in `schema_migrations`. A new file named
+-- 0102_*.sql therefore sorts BEFORE the already-applied 0103-0105 on every
+-- existing database, and `pendingMigrations` would either apply it out of the
+-- order those databases ran in or (worse, if the applied-name set is treated as
+-- a prefix) skip it entirely on exactly the databases that need it. The next
+-- number after the highest file in this directory is the only name that sorts
+-- last everywhere, so this is 0106.
+--
+-- WHY `dropped` AND NOT A NEW WORD. The status check constraint was widened by
+-- 0101 to the union of both vocabularies: open | answered | dropped are the
+-- manual ask's, active | paused | stopped | done are an agent's. There is no
+-- `archived`, and adding one would be a second widening of the same constraint
+-- plus a new value in every filter, chip and copy lookup keyed to the seven
+-- existing words -- and follow-up-migration.test.ts deliberately asserts that
+-- 'archived' is refused, because a status a screen does not know how to draw
+-- is worse than a reused one. `dropped` is the existing word for "this ask is
+-- closed and was not answered", which is exactly the state a retired manual row
+-- is in. The cost, named in the report: a row archived here is not
+-- distinguishable from one an editor dropped on purpose before 0.6.81. The row
+-- itself is untouched otherwise -- `who`, `what`, `due_on`, `reply_text`, the
+-- lead link and the created/updated stamps all keep their values, so the
+-- record of who was asked survives in the table for anyone reading it by hand.
+--
+-- Additive and idempotent, like every other file here: a second replay finds no
+-- row with `agent_kind is null and status = 'open'` left to close, and the
+-- `agent_kind is not null` guard means no AI follow-up -- whose `open` is not
+-- even in its vocabulary -- can be reached by this statement.
+update follow_ups
+   set status = 'dropped', updated_at = now()
+ where agent_kind is null
+   and status = 'open';
