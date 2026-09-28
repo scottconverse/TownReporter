@@ -3255,6 +3255,13 @@
   padding: 30px 0 44px;
   border-top: 3px solid var(--grid);
 }
+/* The band bleeds (see the band list above) and the grid bleeds with it, so
+   the heading and the section link -- both text, not rules -- take the page
+   gutter back themselves. Without this the h2 printed at x=0 while every band
+   above it sat on the measure. */
+.reader .keepreading .sectionhead {
+  padding-inline: var(--px);
+}
 .reader .keepreading .sectionhead h2 {
   font-family: var(--fd);
   font-size: 28px;
@@ -3263,21 +3270,52 @@
 }
 .reader .keepreadinggrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   background: var(--grid);
   border-bottom: 1px solid var(--grid);
 }
+/*
+  The grid is sized to the stories it was handed (`cols-N`, the front page's
+  own vocabulary -- `StoryGrid` in src/components/paper/story-grid.tsx), and
+  not to the three columns this band once always drew. The ruled ground is the
+  container's `background: var(--grid)` showing through the 1px gaps, so an
+  unfilled track printed the ground itself: a solid block of rule colour where
+  a third story would have been, and the whole band a black box with no
+  related stories at all. A track that no story fills cannot be painted, so the
+  fix is to stop creating one: one related story prints one across, two print
+  two across, three print the front page's 3-up.
+*/
+.reader .keepreadinggrid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.reader .keepreadinggrid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reader .keepreadinggrid.cols-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+/*
+  There is no base rule for an odd last card, and there cannot be one: at the
+  three counts above every track is filled, and the one width where the count
+  stops filling them -- three stories collapsed to two columns -- needs a rule
+  that names both of the lines it spans. That rule is in the `max-width: 1024px`
+  block below, next to the collapse that makes it necessary.
+*/
 .reader .keepreadinggrid > .newsrow {
   grid-template-columns: minmax(0, 1fr) 35px;
   background: var(--bg);
   padding: 22px 26px 24px;
   border-top: 0;
 }
-.reader .keepreadinggrid > :nth-child(3n + 1) {
+/* The edge cells carry the page gutter, at the count the grid is drawn with. */
+.reader .keepreadinggrid.cols-3 > :nth-child(3n + 1),
+.reader .keepreadinggrid.cols-2 > :nth-child(2n + 1),
+.reader .keepreadinggrid.cols-1 > :nth-child(n) {
   padding-left: var(--px);
 }
-.reader .keepreadinggrid > :nth-child(3n) {
+.reader .keepreadinggrid.cols-3 > :nth-child(3n),
+.reader .keepreadinggrid.cols-2 > :nth-child(2n),
+.reader .keepreadinggrid.cols-1 > :nth-child(n) {
   padding-right: var(--px);
 }
 .reader .keepreadinggrid .datebox {
@@ -3314,18 +3352,44 @@
   .reader .storygrid.cols-3 > :nth-child(2n) {
     padding-right: var(--px);
   }
-  .reader .keepreadinggrid {
+  /* Three across becomes two, and the edge cells change with the column count,
+     so the gutter padding is rewritten in the same breath. Only `cols-3` is
+     touched: `cols-2` and `cols-1` are already at or below two columns, and
+     their edge padding is set at the count they were handed. */
+  .reader .keepreadinggrid.cols-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .reader .keepreadinggrid > :nth-child(3n + 1),
-  .reader .keepreadinggrid > :nth-child(3n) {
+  .reader .keepreadinggrid.cols-3 > :nth-child(3n + 1),
+  .reader .keepreadinggrid.cols-3 > :nth-child(3n) {
     padding-inline: 26px;
   }
-  .reader .keepreadinggrid > :nth-child(2n + 1) {
+  .reader .keepreadinggrid.cols-3 > :nth-child(2n + 1) {
     padding-left: var(--px);
   }
-  .reader .keepreadinggrid > :nth-child(2n) {
+  .reader .keepreadinggrid.cols-3 > :nth-child(2n) {
     padding-right: var(--px);
+  }
+  /*
+     The odd third story is alone in row two, and row two is a fresh row whose
+     both tracks are page edges, so the card takes the gutter on both sides --
+     `3n` above had just given it the mid-grid 26px.
+
+     Both edges, and `grid-column: 1 / -1` to get the row at all. A bare
+     `grid-column-end: -1` is not enough: with an auto start and a definite end
+     the browser resolves the span to a single track and places the card
+     against that end, so the third story landed in row two's SECOND track and
+     row two's first track printed the ruled ground -- the same block of rule
+     colour this unit came to remove, at the one width where a count-sized grid
+     still wraps. Both lines have to be named.
+
+     `:nth-child(3):last-child` is the exact condition: three cards, and the
+     third is the last. It cannot reach the front page's `.storygrid.cols-3`,
+     where `cols-3` is a column count and six stories wrap to three full rows --
+     no odd card, and this rule is not written on that class.
+  */
+  .reader .keepreadinggrid.cols-3 > :nth-child(3):last-child {
+    grid-column: 1 / -1;
+    padding-inline: var(--px);
   }
 }
 @media (max-width: 900px) {
@@ -3491,10 +3555,20 @@
   .reader .storycell {
     padding-block: 22px 24px;
   }
-  .reader .keepreadinggrid {
+  /* One column, whatever count the grid was handed, so every cell is an edge
+     cell on both sides and takes the page gutter on both sides. The class
+     variants are named because the rules that set the edge padding above carry
+     the class too, and a bare `.keepreadinggrid > :nth-child(n)` is one class
+     lighter and would lose to them (`storygrid` above still has this: its
+     phone rule is dead against the ≤1024 reset). */
+  .reader .keepreadinggrid.cols-1,
+  .reader .keepreadinggrid.cols-2,
+  .reader .keepreadinggrid.cols-3 {
     grid-template-columns: minmax(0, 1fr);
   }
-  .reader .keepreadinggrid > :nth-child(n) {
+  .reader .keepreadinggrid.cols-1 > :nth-child(n),
+  .reader .keepreadinggrid.cols-2 > :nth-child(n),
+  .reader .keepreadinggrid.cols-3 > :nth-child(n) {
     padding-inline: var(--px);
   }
   .reader .backmatter {

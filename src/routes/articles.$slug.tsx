@@ -530,11 +530,22 @@ function ArticlePage() {
             More in this section →
           </Link>
         </div>
-        <div className="keepreadinggrid">
-          {more.map((a) => (
-            <ReaderRow key={a.id} story={a} description={false} />
-          ))}
-        </div>
+        {/*
+          The grid is told how many stories it is being given (`cols-N`, the
+          front page's grid vocabulary), because the ruled ground shows through
+          any track a story does not fill -- one related story in a fixed 3-up
+          printed two empty tracks as solid rule colour. No stories, no grid.
+          The band itself stays: its heading carries the jump list's "Read next"
+          anchor (`#related`), which the list prints whether or not the paper
+          has anything else to offer.
+        */}
+        {more.length ? (
+          <div className={`keepreadinggrid cols-${more.length}`}>
+            {more.map((a) => (
+              <ReaderRow key={a.id} story={a} description={false} />
+            ))}
+          </div>
+        ) : null}
       </section>
     </PaperShell>
   );
