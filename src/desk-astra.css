@@ -1461,6 +1461,46 @@
   font-weight: 800;
   border: 2px solid var(--fg);
 }
+/*
+  The shut disclosure under a list row (unit CW2). The drawn list has no such
+  element -- the drawing's page ends under it -- so this is the smallest thing
+  that can hold what the screen has to keep: an editor opens the row they are
+  judging, and the list stays a list until they do.
+
+  Column 2, because a row is a 2-column grid and the disclosure belongs under
+  the row's text, not beside its chip. The hover is an underline and not a
+  color: the two yellows on the cream surface are the pairs
+  `scripts/contrast-audit.mjs` rejects.
+*/
+.desk-ltr.astra .astra-evidence-row > .astra-evidence-more {
+  grid-column: 2;
+}
+.desk-ltr.astra .astra-evidence-more {
+  margin-top: 10px;
+}
+.desk-ltr.astra .astra-evidence-more > summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  color: var(--fg);
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-evidence-more > summary:hover,
+.desk-ltr.astra .astra-evidence-more > summary:focus-visible {
+  text-decoration: underline;
+}
+.desk-ltr.astra .astra-evidence-more-body {
+  margin-top: 6px;
+}
+/* The two disclosures the list ends with -- the inventory and the manual-claim
+   form -- set off from the rows above them by the same 1px rule every row has. */
+.desk-ltr.astra .astra-evidence > .astra-evidence-extra {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
 
 .desk-ltr.astra .astra-check-action p {
   margin: 8px 0 12px;
@@ -2572,13 +2612,12 @@
 .desk-ltr.astra .work-form .astra-dek {
   overflow: hidden;
 }
+/* The evidence review no longer draws a box of its own (unit CW2): it is the
+   drawn list now, and the drawing's list has no card around it -- the rows'
+   own 1px rules are the whole structure. Only the anchor's scroll offset is
+   left, for the presses that jump to it. */
 .desk-ltr.astra #finding-evidence-review {
   scroll-margin-top: 92px;
-  border: 1px solid var(--line);
-  border-radius: 0;
-  padding: 24px;
-  background: var(--surface);
-  margin-top: 24px;
 }
 
 /*

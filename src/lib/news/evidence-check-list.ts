@@ -61,6 +61,23 @@ export type EvidenceRowAction =
   | { kind: "open-record"; label: string; href: string }
   | { kind: "style"; label: string };
 
+/**
+ * Which review row a list row was built from (unit CW2).
+ *
+ * The list is drawn from the review, and the row that opens under a list row
+ * has to find its way back to the same review row -- that is where the record
+ * checks and the judgment controls come from. `id` is the review row's own key
+ * (`FindingEvidenceRow.key` and its two siblings), which is what the judgment
+ * save takes.
+ *
+ * A row with no `ref` -- a claim of absence, the name row, the style row -- is
+ * a row the desk measures but does not judge, so it opens to nothing.
+ */
+export type EvidenceRowRef =
+  | { kind: "finding"; id: string }
+  | { kind: "claim"; id: string }
+  | { kind: "manual"; id: string };
+
 export type EvidenceListRow = {
   key: string;
   chip: string;
@@ -70,7 +87,22 @@ export type EvidenceListRow = {
   /** What it was checked against, or why it could not be. Never a verdict. */
   note: string;
   action: EvidenceRowAction | null;
+  /** The review row behind this list row, or null when there is none. */
+  ref: EvidenceRowRef | null;
 };
+
+/**
+ * The DOM id of one list row's disclosure (unit CW2).
+ *
+ * A row's key carries the kind of row it is and a colon (`finding:…`,
+ * `claim:…`, `manual:…`, `absence:…`), which is not an id, so the colon becomes
+ * a dash -- as does anything else that is not a letter, a digit, an underscore
+ * or a dash. The one id a press outside the list has to name is the style row's,
+ * and it comes out as `evidence-detail-style`.
+ */
+export function evidenceDetailId(key: string): string {
+  return `evidence-detail-${key.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
 
 /** A capture the check could actually read. */
 export function captureIsReadable(capture: FindingCaptureEvidence): boolean {
@@ -212,6 +244,7 @@ export function evidenceCheckRows(input: {
       what: findingWhat(row),
       note: findingNote(row),
       action: openRecordAction(row.captures),
+      ref: { kind: "finding", id: row.key },
     });
   }
 
@@ -227,6 +260,7 @@ export function evidenceCheckRows(input: {
           ? "No captured record was cited for this claim."
           : (row.captures[0]?.title ?? row.claim.url ?? "Cited record"),
       action: openRecordAction(row.captures),
+      ref: { kind: "claim", id: row.key },
     });
   }
 
@@ -242,6 +276,7 @@ export function evidenceCheckRows(input: {
           ? "No captured record is attached to this claim."
           : (row.captures[0]?.title ?? "Selected captured record"),
       action: openRecordAction(row.captures),
+      ref: { kind: "manual", id: row.key },
     });
   }
 
@@ -259,6 +294,7 @@ export function evidenceCheckRows(input: {
       what: todo.t.trim(),
       note: todo.q?.trim() ? `The gate searched: ${todo.q.trim()}` : "Confirmation is still outstanding.",
       action: null,
+      ref: null,
     });
   }
 
@@ -281,6 +317,7 @@ export function evidenceCheckRows(input: {
             .join(" ")
         : check.note.trim() || "Every name in this draft was matched to a written source.",
       action: null,
+      ref: null,
     });
   }
 
@@ -293,6 +330,7 @@ export function evidenceCheckRows(input: {
       what: "Style check (measured in code)",
       note: input.styleFindings[0]!.message,
       action: { kind: "style", label: "Fix these with the model" },
+      ref: null,
     });
   }
 

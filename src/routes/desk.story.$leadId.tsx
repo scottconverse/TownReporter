@@ -8,13 +8,6 @@ import {
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
-import { EvidenceCheckList } from "@/components/evidence-check-list";
-import {
-  citedCaptureCount,
-  evidenceCheckRows,
-  evidenceRanLine,
-} from "@/lib/news/evidence-check-list";
-import { getFindingEvidenceReview } from "@/lib/news/finding-evidence-review";
 import { readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { meetingClock } from "@/components/meeting-source-block-utils";
@@ -376,24 +369,6 @@ function StoryPage() {
       return status === "queued" || status === "running" ? 2_000 : false;
     },
     refetchIntervalInBackground: true,
-  });
-
-  /*
-    The checks the desk recorded for this draft, read here as well as in the
-    Reporting tab's panel (unit CW).
-
-    Same query key and same call as `FindingEvidenceReviewPanel`, so React Query
-    serves both from one request and one cache entry -- the list on the Checks
-    tab and the panel that edits the judgments can never disagree about what was
-    found. `retry: false` and the panel's error branch are the same choice: a
-    failed read is reported where the claims would be, not retried behind the
-    editor's back.
-  */
-  const evidenceQuery = useQuery({
-    queryKey: ["finding-evidence-review", id, data?.evidenceToken],
-    queryFn: () => getFindingEvidenceReview({ data: { leadId: id } }),
-    enabled: Boolean(data?.draft?.id),
-    retry: false,
   });
 
   /*
@@ -1536,20 +1511,27 @@ function StoryPage() {
     calls, the same details the Reporting tab opens, the same select the
     section-change link focuses -- so a row is a way to the work, never a
     second implementation of it.
+
+    Unit CW2: the review is the Checks tab's own body now, so a row that sends
+    the editor to it opens that tab and scrolls the panel into view instead of
+    opening a shut details element in the Reporting tab. The scroll waits one
+    frame, because the panel is rendered by the tab that is only just being
+    switched to and is not in the document yet at the moment of the press.
   */
   const openEvidenceReview = () => {
-    setInspector("reporting");
-    const details = document.getElementById("evidence-review")?.closest("details");
-    if (details) details.open = true;
+    setInspector("checks");
+    requestAnimationFrame(() =>
+      document.getElementById("finding-evidence-review")?.scrollIntoView({ block: "start" }),
+    );
   };
   /*
-    ── The drawn Checks-tab list (unit CW) ─────────────────────────────────────
+    ── The drawn Checks-tab list (unit CW, moved by CW2) ───────────────────────
     The screen this replaces said "Review names, claims and supporting records"
     and gave two paragraphs and two links; it never said which claim had been
-    checked, what the desk found, or where the record was. The list below is
-    every row of that answer, built from the review the Reporting panel already
-    saves judgments against -- one request, one cache entry, no second read of
-    the same facts.
+    checked, what the desk found, or where the record was. The list on the
+    Checks tab is every row of that answer, built from the review the panel on
+    that tab saves judgments against -- one request, one cache entry, no second
+    read of the same facts.
 
     `readNameCheck` on the draft's own record is the same name check
     `DeskNameCheck` renders above it; the style row's count is the same
@@ -1558,37 +1540,6 @@ function StoryPage() {
     spelling"), the row is drawn without it and the divergence is a CW line in
     `design/SPEC-GAPS-0681.md`.
   */
-  const recordedEvidence = evidenceQuery.data?.ok ? evidenceQuery.data.review : null;
-  const evidenceRan = evidenceRanLine({
-    checkedAt: evidenceCheckedAt,
-    modelLabel: reconcileStatus.data?.modelChoice
-      ? modelChoiceLabel(reconcileStatus.data.modelChoice)
-      : "",
-    captures: recordedEvidence
-      ? citedCaptureCount(
-          recordedEvidence.rows,
-          recordedEvidence.claimRows,
-          recordedEvidence.manualClaimRows,
-        )
-      : 0,
-  });
-  /*
-    Not memoised on purpose. It is a walk over a handful of rows with string
-    joins, and every hook on this page has to sit above the loading guards --
-    a `useMemo` here would be a hook called after an early return, which is a
-    bug the linter is right to refuse. `evidenceCheckedAt` and `styleNote`
-    above are memos only because they parse JSON.
-  */
-  const evidenceRows = recordedEvidence
-    ? evidenceCheckRows({
-        rows: recordedEvidence.rows,
-        claimRows: recordedEvidence.claimRows,
-        manualClaimRows: recordedEvidence.manualClaimRows,
-        openClaims,
-        nameCheck: readNameCheck(data.draft?.research_json),
-        styleFindings: styleCheck.findings,
-      })
-    : [];
   /*
     The style row's press is the style section's own repair button, focused and
     scrolled to -- a row is a way to the work, never a second implementation of
@@ -1927,12 +1878,39 @@ function StoryPage() {
             */}
             <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
             {data.draft ? (
-              <EvidenceCheckList
-                ranLine={evidenceRan}
-                rows={evidenceRows}
-                compareLabel={evidenceReview ? "Compare checked vs. previous version" : ""}
-                onCompare={openCompareChecked}
-                onStylePress={focusStyleFix}
+              /*
+                The panel, not the list (unit CW2). The panel owns the review
+                query and every judgment mutation, so it is the one thing that
+                can render the list's rows with the record checks and the
+                judgment controls the row opens into; the list it draws, the
+                run line, and the extra rows are all still the same unit CW
+                code, with the page's own facts passed in.
+              */
+              <FindingEvidenceReviewPanel
+                leadId={id}
+                reviewRevision={data.evidenceToken}
+                currentDraft={{ headline, dek, body, topic }}
+                meetingEvidence={data.draftMeetingEvidence}
+                disabled={
+                  locked ||
+                  onPaper ||
+                  waiting ||
+                  save.isPending ||
+                  reviewEvidence.isPending ||
+                  reconcileActive
+                }
+                list={{
+                  checkedAt: evidenceCheckedAt,
+                  modelLabel: reconcileStatus.data?.modelChoice
+                    ? modelChoiceLabel(reconcileStatus.data.modelChoice)
+                    : "",
+                  openClaims,
+                  nameCheck: readNameCheck(data.draft?.research_json),
+                  styleFindings: styleCheck.findings,
+                  compareLabel: evidenceReview ? "Compare checked vs. previous version" : "",
+                  onCompare: openCompareChecked,
+                  onStylePress: focusStyleFix,
+                }}
               />
             ) : (
               <section className="astra-evidence" aria-label="Evidence check">
@@ -2969,22 +2947,13 @@ function StoryPage() {
               {styleNote ? <p className="note-one">{styleNote}</p> : null}
             </section>
           ) : null}
-          {data.draft ? (
-            <FindingEvidenceReviewPanel
-              leadId={id}
-              reviewRevision={data.evidenceToken}
-              currentDraft={{ headline, dek, body, topic }}
-              meetingEvidence={data.draftMeetingEvidence}
-              disabled={
-                locked ||
-                onPaper ||
-                waiting ||
-                save.isPending ||
-                reviewEvidence.isPending ||
-                reconcileActive
-              }
-            />
-          ) : null}
+          {/*
+            The evidence review used to be mounted here, at the bottom of the
+            page's main column (unit CW2). It is on the Checks tab now, where
+            the drawing puts the list it draws: the main column ends at the
+            action row, and the page's own stack of judgment forms under the
+            editors is gone with it.
+          */}
         </section>
       </div>
       {canPublish ? (

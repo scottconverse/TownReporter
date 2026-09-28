@@ -1,4 +1,5 @@
-import type { EvidenceListRow } from "../lib/news/evidence-check-list";
+import type { ReactNode } from "react";
+import { evidenceDetailId, type EvidenceListRow } from "../lib/news/evidence-check-list";
 
 /**
  * The drawn Checks-tab list (unit CW, 0.6.81).
@@ -9,9 +10,18 @@ import type { EvidenceListRow } from "../lib/news/evidence-check-list";
  * column, everything else in the right one -- because the drawing draws them
  * the same and an editor reads them the same way.
  *
- * The only presses here are the two the rows can carry: a link to the captured
+ * A row's presses are the two the drawing gives it: a link to the captured
  * record the claim was checked against, and a focus of the style section's own
  * repair button. Nothing in this component mutates anything.
+ *
+ * `detail` (unit CW2) is the one thing that does not come from the row's data:
+ * the body of the disclosure a row opens into -- the record checks and the
+ * judgment controls for a row that has a review row behind it. It is a render
+ * prop rather than markup here because the state and the mutations those
+ * controls need belong to whoever owns the review, and rendering them from the
+ * row alone would mean a second implementation of the same judgment. A row
+ * whose `detail` comes back empty gets no disclosure at all: a shut `details`
+ * that opens to nothing is a press that does nothing.
  */
 export function EvidenceCheckList({
   ranLine,
@@ -19,6 +29,8 @@ export function EvidenceCheckList({
   compareLabel,
   onCompare,
   onStylePress,
+  detail,
+  footer,
 }: {
   /** "Ran 8:14 a.m. · Claude Sonnet · checked against 3 captures", or "". */
   ranLine: string;
@@ -27,6 +39,15 @@ export function EvidenceCheckList({
   compareLabel: string;
   onCompare: () => void;
   onStylePress: () => void;
+  /** The body of one row's shut disclosure, or null for a row that opens to nothing. */
+  detail?: (row: EvidenceListRow) => ReactNode;
+  /**
+   * What the list ends with (unit CW2): the shut disclosures that hold the
+   * draft-pass inventory and the manual-claim form. They are passed in rather
+   * than built here for the same reason `detail` is -- both own state that
+   * belongs to whoever owns the review.
+   */
+  footer?: ReactNode;
 }) {
   return (
     <section className="astra-evidence" aria-label="Evidence check">
@@ -40,7 +61,9 @@ export function EvidenceCheckList({
         <p className="meta">No claims are recorded for this draft yet.</p>
       ) : (
         <ul className="astra-evidence-list">
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const body = detail?.(row) ?? null;
+            return (
             <li key={row.key} className="astra-evidence-row">
               <span className={`astra-evidence-chip is-${row.tone}`}>{row.chip}</span>
               <p className="astra-evidence-what">{row.what}</p>
@@ -65,8 +88,21 @@ export function EvidenceCheckList({
                   )}
                 </div>
               ) : null}
+              {body ? (
+                /*
+                  The judgment forms live here, not in the page's main column
+                  (unit CW2): the editor opens the row they are judging. Shut by
+                  default, so the list stays the list, and the row's own press
+                  above stays the way to the record.
+                */
+                <details className="astra-evidence-more" id={evidenceDetailId(row.key)}>
+                  <summary>Record checks and judgment</summary>
+                  <div className="astra-evidence-more-body">{body}</div>
+                </details>
+              ) : null}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
       {compareLabel ? (
@@ -74,6 +110,7 @@ export function EvidenceCheckList({
           {compareLabel}
         </button>
       ) : null}
+      {footer}
     </section>
   );
 }
