@@ -34,7 +34,26 @@ export function publicArticle<T extends ArticleRow>(
   try {
     const stored = JSON.parse(row.provenance_json || "[]") as ProvenanceItem[];
     if (Array.isArray(stored) && stored.length) {
-      provenance = stored.filter(item => publicUrls.some(url => samePublicUrl(url,item.url)));
+      /*
+        A row with no URL is a record the report NAMED and did not link.
+
+        A pasted report cites "September 22 budget packet (Attachment G)" the
+        way an editor writes in their notes -- by naming it -- so
+        `provenanceFromCitations` files it with an empty `url` and no page to
+        open. Matching those against `source_urls` dropped every one of them
+        (an empty string is in no list), so a story that cited three documents
+        and linked none printed "No separate public source records are
+        attached to this story" -- over the very records the desk had
+        recorded, and with `ProvenanceBlock`'s branch for a row with no page
+        to open left as unreachable code.
+
+        The fence is unchanged for rows that DO carry a URL: a provenance row
+        the published edition does not cite stays private, which is what keeps
+        another newsroom's corroboration off the page.
+      */
+      provenance = stored.filter(item =>
+        item.url ? publicUrls.some(url => samePublicUrl(url, item.url)) : true,
+      );
     }
   } catch {
     provenance = [];

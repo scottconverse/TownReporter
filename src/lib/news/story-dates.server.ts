@@ -30,8 +30,35 @@ import type { ProvenanceItem } from "./findings.ts";
 const SOURCE_LIMIT = 60;
 /** How many days ahead the front page's panel looks, on the paper's own calendar. */
 export const WEEK_DAYS = 7;
-/** How many rows a panel prints before it stops. */
+/** How many rows the article page's "Dates in this story" panel prints before it stops. */
 const ROW_LIMIT = 12;
+/**
+ * How many rows the front page's "This week" panel prints before it stops.
+ *
+ * Unit BZ, item 7 (owner review, 2026-09-27): at 1790px "This week" ran to ten
+ * rows beside a lead column that is four fields tall (tag, headline, dek,
+ * date -- `.reader .ledgerow > .lead`), leaving roughly 430px of blank paper
+ * under the lead. The drawing caps the panel at six
+ * (`docs/design/handoff-2026-09-26/design/Front Daily.dc.html:43`,
+ * `hint-placeholder-count="6"` over `week`, and `week` there is a fixed
+ * six-item array) with a "Full calendar →" link under it. The count is taken
+ * from the drawing; the link is not -- `DatesPanel`'s own doc says why: the
+ * drawing's link is a bare `href="#"` to a calendar screen this paper does not
+ * have (Unit BD ruling), and inventing one to fill the space would be scope
+ * this fix was not asked for. Six is still the fewer of the two: a panel that
+ * prints fewer than it is given is honest, and it is what balances the lead
+ * column at both 1790 and 1440px (measured, `reports/CL-front-page-0681.md`).
+ *
+ * Unit CN, item 1(a) (owner review, 2026-09-27): six rows was still 214px too
+ * many at 1790px. Five is what the owner asked to try, and five is the count
+ * that leaves the panel within 40px of the lead column at 1790 and 1440 once
+ * the lead carries its own rows under the button (item 1(b), `ALSO_ROWS` in
+ * `routes/index.tsx`) -- measured, `reports/CN-front-gap-and-clause.md`. The
+ * drawing's six is a placeholder count in a drawing whose lead column also
+ * carries no such rows; the panel's job is to say what is dated this week, and
+ * five rows say it.
+ */
+const FRONT_WEEK_LIMIT = 5;
 
 /** The paper's own calendar day for an instant -- the day a reader is living in. */
 function localDay(timezone: string, now: Date): string {
@@ -129,7 +156,7 @@ async function readSources(slug: string | null): Promise<{
 export async function listThisWeekDates(): Promise<StoryDateItem[]> {
   const { sources, today } = await readSources(null);
   if (!today) return [];
-  return collectStoryDates(sources, { from: today, days: WEEK_DAYS, limit: ROW_LIMIT });
+  return collectStoryDates(sources, { from: today, days: WEEK_DAYS, limit: FRONT_WEEK_LIMIT });
 }
 
 /**

@@ -5,6 +5,7 @@
 */
 import { chromium } from "playwright";
 import { Client } from "pg";
+import { fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = (process.env.N1_BASE_URL || "http://127.0.0.1:3500").replace(/\/$/, "");
 const dbUrl = process.env.DATABASE_URL;
@@ -42,15 +43,17 @@ try {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45000 });
   step("owner created");
 
   const nid = await newsroomId();
 
-  // Open Server page -> Meeting capture.
-  await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Meeting capture", exact: true }).click();
+  // Open Server page -> Meeting capture. 0.6.81 (unit CX2) splits the card off
+  // onto a screen of its own, so "opening" it is a `goto` to that screen.
+  await page.goto(`${base}/desk/ops/meeting-capture`, { waitUntil: "networkidle" });
+  await page.locator("#ops-panel-meeting-capture").scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Meeting capture" }).waitFor({ timeout: 20000 });
   step("Meeting capture panel renders");
 

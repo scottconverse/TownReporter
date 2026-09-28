@@ -22,7 +22,7 @@
  */
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.DESK_FLOWS_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -172,6 +172,7 @@ async function main() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -181,6 +182,15 @@ async function main() {
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Opinion", exact: true }).waitFor();
   step("Opinion desk renders");
+
+  // CY item 8: the AI intake is a shut card now, the way the drawing draws it,
+  // so the form inside it -- the picker, the subject box, the button -- is only
+  // in the document once the card is opened. Every assertion below is
+  // unchanged; this is the one press that gets to them. The card is opened
+  // before anything is typed, so UIUX-05 still means what it says.
+  await page.getByRole("button", { name: /Have the AI write an editorial/ }).click();
+  await page.getByLabel("Writing model").waitFor();
+  step("Opinion's AI card opens the form");
 
   // Opinion uses the shared native provider registry, with Sol selected by default.
   const opinionModel = page.getByLabel("Writing model");
@@ -347,7 +357,7 @@ async function main() {
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with a hearing date.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("a lead can be filed by hand");
 
   await page.getByRole("button", { name: /Model & research/ }).click();
@@ -411,13 +421,13 @@ async function main() {
   await page.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });
 
   await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Server & newsroom", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Server", exact: true }).waitFor();
   step("Server page renders");
 
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Recently deleted", exact: true })
-    .click();
+  // 0.6.81 (unit CX2): the Server page draws the card, and the card's own
+  // screen is where its controls live, so the trash is reached by going to it.
+  await page.goto(`${base}/desk/ops/recently-deleted`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Recently deleted", exact: true }).first().scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Recently deleted" }).waitFor({ timeout: 20_000 });
   const trashRow = page.locator("li", { hasText: leadHeadline }).first();
   await trashRow.waitFor({ timeout: 20_000 });

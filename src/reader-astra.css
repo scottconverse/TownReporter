@@ -516,25 +516,6 @@
   font-size: 14px;
   line-height: 1.45;
 }
-.reader .trustbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  padding: 18px 3px;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
-  color: var(--muted);
-}
-.reader .trustbar span {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-}
-.reader .trustbar svg {
-  color: var(--teal);
-  width: 17px;
-}
 .reader .sectionhead {
   display: flex;
   align-items: center;
@@ -995,9 +976,8 @@
   color: var(--muted);
   padding-top: 10px;
 }
-.reader .articleaside .tag {
-  margin-bottom: 8px;
-}
+/* `.reader .articleaside p` and `a` stay: they match the dates panel's own
+   empty state and its foot link, which are still in the rail. */
 .reader .articleaside p {
   margin-bottom: 12px;
 }
@@ -1387,16 +1367,6 @@
     padding: 12px 0;
   }
   .reader .record-list p {
-    font-size: 14px;
-  }
-  .reader .trustbar {
-    font-size: 14px;
-    align-items: start;
-  }
-  .reader .trustbar > span:nth-child(2) {
-    display: none;
-  }
-  .reader .trustbar .textlink {
     font-size: 14px;
   }
   .reader .content-grid {
@@ -1873,11 +1843,6 @@
   padding: 30px 0 45px;
   border-top: 1px solid var(--line);
 }
-.reader .riverintro {
-  font-size: 14px;
-  color: var(--muted);
-  margin: -12px 0 6px;
-}
 .reader .river .newsrow h3 {
   font-size: 20px;
 }
@@ -2013,14 +1978,22 @@
 }
 /* The bands that reach the viewport edge. Only ever written on an element that
    is a direct child of `.wrap`, so the negative margin always lands on the
-   gutter and never inside a column. */
+   gutter and never inside a column.
+
+   `.evidence` and `.articlefoot` joined this list in unit DA2. They used to sit
+   inside `.articlebody` -- the story column, 680px wide -- because the article
+   grid puts everything it is handed in column 2. The drawing has both of them
+   edge to edge on the page, so both are direct children of `main.wrap` now
+   (siblings of `<article>`, before `#related`), and they need the same negative
+   gutter as the front page's bands. */
 .reader .ledgerow,
 .reader .storygrid,
-.reader .trustbar,
 .reader .regionband,
 .reader .river,
 .reader .aboutstrip,
-.reader .keepreading {
+.reader .keepreading,
+.reader .evidence,
+.reader .articlefoot {
   margin-inline: calc(-1 * var(--px));
 }
 /* The front page's own h1: the edition title is the dateline in the top bar,
@@ -2279,9 +2252,27 @@
   background: var(--grid);
   border-bottom: 3px solid var(--grid);
 }
-.reader .ledgerow > .lead {
+/* The row's left-hand grid item is the COLUMN, not the lead article: the lead
+   and the paper's next stories under it are two things, and each one is its
+   own story in this page's markup (unit CN, item 1(b); `river-e2e` reads a
+   card's stories, so the rows sit beside `.lead` rather than inside it). The
+   padding is the column's, which is what keeps the rows and the lead's own
+   button on the same left edge. */
+.reader .ledgerow > .leadcolumn {
   background: var(--bg);
   padding: 32px var(--px) 36px;
+}
+/* The lead carries no box of its own inside the column: the column above has
+   the padding. This is not decoration. `.reader .lead { padding: 39px 42px
+   34px }` earlier in this file is the pre-redesign `.hero` layout's rule, and
+   it is still there because nothing else needed it changed; the lead used to
+   be the row's grid item, whose own three-class rule beat it. Now that the
+   column is the item, the old rule is the only thing setting the article's
+   padding, and it would put the lead's text 42px inside the rows that sit
+   under it (measured: the column grew 85px at 1790px and the two columns read
+   85px apart). */
+.reader .leadcolumn > .lead {
+  padding: 0;
 }
 /* The panel is the ink block in BOTH themes, and it is stated here rather than
    left to the `.datespanel` rule below: this selector carries three classes to
@@ -2322,31 +2313,34 @@
    `inline-block` is blockified, and a stretched one would paint the yellow
    label across the whole column instead of its own words. */
 @media (min-width: 901px) {
-  .reader .ledgerow.solo > .lead {
+  .reader .ledgerow.solo > .leadcolumn > .lead {
     display: grid;
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
     column-gap: 56px;
     align-items: start;
   }
-  .reader .ledgerow.solo > .lead > .sectiontag {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .sectiontag {
     grid-area: 1 / 1 / 2 / 2;
     justify-self: start;
   }
-  .reader .ledgerow.solo > .lead > .leadhead {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .leadhead {
     grid-area: 2 / 1 / 4 / 2;
     max-width: none;
   }
-  .reader .ledgerow.solo > .lead > .dek {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .dek {
     grid-area: 1 / 2 / 3 / 3;
     margin-top: 0;
     max-width: none;
   }
-  .reader .ledgerow.solo > .lead > .meta {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .meta {
     grid-area: 3 / 2 / 4 / 3;
   }
-  .reader .ledgerow.solo > .lead > .leadbottom {
+  .reader .ledgerow.solo > .leadcolumn > .lead > .leadbottom {
     grid-area: 4 / 1 / 5 / 3;
   }
+  /* The column's own rows (unit CN, item 1(b)) need no placement here: they
+     are a block under the lead's two-column grid, so they already run the
+     whole width the way the button's row does. */
 }
 .reader .lead h2.leadhead {
   font-family: var(--fd);
@@ -2378,6 +2372,63 @@
 }
 .reader .lead .leadbottom {
   margin-top: 26px;
+}
+/*
+   The lead column's own rows, under the lead (unit CN, item 1(b)).
+
+   The lead and "This week" are one grid row, so the column's box is always as
+   tall as the panel; these rows are what the column has to say with the
+   paper's next news rather than with blank paper. They are the grid cell
+   itself -- same markup, same `.storysec` / `h3` / `.storymeta` classes, so
+   the kicker still links to its section and a `misc` story still reserves its
+   empty kicker line -- laid out as COMPACT rows: the owner's own words for
+   them ("compact rows under the lead's 'Read the story' button: section tag,
+   headline link, date · min read"). The three fields sit on one line, the
+   headline flexing between the kicker and the line, which wraps to a second
+   line rather than crowding when the column is narrow. No type goes below the
+   handoff's 14px floor: the kicker and the line stay at the cell's 14px, the
+   headline comes down from the cell's 23px to 17px.
+
+   The block's height is not decoration. Measured at 1790px (`reports/
+   CN-front-gap-and-clause.md`), five rows in the panel end 97px below the
+   lead's button; two of these rows plus the block's own margin are 91px, which
+   is what puts the two columns within the owner's 40px. The three-line cell
+   the first attempt used was 95px a row, and two of those overshot the panel by
+   136px -- the balance the owner asked for is only reachable with a row this
+   size, which is why these are one line and not three.
+*/
+.reader .leadalso {
+  margin-top: 22px;
+}
+.reader .leadcolumn .leadalso .storycell {
+  display: flex;
+  /* The grid cell stacks its three fields (`flex-direction: column`, further
+     down this file); these rows put them on one line. */
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--grid);
+}
+/* Each of these carries one class more than the grid cell's own rule, which
+   is further down this file and would otherwise win on a tie. */
+.reader .leadcolumn .leadalso .storysec {
+  margin-bottom: 0;
+}
+.reader .leadcolumn .leadalso h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 17px;
+  line-height: 1.3;
+}
+.reader .leadcolumn .leadalso .storymeta {
+  margin-top: 0;
+  margin-left: auto;
+  padding-top: 0;
+  /* "Sep 27, 2026 · 1 min read" is one unbreakable line at the row's end. */
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
@@ -2586,16 +2637,6 @@
   color: var(--muted);
 }
 
-/* ---------------------------------------------------------------------------
-   The line under the grid. It is the only band that is a sentence rather than
-   a story, so it keeps the 1px rule and nothing else.
-   --------------------------------------------------------------------------- */
-.reader .trustbar {
-  padding: 14px var(--px);
-  border-top: 1px solid var(--grid);
-  border-bottom: 1px solid var(--grid);
-  font-size: 14px;
-}
 
 /* ---------------------------------------------------------------------------
    Around the region, beside Opinion.
@@ -2948,27 +2989,10 @@
   padding-top: 0;
   min-width: 0;
 }
-.reader .articleaside .asidecard {
-  margin-top: 22px;
-  border: 2px solid var(--grid);
-  padding: 18px;
-}
-.reader .articleaside .asidecard .tag {
-  margin-bottom: 10px;
-}
-.reader .articleaside .asidecard p {
-  font-size: 15px;
-  line-height: 1.55;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-.reader .articleaside .asidecard .textlink {
-  color: var(--ink);
-  text-decoration: underline;
-  text-decoration-thickness: 3px;
-  text-decoration-color: var(--yel);
-  text-underline-offset: 4px;
-}
+/* The rail is the dates panel alone now. The OPEN RECORD card that used to sit
+   under it -- its .asidecard box, its kicker, its line and its "How we report"
+   link -- is not in the drawing (Article Daily.dc.html has no such card beside
+   the story), so it and every rule that styled it are gone. */
 /* The panels stack into one column once the aside is under the story, so the
    two of them are not sticky there (a sticky aside inside a short column
    detaches from the thing it describes). */
@@ -2984,24 +3008,39 @@
 }
 
 /* ---------------------------------------------------------------------------
-   "How we reported this". It lives inside the story column, so it is ruled,
-   never bled: a negative margin there would open into the layout gaps and
-   stop, which is worse than not bleeding at all.
+   "How we reported this". A band of the page, not of the story column: the
+   drawing puts it edge to edge, under the body and the disclosure, with its
+   rule on the gutter. It is a direct child of `main.wrap` (see the band list
+   above), so it bleeds the way the front page's bands do, and its own
+   `padding-inline` is what puts the records back on the reading measure.
+
+   The header is one baseline row: the yellow "Follow the evidence" chip sits
+   inline to the LEFT of the heading, which is how the drawing has it. It used
+   to be a block above the heading.
    --------------------------------------------------------------------------- */
 .reader .evidence {
-  margin-top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 36px var(--px) 40px;
+  margin-top: 0;
   border-top: 3px solid var(--grid);
-  padding-top: 22px;
+}
+.reader .evidence .evidencehead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
 }
 .reader .evidence .evidencehead .kicker {
-  display: block;
   font-family: var(--fd);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 8px;
+  background: var(--yel);
+  color: #111;
+  padding: 2px 8px;
 }
 .reader .evidence .evidencehead h2 {
   font-family: var(--fd);
@@ -3009,7 +3048,7 @@
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -1px;
-  margin-bottom: 18px;
+  margin: 0;
 }
 .reader .evidence .evidenceform {
   font-family: var(--fd);
@@ -3018,13 +3057,16 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 14px;
+  margin: 0;
 }
 .reader .sourcegrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--grid);
+  /* The drawing closes the grid with its own hairline, so an odd last card
+     does not end in a gap where the empty cell would have been. */
+  border: 1px solid var(--grid);
 }
 .reader .sourcegrid > .sourcecard-new {
   background: var(--bg);
@@ -3086,86 +3128,63 @@
   color: var(--muted);
   margin: 0;
 }
-.reader .findingblock {
-  margin-top: 30px;
-  border-top: 3px solid var(--grid);
-  padding-top: 22px;
-}
-.reader .findingtitle {
-  font-family: var(--fd);
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.7px;
-  margin-bottom: 6px;
-}
-.reader .findinglist {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.reader .findinglist > li {
-  padding: 18px 0;
-  border-top: 1px solid var(--grid);
-}
-.reader .evidence .findinglist p {
-  font-family: var(--serif);
-  font-size: 17px;
-  line-height: 1.6;
-  color: var(--ink);
-}
-.reader .evidence p.findingsource {
-  font-family: var(--fd);
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--muted);
-  margin-top: 8px;
-  word-break: break-all;
-}
+/* The "What TownReporter found" appendix. Its `.findingblock`, `.findingtitle`,
+   `.findinglist` and `.findingsource` rules were removed in unit DA2 with the
+   markup: the drawing has no such block, and every row it printed was already
+   a card above it (see `provenance.tsx`). Recorded in `SPEC-GAPS-0681.md`. */
 .reader .evidence p.trustline {
   font-family: var(--fd);
   font-size: 14px;
   line-height: 1.6;
   color: var(--muted);
-  margin-top: 24px;
+  margin: 0;
   border-top: 1px solid var(--grid);
   padding-top: 14px;
 }
-/* The disclosure sits at the head of `#sources`, above the records it points
-   at: a 4px yellow rule, the sentence, and no box. */
-.reader .evidence p.ai-disclosure {
-  font-family: var(--fd);
-  font-size: 14px;
-  line-height: 1.6;
+/* The disclosure closes the story column, which is where the drawing puts it:
+   the last thing in the body, over a 3px rule the width of the reading
+   measure, in the secondary ink. It used to sit at the head of `#sources` on a
+   4px yellow rule; the records it points at are a band of the page now, and a
+   rule inside them would read as part of the first card. */
+.reader .articlebody p.ai-disclosure {
+  margin: 0.4em 0 0;
+  padding: 16px 0 0;
+  border-top: 3px solid var(--grid);
+  font-size: 0.85em;
+  line-height: 1.55;
   color: var(--muted);
-  border-left: 4px solid var(--yel);
-  padding: 2px 0 2px 14px;
-  margin: 0 0 22px;
   background: transparent;
 }
 
 /* ---------------------------------------------------------------------------
    The foot of the story: corrections beside the reprint panel, as two halves
-   of one ruled band. In the yellow half the ink is fixed #111, as everywhere a
-   yellow ground is used.
+   of one ruled band, edge to edge like the evidence band above it. In the
+   yellow half the ink is fixed #111, as everywhere a yellow ground is used.
+
+   The band bleeds (see the band list above), so each half carries the gutter
+   as its own padding: the container's padding would be where the 1px `--grid`
+   divider is painted, and the divider has to land between the halves, not
+   around them.
    --------------------------------------------------------------------------- */
 .reader .articlefoot {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--grid);
-  margin-top: 36px;
+  border-top: 3px solid var(--grid);
+  margin-top: 0;
 }
 .reader .articlefoot > .sources {
   border-top: 0;
-  padding: 24px 24px 26px;
+  padding: 32px var(--px) 36px;
   margin-top: 0;
   background: var(--bg);
 }
 .reader .articlefoot > .sources h2 {
   font-family: var(--fd);
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 800;
-  letter-spacing: -0.7px;
+  letter-spacing: -0.56px;
 }
 .reader .articlefoot > .sources > p {
   font-family: var(--serif);
@@ -3191,6 +3210,21 @@
   font-size: 16px;
   line-height: 1.55;
   margin-top: 6px;
+}
+/* "File a correction →" is the black button in the drawing: `--ink` ground,
+   `--bg` label. `.btn.primary` is the page's yellow button and was what this
+   printed before unit DA2 -- on a white half of a band that now spans the
+   page, the yellow was the loudest thing on the article. The hover keeps the
+   page's convention of inverting to the outline. */
+.reader .articlefoot > .sources > .btn.primary {
+  margin-top: 6px;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+.reader .articlefoot > .sources > .btn.primary:hover {
+  background: transparent;
+  color: var(--ink);
 }
 .reader .articlefoot .sharepanel {
   background: var(--yel);
@@ -3221,6 +3255,13 @@
   padding: 30px 0 44px;
   border-top: 3px solid var(--grid);
 }
+/* The band bleeds (see the band list above) and the grid bleeds with it, so
+   the heading and the section link -- both text, not rules -- take the page
+   gutter back themselves. Without this the h2 printed at x=0 while every band
+   above it sat on the measure. */
+.reader .keepreading .sectionhead {
+  padding-inline: var(--px);
+}
 .reader .keepreading .sectionhead h2 {
   font-family: var(--fd);
   font-size: 28px;
@@ -3229,21 +3270,52 @@
 }
 .reader .keepreadinggrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   background: var(--grid);
   border-bottom: 1px solid var(--grid);
 }
+/*
+  The grid is sized to the stories it was handed (`cols-N`, the front page's
+  own vocabulary -- `StoryGrid` in src/components/paper/story-grid.tsx), and
+  not to the three columns this band once always drew. The ruled ground is the
+  container's `background: var(--grid)` showing through the 1px gaps, so an
+  unfilled track printed the ground itself: a solid block of rule colour where
+  a third story would have been, and the whole band a black box with no
+  related stories at all. A track that no story fills cannot be painted, so the
+  fix is to stop creating one: one related story prints one across, two print
+  two across, three print the front page's 3-up.
+*/
+.reader .keepreadinggrid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.reader .keepreadinggrid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reader .keepreadinggrid.cols-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+/*
+  There is no base rule for an odd last card, and there cannot be one: at the
+  three counts above every track is filled, and the one width where the count
+  stops filling them -- three stories collapsed to two columns -- needs a rule
+  that names both of the lines it spans. That rule is in the `max-width: 1024px`
+  block below, next to the collapse that makes it necessary.
+*/
 .reader .keepreadinggrid > .newsrow {
   grid-template-columns: minmax(0, 1fr) 35px;
   background: var(--bg);
   padding: 22px 26px 24px;
   border-top: 0;
 }
-.reader .keepreadinggrid > :nth-child(3n + 1) {
+/* The edge cells carry the page gutter, at the count the grid is drawn with. */
+.reader .keepreadinggrid.cols-3 > :nth-child(3n + 1),
+.reader .keepreadinggrid.cols-2 > :nth-child(2n + 1),
+.reader .keepreadinggrid.cols-1 > :nth-child(n) {
   padding-left: var(--px);
 }
-.reader .keepreadinggrid > :nth-child(3n) {
+.reader .keepreadinggrid.cols-3 > :nth-child(3n),
+.reader .keepreadinggrid.cols-2 > :nth-child(2n),
+.reader .keepreadinggrid.cols-1 > :nth-child(n) {
   padding-right: var(--px);
 }
 .reader .keepreadinggrid .datebox {
@@ -3280,18 +3352,44 @@
   .reader .storygrid.cols-3 > :nth-child(2n) {
     padding-right: var(--px);
   }
-  .reader .keepreadinggrid {
+  /* Three across becomes two, and the edge cells change with the column count,
+     so the gutter padding is rewritten in the same breath. Only `cols-3` is
+     touched: `cols-2` and `cols-1` are already at or below two columns, and
+     their edge padding is set at the count they were handed. */
+  .reader .keepreadinggrid.cols-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .reader .keepreadinggrid > :nth-child(3n + 1),
-  .reader .keepreadinggrid > :nth-child(3n) {
+  .reader .keepreadinggrid.cols-3 > :nth-child(3n + 1),
+  .reader .keepreadinggrid.cols-3 > :nth-child(3n) {
     padding-inline: 26px;
   }
-  .reader .keepreadinggrid > :nth-child(2n + 1) {
+  .reader .keepreadinggrid.cols-3 > :nth-child(2n + 1) {
     padding-left: var(--px);
   }
-  .reader .keepreadinggrid > :nth-child(2n) {
+  .reader .keepreadinggrid.cols-3 > :nth-child(2n) {
     padding-right: var(--px);
+  }
+  /*
+     The odd third story is alone in row two, and row two is a fresh row whose
+     both tracks are page edges, so the card takes the gutter on both sides --
+     `3n` above had just given it the mid-grid 26px.
+
+     Both edges, and `grid-column: 1 / -1` to get the row at all. A bare
+     `grid-column-end: -1` is not enough: with an auto start and a definite end
+     the browser resolves the span to a single track and places the card
+     against that end, so the third story landed in row two's SECOND track and
+     row two's first track printed the ruled ground -- the same block of rule
+     colour this unit came to remove, at the one width where a count-sized grid
+     still wraps. Both lines have to be named.
+
+     `:nth-child(3):last-child` is the exact condition: three cards, and the
+     third is the last. It cannot reach the front page's `.storygrid.cols-3`,
+     where `cols-3` is a column count and six stories wrap to three full rows --
+     no odd card, and this rule is not written on that class.
+  */
+  .reader .keepreadinggrid.cols-3 > :nth-child(3):last-child {
+    grid-column: 1 / -1;
+    padding-inline: var(--px);
   }
 }
 @media (max-width: 900px) {
@@ -3430,7 +3528,7 @@
   .reader .lead .dek {
     font-size: 18px;
   }
-  .reader .ledgerow > .lead,
+  .reader .ledgerow > .leadcolumn,
   .reader .ledgerow > .datespanel {
     padding: 24px var(--px) 26px;
   }
@@ -3457,10 +3555,20 @@
   .reader .storycell {
     padding-block: 22px 24px;
   }
-  .reader .keepreadinggrid {
+  /* One column, whatever count the grid was handed, so every cell is an edge
+     cell on both sides and takes the page gutter on both sides. The class
+     variants are named because the rules that set the edge padding above carry
+     the class too, and a bare `.keepreadinggrid > :nth-child(n)` is one class
+     lighter and would lose to them (`storygrid` above still has this: its
+     phone rule is dead against the ≤1024 reset). */
+  .reader .keepreadinggrid.cols-1,
+  .reader .keepreadinggrid.cols-2,
+  .reader .keepreadinggrid.cols-3 {
     grid-template-columns: minmax(0, 1fr);
   }
-  .reader .keepreadinggrid > :nth-child(n) {
+  .reader .keepreadinggrid.cols-1 > :nth-child(n),
+  .reader .keepreadinggrid.cols-2 > :nth-child(n),
+  .reader .keepreadinggrid.cols-3 > :nth-child(n) {
     padding-inline: var(--px);
   }
   .reader .backmatter {
@@ -3512,6 +3620,7 @@
    below the byline bar, but they must not land under it either. */
 .reader .articlebody [id],
 .reader .sources[id],
+.reader .evidence[id],
 .reader .keepreading[id] {
   scroll-margin-top: 24px;
 }

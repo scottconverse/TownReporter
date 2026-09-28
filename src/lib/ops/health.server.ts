@@ -9,6 +9,7 @@ import { getDbSource, getSql } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
 import {
+  backupState,
   databaseValue,
   diskState,
   formatAgo,
@@ -151,7 +152,11 @@ async function checkJobs(): Promise<HealthCheck[]> {
       where status in ('queued', 'running')
       group by coalesce(lane, 'default'), status, kind
     `;
-    const [failureCounts] = await sql<{ latest_failed: number; historical_failed: number }>`
+    const [failureCounts] = await sql<{
+      latest_failed: number;
+      historical_failed: number;
+      failed_24h: number;
+    }>`
       with latest_terminal_by_kind as (
         select distinct on (kind) kind, status
         from desk_jobs
@@ -160,12 +165,16 @@ async function checkJobs(): Promise<HealthCheck[]> {
       )
       select
         (select count(*)::int from latest_terminal_by_kind where status = 'failed') as latest_failed,
-        (select count(*)::int from desk_jobs where status = 'failed') as historical_failed
+        (select count(*)::int from desk_jobs where status = 'failed') as historical_failed,
+        (select count(*)::int from desk_jobs
+          where status = 'failed'
+            and coalesce(finished_at, updated_at) > now() - interval '24 hours') as failed_24h
     `;
     const running = rows.filter((r) => r.status === "running").reduce((a, r) => a + r.n, 0);
     const queued = rows.filter((r) => r.status === "queued").reduce((a, r) => a + r.n, 0);
     const latestFailed = Number(failureCounts?.latest_failed ?? 0);
     const historicalFailed = Number(failureCounts?.historical_failed ?? 0);
+    const failed24h = Number(failureCounts?.failed_24h ?? 0);
     const queueCopy = jobQueueCopy(running, queued, latestFailed, historicalFailed);
     const runningRows = rows.filter((r) => r.status === "running");
     const oldestRunning = runningRows
@@ -202,9 +211,34 @@ async function checkJobs(): Promise<HealthCheck[]> {
           .filter(Boolean)
           .join(" · "),
       },
+      /*
+        The Server card's "Errors in 24 h" row, read from the same table and the
+        same query as the queue above so the two can never disagree about what
+        failed.
+
+        What it counts is failed desk jobs, and the note says so: this app's
+        error LOG is the node process's redirected stderr
+        (ops/start-townreporter.ps1:143), which carries no timestamps and rolls
+        over when the process restarts, so it cannot answer a 24-hour window.
+        The work queue is the desk's own record of work that failed, with the
+        time it failed at.
+      */
+      {
+        id: "errors-24h",
+        label: "Errors in 24 h",
+        state: failed24h > 0 ? "warn" : "ok",
+        value: String(failed24h),
+        note:
+          failed24h > 0
+            ? "Failed desk jobs in the last 24 hours. Open the work queue to see which."
+            : "No desk job has failed in the last 24 hours.",
+      },
     ];
   } catch {
-    return [{ id: "jobs", label: "Work queue", state: "unknown", value: "could not read" }];
+    return [
+      { id: "jobs", label: "Work queue", state: "unknown", value: "could not read" },
+      { id: "errors-24h", label: "Errors in 24 h", state: "unknown", value: "could not read" },
+    ];
   }
 }
 
@@ -340,6 +374,83 @@ async function checkDisk(): Promise<HealthCheck[]> {
   }
 }
 
+/** The fields of `logs/backup-state.json` this check reads. */
+type BackupRecord = {
+  lastSuccessAt?: string | null;
+  lastAttemptAt?: string | null;
+  lastError?: string | null;
+  skippedReason?: string | null;
+  localCount?: number | null;
+};
+
+/**
+ * The backup's own record, from the file the backup writes.
+ *
+ * `ops/lib-backup.ps1` writes `logs/backup-state.json` after every run
+ * (`Save-TownReporterBackupState`, a scratch file moved into place so a reader
+ * never catches half of one), and the Control page polls the same file. The
+ * Server card's "Last backup" row read "Not set" while that file held the
+ * answer, which is a row printing "nobody knows" about a fact this machine had
+ * written down.
+ *
+ * Every state here is a sentence, not an invented time: no file at all is
+ * "No backup on record" (the ordinary state of a fresh or development copy,
+ * and not the same fact as a backup that stopped working), a file with no
+ * success in it says so and carries the run's own error text, and a success
+ * prints how long ago it was.
+ */
+async function checkBackup(): Promise<HealthCheck[]> {
+  const ownedRoot = await managedInstallRoot();
+  const path = join(ownedRoot || appRoot(), "logs", "backup-state.json");
+  let record: BackupRecord = {};
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    /* A JSON file holding anything but an object is a corrupt record, and the
+       note below reports it as unreadable rather than pretending to read it. */
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("the backup state file does not hold a backup record");
+    }
+    record = parsed as BackupRecord;
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException | null)?.code === "ENOENT";
+    return [
+      {
+        id: "backup",
+        label: "Last backup",
+        state: "unknown",
+        value: missing ? "No backup on record" : "state file unreadable",
+        note: missing
+          ? "The nightly backup writes logs\\backup-state.json the first time it runs (ops\\backup.ps1). Nothing has written it here."
+          : err instanceof Error
+            ? err.message.slice(0, 160)
+            : "unknown error",
+      },
+    ];
+  }
+  const lastSuccessAt = typeof record.lastSuccessAt === "string" ? record.lastSuccessAt : null;
+  const rawCount = Number(record.localCount);
+  const localCount = Number.isFinite(rawCount) ? rawCount : 0;
+  const state = backupState(lastSuccessAt);
+  return [
+    {
+      id: "backup",
+      label: "Last backup",
+      state,
+      value: lastSuccessAt ? formatAgo(lastSuccessAt) : "no successful backup yet",
+      note: [
+        lastSuccessAt ? `${localCount} local backup${localCount === 1 ? "" : "s"} on disk` : "",
+        record.lastError ? `last error: ${String(record.lastError).slice(0, 140)}` : "",
+        record.skippedReason ? `skipped: ${String(record.skippedReason).slice(0, 140)}` : "",
+        state === "warn"
+          ? "The nightly backup takes one whenever the newest is over 20 hours old; nothing has succeeded in a day and a half."
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    },
+  ];
+}
+
 /**
  * Does the paper answer on its public address?
  *
@@ -450,6 +561,7 @@ export async function collectHealth(): Promise<OpsHealth> {
     checkJobs(),
     checkWatchdog(),
     checkDisk(),
+    checkBackup(),
   ]);
   return {
     managedInstall: Boolean(await managedInstallRoot()),

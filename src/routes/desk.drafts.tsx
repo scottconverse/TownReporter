@@ -1,19 +1,18 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskMoreMenu, DeskShell, JobSlot } from "@/components/desk-chrome";
 import { useNowMs, type RunningJob } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
-import { listDraftsDesk } from "@/lib/news/desk";
+import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
 import {
   deskDraftAction,
   deskDraftElapsed,
-  deskDraftFilterCounts,
-  deskDraftMatchesFilter,
   deskDraftState,
   type DeskDraftFilter,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
+import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { modelChoiceLabel } from "@/lib/news/model-choice";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useEditorSections } from "@/lib/use-sections";
@@ -81,25 +80,54 @@ function DraftsPage() {
   const { formatDateTime, formatShortDate } = usePaperDateFormatters();
   const navigate = useNavigate();
   const [filter, setFilter] = useState<DeskDraftFilter>("all");
+  const [draftShown, setDraftShown] = useState(PAGE_SIZE);
+  /*
+    HOW MUCH OF THE LIST IS ON THE SCREEN (Unit CZ-long-lists).
+
+    The desk can hold more drafts than anyone scrolls: this screen used to
+    render every one of them. It now asks the server for the first 25 and for
+    one more page each time the footer is pressed, and the server does the
+    narrowing -- a window cut on the client, before the filter, would page the
+    unfiltered list and show the wrong rows. The query key carries the filter
+    and the window size, so pressing a pill or the footer is a new fetch, and
+    `placeholderData` keeps the previous page on screen while it arrives
+    instead of blanking the table.
+
+    The bare `["drafts-desk"]` prefix is deliberate and shared with Today's own
+    read of the same list: several screens invalidate `["drafts-desk"]` after
+    they change a draft (desk.index.tsx:743), and a prefix reaches every key
+    that starts with it. A key of its own would go stale behind those writes.
+
+    Today's edition keeps reading the whole list through `listDraftsDesk`: its
+    "writing now" and "ready to check" counts describe every draft, and a page
+    of 25 would make them describe the page.
+  */
   const query = useQuery({
-    queryKey: ["drafts-desk"],
-    queryFn: () => listDraftsDesk(),
+    queryKey: ["drafts-desk", filter, draftShown],
+    queryFn: () => listDraftsDeskPage({ data: { limit: draftShown, offset: 0, filter } }),
+    placeholderData: keepPreviousData,
     // The desk polls its lists: a draft being written on Tonight's edition is
     // the same work this screen is watching.
     refetchInterval: 5000,
   });
 
-  const rows = query.data ?? [];
+  const rows = query.data?.rows ?? [];
+  const total = query.data?.total ?? 0;
+  /*
+    THE PILLS COUNT THE LIST, NOT THE PAGE. These arrive counted on the server
+    over every draft the newsroom holds; counting `rows` here would make "All"
+    read 25 the moment a page appeared.
+  */
+  const counts = query.data?.counts;
   const anyRunning = rows.some((row) => row.job_status === "running" || row.job_status === "queued");
   const nowMs = useNowMs(anyRunning);
 
-  const states = rows.map((row) =>
-    deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
-  );
-  const counts = deskDraftFilterCounts(states);
-  const shown = rows
-    .map((row, index) => ({ row, state: states[index] }))
-    .filter(({ state }) => deskDraftMatchesFilter(state, filter));
+  // The window has narrowed the list already, so every row that arrives is
+  // shown; the elapsed time is read here only for the rows on screen.
+  const shown = rows.map((row) => ({
+    row,
+    state: deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
+  }));
 
   const sectionName = (topic: string | null) =>
     (topic && sections.find((s) => s.key === topic)?.name) || topic || "No section";
@@ -156,7 +184,7 @@ function DraftsPage() {
             aria-pressed={filter === f.key}
             onClick={() => setFilter(f.key)}
           >
-            {f.label} · {counts[f.key]}
+            {f.label} · {counts?.[f.key] ?? 0}
           </button>
         ))}
       </div>
@@ -241,6 +269,25 @@ function DraftsPage() {
               </div>
             );
           })}
+          {/* The list is windowed, so the footer says how much of it is on the
+              screen and offers the next page. Not drawn: the handoff's only
+              footer is the Queue's "Load more" (Desk Screens.dc.html:67); the
+              brief names this button, so this is the brief's wording. Recorded
+              in SPEC-GAPS-0681.md. */}
+          {total > 0 ? (
+            <div className="astra-list-foot">
+              <span>{showingLine(rows.length, total, "drafts")}</span>
+              {rows.length < total ? (
+                <button
+                  type="button"
+                  className="astra-list-more"
+                  onClick={() => setDraftShown((n) => n + PAGE_SIZE)}
+                >
+                  Show {PAGE_SIZE} more
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
     </DeskShell>

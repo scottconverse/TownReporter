@@ -43,8 +43,8 @@ import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { confirmSectionAndWaitForPublishable, openStoryDetails } from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen ports, registered with
@@ -220,6 +220,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -228,9 +229,20 @@ async function ownTheDesk() {
 
 /** A Custom AI connection at the fake, so the batch has a runtime that answers. */
 async function saveTheFakeConnection() {
-  await page.goto(`${base}/desk/ops#custom-ai-connections`, { waitUntil: "networkidle" });
+  /*
+    Unit CX: the Server page draws no connections panel any more. Its two doors
+    ("Assign models to jobs…", "All connections") lead to the Models screen,
+    which owns the list, so this walk goes there and opens the form the same way
+    an owner does: the header's "+ Add a connection" button. The panel keeps the
+    `#custom-ai-connections` anchor it had on Server settings, so every locator
+    below this line is unchanged -- only the way in, and what to wait for.
+    `showHeading={false}` in that dialog suppresses "Add your own AI API", so
+    the wait is on the form's first field instead of on a heading.
+  */
+  await page.goto(`${base}/desk/models?tab=conn`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "+ Add a connection" }).click();
   const section = page.locator("#custom-ai-connections");
-  await section.getByRole("heading", { name: "Add your own AI API" }).waitFor({ timeout: 45_000 });
+  await section.getByLabel("Connection name", { exact: true }).waitFor({ timeout: 45_000 });
   await section.getByLabel("Connection name", { exact: true }).fill(connectionName);
   await section.getByLabel("Base URL", { exact: true }).fill(modelBase);
   await section.getByLabel("Model id (optional)", { exact: true }).fill(modelId);
@@ -259,7 +271,7 @@ async function fileTwoLeads() {
     await page.getByLabel("Why now").fill("Filed by the batch-panel walk.");
     await page.getByRole("button", { name: "File lead" }).click();
     // Filing lands on the story workbench; the Queue is where the batch is run.
-    await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+    await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   }
   step("two leads are filed");
 }
@@ -293,13 +305,18 @@ async function printTheFirstStory() {
   const href = await row.locator("a.hl-link").getAttribute("href");
   assert.match(href ?? "", /^\/desk\/story\/\d+$/, "the row opens its story workbench");
   await row.locator("a.hl-link").click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   await page.getByLabel("Headline").fill(`Water tower inspection backlog ${stamp}`);
-  await page.getByLabel("Dek").fill("The city has not inspected the tower since 2019.");
+  await page.getByLabel("Summary").fill("The city has not inspected the tower since 2019.");
   /*
     The section a draft files under is read by a person before it prints, and a
     batch draft's section came from the model. Picking it here is that read.
   */
+  /*
+    Unit CW2 moved the section picker into the shut "Story details" disclosure,
+    so it has to be opened before it can be read -- see openStoryDetails.
+  */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic-select");
   const values = await topic.locator("option").evaluateAll((nodes) => nodes.map((n) => n.value));
   await topic.selectOption(values.includes("council") ? "council" : values[0]);

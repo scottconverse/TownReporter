@@ -17,6 +17,29 @@ import {
 } from "../test-support/pg-admin.ts";
 
 /**
+ * Unit CJ (0.6.81) put the first account on a fresh desk behind the one-time
+ * setup code, and this file's signup was still the pre-CJ one: it filled the
+ * four fields, pressed "Create editor account", and waited for the Queue --
+ * against a form that now refuses without the code, so the wait timed out on a
+ * page still sitting on `/login`. The four sibling `*.e2e.test.ts` files that
+ * also sign an owner in (paper-identity, two-editors, stalled-run,
+ * uncredited-source-warning) each carry this same short reader; this is the
+ * one that was missed. Inline rather than imported from
+ * `scripts/first-run-setup-step.mjs`, because this strict typed project does
+ * not import an untyped `.mjs` walk helper -- see two-editors.e2e.test.ts:20.
+ *
+ * The field is absent once a desk is claimed, so a run against an already-set-up
+ * database is unaffected.
+ */
+async function fillPendingSetupCodeIfPresent(page: Page): Promise<void> {
+  const field = page.getByLabel("Setup code", { exact: true });
+  if ((await field.count()) === 0) return;
+  const root = process.env.TOWNREPORTER_DATA_ROOT?.trim() || join(process.cwd(), ".townreporter-data");
+  const code = readFileSync(join(root, "logs", "SETUP-CODE.txt"), "utf8").trim();
+  await field.fill(code);
+}
+
+/**
  * Giving up the desk must not be reachable by a click alone.
  *
  * An audit walked this end to end: a button in the header of every desk page,
@@ -125,17 +148,38 @@ function findLeaveEditorClientRpc(): { file: string; exportName: string } {
     const src = readFileSync(join(assetsDir, f), "utf8");
     if (!src.includes(functionId)) continue;
     /*
-      The helper names are the minifier's choice, not ours. This pattern
+      The helper names are the minifier's choice, not ours. An earlier pattern
       hard-coded `X(` and `W(` and held for weeks -- until v0.5.3 added four
       server functions to the same chunk and the minifier dealt every helper
       a different letter. Any identifier works where any identifier can be.
+
+      What "any identifier" must NOT mean is "any stub" (measured, 0.6.81
+      integration). The previous pattern here matched `var <id>=<fn>({method:
+      `POST`})` and then allowed the gap to the handler to be ANY 150
+      characters -- and this chunk declares its stubs in one comma-joined list
+      (`var Bt=<fn>({...}),Vt=<fn>({...}),Ht=...`). The stub BEFORE leaveEditor
+      sits ~134 characters from leaveEditor's own `handler(n(`<id>`))`, so the
+      window reached across it and bound `Bt` -- claimDeskWithCode, exported as
+      `n` -- and this file then called THAT with a wrong confirmation email and
+      read `{ok:true,role:"owner",newsroomId:1}`, which is claimDeskWithCode's
+      answer, not leaveEditor's. The assertion below is what caught it; a
+      resolution that lands one stub over is now impossible by construction:
+      each candidate stub owns the region up to the next stub, and the one
+      whose OWN region holds this function id's handler wins.
     */
-    const localMatch = src.match(
-      new RegExp("var\\s+(\\w+)\\s*=\\s*\\w+\\(\\{method:`POST`\\}\\)[\\s\\S]{0,150}?handler\\(\\w+\\(`" + functionId + "`\\)\\)"),
-    );
-    if (!localMatch) continue;
-    const local = localMatch[1];
-    const exportMatch = src.match(new RegExp("[{,]" + local + "\\s+as\\s+(\\w+)[,}]"));
+    const stubStart = /(?:^|[\s,;{])([\w$]+)\s*=\s*[\w$]+\(\{method:`POST`\}\)/g;
+    const stubs = [...src.matchAll(stubStart)].map((m) => ({ local: m[1], at: m.index }));
+    const owners = stubs.filter((stub, i) => {
+      const region = src.slice(stub.at, stubs[i + 1]?.at ?? src.length);
+      return new RegExp("handler\\([\\w$]+\\(`" + functionId + "`\\)\\)").test(region);
+    });
+    if (owners.length !== 1) {
+      throw new Error(
+        `expected exactly one client stub to own leaveEditor's handler (${functionId}), ` +
+          `found ${owners.length}: ${owners.map((o) => o.local).join(", ") || "none"}`,
+      );
+    }
+    const exportMatch = src.match(new RegExp("[{,]" + owners[0].local + "\\s+as\\s+([\\w$]+)[,}]"));
     if (exportMatch) return { file: f, exportName: exportMatch[1] };
   }
   throw new Error(
@@ -172,6 +216,7 @@ if (dbProbe.ok) {
     await page.getByLabel("Email").fill(OWNER_EMAIL);
     await page.getByLabel("Password", { exact: true }).fill(OWNER_PASSWORD);
     await page.getByLabel("Confirm password").fill(OWNER_PASSWORD);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
   }, { timeout: 240_000 });

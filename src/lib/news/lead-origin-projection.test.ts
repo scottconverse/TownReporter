@@ -35,9 +35,31 @@ void sourceTypeProbe;
 
 const desk = await readFile(new URL("./desk.ts", import.meta.url), "utf8");
 
+/**
+ * Unit CZ-long-lists (0.6.81) extracted the queue projection out of `listLeads`
+ * into `queryLeadRows`, which the Queue's own window (`listQueuePage`) reads
+ * too, so the queue half of this pin now takes the reader's block and asserts
+ * that `listLeads` delegates to it. The story view's projection is still inline
+ * in `getLead`. Which function holds the SELECT was never the claim -- that
+ * these bytes return a lead's persisted provenance and import origin, run
+ * against a real database below, is.
+ */
 function projectionQuery(name: "listLeads" | "getLead"): string {
-  const start = desk.indexOf(`export const ${name} = createServerFn`);
-  const endMarker = name === "listLeads" ? "async function insertLeadWithDraft" : "export const deleteLead";
+  if (name === "listLeads") {
+    const callerStart = desk.indexOf("export const listLeads = createServerFn");
+    const callerEnd = desk.indexOf("async function insertLeadWithDraft", callerStart);
+    assert.ok(callerStart >= 0 && callerEnd > callerStart, "could not isolate listLeads");
+    assert.match(
+      desk.slice(callerStart, callerEnd),
+      /queryLeadRows\(context\)/,
+      "listLeads must read the shared projection, not its own query",
+    );
+  }
+  const start =
+    name === "listLeads"
+      ? desk.indexOf("async function queryLeadRows(")
+      : desk.indexOf(`export const ${name} = createServerFn`);
+  const endMarker = name === "listLeads" ? "export const listLeads = createServerFn" : "export const deleteLead";
   const end = desk.indexOf(endMarker, start);
   assert.ok(start >= 0 && end > start, `could not isolate ${name}`);
   const block = desk.slice(start, end);

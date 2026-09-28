@@ -25,7 +25,7 @@ import { expect } from "playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -125,6 +125,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -227,8 +228,10 @@ async function addRoutineNoticeFixtureSource() {
 
 async function dailySettingsJourney(context, observePage) {
   const originalPage = page;
-  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
+  await page.goto(`${base}/desk/ops/daily-scan`, { waitUntil: "domcontentloaded" });
+  // 0.6.81 (unit CX2): the daily settings live on the Daily scan card's own
+  // screen. The heading wait below is what proves they are really on screen.
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const panel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await panel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
   const enabled = panel.getByRole("checkbox", { name: /Run once each day/ });
@@ -285,8 +288,8 @@ async function dailySettingsJourney(context, observePage) {
   step("daily settings history and queue links open their real desk routes");
 
   await addAcceptedSource();
-  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
+  await page.goto(`${base}/desk/ops/daily-scan`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const freshPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await freshPanel.getByText(/Accepted community sources \(1\)/).waitFor();
   await freshPanel.getByRole("checkbox", { name: /Daily settings source/ }).check();
@@ -312,7 +315,7 @@ async function dailySettingsJourney(context, observePage) {
   await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
   await freshPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const persistedPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   if ((await persistedPanel.getByLabel("Local time").inputValue()) !== future) throw new Error("saved local time did not persist");
   if ((await persistedPanel.getByLabel("Writing model").inputValue()) !== "claude-haiku") throw new Error("saved runtime did not persist");
@@ -322,8 +325,8 @@ async function dailySettingsJourney(context, observePage) {
   const other = await context.newPage();
   observePage(other, "daily-second-tab");
   other.setDefaultTimeout(45_000);
-  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
+  await other.goto(`${base}/desk/ops/daily-scan`, { waitUntil: "domcontentloaded" });
+  await other.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const otherPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
   await otherPanel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
   await otherPanel.getByLabel("Daily source limit").fill("3");
@@ -357,7 +360,7 @@ async function dailySettingsJourney(context, observePage) {
   }
   await otherPanel.screenshot({ path: join(evidenceDir, "daily-scan-settings-mobile-dark-large.png") });
   await other.reload({ waitUntil: "domcontentloaded" });
-  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Daily scan", exact: true }).click();
+  await other.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const cleanupPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
   await cleanupPanel.getByRole("button", { name: "Resume daily scan" }).click();
   await cleanupPanel.getByText("Daily scan resumed.").waitFor();
@@ -394,7 +397,16 @@ async function fileQueueLead(headline, why) {
   await form.getByLabel("Why now").fill(why);
   await form.getByRole("button", { name: "File lead", exact: true }).click();
   await expect(page).toHaveURL(/\/desk\/story\/\d+$/);
-  await expect(page.getByRole("textbox", { name: "Headline", exact: true })).toHaveValue(headline);
+  /*
+    The story page's headline box is labelled with the drawn words (unit CW),
+    "Headline · yours", so the box's accessible name is that whole label --
+    the same rule desk-chrome.tsx records for the old "Edit" span. The
+    assertion is unchanged: the box the walking editor lands in holds the
+    headline they filed.
+  */
+  await expect(page.getByRole("textbox", { name: "Headline · yours", exact: true })).toHaveValue(
+    headline,
+  );
 }
 
 async function persistSuppliedScope(headline, why) {
@@ -615,8 +627,12 @@ async function draftBatchJourney() {
 
 async function routineNoticePermissionsJourney(context, observePage) {
   await addRoutineNoticeFixtureSource();
-  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
+  await page.goto(`${base}/desk/ops/routine-notices`, { waitUntil: "domcontentloaded" });
+  // The card's own screen (0.6.81, unit CX2), which still carries the anchor
+  // the summary card carries. The jump button read "Routine notices" while the
+  // panel's heading is "Routine notice permissions", so the anchor is the
+  // unambiguous way to name the same card.
+  await page.locator("#ops-panel-routine-notices").scrollIntoViewIfNeeded();
   const panel = page.locator("#routine-notice-permissions");
   await panel.getByRole("heading", { name: "Routine notice permissions", exact: true }).waitFor();
   await panel
@@ -650,7 +666,7 @@ async function routineNoticePermissionsJourney(context, observePage) {
     )
     .waitFor();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
+  await page.locator("#ops-panel-routine-notices").scrollIntoViewIfNeeded();
   const reloaded = page.locator("#routine-notice-permissions");
   if (
     !(await reloaded
@@ -714,8 +730,8 @@ async function routineNoticePermissionsJourney(context, observePage) {
   const other = await context.newPage();
   observePage(other, "routine-second-tab");
   other.setDefaultTimeout(45_000);
-  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
+  await other.goto(`${base}/desk/ops/routine-notices`, { waitUntil: "domcontentloaded" });
+  await other.locator("#ops-panel-routine-notices").scrollIntoViewIfNeeded();
   const otherPanel = other.locator("#routine-notice-permissions");
   await otherPanel
     .getByRole("heading", { name: "Routine notice permissions", exact: true })
@@ -748,10 +764,10 @@ async function routineNoticePermissionsJourney(context, observePage) {
     .click();
   await other.getByRole("button", { name: /^Rejected / }).click();
   await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
-  await other.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
+  await other.goto(`${base}/desk/ops/routine-notices`, { waitUntil: "domcontentloaded" });
+  await other.locator("#ops-panel-routine-notices").scrollIntoViewIfNeeded();
   await other.reload({ waitUntil: "domcontentloaded" });
-  await other.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Routine notices", exact: true }).click();
+  await other.locator("#ops-panel-routine-notices").scrollIntoViewIfNeeded();
   await otherPanel.getByText("Saved permissions need attention").waitFor();
   await otherPanel
     .getByText(/Saved address: https:\/\/daily-settings-/)

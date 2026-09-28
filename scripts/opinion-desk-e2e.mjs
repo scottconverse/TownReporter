@@ -26,7 +26,7 @@
 import { chromium } from "playwright";
 import { Client } from "pg";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.OPINION_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const dbUrl = process.env.OPINION_DB_URL;
@@ -76,6 +76,7 @@ async function main() {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
   } else {
     await page.getByLabel("Email").fill(email);

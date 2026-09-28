@@ -27,12 +27,23 @@ import { PGlite } from "@electric-sql/pglite";
 const desk = await readFile(new URL("./desk.ts", import.meta.url), "utf8");
 
 function draftsQuery(): string {
-  const start = desk.indexOf("export const listDraftsDesk = createServerFn");
-  assert.ok(start >= 0, "desk.ts no longer defines listDraftsDesk");
+  /*
+    ANCHORED ON THE ROW QUERY, NOT ON THE EXPORTED FUNCTION.
+
+    Unit CZ-long-lists windowed this list, so the SQL moved out of the
+    `listDraftsDesk` chain into `queryDraftRows`, which both `listDraftsDesk`
+    (every draft, for Today's counts) and `listDraftsDeskPage` (one window,
+    for the screen) now call. Searching from the export found nothing and the
+    guard below fired. The guard itself is kept and the search now starts at
+    the function the query lives in; every assertion about the rows is
+    unchanged.
+  */
+  const start = desk.indexOf("async function queryDraftRows");
+  assert.ok(start >= 0, "desk.ts no longer defines queryDraftRows");
   const queryStart = desk.indexOf("with latest_draft as (", start);
-  assert.ok(queryStart > start, "could not isolate the listDraftsDesk query");
+  assert.ok(queryStart > start, "could not isolate the drafts query");
   const queryEnd = desk.indexOf("`;", queryStart);
-  assert.ok(queryEnd > queryStart, "could not find the end of the listDraftsDesk query");
+  assert.ok(queryEnd > queryStart, "could not find the end of the drafts query");
   const query = desk.slice(queryStart, queryEnd).replaceAll("${owned(context)}", "1");
   assert.ok(!query.includes("${"), "the isolated query still holds a template slot");
   return query;

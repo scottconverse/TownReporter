@@ -5,7 +5,7 @@
  */
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.PULL_E2E_BASE_URL || "http://127.0.0.1:3492").replace(/\/$/, "");
 const stamp = Date.now();
@@ -23,6 +23,7 @@ try {
   await page.getByLabel("Email").fill(`pull-proof-${stamp}@townreporter.test`);
   await page.getByLabel("Password", { exact: true }).fill("pull-proof-e2e-pass");
   await page.getByLabel("Confirm password").fill("pull-proof-e2e-pass");
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base, {
@@ -50,7 +51,7 @@ try {
   await page.getByLabel("Headline").fill(`Longmont council packet proof ${stamp}`);
   await page.getByLabel("Why now").fill("Verify that Pull finds and saves official council records.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor();
+  await page.getByLabel("Story", { exact: true }).waitFor();
   await page.getByRole("tab", { name: "Reporting", exact: true }).click();
 
   await page

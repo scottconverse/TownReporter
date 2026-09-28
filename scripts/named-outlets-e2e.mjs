@@ -29,7 +29,7 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 /**
@@ -119,6 +119,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -138,11 +139,11 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
 
   await page.getByLabel("Headline").fill(headline);
-  await page.getByLabel("Dek").fill(why);
-  await page.getByLabel("Body").fill(body);
+  await page.getByLabel("Summary").fill(why);
+  await page.getByLabel("Story", { exact: true }).fill(body);
   // The section still has to be saved before the server will read the body
   // against the Sources -- the notice below is computed from the saved draft --
   // but the Publish button is down on purpose from here (0.6.67: pressing it
@@ -158,7 +159,61 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   });
   const print = page.getByRole("button", { name: /^Publish in / });
   assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
-  await page.getByText("Deal with the named outlet first").waitFor();
+  /*
+    Two units wrote the same screen at once, and both halves of this pin are
+    real on the merged page, so both are kept.
+
+    Unit DB2 (0.6.81) merged the second unit and hit this same hunk again, with
+    a third copy of the pin on the other side. That copy was the pin as it stood
+    before the note above was written: it waited for the singular sentence only
+    (`/1 thing blocks Publish\./`, no timeout) and for an unscoped "Blocks Publish"
+    with `.first()` -- both weaker than what is here, and neither carrying
+    anything this side does not already assert, so what is kept is this side
+    whole. Its one addition is the `step(...)` line below, which the other side
+    added and which is kept: it names the state on the walk's step list, and the
+    resolution would otherwise have dropped a line of reporting rather than a
+    line of checking. (The scoping here is also why the `.first()` is not
+    needed: the row is located by `[data-blocker]` inside `#publish-blockers`.)
+
+    Unit CT part 2 (b16a07b5) deleted the mid-form heading this line used to
+    wait for -- "Deal with the named outlet first" -- and moved the reasons to
+    the top of the Checks tab, one row each with its own press. So the words
+    pinned here are the ones the block draws now: its own summary, which counts
+    the reasons and promises every row a press, and the named-outlet row
+    itself, chip and sentence, which is the desk naming this reason by
+    category and then by name. `#publish-blockers` sits on the tab the page
+    opens on (the inspector defaults to "checks"), so the row is on screen and
+    not merely in the DOM -- `scripts/publish-blockers-walk.mjs` reads the same
+    three parts of that block the same way.
+
+    The count moves the number AND the verb: publishBlockedSummary says
+    "1 thing blocks Publish" and "3 things block Publish", so the one-blocker
+    case this walk reaches is not the plural row-count spelling that
+    `publish-blockers-walk.mjs` pins. A pattern of `things? block Publish`
+    reads naturally and matches the plural only, and a wait on it against this
+    page times out with the sentence sitting in `body.innerText` -- the pin has
+    to accept either spelling.
+
+    Unit CW replaced the old gate note ("Deal with the named outlet first") in
+    the dark sticky bar with the drawn bar's own sentence -- the first reason,
+    said as the press that clears it (`publishGateNote`,
+    src/lib/news/publish-blockers.ts:248, drawn as "Review 1 name to publish."
+    at `Desk Story.dc.html:183`, rendered at
+    src/routes/desk.story.$leadId.tsx:3105). The assertion is the one the walk
+    always made -- printing is held down IN WORDS, and the words name this
+    draft's own reason -- so it also pins the drawn copy, which is the label on
+    the "Override Denver Post" press the walk clicks next. That press is the
+    same mutation CT's row button calls.
+  */
+  await page
+    .getByText(/\d+ things? blocks? Publish\. Each row has the press that clears it\./)
+    .waitFor({ timeout: 45_000 });
+  const reason = page.locator('#publish-blockers [data-blocker="outlet:Denver Post"]');
+  await reason.getByText("Blocks Publish", { exact: true }).waitFor({ timeout: 45_000 });
+  await reason
+    .getByText("The body names Denver Post and this draft's Sources do not show it.")
+    .waitFor({ timeout: 45_000 });
+  await page.getByText("Override Denver Post to publish.").waitFor({ timeout: 45_000 });
   step("printing is held down, in words, while Denver Post is named and uncovered");
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();
@@ -181,7 +236,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
 }
 
 async function openOutlets() {
-  await page.goto(`${base}/desk/ops#outlets`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/named-outlets`, { waitUntil: "networkidle" });
   await panel().getByRole("heading", { name: "Named outlets" }).waitFor({ timeout: 45_000 });
 }
 

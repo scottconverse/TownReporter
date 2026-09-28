@@ -33,7 +33,10 @@ import {
   PROVIDER_REGISTRY,
   clampBudgetMs,
   effectiveBudget,
+  providerEndpoint,
+  providerEndpointWatched,
   providerEntry,
+  providerSwitchedOff,
   validateProviderSeconds,
   type ProviderOverrides,
 } from "./provider-registry.ts";
@@ -453,6 +456,33 @@ export type ProviderTimeSetting = {
   enabled: boolean;
   /** False when the machine itself has the provider switched off. */
   availableOnThisMachine: boolean;
+  /**
+   * The address this provider's calls go to, or null for a provider that has
+   * none (the two command-line tools reach their service through a login, not
+   * a URL). `providerEndpoint` is the one reader of that fact, so the address
+   * the Server page prints is the address `rungGateway` calls.
+   */
+  endpoint: string | null;
+  /**
+   * Is that address one the desk's own local-model discovery looks at?
+   *
+   * False when an installation setting named the address, and false when
+   * discovery is switched off -- both cases where nobody looked, and where
+   * "nothing answered there" would be a claim about a probe that never ran.
+   * See `providerEndpointWatched`.
+   */
+  endpointWatched: boolean;
+  /**
+   * True when an installation setting has THIS provider switched off
+   * (`TOWNREPORTER_X=0`), the state `provider-login.server.ts` reports as
+   * `disabledByOperator` for the two logins.
+   *
+   * Not derivable from `availableOnThisMachine` above, which for a local rung
+   * also means "nothing was found answering": those are two different
+   * sentences -- "you turned this off" and "nothing is listening" -- and the
+   * Server page prints each one only where it is true.
+   */
+  switchedOffByOperator: boolean;
 };
 
 export async function providerTimeSettings(
@@ -472,6 +502,9 @@ export async function providerTimeSettings(
       overridden: typeof override?.callMs === "number" && override.callMs > 0,
       enabled: override?.enabled !== false,
       availableOnThisMachine: entry.enabled(),
+      endpoint: providerEndpoint(entry),
+      endpointWatched: providerEndpointWatched(entry),
+      switchedOffByOperator: providerSwitchedOff(entry),
     };
   });
 }

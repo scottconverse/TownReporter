@@ -40,8 +40,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import {
+  confirmSectionAndWaitForPublishable,
+  openStoryDetails,
+} from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -169,6 +172,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -461,6 +465,11 @@ async function oneImportedStoryPublishes(chosen) {
   await row.getByRole("link", { name: REFILED, exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
 
+  /*
+    Unit CW2 put the section picker inside the shut "Story details" disclosure,
+    so a walk that reads it opens that disclosure first -- see openStoryDetails.
+  */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic");
   await topic.waitFor({ timeout: 45_000 });
   must(

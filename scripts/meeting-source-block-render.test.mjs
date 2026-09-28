@@ -20,6 +20,18 @@ const source = await readFile(new URL("../src/components/meeting-source-block.ts
 const utilities = await readFile(new URL("../src/components/meeting-source-block-utils.ts", import.meta.url), "utf8");
 const utilityOutput = ts.transpileModule(utilities, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
 const utilityStub = "data:text/javascript;base64," + Buffer.from(utilityOutput).toString("base64");
+/*
+  The block also links out of the excerpt list into the whole tape, and that
+  link's href is built by `transcriptViewPath`. Transpiled from the real module
+  rather than stubbed with the literal string, so a change to the desk path
+  moves this test too. Its one import -- `meetingClock` from the draft input --
+  is pointed back at the utilities stub, which is the same function.
+*/
+const view = await readFile(new URL("../src/lib/news/meeting-transcript-view.ts", import.meta.url), "utf8");
+const viewOutput = ts
+  .transpileModule(view, { compilerOptions: { module: ts.ModuleKind.ESNext } })
+  .outputText.replaceAll(JSON.stringify("./meeting-draft-input.ts"), JSON.stringify(utilityStub));
+const viewStub = "data:text/javascript;base64," + Buffer.from(viewOutput).toString("base64");
 const reactStub = "data:text/javascript;base64," + Buffer.from("export const useState=(value)=>[value,()=>{}]; export const useEffect=()=>{};").toString("base64");
 let output = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext } }).outputText;
 const notesStub = "data:text/javascript;base64," + Buffer.from("export const emptyNotes=()=>({news:\"\",why:\"\",angle:\"\",todo:[],found:[],verify:[],opened:[],scratch:\"\"})").toString("base64");
@@ -27,6 +39,7 @@ output = output
   .replaceAll(JSON.stringify("@/lib/news/notes"), JSON.stringify(notesStub))
   .replaceAll(JSON.stringify("react"), JSON.stringify(reactStub))
   .replaceAll(JSON.stringify("@/components/meeting-source-block-utils"), JSON.stringify(utilityStub))
+  .replaceAll(JSON.stringify("@/lib/news/meeting-transcript-view"), JSON.stringify(viewStub))
   .replaceAll(JSON.stringify("react/jsx-runtime"), JSON.stringify(import.meta.resolve("react/jsx-runtime")));
 const mod = await import("data:text/javascript;base64," + Buffer.from(output).toString("base64"));
 const { MeetingSourceBlock } = mod;
@@ -60,6 +73,22 @@ test("shows the agenda item, the timestamp and the verbatim words", () => {
 test("puts the recording one click away at the cited moment", () => {
   const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full, usedEvidence }));
   assert.match(html, /youtube\.com\/watch\?v=L1AnMLsLwtk&amp;t=18450s/, "the tape must be one click away at the cited moment");
+});
+
+test("opens the whole tape, not only the excerpt, at the artifact this draft cites", () => {
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full, usedEvidence }));
+  // The link row's artifact, which is what the citations resolve against --
+  // not notes.meeting.artifactId, which is only the capture-time fallback.
+  assert.match(html, /href="\/desk\/transcript\/4"/, "the excerpt list must have a door into the whole transcript");
+  assert.match(html, /Open transcript/);
+  assert.match(html, /target="_blank"/, "opening the tape must not navigate away from the story being checked");
+});
+
+test("opens the tape even when the draft has no persisted citation link", () => {
+  // An older draft whose link row predates the writer: candidate material but
+  // no usedEvidence, so the artifact comes from the lead's own meeting notes.
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full }));
+  assert.match(html, /href="\/desk\/transcript\/4"/);
 });
 
 test("renders nothing for an ordinary story", () => {

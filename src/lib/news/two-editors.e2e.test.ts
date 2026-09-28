@@ -15,6 +15,21 @@ import {
   withDatabase,
   type ChildProcess,
 } from "../test-support/pg-admin.ts";
+import { readFileSync } from "node:fs";
+
+/**
+ * Unit CR (0.6.81): the first account on a fresh install is gated behind the
+ * one-time setup code. Reads the same file `scripts/first-run-setup-step.mjs`
+ * reads (duplicated inline, a few lines, so this strict typed project does not
+ * import an untyped .mjs walk helper).
+ */
+async function fillPendingSetupCodeIfPresent(page: Page): Promise<void> {
+  const field = page.getByLabel("Setup code", { exact: true });
+  if ((await field.count()) === 0) return;
+  const root = process.env.TOWNREPORTER_DATA_ROOT?.trim() || join(process.cwd(), ".townreporter-data");
+  const code = readFileSync(join(root, "logs", "SETUP-CODE.txt"), "utf8").trim();
+  await field.fill(code);
+}
 
 /**
  * Two editors, one story, at the same time (TEST-001, shipped with v0.5.4).
@@ -83,6 +98,26 @@ const skip = dbProbe.ok ? false : dbProbe.reason;
  * button that is still gated would be measuring the gate, not the publish.
  */
 async function sectionOnTheButton(page: Page): Promise<{ name: string; key: string }> {
+  /*
+    Unit CW2 (0.6.81) moved the section select into the shut "Story details"
+    disclosure under the action row, where the drawing puts the fields the
+    drawing does not draw. A shut `<details>` hides its content from the page --
+    the field is in the DOM and never visible -- so this opens it the way a
+    person would before reading it. Same step as `openStoryDetails` in
+    scripts/confirm-section-step.mjs, which the browser walks share.
+  */
+  const details = page.locator("main#desk details#story-details").first();
+  if (
+    (await details.count()) > 0 &&
+    !(await details.evaluate((element) => (element as HTMLDetailsElement).open))
+  ) {
+    await details.locator("summary").first().click();
+    await page.waitForFunction(
+      () => (document.getElementById("story-details") as HTMLDetailsElement | null)?.open === true,
+      null,
+      { timeout: 15_000 },
+    );
+  }
   await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
   await page.waitForFunction(
     () =>
@@ -122,6 +157,7 @@ async function signUpAndEnter(page: Page, name: string, email: string) {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByLabel("Confirm password").fill(PASSWORD);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
   } else {
     await page.getByLabel("Email").fill(email);
@@ -228,7 +264,7 @@ describe("two editors on one story", () => {
       const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       // Owner has the workbench open and types a body.
-      await ownerPage.getByLabel("Body").fill("The body the owner is still writing.");
+      await ownerPage.getByLabel("Story", { exact: true }).fill("The body the owner is still writing.");
 
       // The editor deletes the lead out from under them, from THEIR queue --
       // the exact two-click pattern desk-flows-e2e already proves.
@@ -283,12 +319,12 @@ describe("two editors on one story", () => {
       const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
-      await editorPage.getByLabel("Body").waitFor();
+      await editorPage.getByLabel("Story", { exact: true }).waitFor();
 
       const BODY_A = "Body A: the owner's complete paragraph, written first.";
       const BODY_B = "Body B: the editor's complete paragraph, written second.";
-      await ownerPage.getByLabel("Body").fill(BODY_A);
-      await editorPage.getByLabel("Body").fill(BODY_B);
+      await ownerPage.getByLabel("Story", { exact: true }).fill(BODY_A);
+      await editorPage.getByLabel("Story", { exact: true }).fill(BODY_B);
 
       // Fire both saves as close together as two real clicks get.
       await Promise.all([
@@ -318,7 +354,7 @@ describe("two editors on one story", () => {
       const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       await ownerPage
-        .getByLabel("Body")
+        .getByLabel("Story", { exact: true })
         .fill("A body long enough to publish, written for the race.");
       await ownerPage.getByRole("button", { name: "Save edits" }).click();
       await ownerPage.waitForTimeout(1200);
@@ -334,7 +370,7 @@ describe("two editors on one story", () => {
       const sectionKey = section.key;
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
-      await editorPage.getByLabel("Body").waitFor();
+      await editorPage.getByLabel("Story", { exact: true }).waitFor();
 
       /*
       Publish is deliberately two-step (arm, then confirm) -- one unconfirmed
@@ -416,22 +452,39 @@ describe("two editors on one story", () => {
       cookie -- not merely that the UI declines to render the button.
     */
       await editorPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
-      await editorPage.getByRole("navigation", { name: "Server settings" })
-        .getByRole("button", { name: "Server health", exact: true }).click();
 
-      // getOpsHealth: the Health section's own query has no role gate in the
-      // React tree (it fires for every desk member), so an editor session must
-      // see the query itself fail, not silently render an owner's data.
+      /*
+        Unit CX: the twelve-button "Server settings" jump strip is gone (the
+        drawing has no tab pills), and an editor now reads a sentence where the
+        owner reads a health panel. So the assertion is the DESIGN -- a plain
+        read-only line, not a skeleton that never resolves and not a panel that
+        printed "Only the owner" over a failed read. The server half of ENG-01
+        is the replayed RPC at the bottom, which is unchanged.
+      */
+      await editorPage.locator("#ops-panel-server-health").scrollIntoViewIfNeeded();
       await editorPage
-        .getByText(/Could not read the server\..*Only the owner/i)
+        .getByText(/Only the owner can read this machine/i)
         .waitFor({ timeout: 20_000 });
 
-      // Controls are now correctly disabled when health/ownership is unavailable.
-      // Obtain a real owner-generated RPC for an available action, then replay it
-      // with the editor's own cookie jar. Migrations target only this disposable DB.
-      await ownerPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
-      await ownerPage.getByRole("navigation", { name: "Server settings" })
-        .getByRole("button", { name: "Server health", exact: true }).click();
+      /*
+        Obtain a real owner-generated RPC for an available action, then replay
+        it with the editor's own cookie jar. Migrations target only this
+        disposable DB.
+
+        "Apply database migrations" lives behind the Health card's "Restart
+        workers" disclosure now (the drawing draws those two buttons at the foot
+        of the card and gives the Actions panel no other door), so the owner
+        opens it the way a reader does before pressing Run.
+
+        Unit CX2 then moved that disclosure off `/desk/ops` and behind the
+        Health card's own screen: the summary page draws the card's rows and a
+        "Restart workers" DOOR (`ops-cards.ts:130`), and the disclosure itself
+        is in `HealthPanel`, which `/desk/ops/health` renders
+        (`desk.ops_.$card.tsx:101`). The card keeps its anchor there, so the
+        owner walks to the card screen and presses the same button.
+      */
+      await ownerPage.goto(`${BASE_URL}/desk/ops/health`, { waitUntil: "domcontentloaded" });
+      await ownerPage.getByRole("button", { name: "Restart workers", exact: true }).click();
       const row = ownerPage.locator("li", { hasText: "Apply database migrations" });
       const pending = ownerPage.waitForRequest(
         (request) =>

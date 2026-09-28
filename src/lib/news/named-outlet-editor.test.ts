@@ -262,6 +262,26 @@ describe("the owner's outlet list: three stored states, one reader", { timeout: 
       false,
       "an editor with desk rights may read the list, like the Sections panel",
     );
+
+    /*
+      CX3: the Server card's "Overrides" row reads the paper-wide count from
+      this same read. A paper with none reads 0 -- the table answered -- and
+      the count is the paper's own rows, not either per-draft read in desk.ts.
+      The table is append-only by trigger (migrations/0086), so this row is
+      written and left: the newsroom id is this case's own.
+    */
+    assert.equal(asOwner.overrides, 0, "a paper with no overrides is a real 0");
+    const sql = await getSql();
+    await sql.query(
+      "insert into named_outlet_overrides(newsroom_id,draft_id,lead_id,outlet,overridden_by) values($1,$2,$3,$4,$5)",
+      [newsroomId, 1, 1, "Times-Call", owner(newsroomId)],
+    );
+    assert.equal((await readNamedOutlets(owner(newsroomId))).overrides, 1, "the paper's own override rows");
+    assert.equal(
+      (await readNamedOutlets(plainEditor(newsroomId))).overrides,
+      1,
+      "an editor reads the same count the card prints",
+    );
   });
 
   it("keeps an empty list and a built-in list apart, all the way to the gate", async () => {

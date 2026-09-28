@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 // Disposable in-memory built-server check. Never point this at a real newsroom.
 const base = process.env.CUSTOM_API_UI_BASE;
@@ -160,6 +160,7 @@ try {
   if (await create.count()) {
     await page.getByLabel("Name", { exact: true }).fill("Isolated API UI");
     await page.getByLabel("Confirm password", { exact: true }).fill("isolated-api-ui-only-2026");
+    await fillPendingSetupCodeIfPresent(page);
     await create.click();
   } else {
     await page.getByRole("button", { name: /Sign in/i }).click();
@@ -170,9 +171,16 @@ try {
     city: "Testerville",
     state: "Wyoming",
   });
-  await page.goto(`${base}/desk/ops#custom-ai-connections`);
+  /*
+    Unit CX: the Server page draws no connections panel any more -- both its
+    doors lead to the Models screen, which owns the list. The form is that
+    screen's "+ Add a connection" dialog, and the panel keeps the
+    `#custom-ai-connections` anchor, so every locator below is unchanged.
+  */
+  await page.goto(`${base}/desk/models?tab=conn`);
+  await page.getByRole("button", { name: "+ Add a connection" }).click();
   const section = page.locator("#custom-ai-connections");
-  await section.getByRole("heading", { name: "Add your own AI API" }).waitFor();
+  await section.getByLabel("Connection name", { exact: true }).waitFor();
   await section.getByLabel("Connection name", { exact: true }).fill("Isolated API fixture");
   await section.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:3471/v1");
   await section.getByLabel(/^API key \(optional\)/).fill("fixture-secret-do-not-return");
@@ -265,7 +273,7 @@ try {
   await openTheStoryJustFiled();
   await page.getByRole("heading", { name: "Story workspace", exact: true }).waitFor();
   await page.getByRole("button", { name: "Redraft", exact: true }).waitFor({ timeout: 45_000 });
-  assert.match(await page.getByLabel("Body").inputValue(), new RegExp(documentMarker));
+  assert.match(await page.getByLabel("Story", { exact: true }).inputValue(), new RegExp(documentMarker));
   assert(
     providerRequests.some(
       (request) =>
@@ -281,6 +289,10 @@ try {
 
   const opinionMarker = `CUSTOM_OPINION_DOCUMENT_MARKER_${Date.now()}`;
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
+  // CY item 8: the AI intake is a shut card now, as the drawing draws it, so
+  // the uploader inside it exists only after the card is opened. The rest of
+  // this block is unchanged.
+  await page.getByRole("button", { name: /Have the AI write an editorial/ }).click();
   await page.getByLabel("Attach documents").setInputFiles({
     name: "custom-opinion-source.txt",
     mimeType: "text/plain",
@@ -314,11 +326,10 @@ try {
     "an Opinion server-function response exposed the saved API key",
   );
 
-  await page.goto(`${base}/desk/ops`);
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Daily scan", exact: true })
-    .click();
+  await page.goto(`${base}/desk/ops/daily-scan`);
+  // 0.6.81 (unit CX2): the Daily scan card's panel lives on the card's own
+  // screen now, so it is reached by going there, not by scrolling the page.
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const dailyPanel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),
   });
@@ -331,10 +342,7 @@ try {
   await dailyPanel.getByRole("button", { name: "Save daily scan", exact: true }).click();
   await dailyPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload();
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Daily scan", exact: true })
-    .click();
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const savedDailyPanel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),
   });
@@ -404,7 +412,15 @@ try {
     "a Batch server-function response exposed the saved API key",
   );
   assert.equal((await page.locator("body").innerText()).includes("fixture-secret-do-not-return"), false);
-  await page.goto(`${base}/desk/ops#custom-ai-connections`);
+  /*
+    The saved row is read back the way the first pass saved it: the Models
+    screen's dialog, opened with the header button. The panel moved off Server
+    settings in unit CX, and `#custom-ai-connections` moved with it, so this
+    second look is the same locator on the same component -- only the way in
+    changed.
+  */
+  await page.goto(`${base}/desk/models?tab=conn`);
+  await page.getByRole("button", { name: "+ Add a connection" }).click();
   const finalSection = page.locator("#custom-ai-connections");
   const finalRow = finalSection.locator("article").filter({ hasText: "Isolated API fixture" });
   await finalRow.getByRole("heading", { name: "Isolated API fixture", exact: true }).waitFor();

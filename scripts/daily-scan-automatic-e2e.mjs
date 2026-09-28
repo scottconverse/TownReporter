@@ -48,7 +48,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /**
  * This walk's own listen ports, registered with
@@ -270,6 +270,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -295,13 +296,12 @@ async function addAcceptedSource() {
   step("an accepted source is on watch, without being fetched");
 }
 
-/** The Daily scan panel on /desk/ops, opened the way an owner opens it. */
+/** The Daily scan panel on its own screen, reached the way an owner reaches it. */
 async function openDailyScanPanel() {
-  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Daily scan", exact: true })
-    .click();
+  await page.goto(`${base}/desk/ops/daily-scan`, { waitUntil: "domcontentloaded" });
+  // 0.6.81 (unit CX2): the Server page draws the card, and the card's own
+  // screen is where its panel lives, so reaching it is a `goto`, not a scroll.
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const panel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),
   });

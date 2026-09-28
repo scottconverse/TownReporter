@@ -45,6 +45,8 @@ import {
   plainEditorText,
   plainFinding,
   progressLine,
+  clockFromLocalTime,
+  dailyScheduleLabel,
   scanCountsLine,
   scanCoverageLine,
   parseFailedSources,
@@ -628,6 +630,47 @@ describe("Worth a Look presentation", () => {
     assert.match(composeZeroLeadSummary({ fetched: 41, changed: 2 }), /39 pages matched/);
   });
 
+  /*
+    The Sources rail's "Runs" line (Unit CZ-long-lists).
+
+    The drawing draws a schedule there, and the point of these is that it is a
+    SCHEDULE: the policy's `localTime` is a wall clock on the paper, so 06:00
+    has to come out "6:00 a.m." whatever the machine reading it thinks the time
+    is. A locale-driven formatter is exactly what would break that.
+  */
+  it("prints the drawn schedule for the default daily scan", () => {
+    assert.equal(
+      dailyScheduleLabel({ enabled: true, paused: false, localTime: "06:00" }),
+      "Every day, 6:00 a.m.",
+    );
+  });
+
+  it("reads the policy's wall clock, not the reader's clock", () => {
+    assert.equal(clockFromLocalTime("06:00"), "6:00 a.m.");
+    assert.equal(clockFromLocalTime("00:05"), "12:05 a.m.");
+    assert.equal(clockFromLocalTime("12:00"), "12:00 p.m.");
+    assert.equal(clockFromLocalTime("13:30"), "1:30 p.m.");
+    assert.equal(clockFromLocalTime("23:59"), "11:59 p.m.");
+    assert.equal(clockFromLocalTime(" 07:15 "), "7:15 a.m.");
+  });
+
+  it("follows a schedule the owner moved, and says so when there is no run", () => {
+    assert.equal(
+      dailyScheduleLabel({ enabled: true, paused: false, localTime: "17:45" }),
+      "Every day, 5:45 p.m.",
+    );
+    assert.equal(dailyScheduleLabel({ enabled: false, paused: false, localTime: "06:00" }), "Off");
+    assert.equal(dailyScheduleLabel({ enabled: true, paused: true, localTime: "06:00" }), "Paused");
+  });
+
+  it("falls back to the drawn line when the policy cannot be read, and never prints NaN", () => {
+    assert.equal(dailyScheduleLabel(null), "Every day, 6:00 a.m.");
+    assert.equal(clockFromLocalTime(""), "");
+    assert.equal(clockFromLocalTime("6pm"), "6pm");
+    assert.equal(clockFromLocalTime("25:00"), "25:00");
+    assert.equal(clockFromLocalTime("06:99"), "06:99");
+  });
+
   it("flags a queue lead that covers a printed piece", () => {
     const dup = nearDuplicate(
       { headline: "Neighbors' traffic study missing from Bohn Farm staff report", topic: "development" },
@@ -1086,10 +1129,17 @@ describe("the Server page tells a point-and-click operator what its buttons do",
    * Paper setup Save, Invite an editor, or Give up the desk actually do.
    * Does it warn you? Where does the invited person put this code?" These
    * are source-shape checks -- there is no request whose response is "the
-   * words on the Server page" -- reading desk.ops.tsx directly is the
-   * check. No database needed, so it always runs.
+   * words on the Server page" -- reading the source of the cards directly
+   * is the check. No database needed, so it always runs.
+   *
+   * Unit CX2 moved these three editors off `/desk/ops` and behind the cards'
+   * own screens at `/desk/ops/<card>`; the components live in
+   * `src/components/ops-panels.tsx` now, and Paper setup and Invite an editor
+   * picked up the `-Panel` suffix their neighbours already had. The copy under
+   * test did not change -- only the file it is written in did -- so this check
+   * follows the copy rather than the file it used to be in.
    */
-  const ops = readFileSync(new URL("../../routes/desk.ops.tsx", import.meta.url), "utf8");
+  const ops = readFileSync(new URL("../../components/ops-panels.tsx", import.meta.url), "utf8");
   // JSX text wraps across source lines the way the paragraphs above are
   // written; the browser collapses that whitespace when it renders, so the
   // check does the same rather than requiring every phrase to fall on one
@@ -1098,7 +1148,7 @@ describe("the Server page tells a point-and-click operator what its buttons do",
 
   it("Paper setup explains what Save writes, and answers the watch-list question truthfully", () => {
     const block = flatten(
-      ops.slice(ops.indexOf("function PaperSetup("), ops.indexOf("function InviteAnEditor(")),
+      ops.slice(ops.indexOf("function PaperSetupPanel("), ops.indexOf("function DarkDeskCounty(")),
     );
     for (const phrase of [
       "writes every field",
@@ -1114,7 +1164,7 @@ describe("the Server page tells a point-and-click operator what its buttons do",
 
   it("Invite an editor says up front that nothing gets emailed", () => {
     const block = flatten(
-      ops.slice(ops.indexOf("function InviteAnEditor("), ops.indexOf("function GiveUpTheDesk(")),
+      ops.slice(ops.indexOf("function InviteAnEditorPanel("), ops.indexOf("function RecoveryCodesPanel(")),
     );
     assert.ok(
       block.includes("does not send email"),
@@ -1124,7 +1174,7 @@ describe("the Server page tells a point-and-click operator what its buttons do",
 
   it("Invite an editor says what happens once the person has the link", () => {
     const block = flatten(
-      ops.slice(ops.indexOf("function InviteAnEditor("), ops.indexOf("function GiveUpTheDesk(")),
+      ops.slice(ops.indexOf("function InviteAnEditorPanel("), ops.indexOf("function RecoveryCodesPanel(")),
     );
     assert.ok(
       block.includes("What happens next"),

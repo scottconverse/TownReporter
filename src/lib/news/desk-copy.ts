@@ -429,12 +429,12 @@ export function excerptForEditor(text: string, max = 280): string {
 }
 
 /** Leads still on the queue: published stories live on Published. */
-export function workingLeads<T extends { status: string }>(leads: T[]): T[] {
+export function workingLeads<T extends { status: string }>(leads: readonly T[]): T[] {
   return leads.filter((l) => l.status !== "published");
 }
 
 /** Open work for the command center: not published, not killed. */
-export function openLeads<T extends { status: string }>(leads: T[]): T[] {
+export function openLeads<T extends { status: string }>(leads: readonly T[]): T[] {
   return leads.filter((l) => l.status !== "killed" && l.status !== "published");
 }
 
@@ -921,18 +921,20 @@ export function workingQueueEmptyCopy(input: {
 /**
  * Direction A, stage 1 resilience fix: `listFollowUps` reaches a real query
  * (see follow-ups.ts) and can throw -- a stale connection, a locked table, a
- * database the ensure chain hasn't reached yet. Before this, both the desk
- * rail (desk.index.tsx) and the story page's follow-up block
- * (desk.story.$leadId.tsx) treated `data ?? []` the same for "loaded, zero
- * rows" and "failed to load", so a real failure quietly rendered as "no one
- * owes you an answer" -- indistinguishable from the healthy empty state.
+ * database the ensure chain hasn't reached yet. Before this, the desk rail
+ * (desk.index.tsx) treated `data ?? []` the same for "loaded, zero rows" and
+ * "failed to load", so a real failure quietly rendered as an empty panel --
+ * indistinguishable from a desk with nothing on it.
  *
- * One line, shown instead of the list/empty-state copy, whenever the query
- * is in its error state. Kept as a plain string function (no JSX) so it can
- * be unit tested with plain `node --test` the same as every other copy
- * helper in this file, matching this repo's "no component-test framework"
- * convention (see follow-ups.test.ts and schema-parity.test.ts for the
- * server-side half of this fix).
+ * Unit CU (0.6.81): the story page's "People who still need to respond" block
+ * was the other caller and is gone with the manual workflow; the rail is the
+ * one caller left, and there it is shown only when the query IS in error.
+ *
+ * One line, kept as a plain string function (no JSX) so it can be unit tested
+ * with plain `node --test` the same as every other copy helper in this file,
+ * matching this repo's "no component-test framework" convention (see
+ * follow-ups.test.ts and schema-parity.test.ts for the server-side half of
+ * this fix).
  */
 export function followUpsRailCopy(isError: boolean): string | null {
   return isError ? "Follow-ups could not be loaded. See the server log." : null;
@@ -1008,6 +1010,44 @@ export function scanCountsLine(s: {
     return `${s.sources_fetched} fetched · ${s.leads_created} leads · ${s.sources_proposed} proposed`;
   }
   return `${s.sources_fetched} fetched · filed nothing`;
+}
+
+/**
+ * The Sources rail's "Runs" line: when the daily scan goes out (Unit
+ * CZ-long-lists).
+ *
+ * The drawing draws "Every day, 6:00 a.m." there -- a schedule, not a count --
+ * and the panel used to print the number of runs instead. The time comes from
+ * the daily scan policy's own `localTime`, which is a wall clock in the paper's
+ * timezone, so it is FORMATTED AND NEVER CONVERTED: 06:00 in the record is
+ * "6:00 a.m." on the paper, not 6:00 a.m. wherever the editor happens to be
+ * sitting. It is built by hand rather than with `toLocaleTimeString` for the
+ * same reason `clockLabel` is -- the locale decides the case and the spacing of
+ * "a.m.", and the desk's house style is lowercase with periods.
+ *
+ * `null` is a policy that cannot be read -- a non-owner, or a failed read --
+ * and gets the drawing's own line rather than a blank. Off and paused are
+ * states the drawing does not draw; they say so rather than promise a run that
+ * will not happen (recorded in SPEC-GAPS-0681, prefix CZ-long-lists).
+ */
+export function dailyScheduleLabel(
+  policy: { enabled: boolean; paused: boolean; localTime: string } | null,
+): string {
+  if (!policy) return "Every day, 6:00 a.m.";
+  if (policy.paused) return "Paused";
+  if (!policy.enabled) return "Off";
+  return `Every day, ${clockFromLocalTime(policy.localTime)}`;
+}
+
+/** "06:00" -> "6:00 a.m.". Anything that is not a 24-hour clock comes back
+ *  trimmed and unchanged rather than as "NaN:NaN". */
+export function clockFromLocalTime(localTime: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(localTime.trim());
+  if (!match) return localTime.trim();
+  const hour24 = Number(match[1]);
+  if (hour24 > 23 || Number(match[2]) > 59) return localTime.trim();
+  const hour = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour}:${match[2]} ${hour24 < 12 ? "a.m." : "p.m."}`;
 }
 
 /**
@@ -1306,7 +1346,7 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
-  published: { slug: string; headline: string; topic?: string; published_at: string }[],
+  published: readonly { slug: string; headline: string; topic?: string; published_at: string }[],
 ): PrintedDup | null {
   for (const p of published) {
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
@@ -2000,31 +2040,12 @@ export function redditPostStateLabel(state: "filed" | "already-known" | "below-l
   return "below the line";
 }
 
-/**
- * The Follow-ups object's due-date line (Direction A stage 1, rail and
- * /desk/follow-ups): "due Tue Sep 9" / "due today" / "Overdue 3 days" --
- * overdue is always stated in words, never colour alone (see the build
- * notes' "Follow-ups" section). `dueOn` is a plain `YYYY-MM-DD` date (no
- * time component), compared at day granularity against `today` so a
- * follow-up due "today" reads as today regardless of time of day.
- */
-export function followUpDueLabel(dueOn: string | null | undefined, today: Date = new Date()): string {
-  if (!dueOn) return "";
-  const due = new Date(dueOn + "T00:00:00");
-  if (Number.isNaN(due.getTime())) return "";
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const startOfDue = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / 86_400_000);
-  if (diffDays < 0) {
-    const days = Math.abs(diffDays);
-    return `Overdue ${days} day${days === 1 ? "" : "s"}`;
-  }
-  if (diffDays === 0) return "due today";
-  const formatted = due.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  return `due ${formatted}`;
-}
-
-/** True when followUpDueLabel's text represents an overdue follow-up (for styling in `--warn`). */
-export function followUpIsOverdue(dueOn: string | null | undefined, today: Date = new Date()): boolean {
-  return followUpDueLabel(dueOn, today).startsWith("Overdue");
-}
+/*
+  Unit CU (0.6.81): `followUpDueLabel` and `followUpIsOverdue` stood here --
+  "due Tue Sep 9" / "due today" / "Overdue 3 days", the due-date line the
+  Follow-ups object drew on the rail, on /desk/follow-ups and on the story
+  page. A due date belongs to an ask a person owes an answer to, and that whole
+  object is retired (DECISIONS.md:38, :44). Their only caller was
+  src/components/follow-up-item.tsx, deleted with them; an agent has
+  `next_run_at` and says when it runs next, not when something is overdue.
+*/

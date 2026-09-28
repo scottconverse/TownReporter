@@ -51,25 +51,28 @@ const base = checkedUrl(`http://127.0.0.1:${PORT_FRONT_PAGE_RIVER}`);
 /** Published stories seeded, newest first: "River story 01" is the newest. */
 const SEEDED = 40;
 /**
- * The front page's top section prints the first seven -- the lead, and the six
- * cells of the ruled grid under it (src/routes/index.tsx: TOP_STORIES =
- * 1 + GRID_CELLS, GRID_CELLS = 6).
+ * The front page's top section prints the first nine -- the lead, the six cells
+ * of the ruled grid under it, and the lead column's own two rows
+ * (src/routes/index.tsx: TOP_STORIES = 1 + GRID_CELLS, GRID_CELLS = 6, and
+ * ALSO_ROWS = 2).
  *
- * Seven, not the nine this walk was written against: the approved design puts
+ * Nine, not the seven this walk was written against: the approved design puts
  * one lead and a six-cell grid above the band, and no "More of the story" box
  * beside the lead. `docs/design/handoff-2026-09-26/design/Front Daily.dc.html`:
  * the lead row is line 34 (`.lead`, one story), the grid is line 56 with
  * `hint-placeholder-count="6"` (line 57) over `six`, and `six` is
  * `phone ? S.slice(0, 4) : S` (line 125) with the desktop columns
  * `--sixCols: "repeat(3,minmax(0,1fr))"` (line 109) -- six cells on a desktop
- * viewport, the one this walk drives.
+ * viewport, the one this walk drives. The two rows under the lead are unit CN,
+ * item 1(b): the drawing has no such list (see the report), and the owner asked
+ * for them by name to fill the column the panel used to leave blank.
  */
-const ABOVE = 7;
+const ABOVE = 9;
 /**
  * Two opinion pieces, and the shape unit BZ item 9 gave the page.
  *
  * The newest is story 3 (`OPINION_NEWEST`): the opinion band prints it. It sits
- * INSIDE the top seven's range on purpose -- the number that used to matter is
+ * INSIDE the top nine's range on purpose -- the number that used to matter is
  * the one that must not matter any more. The band used to take "the newest
  * opinion the top has NOT printed", so a piece here pushed the box down to the
  * older one; since the edition read skips opinion, the band takes the newest
@@ -81,16 +84,23 @@ const ABOVE = 7;
 const OPINION_NEWEST = 3;
 const OPINION_OLDER = 20;
 /**
- * The seven the top of the page prints: the lead and the six cells of the ruled
- * grid. NEWS ONLY -- the edition read passes `notTopic: "opinion"`
- * (`src/routes/index.tsx`), so the top seven are the seven newest stories that
- * are not opinion, which is 1..8 less the band's own piece.
+ * The nine the top of the page prints: the lead and the six cells of the ruled
+ * grid, and the lead column's own two rows. NEWS ONLY -- the edition read passes
+ * `notTopic: "opinion"` (`src/routes/index.tsx`), so the top nine are the nine
+ * newest stories that are not opinion, which is 1..10 less the band's own piece.
+ *
+ * The two rows are unit CN, item 1(b) (`ALSO_ROWS` in `src/routes/index.tsx`):
+ * the lead and "This week" are one grid row, and with the panel capped at the
+ * drawing's five the column still ended far below the lead's button, so the
+ * column prints the paper's next stories under it. They are the top's stories
+ * like any other card -- the river leaves them out, and this walk counts them
+ * above the river the way it counts the grid.
  */
-const TOP = [1, 2, 4, 5, 6, 7, 8];
+const TOP = [1, 2, 4, 5, 6, 7, 8, 9, 10];
 /** The newest story in the river, and therefore what the top of the page stops at. */
-const RIVER_FIRST = 9;
-/** The river's rows: the paper, less the top seven, less the band's piece. */
-const RIVER = SEEDED - ABOVE - 1; // 32
+const RIVER_FIRST = 11;
+/** The river's rows: the paper, less the top nine, less the band's piece. */
+const RIVER = SEEDED - ABOVE - 1; // 30
 /**
  * How many of those the front page prints, and therefore how many are left for
  * the archive (unit BX).
@@ -459,13 +469,13 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
     throw new Error(`the river starts at ${first}, not ${headline(RIVER_FIRST)}`);
 
   /*
-    The seven the river leaves out: the lead and the six cells of the ruled grid
-    under it. Each is printed once up there, and none of them appears again
-    inside the river.
+    The nine the river leaves out: the lead, the six cells of the ruled grid
+    under it, and the lead column's own two rows. Each is printed once up there,
+    and none of them appears again inside the river.
 
     The opinion piece at the top of the paper's range is NOT one of them -- it
     is the band's own card, and the lead and the grid are news (unit BZ item 9).
-    So the check is over 1..8: every one of `TOP` printed exactly once above, and
+    So the check is over 1..10: every one of `TOP` printed exactly once above, and
     the newest opinion piece printed once as well, in the band's card and not in
     the top -- which the selector read just below this loop pins down.
 
@@ -479,7 +489,7 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
   for (let n = 1; n < RIVER_FIRST; n += 1) {
     const printed = top.filter((h) => h === headline(n)).length;
     /*
-      A story printed above the river is either a card of the top seven or the
+      A story printed above the river is either a card of the top nine or the
       band's own piece: the census reads `.opinionpanel` too, and item 9 puts
       the newest opinion there rather than in the lead or the grid.
     */
@@ -492,9 +502,11 @@ async function theFrontPageRendersTheTopAndTheRiverRows() {
   }
   /*
     ...and it is in the band, not in the top. The census cannot say WHICH card
-    a story was printed in, so the two selectors are read directly: the lead
-    and the six cells are news, and the newest opinion piece is not one of
-    them (unit BZ item 9). The band's own step reads its `<h3>` separately.
+    a story was printed in, so the selectors are read directly: the lead, the
+    six cells and the lead column's rows are news, and the newest opinion piece
+    is not one of them (unit BZ item 9). The band's own step reads its `<h3>`
+    separately. The rows are `.storycell`s inside `.leadcolumn`, so this
+    selector catches them as it catches the grid.
   */
   const topCards = (await page.locator(".lead h3, .storycell h3").allInnerTexts()).map((h) =>
     h.trim(),
@@ -735,7 +747,13 @@ async function aThreeStoryPaperPrintsThreeCardsAndNoRiver() {
     throw new Error("a one-column region band was rendered with neither column to print");
   const [row, lead] = await page.evaluate(() => [
     document.querySelector(".ledgerow")?.clientWidth ?? 0,
-    document.querySelector(".lead")?.getBoundingClientRect().width ?? 0,
+    /*
+      The row's left grid item, which since unit CN item 1(b) is the column
+      (`.leadcolumn`) and not the lead article: the article's own box stops at
+      the column's inline padding, so measuring `.lead` here would read the
+      padding rather than whether the column took the width.
+    */
+    document.querySelector(".ledgerow > .leadcolumn")?.getBoundingClientRect().width ?? 0,
   ]);
   if (!(lead > 0 && lead >= row - 2))
     throw new Error(

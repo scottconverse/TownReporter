@@ -55,7 +55,8 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { fromCrossJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { openStoryDetails } from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -182,6 +183,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -353,6 +355,9 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
     "the headline line is repeated as the draft body's first line",
   );
 
+  /* Unit CW2: the section picker lives in the shut "Story details" disclosure
+     now, so the walk opens it before it reads -- see openStoryDetails. */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic select");
   const topicValue = await topic.inputValue();
   if (sectionChoice) {
@@ -388,9 +393,15 @@ async function theEditorEditsASentence(bodyField) {
     .filter({ hasText: "Unsaved changes" })
     .waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "Save edits", exact: true }).click();
+  /*
+    `/^Saved/` and not the string "Saved": a string in `hasText` is matched
+    case-insensitively as a substring, and the drawn save line reads "Saved 8:20
+    a.m." (unit CW) -- but "Unsaved changes" also contains "Saved", and that is
+    the state this wait exists to leave.
+  */
   await page
     .locator(".astra-save-state")
-    .filter({ hasText: "Saved draft" })
+    .filter({ hasText: /^Saved/ })
     .waitFor({ timeout: 45_000 });
   must(
     (await bodyField.inputValue()).includes(AFTER_EDIT),
@@ -475,6 +486,9 @@ async function publishIt() {
     (await page.getByText(/Section confirmed for this saved draft/).count()) === 0,
     "the pasted story arrived with its section already confirmed, so nothing was confirmed here",
   );
+  /* Opened before it is read: the section block is inside the shut "Story
+     details" disclosure since unit CW2 (see openStoryDetails). */
+  await openStoryDetails(page);
   const said = ((await page.locator("#story-topic").innerText()) ?? "").replace(/\s+/g, " ");
   must(
     said.includes("The Publish button names") &&
@@ -990,14 +1004,18 @@ async function main() {
     const { body: secondBody } = await theDraftHoldsThePasteWordForWord(sectionTwo, SECOND_LINE);
     await page.locator(".astra-headline").fill(SECOND_TITLE);
     await page.locator(".astra-dek").fill(PASTE_DEK);
+    /* The disclosure again: retitling and moving a section is the same read of
+       the same field. Idempotent, so it does nothing when it is already open. */
+    await openStoryDetails(page);
     const topics = await optionsOf(page.locator("#story-topic select"));
     const movedTo = topics.find((o) => o.value && o.value !== sectionTwo.value && o.value !== "opinion");
     must(Boolean(movedTo?.value), `the story editor offered no other section: ${JSON.stringify(topics)}`);
     await page.locator("#story-topic select").selectOption(movedTo.value);
     await page.getByRole("button", { name: "Save edits", exact: true }).click();
+    // `/^Saved/`: see the note on the first save wait above.
     await page
       .locator(".astra-save-state")
-      .filter({ hasText: "Saved draft" })
+      .filter({ hasText: /^Saved/ })
       .waitFor({ timeout: 45_000 });
     must(
       (await secondBody.inputValue()) === SECOND_BODY,

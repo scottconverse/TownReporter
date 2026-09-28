@@ -1,11 +1,11 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UserButton } from "@/lib/auth/gates";
 import { signOut } from "@/lib/auth/client";
-import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { leaveEditor } from "@/lib/news/claim";
-import { createEditorCopy, openLeads } from "@/lib/news/desk-copy";
+import { listInvestigations } from "@/lib/news/dark";
+import { createEditorCopy, openLeads, pileForStatus } from "@/lib/news/desk-copy";
+import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { useAppearance } from "@/lib/appearance-context";
 import { Dialog } from "@/components/dialog";
@@ -20,7 +20,7 @@ import { NewStoryDialog } from "@/components/dialogs";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
-import { listLeads, listRecentStoryWork } from "@/lib/news/desk";
+import { listFollowUps, listLeads, listRecentStoryWork } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 
 /*
@@ -43,9 +43,12 @@ import { listEditorials } from "@/lib/news/opinion";
   /desk/models screen the app does not have; the hash is what tells the two
   apart for the active item, below.
 
-  `count` is only ever set from data a desk page already polls (leads, jobs).
-  A designed count with no query behind it shows nothing rather than a zero
-  that looks like an answer.
+  CY item 6: `count` is drawn on five of the eleven items -- Queue, Drafts,
+  Opinion, Follow-ups and Dark Desk (Desk Nav.dc.html:56) -- and every one of
+  them is a number a desk screen already prints, computed by that screen's own
+  rule rather than a second one invented here (see `counts`, below). Published
+  is drawn blank, so it carries none. A count with no data yet shows nothing
+  rather than a zero that looks like an answer.
 */
 type DeskNavItem = {
   to: string;
@@ -169,7 +172,6 @@ export function DeskShell({
   actions?: React.ReactNode;
   hideTitle?: boolean;
 }) {
-  const { user, isPending } = useCurrentUserState();
   const { mode, choose } = useDeskMode();
   const { size, choose: chooseSize } = useDeskTextSize();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -225,9 +227,17 @@ export function DeskShell({
 
     `["recent-story-work"]` is the key `/desk` already polls, so the shell and
     the page share one in-flight request and one cache entry. `["leads"]` is
-    the key every desk page already uses for `listLeads()`. Nothing new is
-    fetched that a desk screen was not already fetching; the shell only reads
-    it.
+    the key every desk page already uses for `listLeads()`.
+
+    CY item 6 adds three more keys to that list, and this comment used to claim
+    otherwise ("nothing new is fetched that a desk screen was not already
+    fetching"), so it says what is true now: `["editorials"]` and
+    `["follow-ups","all"]` were until now only fetched when a reader asked for
+    them -- the palette opens the first with `enabled: open` (DeskSearch,
+    below), Today the second -- and `["investigations"]` was Today's alone. The
+    shell now reads all three on every desk screen, because the nav it draws
+    the counts on is on every desk screen. Nothing is written, and the keys are
+    the existing ones, so an invalidation anywhere still refreshes them.
   */
   const jobs = useQuery({
     queryKey: ["recent-story-work"],
@@ -235,15 +245,49 @@ export function DeskShell({
     refetchInterval: 5000,
   });
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
+  const editorials = useQuery({ queryKey: ["editorials"], queryFn: () => listEditorials() });
+  const followUps = useQuery({
+    queryKey: ["follow-ups", "all"],
+    queryFn: () => listFollowUps({ data: {} }),
+  });
+  const investigations = useQuery({
+    queryKey: ["investigations"],
+    queryFn: () => listInvestigations(),
+  });
   const running = (jobs.data ?? []).filter(
     (j) => j.status === "running" || j.status === "queued",
   ) as RunningJob[];
   const allLeads = leads.data ?? [];
+  /*
+    THE FIVE DRAWN COUNTS, each one the number its own screen prints:
+
+      Queue      `openLeads`, the same filter Today's and the Queue's own
+                 headings count with (desk-copy.ts:437).
+      Drafts     leads with status "drafted" -- what /desk/drafts lists.
+      Opinion    every row /desk/opinion's "Requests & editorials" heading
+                 counts (desk.opinion.tsx:474-482, `rows.length`).
+      Follow-ups the Follow-ups screen's default tab: its agent rows that pass
+                 `matchesFollowUpFilter(row,"active")` (desk.follow-ups.tsx:95
+                 -101). The drawing's own nav says 5 and its Today rail says
+                 "5 active" of the same set.
+      Dark Desk  the investigations pile /desk/dark counts under the same name
+                 ("Open files"), i.e. `pileForStatus(r.status) === "desk"`
+                 (desk-copy.ts:412).
+
+    Every entry is `undefined` until its query has data, which is what keeps a
+    slow screen from printing a confident 0.
+  */
   const counts: Record<string, number | undefined> = {
     Queue: allLeads.length ? openLeads(allLeads).length : undefined,
     Drafts: allLeads.length ? allLeads.filter((l) => l.status === "drafted").length : undefined,
-    Published: allLeads.length
-      ? allLeads.filter((l) => l.status === "published").length
+    Opinion: editorials.data ? editorials.data.length : undefined,
+    "Follow-ups": followUps.data
+      ? followUps.data.filter(
+          (row) => isAgentKind(row.agent_kind) && matchesFollowUpFilter(row, "active"),
+        ).length
+      : undefined,
+    "Dark Desk": investigations.data
+      ? investigations.data.filter((r) => pileForStatus(r.status) === "desk").length
       : undefined,
   };
   const nowMs = useNowMs(running.length > 0);
@@ -313,37 +357,17 @@ export function DeskShell({
           <span>Editor’s desk</span>
         </Link>
         {/*
-          Unit BN2, item 5: the rail's own "+ New story", at the top of the nav,
-          opening the drawn New-story dialog (phase 4). It is the phone bar's
-          "+ New" control in its desktop place, and it mounts the same dialog
-          this shell already owns for that button -- one mount, two controls, so
-          both open the same three tabs on the same screen. The drawer closes
-          first for the reason the phone bar records above: on a phone the rail
-          IS the modal drawer, and a dialog opened over it would land behind its
-          scrim.
-
-          The rail slot is the one the stylesheet already keeps for it: the
-          `.astra-new` rule that sits between `.astra-brand` and
-          `.astra-navigation` and, until now, had no element to style. Where the
-          drawn captures actually put this button is in the report: the search of
-          `Desk Nav.dc.html` found the yellow `+ New` only on the *phone* bar
-          (line 17) and found no such control anywhere in the desktop `<aside>`
-          (lines 23-45); the drawn desktop `+ New story` is a header action
-          (`Desk Command.dc.html:25`, `Desk Screens.dc.html:364`). Item 5 asks for
-          the rail, so the rail gets it, and the report says which drawing does
-          not.
+          CY item 6: the rail's "+ New story" (Unit BN2, item 5) is gone. The
+          drawing has no such control in the desktop rail: `Desk Nav.dc.html`
+          draws brand, running work, the eleven nav items and the footer
+          (lines 23-45), and the only "+ New" in that file is the *phone* bar's
+          (line 17). The drawn desktop create buttons are header actions --
+          Today's three under its headline, the Queue's "Run scan now" -- so
+          removing this leaves one door to `NewStoryDialog` on the phone bar
+          (`.astra-bar-new`, above) and Today's own "+ New story" button. The
+          shell still owns the one mount below, so both keep opening the same
+          three tabs.
         */}
-        <button
-          type="button"
-          className="btn solid astra-new"
-          aria-haspopup="dialog"
-          onClick={() => {
-            setMenuOpen(false);
-            setNewStoryOpen(true);
-          }}
-        >
-          <Plus size={18} aria-hidden /> New story
-        </button>
         <RunningBox jobs={running} nowMs={nowMs} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
@@ -401,9 +425,16 @@ export function DeskShell({
             /desk/legal-removals -- so DESK_MORE is still the palette's page
             list below, and the footer draws only what the capture draws.
           */}
-          <div className="astra-account">
-            {isPending ? <span aria-hidden /> : user ? <UserButton /> : null}
-          </div>
+          {/*
+            CY item 6: no account block in the rail. `Desk Nav.dc.html` ends the
+            footer at "Press ? for keyboard shortcuts" (lines 40-44) -- no
+            avatar, no email, no Sign out -- and the brief names it alongside
+            "+ New story" as drawn-nowhere. Signing out stays reachable where
+            the desk already keeps it: `LeaveEditorControl` on the Server page
+            (`/desk/ops`, "the desk's own sign out", desk-chrome.tsx:714+) and
+            the `UserButton` on the public paper's chrome. Recorded in
+            design/SPEC-GAPS-0681.md.
+          */}
         </div>
       </aside>
       <div className="astra-workspace">
@@ -1023,6 +1054,8 @@ export function Field({
   chip,
   hint,
   htmlFor,
+  aside,
+  className,
   children,
 }: {
   label: string;
@@ -1034,6 +1067,20 @@ export function Field({
    * had to stop being a descendant of the label. See the branch below.
    */
   htmlFor?: string;
+  /**
+   * One sentence about the field, drawn at the right edge of the label row --
+   * the story workbench's "A redraft will not replace it" (unit CW). It needs
+   * `htmlFor`: see the branch below.
+   *
+   * It is a node rather than a string because the other thing the drawing puts
+   * in that spot is the story editor's save line, which is not a sentence but
+   * a live status: a `<span class="astra-save-state" role="status">`. What
+   * matters is where the node lands -- a sibling of the label -- not what it
+   * says, so both shapes are the caller's business.
+   */
+  aside?: React.ReactNode;
+  /** Extra class on the wrapper, for a surface that styles its own labels. */
+  className?: string;
   children: React.ReactNode;
 }) {
   const wording = (
@@ -1062,18 +1109,32 @@ export function Field({
     label; the "Edit" span stays reachable as the control's description. The
     wrapper keeps the class `f`, so the CSS that positions the label text is
     the only thing that has to know about the second shape (desk-astra.css).
+
+    `aside` is the same trap one step further: it is a sentence about the
+    field, not the field's name, so it is a sibling of the <label> and never
+    a child of it. It is drawn in the `htmlFor` shape only -- the shape below
+    has its control inside the label, where a sibling is not available and
+    any text added is part of the name. No field on that shape passes one.
   */
   if (htmlFor) {
+    const bound = <label htmlFor={htmlFor}>{wording}</label>;
     return (
-      <div className="f">
-        <label htmlFor={htmlFor}>{wording}</label>
+      <div className={className ? `f ${className}` : "f"}>
+        {aside ? (
+          <div className="f-head">
+            {bound}
+            <span className="f-aside">{aside}</span>
+          </div>
+        ) : (
+          bound
+        )}
         {children}
         {tail}
       </div>
     );
   }
   return (
-    <label className="f">
+    <label className={className ? `f ${className}` : "f"}>
       <span className={chip ? "f-lab" : undefined}>{wording}</span>
       {children}
       {tail}

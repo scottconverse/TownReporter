@@ -115,8 +115,11 @@ const controlsStub = inlineModule(`
 `);
 const provenanceStub = inlineModule(`
   import { createElement } from "react";
-  export function ProvenanceBlock({ items }) {
-    return createElement("div", { className: "provenance" }, String((items ?? []).length));
+  /* The real block carries the \`#sources\` anchor itself (unit DA2); it used to
+     be wrapped in a \`<section id="sources">\` here. The stub honours the prop so
+     the page this test renders has the same anchor the product's has. */
+  export function ProvenanceBlock({ id, items }) {
+    return createElement("div", { className: "provenance", id }, String((items ?? []).length));
   }
 `);
 const beaconStub = inlineModule(`export function ViewBeacon() { return null; }`);
@@ -252,13 +255,27 @@ function renderArticle(overrides = {}) {
   return renderToStaticMarkup(createElement(articleRoute.Route.options.component));
 }
 
-test("an article page states the AI disclosure, above the sources it names", () => {
+test("an article page states the AI disclosure, in the story column above the records", () => {
   const html = renderArticle();
   assert.match(html, new RegExp(AI_LINE.replace(/\./g, "\\.")));
-  // It belongs with the records it points at, not buried at the foot of the page.
-  const sourcesIdx = html.indexOf('id="sources"');
+  /*
+    It closes the story body -- the drawing's last `<p>` inside `<article>` --
+    and the records it points at are the band below it. So the order asserted
+    here is: the body's anchor, the sentence, then the records' anchor. It used
+    to be the other way round (the line was the head of `#sources`) because the
+    evidence block lived inside the story column; unit DA2 moved the block out
+    to a page-wide band and the sentence stayed with the story, where
+    `Article Daily.dc.html` has it. The claim is unchanged: the line must not
+    be buried at the foot of the page, and it must still be on the page that
+    names the records.
+  */
+  const bodyIdx = html.indexOf('id="story-body"');
   const lineIdx = html.indexOf("A person reviewed and edited this story.");
-  assert.ok(sourcesIdx >= 0 && lineIdx > sourcesIdx, "the line should render inside the sources section");
+  const sourcesIdx = html.indexOf('id="sources"');
+  assert.ok(
+    bodyIdx >= 0 && lineIdx > bodyIdx && sourcesIdx > lineIdx,
+    "the line should render in the story column, above the sources band",
+  );
 });
 
 test("a routine-notice roundup does NOT claim AI wrote it, and says what did", () => {

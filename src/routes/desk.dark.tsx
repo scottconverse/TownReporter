@@ -306,7 +306,8 @@ function DarkPage() {
   }, [openId, detailInvestigationId, currentDarkJob, qc]);
 
   /*
-    The model the Start-a-file dialog was set to, for the first round only.
+    The model and effort the Start-a-file dialog was set to, for the first round
+    only.
 
     The dialog hands its pick back with the new id, and the round it starts is
     issued in the same tick -- one render before `setModelChoice` could take
@@ -314,15 +315,22 @@ function DarkPage() {
     model. Holding the pick in a ref and consuming it here is what makes the
     dialog's pick the model that actually runs; later rounds ("Keep digging",
     the picker under the file) read the state as before.
+
+    Unit CY item 9: the ref carries the effort too. The dialog now draws the
+    Effort select the reference draws (`Desk Dialogs.dc.html:89-93`), and an
+    effort the editor turned that is then thrown away here would be the same
+    lie as a model pick thrown away -- the row they saw would not be the row
+    that ran. An untouched effort arrives as null and resolves to the surface
+    default, which is what this round ran at before the select existed.
   */
-  const firstRoundPick = useRef<StoryModelChoice | null>(null);
+  const firstRoundPick = useRef<{ choice: StoryModelChoice; effort: ModelEffort | null } | null>(null);
   const advance = useMutation({
     mutationFn: (id: number) => {
       const picked = firstRoundPick.current;
       firstRoundPick.current = null;
       return continueInvestigation({
         data: picked
-          ? { id, modelChoice: picked, modelEffort: defaultModelEffort(picked) }
+          ? { id, modelChoice: picked.choice, modelEffort: picked.effort }
           : { id, modelChoice, modelEffort },
       });
     },
@@ -697,9 +705,17 @@ function DarkPage() {
           // round in this same tick, before `setModelChoice` can be read.
           const picked = run.modelChoice ? darkModelChoice(run.modelChoice) : null;
           if (picked) {
-            firstRoundPick.current = picked;
+            /*
+              Unit CY item 9: the dialog's Effort wins when it was touched, and
+              the model's own default stands in when it was not -- the same
+              resolution `DarkDialsPanel` uses a few hundred lines down
+              (`onModelChoice` -> `defaultModelEffort`), so the panel and the
+              round agree on what is running.
+            */
+            const effort = validatedModelEffort(picked, run.modelEffort) ?? defaultModelEffort(picked);
+            firstRoundPick.current = { choice: picked, effort };
             setModelChoice(picked);
-            setModelEffort(defaultModelEffort(picked));
+            setModelEffort(effort);
           }
           afterOpen(id);
         }}

@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ArrowRight, FileText, Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import { PaperShell } from "@/components/paper-chrome";
 import { ReaderRow, SaveStory } from "@/components/reader-controls";
 import { DatesPanel } from "@/components/paper/dates-panel";
@@ -49,6 +49,53 @@ const GRID_CELLS = 6;
 const TOP_STORIES = 1 + GRID_CELLS;
 /** How many place rows the region band prints at most -- one per ground. */
 const REGION_ROWS = 3;
+/**
+ * How many stories the lead column carries under "Read the story".
+ *
+ * Unit CN, item 1(b) (owner review, 2026-09-27). The lead and "This week" are
+ * one grid row, so a lead column four fields tall beside a five-row panel
+ * leaves blank paper under the lead; the owner's target is that the two columns
+ * end within 40px of each other at 1790 and 1440. Two rows is what closes it
+ * (the lead column's own 36px bottom padding and the row's 1px gap are the rest
+ * of the difference) -- measured, `reports/CN-front-gap-and-clause.md`.
+ *
+ * The drawing has no such list: its lead column is the tag, headline, dek and
+ * date and nothing else, and its own `week` aside is a fixed six rows. The
+ * owner's instruction for that case is to use the grid cell's own type styles,
+ * smaller, and the rows reuse the grid cell itself (`StoryCell`) under a
+ * `.leadalso` wrapper that takes its padding down.
+ */
+const ALSO_ROWS = 2;
+
+/**
+ * The stories the lead column prints under its own button.
+ *
+ * Read from the stories AFTER the top of the page -- the lead and the six grid
+ * cells, `TOP_STORIES` -- so nothing the page prints below is chosen, and a
+ * story the "This week" panel already names is skipped as well: the panel sits
+ * three inches to the right of these rows, and the same story twice in one
+ * glance is not a service to the reader. The one exception is the band's own
+ * opinion piece, which the edition read has already excluded; it is skipped
+ * here too rather than assumed away.
+ *
+ * Both callers -- the loader, which needs the ids for the river's exclusion,
+ * and the component, which renders them -- call this on the same list, so the
+ * stories the lead prints are exactly the ones the river leaves out.
+ */
+function alsoUnderLead<T extends { id: number; slug: string }>(
+  stories: T[],
+  week: readonly { slug?: string }[],
+  opinionSlug: string | undefined,
+): T[] {
+  const spoken = new Set(week.map((row) => row.slug).filter(Boolean));
+  const chosen: T[] = [];
+  for (const story of stories.slice(TOP_STORIES)) {
+    if (chosen.length >= ALSO_ROWS) break;
+    if (story.slug === opinionSlug || spoken.has(story.slug)) continue;
+    chosen.push(story);
+  }
+  return chosen;
+}
 
 export const Route = createFileRoute("/")({
   validateSearch: readerSearch,
@@ -110,13 +157,20 @@ export const Route = createFileRoute("/")({
       query because it sweeps the whole paper, not one section.
     */
     const week = await thisWeekDates();
+    /*
+      The lead column's own rows under the button (unit CN, item 1(b)). Read
+      here rather than in the component because the river has to leave them
+      out: `alsoUnderLead` is the same rule both callers apply to the same
+      stories, so what the lead prints is exactly what the river does not.
+    */
+    const also = alsoUnderLead(page.stories, week, opinion.stories[0]?.slug).map((s) => s.id);
     const region = await readRegion(above);
     const river = await readerArticles({
       data: {
         limit: RIVER_BATCH,
-        // Everything the top of the page prints, and the band's piece: the
-        // river carries what is left, and each story once.
-        exclude: [...above, ...opinion.stories.map((s) => s.id)],
+        // Everything the top of the page prints -- the lead, the six cells,
+        // the band's piece, the lead column's own rows -- each story once.
+        exclude: [...above, ...opinion.stories.map((s) => s.id), ...also],
       },
     });
     return { listing: page, river, opinion, week, region };
@@ -241,6 +295,12 @@ function Home() {
     where a dated item comes from and why a short panel is the honest read.
   */
   const week = storyDateRows(initial.week);
+  /*
+    The lead column's own rows, under its button (unit CN, item 1(b)). The same
+    rule the loader applied to the same stories, so what the lead prints is
+    exactly what the river was told to leave out.
+  */
+  const also = alsoUnderLead(stories, week, featuredOpinion?.slug);
   /*
     The "Latest stories" river. The loader server-renders the whole list --
     six stories, newest first, and nothing behind them (unit BX). It used to
@@ -410,26 +470,67 @@ function Home() {
                 className={`ledgerow${week.length ? "" : " solo"}`}
                 aria-label="Featured story"
               >
-                <article className="lead">
-                  <SectionTag topic={lead.topic}>{sectionName(lead.topic)}</SectionTag>
-                  <h2 className="leadhead">
-                    <Link to="/articles/$slug" params={{ slug: lead.slug }}>
-                      {headlineWithTag(lead.topic, lead.headline)}
-                    </Link>
-                  </h2>
-                  <p className="dek">{dekOrFallback(lead.dek, lead.body)}</p>
-                  <div className="meta">
-                    <span>{formatShortDate(lead.published_at)}</span>
-                    <span className="dot" />
-                    <span>{readMinutes(lead.body)} min read</span>
-                  </div>
-                  <div className="leadbottom">
-                    <Link className="btn primary" to="/articles/$slug" params={{ slug: lead.slug }}>
-                      Read the story <ArrowRight aria-hidden />
-                    </Link>
-                    <SaveStory story={lead} />
-                  </div>
-                </article>
+                {/*
+                  The lead column: the lead itself, then the paper's next
+                  stories under it (unit CN, item 1(b)). The rows are the
+                  COLUMN's, not the lead's, and the wrapper is what says so:
+                  `river-e2e` reads `.lead` as one story and refuses a card
+                  that links more than one (`assertEveryStoryIsPrintedOnce`),
+                  which printing them inside the article made it look like.
+                  The wrapper is also the row's grid item, so the column's
+                  padding and background sit in one place for both parts.
+                */}
+                <div className="leadcolumn">
+                  <article className="lead">
+                    <SectionTag topic={lead.topic}>{sectionName(lead.topic)}</SectionTag>
+                    <h2 className="leadhead">
+                      <Link to="/articles/$slug" params={{ slug: lead.slug }}>
+                        {headlineWithTag(lead.topic, lead.headline)}
+                      </Link>
+                    </h2>
+                    <p className="dek">{dekOrFallback(lead.dek, lead.body)}</p>
+                    <div className="meta">
+                      <span>{formatShortDate(lead.published_at)}</span>
+                      <span className="dot" />
+                      <span>{readMinutes(lead.body)} min read</span>
+                    </div>
+                    <div className="leadbottom">
+                      <Link
+                        className="btn primary"
+                        to="/articles/$slug"
+                        params={{ slug: lead.slug }}
+                      >
+                        Read the story <ArrowRight aria-hidden />
+                      </Link>
+                      <SaveStory story={lead} />
+                    </div>
+                  </article>
+                  {/*
+                    The lead column's own rows (unit CN, item 1(b)). The lead
+                    and "This week" are one grid row, so the lead column's box
+                    is stretched to the panel's height whatever it prints --
+                    a four-field lead beside a five-row panel left blank paper
+                    under the button. These are the paper's next stories, in
+                    the grid cell's own shapes: kicker, headline link, date ·
+                    min read. No story here prints below: the loader leaves
+                    these ids out of the river (`alsoUnderLead`).
+                  */}
+                  {also.length ? (
+                    <div className="leadalso">
+                      {also.map((s) => (
+                        <StoryCell
+                          key={s.id}
+                          section={sectionName(s.topic)}
+                          title={headlineWithTag(s.topic, s.headline)}
+                          date={formatShortDate(s.published_at)}
+                          read={String(readMinutes(s.body))}
+                          slug={s.slug}
+                          topic={s.topic}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 {/*
                   No dated items, no panel: the lead runs the full width instead
                   and no sentence explains the absence (unit BX). A panel whose
@@ -471,16 +572,6 @@ function Home() {
               </Link>
             </div>
           ) : null}
-          <div className="trustbar">
-            <span>
-              <FileText aria-hidden />
-              Reporting you can trace to the record.
-            </span>
-            <span>Corrections in the open.</span>
-            <Link className="textlink" to="/how-we-report">
-              How we report <ArrowRight aria-hidden />
-            </Link>
-          </div>
           {/*
             "Around the region" beside "Opinion": the places this paper
             covers beyond the home town, and the paper's own voice. Both are
@@ -545,9 +636,6 @@ function Home() {
                   All stories <ArrowRight aria-hidden />
                 </Link>
               </div>
-              <p className="riverintro">
-                Every story we have published, newest first, as it went to press.
-              </p>
               {/*
                 `datebox={false}`: the row's own meta line under the headline
                 already carries the date, and the front page printed it twice --

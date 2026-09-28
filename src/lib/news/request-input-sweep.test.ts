@@ -32,11 +32,8 @@ import {
   evidenceUrl,
   fileLeadInput,
   findSourcesInput,
-  followUpCreateInput,
-  followUpReplyInput,
   followUpsInput,
   holdLeadInput,
-  idOnlyInput,
   jobIdInput,
   leadIdInput,
   leadStatusInput,
@@ -402,40 +399,14 @@ const rows: Row[] = [
     ],
   },
   {
+    // The manual rows around this one -- createFollowUp, recordFollowUpReply,
+    // nudgeFollowUp, dropFollowUp -- were removed with their schemas in 0.6.81
+    // (unit CU). `status` went with them: it only ever named a manual ask's
+    // state, and the list is agent-only now.
     fn: "desk.ts:2236 listFollowUps",
     run: followUpsInput.parse.bind(followUpsInput),
-    valid: { status: "open", limit: 50 },
-    bad: [
-      { why: "unknown status", value: { status: "closed" } },
-      { why: "negative limit", value: { limit: -50 } },
-    ],
-  },
-  {
-    fn: "desk.ts:2252 createFollowUp",
-    run: followUpCreateInput.parse.bind(followUpCreateInput),
-    valid: { leadId: 42, articleId: null, who: "City clerk", what: "Ask for the vote tally.", dueOn: "2026-09-30" },
-    bad: [
-      { why: "oversize what", value: { who: "w", what: x(LIMITS.followUpWhat + 1) } },
-      { why: "negative leadId", value: { leadId: -42, who: "w", what: "w" } },
-    ],
-  },
-  {
-    fn: "desk.ts:2265 recordFollowUpReply",
-    run: followUpReplyInput.parse.bind(followUpReplyInput),
-    valid: { id: 9, replyText: "The clerk sent the tally.", repliedOn: null },
-    bad: [{ why: "oversize reply", value: { id: 9, replyText: x(LIMITS.followUpReply + 1) } }],
-  },
-  {
-    fn: "desk.ts:2270 nudgeFollowUp",
-    run: idOnlyInput.parse.bind(idOnlyInput),
-    valid: { id: 9 },
-    bad: [{ why: "id as text", value: { id: "9" } }],
-  },
-  {
-    fn: "desk.ts:2275 dropFollowUp",
-    run: idOnlyInput.parse.bind(idOnlyInput),
-    valid: { id: 9 },
-    bad: [{ why: "negative id", value: { id: -9 } }],
+    valid: { limit: 50 },
+    bad: [{ why: "negative limit", value: { limit: -50 } }],
   },
   {
     fn: "desk.ts:2333 confirmDraftTopic",
@@ -528,7 +499,14 @@ const rows: Row[] = [
   {
     fn: "dark.ts:2039 runDarkDesk",
     run: darkRunInput.parse.bind(darkRunInput),
-    valid: { paste: "Who signed the 2019 annexation agreement?", investigationId: 12, modelChoice: "claude" },
+    // Unit CY item 9 added modelEffort to this shape; the sweep exercises it
+    // beside the model, which is the only way the dialog ever sends it.
+    valid: {
+      paste: "Who signed the 2019 annexation agreement?",
+      investigationId: 12,
+      modelChoice: "claude",
+      modelEffort: "high",
+    },
     bad: [
       { why: "oversize paste", value: { paste: x(LIMITS.darkPaste + 1) } },
       { why: "negative investigationId", value: { paste: "p", investigationId: -12 } },
@@ -1114,9 +1092,26 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * Unit BW5 adds `pasteDuplicateInput` (the drawn paste tab's duplicate
    * warning): a `z.object` in `request-input.ts` whose headline is capped at
    * `LIMITS.leadHeadline`, called from `desk.ts` in the same shape.
+   *
+   * Two lanes met on this line again in the 0.6.81 release merge, and the
+   * union is kept: Unit CU retires the manual follow-up workflow, so
+   * `followUpCreateInput`, `followUpReplyInput` and `idOnlyInput` are gone
+   * from `request-input.ts` and their three names come out of this list --
+   * keeping them would have hidden the day a call came back. Unit CR restores
+   * the first-owner setup code and its recovery codes, which adds
+   * `setupCodeInput` and `recoveryCodeInput` as names. Neither side's change
+   * relaxed the check; the list is the union of what is still called.
+   *
+   * Unit CZ-long-lists moved the Queue's and the Sources' window request out of
+   * `desk.ts` into two named readers, `cleanQueueWindow` (`queue-rows.ts`) and
+   * `cleanSourceWindow` (`source-rows.ts`). Both run `cleanListWindow`, which
+   * clamps limit, offset, search and tab, and each clamps its own extras on top
+   * (the Queue's section and sort), so the two names join `cleanOrRaw` and
+   * `cleanPublishId` here: a named cleaner IS the swept form, and a `.validator`
+   * that reaches one of them is not a cast.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|followUpCreateInput|followUpReplyInput|idOnlyInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanQueueWindow|cleanSourceWindow|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to

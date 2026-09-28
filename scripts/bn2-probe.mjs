@@ -24,7 +24,7 @@
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.DESK_FLOWS_BASE_URL || "http://127.0.0.1:8090").replace(/\/$/, "");
 /* Shots land beside the other units' evidence, in the oversight repo, not in the
@@ -151,6 +151,7 @@ async function main() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -161,7 +162,7 @@ async function main() {
     await page.getByLabel("Headline").fill(`Probe lead ${i + 1} of ${LEADS} for the hit test ${stamp}`);
     await page.getByLabel("Why now").fill("Filed by the BN2 hit-test probe; nothing here starts a job.");
     await page.getByRole("button", { name: "File lead" }).click();
-    await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+    await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
     console.log(`  filed lead ${i + 1} of ${LEADS}`);
   }
 

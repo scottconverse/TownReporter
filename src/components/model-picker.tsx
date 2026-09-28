@@ -34,6 +34,7 @@ import {
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { writerIsReady } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
 
@@ -358,17 +359,26 @@ export function ModelPicker(props: Props) {
     queryFn: () => providerAvailability(),
     staleTime: 5 * 60 * 1000,
   });
+  /*
+    The rule itself lives in `lib/news/writer-bar.ts` (unit CW), because the
+    drawer's own "● Ready" line asks the same question this menu asks about
+    each option -- "can this writer run?" -- and the two must not be able to
+    answer it differently. It is called here with this component's own queries:
+    the shared availability map, and the connection behind a `custom:<id>`.
+
+    Undecided (still loading, or the query failed) counts as available so the
+    picker never locks up over a slow network call -- the preflight check on
+    the actual run is the backstop that refuses before spending anything either
+    way (see commitStoryDraftForAuthenticatedEditor).
+  */
   function isAvailable(value: string): boolean {
-    if (value === "auto") return true;
-    if (isCustomModelChoice(value)) {
-      const connection = connections.data?.find((row) => `custom:${row.id}` === value);
-      return Boolean(connection?.enabled && connection.modelId);
-    }
-    // Undecided (still loading, or the query failed) defaults to available
-    // so the picker never locks up over a slow network call -- the
-    // preflight check on the actual run is the backstop that refuses
-    // before spending anything either way (see commitStoryDraftForAuthenticatedEditor).
-    return availability.data ? availability.data[value] !== false : true;
+    return writerIsReady({
+      choice: value,
+      availability: availability.data,
+      customConnection: isCustomModelChoice(value)
+        ? (connections.data?.find((row) => `custom:${row.id}` === value) ?? null)
+        : null,
+    });
   }
   const unavailable = options.filter(
     (option) => option.value !== "auto" && !isAvailable(option.value),
@@ -480,7 +490,14 @@ export function ModelPicker(props: Props) {
         </summary>
         <div className="mt-2 space-y-2">
           <p>
-            <a className="inline-link" href="/desk/ops#custom-ai-connections">
+            {/*
+              Unit CX: the connections list lives on the Models screen, and the
+              Server page's "All connections" door leads there too. The old
+              `/desk/ops#custom-ai-connections` anchor pointed at a panel that
+              screen no longer draws, so it would have opened Server and sat
+              there. `tab=conn` is the same list, one click from the picker.
+            */}
+            <a className="inline-link" href="/desk/models?tab=conn">
               Add or manage your own AI API
             </a>
             . Saving a connection does not change Automatic or start a model request.

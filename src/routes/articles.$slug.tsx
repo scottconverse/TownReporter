@@ -340,9 +340,24 @@ function ArticlePage() {
 
   const dekText = dekOrFallback(article.dek, article.body);
   const sources = parseUrlList(article.source_urls);
-  const provenance = article.provenance?.length
-    ? article.provenance
-    : sources.map((url) => ({
+  /*
+    Every URL the story cites reaches "Sources & public records", including the
+    ones the provenance records do not cover.
+
+    This used to be either/or: a story with any provenance record printed those
+    and silently dropped the rest of its `source_urls`; only a story with none
+    fell through to the URL list. A meeting story is exactly the shape that
+    broke -- it is written from a recording, so its one source is the video, and
+    a single captured document anywhere in the story was enough to hide it.
+    Records first, then the cited URLs they do not already name.
+  */
+  const recordedProvenance = article.provenance ?? [];
+  const recordedUrls = new Set(recordedProvenance.map((item) => item.url).filter(Boolean));
+  const provenance = [
+    ...recordedProvenance,
+    ...sources
+      .filter((url) => !recordedUrls.has(url))
+      .map((url) => ({
         title: url,
         organization: "",
         document_date: "",
@@ -353,7 +368,8 @@ function ArticlePage() {
         capture_event_id: null,
         disappeared: false,
         role: "source",
-      }));
+      })),
+  ];
   const more = related.filter((a) => a.slug !== slug).slice(0, 3);
   const sectionName = sections.find((s) => s.key === article.topic)?.name ?? article.topic;
   const isOpinion = article.topic === "opinion";
@@ -426,67 +442,14 @@ function ArticlePage() {
         </nav>
         <div className="articlebody" id="story-body">
           <StoryBody body={article.body} publicReading />
-          <section className="sources" id="sources">
-            <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
-            {/*
-              FOLLOW THE EVIDENCE used to print above this section whatever was
-              in it, so a story with no separate source records showed a
-              heading with nothing under it (coordinator review of the Unit X
-              screenshots, 2026-09-24: a published imported story read
-              "FOLLOW THE EVIDENCE" and then stopped). The kicker now lives
-              inside ProvenanceBlock, above the records it introduces, so it is
-              printed only when there are records to follow -- for every story,
-              not only imported ones. The branch below already says in words
-              that there are none.
-            */}
-            {provenance.length ? (
-              <ProvenanceBlock
-                items={provenance}
-                findings={article.findings}
-                form={article.form}
-              />
-            ) : (
-              <>
-                <h2>Sources &amp; public records</h2>
-                <p>
-                  No separate public source records are attached to this story. See any source
-                  references in the article above.
-                </p>
-              </>
-            )}
-          </section>
-          <div className="articlefoot">
-            <section className="sources" id="story-corrections">
-              <h2>Corrections &amp; accountability</h2>
-              {article.corrections?.length ? (
-                article.corrections.map((c, i) => (
-                  <div className="sourcecard" key={i}>
-                    <strong>{formatDate(c.date)}</strong>
-                    <p>{c.body}</p>
-                  </div>
-                ))
-              ) : (
-                <p>No corrections have been posted for this story.</p>
-              )}
-              <Link className="btn primary" to="/corrections" search={{ article: article.headline }}>
-                File a correction →
-              </Link>
-            </section>
-            <section className="sources sharepanel">
-              <h2>Share the reporting.</h2>
-              <p>
-                Free to reprint with credit to {paper.name} and a link to the original. Reprinting
-                does not imply endorsement.
-              </p>
-              <CopyButton
-                text={() =>
-                  `${article.headline}\nOriginally published by ${paper.name}.\n${new URL("/articles/" + slug, window.location.origin).href}`
-                }
-              >
-                Copy credit &amp; original link
-              </CopyButton>
-            </section>
-          </div>
+          {/*
+            The disclosure closes the story column, which is where the drawing
+            puts it (`Article Daily.dc.html`: the last `<p>` inside `<article>`,
+            over a rule the width of the reading measure). It used to sit at the
+            head of `#sources`; the records it points at are a band of the page
+            now, not of this column, so it cannot live inside them.
+          */}
+          <AiDisclosure routine={article.routine_notice} text={article.disclosure_text ?? ""} />
         </div>
           <aside className="articleaside">
             <DatesPanel
@@ -494,16 +457,72 @@ function ArticlePage() {
               items={storyDates}
               empty="No published record attached to this story carries a date of its own."
             />
-            <div className="asidecard">
-              <span className="tag">OPEN RECORD</span>
-              <p>Good reporting should let you look over its shoulder.</p>
-              <Link className="textlink" to="/how-we-report">
-                How we report →
-              </Link>
-            </div>
           </aside>
         </div>
       </article>
+      {/*
+        The evidence band and the band under it. They are direct children of
+        `.wrap` -- siblings of `<article>` -- and not children of
+        `.articlebody`: a band reaches the viewport edge only when its negative
+        margin lands on the page gutter, which can only happen outside the grid
+        (see the band list in `reader-astra.css`). Inside the story column it
+        was as wide as the reading measure and no wider, which is the difference
+        the audit found between this page and the drawing.
+
+        FOLLOW THE EVIDENCE used to print above the evidence section whatever
+        was in it, so a story with no separate source records showed a heading
+        with nothing under it (coordinator review of the Unit X screenshots,
+        2026-09-24: a published imported story read "FOLLOW THE EVIDENCE" and
+        then stopped). The kicker now lives inside ProvenanceBlock, above the
+        records it introduces, so it is printed only when there are records to
+        follow -- for every story, not only imported ones. The branch below
+        already says in words that there are none.
+      */}
+      {provenance.length ? (
+        <ProvenanceBlock id="sources" items={provenance} form={article.form} />
+      ) : (
+        <section className="evidence" id="sources">
+          <div className="evidencehead">
+            <h2>Sources &amp; public records</h2>
+          </div>
+          <p>
+            No separate public source records are attached to this story. See any source
+            references in the article above.
+          </p>
+        </section>
+      )}
+      <div className="articlefoot">
+        <section className="sources" id="story-corrections">
+          <h2>Corrections &amp; accountability</h2>
+          {article.corrections?.length ? (
+            article.corrections.map((c, i) => (
+              <div className="sourcecard" key={i}>
+                <strong>{formatDate(c.date)}</strong>
+                <p>{c.body}</p>
+              </div>
+            ))
+          ) : (
+            <p>No corrections have been posted for this story.</p>
+          )}
+          <Link className="btn primary" to="/corrections" search={{ article: article.headline }}>
+            File a correction →
+          </Link>
+        </section>
+        <section className="sources sharepanel">
+          <h2>Share the reporting.</h2>
+          <p>
+            Free to reprint with credit to {paper.name} and a link to the original. Reprinting
+            does not imply endorsement.
+          </p>
+          <CopyButton
+            text={() =>
+              `${article.headline}\nOriginally published by ${paper.name}.\n${new URL("/articles/" + slug, window.location.origin).href}`
+            }
+          >
+            Copy credit &amp; original link
+          </CopyButton>
+        </section>
+      </div>
       <section id="related" className="opinionband keepreading">
         <div className="sectionhead">
           <h2>Keep reading</h2>
@@ -511,11 +530,22 @@ function ArticlePage() {
             More in this section →
           </Link>
         </div>
-        <div className="keepreadinggrid">
-          {more.map((a) => (
-            <ReaderRow key={a.id} story={a} description={false} />
-          ))}
-        </div>
+        {/*
+          The grid is told how many stories it is being given (`cols-N`, the
+          front page's grid vocabulary), because the ruled ground shows through
+          any track a story does not fill -- one related story in a fixed 3-up
+          printed two empty tracks as solid rule colour. No stories, no grid.
+          The band itself stays: its heading carries the jump list's "Read next"
+          anchor (`#related`), which the list prints whether or not the paper
+          has anything else to offer.
+        */}
+        {more.length ? (
+          <div className={`keepreadinggrid cols-${more.length}`}>
+            {more.map((a) => (
+              <ReaderRow key={a.id} story={a} description={false} />
+            ))}
+          </div>
+        ) : null}
       </section>
     </PaperShell>
   );

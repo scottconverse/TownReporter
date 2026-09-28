@@ -416,7 +416,9 @@ describe("the run, end to end with the queue and the notes column", () => {
       },
     });
 
-    const rows = await performListFollowUps({ userId, newsroomId }, { status: "active" });
+    // No status filter: the list takes none since 0.6.81 (unit CU) -- the
+    // screens narrow what they were given client-side (`matchesFollowUpFilter`).
+    const rows = await performListFollowUps({ userId, newsroomId }, {});
     const row = rows.find((r) => r.id === followUpId)!;
     assert.equal(row.last_state, "found");
     assert.equal(parseFinding(row.finding_json).url, "https://clerk.test/budget-papers");
@@ -527,7 +529,7 @@ describe("the run, end to end with the queue and the notes column", () => {
       },
     });
     assert.equal(searched, false, "a stopped follow-up does not run");
-    const rows = await performListFollowUps({ userId, newsroomId }, { status: "stopped" });
+    const rows = await performListFollowUps({ userId, newsroomId }, {});
     const row = rows.find((r) => r.id === followUpId)!;
     assert.notEqual(row.last_state, "running", "the row is released rather than left running");
   });

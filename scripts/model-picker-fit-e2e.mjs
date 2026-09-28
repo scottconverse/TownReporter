@@ -23,7 +23,7 @@ import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.PICKER_FIT_BASE_URL || "http://127.0.0.1:3491")
   .replace(/\/$/, "");
@@ -107,6 +107,7 @@ try {
   await page.getByLabel("Email").fill(`picker-fit-${stamp}@townreporter.test`);
   await page.getByLabel("Password", { exact: true }).fill("picker-fit-e2e-pass");
   await page.getByLabel("Confirm password").fill("picker-fit-e2e-pass");
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);

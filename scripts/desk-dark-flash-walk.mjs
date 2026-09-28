@@ -63,7 +63,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /**
  * This walk's own listen ports, found by
@@ -321,6 +321,7 @@ async function ownTheDesk(pass) {
   await page.getByLabel("Password", { exact: true }).fill(password);
   if (create) {
     await page.getByLabel("Confirm password").fill(password);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();

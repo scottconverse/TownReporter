@@ -20,7 +20,7 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /**
  * The same address the behaviour walk uses. These screenshots are a second
@@ -93,13 +93,14 @@ try {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
   console.log("  ok    the first account owns the desk");
 
-  // Server -> Sections (the hash opens the panel directly).
-  await page.goto(`${base}/desk/ops#sections`, { waitUntil: "networkidle" });
+  // Server -> Sections (the card's own screen opens the panel directly).
+  await page.goto(`${base}/desk/ops/sections`, { waitUntil: "networkidle" });
   const panel = page.locator('section[aria-label="Newspaper sections"]');
   await panel.getByRole("heading", { name: "Newspaper sections" }).waitFor({ timeout: 45_000 });
 
@@ -135,7 +136,7 @@ try {
 
   // An unsaved section draft, so the sticky bar is on screen if it exists.
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(`${base}/desk/ops#sections`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/sections`, { waitUntil: "networkidle" });
   await panel.getByRole("heading", { name: "Newspaper sections" }).waitFor({ timeout: 45_000 });
   await panel.getByLabel("New section name").fill("Civic life");
   await panel.getByRole("button", { name: "Add section" }).click();

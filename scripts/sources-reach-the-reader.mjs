@@ -16,7 +16,7 @@
  */
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 
 const base = checkedUrl(process.env.SOURCES_BASE_URL || "http://127.0.0.1:3200").replace(/\/$/, "");
@@ -42,6 +42,7 @@ try {
   await page.getByLabel("Email").fill(process.env.E2E_DESK_EMAIL ?? `sources-${stamp}@townreporter.test`);
   await page.getByLabel("Password", { exact: true }).fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
   await page.getByLabel("Confirm password").fill(process.env.E2E_DESK_PASSWORD ?? "sources-e2e-pass");
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -61,10 +62,10 @@ try {
   const url = page.getByLabel(/source|link|url/i).first();
   await url.fill(SOURCE);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("filed a lead carrying a source URL");
 
-  await page.getByLabel("Body").fill(
+  await page.getByLabel("Story", { exact: true }).fill(
     "The water board posted the Kimbark packet on Tuesday. A hearing follows on the 14th.",
   );
   await page.getByRole("button", { name: /^Save/ }).first().click();
@@ -84,7 +85,39 @@ try {
     .getByText(/The story changed after its evidence was gathered/)
     .waitFor({ timeout: 30_000 });
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
-  const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  /*
+    The story screen's own confirm, and not the one the reasons block now draws
+    with the same words. Two units met here and both found the same collision:
+    Unit CT's "every reason at the top of the Checks tab, each with its button"
+    (5368d336) put an "I checked: keep this evidence" button inside
+    `[aria-label="Reasons Publish is off"]`, so the bare role query resolves to
+    two elements and Playwright's strict mode refuses it. Unit CY (today's rail)
+    excluded that ancestor by name; Unit DA (article and front page) scoped the
+    query to `.publish-blocked`, the way the sentence above and the link pressed
+    below are already scoped. The container scope is kept because it is the
+    scope this walk already uses for this block -- and it holds the same
+    guarantee: the reasons list is drawn inside `#inspector-checks`
+    (`astra-blocker-list`, `src/routes/desk.story.$leadId.tsx:1676`), which is
+    outside `.publish-blocked`. Unit CW2 moved the drawn list again, onto the
+    Checks tab's own evidence list (`src/components/evidence-check-list.tsx`),
+    which is still outside this notice, so the scope holds unchanged. Neither is
+    a `.nth(0)`/`.nth(1)` position, so neither breaks the moment the reasons
+    list grows a second row.
+
+    The label is on the page twice, and the assertion is the same one either
+    way: the evidence decision has to be reachable from the screen that says
+    Publish is off. Unit CT's drawn list of reasons carries it
+    (src/components/publish-blockers.ts:187), and so does the notice this walk
+    is about -- the one that links to #evidence-review --
+    at src/routes/desk.story.$leadId.tsx:2192. Both are the same mutation, the
+    `keep` press the evidence review itself calls. The press is scoped to that
+    notice (the element the walk already clicks the "Review claims and sources"
+    link out of, and the one the label was on before the reasons list existed),
+    so neither copy can shadow the other.
+  */
+  const confirmEvidence = page
+    .locator(".publish-blocked")
+    .getByRole("button", { name: "I checked: keep this evidence" });
   await confirmEvidence.waitFor({ state: "visible" });
   const originalViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });

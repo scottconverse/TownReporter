@@ -1,9 +1,11 @@
 # Release history
 
 Verbatim release notes, moved out of the README on 2026-09-24. Newest first.
-Current version: [0.6.80](0.6.80.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
+Current version: [0.6.81](0.6.81.md). Full detail: [CHANGELOG](../../CHANGELOG.md).
 
 ### Recent releases
+
+- **0.6.81** — Every HTML page now tells every cache to revalidate, so a release cannot be outlived by the bytes it replaced. The front page's lead gap is closed and "This week" names each event once; a meeting story's transcript opens in full, with every timestamp a link into the video; the story workbench is the drawn screen; every reason Publish is off is listed with its own button; Dark Desk has an honest light theme; the Server screen is the drawn summary cards with each editor one door away; Today and its rail match the drawing at laptop widths; long lists render 25 at a time with Show 25 more and the Queue's selection bar; the article's "How we reported this" band is a band of the page and the front page's trust strip is gone; the first-owner setup code and recovery codes return, salted and transactional; the manual follow-up workflow is retired, open rows marked dropped with nothing deleted; the desk dialogs the drawing drew now have their press; and the "Keep reading" band's missing gutter and empty cells were fixed. Two additive migrations, 0106 and 0107. See [the release guide](0.6.81.md); it does not assert GitHub publication, production deployment, or live-model proof.
 
 - **0.6.80** — The front page, desks and workbench, from nine design-review notes and worker findings. The header and grid share one measure at wide windows; the Opinion box always shows the newest opinion piece; an opinion piece publishes from its own row; the style check says why its button is off and trusts no client-sent finding; "Edit the lead" is back; every schema module warms up at boot; hand-named backups copy offsite and prune under a verified, age-gated rule; publishing refuses an empty dek, and every reader-facing dek falls back to the body's first sentence. One additive migration, 0105. See [the release guide](0.6.80.md); it does not assert GitHub publication, production deployment, or live-model proof.
 

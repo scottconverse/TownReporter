@@ -228,6 +228,13 @@ export type EditorialDraft = {
   fact_sheet: string;
   image_prompt: string;
   published_slug: string | null;
+  /**
+   * When the piece was last saved. `select d.*` has always returned it; unit CW
+   * names it because the drawn save line at the head of the STORY box says the
+   * hour of the save the desk actually made, from the same `saveState` the
+   * reported screen uses.
+   */
+  updated_at: string;
 };
 
 export const getEditorialDraft = createServerFn({ method: "GET" })

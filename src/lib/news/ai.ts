@@ -18,6 +18,7 @@ import {
   plannerModelFor,
   openAiCompatibleModelEfforts,
   defaultModelEffort,
+  providerEndpoint,
   providerEntry,
   providerModel,
   type ProviderBudget,
@@ -237,7 +238,7 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
  * always had.
  */
 function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmConfig | null {
-  const baseUrl = rungBaseUrl(entry);
+  const baseUrl = providerEndpoint(entry);
   if (!baseUrl) return null;
   const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
   const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
@@ -260,19 +261,16 @@ function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmCo
   };
 }
 
-/**
- * The endpoint a rung's calls go to: its own env override, else the registry.
- *
- * Split out of `rungGateway` because the call-time pick has to know WHICH
- * server to ask for loaded models (`resolveRungLocalModel`) before there is a
- * model to build a gateway around. Same two sources, so the server that was
- * asked and the server that is called cannot drift.
- */
-function rungBaseUrl(entry: ProviderEntry): string | null {
-  const overrideBase = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
-  const baseUrl = overrideBase || entry.baseUrl;
-  return baseUrl ? trimSlash(baseUrl) : null;
-}
+/*
+  A rung's endpoint is `providerEndpoint(entry)` (provider-registry.ts). It was
+  a private `rungBaseUrl` here until unit CX3 (0.6.81): the Server page now
+  prints the same address beside each rung of the Writing models ladder, so the
+  reader moved to the registry rather than being written a second time. The
+  reason it is split out of `rungGateway` above still stands -- the call-time
+  pick has to know WHICH server to ask for loaded models
+  (`resolveRungLocalModel`) before there is a model to build a gateway around,
+  and there must be one answer to that question, not two.
+*/
 
 /**
  * The endpoint a rung that NAMES ITS OWN MODEL reaches, the way a snapshot
@@ -731,7 +729,7 @@ async function resolveRungLocalModel(
   const entry = providerEntry(choice);
   if (!entry || !entry.requiresLoadedLocalModel) return { ok: true, localModel: null };
   const label = entry.label;
-  const baseUrl = rungBaseUrl(entry);
+  const baseUrl = providerEndpoint(entry);
   // No endpoint named: a misconfigured install, not a runnable model. The
   // probe reports that in its own words (`rungGateway` refuses it too).
   if (!baseUrl) return { ok: true, localModel: null };

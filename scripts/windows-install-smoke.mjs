@@ -7,7 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { verifyBuild } from "./install-build-manifest.mjs";
 
@@ -208,6 +208,13 @@ async function main() {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
+    /*
+      The packaged server writes the setup code under the installer's -DataRoot,
+      which on the Windows CI job is %LOCALAPPDATA%\TownReporter\ci-<guid> --
+      NOT this walk's cwd. `config.DataRoot` is read from the install pointer's
+      config.json, so it is the data root the server itself uses.
+    */
+    await fillPendingSetupCodeIfPresent(page, { dataRoot: config.DataRoot });
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
     await completeFirstRunSetup(page, base);
@@ -217,10 +224,10 @@ async function main() {
       .getByLabel("Why now")
       .fill("A manual installer acceptance fixture, not a reported event.");
     await page.getByRole("button", { name: "File lead" }).click();
-    await page.getByLabel("Body").waitFor();
+    await page.getByLabel("Story", { exact: true }).waitFor();
     await page.getByLabel("Headline").fill(headline);
-    await page.getByLabel("Dek").fill("Local fixture for persistence verification.");
-    await page.getByLabel("Body").fill(body);
+    await page.getByLabel("Summary").fill("Local fixture for persistence verification.");
+    await page.getByLabel("Story", { exact: true }).fill(body);
     // The editor confirms the section before printing; the install is accepted
     // on the same path a person takes. 0.6.67 names the section on the button
     // and the press is the confirmation. See confirm-section-step.mjs.

@@ -60,7 +60,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { fromCrossJSON } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { LMSTUDIO_BASE, LMSTUDIO_PORT } from "./fakes/lmstudio-address.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -335,6 +335,7 @@ async function main() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);
@@ -463,7 +464,7 @@ async function main() {
   assert.deepEqual(leaked, [], `rung 1 was asked to draft after the hop: ${JSON.stringify(leaked)}`);
   step(`rung 1 answered the probe with 200 and ${documents.length} document read(s) with 429, nothing more`);
 
-  const body = await page.getByLabel("Body").inputValue();
+  const body = await page.getByLabel("Story", { exact: true }).inputValue();
   assert.match(
     body,
     new RegExp(marker),

@@ -292,6 +292,22 @@ function notSwitchedOff(key: string): boolean {
 }
 
 /**
+ * The local model servers this desk looks for on its own, by address.
+ *
+ * THE one list, and it has two readers: `local-models.ts` probes exactly these
+ * three ports (its own doc comment says the same three), and
+ * `providerEndpointWatched` below reads it to answer "did anything look at
+ * that address?" for a rung that ships one. Two lists that drifted would mean
+ * the Server page telling an owner that nothing answered at an address the
+ * desk never visited -- a claim about a probe that never ran.
+ */
+export const DISCOVERED_LOCAL_ADDRESSES: readonly string[] = [
+  "http://127.0.0.1:1234/v1",
+  "http://127.0.0.1:11434/v1",
+  "http://127.0.0.1:8080/v1",
+];
+
+/**
  * What each kind needs when its entry does not say otherwise.
  *
  * `claude-code` / `codex` spawn a process and reload a ~25k-token preamble on
@@ -927,6 +943,69 @@ export const FORCED_FAILOVER_LADDER = [
 /** The model id an entry should actually use, after its env override. */
 export function providerModel(entry: ProviderEntry): string {
   return (entry.envOverrides.model && env(entry.envOverrides.model)) || entry.model;
+}
+
+/**
+ * `http://127.0.0.1:1234/v1/` -> `http://127.0.0.1:1234/v1`.
+ *
+ * An address is compared as a string all over this desk -- the local catalog
+ * keys its servers by `baseUrl`, and the Server page matches a rung's endpoint
+ * against one -- so the one trailing slash an operator may or may not have
+ * typed has to come off in one place, here.
+ */
+function trimSlash(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+/**
+ * The ADDRESS a provider's calls go to, or null for one that has none.
+ *
+ * `ai.ts`'s private `rungBaseUrl` was the only reader of these two sources
+ * until the Server page needed to print them: it now delegates here, so the
+ * address a card names and the address a call is sent to cannot drift -- the
+ * same reason `providerModel` exists for the model id. Null covers the two
+ * command-line tools, which reach their service through a login rather than a
+ * URL, and a misconfigured install with no address at all, which is the same
+ * condition `rungGateway` refuses.
+ */
+export function providerEndpoint(entry: ProviderEntry): string | null {
+  const override = entry.envOverrides.baseUrl ? env(entry.envOverrides.baseUrl) : undefined;
+  const baseUrl = override || entry.baseUrl;
+  return baseUrl ? trimSlash(baseUrl) : null;
+}
+
+/**
+ * Does this desk look at that address on its own?
+ *
+ * True only for an address the desk's local-model discovery visits
+ * (`DISCOVERED_LOCAL_ADDRESSES`) with nothing named by hand and discovery left
+ * on. False when an installation setting named the address -- discovery probes
+ * three fixed ports and LLM_BASE_URL, never an address typed for one rung --
+ * and false when discovery is switched off.
+ *
+ * The difference is a whole sentence, not a shading: "nothing answered there"
+ * is a claim about a probe that ran, and may only be said where one did. The
+ * Server page prints readiness per rung and asks this first.
+ */
+export function providerEndpointWatched(entry: ProviderEntry): boolean {
+  if (entry.envOverrides.baseUrl && env(entry.envOverrides.baseUrl)) return false;
+  if (!notSwitchedOff("TOWNREPORTER_LOCAL_DISCOVERY")) return false;
+  const endpoint = providerEndpoint(entry);
+  return endpoint !== null && DISCOVERED_LOCAL_ADDRESSES.includes(endpoint);
+}
+
+/**
+ * `TOWNREPORTER_X=0` for this entry's own switch: this installation has it off.
+ *
+ * The same fact `provider-login.server.ts` reports as `disabledByOperator` for
+ * the two logins, and the same words are printed for both. Distinct from
+ * `enabled()`, which for a local rung also says whether anything was found to
+ * answer -- "the operator turned this off" and "nothing is listening" are two
+ * different sentences and the Server page prints each one only where it is
+ * true.
+ */
+export function providerSwitchedOff(entry: ProviderEntry): boolean {
+  return entry.offSwitchEnv ? !notSwitchedOff(entry.offSwitchEnv) : false;
 }
 
 /**

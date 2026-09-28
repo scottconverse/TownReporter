@@ -22,6 +22,7 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import pg from "pg";
+import { fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const { Client } = pg;
 
@@ -143,6 +144,7 @@ try {
   if (await page.getByRole("button", { name: "Create editor account" }).count()) {
     await page.getByLabel("Name").fill("Scan Refresh Editor");
     await page.getByLabel("Confirm password").fill(password);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();

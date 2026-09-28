@@ -33,7 +33,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -160,6 +160,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -600,7 +601,7 @@ async function theDraftIsTheReportsTextWithoutItsLedger() {
   const row = page.locator(".lead-row", { hasText: TIER1[0] });
   await row.getByRole("link", { name: TIER1[0], exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
-  const body = page.getByLabel("Body");
+  const body = page.getByLabel("Story", { exact: true });
   await body.waitFor({ timeout: 45_000 });
   const text = await body.inputValue();
   must(

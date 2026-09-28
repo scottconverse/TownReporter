@@ -100,8 +100,14 @@ export function FollowUpCard({
       <div className="fu-main">
         <div className="fu-top">
           {chip ? <span className={"fu-chip " + chip.tone}>{chip.text}</span> : null}
+          {/*
+            0.6.81 (unit CU): this fell back to `row.who` -- the name of the
+            person a manual ask was addressed to -- for a row with no method
+            line. Every read that feeds this card is agents only, so there is
+            no such row left and no human name belongs on a follow-up card.
+          */}
           <span className="fu-method">
-            {row.agent_kind && row.schedule ? methodLine(row.agent_kind, row.schedule) : row.who}
+            {row.agent_kind && row.schedule ? methodLine(row.agent_kind, row.schedule) : ""}
           </span>
         </div>
         <span className="fu-q">{row.what}</span>

@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -169,6 +169,7 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -497,7 +498,7 @@ async function theStoryIsFiledWithItsDraft() {
   const row = page.locator(".lead-row", { hasText: AS_STORY[0] });
   await row.getByRole("link", { name: AS_STORY[0], exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
-  const body = page.getByLabel("Body");
+  const body = page.getByLabel("Story", { exact: true });
   await body.waitFor({ timeout: 45_000 });
   const text = await body.inputValue();
   must(
@@ -509,7 +510,7 @@ async function theStoryIsFiledWithItsDraft() {
     and must not: the reader lifts it into the lead's sources as names, so the
     body is the report's prose and nothing else.
   */
-  const dek = await page.getByLabel("Dek").inputValue();
+  const dek = await page.getByLabel("Summary").inputValue();
   must(
     dek.includes(FIRST_DEK),
     `the imported story's dek is not the report's own line under the headline; it reads: ${dek.slice(0, 160)}`,

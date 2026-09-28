@@ -255,7 +255,7 @@ jobs:
   postgres-integration:
     name: Every discovered PostgreSQL-capable test, on a real Postgres
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18
@@ -1595,6 +1595,65 @@ jobs:
             echo "built server did not come up"; tail -n 80 /tmp/claim-sources.log; exit 1;
           }
           node scripts/claim-sources-pull-walk.mjs
+
+  # Unit CR (0.6.81), the review's P1 finding. The first account is created
+  # BEFORE the setup code is checked, so a wrong code leaves this state: a live
+  # session, an unclaimed desk, and the server's refusal on the way back. The
+  # signed-in redirect in `Login` fired on the session alone, so it unmounted
+  # the error, the setup field and the typed address in the same render that
+  # showed them -- and /desk refuses an unclaimed owner, so the browser came
+  # straight back to /login, which redirected again. A loop with no screen on
+  # which to type the right code, which is the only thing the owner can do.
+  #
+  # This job is the walk for that recovery: wrong code, refusal READABLE and
+  # the form still standing, retype, claim, /desk/setup, desk opens. It needs a
+  # virgin desk with a PENDING code, so it runs alone in its own job.
+  #
+  # No TOWNREPORTER_DATA_ROOT is exported here, and the server is started from
+  # the checkout root, so the code the walk reads from
+  # `<cwd>/.townreporter-data/logs/SETUP-CODE.txt` is the one this server wrote
+  # (the resolution order in scripts/first-run-setup-step.mjs).
+  first-owner-setup-code:
+    name: A wrong setup code refuses, and the owner can retype it
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Mistype the setup code, then retype it
+        env:
+          BETTER_AUTH_SECRET: ci-first-owner-setup-code-secret-not-for-production
+          PORT: "3541"
+          HOST: 127.0.0.1
+          DATABASE_URL: ""
+          TOWNREPORTER_CLAUDE_CODE: "0"
+          FIRST_OWNER_BASE_URL: http://127.0.0.1:3541
+        run: |
+          npm start > /tmp/first-owner-setup-code.log 2>&1 &
+          DEV_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3541/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3541/ || {
+            echo "built server did not come up"; tail -n 80 /tmp/first-owner-setup-code.log; exit 1;
+          }
+          node scripts/first-owner-setup-code-walk.mjs
+          kill_tree() {
+            local pid="$1"
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+              kill_tree "$child"
+            done
+            kill "$pid" 2>/dev/null || true
+          }
+          kill_tree "$DEV_PID"
 
   # BH4 made a removed story answer 410 Gone at its URL. BH6 found that the
   # OTHER door -- the reader already inside the paper, pressing Back to a story

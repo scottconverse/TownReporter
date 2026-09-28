@@ -648,6 +648,8 @@ const deskCopyStub = inlineModule(`
     that the import resolves.
   */
   export function openLeads(leads) { return leads ?? []; }
+  /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
+  export function pileForStatus() { return "desk"; }
 `);
 // Chip() does not touch the appearance context, but desk-chrome.tsx imports it
 // (Light/Dark and Normal/Large moved there -- src/lib/appearance-context.ts),
@@ -703,9 +705,21 @@ const { Chip } = await import(
       ),
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
-        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; }",
+        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; } export async function listFollowUps() { return []; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
+      /*
+        CY item 6 put the Dark Desk and Follow-ups nav counts in the shell, so
+        desk-chrome.tsx now imports these two modules. Chip() does not read
+        either, but the module cannot load without the specifiers resolving --
+        the same reason the Dialog and NewStoryDialog above are stubbed.
+      */
+      "@/lib/news/dark": inlineModule(
+        "export async function listInvestigations() { return []; }",
+      ),
+      "@/lib/news/follow-up-copy": inlineModule(
+        "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
+      ),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

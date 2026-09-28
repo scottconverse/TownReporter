@@ -86,7 +86,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { fromCrossJSON } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { LMSTUDIO_BASE, LMSTUDIO_PORT } from "./fakes/lmstudio-address.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -447,6 +447,7 @@ async function main() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -462,7 +463,7 @@ async function main() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("filed a lead by hand and landed on its story page");
 
   // --- leave the picker on Automatic, click Draft with AI ----------------
@@ -611,7 +612,7 @@ async function main() {
   );
 
   // --- the landed draft is really there, on the page -----------------------
-  const bodyText = await page.getByLabel("Body").inputValue();
+  const bodyText = await page.getByLabel("Story", { exact: true }).inputValue();
   if (bodyText.trim().length < 20) {
     throw new Error(`the draft body looks empty/too short: ${JSON.stringify(bodyText)}`);
   }
