@@ -309,11 +309,20 @@ export function ReaderRow({
   story,
   description = true,
   datebox = true,
+  title,
 }: {
   story: ReaderStory;
   description?: boolean;
   /** The date gutter at the head of the row; false on the front page. */
   datebox?: boolean;
+  /**
+   * The headline to print, when the caller prints it in a display form of its
+   * own. The front page's rows carry the story's section tag above the
+   * headline, so they pass the headline without the "OPINION: " prefix the
+   * stored one carries (`headlineWithTag`, unit BZ item 3). Left out, the row
+   * prints the stored headline unchanged, which is what a listing screen wants.
+   */
+  title?: string;
 }) {
   const { sections } = usePublicSections();
   const { formatShortDate } = usePaperDateFormatters();
@@ -328,7 +337,7 @@ export function ReaderRow({
           </Link>
         )}
         <Link to="/articles/$slug" params={{ slug: story.slug }}>
-          <h3>{story.headline}</h3>
+          <h3>{title ?? story.headline}</h3>
         </Link>
         {description && <p>{story.dek}</p>}
         <div className="meta">

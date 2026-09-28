@@ -1977,6 +1977,27 @@
 .reader .wrap:has(> .ledgerow) {
   width: min(1600px, calc(100% - 2 * var(--px)));
 }
+/* The masthead and the nav rule share that measure and that gutter (unit BZ,
+   item 4). Measured at a 1892px window before this rule: the masthead wrap and
+   both header rules stopped at 286..1606 while the lead, the grid and the river
+   bled to 86..1806, so the story column started 200px left of the masthead and
+   the This week panel ended 200px right of the nav rule. The design draws one
+   full-bleed stack -- masthead and nav carry the same `--px` padding as every
+   band below them -- so the header wrap takes the front page's width and the
+   two rules bleed one gutter, which puts their ink on exactly the band edges.
+   Written from 1500 up, where `--px` and `.wrap` already step: below it the
+   1240px header column and the 1360px front-page wrap are the numbers 1440 and
+   390 are measured at, and the note is about a wide window only. */
+@media (min-width: 1500px) {
+  .reader:has(.ledgerow) > header .wrap {
+    width: min(1600px, calc(100% - 2 * var(--px)));
+  }
+  .reader:has(.ledgerow) .mast,
+  .reader:has(.ledgerow) .navrow {
+    margin-inline: calc(-1 * var(--px));
+    padding-inline: var(--px);
+  }
+}
 /* The article page too: header and story, not the footer. The rail in
    `Article Daily.dc.html` is the grid's `1fr`, so it is exactly what the
    reading measure leaves over -- at 1440 the 1240px measure left the "Dates in

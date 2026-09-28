@@ -33,6 +33,15 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
   const page = data.page ?? 1;
   const oldest = data.oldest ?? false;
   const topic = data.topic ? await resolveSectionKey(DEFAULT_NEWSROOM_ID, data.topic) : "";
+  /*
+    The section the caller wants left out. Resolved through `resolveSectionKey`
+    for the same reason `topic` is: a paper can rename or replace a section, and
+    the stored key on the rows is the one the newsroom filed them under. `topic`
+    is the column itself, not the resolved name -- the front page asks for
+    `notTopic: "opinion"`, and the field an article's opinion-ness lives in is
+    `articles.topic` (`TOPICS` in `../paper.ts` is where "opinion" is declared).
+  */
+  const notTopic = data.notTopic ? await resolveSectionKey(DEFAULT_NEWSROOM_ID, data.notTopic) : "";
   const q = data.q || "";
   // Treat punctuation literally. Short searches stay on headline and dek.
   const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -76,6 +85,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
     count: string;
   }>`select count(*)::text as count from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
     and (${topic}='' or topic=${topic})
+    and (${notTopic}='' or topic<>${notTopic})
     and (${q}='' or headline ilike ${like} or dek ilike ${like} or (${q.length >= 3} and body ilike ${like}))
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))
@@ -85,6 +95,7 @@ export async function listReaderArticles(data: ReaderArticlesInput): Promise<Rea
   const rows =
     await sql<Omit<ReaderStory, "area"> & { area: string | null; published_at_text: string }>`select id,slug,headline,dek,body,topic,published_at,published_at::text as published_at_text,area from articles where newsroom_id=${DEFAULT_NEWSROOM_ID} and status='published'
     and (${topic}='' or topic=${topic})
+    and (${notTopic}='' or topic<>${notTopic})
     and (${q}='' or headline ilike ${like} or dek ilike ${like} or (${q.length >= 3} and body ilike ${like}))
     and (${data.saved === undefined} or slug in (select jsonb_array_elements_text(${saved}::jsonb)))
     and (${data.cursor === undefined} or (published_at, id) < (${after}::timestamptz, ${afterId}::int))

@@ -175,10 +175,26 @@ const DELIVERY_PREAMBLE =
  * century-old convention, and the honest one for a paper run by one person.
  */
 export function opinionHeadline(headline: string): string {
-  const clean = String(headline ?? "")
-    .replace(/^\s*OPINION\s*[:—-]\s*/i, "")
-    .trim();
+  const clean = stripOpinionPrefix(headline);
   return clean ? `OPINION: ${clean}` : "OPINION";
+}
+
+/**
+ * The paper's own opinion prefix, off the front of a headline.
+ *
+ * One pattern for the two directions -- written in when a piece is stored
+ * (`opinionHeadline`), taken back off when the headline prints under a tag that
+ * already says Opinion. Unit BZ, item 3: any case, and spaces are allowed on
+ * either side of the separator, because a headline the editor typed by hand is
+ * the same headline to a reader whether they wrote "OPINION:" or "Opinion :".
+ */
+const OPINION_PREFIX = /^\s*opinion\s*[:—–-]\s*/i;
+
+/** The stored headline with the paper's own opinion prefix taken off. */
+export function stripOpinionPrefix(headline: string): string {
+  return String(headline ?? "")
+    .replace(OPINION_PREFIX, "")
+    .trim();
 }
 
 /**
@@ -193,14 +209,31 @@ export function opinionHeadline(headline: string): string {
  * Unit BX: the block prints this. Nothing else changes -- the stored headline
  * is never rewritten, so the desk, the feed and the article page keep the
  * prefix that makes the piece unmistakable where there is no block around it.
+ *
+ * Unit BZ, item 3: the lead, the grid and the Latest stories rows each print
+ * the story's own section tag a line above the headline, so they print the same
+ * double -- a yellow OPINION tag, then "OPINION: ..." underneath it. Use
+ * `headlineWithTag` at every one of those sites rather than this function
+ * directly, so the rule lives in one place.
  */
 export function opinionHeadlineDisplay(headline: string): string {
-  const clean = String(headline ?? "")
-    .replace(/^\s*OPINION\s*[:—–-]\s*/i, "")
-    .trim();
+  const clean = stripOpinionPrefix(headline);
   // A headline that was exactly "OPINION" has nothing left to show; the block's
   // own heading carries it.
   return clean || "Opinion";
+}
+
+/**
+ * A headline as it prints when its own tag is already on the page above it.
+ *
+ * Unit BZ, item 3. The stored opinion headline carries the literal "OPINION: "
+ * prefix on purpose (see `opinionHeadline`), and every place the front page
+ * prints it -- the lead, the ruled grid, the Latest stories rows -- prints the
+ * section tag first. The prefix is the tag said twice, so the display form drops
+ * it for an opinion story and leaves every other headline exactly as stored.
+ */
+export function headlineWithTag(topic: string | null | undefined, headline: string): string {
+  return topic === "opinion" ? opinionHeadlineDisplay(headline) : String(headline ?? "");
 }
 
 /**
