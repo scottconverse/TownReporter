@@ -342,19 +342,25 @@ async function createEnsureStateTable(sql: Sql, attemptsLeft = 4): Promise<void>
  * — down from 111 to 2 on the Dark Desk path. Every statement stays
  * idempotent and is still wrapped so one already-applied or unsupported
  * statement (older PGLite) can't abort the batch — unchanged from before.
+ *
+ * Returns `"skipped"` when the fingerprint already matched (no DDL ran) or
+ * `"ran"` when the statement batch executed — the boot warm-up
+ * (`src/lib/schema-warmup.ts`) logs this per module so a promote's log shows
+ * which modules were already current and which one actually issued DDL.
+ * Every existing caller discards the return value, so this is additive.
  */
 export async function ensureSchemaOnce(
   sql: Sql,
   name: string,
   statements: readonly string[],
-): Promise<void> {
+): Promise<"ran" | "skipped"> {
   await createEnsureStateTable(sql);
   const fingerprint = await fingerprintOf(statements);
   const [row] = await sql.query<{ fingerprint: string }>(
     `select fingerprint from _schema_ensure_state where name = $1`,
     [name],
   );
-  if (row?.fingerprint === fingerprint) return;
+  if (row?.fingerprint === fingerprint) return "skipped";
 
   for (const stmt of statements) {
     try {
@@ -370,6 +376,29 @@ export async function ensureSchemaOnce(
      on conflict (name) do update set fingerprint = excluded.fingerprint, ensured_at = now()`,
     [name, fingerprint],
   );
+  return "ran";
+}
+
+/**
+ * Read the `ensured_at` marker `ensureSchemaOnce` last wrote for `name`, as
+ * text (avoids driver-specific timestamptz parsing -- see the OID_* parsers
+ * above). `null` when the marker table or the row does not exist yet.
+ *
+ * Used by the boot warm-up (`src/lib/schema-warmup.ts`) to tell "ran" from
+ * "skipped-by-marker" for modules whose own `ensure*Schema` wrapper discards
+ * `ensureSchemaOnce`'s return value (most of them) -- read the marker before
+ * and after calling the wrapper; unchanged means the DDL batch did not run.
+ */
+export async function readSchemaEnsureMarker(sql: Sql, name: string): Promise<string | null> {
+  try {
+    const [row] = await sql.query<{ ensured_at: string }>(
+      `select ensured_at::text as ensured_at from _schema_ensure_state where name = $1`,
+      [name],
+    );
+    return row?.ensured_at ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function fingerprintOf(statements: readonly string[]): Promise<string> {

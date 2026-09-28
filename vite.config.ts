@@ -52,6 +52,40 @@ function pgliteBootstrapPlugin(): Plugin {
 }
 
 /**
+ * Warm every `ensure*Schema` module before the dev server serves its first
+ * request (Unit CE, release 0.6.80 — the built-server equivalent is
+ * `server/plugins/schema-warmup.ts` plus the request-gating
+ * `server/middleware/00-schema-warmup.ts`).
+ *
+ * Runs after `pgliteBootstrapPlugin` in the `plugins` array below: the
+ * `ensure*Schema` functions ALTER tables that `migrations/*.sql` creates, so
+ * PGLite bootstrap (which applies those migrations) must finish first. Vite
+ * awaits `configureServer` hooks in array order, so listing this plugin after
+ * `pgliteBootstrapPlugin()` is sufficient — no extra synchronization needed.
+ */
+function schemaWarmupDevPlugin(): Plugin {
+  return {
+    name: "app-builder:schema-warmup",
+    apply: "serve",
+    async configureServer(server) {
+      try {
+        const mod = (await server.ssrLoadModule("/src/lib/schema-warmup.ts")) as {
+          runSchemaWarmup?: () => Promise<unknown>;
+        };
+        if (typeof mod.runSchemaWarmup === "function") {
+          await mod.runSchemaWarmup();
+        }
+      } catch (err) {
+        // Matches runSchemaWarmup's own contract (never crash the server on
+        // one module's failure) — but a *dev*-server bootstrap module load
+        // failure is not that; surfacing it here would otherwise be silent.
+        console.error("[app-builder] schema warm-up failed to run at all:", err);
+      }
+    },
+  };
+}
+
+/**
  * Live-preview OAuth popup — handled HERE so the agent never has to create a
  * `/auth/popup` route (and cannot break it by scaffolding a React page that
  * paints the full app shell in the popup).
@@ -356,6 +390,7 @@ export default defineConfig(({ command, isPreview }) => ({
   ssr: { external: ["@napi-rs/canvas"] },
   plugins: [
     pgliteBootstrapPlugin(),
+    schemaWarmupDevPlugin(),
     darkDeskMonitorPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),

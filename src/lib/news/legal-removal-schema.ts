@@ -145,6 +145,29 @@ export const LEGAL_SCHEMA = [
   ]),
 ] as const;
 
+/**
+ * NOT routed through the shared `ensureSchemaOnce` (db.ts), on purpose (Unit
+ * CE tried it and reverted -- see `newsroom-scoped-write.proof.test.ts`'s
+ * regression). `ensureSchemaOnce` runs each statement independently, catching
+ * and discarding any single statement's error so one already-applied or
+ * unsupported statement can't abort the batch. That is safe for every OTHER
+ * module's schema, whose statements are independent `create table`/`alter
+ * table` lines -- but `LEGAL_SCHEMA` is not independent: it installs a guard
+ * trigger on every table in `GUARDED_TABLES`, and `prevent_legal_resurrection()`
+ * unconditionally references several of those tables (`sources`,
+ * `source_monitors`, ...) in its body. Under `ensureSchemaOnce`, a database
+ * missing just one guarded table (a test fixture with a partial schema, or a
+ * pre-migration production database) would silently skip THAT ONE trigger
+ * while still installing the others -- so a trigger on a table that DOES
+ * exist could still fire and query a table that does NOT, failing with
+ * "relation does not exist" instead of failing closed the way
+ * `assertLegalReady` is written to. This module's DDL batch must be
+ * all-or-nothing, so it keeps its own transaction and its own marker check
+ * (below) instead of the shared per-statement one. It still writes into the
+ * same `_schema_ensure_state` table under the same `'legal-removal'` name, so
+ * the boot warm-up (`src/lib/schema-warmup.ts`) still sees it and can tell
+ * "ran" from "skipped-by-marker" via `readSchemaEnsureMarker`.
+ */
 export async function ensureLegalSchema() {
   const fingerprint = createHash("sha256").update(LEGAL_SCHEMA.join("; ")).digest("hex");
   const sql = await getSql();
