@@ -3210,6 +3210,39 @@
 .desk-ltr.astra .today-lead.acted {
   opacity: 0.6;
 }
+/* CY item 4. The drawn row opens with its chip line and the headline sits under
+   it (Desk Command.dc.html:112-116). `.lead-flags` defaults to the Queue's
+   right-hand badge rail -- a right-aligned column, 11rem wide (styles.css:1201)
+   -- so this line lays it out again as the wrapping left-hand row the drawing
+   draws, and only for Today's rows. */
+.desk-ltr.astra .today-lead-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.desk-ltr.astra .today-lead-chips .lead-flags {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: none;
+}
+/* CY item 4. The evidence cell at the head of the meta line: the squares, then
+   the count in ink (Desk Command.dc.html:118-121). The squares are the Queue's
+   own `.ev-squares`; only the count's weight and colour are Today's. */
+.desk-ltr.astra .today-lead-evidence {
+  display: inline-flex;
+  align-items: center;
+  font: 700 calc(14px * var(--ts)) var(--fd);
+  color: var(--fg);
+}
+/* The row's own gap is the drawing's meter-to-count space, so the margin the
+   Queue needs (its meter sits on a line of its own) comes off here. */
+.desk-ltr.astra .today-lead-evidence .ev-squares {
+  margin-right: 0;
+}
 .desk-ltr.astra .today-lead-hl {
   font: 700 calc(19px * var(--ts)) var(--fd);
   margin: 0;
@@ -3264,7 +3297,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  /* The drawn gap in this line: 6px between wrapped rows, 12px between the
+     evidence cell and the meta text beside it (Desk Command.dc.html:118). */
+  gap: 6px 12px;
   margin-top: 10px;
 }
 

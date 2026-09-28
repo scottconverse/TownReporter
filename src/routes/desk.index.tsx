@@ -11,7 +11,7 @@ import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
 import { LeadFlags } from "@/components/desk-leads";
-import { formatAge } from "@/lib/paper";
+import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
@@ -1709,6 +1709,18 @@ function DeskHome() {
                       const dup = nearDuplicate(l, printed);
                       const held = l.status === "held";
                       const done = held || l.status === "killed";
+                      /*
+                        CY item 4. The drawn evidence cell: the squares and the
+                        count, at the head of the meta line (Desk
+                        Command.dc.html:118-121). `source_urls` is the desk's own
+                        record of what the lead was read out of -- the same
+                        field, counted the same way, that the Queue's row prints
+                        (desk-leads.tsx:155). The drawing's cell adds "· 1 could
+                        not open"; the desk has no per-lead failure figure
+                        anywhere (desk-leads.tsx:147-155), so that half is
+                        dropped rather than invented, exactly as on the Queue.
+                      */
+                      const sources = parseUrlList(l.source_urls).length;
                       return (
                         /*
                         The drawn compact row: `52px | 1fr | auto` -- score
@@ -1726,6 +1738,26 @@ function DeskHome() {
                         >
                           <Score v={l.newsworthiness ?? 0} />
                           <div>
+                            {/*
+                              CY item 4. The drawn row opens with its chip line
+                              -- NEW / HELD / ≈ PRINTED, then the warnings -- and
+                              the headline sits under it (Desk
+                              Command.dc.html:112-116). It was last on the row,
+                              below the meta line, which is the opposite end.
+                            */}
+                            <div className="today-lead-chips">
+                              {/*
+                                The status chip and the possible-duplicate chip
+                                used to be drawn here as well, and `LeadFlags`
+                                draws both of them from the same fields -- so the
+                                row printed NEW twice, stacked, which is what the
+                                BF3 side-by-side caught against the drawing's one
+                                chip line. One row, one chip, and it is the
+                                component both screens render, so the two screens
+                                cannot drift on what the desk has found.
+                              */}
+                              <LeadFlags lead={l} dup={dup} />
+                            </div>
                             <Link
                               to="/desk/story/$leadId"
                               params={{ leadId: String(l.id) }}
@@ -1738,24 +1770,23 @@ function DeskHome() {
                             </Link>
                             <p className="today-lead-why">{l.why}</p>
                             <div className="today-lead-row2">
+                              {/*
+                                CY item 4, the drawn evidence cell. It is the
+                                Queue's own `.ev-squares`, so the two screens
+                                cannot draw the same count two ways.
+                              */}
+                              <span className="today-lead-evidence">
+                                <span className="ev-squares" aria-hidden="true">
+                                  {Array.from({ length: Math.min(sources, 10) }, (_, i) => (
+                                    <i key={i} />
+                                  ))}
+                                </span>
+                                <b>{sources} opened</b>
+                              </span>
                               <span className="meta">
                                 {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
                               </span>
-                              {/*
-                                The status chip and the possible-duplicate chip
-                                used to be drawn here as well, and `LeadFlags`
-                                two lines down draws both of them from the same
-                                fields -- so the row printed NEW twice, stacked,
-                                which is what the BF3 side-by-side caught against
-                                the drawing's one chip line. One row, one chip,
-                                and it is the component both screens render.
-                              */}
                             </div>
-                            {/*
-                            Same component the Queue's row renders, so the two
-                            screens cannot drift on what the desk has found.
-                          */}
-                            <LeadFlags lead={l} dup={dup} />
                           </div>
                           <span className="today-lead-side">
                             {done ? (
