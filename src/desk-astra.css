@@ -3174,13 +3174,41 @@
   color: var(--fg);
 }
 .desk-ltr.astra .today-lead {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px 18px;
   align-items: start;
   padding: 18px 12px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
+}
+/*
+  CY item 5. The drawn row is a grid -- `52px minmax(0,1fr) auto`, score then
+  the title block then the presses (Desk Command.dc.html:112) -- and that is
+  exactly how it was built. The `auto` column is the presses, and at 1280 they
+  measured 342px of a 556px row, so `minmax(0, 1fr)` gave the middle column the
+  102px that was left over, with `overflow: visible` painting the headline and
+  the why line outside their own box. At 1100 the middle column was 40px; at
+  1024 it was 0px, and the lead's text was not narrow, it was absent. The grid
+  had no way to say "this does not fit": an explicit third column cannot wrap.
+
+  So the row is a wrapping flex line instead, and the middle column carries a
+  12rem flex-basis. Basis is what the wrap decision is made on, so the presses
+  move to their own line exactly when 52 + 192 + their own width + the gaps
+  stop fitting the row -- no breakpoint, and the same rule holds at every
+  width, under Large text, and with the nav collapsed. 12rem and not more
+  because the basis is also the floor the middle column can never go under,
+  and it has to stay small enough that the score badge keeps the title beside
+  it on a phone: 52 + 192 = 244, which still fits a 320px screen. Below 700
+  the presses are put on their own line outright, flush left (the media block
+  at the foot of this file): that is the phone shape, and it is unchanged.
+
+  What the drawing does NOT draw is the wrapped state -- it is a fixed-width
+  canvas with the presses on the row. Recorded in design/SPEC-GAPS-0681.md.
+*/
+.desk-ltr.astra .today-lead-main {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 .desk-ltr.astra .today-lead.sel {
   background: var(--surface);
@@ -3791,11 +3819,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .desk-ltr.astra .today-lead {
-    grid-template-columns: 52px minmax(0, 1fr);
     padding: 16px 8px;
   }
   .desk-ltr.astra .today-lead-side {
-    grid-column: 1 / -1;
+    /* The phone shape, and now guaranteed rather than implied: a 100% basis
+       puts the presses on their own line whatever the row measures, flush
+       left, the way the drawing's phone frame draws them. It used to be
+       `grid-column: 1 / -1`, which stopped meaning anything when CY item 5
+       turned this row into a wrapping flex line. */
+    flex: 1 1 100%;
+    justify-content: flex-start;
     align-items: flex-start;
   }
   .desk-ltr.astra .drafts-row,

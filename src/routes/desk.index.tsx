@@ -1737,7 +1737,7 @@ function DeskHome() {
                           key={l.id}
                         >
                           <Score v={l.newsworthiness ?? 0} />
-                          <div>
+                          <div className="today-lead-main">
                             {/*
                               CY item 4. The drawn row opens with its chip line
                               -- NEW / HELD / ≈ PRINTED, then the warnings -- and
