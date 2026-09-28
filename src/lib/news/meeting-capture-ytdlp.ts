@@ -51,6 +51,17 @@ export type CaptionCaptureSuccess = {
   argv: string[];
   stdout: string;
   stderr: string;
+  /**
+   * FEATURE-BACKLOG player_client retry: which alternate `player_client` yt-dlp
+   * needed to get past YouTube's bot/sign-in challenge, or `null`/absent when
+   * the plain request succeeded and no retry was needed. This is the existing
+   * record path for a capture's outcome (alongside `argv`/`stdout`/`stderr`) --
+   * there is no separate log call in this module to extend. Optional (rather
+   * than required) so the other call sites that build a `CaptionCaptureSuccess`
+   * by hand for their own tests don't all need updating for a field they have
+   * no opinion about; treat a missing value the same as `null`.
+   */
+  playerClientUsed?: PlayerClientId | null;
 };
 
 export type CaptionCaptureFailure = {
@@ -88,6 +99,8 @@ export type AudioCaptureSuccess = {
   argv: string[];
   stdout: string;
   stderr: string;
+  /** FEATURE-BACKLOG player_client retry: see CaptionCaptureSuccess.playerClientUsed. */
+  playerClientUsed?: PlayerClientId | null;
 };
 
 export type AudioCaptureFailure = {
@@ -205,6 +218,85 @@ export function requiresAudioFallback(result: CaptionCaptureFailure): boolean {
   );
 }
 
+/**
+ * FEATURE-BACKLOG: yt-dlp player_client retry.
+ *
+ * YouTube sometimes answers yt-dlp's plain request with a bot/sign-in
+ * challenge rather than the video's data, independent of the video itself --
+ * the same URL can succeed a minute later, or succeed immediately with a
+ * different `player_client`. This is the fixed retry order: each named client
+ * is tried once, in order, and the first one that gets past the challenge
+ * wins. Order chosen for cheapest-first: android_vr and visionos have shipped
+ * without the challenge most consistently in reports of this failure mode;
+ * tv_embedded is the last resort.
+ */
+export const PLAYER_CLIENT_RETRY_ORDER = ["android_vr", "visionos", "tv_embedded"] as const;
+export type PlayerClientId = (typeof PLAYER_CLIENT_RETRY_ORDER)[number];
+
+/**
+ * Whether yt-dlp's stderr is YouTube's bot/sign-in challenge, rather than
+ * some other failure (rate limiting, a network error, a genuinely missing
+ * video). Only a challenge is worth retrying with a different player_client --
+ * everything else would just fail again the same way three more times.
+ */
+export function looksLikeYoutubeBotChallenge(stderr: string): boolean {
+  return /confirm you.?re not a bot|sign in to confirm/i.test(stderr);
+}
+
+/**
+ * The same argv, with `--extractor-args youtube:player_client=<id>` inserted
+ * right before the trailing positional URL (the last element every argv list
+ * in this module ends with). Kept as a small pure function so the retry
+ * orchestration below can build each attempt's argv without duplicating the
+ * "insert before the URL" rule three times.
+ */
+export function withPlayerClientArgs(argv: string[], client: PlayerClientId): string[] {
+  return [
+    ...argv.slice(0, -1),
+    "--extractor-args",
+    `youtube:player_client=${client}`,
+    ...argv.slice(-1),
+  ];
+}
+
+export type YtdlpAttemptResult = { code: number | null; stdout: string; stderr: string; stopped: boolean };
+
+/**
+ * The retry itself, kept independent of `runYtdlp`/child-process spawning so
+ * it can be driven by a fake in tests (real yt-dlp is a Python process this
+ * repo cannot spawn portably in a unit test -- see meeting-capture-ytdlp.test.ts).
+ *
+ * `attempt(argv)` runs exactly one yt-dlp invocation. The base argv (no
+ * `player_client` override) is always tried first, matching today's behavior
+ * for the overwhelming majority of requests that never hit the challenge.
+ * Only a bot-challenge failure triggers a retry; anything else (rate limit,
+ * a real 404, a network error, `stopped` from an operator abort) is returned
+ * as-is; a non-challenge failure from a RETRY client stops the loop early
+ * too, rather than working through the rest of the list for no reason.
+ */
+export async function runWithPlayerClientRetry(
+  baseArgv: string[],
+  attempt: (argv: string[]) => Promise<YtdlpAttemptResult>,
+): Promise<{ result: YtdlpAttemptResult; argv: string[]; playerClientUsed: PlayerClientId | null }> {
+  let result = await attempt(baseArgv);
+  if (result.stopped || result.code === 0 || !looksLikeYoutubeBotChallenge(result.stderr)) {
+    return { result, argv: baseArgv, playerClientUsed: null };
+  }
+  for (const client of PLAYER_CLIENT_RETRY_ORDER) {
+    const argv = withPlayerClientArgs(baseArgv, client);
+    result = await attempt(argv);
+    if (result.stopped || result.code === 0) return { result, argv, playerClientUsed: result.code === 0 ? client : null };
+    if (!looksLikeYoutubeBotChallenge(result.stderr)) return { result, argv, playerClientUsed: null };
+  }
+  // Every client tried; the last attempt's argv and result stand as the
+  // reported failure (still the bot challenge, from the last client tried).
+  return {
+    result,
+    argv: withPlayerClientArgs(baseArgv, PLAYER_CLIENT_RETRY_ORDER[PLAYER_CLIENT_RETRY_ORDER.length - 1]!),
+    playerClientUsed: null,
+  };
+}
+
 function findCaptionFile(outputDir: string, videoId: string): string | null {
   const files = readdirSync(outputDir)
     .filter((name) => name.startsWith(`${videoId}.`) && /\.(srv3|vtt)$/i.test(name))
@@ -299,8 +391,10 @@ async function runYtdlp(
 export async function captureMeetingCaptions(input: CaptionCaptureInput): Promise<CaptionCaptureResult> {
   const outputDir = resolve(input.outputDir);
   mkdirSync(outputDir, { recursive: true });
-  const argv = buildCaptionCaptureArgs(input);
-  const run = await runYtdlp(argv, outputDir, { signal: input.signal, onProgress: input.onProgress });
+  const baseArgv = buildCaptionCaptureArgs(input);
+  const { result: run, argv, playerClientUsed } = await runWithPlayerClientRetry(baseArgv, (attemptArgv) =>
+    runYtdlp(attemptArgv, outputDir, { signal: input.signal, onProgress: input.onProgress }),
+  );
 
   if (run.stopped) {
     return { ok: false, reason: "Capture stopped by the operator.", argv, stderr: run.stderr, stopped: true };
@@ -335,14 +429,17 @@ export async function captureMeetingCaptions(input: CaptionCaptureInput): Promis
     argv,
     stdout: run.stdout,
     stderr: run.stderr,
+    playerClientUsed,
   };
 }
 
 export async function captureMeetingAudio(input: AudioCaptureInput): Promise<AudioCaptureResult> {
   const outputDir = resolve(input.outputDir);
   mkdirSync(outputDir, { recursive: true });
-  const argv = buildAudioCaptureArgs(input);
-  const run = await runYtdlp(argv, outputDir, { signal: input.signal, onProgress: input.onProgress });
+  const baseArgv = buildAudioCaptureArgs(input);
+  const { result: run, argv, playerClientUsed } = await runWithPlayerClientRetry(baseArgv, (attemptArgv) =>
+    runYtdlp(attemptArgv, outputDir, { signal: input.signal, onProgress: input.onProgress }),
+  );
   if (run.stopped) {
     return { ok: false, reason: "Capture stopped by the operator.", argv, stderr: run.stderr, stopped: true };
   }
@@ -378,6 +475,7 @@ export async function captureMeetingAudio(input: AudioCaptureInput): Promise<Aud
     argv,
     stdout: run.stdout,
     stderr: run.stderr,
+    playerClientUsed,
   };
 }
 
