@@ -5589,6 +5589,38 @@
   scroll-margin-top: 92px;
 }
 
+/* CY item 8: the Opinion AI intake is a shut card that opens the form, as the
+   drawing draws it (a whole-card `<a>`). The heading text is the press target,
+   stretched over the card so the whole drawn box is clickable; the readiness
+   notice below keeps its own controls above the stretch. */
+.desk-ltr.astra .astra-panel-open { position: relative; }
+.desk-ltr.astra .astra-card-link {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* The ring belongs on the card, not on the two words inside it: the button's
+   hit area is the whole box, so the focus ring is the whole box too. Same
+   `:has(> :focus-visible)` shape the queue's tick boxes use (line 3578). */
+.desk-ltr.astra .astra-card-link:focus-visible { outline: none; }
+.desk-ltr.astra .astra-panel-open:has(.astra-card-link:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+.desk-ltr.astra .astra-panel-open > [role="alert"],
+.desk-ltr.astra .astra-panel-open > [role="status"] {
+  position: relative;
+}
+
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */
 @media (max-width: 980px) {
   .desk-ltr.astra .astra-2col,

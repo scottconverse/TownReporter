@@ -93,6 +93,12 @@ function OpinionPage() {
   */
   const [written, setWritten] = useState("");
   const [showWritten, setShowWritten] = useState(false);
+  /*
+    CY item 8: the same shut-by-default shape for the AI intake, because the
+    drawing draws it as a door rather than as a form standing open. The header's
+    "+ New editorial" and the card itself both open it.
+  */
+  const [showAi, setShowAi] = useState(false);
   // Which row is asking "are you sure". Null when nothing is.
   const [confirmId, setConfirmId] = useState<number | null>(null);
   // The trash id of the last delete, so Undo is here rather than on Server.
@@ -251,14 +257,45 @@ function OpinionPage() {
   const rows = list.data ?? [];
   const working = rows.filter((r) => !r.finished_at && !r.stalled);
 
+  /*
+    CY item 8: the readiness notice belongs to the card, not to the form inside
+    it. UIUX-05 (scripts/desk-flows-e2e.mjs:211) requires the missing dependency
+    to be visible *before anything is typed*, and the form now starts collapsed,
+    so the notice is rendered in both states -- on the shut card as well as on
+    the open one. Its copy is unchanged.
+  */
+  const readinessNotice =
+    ready.isPending || ready.isFetching ? (
+      <p role="status" className="border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted">
+        Checking the editorial voice and writing model…
+      </p>
+    ) : ready.isError ? (
+      <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
+        <b>The desk could not check the writing model.</b> Nothing can be queued until the check
+        succeeds.{" "}
+        <button type="button" className="inline-link" onClick={() => void ready.refetch()}>
+          Check again
+        </button>
+      </div>
+    ) : ready.data && !ready.data.ready ? (
+      <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
+        <b>This desk cannot write yet.</b>
+        <ul className="mt-1 list-disc pl-5">
+          {ready.data.problems.map((problem, index) => (
+            <li key={`${index}-${problem}`}>{problem}</li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
   return (
     <DeskShell title="Opinion" kicker="Editorials and requests" hideTitle>
       {/*
         The drawn header: kicker, title, the page's own action, rule. The
         drawing's "+ New editorial" opens the New-editorial dialog, which is
-        lane 1's work and not in this tree; the button takes the editor to the
-        card that does that job today -- the AI intake, which is also card one
-        in the drawing -- and puts the cursor in its subject box.
+        lane 1's work and not in this tree; the button opens the card that does
+        that job today -- the AI intake, which is also card one in the drawing
+        -- and puts the cursor in its subject box.
 
         The lede moves out of the shell and into the body: `hideTitle` is what
         buys the action slot, and it drops the shell's sentence with the title,
@@ -274,9 +311,17 @@ function OpinionPage() {
             type="button"
             className="btn solid"
             onClick={() => {
-              const card = document.getElementById("astra-new-editorial");
-              card?.scrollIntoView({ block: "start" });
-              document.getElementById("astra-editorial-subject")?.focus();
+              /*
+                CY item 8: the card starts shut, so the button has to open it
+                before it can scroll to it or put the cursor anywhere. The
+                rAF waits for React to have committed the open state, which
+                happens before the next paint.
+              */
+              setShowAi(true);
+              requestAnimationFrame(() => {
+                document.getElementById("astra-new-editorial")?.scrollIntoView({ block: "start" });
+                document.getElementById("astra-editorial-subject")?.focus();
+              });
             }}
           >
             + New editorial
@@ -289,46 +334,38 @@ function OpinionPage() {
         edited — a correction runs as a dated note above it.
       </p>
       <div className="astra-2col wide">
-        <div className="astra-panel hot astra-jump" id="astra-new-editorial">
-          <h2 className="astra-panel-h lg">
-            Have the AI write an editorial <span aria-hidden="true">→</span>
-          </h2>
-          <p className="astra-panel-sub">
-            Paste your source material, add documents, or give it a subject and links. The writer
-            reads the material before drafting.
-          </p>
-          {ready.isPending || ready.isFetching ? (
-          <p
-            role="status"
-            className="border border-rule bg-paper-2 px-3 py-2.5 text-sm text-muted"
-          >
-            Checking the editorial voice and writing model…
-          </p>
-        ) : ready.isError ? (
-          <div
-            role="alert"
-            className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
-          >
-            <b>The desk could not check the writing model.</b> Nothing can be queued until the check
-            succeeds.{" "}
-            <button type="button" className="inline-link" onClick={() => void ready.refetch()}>
-              Check again
-            </button>
-          </div>
-        ) : ready.data && !ready.data.ready ? (
-          <div
-            role="alert"
-            className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust"
-          >
-            <b>This desk cannot write yet.</b>
-            <ul className="mt-1 list-disc pl-5">
-              {ready.data.problems.map((problem, index) => (
-                <li key={`${index}-${problem}`}>{problem}</li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        <div className="space-y-3">
+        {/*
+          CY item 8. The drawing draws the AI intake as a *door*, not as an open
+          form: "Two entry cards: 'Have the AI write an editorial →' (yellow
+          border) and 'File one you wrote →'" (handoff-2026-09-26/README.md:305),
+          both of them `<a>` links in Desk Screens.dc.html:109-121. The desk had
+          the form standing open under that heading, which is not the picture.
+          Shut, the card is exactly the drawn card -- the drawn heading and the
+          drawn sub-line, nothing else -- and it opens the form.
+
+          The heading is inside the card's press target rather than the whole
+          panel being one `<button>`: a `<button>` may not contain the `<h2>`
+          (flow content inside phrasing content), and the readiness notice
+          below carries a "Check again" button of its own that must not be
+          nested in another control. `.astra-card-link` stretches the press
+          target over the whole shut card (desk-astra.css), which is what the
+          drawn card's hit area is.
+
+          Sub-line is the drawing's, word for word; it replaced the desk's
+          longer sentence about pasting source material, which said the same
+          thing the label and placeholder on the subject box already say.
+        */}
+        {showAi ? (
+          <div className="astra-panel hot astra-jump" id="astra-new-editorial">
+            <h2 className="astra-panel-h lg">
+              Have the AI write an editorial <span aria-hidden="true">→</span>
+            </h2>
+            <p className="astra-panel-sub">
+              Give it documents and a position. It writes in the paper’s voice with a Claims and
+              sources appendix.
+            </p>
+            {readinessNotice}
+            <div className="space-y-3">
           <label className="block">
             <span className="text-sm tracking-[0.14em] text-muted uppercase">
               Subject, source text, or links
@@ -409,9 +446,31 @@ function OpinionPage() {
             >
               {notice && notice.kind !== "error" ? notice.text : ""}
             </span>
+            {/*
+              CY item 8: a shut door needs a way back. Card two has had a
+              "Cancel" on its own disclosure since it was built; this is the
+              same control on card one, in the same place in the same row.
+            */}
+            <InkButton tone="quiet" onClick={() => setShowAi(false)}>
+              Cancel
+            </InkButton>
           </div>
           </div>
-        </div>
+          </div>
+        ) : (
+          <div className="astra-panel hot astra-panel-open astra-jump" id="astra-new-editorial">
+            <h2 className="astra-panel-h lg">
+              <button type="button" className="astra-card-link" onClick={() => setShowAi(true)}>
+                Have the AI write an editorial <span aria-hidden="true">→</span>
+              </button>
+            </h2>
+            <p className="astra-panel-sub">
+              Give it documents and a position. It writes in the paper’s voice with a Claims and
+              sources appendix.
+            </p>
+            {readinessNotice}
+          </div>
+        )}
 
         <div className="astra-panel">
           <h2 className="astra-panel-h lg">
