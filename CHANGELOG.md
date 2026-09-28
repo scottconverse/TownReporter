@@ -1,6 +1,12 @@
 # Changelog
 
-Current software version: **0.6.79**. Publication state is recorded by GitHub.
+Current software version: **0.6.80**. Publication state is recorded by GitHub.
+
+## 0.6.80 — 2026-09-27
+
+- The front page, desks, workbench and first-run setup, from nine design-review notes and worker findings. The header and grid share one measure at wide windows; the Opinion box always shows the newest opinion piece; an opinion piece publishes from its own row; the style check says why its button is off and trusts no client-sent finding; "Edit the lead" is back; every schema module warms up at boot; hand-named backups copy offsite and prune under a verified, age-gated rule; a fresh install needs a one-time setup code to claim the owner seat, and owners get recovery codes; publishing refuses an empty dek, and every reader-facing dek falls back to the body's first sentence. Two additive migrations, 0105 and 0106. Full detail in [the release guide](docs/releases/0.6.80.md).
+
+The packaged release note names `v0.6.80` and the expected asset files without embedding its own commit or ZIP hash. The JSON metadata and `.sha256` sidecar are the authorities for those values; GitHub is the authority for publication state.
 
 ## 0.6.79 — 2026-09-27
 
