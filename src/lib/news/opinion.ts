@@ -272,11 +272,17 @@ export const saveEditorialDraft = createServerFn({ method: "POST" })
  * The slug loop is the same as the reported path, and for the same reason: the
  * column is unique, and a single retry could still collide.
  */
-export const publishEditorial = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  // Same annotation-not-a-check as publishLead: see request-input.ts.
-  .validator((raw: unknown) => cleanPublishId(raw))
-  .handler(async ({ context, data: draftId }) => {
+/**
+ * The body of `publishEditorial`, pulled out so it can be called directly in
+ * a test with a plain `{ userId, newsroomId }` context and a real (PGlite)
+ * database -- the same shape `performPublish` (desk.ts) exposes for the same
+ * reason. `publishEditorial` itself stays the RPC entry point, unwrapping the
+ * validated `draftId` and calling straight through.
+ */
+export async function performPublishEditorial(
+  context: { userId: string; newsroomId?: number },
+  draftId: number | null,
+) {
     if (draftId === null) return { ok: false as const, error: "There is no such draft." };
     const { slugify } = await import("@/lib/paper");
     const { withEditorialDraft, assertOpinionEvidenceReady } = await import("./opinion-draft.server.ts");
@@ -284,6 +290,20 @@ export const publishEditorial = createServerFn({ method: "POST" })
     assertOpinionEvidenceReady(d);
     if (!d.headline.trim() || !d.body.trim()) {
       return { ok: false as const, error: "An editorial needs a headline and a body." };
+    }
+    /*
+      An editorial is filed with `dek: ""` unconditionally (`editorial.server.ts:501`),
+      whether the model wrote the piece or the editor pasted one in
+      (`fileWrittenEditorial`, opinion.ts) -- nothing before this click ever
+      required one. The workbench that edits an editorial draft
+      (`desk.story.draft.$draftId.tsx:259`) already has a dek field, so this
+      refuses at publish rather than adding a second entry point.
+    */
+    if (!d.dek.trim()) {
+      return {
+        ok: false as const,
+        error: "Add a dek, the one-line summary under the headline, before you publish.",
+      };
     }
 
     const already = await sql<{ slug: string }>`
@@ -322,7 +342,13 @@ export const publishEditorial = createServerFn({ method: "POST" })
     });
     if (result.ok && typeof result.articleId === "number") await audit(context.userId, "publish-editorial", `Article ${result.articleId}`, owned(context), {kind:"articles",id:result.articleId});
     return result;
-  });
+}
+
+export const publishEditorial = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  // Same annotation-not-a-check as publishLead: see request-input.ts.
+  .validator((raw: unknown) => cleanPublishId(raw))
+  .handler(async ({ context, data: draftId }) => performPublishEditorial(context, draftId));
 
 /**
  * Throw an editorial away.

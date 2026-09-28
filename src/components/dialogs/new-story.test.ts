@@ -356,14 +356,18 @@ The council voted to delay it until November ([minutes](https://records.example/
     assert.ok(!("origin" in inputOf(ai.steps[0]!)), "the AI tab files an origin");
   });
 
-  it("draws the duplicate warning with the old panel's words and link, after the save", () => {
+  it("draws the duplicate warning with the saved-state words and the panel's link, after the save", () => {
     /*
       Unit BW5. The one-story paste panel warned, once the story was added,
-      that it looked like one the paper already had: `duplicateNote`'s sentence
-      and a link to the story it means (`desk.index.tsx:1532-1551` before the
-      redesign). The drawn tab saved the story and said nothing, so the warning
-      went with the panel. Both halves are asserted here -- the words, and that
-      they arrive WITH the save rather than instead of it.
+      that it looked like one the paper already had, with a link to the story
+      it means (`desk.index.tsx:1532-1551` before the redesign). The drawn tab
+      saved the story and said nothing, so the warning went with the panel.
+      Both halves are asserted here -- the words, and that they arrive WITH the
+      save rather than instead of it.
+
+      Unit CA, note 6: the words are the saved-state ones now. The review
+      screen's "Import it anyway if it is different — you decide" asks for a
+      decision the editor has already made by the time this draws.
     */
     const printed = render({
       tab: "paste",
@@ -371,7 +375,10 @@ The council voted to delay it until November ([minutes](https://records.example/
     });
     // Nothing was asked, so nothing is drawn: the warning is the server's
     // answer about one particular paste, never a guess the body makes.
-    assert.ok(!printed.includes("already published as"), "a warning is drawn with no answer to draw");
+    assert.ok(
+      !printed.includes("Kill one if they are the same"),
+      "a warning is drawn with no answer to draw",
+    );
 
     const withWarning = renderToStaticMarkup(
       createElement(NewStoryBody, {
@@ -381,9 +388,10 @@ The council voted to delay it until November ([minutes](https://records.example/
         duplicate: { headline: "Council delays the budget", slug: "council-delays-the-budget" },
       }),
     );
-    assert.match(withWarning, /already published as/);
-    assert.match(withWarning, /This looks like a story already published as/);
-    assert.match(withWarning, /Council delays the budget/);
+    assert.match(withWarning, /already on the paper/);
+    assert.match(withWarning, /It looks like “Council delays the budget”, already on the paper\./);
+    assert.match(withWarning, /Kill one if they are the same\./);
+    assert.doesNotMatch(withWarning, /Import it anyway|you decide/);
     assert.match(withWarning, /Saved as your draft/, "the warning replaced the confirmation");
     assert.match(withWarning, /href="\/articles\/council-delays-the-budget"/);
     assert.match(withWarning, /Read the printed one/);
@@ -401,7 +409,8 @@ The council voted to delay it until November ([minutes](https://records.example/
         duplicate: { headline: "Council delays the budget", leadId: 42 },
       }),
     );
-    assert.match(onTheDesk, /already on the desk as/);
+    assert.match(onTheDesk, /already in the Queue/);
+    assert.match(onTheDesk, /It looks like “Council delays the budget”, already in the Queue\./);
     assert.match(onTheDesk, /href="\/desk\/story\/42"/);
     assert.match(onTheDesk, /Open the one on the desk/);
   });

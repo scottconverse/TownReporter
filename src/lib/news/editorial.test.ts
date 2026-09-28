@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   NEWSROOM_NOTE,
   buildEditorialPack,
+  headlineWithTag,
   opinionHeadline,
   opinionHeadlineDisplay,
   parseEditorial,
+  stripOpinionPrefix,
 } from "./editorial.ts";
 import type { EditorialOrchestrationRuntime as EditorialRuntime, WriteEditorialInput } from "./editorial-orchestration.ts";
 import { opinionModelChoice, retiredModelChoiceNote } from "./model-choice.ts";
@@ -220,6 +222,52 @@ describe("opinionHeadlineDisplay", () => {
     const stored = opinionHeadline("A Libertarian case for the rail tax");
     assert.equal(stored, "OPINION: A Libertarian case for the rail tax");
     assert.equal(opinionHeadlineDisplay(stored), "A Libertarian case for the rail tax");
+  });
+});
+
+/*
+  Unit BZ, item 3: the same double, one row lower.
+
+  The lead, the ruled grid and the Latest stories rows each print the story's
+  section tag above the headline, so an opinion piece prints the yellow OPINION
+  tag and then "OPINION: ...". `headlineWithTag` is the one helper all three
+  call; the strip itself is `stripOpinionPrefix`, shared with `opinionHeadline`
+  so the written form and the taken-off form can never drift apart.
+*/
+describe("headlineWithTag", () => {
+  it("drops the prefix for an opinion story, which prints the tag itself", () => {
+    assert.equal(
+      headlineWithTag("opinion", "OPINION: A Libertarian case for the rail tax"),
+      "A Libertarian case for the rail tax",
+    );
+  });
+
+  it("takes any case and spaces on either side of the separator", () => {
+    for (const stored of [
+      "Opinion: The rail tax",
+      "opinion: The rail tax",
+      "OpInIoN : The rail tax",
+      "OPINION  —  The rail tax",
+      "Opinion - The rail tax",
+      "  OPINION: The rail tax  ",
+    ]) {
+      assert.equal(headlineWithTag("opinion", stored), "The rail tax", stored);
+    }
+  });
+
+  it("leaves every other section's headline exactly as stored", () => {
+    assert.equal(headlineWithTag("council", "Council votes Tuesday"), "Council votes Tuesday");
+    assert.equal(headlineWithTag(undefined, "Council votes Tuesday"), "Council votes Tuesday");
+    // A news headline that happens to open with the word is not touched: only
+    // the opinion tag claims the prefix.
+    assert.equal(headlineWithTag("council", "Opinion: Council votes"), "Opinion: Council votes");
+  });
+
+  it("shares one prefix pattern with the stored form", () => {
+    const stored = opinionHeadline("OPINION : The rail tax");
+    assert.equal(stored, "OPINION: The rail tax");
+    assert.equal(headlineWithTag("opinion", stored), "The rail tax");
+    assert.equal(stripOpinionPrefix("OPINION : The rail tax"), "The rail tax");
   });
 });
 

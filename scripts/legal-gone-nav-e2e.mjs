@@ -253,6 +253,37 @@ async function waitForArticleRoute(page) {
   );
 }
 
+/**
+ * Wait until the removal notice itself -- body, tab title, AND the `robots`
+ * meta -- has actually committed, not just the route.
+ *
+ * The flake this guards (main run 36354845113, 6 failed checks after the same
+ * tree passed on the PR): `waitForArticleRoute` only waits for the BODY to stop
+ * showing the live headline. The route's `head()` is derived from the same
+ * loaderData and reaches the DOM through `<HeadContent>`, which TanStack Router
+ * commits in its own effect, one tick after the body that reads loaderData
+ * directly -- so occasionally the body already read "This story was removed."
+ * while `document.title` and the `robots` meta still held the PREVIOUS route's
+ * values for one more frame. Reading `after` at that instant is exactly the
+ * kind of once-in-a-while loss a slower CI runner turns up far more often than
+ * a laptop. Nothing here weakens what gets checked below -- it makes sure the
+ * three signals the checks read (body, title, robots) have all landed before
+ * `after` is captured, the same way `#story-body`'s arrival is used as the
+ * settle signal for the earlier, live-story navigation.
+ */
+async function waitForRemovedNoticeSettled(page) {
+  await page.waitForFunction(
+    ({ removedTitle }) =>
+      document.body.innerText.includes(removedTitle) &&
+      document.title.includes(removedTitle) &&
+      [...document.querySelectorAll('meta[name="robots"]')].some((m) =>
+        /noindex/i.test(m.content),
+      ),
+    { removedTitle: REMOVED_TITLE },
+    { timeout: 20_000 },
+  );
+}
+
 async function main() {
   await bootTheServer();
   step(`the built server is answering on ${base}`);
@@ -319,6 +350,7 @@ async function main() {
     /* 5: the reader presses Back, to the story they still have open in history. */
     await page.goBack().catch(() => {});
     await waitForArticleRoute(page);
+    await waitForRemovedNoticeSettled(page);
 
     const after = await page.evaluate(() => ({
       pathname: location.pathname,

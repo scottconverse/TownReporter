@@ -74,7 +74,7 @@ const SCHEMA = [
  * every caller below is a request path. See `paper-settings-read-lock.test.ts`
  * and `questions/BP.md`.
  */
-async function ensureSchema(): Promise<void> {
+export async function ensureYoutubeDataApiSchema(): Promise<void> {
   await ensureSchemaOnce(await getSql(), "youtube-data-api", SCHEMA);
 }
 
@@ -124,7 +124,7 @@ export type YouTubeKeyRow = {
 };
 
 async function readKeyRow(newsroomId: number): Promise<YouTubeKeyRow> {
-  await ensureSchema();
+  await ensureYoutubeDataApiSchema();
   const sql = await getSql();
   const rows = await sql<{ encrypted_api_key: string | null; quota_blocked_day: string | null }>`
     select encrypted_api_key, quota_blocked_day from youtube_api_settings where newsroom_id = ${newsroomId} limit 1
@@ -174,7 +174,7 @@ export async function recordYouTubeUnits(
   units = YOUTUBE_API_UNIT_COST,
   at: Date = new Date(),
 ): Promise<void> {
-  await ensureSchema();
+  await ensureYoutubeDataApiSchema();
   const sql = await getSql();
   await sql`
     insert into youtube_api_usage(newsroom_id, day, units) values (${newsroomId}, ${pacificDay(at)}, ${units})
@@ -186,7 +186,7 @@ export async function readYouTubeUnits(
   newsroomId: number,
   at: Date = new Date(),
 ): Promise<number> {
-  await ensureSchema();
+  await ensureYoutubeDataApiSchema();
   const sql = await getSql();
   const rows = await sql<{ units: number }>`
     select units from youtube_api_usage where newsroom_id = ${newsroomId} and day = ${pacificDay(at)}
@@ -196,7 +196,7 @@ export async function readYouTubeUnits(
 
 /** Remember that Google refused today. Cleared by the Pacific day rolling over. */
 async function blockForToday(newsroomId: number, at: Date): Promise<void> {
-  await ensureSchema();
+  await ensureYoutubeDataApiSchema();
   const sql = await getSql();
   await sql`
     insert into youtube_api_settings(newsroom_id, quota_blocked_day) values (${newsroomId}, ${pacificDay(at)})
@@ -480,7 +480,7 @@ export async function saveYouTubeApiKey(
   apiKey: string,
 ): Promise<YouTubeKeyState> {
   const me = await requireEditor(userId);
-  await ensureSchema();
+  await ensureYoutubeDataApiSchema();
   const sql = await getSql();
   const encrypted = encryptApiKey(apiKey);
   await sql`
@@ -498,7 +498,7 @@ export async function saveYouTubeApiKey(
 
 export async function removeYouTubeApiKey(userId: string): Promise<YouTubeKeyState> {
   const me = await requireEditor(userId);
-  await ensureSchema();
+  await ensureYoutubeDataApiSchema();
   const sql = await getSql();
   await sql`
     insert into youtube_api_settings(newsroom_id, encrypted_api_key, quota_blocked_day, updated_at)

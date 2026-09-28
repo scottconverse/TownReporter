@@ -16,6 +16,7 @@ import {
   readSummary,
   tickedCards,
   duplicateNote,
+  duplicateNoteAfterSave,
   selectionFromCard,
   type ReviewCard,
 } from "./import-review.ts";
@@ -321,6 +322,28 @@ describe("the choices the review screen offers", () => {
     );
     assert.match(duplicateNote({ headline: "Ride Longmont expansion", leadId: 12 }), /already on the desk/);
     assert.equal(duplicateNote(undefined), "");
+  });
+
+  it("states the match, and no decision, once the story is already saved", () => {
+    /*
+      Unit CA, note 6. The paste tab reads its warning AFTER the save, where
+      "Import it anyway if it is different — you decide" describes a step the
+      editor has already taken. The post-save sentence names the story instead.
+    */
+    assert.equal(
+      duplicateNoteAfterSave({ headline: "Ride Longmont expansion", leadId: 12 }),
+      "It looks like “Ride Longmont expansion”, already in the Queue. Kill one if they are the same.",
+    );
+    assert.equal(
+      duplicateNoteAfterSave({ headline: "Council votes on marijuana rules", slug: "council-votes" }),
+      "It looks like “Council votes on marijuana rules”, already on the paper. Kill one if they are the same.",
+    );
+    // The choice stays on the review screen, where it is still a choice.
+    assert.match(duplicateNote({ headline: "Ride Longmont expansion", leadId: 12 }), /Import it anyway/);
+    assert.doesNotMatch(
+      duplicateNoteAfterSave({ headline: "Ride Longmont expansion", leadId: 12 }),
+      /Import it anyway|you decide/,
+    );
   });
 
   it("finds a story already printed, and says which one, and leaves the decision to the editor", () => {

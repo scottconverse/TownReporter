@@ -1,6 +1,6 @@
 # TownReporter — operator setup
 
-**Current software version: [0.6.79](releases/0.6.79.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
+**Current software version: [0.6.80](releases/0.6.80.md).** See the release guide for changes and evidence boundaries; GitHub records package publication, while deployment and provider-run evidence remain separate. Editors should start at [the editor guide](editor.md).
 
 This is a Node 22 web app (TanStack Start + Vite), with a Windows installation package. The landing page in this folder is static marketing; GitHub Pages does not run the newsroom. The manual source commands are `npm run dev` / `npm run build`.
 
@@ -686,6 +686,26 @@ with **Open the story**. For the complete editor workflow—including used
 citations, redrafting against a newer transcript, publication review, and the
 limits of captions—see [From a meeting recording to a story in the editor’s
 manual](editor.md#from-a-meeting-recording-to-a-story).
+
+#### Which python runs yt-dlp (0.6.80)
+
+Capture starts yt-dlp as a python program — `python -m yt_dlp` — and reads a
+meeting's audio through **ffmpeg**, so both have to be installed on the machine
+that runs TownReporter. If that machine has more than one python and only one of
+them carries yt-dlp, the order of `PATH` silently decides which one a capture
+gets. Name the right one in the app's `.env` (or in the environment of the
+service that runs it):
+
+```
+TOWNREPORTER_PYTHON=C:\Program Files\Python313\python.exe
+```
+
+Left unset the desk uses `python` from `PATH`, as it always has. A path that is
+set but has no file behind it is refused in words, naming the variable and the
+path, rather than quietly running a different interpreter. To read the same
+answer off the machine, the Control page's **Meeting video tools** row runs that
+interpreter with `-m yt_dlp --version` and `ffmpeg -version` and names both, or
+says which one did not answer and what to set.
 
 #### Speech-to-text for tapes with no captions (optional)
 

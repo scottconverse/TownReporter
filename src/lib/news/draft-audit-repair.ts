@@ -24,6 +24,7 @@
 import {
   DRAFT_AUDIT_LIMITS,
   auditDraft,
+  findingsByIds,
   quotedSpans,
   urlsIn,
   type DraftAuditFinding,
@@ -262,6 +263,14 @@ const plural = (count: number, one: string, many: string): string =>
  *
  * The body this returns is always the safest text available: the last rewrite
  * that survived the guard, or the text that came in.
+ *
+ * `selectedIds` is the editor's ticks from the story page ("Fix these with the
+ * model"). With it, the list sent is exactly what was ticked -- including the
+ * "to read, not to fix" findings the desk would never have sent on its own,
+ * which is the whole point of the button. Without it, the list is the desk's
+ * own: every fix-level finding in the body. Either way the ids are looked up in
+ * the audit THIS function measures, so a finding the editor never saw cannot
+ * arrive as an instruction.
  */
 export async function repairDraftStyle(input: {
   headline: string;
@@ -270,6 +279,8 @@ export async function repairDraftStyle(input: {
   form: string;
   repair: DraftRepairCall;
   maxRounds?: number;
+  /** Tick boxes on the story page, by `findingId` (draft-audit.ts). */
+  selectedIds?: readonly string[];
 }): Promise<DraftStyleRepairOutcome> {
   const measure = (body: string): DraftAuditResult =>
     auditDraft({ headline: input.headline, dek: input.dek, body, form: input.form });
@@ -293,13 +304,37 @@ export async function repairDraftStyle(input: {
     note,
   });
 
-  if (before.fixCount === 0) {
+  /**
+   * What one round sends, from the audit of the text that round is about to
+   * rewrite. A ticked finding with no paragraph is left out for the same
+   * reason the desk's own list leaves the headline out: the call returns a
+   * body, so there is nothing in it the model could change.
+   */
+  const instructionsFor = (result: DraftAuditResult): DraftRepairInstruction[] =>
+    input.selectedIds
+      ? findingsByIds(result, input.selectedIds)
+          .findings.filter((finding) => finding.paragraph > 0)
+          .slice(0, DRAFT_REPAIR_LIMITS.maxFindingsSent)
+          .map(({ paragraph, sentence, message }) => ({ paragraph, sentence, message }))
+      : repairInstructions(result);
+
+  /** How much of what was asked for is still outstanding. */
+  const outstanding = (result: DraftAuditResult): number =>
+    input.selectedIds ? instructionsFor(result).length : result.fixCount;
+
+  if (!input.selectedIds && before.fixCount === 0) {
     return finish("clean", "The style check found nothing to fix, so no rewrite was asked for.");
+  }
+  if (input.selectedIds && instructionsFor(before).length === 0) {
+    return finish(
+      "open",
+      "Everything you ticked is in the headline or the dek. The model's rewrite is a body, so it cannot reach those; fix them by hand.",
+    );
   }
 
   const maxRounds = input.maxRounds ?? DRAFT_REPAIR_LIMITS.maxRounds;
-  while (rounds < maxRounds && current.fixCount > 0) {
-    const findings = repairInstructions(current);
+  while (rounds < maxRounds && outstanding(current) > 0) {
+    const findings = instructionsFor(current);
     // Nothing in the list can be acted on by a call that returns a body: every
     // remaining problem is in the headline or the dek, and those are the
     // editor's to fix.
@@ -338,6 +373,19 @@ export async function repairDraftStyle(input: {
     current = next;
   }
 
+  if (input.selectedIds) {
+    const left = outstanding(current);
+    if (left === 0) {
+      return finish(
+        "repaired",
+        `The model repaired the ${plural(instructionsFor(before).length, "problem", "problems")} you ticked.`,
+      );
+    }
+    return finish(
+      "open",
+      `${plural(left, "problem", "problems")} you ticked ${left === 1 ? "is" : "are"} still there. Fix ${left === 1 ? "it" : "them"} by hand, or ask the model again.`,
+    );
+  }
   if (current.fixCount === 0) {
     return finish(
       "repaired",

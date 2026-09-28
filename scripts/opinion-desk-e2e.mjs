@@ -26,6 +26,7 @@
 import { chromium } from "playwright";
 import { Client } from "pg";
 import { checkedUrl } from "./browser-guard.mjs";
+import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
 
 const base = checkedUrl(process.env.OPINION_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const dbUrl = process.env.OPINION_DB_URL;
@@ -69,7 +70,8 @@ async function main() {
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
   const loginHeading = page.getByRole("heading", { name: /Create the desk|Editor sign-in/ });
   await loginHeading.waitFor();
-  if (/Create the desk/.test((await loginHeading.textContent()) ?? "")) {
+  const createdDesk = /Create the desk/.test((await loginHeading.textContent()) ?? "");
+  if (createdDesk) {
     await page.getByLabel("Name").fill("Opinion Walk");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
@@ -82,6 +84,21 @@ async function main() {
   }
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   step("owns the desk");
+
+  /*
+    Unit CA, note 1's walk reads the published piece back from the paper, and
+    the public pages print nothing until first-run setup has been completed
+    (CITY-SETUP: `/articles/$slug` answers 404 on an un-onboarded desk).
+
+    Only in the branch that just claimed the desk, exactly where every other
+    walk does it. In CI this script runs SECOND, signing in to the desk
+    delete-corrections-e2e already set up, and running setup again would wait
+    for a form that is no longer there.
+  */
+  if (createdDesk) {
+    await completeFirstRunSetup(page, base);
+    step("the desk is set up, so the paper's own pages can print");
+  }
 
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Paste a piece I wrote" }).click();
@@ -104,6 +121,10 @@ async function main() {
     The two stuck shapes. A model run that times out leaves the first; the
     second is the one that alarmed the operator most, because it claims to have
     finished and shows no error while having produced nothing at all.
+
+    The third is Unit CA's: finished, with a draft, and an appendix the writer's
+    own source check refused. It is a piece that exists and cannot print, so it
+    is the row that separates "finished" from "publishable".
   */
   const c = new Client({ connectionString: dbUrl });
   await c.connect();
@@ -118,8 +139,20 @@ async function main() {
      values ($1, 1, 'Finished with nothing ${stamp}', 'desk', '', now())`,
     [owner],
   );
+  const shortClaims = await c.query(
+    `insert into drafts (user_id, newsroom_id, headline, body, topic, form, integrity_notes)
+     values ($1, 1, 'Claims missing ${stamp}', 'The body of a piece whose appendix is short.', 'opinion', 'editorial',
+             'Claims and sources are incomplete. This draft is saved, but every op-ed needs a sourced claims appendix before publication.')
+     returning id`,
+    [owner],
+  );
+  await c.query(
+    `insert into editorial_requests (user_id, newsroom_id, subject, source_kind, source_ref, draft_id, finished_at)
+     values ($1, 1, 'Claims missing ${stamp}', 'desk', '', $2, now())`,
+    [owner, shortClaims.rows[0].id],
+  );
   await c.end();
-  step("seeded a timed-out run and one that finished producing nothing");
+  step("seeded a timed-out run, one that finished producing nothing, and one whose claims are short");
 
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
   await page.waitForTimeout(800);
@@ -128,7 +161,7 @@ async function main() {
   // never change is a dead end the operator has to step around forever.
   const clears = page.getByRole("button", { name: /^(Delete|Clear)$/ });
   const count = await clears.count();
-  if (count < 3) throw new Error(`only ${count} rows offer a way to remove them; expected 3`);
+  if (count < 4) throw new Error(`only ${count} rows offer a way to remove them; expected 4`);
   for (let i = 0; i < count; i++) {
     if (await clears.nth(i).isDisabled()) {
       throw new Error(`row ${i + 1} has no usable way to be removed`);
@@ -154,6 +187,72 @@ async function main() {
     );
   }
   step(`Read it brings the piece into view (${panel.top}px of ${panel.viewport}px)`);
+
+  /*
+    Unit CA, note 1. The operator pasted a finished piece, saved it, and could
+    not find how to publish it: "Publish to the paper" lived only inside the
+    panel that Read it opens. The row draws it now, on the same server call the
+    panel makes, and only where there is a draft to print.
+  */
+  await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });
+  const timedOutRow = page.locator("li", { hasText: `Timed out ${stamp}` }).first();
+  const producedNothingRow = page.locator("li", { hasText: `Finished with nothing ${stamp}` }).first();
+  const shortClaimsRow = page.locator("li", { hasText: `Claims missing ${stamp}` }).first();
+  await timedOutRow.waitFor({ timeout: 20_000 });
+  for (const [what, row] of [
+    ["the run that timed out", timedOutRow],
+    ["the run that finished with nothing", producedNothingRow],
+    ["the finished piece whose claims appendix is short", shortClaimsRow],
+  ]) {
+    const offered = await row.getByRole("button", { name: "Publish", exact: true }).count();
+    if (offered > 0) throw new Error(`${what} is offered Publish, and has no piece to print`);
+  }
+  // It is not merely offered nothing: the row says what it wants instead.
+  await shortClaimsRow.getByRole("link", { name: "Repair claims" }).waitFor({ timeout: 20_000 });
+  step("a row that cannot print draws no Publish, and the claims row asks for its sources");
+
+  const finishedRow = page.locator("li", { hasText: `A real editorial ${stamp}` }).first();
+  await finishedRow.waitFor({ timeout: 20_000 });
+  const rowPublish = finishedRow.getByRole("button", { name: "Publish", exact: true });
+  const offered = await rowPublish.count();
+  if (offered !== 1) {
+    throw new Error(`the finished piece offers ${offered} Publishes on its row; expected 1`);
+  }
+  /*
+    0.6.80 (CK): publishing refuses an empty dek, and a pasted piece files
+    none. The row's press says so in words and prints nothing. The editor then
+    writes the dek (the full editor's Dek field; here written to the draft
+    directly, the way this walk seeds its other rows) and presses again.
+  */
+  await rowPublish.click();
+  await page.getByText(/Add a dek, the one-line summary under the headline/).waitFor({ timeout: 30_000 });
+  step("a piece with no dek is refused in words from its own row");
+  const dekClient = new Client({ connectionString: dbUrl });
+  await dekClient.connect();
+  const dekSet = await dekClient.query(
+    `update drafts set dek = 'Why this piece matters, in one line.' where headline like $1 and newsroom_id = 1 and form = 'editorial'`,
+    // Filed as "OPINION: A real editorial <stamp>"; the stamp makes it unique.
+    [`%A real editorial ${stamp}`],
+  );
+  await dekClient.end();
+  if (dekSet.rowCount !== 1) throw new Error(`the dek went to ${dekSet.rowCount} drafts; expected 1`);
+  await rowPublish.click();
+  await page.getByText(/On the paper\. See it under Published/).waitFor({ timeout: 30_000 });
+
+  await page.reload({ waitUntil: "networkidle" });
+  const printedRow = page.locator("li", { hasText: `A real editorial ${stamp}` }).first();
+  await printedRow.getByText("Published", { exact: true }).waitFor({ timeout: 20_000 });
+  if ((await printedRow.getByRole("button", { name: "Publish", exact: true }).count()) > 0) {
+    throw new Error("a piece already on the paper is still offered Publish");
+  }
+  const href = await printedRow.getByRole("link", { name: "View" }).getAttribute("href");
+  if (!href || !href.startsWith("/articles/")) {
+    throw new Error(`the published row points at ${href}, not a piece on the paper`);
+  }
+  // Published is not a state on a row; it is a page a reader can open.
+  await page.goto(`${base}${href}`, { waitUntil: "networkidle" });
+  await page.getByText(`A real editorial ${stamp}`).first().waitFor({ timeout: 20_000 });
+  step(`a finished piece publishes from its own row, and is readable at ${href}`);
 
   // Clearing a row that produced nothing must actually remove it.
   await page.goto(`${base}/desk/opinion`, { waitUntil: "networkidle" });

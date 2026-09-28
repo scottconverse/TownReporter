@@ -54,6 +54,14 @@ const storyBodyUrl = moduleUrl(
   pageImports,
 );
 
+/* 0.6.80 (CK): the article page prints its dek through `dekOrFallback`. The
+   helper is pure and imports nothing, so the real module loads here. */
+const dekFallbackUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/dek-fallback.ts", import.meta.url), "utf8"),
+  "dek-fallback.ts",
+  pageImports,
+);
+
 /* The article the page is showing. The route reads it through useQuery, so
    the query stub is the seam that lets a test set the story. */
 const reactQueryStub = inlineModule(`
@@ -198,6 +206,7 @@ const routeImports = {
   "@/lib/paper-identity": paperIdentityStub,
   "@/lib/use-sections": sectionsStub,
   "@/lib/reader": readerStub,
+  "@/lib/news/dek-fallback": dekFallbackUrl,
 };
 
 const articleRoute = await import(

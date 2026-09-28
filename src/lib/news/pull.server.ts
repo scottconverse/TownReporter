@@ -568,13 +568,20 @@ export async function runPullPipeline(
   }
 }
 
-async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<PullCheckpoint> {
+/**
+ * ACCESS EXCLUSIVE on `leads` when it runs, so once per database rather than
+ * once per pull; see `paper-settings-read-lock.test.ts`.
+ */
+export async function ensurePullLeadMemoSchema(): Promise<void> {
   const sql = await getSql();
-  // ACCESS EXCLUSIVE on `leads` when it runs, so once per database rather than
-  // once per pull; see `paper-settings-read-lock.test.ts`.
   await ensureSchemaOnce(sql, "pull-lead-memo-column", [
     "alter table leads add column if not exists notes_json text not null default '{}'",
   ]);
+}
+
+async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<PullCheckpoint> {
+  const sql = await getSql();
+  await ensurePullLeadMemoSchema();
   const rows = await sql<{ notes_json: string | null; headline: string; source_urls: string }>`
     select notes_json, headline, source_urls from leads
     where id = ${receipt.leadId} and newsroom_id = ${job.newsroom_id} limit 1

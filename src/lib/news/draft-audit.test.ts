@@ -15,6 +15,7 @@ import {
   auditDraft,
   maskQuotedText,
   repeatedSixWordRuns,
+  storyTextForAudit,
   styleCheckLabel,
   type DraftAuditFinding,
   type DraftAuditResult,
@@ -447,6 +448,74 @@ describe("six-word repeats", () => {
       body: "The council voted on the fee on Tuesday. The council meets next month on the budget.",
     });
     assert.deepEqual(withCode(result, "six-word-repeat"), []);
+  });
+});
+
+describe("the source list at the end of a story", () => {
+  /*
+    Item 8, from Scott's screenshot (2026-09-27): "Paragraph 40" was not a
+    paragraph. It was the receipts block -- "Draft One $132,457 ... PRIMARY
+    RECORD ... video check https youtube com watch" -- reported as one 391-word
+    paragraph with repeated phrases, because an op-ed's appendix is welded onto
+    the body it renders with. Receipts are not prose and nobody repairs them for
+    rhythm.
+  */
+  const prose = [
+    "The council voted on the water fee on Tuesday night.",
+    "The rate starts in January and runs for two years.",
+  ].join("\n\n");
+  /** One receipts line, repeated: the shape of the block in the screenshot. */
+  const receipt = (n: number): string =>
+    `Video check https youtube com watch Draft One $132,457 PRIMARY RECORD ${n}`;
+  const receipts = Array.from({ length: 30 }, (_, i) => receipt(i + 1)).join("\n");
+  const marked = `${prose}\n\n---\n\nCLAIMS AND SOURCES\n\n${receipts}`;
+
+  it("flags the receipts when nothing marks them, so the fixture is the real thing", () => {
+    const unmarked = audit({ form: "reported", body: `${prose}\n\n${receipts}` });
+    assert.equal(withCode(unmarked, "paragraph-length").length, 1);
+    assert.equal(withCode(unmarked, "paragraph-length")[0]!.paragraph, 3);
+    assert.ok(unmarked.measurements.sixWordRepeats > 0, "the fixture must carry a repeated run");
+  });
+
+  it("points no finding into the receipts block", () => {
+    const result = audit({ form: "reported", body: marked });
+    const intoReceipts = result.findings.filter((finding) => finding.paragraph > 2);
+    assert.deepEqual(
+      intoReceipts.map((finding) => `${finding.paragraph}:${finding.code}`),
+      [],
+    );
+  });
+
+  it("measures the story, not the receipts", () => {
+    const result = audit({ form: "reported", body: marked });
+    assert.equal(result.measurements.paragraphCount, 2);
+    assert.equal(result.measurements.wordCount, audit({ form: "reported", body: prose }).measurements.wordCount);
+    assert.ok(result.measurements.wordCount < marked.length / 4, "the receipts must be far longer than the story");
+    assert.equal(result.measurements.sixWordRepeats, 0);
+  });
+
+  it("leaves the paragraph numbers above the block exactly as the page shows them", () => {
+    const body = [
+      "The council voted on the water fee on Tuesday night.",
+      "The rate starts in January and runs for two years.",
+      "The fee pays for the new treatment plant on Mill Street.",
+    ].join("\n\n");
+    const alone = audit({ form: "reported", body });
+    const withReceipts = audit({ form: "reported", body: `${body}\n\n---\n\nCLAIMS AND SOURCES\n\n${receipts}` });
+    assert.deepEqual(withReceipts.findings, alone.findings);
+  });
+
+  it("cuts at the appendix heading too, and at a block that arrived without a rule", () => {
+    for (const head of ["CLAIMS AND SOURCES APPENDIX", "CLAIMS AND SOURCES"]) {
+      const result = audit({ form: "reported", body: `${prose}\n\n${head}\n\n${receipts}` });
+      assert.equal(result.measurements.paragraphCount, 2, head);
+    }
+  });
+
+  it("reads the story through when no receipts block is there", () => {
+    assert.equal(storyTextForAudit(prose), prose);
+    assert.equal(storyTextForAudit(marked), prose);
+    assert.equal(storyTextForAudit(`${prose}\n\n---\n\nCLAIMS AND SOURCES\n`), prose);
   });
 });
 

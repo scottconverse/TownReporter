@@ -14,6 +14,7 @@ import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
+import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { ProvenanceBlock } from "@/components/provenance";
 import { DatesPanel } from "@/components/paper/dates-panel";
 import { SectionTag } from "@/components/paper/section-tag";
@@ -337,6 +338,7 @@ function ArticlePage() {
     );
   }
 
+  const dekText = dekOrFallback(article.dek, article.body);
   const sources = parseUrlList(article.source_urls);
   const provenance = article.provenance?.length
     ? article.provenance
@@ -385,7 +387,7 @@ function ArticlePage() {
             )}
           </div>
           <h1>{article.headline}</h1>
-          {article.dek ? <p className="dek">{article.dek}</p> : null}
+          {dekText ? <p className="dek">{dekText}</p> : null}
         </header>
         <div className="bylinebar">
           <div className="bylinewho">

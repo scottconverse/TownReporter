@@ -306,6 +306,27 @@ export function duplicateNote(warning: DuplicateWarning | undefined): string {
 }
 
 /**
+ * The same duplicate, once the story is already saved.
+ *
+ * Unit CA, note 6, from the design review: "After a paste is already saved, the
+ * duplicate warning says 'Import it anyway if it is different — you decide.'
+ * That reads as a step still to take." It was the review screen's sentence word
+ * for word (`duplicateNote`, above), and the review screen is the one place the
+ * choice is real: those cards are not imported yet, so "import it anyway" is an
+ * instruction the editor can still follow. The paste tab asks its question
+ * AFTER the save (`editor-dialogs.tsx:462`, `findPasteDuplicate`), where the
+ * story is already filed and there is no decision left to make.
+ *
+ * So this one states the state instead of asking for it: both stories exist,
+ * this is the one it matched, and the caller draws the link to it. Nothing here
+ * merges, kills or renames anything -- the desk still leaves that to a person.
+ */
+export function duplicateNoteAfterSave(warning: DuplicateWarning): string {
+  const where = warning.slug ? "already on the paper" : "already in the Queue";
+  return `It looks like “${warning.headline}”, ${where}. Kill one if they are the same.`;
+}
+
+/**
  * Whether a card looks like a story the paper already has.
  *
  * A report covering the last month of meetings will happily re-tell something

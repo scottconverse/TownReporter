@@ -63,6 +63,7 @@ import {
   leadIdInput,
   leadStatusInput,
   leadDuplicateResolutionInput,
+  editLeadInput,
   meetingArticleReviewInput,
   outletInput,
   packDeleteInput,
@@ -196,7 +197,7 @@ function effortFromJob(job: Pick<DeskJob, "model_choice" | "result_json">): Mode
  * lead page waited here. `ensureSchemaOnce` runs them once per database
  * instead; see `paper-settings-read-lock.test.ts` and `questions/BP.md`.
  */
-async function ensureDraftMemoColumn() {
+export async function ensureDeskDraftMemoSchema() {
   const sql = await getSql();
   await ensureSchemaOnce(sql, "desk-draft-memo-columns", [
     "alter table drafts add column if not exists research_json text not null default '{}'",
@@ -593,8 +594,8 @@ export const fileLead = createServerFn({ method: "POST" })
 /**
  * Whether a story about to be filed looks like one the paper already has.
  *
- * Unit BW5. The one-story paste panel warned "already published as ..." with a
- * link to the story, computed from the Queue's own loaded lists
+ * Unit BW5. The one-story paste panel warned that the paste looked like one the
+ * paper already had, with a link to the story, computed from the Queue's own loaded lists
  * (`findDuplicate`, `import-review.ts:322`, over `listLeads` + `listPublishedDesk`)
  * -- and the drawn dialog holds no such lists, so the warning went with the
  * panel. This is that lookup, asked by the dialog that needs it.
@@ -642,7 +643,7 @@ export const getLead = createServerFn({ method: "GET" })
   .handler(async ({ context, data: id }) => {
     kickJobs();
     const sql = await getSql();
-    await ensureDraftMemoColumn();
+    await ensureDeskDraftMemoSchema();
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.origin,
@@ -1676,7 +1677,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     (!current ||
       !expectedDraft ||
       evidenceReviewToken(current) === evidenceReviewToken(expectedDraft));
-  await ensureDraftMemoColumn();
+  await ensureDeskDraftMemoSchema();
 
   let urls: string[] = [];
   try {
@@ -2681,7 +2682,7 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => reportingNotesInput.parse(input))
   .handler(async ({ context, data }) => {
-    await ensureDraftMemoColumn();
+    await ensureDeskDraftMemoSchema();
     return withTransaction(async (sql) => {
       /*
         Pull writes excerpts in the background. Lock the same lead row before
@@ -2725,7 +2726,7 @@ export const pullTodo = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     try {
       await assertRate(context.userId, "pull", owned(context));
-      await ensureDraftMemoColumn();
+      await ensureDeskDraftMemoSchema();
       const sql = await getSql();
       const rows = await sql<{ id: number }>`
         select id from leads
@@ -2973,6 +2974,23 @@ export const setLeadStatus = createServerFn({ method: "POST" })
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
+  });
+
+/**
+ * "Edit the lead" (design review note 2, 0.6.80): the drawn row's own
+ * subtitle is "Change the title, notes or section before drafting"
+ * (`docs/design/handoff-2026-09-26/design/Desk Dialogs.dc.html:152`). The
+ * behavior lives in `lead-edit.server.ts`, thin-wrapped here the way
+ * `saveDraft` wraps `saveDraftForEditor` -- so a test can call it directly
+ * against a real `leads` table without importing this file (see the comment
+ * on `updateLeadForEditor`).
+ */
+export const updateLead = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => editLeadInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { updateLeadForEditor } = await import("./lead-edit.server.ts");
+    return updateLeadForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 /**
@@ -3555,6 +3573,22 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   );
   const row = drafts[0];
   if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
+  /*
+    A STORY NEVER PRINTS WITH A HOLE WHERE ITS DEK BELONGS (0.6.80).
+    Nothing upstream requires one -- a pasted story is filed with `dek: ""`
+    (`paste-one-story.ts:178`) and a report's own model can omit the "why it
+    matters" paragraph a dek comes from (`import-review.ts:2111`) -- so this is
+    the one gate every reported story passes through before it prints. The
+    workbench already has a dek field (`desk.story.draft.$draftId.tsx:259`);
+    refusing here, not earlier, lets the editor fill it any time before this
+    click.
+  */
+  if (!row.dek || !row.dek.trim()) {
+    return {
+      ok: false as const,
+      error: "Add a dek, the one-line summary under the headline, before you publish.",
+    };
+  }
   if (evidenceNeedsReview(row, row.body))
     return {
       ok: false as const,

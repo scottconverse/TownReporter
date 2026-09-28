@@ -166,25 +166,40 @@ function Get-TownReporterBackupList {
   return ,@($out | Sort-Object -Property Stamp -Descending)
 }
 
-# --- The files in that folder that are NOT part of the series ---------------
+# --- The files and folders in that folder that are NOT part of the series ---
 <#
-  Everything else in the local backup folder that is a plain .sql or .dump:
-  a hand-made export, an old dump somebody saved under their own name, a
-  pg_dump custom-format .dump. The owner's rule is that these are safety
-  copies too, so they go to D: exactly like the series does.
+  Everything else in the local backup folder that looks like a one-off safety
+  copy: a hand-made .sql export, an old pg_dump custom-format .dump, or a
+  whole top-level FOLDER someone left there ("configuration_..._live-recovery",
+  a pre-upgrade "output-..." snapshot, and so on -- CF-unfinished-steps-sweep.md
+  item 14 and design/FEATURE-BACKLOG.md's "Backup series pattern ignores
+  suffixed names"). The owner's rule is that these are safety copies too, so
+  they go to D: exactly like the series does.
 
-  Read this list is what the SERIES prune never sees. The prune works from
-  Get-TownReporterBackupList, so a file in this list can never be deleted
+  Read: this list is what the SERIES prune never sees. The prune works from
+  Get-TownReporterBackupList, so an item in this list can never be deleted
   locally by the keep-three rule -- that is deliberate, and it is why these
-  two lists are separate functions rather than one with a flag.
+  two lists are separate functions rather than one with a flag. Deleting a
+  one-off item locally is Remove-TownReporterOneOffOld's job, below, and it
+  is a different rule (verified on D: AND at least MinAgeMinutes -- see there).
 
-  The extension test is what keeps the walking wounded out, and it is the
-  whole reason this is a -match on the name instead of -Filter '*.sql*':
+  The extension test on files is what keeps the walking wounded out, and it is
+  the whole reason this is a -match on the name instead of -Filter '*.sql*':
   a copy that died is <name>.sql.partial, and an <name>.sql.incomplete is a
   dump that died under the version of this file that kept those -- either way
   it does not end in .sql. A file that is not a backup must never be presented
   to the offsite copy wearing a backup's name, and it must never be hashed and
-  copied to D: as though it were one.
+  copied to D: as though it were one. A folder is judged the same way but by
+  what it holds: any .incomplete or .partial file inside it, at any depth,
+  means the folder itself is treated as not-yet-settled.
+
+  Skip = $true marks an item that is not copied or pruned THIS run because it
+  looks like it may still be being written: a .incomplete/.partial file inside
+  it (folders) or its own newest write is younger than MinAgeMinutes. This is
+  a possibly-in-progress guard, not a backup-completeness check -- a hand-named
+  item has no pg_dump trailer to look for, so recency is the only signal there
+  is. The caller logs Skip items and leaves them alone; they are picked up
+  again on the next run once they have settled.
 
   Oldest first, same as the series pass, so a run that is cut off leaves the
   newest safety copies already on the other drive.
@@ -192,23 +207,70 @@ function Get-TownReporterBackupList {
 function Get-TownReporterSafetyCopyList {
   param(
     [Parameter(Mandatory = $true)][string]$Dir,
-    [string[]]$Exclude = @()
+    [string[]]$Exclude = @(),
+    [datetime]$Now = (Get-Date),
+    [double]$MinAgeMinutes = 10
   )
   $out = New-Object System.Collections.ArrayList
   if (-not (Test-Path -LiteralPath $Dir)) { return ,@() }
   $skip = @{}
   foreach ($name in @($Exclude)) { if ($name) { $skip[$name] = $true } }
+
   foreach ($file in @(Get-ChildItem -LiteralPath $Dir -File -ErrorAction SilentlyContinue)) {
     if ($file.Name -notmatch '\.(sql|dump)$') { continue }
     if ($skip.ContainsKey($file.Name)) { continue }
+    $ageMinutes = ($Now - $file.LastWriteTime).TotalMinutes
+    $isSkip = $false
+    $skipReason = ''
+    if ($ageMinutes -lt $MinAgeMinutes) {
+      $isSkip = $true
+      $skipReason = ("it was written {0} minute(s) ago, under the {1}-minute settle time -- it may still be being written" -f [math]::Round($ageMinutes, 1), $MinAgeMinutes)
+    }
     [void]$out.Add([pscustomobject]@{
-      Name    = $file.Name
-      Path    = $file.FullName
-      Bytes   = $file.Length
-      Written = $file.LastWriteTime
+      Name        = $file.Name
+      Path        = $file.FullName
+      Bytes       = $file.Length
+      Written     = $file.LastWriteTime
+      IsDirectory = $false
+      FileCount   = 1
+      Skip        = $isSkip
+      SkipReason  = $skipReason
     })
   }
-  # The unary comma again: one file in the folder must still come back as an
+
+  foreach ($d in @(Get-ChildItem -LiteralPath $Dir -Directory -ErrorAction SilentlyContinue)) {
+    if ($skip.ContainsKey($d.Name)) { continue }
+    $files = @(Get-ChildItem -LiteralPath $d.FullName -File -Recurse -ErrorAction SilentlyContinue)
+    # An empty folder has nothing to verify (no bytes, no hash), so it is not a
+    # one-off item -- there is nothing here Test-TownReporterFolderCopyMatches
+    # could ever prove.
+    if ($files.Count -eq 0) { continue }
+    $inProgress = @($files | Where-Object { $_.Name -match '\.(incomplete|partial)$' })
+    $newest = ($files | Sort-Object -Property LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
+    $ageMinutes = ($Now - $newest).TotalMinutes
+    $isSkip = $false
+    $skipReason = ''
+    if ($inProgress.Count -gt 0) {
+      $isSkip = $true
+      $skipReason = ("it holds {0} .incomplete/.partial file(s), so it looks like it is still being written" -f $inProgress.Count)
+    } elseif ($ageMinutes -lt $MinAgeMinutes) {
+      $isSkip = $true
+      $skipReason = ("its newest file was written {0} minute(s) ago, under the {1}-minute settle time -- it may still be being written" -f [math]::Round($ageMinutes, 1), $MinAgeMinutes)
+    }
+    $bytes = ($files | Measure-Object -Property Length -Sum).Sum
+    [void]$out.Add([pscustomobject]@{
+      Name        = $d.Name
+      Path        = $d.FullName
+      Bytes       = $bytes
+      Written     = $newest
+      IsDirectory = $true
+      FileCount   = $files.Count
+      Skip        = $isSkip
+      SkipReason  = $skipReason
+    })
+  }
+
+  # The unary comma again: one item in the folder must still come back as an
   # array of one, or .Count is $null in Windows PowerShell 5.1.
   return ,@($out | Sort-Object -Property Written, Name)
 }
@@ -428,6 +490,48 @@ function Test-TownReporterCopyMatches {
     $dh = Get-TownReporterFileHash -Path $Dest
     if (-not $sh -or -not $dh) { return $false }
     return ($sh -eq $dh)
+  } catch {
+    return $false
+  }
+}
+
+<#
+  The folder version of the rule above, for a one-off item that is a whole
+  directory rather than a single file: same file COUNT, same total BYTES, and
+  the same SHA256 for every file at the same relative path. A count-and-bytes
+  match with a swapped or corrupted file inside would still look identical in
+  aggregate, which is why every file is hashed individually rather than
+  hashing, say, a concatenation of them -- the owner's rule is "same size AND
+  same SHA256" per file here just as it is for a single-file backup.
+
+  Get-FileHash is not used here for the same measured reason as
+  Get-TownReporterFileHash above: it calls that function, not the cmdlet.
+#>
+function Test-TownReporterFolderCopyMatches {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][string]$Dest
+  )
+  if (-not (Test-Path -LiteralPath $Source -PathType Container)) { return $false }
+  if (-not (Test-Path -LiteralPath $Dest -PathType Container)) { return $false }
+  try {
+    $srcRoot = (Get-Item -LiteralPath $Source).FullName
+    $dstRoot = (Get-Item -LiteralPath $Dest).FullName
+    $srcFiles = @(Get-ChildItem -LiteralPath $srcRoot -File -Recurse -ErrorAction Stop | Sort-Object -Property FullName)
+    $dstFiles = @(Get-ChildItem -LiteralPath $dstRoot -File -Recurse -ErrorAction Stop | Sort-Object -Property FullName)
+    if ($srcFiles.Count -eq 0 -or $srcFiles.Count -ne $dstFiles.Count) { return $false }
+    $srcBytes = ($srcFiles | Measure-Object -Property Length -Sum).Sum
+    $dstBytes = ($dstFiles | Measure-Object -Property Length -Sum).Sum
+    if ($srcBytes -ne $dstBytes) { return $false }
+    for ($i = 0; $i -lt $srcFiles.Count; $i++) {
+      $relSrc = $srcFiles[$i].FullName.Substring($srcRoot.Length).TrimStart('\', '/')
+      $relDst = $dstFiles[$i].FullName.Substring($dstRoot.Length).TrimStart('\', '/')
+      if ($relSrc -ne $relDst) { return $false }
+      $sh = Get-TownReporterFileHash -Path $srcFiles[$i].FullName
+      $dh = Get-TownReporterFileHash -Path $dstFiles[$i].FullName
+      if (-not $sh -or -not $dh -or $sh -ne $dh) { return $false }
+    }
+    return $true
   } catch {
     return $false
   }
@@ -715,23 +819,32 @@ function New-TownReporterBackup {
        bad copy never appears under a backup's name, and a good copy already on
        D: is never replaced by a bad one.
 
-  A second pass then does the same thing for every other .sql and .dump in the
-  folder (Get-TownReporterSafetyCopyList), into <offsite>\other-safety-copies\.
-  Those are the owner's hand-named copies, and the same four rules apply with
-  one change: step 1 is not run on them. A .dump is pg_dump's binary custom
-  format and has no text trailer to look for, and a hand-named .sql is not
-  necessarily this series' pg_dump output at all -- so the guarantee for these
-  is "the bytes on D: are the bytes that are on C:", which is exactly what
-  Test-TownReporterCopyMatches proves. They are never added to the series
-  list, so the keep-three prune cannot touch them, and nothing is ever deleted
-  from D:.
+  A second pass then does the same thing for every other .sql/.dump FILE and
+  every top-level FOLDER in the backup folder (Get-TownReporterSafetyCopyList),
+  into <offsite>\other-safety-copies\. Those are the owner's one-off items --
+  hand-named exports and old pre-upgrade snapshot folders -- and the same four
+  rules apply with two changes: step 1 (the completeness check) is not run on
+  them, and an item Get-TownReporterSafetyCopyList marked Skip (a .incomplete/
+  .partial file inside it, or written under 10 minutes ago) is logged and left
+  alone this run rather than copied. A .dump is pg_dump's binary custom format
+  and has no text trailer to look for, and a hand-named .sql or a folder is not
+  this series' pg_dump output at all -- so the guarantee for these is "the
+  bytes on D: are the bytes that are on C:", which is exactly what
+  Test-TownReporterCopyMatches (a file) and Test-TownReporterFolderCopyMatches
+  (a folder: file count, total bytes, and a SHA256 of every file at the same
+  relative path) prove. They are never added to the series list, so the
+  keep-three prune cannot touch them, and nothing is ever deleted from D:.
+  Removing an old, verified one-off item from C: is Remove-TownReporterOneOffOld's
+  job, below -- a separate rule (verified on D: AND at least 14 days old) from
+  the series' keep-three.
 #>
 function Copy-TownReporterBackupOffsite {
   param(
     [string]$LogFile,
     [Parameter(Mandatory = $true)][string]$BackupDir,
     [Parameter(Mandatory = $true)][string]$OffsiteDir,
-    [long]$MinFreeGb = 100
+    [long]$MinFreeGb = 100,
+    [datetime]$Now = (Get-Date)
   )
   $ready = Test-TownReporterOffsiteReady -Dir $OffsiteDir
   if (-not $ready.Ok) {
@@ -740,7 +853,16 @@ function Copy-TownReporterBackupOffsite {
   }
 
   $local = Get-TownReporterBackupList -Dir $BackupDir
-  $safety = Get-TownReporterSafetyCopyList -Dir $BackupDir -Exclude @($local | ForEach-Object { $_.Name })
+  # Items that look like they may still be being written (a .incomplete /
+  # .partial file, or written less than 10 minutes ago) are left alone this
+  # run and logged as skipped -- they are not counted in $safety, so they
+  # never show up as a "failure" in the tally below, and are picked up again
+  # once they have settled.
+  $safetyAll = Get-TownReporterSafetyCopyList -Dir $BackupDir -Exclude @($local | ForEach-Object { $_.Name }) -Now $Now
+  foreach ($sk in @($safetyAll | Where-Object { $_.Skip })) {
+    Write-TownReporterBackupLog $LogFile "offsite copy: skipping the one-off $($sk.Name) -- $($sk.SkipReason)"
+  }
+  $safety = @($safetyAll | Where-Object { -not $_.Skip })
   if ($local.Count -eq 0 -and $safety.Count -eq 0) {
     return @{ Ok = $true; Reason = 'there are no local backups to copy'; Copied = 0; Verified = 0; Failed = 0; FreeGb = $ready.FreeGb; OtherCopied = 0; OtherVerified = 0; OtherFailed = 0; OtherTotal = 0 }
   }
@@ -847,8 +969,17 @@ function Copy-TownReporterBackupOffsite {
 
   if ($dirReady) {
     foreach ($f in $safety) {
+      # A folder is verified by file count, total bytes, and a SHA256 of every
+      # file at the same relative path (Test-TownReporterFolderCopyMatches); a
+      # single item uses the same same-size-and-SHA256 test as the series.
       $dest = Join-Path $copiesDir $f.Name
-      if (Test-TownReporterCopyMatches -Source $f.Path -Dest $dest) { $otherVerified++; continue }
+      $kind = if ($f.IsDirectory) { 'folder' } else { 'file' }
+      $already = if ($f.IsDirectory) { Test-TownReporterFolderCopyMatches -Source $f.Path -Dest $dest } else { Test-TownReporterCopyMatches -Source $f.Path -Dest $dest }
+      if ($already) {
+        $otherVerified++
+        Write-TownReporterBackupLog $LogFile "offsite copy: the one-off $kind $($f.Name) is already on $OffsiteDir (verified)"
+        continue
+      }
 
       if ($null -ne $free -and ($free - ($f.Bytes / 1GB)) -lt $MinFreeGb) {
         $otherFailed++
@@ -858,22 +989,27 @@ function Copy-TownReporterBackupOffsite {
       }
 
       $partial = $dest + '.partial'
-      Write-TownReporterBackupLog $LogFile ("offsite copy: copying the other safety copy $($f.Name) ({0} MB) to $copiesDir" -f [math]::Round($f.Bytes / 1MB, 1))
+      $sizeText = if ($f.IsDirectory) { "{0} file(s), {1} MB" -f $f.FileCount, [math]::Round($f.Bytes / 1MB, 1) } else { "{0} MB" -f [math]::Round($f.Bytes / 1MB, 1) }
+      Write-TownReporterBackupLog $LogFile ("offsite copy: copying the one-off $kind $($f.Name) ($sizeText) to $copiesDir")
       Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
       try {
-        Copy-Item -LiteralPath $f.Path -Destination $partial -Force -ErrorAction Stop
+        # Copy-Item -Recurse against a directory SOURCE creates $partial as a
+        # copy of that directory (not a copy placed inside it); a plain file
+        # source is copied the same way the series files are.
+        Copy-Item -LiteralPath $f.Path -Destination $partial -Recurse:$f.IsDirectory -Force -ErrorAction Stop
       } catch {
         $otherFailed++
         if (-not $firstFailure) { $firstFailure = "$($f.Name) could not be copied to the other-safety-copies folder ($($_.Exception.Message))" }
-        Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) could not be copied: $($_.Exception.Message)"
+        Write-TownReporterBackupLog $LogFile "offsite copy: the one-off $kind $($f.Name) could not be copied: $($_.Exception.Message)"
         Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
         continue
       }
 
-      if (-not (Test-TownReporterCopyMatches -Source $f.Path -Dest $partial)) {
+      $verifies = if ($f.IsDirectory) { Test-TownReporterFolderCopyMatches -Source $f.Path -Dest $partial } else { Test-TownReporterCopyMatches -Source $f.Path -Dest $partial }
+      if (-not $verifies) {
         $otherFailed++
-        if (-not $firstFailure) { $firstFailure = "$($f.Name) did not verify after the copy (same size and SHA256 required)" }
-        Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) did NOT verify on $OffsiteDir -- the copy is discarded, nothing is deleted"
+        if (-not $firstFailure) { $firstFailure = "$($f.Name) did not verify after the copy (same size/count and SHA256 required)" }
+        Write-TownReporterBackupLog $LogFile "offsite copy: the one-off $kind $($f.Name) did NOT verify on $OffsiteDir -- the copy is discarded, nothing is deleted"
         Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
         continue
       }
@@ -883,7 +1019,7 @@ function Copy-TownReporterBackupOffsite {
       } catch {
         $otherFailed++
         if (-not $firstFailure) { $firstFailure = "$($f.Name) verified but could not be put in place ($($_.Exception.Message))" }
-        Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) verified but could not be put in place: $($_.Exception.Message)"
+        Write-TownReporterBackupLog $LogFile "offsite copy: the one-off $kind $($f.Name) verified but could not be put in place: $($_.Exception.Message)"
         Remove-TownReporterStaleCopy -Path $partial -LogFile $LogFile
         continue
       }
@@ -891,7 +1027,8 @@ function Copy-TownReporterBackupOffsite {
       $otherCopied++
       $otherVerified++
       if ($null -ne $free) { $free = [math]::Round($free - ($f.Bytes / 1GB), 1) }
-      Write-TownReporterBackupLog $LogFile "offsite copy: the other safety copy $($f.Name) verified in $copiesDir (same size and SHA256)"
+      $verifyText = if ($f.IsDirectory) { "$($f.FileCount) file(s), same bytes and SHA256 each" } else { 'same size and SHA256' }
+      Write-TownReporterBackupLog $LogFile "offsite copy: the one-off $kind $($f.Name) verified in $copiesDir ($verifyText)"
     }
   }
 
@@ -1005,6 +1142,100 @@ function Remove-TownReporterBackupOld {
   return @{ Ok = $true; Deleted = @($deleted); Kept = $Keep; Reason = "kept the newest $Keep"; FreeGb = $ready.FreeGb }
 }
 
+# --- Removing OLD one-off items, once they are safe -------------------------
+<#
+  The one-off items (Get-TownReporterSafetyCopyList: hand-named .sql/.dump
+  files and old top-level folders) are never touched by the keep-three rule
+  above -- that rule only ever sees the dated series. Left alone forever is
+  what CF-unfinished-steps-sweep.md item 14 found: 51 one-off files, 3.4 GB,
+  accumulating on C: because nothing ever cleaned them up automatically. This
+  function is the automatic version of the one-time manual cleanup that item
+  described, and it is deliberately narrower than the series prune:
+
+    - An item is removed from C: only when it is verified on D: (same rule as
+      the series: same size AND SHA256 for a file, same file count/bytes/
+      per-file SHA256 for a folder) AND it is at least MinAgeDays old, going by
+      the SAME "Written" instant Get-TownReporterSafetyCopyList reports (a
+      file's LastWriteTime, or a folder's newest file's LastWriteTime).
+      Age matters here in a way it does not for the series: these are safety
+      copies someone may still be actively comparing against or restoring
+      from, so a 14-day grace period is the difference between "definitely
+      done with this" and deleting something the day after somebody made it.
+    - Both conditions are per item, independently -- an item newer than
+      MinAgeDays is kept even if it is verified, and an item that fails to
+      verify is kept even if it is old, with the log saying which.
+    - D: missing, not writable, or short of MinFreeGb blocks the WHOLE pass,
+      exactly like the series prune -- nothing here is deleted while the only
+      other copy of it cannot be proven safe.
+    - Nothing is ever deleted from D:, and nothing here can ever touch a
+      dated-series file: SeriesNames is passed straight to
+      Get-TownReporterSafetyCopyList's -Exclude, the same list that keeps a
+      series backup out of the one-off scan in Copy-TownReporterBackupOffsite.
+    - An item Get-TownReporterSafetyCopyList marks Skip (looks like it may
+      still be being written) is left alone and logged, the same as the copy
+      pass does -- a partial write is never a candidate for deletion.
+
+  Returns the names it deleted, for the same reason the series prune does: a
+  delete with no record of the name is a delete nobody can account for later.
+#>
+function Remove-TownReporterOneOffOld {
+  param(
+    [string]$LogFile,
+    [Parameter(Mandatory = $true)][string]$BackupDir,
+    [Parameter(Mandatory = $true)][string]$OffsiteDir,
+    [string[]]$SeriesNames = @(),
+    [int]$MinAgeDays = 14,
+    [long]$MinFreeGb = 100,
+    [datetime]$Now = (Get-Date)
+  )
+  $empty = @{ Ok = $true; Deleted = @(); Reason = 'no one-off items to consider' }
+  $items = Get-TownReporterSafetyCopyList -Dir $BackupDir -Exclude $SeriesNames -Now $Now
+  if ($items.Count -eq 0) { return $empty }
+
+  $ready = Test-TownReporterOffsiteReady -Dir $OffsiteDir
+  if (-not $ready.Ok) {
+    Write-TownReporterBackupLog $LogFile "one-off prune: NOT deleting anything -- $($ready.Reason)"
+    return @{ Ok = $false; Deleted = @(); Reason = $ready.Reason }
+  }
+  if ($null -eq $ready.FreeGb -or $ready.FreeGb -lt $MinFreeGb) {
+    $reason = if ($null -eq $ready.FreeGb) { "$OffsiteDir free space could not be read" } else { ("{0} has only {1} GB free, below the {2} GB limit" -f $OffsiteDir, $ready.FreeGb, $MinFreeGb) }
+    Write-TownReporterBackupLog $LogFile "one-off prune: NOT deleting anything -- $reason"
+    return @{ Ok = $false; Deleted = @(); Reason = $reason }
+  }
+
+  $copiesDir = Join-Path $OffsiteDir 'other-safety-copies'
+  $deleted = New-Object System.Collections.ArrayList
+  foreach ($item in $items) {
+    if ($item.Skip) {
+      Write-TownReporterBackupLog $LogFile "one-off prune: skipped $($item.Name) -- $($item.SkipReason)"
+      continue
+    }
+
+    $dest = Join-Path $copiesDir $item.Name
+    $verified = if ($item.IsDirectory) { Test-TownReporterFolderCopyMatches -Source $item.Path -Dest $dest } else { Test-TownReporterCopyMatches -Source $item.Path -Dest $dest }
+    if (-not $verified) {
+      Write-TownReporterBackupLog $LogFile "one-off prune: kept $($item.Name) -- not verified on $OffsiteDir yet"
+      continue
+    }
+
+    $ageDays = [math]::Round(($Now - $item.Written).TotalDays, 1)
+    if ($ageDays -lt $MinAgeDays) {
+      Write-TownReporterBackupLog $LogFile ("one-off prune: kept {0} -- only {1} day(s) old, younger than the {2}-day floor" -f $item.Name, $ageDays, $MinAgeDays)
+      continue
+    }
+
+    try {
+      Remove-Item -LiteralPath $item.Path -Force -Recurse -ErrorAction Stop
+      [void]$deleted.Add($item.Name)
+      Write-TownReporterBackupLog $LogFile ("one-off prune: pruned $($item.Name) -- verified on $OffsiteDir and $ageDays day(s) old")
+    } catch {
+      Write-TownReporterBackupLog $LogFile "one-off prune: could not prune $($item.Name): $($_.Exception.Message)"
+    }
+  }
+
+  return @{ Ok = $true; Deleted = @($deleted); Reason = "$($deleted.Count) one-off item(s) pruned" }
+}
+
 # --- The lock --------------------------------------------------------------
 <#
   One backup at a time. The watchdog's task already refuses to overlap itself
@@ -1103,6 +1334,8 @@ function Get-TownReporterBackupState {
     offsiteAt         = $null
     prunedAt          = $null
     prunedCount       = 0
+    oneOffPrunedAt    = $null
+    oneOffPrunedCount = 0
   }
   if (-not (Test-Path -LiteralPath $StateFile)) { return $state }
   try {
@@ -1416,6 +1649,10 @@ function Invoke-TownReporterBackupRun {
     [int]$MaxAgeHours = 20,
     [int]$NightHour = 2,
     [int]$LockWaitSeconds = 0,
+    # How old a verified one-off item (a hand-named .sql/.dump or an old
+    # top-level folder) must be before it is pruned from C:. See
+    # Remove-TownReporterOneOffOld.
+    [int]$OneOffMinAgeDays = 14,
     [datetime]$Now = (Get-Date),
     [switch]$Offsite,
     [switch]$Force,
@@ -1477,7 +1714,7 @@ function Invoke-TownReporterBackupRun {
 
     # 2. The copy to the second drive. Never skipped: a run that took no dump
     #    still has to catch up on anything the last one could not copy.
-    $copy = Copy-TownReporterBackupOffsite -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MinFreeGb $MinFreeGb
+    $copy = Copy-TownReporterBackupOffsite -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -MinFreeGb $MinFreeGb -Now $Now
     $state['offsiteOk'] = [bool]$copy.Ok
     $state['offsiteReason'] = if ($copy.Ok) { $null } else { $copy.Reason }
     $state['offsiteVerified'] = $copy.Verified
@@ -1503,6 +1740,21 @@ function Invoke-TownReporterBackupRun {
       if (@($prune.Deleted).Count -gt 0) { [void]$lines.Add("pruned: deleted $(@($prune.Deleted).Count) older local backup(s), keeping the newest $Keep") }
     } else {
       [void]$lines.Add("pruned nothing: $($prune.Reason)")
+    }
+
+    # 3b. The one-off prune: hand-named files and old folders, a separate rule
+    # (verified on D: AND at least $OneOffMinAgeDays old) from the series'
+    # keep-three above. Also runs regardless of $copy.Ok, for the same reason:
+    # Remove-TownReporterOneOffOld verifies each item against D: itself before
+    # ever deleting it.
+    $seriesNamesNow = @((Get-TownReporterBackupList -Dir $BackupDir) | ForEach-Object { $_.Name })
+    $oneOffPrune = Remove-TownReporterOneOffOld -LogFile $LogFile -BackupDir $BackupDir -OffsiteDir $OffsiteDir -SeriesNames $seriesNamesNow -MinAgeDays $OneOffMinAgeDays -MinFreeGb $MinFreeGb -Now $Now
+    if ($oneOffPrune.Ok) {
+      $state['oneOffPrunedAt'] = Get-TownReporterIsoTime -Time (Get-Date)
+      $state['oneOffPrunedCount'] = @($oneOffPrune.Deleted).Count
+      if (@($oneOffPrune.Deleted).Count -gt 0) { [void]$lines.Add("pruned: deleted $(@($oneOffPrune.Deleted).Count) older one-off item(s) verified on $OffsiteDir and past the $OneOffMinAgeDays-day floor") }
+    } else {
+      [void]$lines.Add("one-off pruned nothing: $($oneOffPrune.Reason)")
     }
 
     $local = Get-TownReporterBackupList -Dir $BackupDir

@@ -49,7 +49,7 @@ import {
   NO_SECTION,
   SECTION_REQUIRED,
   cardProblems,
-  duplicateNote,
+  duplicateNoteAfterSave,
   findDuplicate,
   selectionFromCard,
   type DuplicateWarning,
@@ -1519,6 +1519,17 @@ function DeskHome() {
                 </p>
               ) : null}
               {pasted ? (
+                /*
+                  Unit CA, note 6. This panel is reached by its own hash
+                  (`/desk#paste-one-story`, still mounted and still a live deep
+                  link to the same work) and it warns the same way the drawn New
+                  story dialog's paste tab does -- after the add, over a story
+                  that is already filed. So it says it the same way:
+                  `duplicateNoteAfterSave` names the story it matched instead of
+                  offering "Import it anyway if it is different — you decide",
+                  which was the review screen's sentence and, read here,
+                  described a step the editor had already taken.
+                */
                 <p className="composer-source-note" role="status">
                   Added to the Queue as a draft. Nothing is published.{" "}
                   <Link
@@ -1532,7 +1543,7 @@ function DeskHome() {
                   {pasted.duplicate ? (
                     <>
                       {" "}
-                      {duplicateNote(pasted.duplicate)}{" "}
+                      {duplicateNoteAfterSave(pasted.duplicate)}{" "}
                       {pasted.duplicate.slug ? (
                         <Link
                           to="/articles/$slug"

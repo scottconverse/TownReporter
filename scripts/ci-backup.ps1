@@ -895,6 +895,11 @@ $handDump = Join-Path $script:backupDir 'old-custom-format.dump'
 $dumpBytes = New-Object byte[] 65536
 for ($i = 0; $i -lt $dumpBytes.Length; $i++) { $dumpBytes[$i] = [byte](($i * 31 + 7) % 256) }
 [IO.File]::WriteAllBytes($handDump, $dumpBytes)
+# Backdated past the 10-minute settle time (Get-TownReporterSafetyCopyList's
+# in-progress guard, added for the one-off feature) so this section's runs see
+# them as settled, not as something that might still be being written.
+(Get-Item -LiteralPath $handSql).LastWriteTime = (Get-Date).AddHours(-1)
+(Get-Item -LiteralPath $handDump).LastWriteTime = (Get-Date).AddHours(-1)
 # Four things that are NOT safety copies, two of them wearing a .sql or .dump
 # in the middle of their name -- which is exactly the case the name test has
 # to get right.
@@ -958,6 +963,7 @@ Reset-World "others-fail"
 New-SixBackups
 $handOnly = Join-Path $script:backupDir 'keep-this-one.sql'
 [IO.File]::WriteAllText($handOnly, (New-FakeDumpText -Token 'SECONDhandSECONDhandSECONDhandSECONDhandSECONDhandSECONDhandSECON'), (New-Object Text.UTF8Encoding $false))
+(Get-Item -LiteralPath $handOnly).LastWriteTime = (Get-Date).AddHours(-1)
 # A file where the folder needs to be: the folder cannot be made, so nothing
 # can be copied into it, and the run has to say so instead of saying nothing.
 Set-Content -LiteralPath (Join-Path $script:offsite 'other-safety-copies') -Value 'not a folder' -Encoding ASCII
@@ -972,6 +978,176 @@ Check "the receipt says how many safety copies did not make it" ($text -match '1
 Check "the log says the folder could not be made, in the machine's own words" ($text -match 'NOT copying the 1 other safety copies')
 Check "the hand-named file is still on this machine, untouched" (Test-Path -LiteralPath $handOnly -PathType Leaf)
 Check "and nothing was deleted from this machine" ((Get-LocalNames).Count -eq 6) ((Get-LocalNames).Count)
+
+# ---------------------------------------------------------------------------
+# 16. A one-off FOLDER, not just a file (CF-unfinished-steps-sweep.md item 14 /
+#     design/FEATURE-BACKLOG.md: configuration_..., output-...-swap, and the
+#     rest of the real folders sitting in the live backups folder outside the
+#     dated series -- never touched here, only the shape is copied).
+# ---------------------------------------------------------------------------
+function New-OneOffFolder {
+  param([string]$Dir, [string]$Name, [int]$FileCount = 3)
+  $path = Join-Path $Dir $Name
+  New-Item -ItemType Directory -Force -Path $path | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $path "sub") | Out-Null
+  for ($i = 0; $i -lt $FileCount; $i++) {
+    $bytes = New-Object byte[] 4096
+    for ($j = 0; $j -lt $bytes.Length; $j++) { $bytes[$j] = [byte](($i * 17 + $j) % 256) }
+    $target = if ($i -eq 0) { Join-Path $path "file$i.dat" } else { Join-Path (Join-Path $path "sub") "file$i.dat" }
+    [IO.File]::WriteAllBytes($target, $bytes)
+  }
+  Get-ChildItem -LiteralPath $path -File -Recurse | ForEach-Object { $_.LastWriteTime = (Get-Date).AddHours(-1) }
+  return $path
+}
+
+Reset-World "folder"
+Write-Host "  16. a hand-left FOLDER in the backups directory is a one-off item too"
+New-SixBackups
+$folderPath = New-OneOffFolder -Dir $script:backupDir -Name "pre-0.6.34-local-files-20260908-125442" -FileCount 3
+$localNames16 = Get-LocalNames
+$oneOffs16 = Get-TownReporterSafetyCopyList -Dir $script:backupDir -Exclude $localNames16
+Check "the folder is seen as a one-off item, marked as a directory" ((@($oneOffs16 | Where-Object { $_.Name -eq 'pre-0.6.34-local-files-20260908-125442' }).IsDirectory) -eq $true)
+Check "its file count is right (3 files, one nested)" ((@($oneOffs16 | Where-Object { $_.Name -eq 'pre-0.6.34-local-files-20260908-125442' }).FileCount) -eq 3)
+
+$run = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "the run is Ok" ($run.Ok -eq $true) $run.Reason
+$offsiteFolder = Join-Path $script:offsite 'other-safety-copies\pre-0.6.34-local-files-20260908-125442'
+Check "the folder now exists on the other drive" (Test-Path -LiteralPath $offsiteFolder -PathType Container)
+Check "and it verifies file-by-file: same count, same bytes, same SHA256 each" ((Test-TownReporterFolderCopyMatches -Source $folderPath -Dest $offsiteFolder) -eq $true)
+Check "the log calls it a folder, not a file" ($text -match 'the one-off folder pre-0\.6\.34-local-files-20260908-125442 \(3 file\(s\)')
+Check "no .partial folder is left behind" (-not (Test-Path -LiteralPath ($offsiteFolder + '.partial')))
+
+# A byte flipped inside the copy on D: must be caught -- count and total bytes
+# alone would miss it, which is why every file is hashed individually.
+$corrupted = Join-Path $offsiteFolder 'sub\file1.dat'
+$bytes = [IO.File]::ReadAllBytes($corrupted)
+$bytes[0] = $bytes[0] -bxor 0xFF
+[IO.File]::WriteAllBytes($corrupted, $bytes)
+Check "a single flipped byte inside the copy is caught (same count and bytes, different hash)" ((Test-TownReporterFolderCopyMatches -Source $folderPath -Dest $offsiteFolder) -eq $false)
+# Restore it so the rest of this section's runs see a clean copy again.
+$bytes[0] = $bytes[0] -bxor 0xFF
+[IO.File]::WriteAllBytes($corrupted, $bytes)
+Check "restoring the byte makes it verify again" ((Test-TownReporterFolderCopyMatches -Source $folderPath -Dest $offsiteFolder) -eq $true)
+
+# ---------------------------------------------------------------------------
+# 17. Skip anything that looks like it might still be being written.
+# ---------------------------------------------------------------------------
+Write-Host "  17. a one-off item that looks like it might still be being written is skipped, not copied"
+Reset-World "settling"
+New-SixBackups
+# A file written moments ago: under the 10-minute settle time.
+$freshSql = Join-Path $script:backupDir 'just-written.sql'
+[IO.File]::WriteAllText($freshSql, (New-FakeDumpText -Token 'FRESHfileFRESHfileFRESHfileFRESHfileFRESHfileFRESHfileFRESHfil'), (New-Object Text.UTF8Encoding $false))
+# A folder holding a .partial file: looks like a copy still in flight.
+$busyFolder = Join-Path $script:backupDir 'output-0.6.51-pre-0.6.54-swap'
+New-Item -ItemType Directory -Force -Path $busyFolder | Out-Null
+[IO.File]::WriteAllBytes((Join-Path $busyFolder 'done.dat'), (New-Object byte[] 2048))
+[IO.File]::WriteAllText((Join-Path $busyFolder 'still-copying.dat.partial'), 'not finished', (New-Object Text.UTF8Encoding $false))
+Get-ChildItem -LiteralPath $busyFolder -File | ForEach-Object { $_.LastWriteTime = (Get-Date).AddHours(-1) }
+
+$localNames17 = Get-LocalNames
+$oneOffs17 = Get-TownReporterSafetyCopyList -Dir $script:backupDir -Exclude $localNames17
+$freshItem = @($oneOffs17 | Where-Object { $_.Name -eq 'just-written.sql' })
+$busyItem = @($oneOffs17 | Where-Object { $_.Name -eq 'output-0.6.51-pre-0.6.54-swap' })
+Check "the fresh file is marked Skip -- it is under the 10-minute settle time" ($freshItem[0].Skip -eq $true) $freshItem[0].SkipReason
+Check "the busy folder is marked Skip -- it holds a .partial file" ($busyItem[0].Skip -eq $true) $busyItem[0].SkipReason
+
+$run = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "the run is still Ok -- a skip is not a failure" ($run.Ok -eq $true) $run.Reason
+Check "neither the fresh file nor the busy folder made it to the other drive yet" (-not (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\just-written.sql')) -and -not (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\output-0.6.51-pre-0.6.54-swap')))
+Check "the log says why the file was skipped" ($text -match "skipping the one-off just-written\.sql -- it was written")
+Check "the log says why the folder was skipped" ($text -match "skipping the one-off output-0\.6\.51-pre-0\.6\.54-swap -- it holds 1 \.incomplete/\.partial file")
+Check "both still sit untouched on this machine" ((Test-Path -LiteralPath $freshSql -PathType Leaf) -and (Test-Path -LiteralPath $busyFolder -PathType Container))
+
+# Once they have settled (no longer fresh, no longer holding a .partial), the
+# very next run picks them up -- nothing here is skipped forever.
+(Get-Item -LiteralPath $freshSql).LastWriteTime = (Get-Date).AddHours(-1)
+Remove-Item -LiteralPath (Join-Path $busyFolder 'still-copying.dat.partial') -Force
+$run2 = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+Check "once settled, the file is copied on the very next run" (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\just-written.sql'))
+Check "and so is the folder" (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\output-0.6.51-pre-0.6.54-swap') -PathType Container)
+
+# ---------------------------------------------------------------------------
+# 18. Pruning one-off items: verified AND old enough, never otherwise.
+# ---------------------------------------------------------------------------
+Write-Host "  18. a one-off item is pruned from C: only once it is verified on D: AND at least 14 days old"
+Reset-World "oneoffprune"
+New-SixBackups
+$youngPath = New-OneOffFolder -Dir $script:backupDir -Name "configuration_2026-09-01_203359_live-recovery" -FileCount 2
+$oldSql = Join-Path $script:backupDir 'townreporter_acceptance_20260809_1805-final-1844.dump'
+[IO.File]::WriteAllBytes($oldSql, (New-Object byte[] 8192))
+(Get-Item -LiteralPath $oldSql).LastWriteTime = (Get-Date).AddDays(-30)
+
+# Copy and prune happen in the same call (Invoke-TownReporterBackupRun always
+# runs the one-off prune right after the copy), so a source that is ALREADY
+# verifiable and ALREADY old enough the moment it is first copied -- the old
+# dump here, backdated before this run -- is copied AND pruned in this one
+# run. The young folder is copied but kept, because it is not old enough yet.
+$run = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "the run is Ok" ($run.Ok -eq $true) $run.Reason
+Check "the folder is on D:" (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\configuration_2026-09-01_203359_live-recovery') -PathType Container)
+Check "the old dump is on D:" (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\townreporter_acceptance_20260809_1805-final-1844.dump') -PathType Leaf)
+Check "the young, verified folder is KEPT on C: -- it is not 14 days old yet" (Test-Path -LiteralPath $youngPath -PathType Container)
+Check "the log says why it was kept" ($text -match "kept configuration_2026-09-01_203359_live-recovery -- only .* day\(s\) old, younger than the 14-day floor")
+Check "the old, verified dump is PRUNED from C: in the same run it was verified" (-not (Test-Path -LiteralPath $oldSql -PathType Leaf))
+Check "the log says it was pruned, verified and old enough" ($text -match "pruned townreporter_acceptance_20260809_1805-final-1844\.dump -- verified on .* and 30(\.\d)? day\(s\) old")
+Check "nothing was deleted from D: -- the folder and the dump are both still there" ((Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\configuration_2026-09-01_203359_live-recovery') -PathType Container) -and (Test-Path -LiteralPath (Join-Path $script:offsite 'other-safety-copies\townreporter_acceptance_20260809_1805-final-1844.dump') -PathType Leaf))
+Check "the state file records the one-off prune" ($run.State.oneOffPrunedAt -and $run.State.oneOffPrunedCount -eq 1) $run.State.oneOffPrunedCount
+
+# A second run has nothing left to prune -- confirms the count above was not
+# an artifact of double-counting and the run stays clean afterwards.
+$run2 = Invoke-TownReporterBackupRun -App $script:app -Offsite -BackupDir $script:backupDir -OffsiteDir $script:offsite `
+  -LogFile $script:log -StateFile $script:state -LockFile $script:lock -Keep 10 -MinFreeGb 0
+Check "a second run is still Ok" ($run2.Ok -eq $true) $run2.Reason
+Check "and prunes nothing new" ($run2.State.oneOffPrunedCount -eq 0) $run2.State.oneOffPrunedCount
+
+# A one-off item whose D: copy cannot be verified (corrupt, or never copied)
+# is never pruned, no matter how old it is -- proven directly against
+# Remove-TownReporterOneOffOld, the function the run above calls.
+Write-Host "  18b. an item that is old but NOT verified on D: is left alone"
+Reset-World "oneoffcorrupt"
+New-SixBackups
+$corruptDump = Join-Path $script:backupDir 'townreporter_acceptance_20260809_1805-final-1844.dump'
+$goodBytes = New-Object byte[] 8192
+for ($i = 0; $i -lt $goodBytes.Length; $i++) { $goodBytes[$i] = [byte]($i % 256) }
+[IO.File]::WriteAllBytes($corruptDump, $goodBytes)
+(Get-Item -LiteralPath $corruptDump).LastWriteTime = (Get-Date).AddDays(-30)
+$copiesDir18 = Join-Path $script:offsite 'other-safety-copies'
+New-Item -ItemType Directory -Force -Path $copiesDir18 | Out-Null
+$badBytes = [byte[]]$goodBytes.Clone()
+$badBytes[0] = $badBytes[0] -bxor 0xFF
+[IO.File]::WriteAllBytes((Join-Path $copiesDir18 'townreporter_acceptance_20260809_1805-final-1844.dump'), $badBytes)
+$seriesNames18 = Get-LocalNames
+$prune18 = Remove-TownReporterOneOffOld -LogFile $script:log -BackupDir $script:backupDir -OffsiteDir $script:offsite -SeriesNames $seriesNames18 -MinAgeDays 14 -MinFreeGb 0
+$text = Read-Log $script:log
+Check "the prune run is Ok (blocking one item is not itself a run failure)" ($prune18.Ok -eq $true) $prune18.Reason
+Check "the corrupt-on-D: item is NOT deleted, even though it is 30 days old" (Test-Path -LiteralPath $corruptDump -PathType Leaf)
+Check "nothing was reported as pruned" (@($prune18.Deleted).Count -eq 0) (@($prune18.Deleted) -join ', ')
+Check "the log says it is being kept because it is not verified yet" ($text -match "kept townreporter_acceptance_20260809_1805-final-1844\.dump -- not verified on .* yet")
+
+# D: missing or short of room blocks the one-off prune entirely, same as the
+# series prune -- nothing here is deleted while the only other copy of it
+# cannot be proven safe.
+Write-Host "  18c. a missing D: blocks the one-off prune, exactly like the series prune"
+Reset-World "oneoffnodrive"
+New-SixBackups
+$oldDump18c = Join-Path $script:backupDir 'townreporter_acceptance_20260809_1805-final-1844.dump'
+[IO.File]::WriteAllBytes($oldDump18c, (New-Object byte[] 8192))
+(Get-Item -LiteralPath $oldDump18c).LastWriteTime = (Get-Date).AddDays(-30)
+Remove-Item -LiteralPath $script:offsite -Recurse -Force
+$missingBlocker = Join-Path $script:world "missing-drive"
+Set-Content -LiteralPath $missingBlocker -Value 'a file, not a drive' -Encoding ASCII
+$prune18c = Remove-TownReporterOneOffOld -LogFile $script:log -BackupDir $script:backupDir -OffsiteDir (Join-Path $missingBlocker "D") -SeriesNames (Get-LocalNames) -MinAgeDays 14 -MinFreeGb 0
+Check "the prune reports not Ok" ($prune18c.Ok -eq $false)
+Check "and it deleted nothing" (@($prune18c.Deleted).Count -eq 0)
+Check "the 30-day-old dump is still on this machine, untouched" (Test-Path -LiteralPath $oldDump18c -PathType Leaf)
 
 # ---------------------------------------------------------------------------
 Write-Host ""

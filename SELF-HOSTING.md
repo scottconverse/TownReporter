@@ -1,6 +1,6 @@
 # TownReporter — how this is actually running
 
-Repository documentation version: **0.6.79**. See the [0.6.79 release guide](docs/releases/0.6.79.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
+Repository documentation version: **0.6.80**. See the [0.6.80 release guide](docs/releases/0.6.80.md); it separates source, package metadata, GitHub publication, and production deployment as distinct facts.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -409,6 +409,26 @@ its check, **nothing local is deleted** and the Control page's **Attention** car
 says why. Nothing ever deletes from D:; a full D: stops the copies and alerts,
 and the drive is emptied by a person.
 
+### One-off items: anything else left in the backups folder
+
+The newest-three rule above only ever looks at the dated `<database>_YYYY-MM-DD_HHmm.sql`
+series. Anything else sitting in that folder — a hand-named `.sql` export, an
+old pg_dump `.dump`, or a whole folder someone left there before an upgrade
+(a pre-migration snapshot, a recovery copy, and so on) — is a **one-off item**,
+and every run copies those to D: too, verified the same careful way: a file is
+proved by size and SHA-256, a folder by file count, total bytes, and a SHA-256
+of every file inside it. They land in `D:\TownReporter-backups\other-safety-copies\`,
+never mixed in with the dated series.
+
+One-off items are never touched by the newest-three rule, and they are not
+kept on C: forever either: once a one-off item is **verified on D: and at
+least 14 days old**, it is removed from the local folder — never from D:,
+which keeps everything. An item that is too young, or that has not verified
+yet, is left alone and the log says which. Something that looks like it might
+still be being written — a `.incomplete` or `.partial` file, or anything
+touched in the last 10 minutes — is skipped for that run and picked up again
+once it has settled, rather than copied half-finished.
+
 A backup is taken **once a night** by the five-minute watchdog: after 2:00 AM
 local, when the newest backup is older than 20 hours, and not while an editor
 job is running. A lock file means two never run at once. There is no separate
@@ -515,6 +535,19 @@ screens can be walked before anything is promoted. See `docs/staging.md`.
    an editor watch that happen. It prints the open job(s) and stops. Pass
    `-WaitForJobs` to have it poll every 15 seconds, up to 15 minutes, for them
    to clear on their own, or `-Force` to proceed anyway with a loud warning.
+   **Boot-time schema warm-up (0.6.80):** before the restarted server accepts
+   its first request, it runs every module's `ensure*Schema` DDL once (the
+   same batches that used to run lazily on whatever request happened to touch
+   them first). Watch for one `[schema-warmup] <module> <ms>ms <status>` line
+   per module in `logs\` right after start -- `status` is `ran` (it issued
+   DDL, expected right after a release that added or changed a table),
+   `skipped-by-marker` (nothing to do, the normal case), or `failed` (that one
+   module is logged and left for its own first request; it does not stop the
+   server). This is what step 4's stop-the-app window exists to protect
+   against in the first place: a module's first use meeting the nightly
+   backup's lock. `scripts\schema-warmup.mjs` runs the same warm-up standalone
+   (`node scripts\with-app-env.mjs node scripts\schema-warmup.mjs`), for
+   example right after a manual `db:migrate`, without starting the server.
 5. Require the local page, public page, a script named by the served HTML, and
    the published-story count to pass the script's checks. Verify the served
    version matches the approved release. A homepage 200 alone is not proof.

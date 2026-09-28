@@ -24,7 +24,13 @@ describe("N-2 manual meeting run", () => {
     */
     const ui = readFileSync(new URL("../../components/meeting-capture-settings.tsx", import.meta.url), "utf8");
     assert.match(ui, /if \(settings\.isError\)/, "the read failure has no branch");
-    assert.match(ui, /could not read the meeting capture settings/);
+    // Design review note 10 moved the actual sentence(s) into
+    // meetingSettingsFailureMessage (meeting-settings.ts), so an owner-only
+    // refusal gets its own text instead of this generic one always winning --
+    // see meeting-capture-settings.test.ts for the message-selection behavior.
+    assert.match(ui, /meetingSettingsFailureMessage\(settings\.error\)/);
+    const settingsSrc = readFileSync(new URL("./meeting-settings.ts", import.meta.url), "utf8");
+    assert.match(settingsSrc, /could not read the meeting capture settings/);
     assert.ok(
       ui.indexOf("settings.isError") < ui.indexOf("const list = channels ?? []"),
       "the refusal must come before the defaults are read",

@@ -224,3 +224,65 @@ describe("the latest-stories river", () => {
     assert.equal(batches[0]!.total, CORPUS.length - 2);
   });
 });
+
+/**
+ * The front page's edition read, opinion left out (unit BZ, item 9).
+ *
+ * The lead and the ruled grid are the paper's reporting, and an opinion piece
+ * printed in the grid took the Opinion box's own story off the page: the box
+ * read "the newest opinion the top has NOT printed", so a fresh editorial
+ * landing in the grid pushed the box down to a week-old one. The front page's
+ * edition read now passes `notTopic: "opinion"`, and the box takes the newest
+ * opinion piece the paper has, with no exclusion at all.
+ *
+ * The field is `articles.topic` -- the section key, the same column the stored
+ * `topic` filter reads, resolved through `resolveSectionKey`.
+ */
+describe("the edition read, opinion left out", () => {
+  /** `river-0` is the newest story in the corpus; `river-20` is older. */
+  const OPINION = ["river-0", "river-20"];
+  let order: string[];
+  const news = () => order.filter((slug) => !OPINION.includes(slug));
+
+  beforeEach(async () => {
+    const seeded = await reseed();
+    order = expectedOrder(seeded);
+    const sql = await getSql();
+    await sql`update articles set topic='opinion' where slug in ('river-0','river-20')`;
+  });
+
+  it("holds news only, and the newest opinion is one of the pieces it leaves out", async () => {
+    const edition = await listReaderArticles({ page: 1, notTopic: "opinion" });
+    assert.equal(
+      edition.stories.some((s) => s.topic === "opinion"),
+      false,
+      "an opinion piece reached the lead or the grid",
+    );
+    assert.deepEqual(
+      edition.stories.map((s) => s.slug),
+      news().slice(0, 12),
+    );
+    assert.equal(edition.total, CORPUS.length - OPINION.length, "the count kept the opinion pieces");
+  });
+
+  it("hands the box the newest opinion the paper has published, with nothing excluded", async () => {
+    // The read `src/routes/index.tsx` makes for the band, verbatim.
+    const box = await listReaderArticles({ topic: "opinion", page: 1, oldest: false, limit: 1 });
+    assert.deepEqual(
+      box.stories.map((s) => s.slug),
+      ["river-0"],
+      "the box did not take the newest opinion piece",
+    );
+  });
+
+  it("does not touch the river or a listing read: Latest stories still lists opinion", async () => {
+    const river = await listReaderArticles({ limit: 12 });
+    assert.ok(
+      river.stories.some((s) => s.slug === "river-0"),
+      "the river lost the newest opinion piece",
+    );
+    const listing = await listReaderArticles({ page: 1 });
+    assert.equal(listing.total, CORPUS.length);
+    assert.ok(listing.stories.some((s) => s.topic === "opinion"));
+  });
+});

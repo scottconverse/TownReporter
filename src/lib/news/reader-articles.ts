@@ -23,6 +23,14 @@ const cursorSchema = z.object({
 export const readerArticlesInput = z.object({
   q: z.string().trim().max(80).optional(),
   topic: z.string().max(100).optional(),
+  /*
+    A section to leave out, resolved the same way `topic` is. The front page's
+    edition read uses it for opinion: the lead and the ruled grid are the
+    paper's reporting, and an opinion piece printed there takes the Opinion box's
+    own story -- the newest one -- off the page (unit BZ, item 9). The river is a
+    different read and does not pass it, so Latest stories still lists opinion.
+  */
+  notTopic: z.string().max(100).optional(),
   page: z.number().int().min(1).max(100000).default(1),
   oldest: z.boolean().default(false),
   saved: z.array(z.string().max(300)).max(500).optional(),

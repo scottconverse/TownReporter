@@ -27,6 +27,7 @@ import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { buildDraftRepairPrompt, repairDraftStyle, type DraftRepairCall } from "./draft-audit-repair.ts";
+import { auditDraft, findingsByIds } from "./draft-audit.ts";
 import { styleRecordFromRepair, type DraftStyleRecord } from "./draft-audit-record.ts";
 import { saveDraftForEditor, type DraftEditInput } from "./draft-edit.server.ts";
 
@@ -111,6 +112,8 @@ export type DraftStyleFixInput = {
   topic: string;
   modelChoice?: unknown;
   modelEffort?: unknown;
+  /** The ticked findings, by id (`findingId` in draft-audit.ts). */
+  findingIds?: readonly string[];
 };
 
 export type DraftStyleFixResult = {
@@ -152,6 +155,32 @@ export async function fixDraftStyleForEditor(
   `;
   if (!row) throw new Error("There is no saved draft to check.");
 
+  /*
+    The ticked ids are looked up in the audit of the text being repaired, never
+    taken as sentences. The page and this call measure the same three strings
+    with the same pure audit, so an id either names a finding of this draft or
+    it names nothing -- and a request that names nothing is refused rather than
+    silently sent as an empty list.
+  */
+  const form = String(row.form ?? "");
+  const audit = auditDraft({
+    headline: data.headline,
+    dek: data.dek,
+    body: data.body,
+    form,
+  });
+  let selectedIds: readonly string[] | undefined;
+  if (data.findingIds) {
+    const { findings, unknown } = findingsByIds(audit, data.findingIds);
+    if (unknown.length > 0) {
+      throw new Error(
+        "That finding is not in the style check of this draft. Check the draft again, then tick what you want fixed.",
+      );
+    }
+    if (findings.length === 0) throw new Error("Tick a finding to send it to the model.");
+    selectedIds = data.findingIds;
+  }
+
   const chat = deps.chat ?? grokChat;
   const probe = deps.probe ?? probeProvider;
   const choice = storyModelChoice(data.modelChoice);
@@ -188,9 +217,10 @@ export async function fixDraftStyleForEditor(
     headline: data.headline,
     dek: data.dek,
     body: data.body,
-    form: String(row.form ?? ""),
+    form,
     repair: call,
     maxRounds: 1,
+    selectedIds,
   });
 
   const record = styleRecordFromRepair(outcome, {

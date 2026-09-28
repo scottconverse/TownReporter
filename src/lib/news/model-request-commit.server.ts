@@ -365,6 +365,17 @@ async function ensureEditorialRequestSchemaDefault() {
 }
 
 /**
+ * ACCESS EXCLUSIVE on `leads` when it runs, so once per database rather than
+ * once per commit; see `paper-settings-read-lock.test.ts`.
+ */
+export async function ensureModelRequestLeadMemoSchema(): Promise<void> {
+  const sql = await getSql();
+  await ensureSchemaOnce(sql, "model-request-lead-memo-column", [
+    "alter table leads add column if not exists notes_json text not null default '{}'",
+  ]);
+}
+
+/**
  * The Opinion commit boundary after deskMiddleware has authenticated the caller.
  * A request row, rate entry, audit entry, or job may only exist after readiness.
  */
@@ -679,11 +690,7 @@ export async function writeStoryForAuthenticatedEditor(
   }
 
   const sql = await (deps.getSql ?? getSql)();
-  // ACCESS EXCLUSIVE on `leads` when it runs, so once per database rather than
-  // once per commit; see `paper-settings-read-lock.test.ts`.
-  await ensureSchemaOnce(sql, "model-request-lead-memo-column", [
-    "alter table leads add column if not exists notes_json text not null default '{}'",
-  ]);
+  await ensureModelRequestLeadMemoSchema();
   if(input.documentIds?.length){
     const {ensureStoryDocuments}=await import('./story-documents.server.ts');await ensureStoryDocuments(sql);
     const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and editorial_request_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);

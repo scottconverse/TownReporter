@@ -373,9 +373,16 @@ async function theDraftHoldsThePasteWordForWord(sectionChoice, expectedTitle = F
   return { headline, body };
 }
 
-/** The editor rewrites one sentence and saves it, as desk work. */
+/*
+  0.6.80 (CK): publishing refuses an empty dek, and a paste files none, so the
+  editor writes one here as desk work -- the same act the refusal asks for.
+*/
+const PASTE_DEK = "The council set its next steps after a long public hearing.";
+
+/** The editor rewrites one sentence, writes the dek, and saves it, as desk work. */
 async function theEditorEditsASentence(bodyField) {
   await bodyField.fill(BODY.replace(BEFORE_EDIT, AFTER_EDIT));
+  await page.locator(".astra-dek").fill(PASTE_DEK);
   await page
     .locator(".astra-save-state")
     .filter({ hasText: "Unsaved changes" })
@@ -624,16 +631,23 @@ async function theSecondPasteAsksForASectionThenSavesIt(sectionChoice) {
     `the confirmation does not say the second paste was saved: "${text}"`,
   );
   /*
-    Unit BW5, restored: the desk warns that this paste looks like the story it
-    already printed, in the old panel's own words and with its own link
-    (`duplicateNote` -> "already published as ...", then "Read the printed one"
-    to /articles/$slug; `src/routes/desk.index.tsx:1532-1551` before the
-    redesign). The headline it names is the printed story's, not this paste's --
-    that is what makes it a warning instead of a restatement.
+    Unit BW5, restored, and unit CA note 6: the desk warns that this paste looks
+    like the story it already printed, and it says that now that the paste IS
+    saved -- `duplicateNoteAfterSave` ("It looks like "X", already on the
+    paper. Kill one if they are the same."), then the panel's own "Read the
+    printed one" link to /articles/$slug. The old wording ("Import it anyway if
+    it is different -- you decide") was the review screen's, and read here it
+    asked for a decision the editor had already made. The headline it names is
+    the printed story's, not this paste's -- that is what makes it a warning
+    instead of a restatement.
   */
   must(
-    text.includes("already published as") && text.includes(FIRST_LINE),
+    text.includes("already on the paper") && text.includes(FIRST_LINE),
     `the confirmation does not warn that it looks like the printed story: "${text}"`,
+  );
+  must(
+    text.includes("Kill one if they are the same") && !text.includes("Import it anyway"),
+    `the warning still reads as a step to take after the story was saved: "${text}"`,
   );
   const printedLink = panel.getByRole("link", { name: "Read the printed one", exact: true });
   must(
@@ -672,6 +686,62 @@ async function theSecondPasteAsksForASectionThenSavesIt(sectionChoice) {
     ),
   );
   step("the second paste is saved, and the warning about the printed story follows it");
+}
+
+/**
+ * The panel the hash still opens, `/desk#paste-one-story` -- the Queue's own
+ * one-story paste, which the drawn New story dialog sits in front of but does
+ * not replace (`desk.index.tsx`, "the hash is not superseded, it is a deep link
+ * to the same work"). It warns the same way and, since unit CA note 6, in the
+ * same words: the story is already filed when the warning draws, so it names
+ * the story it matched instead of repeating the review screen's "Import it
+ * anyway if it is different -- you decide", which reads here as a step still to
+ * take. The wording is what this pins; the match itself is the same lookup the
+ * dialog's tab was proved against above.
+ */
+async function theHashPanelWarnsInTheSavedWords(sectionChoice) {
+  await page.goto(`${base}/desk#paste-one-story`, { waitUntil: "networkidle" });
+  const dialog = page
+    .locator('div[role="dialog"]')
+    .filter({ hasText: "Paste a story I already have" })
+    .first();
+  await dialog.waitFor({ timeout: 45_000 });
+  await dialog.getByLabel("The story").fill(SECOND);
+  const section = dialog.getByLabel("Section");
+  await section.waitFor({ timeout: 30_000 });
+  await section.selectOption(sectionChoice.value);
+  const addIt = dialog.getByRole("button", { name: "Add to Queue", exact: true });
+  await waitForEnabled(addIt, 30_000);
+  await addIt.click();
+
+  const said = dialog.locator('[role="status"]').filter({ hasText: "Added to the Queue as a draft" });
+  await said.first().waitFor({ timeout: 45_000 });
+  const text = (await said.first().innerText()).replace(/\s+/g, " ").trim();
+  // It names the story, and it says where that story is. The panel's own
+  // "Open it" link to the new draft sits between the confirmation and the
+  // warning, so the sentence is matched on its own and not on where it starts.
+  must(
+    /It looks like “.+”, already (on the paper|in the Queue)\. Kill one if they are the same\./.test(
+      text,
+    ),
+    `the hash panel's duplicate warning does not state the saved match: "${text}"`,
+  );
+  must(
+    !text.includes("Import it anyway") && !text.includes("you decide"),
+    `the hash panel still asks for a decision the editor has already made: "${text}"`,
+  );
+  // And it still points at the story it means, on the desk or on the paper.
+  const printedLink = said.first().getByRole("link", { name: /^(Read the printed one|Open the one on the desk)$/ });
+  must(
+    (await printedLink.count()) === 1,
+    "the hash panel's warning carries no link to the story it names",
+  );
+  const href = (await printedLink.getAttribute("href")) ?? "";
+  must(
+    /^\/(articles|desk\/story)\//.test(href),
+    `the hash panel's warning points at ${href}, not at the story it names`,
+  );
+  step("the panel the hash opens names the story it matched, and does not ask for a decision already made");
 }
 
 /** A story with no source records prints no heading over an empty section. */
@@ -919,6 +989,7 @@ async function main() {
     );
     const { body: secondBody } = await theDraftHoldsThePasteWordForWord(sectionTwo, SECOND_LINE);
     await page.locator(".astra-headline").fill(SECOND_TITLE);
+    await page.locator(".astra-dek").fill(PASTE_DEK);
     const topics = await optionsOf(page.locator("#story-topic select"));
     const movedTo = topics.find((o) => o.value && o.value !== sectionTwo.value && o.value !== "opinion");
     must(Boolean(movedTo?.value), `the story editor offered no other section: ${JSON.stringify(topics)}`);
@@ -936,6 +1007,18 @@ async function main() {
     await aStoryWithNoRecordsPrintsNoHeading(printedTwo, movedTo);
 
     await thePictures(sectionOne);
+
+    /*
+      Last, and after the 375px measurements, because this is the one step that
+      leaves a draft in the Queue: the hash panel files a paste, and the row it
+      makes carries the Queue's duplicate chip ("Looks already printed: ...")
+      because the paste is meant to be a match. That chip measures 433px wide
+      at a 375px viewport (`fitsAt375` below names it: `A.chip dup right=808`),
+      which is the Queue's own layout and not this panel's -- and it only shows
+      up here because this step is the one that leaves a matching draft behind.
+      Nothing after this step reads the Queue.
+    */
+    await theHashPanelWarnsInTheSavedWords(sectionOne);
   } catch (err) {
     await dump(err);
   }

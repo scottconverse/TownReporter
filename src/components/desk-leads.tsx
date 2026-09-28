@@ -49,6 +49,7 @@ export function LeadRowView({
   onBatchSelect,
   roomy = false,
   onHoldWithReason,
+  onEdit,
   onDarkDesk,
   followUp,
   onKillWithReason,
@@ -108,6 +109,14 @@ export function LeadRowView({
    * which is why none of them is the row's own plain `onHold`/`onKill`.
    */
   onHoldWithReason?: () => void;
+  /**
+   * "Edit the lead" -- design review note 2 (0.6.80). Drawn first of the six
+   * (`MORE_LEAD_ITEMS[0]`), and back in the menu now that something edits a
+   * lead (`EditLeadDialog`, `updateLead` in `desk.ts`). Opens a dialog rather
+   * than calling a handler directly, the same shape as `onDarkDesk` below --
+   * the screen owns the dialog's `open` state, this row only asks for it.
+   */
+  onEdit?: () => void;
   /** "Send to Dark Desk" -- opens the drawn Dark Desk file. */
   onDarkDesk?: () => void;
   /**
@@ -153,12 +162,20 @@ export function LeadRowView({
 
     BN2 item 2: the drawn menu's own six rows come first, in the design's order
     (`MORE_LEAD_ITEMS`, `editor-dialog-forms.ts`), then the three the drawing
-    gives the row anyway -- Open, the draft control, Delete. "Edit the lead" is
-    the sixth drawn row and is not here: nothing in this app edits a lead
-    (BN question 3, hidden by decision), so a press that only says so would be
-    a row that does nothing.
+    gives the row anyway -- Open, the draft control, Delete.
+
+    "Edit the lead" was the sixth drawn row and, until design review note 2
+    (0.6.80), was left out here: BN question 3 hid it because nothing in the
+    app edited a lead, and a press that only said so would have been a row
+    that does nothing. `EditLeadDialog` + `updateLead` (desk.ts) are that
+    something now, so it is back, first in the drawing's own order --
+    `MORE_LEAD_ITEMS[0]`. It is left off a closed lead (killed or published)
+    the same way Hold and Kill are below: `updateLeadForEditor` refuses both
+    with a plain sentence, and a control the desk would only refuse is not
+    offered.
   */
   const items: DeskMoreItem[] = [];
+  if (!closed && onEdit) items.push({ label: "Edit the lead", onSelect: onEdit });
   if (onHoldWithReason) items.push({ label: "Hold with a reason", onSelect: onHoldWithReason });
   /*
     BN2 item 3: the drawn "Merge with a printed story" -- and the one row of the

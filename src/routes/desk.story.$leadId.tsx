@@ -10,7 +10,7 @@ import {
   mayInheritLeadSources,
   type EvidenceDecision,
 } from "@/lib/news/draft-evidence";
-import { auditDraft } from "@/lib/news/draft-audit";
+import { auditDraft, findingsWithIds, type DraftAuditFinding } from "@/lib/news/draft-audit";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
 import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -142,6 +142,38 @@ function styleLocation(finding: { paragraph: number; sentence: number }): string
   return finding.paragraph === 0
     ? "Headline and dek"
     : `Paragraph ${finding.paragraph}, sentence ${finding.sentence}`;
+}
+
+/**
+ * One finding in the style check, with the tick that decides whether "Fix these
+ * with the model" sends it.
+ *
+ * The label wraps the box, so the whole row is the click target and the
+ * finding's own words are the control's accessible name -- nothing restates on
+ * `aria-label` what is already written on the page.
+ */
+function StyleFindingRow({
+  finding,
+  ticked,
+  onTick,
+}: {
+  finding: DraftAuditFinding;
+  ticked: boolean;
+  onTick: (ticked: boolean) => void;
+}) {
+  return (
+    <li>
+      <label className="style-tick">
+        <input type="checkbox" checked={ticked} onChange={(e) => onTick(e.target.checked)} />
+        <span>
+          <span className="style-tick-t">
+            <b>{styleLocation(finding)}</b> · {finding.message}
+          </span>
+          {finding.snippet ? <span className="style-tick-q">{finding.snippet}</span> : null}
+        </span>
+      </label>
+    </li>
+  );
 }
 
 function StoryPage() {
@@ -670,12 +702,25 @@ function StoryPage() {
     changed a quotation, a number, a name or a link is refused there, so the
     text the editor gets back is either the repair or exactly what was sent.
 
-    No findings, no call: the button is only offered when the check above found
-    something to fix.
+    No ticks, no call: the button sends the ids of the findings the editor
+    ticked, and the server looks each one up in its own audit of this same text
+    (`draft-audit.server.ts`), so a finding the client made up can never reach
+    the model. A body that names nothing is refused there as well as here.
   */
   const fixStyle = useMutation({
     mutationFn: () =>
-      fixDraftStyle({ data: { leadId: id, headline, dek, body, topic, modelChoice, modelEffort } }),
+      fixDraftStyle({
+        data: {
+          leadId: id,
+          headline,
+          dek,
+          body,
+          topic,
+          modelChoice,
+          modelEffort,
+          findingIds: styleTickedIds,
+        },
+      }),
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       setBody(res.body);
@@ -706,6 +751,33 @@ function StoryPage() {
   );
   const styleFixes = styleCheck.findings.filter((finding) => finding.severity === "fix");
   const styleReviews = styleCheck.findings.filter((finding) => finding.severity === "review");
+  /*
+    ── The tick boxes ──────────────────────────────────────────────────────────
+    "Fix these with the model" used to be a grey button with no reason: whether
+    it was offered said "there is nothing here to fix", but the editor reading a
+    "to read" line could not send it, and nothing on the page said why.
+
+    Now every finding carries a tick. The fix-level ones start ticked (the list
+    the desk would have sent on its own) and the "to read" ones start clear, so
+    the model's work is still scoped by default and the editor can widen it
+    deliberately. What travels to the server is the ID of each ticked row, never
+    the text of a finding: `draft-audit.server.ts` looks every id up in its own
+    audit of this same draft and refuses one it did not produce.
+
+    The map holds only the rows the editor has touched, so a tick follows the
+    row it was made on and not a position that shifts as the text is edited.
+  */
+  const [styleTickOverrides, setStyleTickOverrides] = useState<Record<string, boolean>>({});
+  const styleRows = useMemo(() => findingsWithIds(styleCheck), [styleCheck]);
+  const styleTickedIds = useMemo(
+    () =>
+      styleRows
+        .filter((row) => styleTickOverrides[row.id] ?? row.finding.severity === "fix")
+        .map((row) => row.id),
+    [styleRows, styleTickOverrides],
+  );
+  const toggleStyleTick = (rowId: string, ticked: boolean) =>
+    setStyleTickOverrides((current) => ({ ...current, [rowId]: ticked }));
   /* What the desk said last time it measured this draft, from the record saved
      with it -- the plain sentence the repair or the save wrote. */
   const styleNote = useMemo(() => {
@@ -1255,6 +1327,27 @@ function StoryPage() {
     reconcileStatus.data?.status === "queued" ||
     reconcileStatus.data?.status === "running";
   const savePending = save.isPending || reviewEvidence.isPending || publish.isPending;
+  /*
+    Why the "Fix these with the model" button is off, in the editor's own words,
+    or "" when it is on. The first reason is the ordinary one on a fresh check --
+    the button used to be grey here with nothing said -- and the rest are the
+    desk's existing gates, said plainly rather than left to a grey button.
+  */
+  const styleFixReason = !styleTickedIds.length
+    ? "Tick a finding to send it to the model."
+    : locked
+      ? "This lead is killed, so the style check will not spend a model call on it."
+      : onPaper
+        ? "This story is published, so the style check will not spend a model call on it."
+        : waiting
+          ? "The desk is still writing this draft. Wait for it to finish, then press again."
+          : reconcileActive
+            ? "A reconcile is running. Wait for it to finish, then press again."
+            : fixStyle.isPending
+              ? "The model is working on the ticked findings."
+              : savePending
+                ? "Your save is still going. Press again when it has landed."
+                : "";
   const openClaims = uncheckedGateTodos(notes);
   /*
     The section a story files under was the last thing about a draft that
@@ -2167,17 +2260,20 @@ function StoryPage() {
               {styleFixes.length ? (
                 <>
                   <p className="note-one">
-                    {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix:
+                    {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix. Tick the
+                    ones you want the model to take on:
                   </p>
                   <ul className="meeting-citations">
-                    {styleFixes.map((finding, index) => (
-                      <li key={`${finding.code}-${finding.paragraph}-${finding.sentence}-${index}`}>
-                        <p>
-                          <b>{styleLocation(finding)}</b> · {finding.message}
-                        </p>
-                        {finding.snippet ? <p className="note-one">{finding.snippet}</p> : null}
-                      </li>
-                    ))}
+                    {styleRows
+                      .filter((row) => row.finding.severity === "fix")
+                      .map((row) => (
+                        <StyleFindingRow
+                          key={row.id}
+                          finding={row.finding}
+                          ticked={styleTickOverrides[row.id] ?? true}
+                          onTick={(ticked) => toggleStyleTick(row.id, ticked)}
+                        />
+                      ))}
                   </ul>
                 </>
               ) : (
@@ -2190,38 +2286,47 @@ function StoryPage() {
                     to fix
                   </summary>
                   <ul className="meeting-citations">
-                    {styleReviews.map((finding, index) => (
-                      <li key={`${finding.code}-${finding.paragraph}-${finding.sentence}-${index}`}>
-                        <p>
-                          <b>{styleLocation(finding)}</b> · {finding.message}
-                        </p>
-                        {finding.snippet ? <p className="note-one">{finding.snippet}</p> : null}
-                      </li>
-                    ))}
+                    {styleRows
+                      .filter((row) => row.finding.severity === "review")
+                      .map((row) => (
+                        <StyleFindingRow
+                          key={row.id}
+                          finding={row.finding}
+                          ticked={styleTickOverrides[row.id] ?? false}
+                          onTick={(ticked) => toggleStyleTick(row.id, ticked)}
+                        />
+                      ))}
                   </ul>
                 </details>
               ) : null}
               <p className="note-one">
                 You do not have to act on any of this. Nothing here publishes anything.
               </p>
-              <InkButton
-                disabled={
-                  !styleFixes.length ||
-                  locked ||
-                  onPaper ||
-                  waiting ||
-                  fixStyle.isPending ||
-                  save.isPending ||
-                  reviewEvidence.isPending ||
-                  reconcileActive
-                }
-                onClick={() => fixStyle.mutate()}
-              >
-                {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
-              </InkButton>
+              <div className="style-fix-act">
+                <InkButton
+                  disabled={
+                    !styleTickedIds.length ||
+                    locked ||
+                    onPaper ||
+                    waiting ||
+                    fixStyle.isPending ||
+                    save.isPending ||
+                    reviewEvidence.isPending ||
+                    reconcileActive
+                  }
+                  onClick={() => fixStyle.mutate()}
+                >
+                  {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
+                </InkButton>
+                {/* Why it is off, in words. Empty when it is on, so nothing sits
+                    beside a live button saying nothing. */}
+                {styleFixReason ? (
+                  <p className="note-one style-fix-why">{styleFixReason}</p>
+                ) : null}
+              </div>
               <p className="note-one">
-                One pass with the model the picker is set to. It is given the list above and the
-                draft, and returns the draft with those problems fixed. It may not change a
+                One pass with the model the picker is set to. It is given the ticked findings above
+                and the draft, and returns the draft with those problems fixed. It may not change a
                 quotation, a number, a name or a link — a rewrite that does is refused and your text
                 is kept. The result is saved as a draft revision, never published.
               </p>

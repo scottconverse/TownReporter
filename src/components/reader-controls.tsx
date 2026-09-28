@@ -12,6 +12,7 @@ import { sendTrustEvent } from "@/components/read-beacon-send";
 import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
+import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
 import { readReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
@@ -309,11 +310,20 @@ export function ReaderRow({
   story,
   description = true,
   datebox = true,
+  title,
 }: {
   story: ReaderStory;
   description?: boolean;
   /** The date gutter at the head of the row; false on the front page. */
   datebox?: boolean;
+  /**
+   * The headline to print, when the caller prints it in a display form of its
+   * own. The front page's rows carry the story's section tag above the
+   * headline, so they pass the headline without the "OPINION: " prefix the
+   * stored one carries (`headlineWithTag`, unit BZ item 3). Left out, the row
+   * prints the stored headline unchanged, which is what a listing screen wants.
+   */
+  title?: string;
 }) {
   const { sections } = usePublicSections();
   const { formatShortDate } = usePaperDateFormatters();
@@ -328,9 +338,9 @@ export function ReaderRow({
           </Link>
         )}
         <Link to="/articles/$slug" params={{ slug: story.slug }}>
-          <h3>{story.headline}</h3>
+          <h3>{title ?? story.headline}</h3>
         </Link>
-        {description && <p>{story.dek}</p>}
+        {description && <p>{dekOrFallback(story.dek, story.body)}</p>}
         <div className="meta">
           <span>{formatShortDate(story.published_at)}</span>
           <span className="dot" />

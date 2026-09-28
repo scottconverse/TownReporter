@@ -550,6 +550,38 @@ function OpinionPage() {
                         Repair claims
                       </Link>
                     ) : null}
+                    {/*
+                      Unit CA, note 1. A finished piece offered Read it / Edit
+                      / Delete and nothing else, and "Publish to the paper"
+                      lived only inside the panel Read it opens -- so an editor
+                      who pasted a piece, saved it and came back to the desk
+                      could not find the one action a done draft wants. The row
+                      draws it now: the drawn row puts its primary first
+                      (`Desk Screens.dc.html`'s opinion rows, "Repair claims" /
+                      "View"), and the drafts list draws "Publish…" as the
+                      solid primary too.
+
+                      The same `publish` mutation the panel's button calls, on
+                      the same argument (both are the DRAFT id -- `openId` is
+                      set to `r.draft_id` by `toggleEditorialReader`) and with
+                      the same checks, because they are the same server call.
+                      The panel has no confirm step and neither does this: the
+                      press is the confirmation, exactly as it is up there.
+                      `publishEditorial` still refuses a piece whose claims
+                      appendix is incomplete, so the claims row keeps Repair
+                      claims as its primary and draws no Publish at all.
+                    */}
+                    {r.draft_id && r.finished_at && !r.error && !r.published_slug && !claims ? (
+                      <InkButton
+                        tone="solid"
+                        disabled={publish.isPending}
+                        onClick={() => publish.mutate(r.draft_id!)}
+                      >
+                        {publish.isPending && publish.variables === r.draft_id
+                          ? "Publishing…"
+                          : "Publish"}
+                      </InkButton>
+                    ) : null}
                     {r.published_slug ? (
                       <Link
                         to="/articles/$slug"
