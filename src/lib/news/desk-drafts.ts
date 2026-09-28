@@ -166,7 +166,18 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
   return { ...base, key: "ready", label: "Ready to check" };
 }
 
-export type DeskDraftFilter = "all" | "running" | "needs-you" | "yours" | "failed";
+/**
+ * The filter row's five pills, in the order the screen draws them.
+ *
+ * Named here rather than only in the route because the Drafts screen's list is
+ * now windowed on the server (Unit CZ-long-lists) and the server has to know
+ * which filters exist before it will answer one: a caller asking for a filter
+ * this list does not have gets "all" back rather than an empty page. The route
+ * and the server function both read this, so they cannot drift.
+ */
+export const DESK_DRAFT_FILTERS = ["all", "running", "needs-you", "yours", "failed"] as const;
+
+export type DeskDraftFilter = (typeof DESK_DRAFT_FILTERS)[number];
 
 /**
  * The filter row's counts, off the states already computed for the list.

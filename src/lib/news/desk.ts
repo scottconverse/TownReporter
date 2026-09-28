@@ -26,6 +26,22 @@ import {
   sanitizePublicUrls,
 } from "./schema";
 import { reportAndDraft } from "./report";
+import { cleanListWindow, takeWindow } from "./list-window.ts";
+import { cleanQueueWindow, queueCounts, queueNeedle, queueSelect } from "./queue-rows.ts";
+import { cleanSourceWindow, selectSourceRows, sourceCounts } from "./source-rows.ts";
+import {
+  DESK_DRAFT_FILTERS,
+  deskDraftFilterCounts,
+  deskDraftMatchesFilter,
+  deskDraftState,
+} from "./desk-drafts.ts";
+import {
+  PUBLISHED_FILTERS,
+  publishedFilterCounts,
+  publishedMatches,
+  publishedNeedle,
+  publishedWeekAgo,
+} from "./published-rows.ts";
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea } from "../story-area.ts";
@@ -212,12 +228,19 @@ export const bootstrapDesk = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-export const listSources = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    await ensureSeeds(context.userId, owned(context));
-    const sql = await getSql();
-    return sql<SourceRow>`
+/**
+ * Every source the newsroom has, in the order the watch list draws them.
+ *
+ * Extracted from `listSources` by Unit CZ-long-lists so the Sources SCREEN's
+ * window can narrow this list without a second copy of the SQL drifting from
+ * it. The order is the rule and is the reason this is one read rather than
+ * two: proposed first (they are a review queue, newest first within it), then
+ * accepted, then paused, then rejected, and by id inside each group.
+ */
+async function querySourceRows(context: { userId: string; newsroomId: number }) {
+  await ensureSeeds(context.userId, owned(context));
+  const sql = await getSql();
+  return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
@@ -252,6 +275,39 @@ export const listSources = createServerFn({ method: "GET" })
         case when status = 'proposed' then id end desc,
         id asc
     `;
+}
+
+/**
+ * Every source, for the callers that need the whole list rather than a page:
+ * the Today screen's rail, the scan settings dialog, the routine-notice
+ * permissions dialog and the editor dialogs all ask "which sources are there".
+ */
+export const listSources = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => querySourceRows(context));
+
+/**
+ * One page of the Sources screen (Unit CZ-long-lists).
+ *
+ * The watch list is the desk's longest list -- 1,588 suggested rows, some
+ * 15,872px -- and the screen used to lay every one of them out. The window has
+ * to be cut AFTER the tab and the search box, not in SQL: "Suggested" is a
+ * status filter, but "Could not check" is a computed one (`status = 'accepted'
+ * or 'paused'` AND `last_error is not null`), so a SQL limit would page the
+ * unfiltered list and show rows the tab does not hold.
+ *
+ * `counts` is taken over every source rather than the page, because the pills
+ * promise the size of the list and "Files up to" promises the size of the
+ * watch list -- a page-scoped count would read 25 the moment a window
+ * appeared.
+ */
+export const listSourcesPage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanSourceWindow(input))
+  .handler(async ({ context, data }) => {
+    const all = await querySourceRows(context);
+    const matched = selectSourceRows(all, data);
+    return { ...takeWindow(matched, data.offset, data.limit), counts: sourceCounts(all) };
   });
 
 async function upsertSource(
@@ -372,69 +428,120 @@ export const reviewSuggestedSources = createServerFn({ method: "POST" })
   .validator((input: unknown) => suggestedSourceReviewInput.parse(input))
   .handler(async ({ context, data }) => performReviewSuggestedSources(context, data));
 
+/**
+ * Every lead the newsroom holds, in the Queue's own order.
+ *
+ * Extracted from `listLeads` by Unit CZ-long-lists so the Queue's window can
+ * read the same rows: `listQueuePage` narrows this list and cuts a page out of
+ * it, while the batch dialog and the Sources screen still want all of it. One
+ * query with one order -- a second copy would be a second answer to "which
+ * leads are there", and the two would drift.
+ */
+async function queryLeadRows(context: { newsroomId: number }) {
+  const sql = await getSql();
+  return sql<
+    LeadRow & {
+      article_slug: string | null;
+      investigation_id: number | null;
+      story_headline: string | null;
+    }
+  >`
+    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
+           l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+           -- "import" = read out of a report the editor pasted; null = not
+           -- recorded. The Queue shows the Imported badge off this.
+           l.origin,
+           coalesce(a.headline, (select nullif(d.headline, '') from drafts d
+             where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
+             order by d.updated_at desc,d.id desc limit 1)) as story_headline,
+           l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
+           l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+           -- Unit AK item 5: the Compare view shows both leads side by side
+           -- without a second round trip, so the prior lead's why, sources,
+           -- dates and kill record travel with the row.
+           case when prior.id is null then null else jsonb_build_object(
+             'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+             'why', prior.why, 'source_urls', prior.source_urls,
+             'created_at', prior.created_at,
+             'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
+             'killed_at', prior.killed_at
+           ) end as possible_duplicate
+    from leads l
+    left join articles a on a.lead_id = l.id and a.status = 'published'
+    left join leads prior on prior.id = l.possible_duplicate_of
+      and prior.newsroom_id = l.newsroom_id
+    where l.newsroom_id = ${owned(context)}
+    -- An editor who just filed a lead by hand sinks below the batch first.
+    --
+    -- fileLead, writeStoryFromInput and a Dark Desk promotion all leave
+    -- newsworthiness at 0 (or whatever the editor typed), and a scan's own
+    -- output routinely scores higher -- so an operator who pasted a link
+    -- into "Write a story" watched it land at the bottom of the same
+    -- minute's scan batch instead of at the top where the thing they just
+    -- asked for belongs. Every lead a scan files carries that scan's
+    -- scan_run_id; nothing an editor files by hand ever does. Leads with no
+    -- scan_run_id sort as one group ahead of every scan-filed lead, in
+    -- their own recency order; scan-filed leads keep exactly the ordering
+    -- below among themselves.
+    --
+    -- Newest batch first, best story first WITHIN the batch.
+    --
+    -- Ordering on the raw timestamp alone put a 14-point "no minutes posted
+    -- for any 2026 council session" below an 8-point flag-committee item:
+    -- a scan writes all its leads inside the same second, so the tie was
+    -- broken arbitrarily and newsworthiness never entered into it. For a
+    -- queue whose entire job is "what should I work on next", the score has
+    -- to lead. Truncating to the minute keeps one scan's output together
+    -- instead of interleaving batches by millisecond.
+    order by (l.scan_run_id is null) desc,
+             date_trunc('minute', l.created_at) desc,
+             l.newsworthiness desc,
+             l.id desc
+  `;
+}
+
+/**
+ * Every lead, for the readers that genuinely need all of them: the batch
+ * dialog's eligible pool, the Sources screen's kill-pattern gate, the import
+ * screen and `findDuplicate`. The Queue SCREEN does not call this any more --
+ * it calls `listQueuePage` below, which sends it 25 rows.
+ */
 export const listLeads = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const sql = await getSql();
-    return sql<
-      LeadRow & {
-        article_slug: string | null;
-        investigation_id: number | null;
-        story_headline: string | null;
-      }
-    >`
-      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
-             l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
-             -- "import" = read out of a report the editor pasted; null = not
-             -- recorded. The Queue shows the Imported badge off this.
-             l.origin,
-             coalesce(a.headline, (select nullif(d.headline, '') from drafts d
-               where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
-               order by d.updated_at desc,d.id desc limit 1)) as story_headline,
-             l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
-             l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
-             -- Unit AK item 5: the Compare view shows both leads side by side
-             -- without a second round trip, so the prior lead's why, sources,
-             -- dates and kill record travel with the row.
-             case when prior.id is null then null else jsonb_build_object(
-               'id', prior.id, 'headline', prior.headline, 'status', prior.status,
-               'why', prior.why, 'source_urls', prior.source_urls,
-               'created_at', prior.created_at,
-               'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
-               'killed_at', prior.killed_at
-             ) end as possible_duplicate
-      from leads l
-      left join articles a on a.lead_id = l.id and a.status = 'published'
-      left join leads prior on prior.id = l.possible_duplicate_of
-        and prior.newsroom_id = l.newsroom_id
-      where l.newsroom_id = ${owned(context)}
-      -- An editor who just filed a lead by hand sinks below the batch first.
-      --
-      -- fileLead, writeStoryFromInput and a Dark Desk promotion all leave
-      -- newsworthiness at 0 (or whatever the editor typed), and a scan's own
-      -- output routinely scores higher -- so an operator who pasted a link
-      -- into "Write a story" watched it land at the bottom of the same
-      -- minute's scan batch instead of at the top where the thing they just
-      -- asked for belongs. Every lead a scan files carries that scan's
-      -- scan_run_id; nothing an editor files by hand ever does. Leads with no
-      -- scan_run_id sort as one group ahead of every scan-filed lead, in
-      -- their own recency order; scan-filed leads keep exactly the ordering
-      -- below among themselves.
-      --
-      -- Newest batch first, best story first WITHIN the batch.
-      --
-      -- Ordering on the raw timestamp alone put a 14-point "no minutes posted
-      -- for any 2026 council session" below an 8-point flag-committee item:
-      -- a scan writes all its leads inside the same second, so the tie was
-      -- broken arbitrarily and newsworthiness never entered into it. For a
-      -- queue whose entire job is "what should I work on next", the score has
-      -- to lead. Truncating to the minute keeps one scan's output together
-      -- instead of interleaving batches by millisecond.
-      order by (l.scan_run_id is null) desc,
-               date_trunc('minute', l.created_at) desc,
-               l.newsworthiness desc,
-               l.id desc
-    `;
+  .handler(({ context }) => queryLeadRows(context));
+
+/**
+ * The Queue screen's window (Unit CZ-long-lists).
+ *
+ * The real desk holds 41 live leads -- well over a screen of scroll -- and the
+ * screen drew every one. This returns the tab-and-search match, in the chosen
+ * order, cut to the page the editor asked for, plus the true total and the tab
+ * counts, so the pills can say "All · 41" while 25 rows are on screen.
+ *
+ * The narrowing runs HERE, before the cut, and lives in `queue-rows.ts` as a
+ * named rule rather than inline in the route: a window cut before the filter
+ * would page the unfiltered list and show the wrong rows.
+ *
+ * `printed` is read because the "≈ Printed" tab and each row's duplicate chip
+ * are decided against the published list, the same `nearDuplicate` the client
+ * used to run. The two reads are sequential, not `Promise.all`: the dev desk
+ * runs one PGlite connection and the driver does not want two queries in
+ * flight on it.
+ */
+export const listQueuePage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanQueueWindow(input))
+  .handler(async ({ context, data }) => {
+    const all = await queryLeadRows(context);
+    const printed = await queryPublishedRows(context);
+    const matched = queueSelect(all, printed, {
+      filter: data.filter,
+      section: data.section,
+      sort: data.sort,
+      needle: queueNeedle(data.search),
+    });
+    const { rows, total } = takeWindow(matched, data.offset, data.limit);
+    return { rows, total, counts: queueCounts(all, printed) };
   });
 
 /**
@@ -2555,122 +2662,164 @@ export const listRecentStoryWork = createServerFn({ method: "GET" })
   newest row is the same "the draft on this desk" rule `listLeads` already uses
   for `story_headline`. A lead with two draft rows is one story, not two.
 */
+async function queryDraftRows(context: { newsroomId: number }) {
+  const { ensureJobsSchema } = await import("./jobs.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  return sql<{
+    id: number;
+    lead_id: number;
+    headline: string;
+    dek: string | null;
+    topic: string | null;
+    form: string | null;
+    updated_at: string;
+    /** Has any prose been written into this draft row yet? See the CTE note. */
+    has_body: boolean;
+    lead_status: string;
+    origin: string | null;
+    newsworthiness: number | null;
+    why: string | null;
+    model_headline: string | null;
+    headline_source: string | null;
+    job_status: string | null;
+    job_stage: string | null;
+    job_started_at: string | null;
+    job_updated_at: string | null;
+    job_model_choice: string | null;
+    job_error: string | null;
+    evidence_required: boolean;
+    evidence_decision: string | null;
+    evidence_checked_at: string | null;
+    imported_text: boolean;
+    name_check_complete: boolean;
+    names_checked_at: string | null;
+    names_unresolved: number;
+  }>`
+    with latest_draft as (
+      select distinct on (d.lead_id)
+             d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
+             d.model_headline, d.headline_source, d.updated_at,
+             /*
+               IS THERE ANY PROSE YET?
+
+               fileLead inserts a draft row alongside the lead (see
+               insertLeadWithDraft) with body = '', so a lead filed by hand
+               has a draft from the moment it is filed. Without this fact
+               every such row fell through deskDraftState to its last branch
+               and announced "Ready to check", which put unwritten leads on
+               the Publish step and in Tonight's edition -- the desk telling
+               an editor two stories were ready to print when nothing had
+               been written. The boolean is projected rather than the body,
+               so no prose is pulled across the wire.
+             */
+             coalesce(nullif(btrim(d.body), ''), '') <> '' as has_body,
+             l.headline as lead_headline, l.status as lead_status, l.origin,
+             l.newsworthiness, l.why,
+             /*
+               research_json is a text column (migration 0010) and is always
+               written with JSON.stringify. It is projected to jsonb HERE, in
+               the query, so the handful of small keys this screen reads --
+               the evidence review's required/decision, the imported-text
+               flag and the name check -- do not drag the whole memo,
+               including the archived original draft body inside
+               evidenceReview.original, across the wire on every poll.
+             */
+             coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
+      from drafts d
+      join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
+      where d.newsroom_id = ${owned(context)}
+        -- "Everything not yet printed": a killed lead, or one already
+        -- published, is not a draft on the desk.
+        and l.status in ('new','drafted','held')
+      order by d.lead_id, d.updated_at desc, d.id desc
+    )
+    select v.id, v.lead_id,
+           coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
+           v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
+           v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
+           jb.status as job_status, jb.stage as job_stage,
+           jb.started_at as job_started_at, jb.updated_at as job_updated_at,
+           jb.model_choice as job_model_choice,
+           -- The failed row prints WHY it stopped ("Codex quota reached"),
+           -- which is the one thing a "Draft failed" chip cannot say. The job
+           -- writes it to desk_jobs.error (jobs.ts, 800 chars max).
+           jb.error as job_error,
+           -- coalesce(..., false): a missing key makes ->> NULL, and
+           -- NULL = 'true' is NULL rather than false, which would arrive on
+           -- the desk as a third value where the row means "no".
+           coalesce((v.research->'evidenceReview'->>'required') = 'true', false) as evidence_required,
+           v.research->'evidenceReview'->>'decision' as evidence_decision,
+           -- When the reconciliation pass last ran (draft-reconcile.server.ts
+           -- stamps this key), and when the name check last ran. The row prints
+           -- "checked 8:02 a.m." off these two; a row with neither says nothing
+           -- rather than a time it does not have.
+           v.research->>'evidenceReconciledAt' as evidence_checked_at,
+           v.research->'nameCheck'->>'checkedAt' as names_checked_at,
+           coalesce((v.research->>'importedText') = 'true', false) as imported_text,
+           coalesce((v.research->'nameCheck'->>'complete') = 'true', false) as name_check_complete,
+           case when jsonb_typeof(v.research->'nameCheck'->'rows') = 'array'
+             then (select count(*)::int from jsonb_array_elements(v.research->'nameCheck'->'rows') r
+                    where r->>'status' = 'unresolved')
+             else 0 end as names_unresolved
+    from latest_draft v
+    left join lateral (
+      select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
+      from desk_jobs j
+      where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
+      order by j.id desc limit 1
+    ) jb on true
+    -- Newest work first: the draft an editor just touched is the one they
+    -- came back for. A running job moves its own updated_at heartbeat, so
+    -- a story being written right now holds the top of the list while it is
+    -- being written.
+    order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
+  `;
+}
+
+/*
+  The whole drafts list, for the readers that need all of it: Today counts
+  writing/needing-you/ready across every draft to draw its four steps, so a
+  windowed list would make those numbers describe the page rather than the desk.
+
+  The `limit 60` this query used to carry is gone, and the two facts it hid are
+  the reason. `deskDraftFilterCounts` counts what a pill would SHOW, and a count
+  taken over the 60 newest drafts is not that count once a desk has more; and
+  the Drafts screen's own window (below) is the bound that matters now, because
+  it is the one that decides what crosses the wire. The query reads every draft
+  row for the newsroom exactly as the queue, sources and published queries
+  already read their tables.
+*/
 export const listDraftsDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const { ensureJobsSchema } = await import("./jobs.ts");
-    await ensureJobsSchema();
-    const sql = await getSql();
-    return sql<{
-      id: number;
-      lead_id: number;
-      headline: string;
-      dek: string | null;
-      topic: string | null;
-      form: string | null;
-      updated_at: string;
-      /** Has any prose been written into this draft row yet? See the CTE note. */
-      has_body: boolean;
-      lead_status: string;
-      origin: string | null;
-      newsworthiness: number | null;
-      why: string | null;
-      model_headline: string | null;
-      headline_source: string | null;
-      job_status: string | null;
-      job_stage: string | null;
-      job_started_at: string | null;
-      job_updated_at: string | null;
-      job_model_choice: string | null;
-      job_error: string | null;
-      evidence_required: boolean;
-      evidence_decision: string | null;
-      evidence_checked_at: string | null;
-      imported_text: boolean;
-      name_check_complete: boolean;
-      names_checked_at: string | null;
-      names_unresolved: number;
-    }>`
-      with latest_draft as (
-        select distinct on (d.lead_id)
-               d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
-               d.model_headline, d.headline_source, d.updated_at,
-               /*
-                 IS THERE ANY PROSE YET?
+  .handler(({ context }) => queryDraftRows(context));
 
-                 fileLead inserts a draft row alongside the lead (see
-                 insertLeadWithDraft) with body = '', so a lead filed by hand
-                 has a draft from the moment it is filed. Without this fact
-                 every such row fell through deskDraftState to its last branch
-                 and announced "Ready to check", which put unwritten leads on
-                 the Publish step and in Tonight's edition -- the desk telling
-                 an editor two stories were ready to print when nothing had
-                 been written. The boolean is projected rather than the body,
-                 so no prose is pulled across the wire.
-               */
-               coalesce(nullif(btrim(d.body), ''), '') <> '' as has_body,
-               l.headline as lead_headline, l.status as lead_status, l.origin,
-               l.newsworthiness, l.why,
-               /*
-                 research_json is a text column (migration 0010) and is always
-                 written with JSON.stringify. It is projected to jsonb HERE, in
-                 the query, so the handful of small keys this screen reads --
-                 the evidence review's required/decision, the imported-text
-                 flag and the name check -- do not drag the whole memo,
-                 including the archived original draft body inside
-                 evidenceReview.original, across the wire on every poll.
-               */
-               coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
-        from drafts d
-        join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
-        where d.newsroom_id = ${owned(context)}
-          -- "Everything not yet printed": a killed lead, or one already
-          -- published, is not a draft on the desk.
-          and l.status in ('new','drafted','held')
-        order by d.lead_id, d.updated_at desc, d.id desc
-      )
-      select v.id, v.lead_id,
-             coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
-             v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
-             v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
-             jb.status as job_status, jb.stage as job_stage,
-             jb.started_at as job_started_at, jb.updated_at as job_updated_at,
-             jb.model_choice as job_model_choice,
-             -- The failed row prints WHY it stopped ("Codex quota reached"),
-             -- which is the one thing a "Draft failed" chip cannot say. The job
-             -- writes it to desk_jobs.error (jobs.ts, 800 chars max).
-             jb.error as job_error,
-             -- coalesce(..., false): a missing key makes ->> NULL, and
-             -- NULL = 'true' is NULL rather than false, which would arrive on
-             -- the desk as a third value where the row means "no".
-             coalesce((v.research->'evidenceReview'->>'required') = 'true', false) as evidence_required,
-             v.research->'evidenceReview'->>'decision' as evidence_decision,
-             -- When the reconciliation pass last ran (draft-reconcile.server.ts
-             -- stamps this key), and when the name check last ran. The row prints
-             -- "checked 8:02 a.m." off these two; a row with neither says nothing
-             -- rather than a time it does not have.
-             v.research->>'evidenceReconciledAt' as evidence_checked_at,
-             v.research->'nameCheck'->>'checkedAt' as names_checked_at,
-             coalesce((v.research->>'importedText') = 'true', false) as imported_text,
-             coalesce((v.research->'nameCheck'->>'complete') = 'true', false) as name_check_complete,
-             case when jsonb_typeof(v.research->'nameCheck'->'rows') = 'array'
-               then (select count(*)::int from jsonb_array_elements(v.research->'nameCheck'->'rows') r
-                      where r->>'status' = 'unresolved')
-               else 0 end as names_unresolved
-      from latest_draft v
-      left join lateral (
-        select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
-        from desk_jobs j
-        where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
-        order by j.id desc limit 1
-      ) jb on true
-      -- Newest work first: the draft an editor just touched is the one they
-      -- came back for. A running job moves its own updated_at heartbeat, so
-      -- a story being written right now holds the top of the list while it is
-      -- being written.
-      order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
-      limit 60
-    `;
+/**
+ * The Drafts screen's window (Unit CZ-long-lists).
+ *
+ * "Everything not yet printed" is a growing list on a real desk, and the screen
+ * drew every row of it. This returns the pill's match cut to the page the editor
+ * asked for, plus the true total and the pill counts.
+ *
+ * The filter is the state machine in `desk-drafts.ts`, not a column -- "Needs
+ * you" is "a name to review OR evidence to check", "Yours" is whether the editor
+ * wrote the headline -- so it runs here, over the rows, before the page is cut.
+ * `deskDraftState` is called with no elapsed time on purpose: the elapsed
+ * argument only changes a running row's LABEL ("Writing · 2:18"), while the
+ * state key, `running`, `failed`, `needsYou` and `yours` -- everything the
+ * filter reads -- are decided by facts alone. The screen still computes its own
+ * states with the real clock, because the label is the row's words.
+ */
+export const listDraftsDeskPage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanListWindow(input, DESK_DRAFT_FILTERS, "all"))
+  .handler(async ({ context, data }) => {
+    const all = await queryDraftRows(context);
+    const states = all.map((row) => deskDraftState(row));
+    const counts = deskDraftFilterCounts(states);
+    const matched = all.filter((_, index) => deskDraftMatchesFilter(states[index], data.filter));
+    const { rows, total } = takeWindow(matched, data.offset, data.limit);
+    return { rows, total, counts };
   });
 
 export const writeStoryFromInput = createServerFn({ method: "POST" })
@@ -4383,62 +4532,95 @@ export const getDraftHistoryItem = createServerFn({ method: "GET" })
     };
   });
 
+async function queryPublishedRows(context: { newsroomId: number }): Promise<DeskPublishedRow[]> {
+  const sql = await getSql();
+  const arts = await sql<{
+    id: number;
+    slug: string;
+    headline: string;
+    dek: string;
+    topic: string;
+    published_at: string;
+    lead_id: number | null;
+    lead_score: number | null;
+    body: string | null;
+  }>`
+    select a.id, a.slug, a.headline, a.dek, a.topic, a.published_at, a.lead_id,
+      a.body, l.newsworthiness as lead_score
+    from articles a
+    left join leads l on l.id = a.lead_id
+    where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
+    order by a.published_at desc nulls last, a.id desc
+  `;
+  if (!arts.length) return [] as DeskPublishedRow[];
+  const corrs = await sql<{ article_id: number | null; body: string; created_at: string }>`
+    select article_id, body, created_at
+    from corrections
+    where newsroom_id = ${owned(context)} and article_id is not null
+    order by created_at asc
+  `;
+  const byArt = new Map<number, { date: string; body: string }[]>();
+  for (const c of corrs) {
+    if (c.article_id == null) continue;
+    const list = byArt.get(c.article_id) ?? [];
+    list.push({ date: c.created_at, body: c.body });
+    byArt.set(c.article_id, list);
+  }
+  const reviews = await loadPublishedMeetingReviews(sql, owned(context));
+  const reviewsByArticle = new Map<number, PublishedMeetingReview[]>();
+  for (const review of reviews) {
+    const list = reviewsByArticle.get(review.article.id) ?? [];
+    list.push(review);
+    reviewsByArticle.set(review.article.id, list);
+  }
+  return arts.map((a) => ({
+    ...a,
+    lead_score: a.lead_score == null ? null : Number(a.lead_score),
+    /*
+      `articles.body` is nullable in the schema and every path that publishes
+      writes it, but the desk must not hand a component a null where it
+      expects the story's words: an editor-opening box seeded from null would
+      read as "this story has no text".
+    */
+    body: String(a.body ?? ""),
+    corrections: byArt.get(a.id) ?? [],
+    transcriptReviews: reviewsByArticle.get(a.id) ?? [],
+  }));
+}
+
+/**
+ * The whole published list, for the readers that genuinely need all of it:
+ * the Queue's near-duplicate matching, `desk.legal-removals`' article picker,
+ * the import screen and Today. The Published SCREEN does not call this any
+ * more -- it calls `listPublishedDeskPage` below, which sends it 25 rows.
+ */
 export const listPublishedDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const sql = await getSql();
-    const arts = await sql<{
-      id: number;
-      slug: string;
-      headline: string;
-      dek: string;
-      topic: string;
-      published_at: string;
-      lead_id: number | null;
-      lead_score: number | null;
-      body: string | null;
-    }>`
-      select a.id, a.slug, a.headline, a.dek, a.topic, a.published_at, a.lead_id,
-        a.body, l.newsworthiness as lead_score
-      from articles a
-      left join leads l on l.id = a.lead_id
-      where a.newsroom_id = ${owned(context)} and a.status = ${"published"}
-      order by a.published_at desc nulls last, a.id desc
-    `;
-    if (!arts.length) return [] as DeskPublishedRow[];
-    const corrs = await sql<{ article_id: number | null; body: string; created_at: string }>`
-      select article_id, body, created_at
-      from corrections
-      where newsroom_id = ${owned(context)} and article_id is not null
-      order by created_at asc
-    `;
-    const byArt = new Map<number, { date: string; body: string }[]>();
-    for (const c of corrs) {
-      if (c.article_id == null) continue;
-      const list = byArt.get(c.article_id) ?? [];
-      list.push({ date: c.created_at, body: c.body });
-      byArt.set(c.article_id, list);
-    }
-    const reviews = await loadPublishedMeetingReviews(sql, owned(context));
-    const reviewsByArticle = new Map<number, PublishedMeetingReview[]>();
-    for (const review of reviews) {
-      const list = reviewsByArticle.get(review.article.id) ?? [];
-      list.push(review);
-      reviewsByArticle.set(review.article.id, list);
-    }
-    return arts.map((a) => ({
-      ...a,
-      lead_score: a.lead_score == null ? null : Number(a.lead_score),
-      /*
-        `articles.body` is nullable in the schema and every path that publishes
-        writes it, but the desk must not hand a component a null where it
-        expects the story's words: an editor-opening box seeded from null would
-        read as "this story has no text".
-      */
-      body: String(a.body ?? ""),
-      corrections: byArt.get(a.id) ?? [],
-      transcriptReviews: reviewsByArticle.get(a.id) ?? [],
-    }));
+  .handler(({ context }) => queryPublishedRows(context));
+
+/**
+ * The Published screen's window (Unit CZ-long-lists).
+ *
+ * The real desk holds 214 printed stories -- 17,615 px of them, drawn as a list
+ * of seven. This returns the pill-and-search match cut to the page the editor
+ * has asked for, plus the true total and the pill counts, so the screen can say
+ * "Showing 25 of 214" and a pill can count the list rather than the page.
+ *
+ * The filter runs HERE, before the cut, which is why it lives in
+ * `published-rows.ts` as a named decision rather than inline in the route: a
+ * window cut before the filter would show whichever 25 rows happened to sort
+ * first instead of the 25 the editor asked for.
+ */
+export const listPublishedDeskPage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanListWindow(input, PUBLISHED_FILTERS, "all"))
+  .handler(async ({ context, data }) => {
+    const all = await queryPublishedRows(context);
+    const weekAgo = publishedWeekAgo(Date.now());
+    const needle = publishedNeedle(data.search);
+    const matched = all.filter((row) => publishedMatches(row, data.filter, needle, weekAgo));
+    const { rows, total } = takeWindow(matched, data.offset, data.limit);
+    return { rows, total, counts: publishedFilterCounts(all, weekAgo) };
   });
 
 /**

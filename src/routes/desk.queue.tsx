@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
 import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
@@ -27,6 +27,7 @@ import {
   fileLead,
   listLeads,
   listPublishedDesk,
+  listQueuePage,
   listScans,
   runScan,
   setLeadStatus,
@@ -37,10 +38,11 @@ import {
   editorActionError,
   mergeFocusSelection,
   nearDuplicate,
-  openLeads,
   suggestFocusLeads,
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
+import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
+import type { QueueFilter, QueueSort } from "@/lib/news/queue-rows";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
 import type { LeadRow } from "@/lib/news/types";
@@ -58,12 +60,13 @@ import {
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
-/** The drawn tab set (README "3. Queue"). */
-type QueueFilter = "open" | "held" | "killed" | "printed" | "all";
-
-/** Sort: Best first is the score the scanner gave; the other two are the age
- *  of the lead, for an editor who came back after a day away. */
-type QueueSort = "best" | "newest" | "oldest";
+/*
+  The drawn tab set (README "3. Queue") and the three orders come from
+  `queue-rows.ts` rather than being spelled again here (Unit CZ-long-lists):
+  the server now decides which rows a page holds, so it has to know the tabs
+  and the sorts, and two lists of the same five words drift the first time one
+  is added. The module is the one source; this screen imports its types.
+*/
 
 /**
  * What "Select all ... leads shown" calls the tab it is selecting. "all" says
@@ -103,18 +106,6 @@ function QueuePage() {
   const navigate = useNavigate();
   const desk = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const newsroomId = desk.data?.ok ? desk.data.newsroomId : null;
-  const {
-    data: leads = [],
-    isPending,
-    isError,
-    error,
-    refetch,
-    isRefetching,
-  } = useQuery({
-    queryKey: ["leads"],
-    queryFn: () => listLeads(),
-    placeholderData: keepPreviousData,
-  });
   const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   /*
@@ -226,6 +217,68 @@ function QueuePage() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<QueueSort>("best");
   const [sectionFilter, setSectionFilter] = useState("all");
+  /*
+    How much of the list is on the screen (Unit CZ-long-lists). "Show 25 more"
+    widens the window from the top rather than fetching a second page into
+    another place, so the rows already read stay where the reader left them --
+    the same shape the Published and Drafts screens use.
+  */
+  const [queueShown, setQueueShown] = useState(PAGE_SIZE);
+  /*
+    The search box is deferred so a fast typist does not fire a request per
+    keystroke: the box keeps up with the typing and the query follows a beat
+    behind. It has to be a request at all because the filter runs on the server
+    before the window is cut -- searching only the 25 rows already drawn would
+    report no matches for a lead that is simply further down the list.
+  */
+  const deferredSearch = useDeferredValue(search);
+  /*
+    THE QUEUE IS WINDOWED (Unit CZ-long-lists).
+
+    The desk holds 41 live leads and this screen drew every one of them. It now
+    asks the server for the first 25 and for one more page per press of the
+    footer under the table, and the SERVER does the narrowing: the tab, the
+    search box, the section select and the sort all run there, before the page
+    is cut. A window cut here in the browser, before the filter, would page the
+    unfiltered list and show the wrong leads -- and the tab counts would read 25,
+    the size of the page, instead of the size of the queue. The rule that does
+    the narrowing is `queue-rows.ts`, where a test can reach it.
+
+    The key carries the tab, the section, the sort and how far the list has been
+    opened, so each combination is cached on its own and going back to one
+    already read is instant; `placeholderData` keeps the rows on screen while the
+    next window is in flight, so pressing a pill or typing does not blank the
+    table. The bare `["leads"]` prefix is deliberate and shared with every other
+    reader of the leads list -- this screen's own batch pool below, the Sources
+    screen's kill-pattern gate, and the invalidation every hold, kill, delete and
+    scan does -- so a prefix match still catches this key.
+
+    `batchPool` is the one thing here that still reads the whole list, and only
+    while the batch dialog is open.
+  */
+  const leadsQuery = useQuery({
+    queryKey: ["leads", filter, sectionFilter, sort, deferredSearch, queueShown],
+    queryFn: () =>
+      listQueuePage({
+        data: {
+          limit: queueShown,
+          offset: 0,
+          filter,
+          search: deferredSearch,
+          section: sectionFilter,
+          sort,
+        },
+      }),
+    placeholderData: keepPreviousData,
+  });
+  const { isPending, isError, error, refetch, isRefetching } = leadsQuery;
+  /*
+    The rows on the screen (`leads`) and how many the tab actually holds
+    (`queueTotal`). `queueTotal` counts the whole match rather than the page:
+    it is what the footer's "Showing 25 of 41" and the pills both read.
+  */
+  const leads = leadsQuery.data?.rows ?? [];
+  const queueTotal = leadsQuery.data?.total ?? 0;
   const [focusTarget, setFocusTarget] = useState<3 | 4 | 5>(3);
   const [headline, setHeadline] = useState("");
   const [why, setWhy] = useState("");
@@ -452,10 +505,34 @@ function QueuePage() {
     },
   });
 
-  const working = openLeads(leads);
-  const batchEligible = leads.filter(
+  /*
+    THE ROWS ON THE SCREEN. The server has already run the tab, the search, the
+    section and the sort, and cut the page, so there is nothing left to narrow
+    here: `shown` is what came back. Everything below that used to compute it --
+    the tab filter, the section select, the search, the three orders and the
+    "Killed sorts by what keeps coming back" rule -- is `queue-rows.ts` now, on
+    the other side of the wire, because a window cut before the filter pages the
+    unfiltered list and shows the wrong leads.
+  */
+  const shown = leads;
+  /*
+    The batch dialog's own pool, and the ONE thing on this screen that still
+    needs every lead: `suggestFocusLeads` balances a suggested set across the
+    whole queue, and a window of 25 would balance it across whichever 25 rows
+    sorted first. Kept lazy -- fetched only while the dialog is open -- so the
+    screen never reads the full list to draw a table it is not showing. It is
+    the same reader the screen used before the window (`listLeads`), so the
+    suggestion it produces is unchanged.
+  */
+  const batchPool = useQuery({
+    queryKey: ["leads", "batch-pool"],
+    queryFn: () => listLeads(),
+    enabled: panel === "batch",
+  });
+  const batchEligible = (batchPool.data ?? []).filter(
     (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
   );
+  const batchPoolPending = panel === "batch" && batchPool.isPending;
   /*
     The list the batch dialog is about to queue: the bulk bar's selection,
     held still while the dialog is open so that adding suggested focus to it
@@ -481,66 +558,24 @@ function QueuePage() {
     batchQueued.every((leadId) => selectedBatchLeads.includes(leadId));
   const suggestedFocus = suggestFocusLeads(batchEligible, sections, focusTarget);
   const focusAddable = suggestedFocus.filter((lead) => !selectedBatchLeads.includes(lead.id));
-  const publishedCount = leads.filter((l) => l.status === "published").length;
   const last = scans.data?.rows?.[0];
-  const counts = {
-    all: working.length,
-    new: leads.filter((l) => l.status === "new").length,
-    drafted: leads.filter((l) => l.status === "drafted").length,
-    held: leads.filter((l) => l.status === "held").length,
-    killed: leads.filter((l) => l.status === "killed").length,
-  };
-  const printed = published.data ?? [];
   /*
-    "≈ Printed": the leads the desk already matches to a piece that ran
-    (the same `nearDuplicate` the row's chip and "Kill as duplicate" use).
-    It is a real, checkable set on this screen, not a count of nothing.
+    THE PILLS COUNT THE LIST, NOT THE PAGE. These arrive counted on the server
+    over every lead the newsroom holds -- the tab, the section and the search
+    narrow the ROWS, never the counts -- so "All" still reads 41 while 25 rows
+    are on the screen. Reading the page here would print 25 for a queue of 41
+    the moment the window appeared.
   */
-  const printedMatches = leads.filter((l) => nearDuplicate(l, printed) !== null);
+  const tabCounts = leadsQuery.data?.counts;
+  const publishedCount = tabCounts?.publishedLeads ?? 0;
   const queueFilters: { key: QueueFilter; label: string; count: number }[] = [
-    { key: "open", label: "Open", count: working.length },
-    { key: "held", label: "Held", count: counts.held },
-    { key: "killed", label: "Killed", count: counts.killed },
-    { key: "printed", label: "≈ Printed", count: printedMatches.length },
-    { key: "all", label: "All", count: leads.length },
+    { key: "open", label: "Open", count: tabCounts?.open ?? 0 },
+    { key: "held", label: "Held", count: tabCounts?.held ?? 0 },
+    { key: "killed", label: "Killed", count: tabCounts?.killed ?? 0 },
+    { key: "printed", label: "≈ Printed", count: tabCounts?.printed ?? 0 },
+    { key: "all", label: "All", count: tabCounts?.all ?? 0 },
   ];
-  const byFilter =
-    filter === "killed"
-      ? leads.filter((l) => l.status === "killed")
-      : filter === "held"
-        ? leads.filter((l) => l.status === "held")
-        : filter === "printed"
-          ? printedMatches
-          : filter === "open"
-            ? working
-            : leads;
-  const needle = search.trim().toLowerCase();
-  const bySearch = needle
-    ? byFilter.filter((l) =>
-        `${l.headline} ${l.why ?? ""} ${l.topic ?? ""}`.toLowerCase().includes(needle),
-      )
-    : byFilter;
-  const filtered =
-    sectionFilter === "all" ? bySearch : bySearch.filter((l) => l.topic === sectionFilter);
-  const byAge = (a: LeadRow, b: LeadRow) =>
-    sort === "newest"
-      ? Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id
-      : Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id;
-  const shown =
-    sort === "best" && filter === "killed"
-      ? // What keeps coming back belongs on top of the Killed tab -- that is
-        // the whole point of stamping a resurfaced lead instead of quietly
-        // hiding it. Leads never resurfaced (last_resurfaced_at null) sort
-        // after ones that have, oldest kill first within that group.
-        [...filtered].sort((a, b) => {
-          const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
-          const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
-          if (at !== bt) return bt - at;
-          return b.id - a.id;
-        })
-      : [...filtered].sort(
-          sort === "best" ? (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0) : byAge,
-        );
+  const printed = published.data ?? [];
   /*
    * Unit BS. What the batch panel may show, decided once, here:
    *
@@ -851,6 +886,10 @@ function QueuePage() {
         </section>
       ) : null}
 
+      {/* The note explains the rows it is printed above, so it is read off the
+          page rather than off the whole list (Unit CZ-long-lists): on the
+          Killed tab "best" puts resurfaced leads first, so a page that holds
+          none of them is a page the note has nothing to say about. */}
       {filter === "killed" && shown.some((l) => (l.resurfaced_count ?? 0) > 0) ? (
         <p className="meta seen-again-note">{SEEN_AGAIN_EXPLAINER}</p>
       ) : null}
@@ -1049,6 +1088,25 @@ function QueuePage() {
               );
             })}
           </div>
+          {/* The list is windowed (Unit CZ-long-lists), so the footer says how
+              much of it is on the screen and offers the next page. Not drawn:
+              the handoff's only footer is this screen's own "Load more"
+              (Desk Screens.dc.html:67), and the brief names this button, so
+              this is the brief's wording. Recorded in SPEC-GAPS-0681.md. */}
+          {queueTotal > 0 ? (
+            <div className="astra-list-foot">
+              <span>{showingLine(shown.length, queueTotal, "leads")}</span>
+              {shown.length < queueTotal ? (
+                <button
+                  type="button"
+                  className="astra-list-more"
+                  onClick={() => setQueueShown((n) => n + PAGE_SIZE)}
+                >
+                  Show {PAGE_SIZE} more
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </>
       )}
 
@@ -1167,7 +1225,16 @@ function QueuePage() {
           selectedBatchLeads.length === 0 ||
           selectedBatchLeads.length > 5 ||
           startBatch.isPending ||
-          batchQueuedNow
+          batchQueuedNow ||
+          /*
+            Unit CZ-long-lists: the eligible pool is now a second read, asked
+            for when this dialog opens, because the screen behind it holds only
+            a page. Until it lands `batchEligible` is empty, so
+            `selectedBatchLeads` is empty too and the first three clauses
+            already hold -- this names the reason, so that a future change to
+            any of them cannot quietly arm a Start that queues the wrong leads.
+          */
+          batchPoolPending
         }
         onPrimary={() => {
           const leadIds = selectedBatchLeads;
@@ -1298,7 +1365,17 @@ function QueuePage() {
                 already carrying.
               */}
               {batchItems.map((item) => {
-                const lead = leads.find((candidate) => candidate.id === item.leadId);
+                /*
+                  The row's headline has to come from somewhere, and since Unit
+                  CZ-long-lists the screen only HOLDS a page: a batch can carry
+                  a lead whose page this screen is not showing. So the visible
+                  page is asked first (it is already in memory) and the batch
+                  pool second, which is every lead. `batchPool` is enabled only
+                  while this dialog is open, which is where this line runs.
+                */
+                const lead =
+                  leads.find((candidate) => candidate.id === item.leadId) ??
+                  batchPool.data?.find((candidate) => candidate.id === item.leadId);
                 return (
                   <DraftBatchResult
                     key={item.jobId}
