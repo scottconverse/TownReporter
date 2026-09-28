@@ -45,6 +45,7 @@ import { Dialog } from "@/components/dialog";
 import { ListSkeleton } from "@/components/states";
 import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
 import { ProviderStatusCard } from "@/components/provider-status-card";
+import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
 import { getProviderStatuses } from "@/lib/news/provider-login";
 import { getLocalModelChoice } from "@/lib/news/provider-settings";
@@ -1002,57 +1003,10 @@ function ConnectionsTab({
   );
 }
 
-/**
- * The four looks a card's chip can wear.
- *
- * Named after what the color MEANS rather than after a provider, so the same
- * four are available to a job's status chip and to a connection's, and neither
- * has to know the other's words.
- */
-type ChipTone = "ready" | "slow" | "signin" | "quiet";
-
-function chipLook(tone: ChipTone): CSSProperties {
-  if (tone === "ready") return { color: "var(--ok)", border: "1px solid var(--ok)" };
-  if (tone === "slow") return { color: "var(--warn)", border: "2px solid var(--warn)" };
-  if (tone === "signin") return { color: "var(--danger)", border: "2px dashed var(--danger)" };
-  return { color: "var(--fg2)", border: "1px solid var(--fg2)" };
-}
-
-/**
- * One chip, in the card's top-right corner.
- *
- * A flex column so an optional second line costs the card's own columns no
- * width -- the same reason the job row's chip stacks. `title` carries the help
- * sentence: a chip is two words, and the sentence that explains them does not
- * fit on the card.
- */
-function Chip({
-  tone,
-  label,
-  help,
-  below,
-}: {
-  tone: ChipTone;
-  label: string;
-  help: string;
-  below?: string;
-}) {
-  return (
-    <div className="flex flex-col items-end gap-0.5" title={help}>
-      <span
-        className="text-sm font-extrabold"
-        style={{ ...chipLook(tone), padding: "1px 8px", whiteSpace: "nowrap" }}
-      >
-        {label}
-      </span>
-      {below ? (
-        <span className="text-sm text-ink-2" style={{ whiteSpace: "nowrap" }}>
-          {below}
-        </span>
-      ) : null}
-    </div>
-  );
-}
+/* The four tones and the chip itself live in @/components/status-chip since
+   unit CX -- Server draws the same chip on each writing model's card, so the
+   four words ("ready", "slow", "signin", "quiet") have one home rather than two
+   that could drift. This file imports them like any other. */
 
 /**
  * The words a CONNECTION card's chip says.

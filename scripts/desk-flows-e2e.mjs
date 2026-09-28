@@ -411,13 +411,12 @@ async function main() {
   await page.getByText(/Deleted, and kept for 30 days/).waitFor({ timeout: 20_000 });
 
   await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Server & newsroom", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Server", exact: true }).waitFor();
   step("Server page renders");
 
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Recently deleted", exact: true })
-    .click();
+  // Every Server panel is on the page at once (no tab strip), so reaching the
+  // trash is a scroll to its card, not a click on a jump button.
+  await page.getByRole("heading", { name: "Recently deleted", exact: true }).first().scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Recently deleted" }).waitFor({ timeout: 20_000 });
   const trashRow = page.locator("li", { hasText: leadHeadline }).first();
   await trashRow.waitFor({ timeout: 20_000 });

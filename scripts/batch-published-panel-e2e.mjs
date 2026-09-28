@@ -228,9 +228,20 @@ async function ownTheDesk() {
 
 /** A Custom AI connection at the fake, so the batch has a runtime that answers. */
 async function saveTheFakeConnection() {
-  await page.goto(`${base}/desk/ops#custom-ai-connections`, { waitUntil: "networkidle" });
+  /*
+    Unit CX: the Server page draws no connections panel any more. Its two doors
+    ("Assign models to jobs…", "All connections") lead to the Models screen,
+    which owns the list, so this walk goes there and opens the form the same way
+    an owner does: the header's "+ Add a connection" button. The panel keeps the
+    `#custom-ai-connections` anchor it had on Server settings, so every locator
+    below this line is unchanged -- only the way in, and what to wait for.
+    `showHeading={false}` in that dialog suppresses "Add your own AI API", so
+    the wait is on the form's first field instead of on a heading.
+  */
+  await page.goto(`${base}/desk/models?tab=conn`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "+ Add a connection" }).click();
   const section = page.locator("#custom-ai-connections");
-  await section.getByRole("heading", { name: "Add your own AI API" }).waitFor({ timeout: 45_000 });
+  await section.getByLabel("Connection name", { exact: true }).waitFor({ timeout: 45_000 });
   await section.getByLabel("Connection name", { exact: true }).fill(connectionName);
   await section.getByLabel("Base URL", { exact: true }).fill(modelBase);
   await section.getByLabel("Model id (optional)", { exact: true }).fill(modelId);

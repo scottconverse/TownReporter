@@ -170,9 +170,16 @@ try {
     city: "Testerville",
     state: "Wyoming",
   });
-  await page.goto(`${base}/desk/ops#custom-ai-connections`);
+  /*
+    Unit CX: the Server page draws no connections panel any more -- both its
+    doors lead to the Models screen, which owns the list. The form is that
+    screen's "+ Add a connection" dialog, and the panel keeps the
+    `#custom-ai-connections` anchor, so every locator below is unchanged.
+  */
+  await page.goto(`${base}/desk/models?tab=conn`);
+  await page.getByRole("button", { name: "+ Add a connection" }).click();
   const section = page.locator("#custom-ai-connections");
-  await section.getByRole("heading", { name: "Add your own AI API" }).waitFor();
+  await section.getByLabel("Connection name", { exact: true }).waitFor();
   await section.getByLabel("Connection name", { exact: true }).fill("Isolated API fixture");
   await section.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:3471/v1");
   await section.getByLabel(/^API key \(optional\)/).fill("fixture-secret-do-not-return");
@@ -315,10 +322,9 @@ try {
   );
 
   await page.goto(`${base}/desk/ops`);
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Daily scan", exact: true })
-    .click();
+  // The Server page draws every panel on the page at once, so the Daily scan
+  // panel is reached by scrolling its card into view, not by a nav pill.
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const dailyPanel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),
   });
@@ -331,10 +337,7 @@ try {
   await dailyPanel.getByRole("button", { name: "Save daily scan", exact: true }).click();
   await dailyPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload();
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Daily scan", exact: true })
-    .click();
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const savedDailyPanel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),
   });
@@ -404,7 +407,15 @@ try {
     "a Batch server-function response exposed the saved API key",
   );
   assert.equal((await page.locator("body").innerText()).includes("fixture-secret-do-not-return"), false);
-  await page.goto(`${base}/desk/ops#custom-ai-connections`);
+  /*
+    The saved row is read back the way the first pass saved it: the Models
+    screen's dialog, opened with the header button. The panel moved off Server
+    settings in unit CX, and `#custom-ai-connections` moved with it, so this
+    second look is the same locator on the same component -- only the way in
+    changed.
+  */
+  await page.goto(`${base}/desk/models?tab=conn`);
+  await page.getByRole("button", { name: "+ Add a connection" }).click();
   const finalSection = page.locator("#custom-ai-connections");
   const finalRow = finalSection.locator("article").filter({ hasText: "Isolated API fixture" });
   await finalRow.getByRole("heading", { name: "Isolated API fixture", exact: true }).waitFor();

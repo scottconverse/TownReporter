@@ -23,7 +23,7 @@ import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
   screen draws the same card under "Subscription sign-ins (OAuth)" and two
   copies of a countdown would drift.
 */
-import { getProviderStatuses } from "@/lib/news/provider-login";
+import { getProviderStatuses, type ProviderStatus } from "@/lib/news/provider-login";
 import { getProviderTimeSettings } from "@/lib/news/provider-settings";
 /*
   The two bounds come from the PURE registry module, not from
@@ -41,7 +41,7 @@ import { RoutineNoticePermissions } from "@/components/routine-notice-permission
 import { YoutubeKeySettings } from "@/components/youtube-key";
 import { XaiOauthConnection } from "@/components/xai-oauth-connection";
 import { ProviderStatusCard } from "@/components/provider-status-card";
-import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
+import { Chip } from "@/components/status-chip";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -87,33 +87,23 @@ function StateDot({ state }: { state: HealthState }) {
   );
 }
 
-const SETTINGS_PANELS = [
-  "Writing models",
-  "Custom connections",
-  "Daily scan",
-  "Meeting capture",
-  "YouTube",
-  "Routine notices",
-  "Paper identity",
-  "Sections",
-  "Named outlets",
-  "Server health",
-  "Recently deleted",
-  "Editors & access",
-] as const;
 /**
- * Where each Server panel sits on the page.
+ * Where each Server card sits on the page.
  *
- * The drawing puts every panel on the page at once (Desk Screens.dc.html,
- * `isServer`), so "which panel am I looking at" is no longer state this screen
- * holds -- arriving with `#named-outlets` from another screen scrolls there
- * instead of selecting anything. These are the anchors the strip and the
- * hashes use; the writing-models and custom-ai-connections ids the panels
- * already carry in their own markup stay where they are.
+ * The drawing puts every card on the page at once (Desk Screens.dc.html,
+ * `isServer`), so "which panel am I looking at" is not state this screen holds
+ * -- arriving with `#named-outlets` from another screen scrolls there instead
+ * of selecting anything. These are the ids the hashes and the header action
+ * use; the `writing-models` id the panel carries in its own markup stays where
+ * it is, because the desk rail links to it.
+ *
+ * Unit CX removed the jump strip these anchors used to feed. The ids stay:
+ * `scripts/named-outlets-e2e.mjs` and `scripts/sections-source-add-e2e.mjs`
+ * visit `/desk/ops#outlets` and `/desk/ops#sections`, and a hash that scrolls
+ * nowhere is a broken bookmark.
  */
 const PANEL_ANCHORS = {
   "Writing models": "ops-panel-writing-models",
-  "Custom connections": "ops-panel-custom-connections",
   "Daily scan": "ops-panel-daily-scan",
   "Meeting capture": "ops-panel-meeting-capture",
   YouTube: "ops-panel-youtube",
@@ -124,7 +114,8 @@ const PANEL_ANCHORS = {
   "Server health": "ops-panel-server-health",
   "Recently deleted": "ops-panel-recently-deleted",
   "Editors & access": "ops-panel-editors-access",
-} as const satisfies Record<(typeof SETTINGS_PANELS)[number], string>;
+  "Time budgets": "ops-panel-time-budgets",
+} as const;
 
 function jumpToPanel(anchor: string) {
   document.getElementById(anchor)?.scrollIntoView({ block: "start" });
@@ -133,11 +124,36 @@ function jumpToPanel(anchor: string) {
 function OpsPage() {
   const { signin } = Route.useSearch();
   const hash = useRouterState({ select: (s) => s.location.hash });
+
+  /*
+    Who is reading the page.
+
+    Unit CX: the drawing gives every card a read-only face for editors who are
+    not the owner, and the panels behind four of these cards are owner-only on
+    the server (health, writing models, time budgets, meeting capture). Asking
+    once here and passing the answer down is what lets a card say "only the
+    owner can read this" in words instead of rendering a skeleton that never
+    resolves, or a panel that throws on a refusal it cannot explain.
+  */
+  const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const known = me.isSuccess;
+  const isOwner = me.data?.role === "owner";
+  const [showLogs, setShowLogs] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+
   useEffect(() => {
     const anchor = signin
       ? PANEL_ANCHORS["Writing models"]
-      : hash === "custom-ai-connections"
-        ? PANEL_ANCHORS["Custom connections"]
+      : /*
+          "#custom-ai-connections" used to land on a panel of its own on this
+          page. Unit CX moved that panel to the Models screen's second tab --
+          the drawn Writing models card links to it as "All connections" -- so
+          the old bookmark now lands on the card that carries the link. A
+          hash that scrolls nowhere is a broken bookmark; one that scrolls to
+          the door is a slightly stale bookmark, which is what it is.
+        */
+        hash === "custom-ai-connections"
+        ? PANEL_ANCHORS["Writing models"]
         : // "#youtube-key" is the key box; checked before the substring tests
           // below so a link to it cannot be swallowed by a wider match.
           hash === "youtube-key"
@@ -203,20 +219,20 @@ function OpsPage() {
   const state = checks.length ? overallState(checks) : "unknown";
 
   return (
-    <DeskShell title="Server & newsroom" kicker="Models, health and setup" hideTitle>
+    <DeskShell title="Server" kicker="Models, health and setup" hideTitle>
       {/*
         The drawn header: kicker, title, the page's own action, rule -- the
         drawing puts "Give up the desk" on the title line, as the one thing on
         this screen that leaves the page. It is not a second control: it takes
-        the editor to the section that holds it, which is the same button the
-        panel has always drawn. The drawing's own style for it is `quiet` (one
-        rule, not two): Desk Screens.dc.html, `btns.server`.
+        the editor to the card that holds it, which is the same button the panel
+        has always drawn. The drawing's own style for it is `quiet` (one rule,
+        not two): Desk Screens.dc.html, `btns.server`.
 
-        The title stays "Server & newsroom", not the drawing's "Server":
-        desk-flows-e2e.mjs waits on a level-1 heading named exactly that, and
-        the drawing's short name is a *nav* label -- the rail in
-        desk-chrome.tsx (lane 3), which still reads "Server", so renaming the
-        h1 alone would make the rail and the page disagree.
+        The title is the drawing's "Server" (unit CX). It read "Server &
+        newsroom" before, on the argument that the rail's label and the h1
+        should agree -- but the rail says "Server" (desk-chrome.tsx, DESK_NAV),
+        so the rename is what makes the two agree, and the drawing is the
+        authority. The kicker keeps the words that were doing the explaining.
 
         The lede moves out of the shell and into the body: `hideTitle` is what
         buys the action slot, and it drops the shell's sentence with the title,
@@ -225,7 +241,7 @@ function OpsPage() {
       <div className="astra-head">
         <div>
           <p className="kick">Models, health and setup</p>
-          <h1 className="h1">Server &amp; newsroom</h1>
+          <h1 className="h1">Server</h1>
         </div>
         <div className="astra-head-acts">
           <button
@@ -244,73 +260,31 @@ function OpsPage() {
         Checks show what responds from this machine; they do not prove that a reader in another town
         can reach your paper.
       </p>
+      {/*
+        The drawn grid (Desk Screens.dc.html, `isServer`): ONE two-column grid
+        with Writing models spanning both rows on the left and the remaining
+        cards flowing after it, in the order the drawing lists them. Unit CX
+        removed the twelve-button jump strip that used to sit here -- the
+        drawing has no tab pills, and with one card per panel the strip was a
+        second list of what the page already shows.
+
+        Card order below IS the drawn order. The page used to pick its column
+        order by height, which is what put Recently deleted at the top of the
+        page and Health down a second column.
+      */}
       <div className="astra-settings">
-        <nav className="astra-settings-nav" aria-label="Server settings">
-          {SETTINGS_PANELS.map((name) => (
-            <button key={name} onClick={() => jumpToPanel(PANEL_ANCHORS[name])}>
-              {name}
-            </button>
-          ))}
-        </nav>
         <div className="astra-settings-body">
-          <div className="astra-ops-col">
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Writing models"]}
-            >
-              <WritingModels />
-            </div>
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Recently deleted"]}
-            >
-              <RecentlyDeleted />
-            </div>
-            <div className="astra-ops-card astra-panel astra-jump" id={PANEL_ANCHORS["Daily scan"]}>
-              <DailyScanSettings />
-            </div>
-            <div className="astra-ops-card astra-panel astra-jump" id={PANEL_ANCHORS.YouTube}>
-              <YoutubeKeySettings />
-            </div>
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Named outlets"]}
-            >
-              <NamedOutletsSetup />
-            </div>
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Custom connections"]}
-            >
-              <CustomAiSettings />
-            </div>
-            {/*
-              The rest of column one is chosen by height, not by the drawing's
-              row pairs. These are the full panels, not the drawing's compact
-              summaries, and a card cannot be split across the two columns --
-              with the drawing's pairing the left column ended several thousand
-              pixels above the right one and the page finished with a blank
-              half-screen. Paper setup and Routine notices are the two that
-              bring the columns out within a couple of hundred pixels.
-            */}
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Paper identity"]}
-            >
-              <PaperSetup />
-            </div>
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Routine notices"]}
-            >
-              <RoutineNoticePermissions />
-            </div>
-          </div>
-          <div className="astra-ops-col">
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Server health"]}
-            >
+          <OpsCard id={PANEL_ANCHORS["Writing models"]} tall>
+            <WritingModels isOwner={isOwner} known={known} />
+          </OpsCard>
+          <OpsCard id={PANEL_ANCHORS["Server health"]}>
+            {known && !isOwner ? (
+              <ReadOnlyNote>
+                Only the owner can read this machine&rsquo;s health, its logs and the buttons that
+                restart things. Ask the owner if a check looks wrong.
+              </ReadOnlyNote>
+            ) : (
+              <>
               <section className="mt-12">
                 <SecHead
                   title="Health"
@@ -353,7 +327,42 @@ function OpsPage() {
                 )}
               </section>
 
-              <section className="mt-12">
+              {/*
+                The drawing's two buttons at the foot of the Health card
+                (Desk Screens.dc.html, `panels[0].btns`): "View logs" and
+                "Restart workers". Neither has a screen of its own, and the
+                drawing gives the two panels behind them no other door -- so
+                they are disclosures, not links: the panel opens in place,
+                under the button that asked for it, and every control inside
+                still works exactly as it did when the panels stood alone.
+                Both are recorded in design/SPEC-GAPS-0681.md (CX).
+
+                `aria-expanded`/`aria-controls` rather than InkButton, which
+                takes no aria props: a disclosure that a screen reader cannot
+                tell is open is a control that lies about its state.
+              */}
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  className="btn small quiet"
+                  aria-expanded={showLogs}
+                  aria-controls="ops-logs-panel"
+                  onClick={() => setShowLogs((open) => !open)}
+                >
+                  {showLogs ? "Hide logs" : "View logs"}
+                </button>
+                <button
+                  type="button"
+                  className="btn small quiet"
+                  aria-expanded={showActions}
+                  aria-controls="ops-actions-panel"
+                  onClick={() => setShowActions((open) => !open)}
+                >
+                  {showActions ? "Hide actions" : "Restart workers"}
+                </button>
+              </div>
+
+              <section className="mt-12" id="ops-actions-panel" hidden={!showActions}>
                 <SecHead
                   title="Actions"
                   sub="Each one says what it does before it does it. The two that interrupt the paper ask twice."
@@ -418,7 +427,7 @@ function OpsPage() {
                 ) : null}
               </section>
 
-              <section className="mt-12">
+              <section className="mt-12" id="ops-logs-panel" hidden={!showLogs}>
                 <SecHead title="Logs" sub="The last few lines of each. Newest at the bottom." />
                 <div className="mt-4 space-y-6">
                   {(health.data?.logs ?? []).map((l) => (
@@ -443,27 +452,213 @@ function OpsPage() {
                   ? "This page runs inside the paper. If the server is down, use Start TownReporter.cmd and the logs in your private data folder. This local installation has no automatic Windows watchdog or startup task."
                   : "This page runs inside the paper, so it cannot report when the server is down. Use your installation's external controls. Automatic recovery is available only when its operator has separately configured and verified it."}
               </p>
-            </div>
-            <div className="astra-ops-card astra-panel astra-jump" id={PANEL_ANCHORS.Sections}>
+              </>
+            )}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Paper identity"]}>
+            {known && !isOwner ? (
+              <ReadOnlyNote>
+                Only the owner can change the paper&rsquo;s name, town, state, timezone and starting
+                watch list.
+              </ReadOnlyNote>
+            ) : (
+              <PaperSetup />
+            )}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Recently deleted"]}>
+            <RecentlyDeleted />
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS.Sections}>
+            {known && !isOwner ? (
+              <ReadOnlyNote>
+                Only the owner can add, rename, hide or retire a section. The sections themselves
+                are the rail on every desk page and the headings on the public paper.
+              </ReadOnlyNote>
+            ) : (
               <SectionsSetup />
-            </div>
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Meeting capture"]}
-            >
+            )}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Daily scan"]}>
+            {known && !isOwner ? (
+              <ReadOnlyNote>
+                Only the owner can change when the daily scan runs and how much it may read. It
+                runs for the whole paper, once.
+              </ReadOnlyNote>
+            ) : (
+              <DailyScanSettings />
+            )}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Meeting capture"]}>
+            {known && !isOwner ? (
+              <ReadOnlyNote>
+                Only the owner can configure meeting capture. The card is here so the page still
+                says what the desk watches.
+              </ReadOnlyNote>
+            ) : (
               <MeetingCaptureSettings />
-            </div>
-            <div
-              className="astra-ops-card astra-panel astra-jump"
-              id={PANEL_ANCHORS["Editors & access"]}
-            >
-              <InviteAnEditor />
-              <GiveUpTheDesk />
-            </div>
-          </div>
+            )}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS.YouTube}>
+            <YoutubeKeySettings />
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Routine notices"]}>
+            <RoutineNoticePermissions />
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Named outlets"]}>
+            {known && !isOwner ? (
+              <ReadOnlyNote>
+                Only the owner can change the named outlets and their overrides. Everything the
+                desk writes still uses them.
+              </ReadOnlyNote>
+            ) : (
+              <NamedOutletsSetup />
+            )}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Editors & access"]}>
+            {known ? (
+              <>
+                {isOwner ? (
+                  <InviteAnEditor />
+                ) : (
+                  <ReadOnlyNote>
+                    Only the owner can invite an editor or hand the newsroom over. Your own way out
+                    is below.
+                  </ReadOnlyNote>
+                )}
+                {/*
+                  Never owner-only: this is the control an editor uses to LEAVE,
+                  and the owner uses to hand the newsroom on. It stays on this
+                  card for everyone (unit CX item 2: never delete a working
+                  owner control).
+                */}
+                <GiveUpTheDesk />
+              </>
+            ) : null}
+          </OpsCard>
+
+          <OpsCard id={PANEL_ANCHORS["Time budgets"]}>
+            <TimeBudgets />
+          </OpsCard>
         </div>
       </div>
     </DeskShell>
+  );
+}
+
+/**
+ * One card of the Server grid.
+ *
+ * The drawing draws this page as a plain two-column grid of boxes, each one a
+ * panel with its title inside (Desk Screens.dc.html, `isServer`: the outer
+ * `div` is the grid, the `sc-for` over `panels` draws the boxes). No tab
+ * pills, no jump strip, no accordion -- every card is on the page at once, so
+ * "which panel am I looking at" is not a question this screen asks.
+ *
+ * `.astra-panel` is the shipped card (surface, 1px rule, 18/20 padding), so a
+ * card here is the same box every other panel on the desk is. The id is what
+ * the old anchors and the header's one action scroll to.
+ *
+ * `tall` is the drawing's `grid-row:span 2` on Writing models -- the one card
+ * that is twice as long as its neighbours. It is reset to `auto` in the
+ * one-column media query, where spanning two rows would leave a hole.
+ */
+function OpsCard({
+  id,
+  tall,
+  children,
+}: {
+  id: string;
+  tall?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      id={id}
+      className={`astra-ops-card astra-panel astra-jump${tall ? " astra-ops-card-tall" : ""}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * What a card says to an editor who is not the owner.
+ *
+ * Unit CX item 4. Four of these cards read something only the owner may read
+ * (this machine's health, the writing models' sign-ins, the time budgets, the
+ * meeting settings), and the server refuses the read rather than trusting the
+ * UI to hide it. Before, the card drew its loading skeleton and stayed there:
+ * "◉UNKNOWN" over grey bars, which reads as a broken page rather than a
+ * permission. One plain sentence is the honest answer, and it is a sentence an
+ * editor can act on -- ask the owner.
+ */
+function ReadOnlyNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-2 max-w-2xl text-base text-ink-2" data-testid="ops-read-only">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * How long the desk waits for one answer from each writing model.
+ *
+ * Unit CX moved these fields here, out of each sign-in card, because the
+ * drawing gives them a card of their own ("Time budgets", Desk Screens.dc.html
+ * `panels`: "Local models — 10 min per call", "Subscription CLIs — 150 s per
+ * call"). They are the SAME fields, one per provider, saving through the same
+ * `ProviderTimeField` -- moved, not copied, so there is still exactly one
+ * place on the desk where a timeout can be changed.
+ *
+ * Owner-only on the server (src/lib/news/provider-settings.ts refuses a plain
+ * editor), which is why the card has a read-only face.
+ */
+function TimeBudgets() {
+  const [note, setNote] = useState("");
+  const times = useQuery({
+    queryKey: ["provider-times"],
+    queryFn: () => getProviderTimeSettings(),
+  });
+  const rows = times.data ?? [];
+  return (
+    <section className="mt-16 border-t border-rule pt-8">
+      <SecHead
+        title="Time budgets"
+        sub="How long one answer from each model may take before the desk gives up on it."
+      />
+      <p aria-live="polite" role="status" className="sr-only">
+        {note}
+      </p>
+      {times.isPending ? (
+        <ListSkeleton rows={2} />
+      ) : times.isError ? (
+        <p className="mt-4 text-rust">Could not read the time limits. {String(times.error)}</p>
+      ) : rows.length === 0 ? (
+        <p className="mt-2 max-w-2xl text-sm text-muted">
+          No model on this machine takes a time limit yet. One appears here as soon as a model is
+          signed in or pointed at.
+        </p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {rows.map((row) => (
+            <div key={row.providerId} className="astra-panel">
+              <h3 className="font-display text-lg font-semibold">{row.label}</h3>
+              <p className="mt-1 text-sm text-ink-2">{row.detail}</p>
+              <ProviderTimeField row={row} onNote={setNote} />
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -482,27 +677,14 @@ function OpsPage() {
  * fixed by signing in again, not by signing out first.
  *
  * Owner-only, and enforced on the server (see src/lib/news/provider-login.ts),
- * not merely hidden here.
+ * not merely hidden here. Unit CX added `known`: while nobody yet knows who is
+ * reading, the card shows a skeleton rather than the sentence for an editor,
+ * because "only the owner can see this" shown to the owner for a tenth of a
+ * second is a lie the page tells about itself.
  */
-function CustomAiSettings() {
-  /*
-    The panel itself moved to src/components/custom-ai-connections-panel.tsx in
-    unit BG, so the Models screen draws the same cards with the same wiring.
-    This wrapper keeps the section's place on the page -- the anchor an editor
-    has bookmarked, and the rule that separates it from the panel above.
-  */
-  return (
-    <div id="custom-ai-connections" className="mt-12 min-w-0 border-t border-rule pt-8">
-      <CustomAiConnectionsPanel />
-    </div>
-  );
-}
-
-function WritingModels() {
-  const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+function WritingModels({ isOwner, known }: { isOwner: boolean; known: boolean }) {
   const { signin } = Route.useSearch();
   const [note, setNote] = useState("");
-  const isOwner = me.data?.role === "owner";
 
   const statuses = useQuery({
     queryKey: ["provider-statuses"],
@@ -551,20 +733,40 @@ function WritingModels() {
     [signin],
   );
 
-  if (!isOwner) return null;
+  /*
+    The two doors the drawing puts at the foot of this card: the yellow
+    "Assign models to jobs →" and the outlined "All connections" (Desk
+    Screens.dc.html, `models` card, both wired to `goModels`). They replace
+    the one inline text link this panel used to carry -- same destination,
+    drawn as the drawing draws them, and the pair is the card's whole footer
+    for an owner and for an editor alike, because a door is not a control:
+    the Models screen has its own read-only face.
+  */
+  const doors = (
+    <div className="mt-5 flex flex-wrap gap-2">
+      <Link to="/desk/models" className="btn solid">
+        Assign models to jobs →
+      </Link>
+      <Link to="/desk/models" search={{ tab: "conn" }} className="btn">
+        All connections
+      </Link>
+    </div>
+  );
 
   return (
     <section className="mt-8" id="writing-models" ref={scrollHere}>
       <SecHead
         title="Writing models"
         aside={
-          <InkButton
-            tone="quiet"
-            onClick={() => void statuses.refetch()}
-            disabled={statuses.isFetching}
-          >
-            {statuses.isFetching ? "Checking…" : "Check now"}
-          </InkButton>
+          isOwner ? (
+            <InkButton
+              tone="quiet"
+              onClick={() => void statuses.refetch()}
+              disabled={statuses.isFetching}
+            >
+              {statuses.isFetching ? "Checking…" : "Check now"}
+            </InkButton>
+          ) : undefined
         }
         sub="Whether this machine can write at all, and the button that fixes it when it cannot."
       />
@@ -575,21 +777,27 @@ function WritingModels() {
         0.6.63 (Unit Y item 5): the order Automatic tries, in plain words. The
         sentence comes from model-choice.ts's `automaticOrderSentence`, which
         reads `automaticLadder` -- the same list the runs walk -- so this panel
-        cannot advertise an order the desk no longer has.
+        cannot advertise an order the desk no longer has. Shown to everyone:
+        it is a fact about the desk, not about this machine's logins.
       */}
       <p className="mt-4 max-w-2xl text-sm text-ink-2">{automaticOrderSentence()}</p>
       {/*
-        Unit BG: the summary the redesign pairs with this panel -- which model
-        runs which job, and its fallbacks, is one screen of its own now. The
-        link is how an owner gets there from Server settings; the new desk
-        navigation carries the same destination (README line 364).
+        Unit CX item 4: what an editor who is not the owner sees.
+
+        The sign-in list is owner-only on the server, so for anyone else the
+        query never runs and the card used to draw a skeleton that could not
+        resolve -- a loading state for a read that was never going to happen.
+        One plain sentence says the same thing and stays true.
       */}
-      <p className="mt-3 text-base">
-        <Link to="/desk/models" className="inline-link">
-          Assign models to jobs →
-        </Link>
-      </p>
-      {statuses.isPending ? (
+      {!known ? (
+        <ListSkeleton rows={2} />
+      ) : !isOwner ? (
+        <ReadOnlyNote>
+          Only the owner can see which writing models this machine is signed in to, and can sign
+          one back in. Both buttons below open the same lists; they will say what is yours to
+          change and what is not.
+        </ReadOnlyNote>
+      ) : statuses.isPending ? (
         <ListSkeleton rows={2} />
       ) : statuses.isError ? (
         <p className="mt-4 text-rust">
@@ -603,42 +811,120 @@ function WritingModels() {
               status={s}
               onNote={setNote}
               times={timesFor(s.provider)}
+              chip={<WritingModelChip status={s} />}
             />
           ))}
         </ul>
       )}
-      <XaiOauthConnection onNote={setNote} />
-      {/*
-        Providers with no sign-in row of their own.
+      {doors}
+      {isOwner ? (
+        <>
+          <XaiOauthConnection onNote={setNote} />
+          {/*
+            Providers with no sign-in row of their own.
 
-        A configured gateway (LLM_BASE_URL) has no login to manage here -- it
-        is an endpoint the operator pointed at -- but it is the door a local
-        model comes through today, and a local model is the exact case that
-        needs a longer per-call ceiling. Without this block the one provider
-        that most needs its timeout raised would be the one provider with no
-        field. Shown only when the machine actually has it.
-      */}
-      {(times.data ?? [])
-        .filter(
-          (row) =>
-            !["claude-code", "anthropic", "codex", "xai-oauth"].includes(row.kind) &&
-            row.availableOnThisMachine,
-        )
-        .map((row) => (
-          <div key={row.providerId} className="astra-panel">
-            <h3 className="font-display text-lg font-semibold">{row.label}</h3>
-            <p className="mt-1 text-sm text-ink-2">
-              {row.detail}. No sign-in to manage here: this one is configured by the operator.
-            </p>
-            <ProviderTimeField row={row} onNote={setNote} />
-          </div>
-        ))}
-      <LocalModelCatalogTable onNote={setNote} />
-      <p className="mt-4 max-w-2xl text-sm text-muted">
-        These are the command-line tools TownReporter drafts with. Being signed in to claude.ai in
-        your browser or the Claude desktop app is a separate login and does not count here.
-      </p>
+            A configured gateway (LLM_BASE_URL) has no login to manage here -- it
+            is an endpoint the operator pointed at -- but it is the door a local
+            model comes through today, and a local model is the exact case that
+            needs a longer per-call ceiling. Without this block the one provider
+            that most needs its timeout raised would be the one provider with no
+            field. Shown only when the machine actually has it.
+          */}
+          {(times.data ?? [])
+            .filter(
+              (row) =>
+                !["claude-code", "anthropic", "codex", "xai-oauth"].includes(row.kind) &&
+                row.availableOnThisMachine,
+            )
+            .map((row) => (
+              <div key={row.providerId} className="astra-panel">
+                <h3 className="font-display text-lg font-semibold">{row.label}</h3>
+                <p className="mt-1 text-sm text-ink-2">
+                  {row.detail}. No sign-in to manage here: this one is configured by the operator.
+                </p>
+                <ProviderTimeField row={row} onNote={setNote} />
+              </div>
+            ))}
+          <LocalModelCatalogTable onNote={setNote} />
+          <p className="mt-4 max-w-2xl text-sm text-muted">
+            These are the command-line tools TownReporter drafts with. Being signed in to claude.ai
+            in your browser or the Claude desktop app is a separate login and does not count here.
+          </p>
+        </>
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * The readiness chip the drawing draws on each writing model's row, in the
+ * card's top-right corner (Desk Screens.dc.html, `models`: `● Ready`,
+ * `! Slow`, `Key rejected`).
+ *
+ * The drawing's three words are a mock of one machine's afternoon. Two of the
+ * three facts behind them do not survive contact with the real status read,
+ * and saying a word the reader cannot act on would be worse than saying fewer
+ * of them, so the TONES are the drawing's and the WORDS are this page's:
+ *
+ *   - "Key rejected" is drawn for an expired API key. This card's rows are
+ *     command-line subscriptions, and what a lapsed subscription reports is
+ *     that it is not signed in -- so the chip says "Sign in needed", in the
+ *     drawing's dashed danger, and the provider's own words ride in the
+ *     tooltip. Recorded in design/SPEC-GAPS-0681.md (CX).
+ *   - "Slow" is drawn for a local model at 18 tok/s. Nothing on this read
+ *     measures speed, so no chip claims it; the warn tone is used for the one
+ *     comparable fact that is measured, a Test that came back failed.
+ *
+ * The tones and the map from state to tone are the same four the Models screen
+ * uses (`Chip` in components/status-chip.tsx), so the two screens cannot drift.
+ */
+function WritingModelChip({ status }: { status: ProviderStatus }) {
+  if (status.disabledByOperator) {
+    return (
+      <Chip
+        tone="quiet"
+        label="Turned off"
+        help={`${status.name} is switched off for this installation. A start-up setting turns it back on.`}
+      />
+    );
+  }
+  if (!status.installed) {
+    return (
+      <Chip
+        tone="quiet"
+        label="Not installed"
+        help={`The ${status.name} command was not found on this machine, so the desk cannot use it.`}
+      />
+    );
+  }
+  if (!status.signedIn) {
+    return (
+      <Chip
+        tone="signin"
+        label="Sign in needed"
+        help={status.detail || `${status.name} is installed but not signed in.`}
+      />
+    );
+  }
+  if (status.lastTest && !status.lastTest.ok) {
+    return (
+      <Chip
+        tone="slow"
+        label="Last test failed"
+        help={status.lastTest.detail || `${status.name} is signed in, but its last test failed.`}
+      />
+    );
+  }
+  return (
+    <Chip
+      tone="ready"
+      label="Ready"
+      help={
+        status.account
+          ? `${status.name} is signed in as ${status.account}.`
+          : `${status.name} is installed and signed in.`
+      }
+    />
   );
 }
 

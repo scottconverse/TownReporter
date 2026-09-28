@@ -1656,42 +1656,13 @@
 .desk-ltr.astra .astra-checks-jump {
   display: none;
 }
-/* Server: the drawing puts every panel on the page at once, two columns wide
-   (design/Desk Screens.dc.html, `isServer`). The nav that used to switch panels
-   becomes a jump strip above the grid; the grid itself carries no box of its
-   own -- each card is the panel. */
+/* Server: the drawing puts every card on the page at once, two columns wide
+   (design/Desk Screens.dc.html, `isServer`). Unit CX removed the jump strip
+   that used to switch panels: the drawing has no tab pills, and with one card
+   per panel the strip was a second list of what the page already shows. The
+   grid carries no box of its own -- each card is the panel. */
 .desk-ltr.astra .astra-settings {
   display: block;
-}
-.desk-ltr.astra .astra-settings-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  position: static;
-  margin-bottom: 20px;
-}
-.desk-ltr.astra .astra-settings-nav button {
-  border: 1px solid var(--line);
-  border-radius: 0;
-  padding: 0 14px;
-  display: inline-flex;
-  align-items: center;
-  text-align: left;
-  background: var(--surface);
-  color: var(--fg2);
-  font-size: calc(14px * var(--ts));
-  white-space: nowrap;
-  min-height: 44px;
-}
-.desk-ltr.astra .astra-settings-nav button:hover {
-  background: var(--hover);
-  color: var(--fg);
-}
-.desk-ltr.astra .astra-settings-nav button[aria-current="page"] {
-  background: var(--surface);
-  color: var(--fg);
-  font-weight: 700;
-  border-left: var(--state-bar) solid var(--sel);
 }
 .desk-ltr.astra .astra-settings-body {
   display: grid;
@@ -1700,11 +1671,11 @@
   align-items: start;
   min-width: 0;
 }
-.desk-ltr.astra .astra-ops-col {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-width: 0;
+/* The drawing's `grid-row:span 2` on the Writing models card -- the one card
+   twice as long as its neighbours. Reset to `auto` in the one-column query
+   below, where spanning two rows would leave a hole in the column. */
+.desk-ltr.astra .astra-ops-card-tall {
+  grid-row: span 2;
 }
 /* Owner-only panels (Writing models) return null; don't leave their box behind. */
 .desk-ltr.astra .astra-ops-card:empty {
@@ -1857,8 +1828,7 @@
   .desk-ltr.astra .work-form {
     padding: 26px;
   }
-  .desk-ltr.astra .astra-settings-body,
-  .desk-ltr.astra .astra-ops-col {
+  .desk-ltr.astra .astra-settings-body {
     gap: 18px;
   }
 }
@@ -1899,12 +1869,9 @@
   .desk-ltr.astra .astra-settings-body {
     grid-template-columns: minmax(0, 1fr);
   }
-  .desk-ltr.astra .astra-settings-nav {
-    overflow: auto;
-    position: static;
-  }
-  .desk-ltr.astra .astra-settings-nav button {
-    white-space: nowrap;
+  /* One column: the tall card has nothing to span. */
+  .desk-ltr.astra .astra-ops-card-tall {
+    grid-row: auto;
   }
   .desk-ltr.astra .h1 {
     font-size: calc(33px * var(--ts));
@@ -1997,9 +1964,6 @@
   }
   .desk-ltr.astra .astra-save-state {
     flex-basis: 100%;
-  }
-  .desk-ltr.astra .astra-settings-nav {
-    margin-bottom: 14px;
   }
   .desk-ltr.astra .astra-dialog-body {
     padding: 20px;
