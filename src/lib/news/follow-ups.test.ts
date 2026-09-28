@@ -1,26 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
-import {
-  ensureFollowUpsSchema,
-  performCreateFollowUp,
-  performDropFollowUp,
-  performListFollowUps,
-  performNudgeFollowUp,
-  performRecordFollowUpReply,
-} from "./follow-ups.ts";
-import { parseNotes } from "./notes.ts";
+import { ensureFollowUpsSchema, performListFollowUps, performReadFollowUp } from "./follow-ups.ts";
 
 /**
- * The Follow-ups object (Direction A, stage 1). `getSql()` auto-applies
- * migrations/*.sql only under Vite; under plain `node --test` the glob is a
- * no-op (see src/lib/db.ts), so `leads` and `articles` are declared here the
- * same way dark-queue.test.ts and jobs.test.ts do for their own fixtures.
- * `ensureFollowUpsSchema` (real, from desk.ts) creates `follow_ups` itself.
+ * The Follow-ups list, after the manual workflow was retired (0.6.81, unit CU).
+ * `getSql()` auto-applies migrations/*.sql only under Vite; under plain `node
+ * --test` the glob is a no-op (see src/lib/db.ts), so `leads` and `articles`
+ * are declared here the same way dark-queue.test.ts and jobs.test.ts do for
+ * their own fixtures. `ensureFollowUpsSchema` creates `follow_ups` itself.
  *
  * These call the plain `perform*` functions desk.ts exports for exactly this
  * reason (same shape as `performPublish`) rather than the `createServerFn`-
  * wrapped exports, which need the framework runtime around them.
+ *
+ * WHAT CHANGED HERE AND WHY. This file used to drive `performCreateFollowUp`,
+ * `performRecordFollowUpReply`, `performNudgeFollowUp` and `performDropFollowUp`
+ * -- create an ask, record the reply, nudge, drop. Those functions are gone
+ * (see the note in follow-ups.ts where their bodies were, and DECISIONS.md:38
+ * and :44 for why), so their tests went with them rather than being rewritten
+ * around a function that no longer exists. What is left is the read the desk
+ * actually makes, plus the one property the retirement adds to it: a manual row
+ * cannot be listed, whatever its status. The writes an agent does have their
+ * own files (follow-up-agents.test.ts, follow-up-scheduler.test.ts), and the
+ * migration that closes the open manual rows has follow-up-migration.test.ts.
  */
 async function ensureFixtureTables() {
   const sql = await getSql();
@@ -58,6 +61,11 @@ async function ensureFixtureTables() {
 
 function ctx(userId: string, newsroomId: number) {
   return { userId, newsroomId };
+}
+
+/** A newsroom number nobody else in this process is using. */
+function room(base: number) {
+  return base + (Math.floor(Math.random() * 100_000) + 1);
 }
 
 /**
@@ -108,122 +116,111 @@ describe("a fresh database with no migrations applied", { timeout: 30000 }, () =
   });
 });
 
-describe("Follow-ups server functions", { timeout: 30000 }, () => {
-  it("creates a follow-up and lists it back, newsroom-scoped", async () => {
-    await ensureFixtureTables();
-    await ensureFollowUpsSchema();
-    const userId = `fu-user-${Date.now()}-${Math.random()}`;
-    const nsA = Math.floor(Math.random() * 1_000_000) + 100;
-    const nsB = nsA + 1;
-
-    const created = await performCreateFollowUp(ctx(userId, nsA), {
-      who: "City Manager's office",
-      what: "cause report on the 15th Avenue explosion",
-      dueOn: "2026-09-09",
-    });
-    assert.equal(created.ok, true);
-
-    const listA = await performListFollowUps(ctx(userId, nsA));
-    assert.equal(listA.length, 1);
-    assert.equal(listA[0]!.who, "City Manager's office");
-    assert.equal(listA[0]!.status, "open");
-
-    // A second newsroom cannot see the first's follow-up.
-    const listB = await performListFollowUps(ctx(userId, nsB));
-    assert.equal(listB.length, 0);
-  });
-
-  it("rejects an empty who/what", async () => {
-    await ensureFixtureTables();
-    await ensureFollowUpsSchema();
-    const userId = `fu-empty-${Date.now()}`;
-    const ns = Math.floor(Math.random() * 1_000_000) + 200_000;
-    const res = await performCreateFollowUp(ctx(userId, ns), { who: "  ", what: "" });
-    assert.equal(res.ok, false);
-  });
-
-  it("recording a reply marks it answered and appends to the linked lead's reporting notes", async () => {
+describe("the follow-up list is the agents'", { timeout: 30000 }, () => {
+  it("lists an agent row and never a manual one, whatever the manual row's status", async () => {
     await ensureFixtureTables();
     await ensureFollowUpsSchema();
     const sql = await getSql();
-    const userId = `fu-reply-${Date.now()}-${Math.random()}`;
-    const ns = Math.floor(Math.random() * 1_000_000) + 300_000;
+    const userId = `fu-user-${Date.now()}-${Math.random()}`;
+    const ns = room(100_000);
+
+    // The three shapes a manual row can be in: the open one migrations/0106
+    // closes, the one it leaves alone, and one an editor answered before
+    // 0.6.81. None of them may reach a screen.
+    await sql`
+      insert into follow_ups (user_id, newsroom_id, who, what, due_on, status, reply_text) values
+        (${userId}, ${ns}, 'City Manager''s office', 'cause report on the 15th Avenue explosion', '2026-09-09', 'open', null),
+        (${userId}, ${ns}, 'Treasurer', 'the ledger', null, 'dropped', null),
+        (${userId}, ${ns}, 'Clerk', 'the minutes', '2026-09-01', 'answered', 'mailed them')
+    `;
+    const agent = await sql<{ id: number }>`
+      insert into follow_ups (user_id, newsroom_id, who, what, status, agent_kind, schedule)
+      values (${userId}, ${ns}, 'Re-check the agenda page', 'the agenda page', 'active', 'recheck', 'daily')
+      returning id
+    `;
+
+    const rows = await performListFollowUps(ctx(userId, ns));
+    assert.equal(rows.length, 1, "only the agent row is listed");
+    assert.equal(rows[0]!.id, agent[0]!.id);
+    assert.equal(rows[0]!.agent_kind, "recheck");
+    // The list is what every screen draws, so this is the assertion behind
+    // "no Record reply, no Nudge, no manual card anywhere": the row those
+    // buttons belonged to is not in the data any screen receives.
+    assert.equal(rows.some((r) => r.who === "City Manager's office"), false);
+  });
+
+  it("hands back every 0101 column, so a branch that forgot one fails here", async () => {
+    await ensureFixtureTables();
+    await ensureFollowUpsSchema();
+    const sql = await getSql();
+    const userId = `fu-cols-${Date.now()}-${Math.random()}`;
+    const ns = room(200_000);
     const leadRows = await sql<{ id: number }>`
-      insert into leads (user_id, newsroom_id, headline, why) values (${userId}, ${ns}, 'A lead', 'because')
+      insert into leads (user_id, newsroom_id, headline, why)
+      values (${userId}, ${ns}, 'The council votes Monday', 'because it changes the budget')
       returning id
     `;
     const leadId = leadRows[0]!.id;
+    const inserted = await sql<{ id: number }>`
+      insert into follow_ups (
+        user_id, newsroom_id, lead_id, who, what, status, agent_kind, targets_json, schedule,
+        model_choice, last_state, last_run_at, next_run_at, finding_json
+      ) values (
+        ${userId}, ${ns}, ${leadId}, 'Re-check the packet', 'the packet', 'active', 'recheck',
+        '["https://clerk.test/packet"]', 'daily', 'sonnet', 'found', now(), now(), '{"url":"https://clerk.test/packet"}'
+      )
+      returning id
+    `;
+    const row = (await performListFollowUps(ctx(userId, ns)))[0]!;
+    assert.equal(row.id, inserted[0]!.id);
+    assert.equal(row.lead_id, leadId);
+    assert.equal(row.lead_headline, "The council votes Monday", "the lead join is part of the shape");
+    assert.equal(row.targets_json, '["https://clerk.test/packet"]');
+    assert.equal(row.schedule, "daily");
+    assert.equal(row.model_choice, "sonnet");
+    assert.equal(row.last_state, "found");
+    assert.ok(row.last_run_at, "last_run_at came back");
+    assert.ok(row.next_run_at, "next_run_at came back");
+    assert.match(row.finding_json, /clerk\.test\/packet/);
+  });
 
-    const created = await performCreateFollowUp(ctx(userId, ns), {
-      leadId,
-      who: "Fire marshal",
-      what: "incident report",
-    });
-    assert.equal(created.ok, true);
-    const id = created.ok ? created.id : -1;
+  it("scopes the list and the single read to one newsroom", async () => {
+    await ensureFixtureTables();
+    await ensureFollowUpsSchema();
+    const sql = await getSql();
+    const userId = `fu-scope-${Date.now()}-${Math.random()}`;
+    const nsA = room(300_000);
+    const nsB = nsA + 1;
+    const mine = await sql<{ id: number }>`
+      insert into follow_ups (user_id, newsroom_id, who, what, status, agent_kind, schedule)
+      values (${userId}, ${nsA}, 'Re-check', 'the agenda', 'active', 'recheck', 'daily')
+      returning id
+    `;
 
-    const replied = await performRecordFollowUpReply(ctx(userId, ns), {
-      id,
-      replyText: "The cause was a severed line.",
-      repliedOn: "2026-09-06",
-    });
-    assert.equal(replied.ok, true);
-
-    const list = await performListFollowUps(ctx(userId, ns), { status: "answered" });
-    assert.equal(list.length, 1);
-    assert.equal(list[0]!.status, "answered");
-    assert.ok(list[0]!.answered_at);
-
-    const leadRow = await sql<{ notes_json: string }>`select notes_json from leads where id = ${leadId}`;
-    const notes = parseNotes(leadRow[0]!.notes_json);
-    assert.ok(
-      notes.found.some((f) => f.t.includes("Reply from Fire marshal") && f.t.includes("severed line")),
-      "expected the reply appended to the lead's found notes",
+    assert.equal((await performListFollowUps(ctx(userId, nsA))).length, 1);
+    assert.deepEqual(await performListFollowUps(ctx(userId, nsB)), [], "a second newsroom's list is empty");
+    assert.equal((await performReadFollowUp(ctx(userId, nsA), mine[0]!.id))?.id, mine[0]!.id, "a run reads its own row");
+    assert.equal(
+      await performReadFollowUp(ctx(userId, nsB), mine[0]!.id),
+      null,
+      "and another newsroom's read answers 'not mine' rather than the row",
     );
   });
 
-  it("a second newsroom cannot record a reply or drop another newsroom's follow-up", async () => {
+  it("clamps the limit rather than trusting it", async () => {
     await ensureFixtureTables();
     await ensureFollowUpsSchema();
-    const userId = `fu-cross-${Date.now()}-${Math.random()}`;
-    const nsA = Math.floor(Math.random() * 1_000_000) + 400_000;
-    const nsB = nsA + 1;
-    const created = await performCreateFollowUp(ctx(userId, nsA), {
-      who: "Water utility",
-      what: "billing spike explanation",
-    });
-    assert.equal(created.ok, true);
-    const id = created.ok ? created.id : -1;
-
-    const replyFromOther = await performRecordFollowUpReply(ctx(userId, nsB), {
-      id,
-      replyText: "Should not land.",
-    });
-    assert.equal(replyFromOther.ok, false);
-
-    await performDropFollowUp(ctx(userId, nsB), id);
-    const stillOpen = await performListFollowUps(ctx(userId, nsA));
-    assert.equal(stillOpen[0]!.status, "open");
-  });
-
-  it("nudge stamps nudged_at and drop marks it dropped", async () => {
-    await ensureFixtureTables();
-    await ensureFollowUpsSchema();
-    const userId = `fu-nudge-${Date.now()}-${Math.random()}`;
-    const ns = Math.floor(Math.random() * 1_000_000) + 500_000;
-    const created = await performCreateFollowUp(ctx(userId, ns), {
-      who: "Planning board",
-      what: "a hearing date",
-    });
-    const id = created.ok ? created.id : -1;
-
-    await performNudgeFollowUp(ctx(userId, ns), id);
-    const afterNudge = await performListFollowUps(ctx(userId, ns));
-    assert.ok(afterNudge[0]!.nudged_at);
-    assert.equal(afterNudge[0]!.status, "open");
-
-    await performDropFollowUp(ctx(userId, ns), id);
-    const afterDrop = await performListFollowUps(ctx(userId, ns), { status: "dropped" });
-    assert.equal(afterDrop.length, 1);
+    const sql = await getSql();
+    const userId = `fu-limit-${Date.now()}-${Math.random()}`;
+    const ns = room(400_000);
+    for (let n = 0; n < 3; n += 1) {
+      await sql`
+        insert into follow_ups (user_id, newsroom_id, who, what, status, agent_kind, schedule)
+        values (${userId}, ${ns}, 'Re-check', ${`the agenda ${n}`}, 'active', 'recheck', 'daily')
+      `;
+    }
+    assert.equal((await performListFollowUps(ctx(userId, ns), { limit: 2 })).length, 2);
+    assert.equal((await performListFollowUps(ctx(userId, ns), { limit: 0 })).length, 1, "0 is raised to 1, not to everything");
+    assert.equal((await performListFollowUps(ctx(userId, ns), { limit: 9_999 })).length, 3);
   });
 });
