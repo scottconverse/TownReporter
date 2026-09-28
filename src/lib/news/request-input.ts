@@ -145,10 +145,16 @@ export const LIMITS = {
   packName: 120,
   /** `sections.server.ts:177` refuses `sourceIds.length > 200`. */
   packSources: 200,
-  /** `follow-ups.ts:91/92/111`: who 200, what 400, replyText 2000. */
-  followUpWho: 200,
+  /**
+   * A follow-up's "what". The manual create that first bound this string --
+   * who 200, what 400, replyText 2000 -- was removed in 0.6.81 with the rest of
+   * the manual workflow, and `followUpWho`/`followUpReply` went with it; this
+   * ceiling stays because `aiFollowUpInput` has carried it since 0101.
+   * `normalizeAiFollowUp` (follow-ups.ts) trims and cuts the same string at
+   * 800, so this is the tighter of the two and the one a request is refused
+   * against.
+   */
   followUpWhat: 400,
-  followUpReply: 2000,
   /** `follow-ups.ts:395` cuts one target at 500 characters. */
   aiFollowUpTarget: 500,
   /** `follow-ups.ts:400` cuts the saved model choice at 120. */
@@ -1033,10 +1039,8 @@ export const pullTodoInput = z.object({
 /** `desk.ts:2065` listPullJobs. */
 export const leadIdInput = z.object({ leadId: rowId });
 
-/** `desk.ts:2117` / `desk.ts:2135` (stop, retry) and `desk.ts:2270` / `:2275`. */
+/** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */
 export const jobIdInput = z.object({ jobId: rowId });
-export const idOnlyInput = z.object({ id: rowId });
-
 /** `desk.ts:2208` setLeadStatus. */
 export const leadStatusInput = z.object({
   id: rowId,
@@ -1076,30 +1080,31 @@ export const editLeadInput = z.object({
   urls: z.array(z.string().max(LIMITS.url)).max(LIMITS.importLinks).optional(),
 });
 
-/** `desk.ts:2236` listFollowUps (`input ?? {}`). */
+/**
+ * `desk.ts` listFollowUps (`input ?? {}`).
+ *
+ * The `status` this used to take -- `open | answered | dropped`, the manual
+ * vocabulary -- was removed in 0.6.81 (unit CU). It only ever named a manual
+ * ask's state: the list is agent-only now (`performListFollowUps` filters on
+ * `agent_kind is not null`), no caller passed one, and the Follow-ups screen
+ * filters the rows it is given client-side (`matchesFollowUpFilter`, which is
+ * the vocabulary an agent row actually has). A wire parameter whose legal
+ * values are all in the retired vocabulary is the last piece of manual surface
+ * a request could still speak.
+ */
 export const followUpsInput = z.preprocess(
   (v) => (v === undefined || v === null ? {} : v),
   z.object({
-    status: z.enum(["open", "answered", "dropped"]).optional(),
     limit: z.number().int().positive().max(1_000).optional(),
   }),
 );
 
-/** `desk.ts:2252` createFollowUp (`follow-ups.ts:91-92` bound who/what). */
-export const followUpCreateInput = z.object({
-  leadId: nullableId.optional(),
-  articleId: nullableId.optional(),
-  who: z.string().max(LIMITS.followUpWho),
-  what: z.string().max(LIMITS.followUpWhat),
-  dueOn: z.string().max(40).nullable().optional(),
-});
-
-/** `desk.ts:2265` replyToFollowUp (`follow-ups.ts:111` bounds replyText). */
-export const followUpReplyInput = z.object({
-  id: rowId,
-  replyText: z.string().max(LIMITS.followUpReply),
-  repliedOn: z.string().max(40).nullable().optional(),
-});
+/*
+  `followUpCreateInput`, `followUpReplyInput` and `idOnlyInput` were here until
+  0.6.81 (unit CU) -- the create / record-reply / nudge / drop schemas of the
+  manual workflow. `idOnlyInput` had exactly those two callers (nudge and
+  drop), so it went with them; the other two had one each.
+*/
 
 /*
   Redesign phase 6: AI follow-ups (`follow-ups.ts:358-402`, migrations/0101).
