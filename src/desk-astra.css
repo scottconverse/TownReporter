@@ -2248,8 +2248,10 @@
    per-source board. Both panels scope their own palette; these are the drawn
    rows inside them.
 --------------------------------------------------------------------------- */
-/* One pile, one line: the name, then its count at 24px. The whole line is the
-   way into Dark Desk, so it is a link, not a label with a link beside it. */
+/* One pile, one line: the name over the sentence that says what is in it, and
+   the count at 24px on the right (Desk Command.dc.html, the Dark Desk rail
+   block). The line is not a link -- the panel's one way in is `.dd-open`
+   below it, which is the only door the drawing draws. */
 .desk-ltr.astra .dd-piles {
   display: flex;
   flex-direction: column;
@@ -2263,14 +2265,40 @@
   padding: 10px 0;
   border-top: 1px solid var(--line);
   color: inherit;
-  text-decoration: none;
+}
+.desk-ltr.astra .dd-pile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* min-width:0 because the drawn label "Waiting on an AI follow-up" is longer
+     than the rail is wide: the column must wrap it, not push the count out. */
+  min-width: 0;
 }
 .desk-ltr.astra .dd-pile-label {
   font: 700 calc(16px * var(--ts)) var(--fd);
 }
+.desk-ltr.astra .dd-pile-note {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+}
 .desk-ltr.astra .dd-pile-count {
+  flex: none;
   font: 800 calc(24px * var(--ts)) var(--fd);
   line-height: 1;
+}
+/* The panel's one way in: full width under the piles, its label at the left
+   edge, which is where the drawing's `display:flex` (no justify-content) puts
+   it. */
+.desk-ltr.astra .dd-open {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 0 14px;
+  border: 2px solid currentcolor;
+  color: inherit;
+  font: 700 calc(15px * var(--ts)) var(--fd);
+  text-decoration: none;
 }
 .desk-ltr.astra .dd-more {
   margin-top: 10px;

@@ -43,7 +43,12 @@ import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dial
   same, and that is where this dialog has been mounted since phase 2b.
 */
 import { KillDialog } from "@/components/dialogs/KillDialog";
-import { cardResultLine, parseFinding } from "@/lib/news/follow-up-copy";
+import {
+  cardResultLine,
+  isAgentKind,
+  matchesFollowUpFilter,
+  parseFinding,
+} from "@/lib/news/follow-up-copy";
 import { IMPORT_DISCLOSURES, IMPORT_LIMITS, type DisclosureKey } from "@/lib/news/import-stories";
 import {
   NO_SECTION,
@@ -235,6 +240,25 @@ function DeskHome() {
   const findings = useQuery({
     queryKey: ["follow-up-findings"],
     queryFn: () => listFollowUpFindings({ data: {} }),
+  });
+  /*
+    CY item 3. The Dark Desk rail's third pile is drawn "Waiting on an AI
+    follow-up" -- an agent that is still watching and has not reported yet.
+    That is deliberately NOT the query above: `listFollowUps({status:"open"})`
+    is the manual asks (0042's `open` status), and an agent's row is
+    `active`/`paused` (0101). So this is the unfiltered list, split with the
+    same `isAgentKind` + `matchesFollowUpFilter` the Follow-ups screen splits it
+    with -- one rule, not a second copy of it -- and the pile counts the live
+    agents whose `last_state` is not yet `found`, the complement of the findings
+    query directly above.
+
+    Its own key: `["follow-ups","open"]` asks a different question and
+    `["follow-ups"]` is the Follow-ups screen's, but a prefix invalidation
+    reaches all three, so a reply, a nudge or a drop anywhere refreshes this.
+  */
+  const allFollowUps = useQuery({
+    queryKey: ["follow-ups", "all"],
+    queryFn: () => listFollowUps({ data: {} }),
   });
   const replyFollowUp = useMutation({
     mutationFn: (input: { id: number; replyText: string; repliedOn: string }) =>
@@ -474,8 +498,19 @@ function DeskHome() {
   const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error);
   const invs = investigations.data ?? [];
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
-  const aside = invs.filter((r) => pileForStatus(r.status) === "aside");
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, invs));
+  /*
+    CY item 3. "Waiting on an AI follow-up": a live agent that has not reported
+    yet. `matchesFollowUpFilter(row, "active")` is the Follow-ups screen's own
+    definition of live, and `last_state !== "found"` is the whole difference
+    between this pile and the findings list above it.
+  */
+  const waitingOnFollowUp = (allFollowUps.data ?? []).filter(
+    (row) =>
+      isAgentKind(row.agent_kind) &&
+      matchesFollowUpFilter(row, "active") &&
+      row.last_state !== "found",
+  ).length;
   const printed = published.data ?? [];
 
   /*
@@ -1895,36 +1930,51 @@ function DeskHome() {
           </section>
 
           <section className="nightpanel gc-darkdesk">
-            <SecHead
-              title="Dark Desk"
-              sub="Never prints on its own"
-              aside={
-                <Link to="/desk/dark" className="np-link">
-                  Open Dark Desk →
-                </Link>
-              }
-            />
+            <SecHead title="Dark Desk" sub="Never prints on its own" />
             {darkErr ? <p className="note err">{darkErr}</p> : null}
             {/*
-                As drawn: the three piles with their counts, then one way in.
-                The items themselves (start digging, open a file) sit behind the
-                disclosure below -- nothing the panel could do is gone, it is
-                just not three cards deep in a rail panel.
+                CY item 3. The piles by their drawn names, each a label, the
+                sentence that says what is in it, and the count:
+                Open files / Signals to review / Waiting on an AI follow-up.
+
+                The rows are NOT links any more. The drawing gives the panel one
+                way in -- a full-width "Open Dark Desk →" under the piles -- and
+                three more links to the same screen beside it made four doors
+                where the design draws one. `Open Dark Desk →` moved down out of
+                the section head for the same reason.
+
+                What the panel used to count as "Set aside" is not gone: that is
+                Dark Desk's own third pile on its own screen (/desk/dark), which
+                owns the list. The items themselves (start digging, open a file)
+                sit behind the disclosure below -- nothing the panel could do is
+                gone, it is just not three cards deep in a rail panel.
               */}
             <div className="dd-piles">
-              <Link to="/desk/dark" className="dd-pile">
-                <span className="dd-pile-label">To look at</span>
-                <span className="dd-pile-count">{inbox.length}</span>
-              </Link>
-              <Link to="/desk/dark" className="dd-pile">
-                <span className="dd-pile-label">On the desk</span>
+              <div className="dd-pile">
+                <span className="dd-pile-text">
+                  <span className="dd-pile-label">Open files</span>
+                  <span className="dd-pile-note">Reading records</span>
+                </span>
                 <span className="dd-pile-count">{onDesk.length}</span>
-              </Link>
-              <Link to="/desk/dark" className="dd-pile">
-                <span className="dd-pile-label">Set aside</span>
-                <span className="dd-pile-count">{aside.length}</span>
-              </Link>
+              </div>
+              <div className="dd-pile">
+                <span className="dd-pile-text">
+                  <span className="dd-pile-label">Signals to review</span>
+                  <span className="dd-pile-note">From the wire and watched pages</span>
+                </span>
+                <span className="dd-pile-count">{inbox.length}</span>
+              </div>
+              <div className="dd-pile">
+                <span className="dd-pile-text">
+                  <span className="dd-pile-label">Waiting on an AI follow-up</span>
+                  <span className="dd-pile-note">AI watching for a statement or record</span>
+                </span>
+                <span className="dd-pile-count">{waitingOnFollowUp}</span>
+              </div>
             </div>
+            <Link to="/desk/dark" className="dd-open">
+              Open Dark Desk →
+            </Link>
             {inbox.length === 0 && onDesk.length === 0 ? (
               <p className="wire-sum">
                 Nothing new tonight.{" "}
