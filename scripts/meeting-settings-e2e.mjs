@@ -50,9 +50,10 @@ try {
 
   const nid = await newsroomId();
 
-  // Open Server page -> Meeting capture.
-  await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Meeting capture", exact: true }).click();
+  // Open Server page -> Meeting capture. 0.6.81 (unit CX2) splits the card off
+  // onto a screen of its own, so "opening" it is a `goto` to that screen.
+  await page.goto(`${base}/desk/ops/meeting-capture`, { waitUntil: "networkidle" });
+  await page.locator("#ops-panel-meeting-capture").scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Meeting capture" }).waitFor({ timeout: 20000 });
   step("Meeting capture panel renders");
 

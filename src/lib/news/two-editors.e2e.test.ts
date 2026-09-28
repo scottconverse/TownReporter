@@ -452,22 +452,32 @@ describe("two editors on one story", () => {
       cookie -- not merely that the UI declines to render the button.
     */
       await editorPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
-      await editorPage.getByRole("navigation", { name: "Server settings" })
-        .getByRole("button", { name: "Server health", exact: true }).click();
 
-      // getOpsHealth: the Health section's own query has no role gate in the
-      // React tree (it fires for every desk member), so an editor session must
-      // see the query itself fail, not silently render an owner's data.
+      /*
+        Unit CX: the twelve-button "Server settings" jump strip is gone (the
+        drawing has no tab pills), and an editor now reads a sentence where the
+        owner reads a health panel. So the assertion is the DESIGN -- a plain
+        read-only line, not a skeleton that never resolves and not a panel that
+        printed "Only the owner" over a failed read. The server half of ENG-01
+        is the replayed RPC at the bottom, which is unchanged.
+      */
+      await editorPage.locator("#ops-panel-server-health").scrollIntoViewIfNeeded();
       await editorPage
-        .getByText(/Could not read the server\..*Only the owner/i)
+        .getByText(/Only the owner can read this machine/i)
         .waitFor({ timeout: 20_000 });
 
-      // Controls are now correctly disabled when health/ownership is unavailable.
-      // Obtain a real owner-generated RPC for an available action, then replay it
-      // with the editor's own cookie jar. Migrations target only this disposable DB.
+      /*
+        Obtain a real owner-generated RPC for an available action, then replay
+        it with the editor's own cookie jar. Migrations target only this
+        disposable DB.
+
+        "Apply database migrations" lives behind the Health card's "Restart
+        workers" disclosure now (the drawing draws those two buttons at the foot
+        of the card and gives the Actions panel no other door), so the owner
+        opens it the way a reader does before pressing Run.
+      */
       await ownerPage.goto(`${BASE_URL}/desk/ops`, { waitUntil: "domcontentloaded" });
-      await ownerPage.getByRole("navigation", { name: "Server settings" })
-        .getByRole("button", { name: "Server health", exact: true }).click();
+      await ownerPage.getByRole("button", { name: "Restart workers", exact: true }).click();
       const row = ownerPage.locator("li", { hasText: "Apply database migrations" });
       const pending = ownerPage.waitForRequest(
         (request) =>

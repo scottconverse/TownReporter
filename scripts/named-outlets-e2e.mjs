@@ -163,6 +163,18 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
     Two units wrote the same screen at once, and both halves of this pin are
     real on the merged page, so both are kept.
 
+    Unit DB2 (0.6.81) merged the second unit and hit this same hunk again, with
+    a third copy of the pin on the other side. That copy was the pin as it stood
+    before the note above was written: it waited for the singular sentence only
+    (`/1 thing blocks Publish\./`, no timeout) and for an unscoped "Blocks Publish"
+    with `.first()` -- both weaker than what is here, and neither carrying
+    anything this side does not already assert, so what is kept is this side
+    whole. Its one addition is the `step(...)` line below, which the other side
+    added and which is kept: it names the state on the walk's step list, and the
+    resolution would otherwise have dropped a line of reporting rather than a
+    line of checking. (The scoping here is also why the `.first()` is not
+    needed: the row is located by `[data-blocker]` inside `#publish-blockers`.)
+
     Unit CT part 2 (b16a07b5) deleted the mid-form heading this line used to
     wait for -- "Deal with the named outlet first" -- and moved the reasons to
     the top of the Checks tab, one row each with its own press. So the words
@@ -202,6 +214,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
     .getByText("The body names Denver Post and this draft's Sources do not show it.")
     .waitFor({ timeout: 45_000 });
   await page.getByText("Override Denver Post to publish.").waitFor({ timeout: 45_000 });
+  step("printing is held down, in words, while Denver Post is named and uncovered");
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();
   await outlets.getByText(/Overrides recorded for this draft/).waitFor({ timeout: 45_000 });
@@ -223,7 +236,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
 }
 
 async function openOutlets() {
-  await page.goto(`${base}/desk/ops#outlets`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/named-outlets`, { waitUntil: "networkidle" });
   await panel().getByRole("heading", { name: "Named outlets" }).waitFor({ timeout: 45_000 });
 }
 

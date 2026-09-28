@@ -82,6 +82,8 @@ export type DailyScanPolicyResult =
     };
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const CAP = 12;
+/** Why a paused row says it is paused: the one reason this code writes. */
+const PAUSED_BY_OWNER = "Paused by the owner.";
 const LEGACY_DAILY_SCAN_RUNTIMES = new Set<string>([
   "local",
   "claude-cli",
@@ -250,6 +252,33 @@ export function runSnapshotRuntimes(value: unknown): {
   };
 }
 
+/**
+ * The schedule a desk that has never saved one reads as.
+ *
+ * One place, because two writes depend on it and they have to agree:
+ * `readDailyScanPolicy` answers with these values when there is no row, and
+ * `setDailyScanPaused` writes them into the row it creates when the owner
+ * pauses a desk whose schedule was never saved. The table's own SQL defaults
+ * are deliberately NOT used for that insert -- they say `runtime 'local'`,
+ * where the read says `'auto'` -- so a row built from them would quietly
+ * change which model the paper runs the moment the owner enabled the scan.
+ * Pausing a desk must write the schedule the desk already had, which is this.
+ *
+ * `revision` is here as the read's answer rather than a row's: 0 is not a
+ * revision any row carries, it is what the read says when there is no row.
+ */
+export const UNSAVED_DAILY_SCAN_POLICY = {
+  enabled: false,
+  paused: false,
+  pauseReason: null,
+  localTime: "06:00",
+  runtime: "auto",
+  modelEffort: null,
+  sourceCap: CAP,
+  selectedSourceIds: [],
+  revision: 0,
+} as const;
+
 export async function readDailyScanPolicy(
   newsroomId: number,
   now = new Date(),
@@ -265,7 +294,7 @@ export async function readDailyScanPolicy(
   );
   const enabled = p?.enabled === true,
     paused = p?.paused === true,
-    localTime = p?.local_time ?? "06:00";
+    localTime = p?.local_time ?? UNSAVED_DAILY_SCAN_POLICY.localTime;
   const last = r
     ? {
         runId: r.scan_run_id,
@@ -289,11 +318,11 @@ export async function readDailyScanPolicy(
     pauseReason: p?.pause_reason ?? null,
     localTime,
     timezone: paper.timezone,
-    runtime: dailyScanRuntime(p?.runtime),
-    modelEffort: modelEffort(dailyScanRuntime(p?.runtime), p?.model_effort),
-    sourceCap: p?.source_cap ?? CAP,
-    selectedSourceIds: p?.selected_source_ids ?? [],
-    revision: p?.revision ?? 0,
+    runtime: dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime),
+    modelEffort: modelEffort(dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime), p?.model_effort),
+    sourceCap: p?.source_cap ?? UNSAVED_DAILY_SCAN_POLICY.sourceCap,
+    selectedSourceIds: p?.selected_source_ids ?? [...UNSAVED_DAILY_SCAN_POLICY.selectedSourceIds],
+    revision: p?.revision ?? UNSAVED_DAILY_SCAN_POLICY.revision,
     updatedAt: p?.updated_at ? String(p.updated_at) : null,
     lastLocalDay,
     nextRunAt:
@@ -400,8 +429,72 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
       };
     return { ok: true, policy: await readDailyScanPolicy(context.newsroomId) };
   });
+/**
+ * Pause or resume the schedule, as a compare-and-swap on the revision.
+ *
+ * `expectedRevision` is what the caller's read said, and a row only ever
+ * carries revision 1 or more (`persistDailyScanPolicy`'s insert starts it at
+ * 1). So 0 is not a stale revision: it is the read's own answer for a desk
+ * that has never saved a schedule at all. That case had no path here, which is
+ * why Pause and Resume were refused on a fresh desk with "The schedule changed
+ * in another window" -- a conflict with a row that did not exist, reported
+ * against an edit nobody had made.
+ *
+ * Pausing such a desk creates the hold its owner asked for: the row the read
+ * was already describing, plus the pause (`UNSAVED_DAILY_SCAN_POLICY` above),
+ * so the schedule the paper has is unchanged and the `on conflict` still
+ * refuses a caller whose 0 was stale. Resuming one writes nothing -- the desk
+ * is not paused, which is the whole of what resuming asks for -- but it proves
+ * no row appeared, so a stale 0 is refused there too.
+ */
+export async function setDailyScanPaused(
+  sql: Sql,
+  newsroomId: number,
+  userId: string,
+  value: boolean,
+  expectedRevision: number,
+): Promise<boolean> {
+  const pauseReason = value ? PAUSED_BY_OWNER : null;
+  if (expectedRevision === 0) {
+    if (!value) {
+      const [existing] = await sql.query<{ newsroom_id: number }>(
+        "select newsroom_id from daily_scan_policies where newsroom_id=$1",
+        [newsroomId],
+      );
+      return !existing;
+    }
+    const fresh = UNSAVED_DAILY_SCAN_POLICY;
+    const rows = await sql.query(
+      "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,selected_source_ids,revision,updated_at,configured_by_user_id) values($1,$2,true,$3,$4,$5,$6,$7,$8::jsonb,$9,now(),$10) on conflict(newsroom_id) do nothing returning revision",
+      [
+        newsroomId,
+        fresh.enabled,
+        PAUSED_BY_OWNER,
+        fresh.localTime,
+        fresh.runtime,
+        fresh.modelEffort,
+        fresh.sourceCap,
+        JSON.stringify(fresh.selectedSourceIds),
+        1,
+        userId,
+      ],
+    );
+    return Boolean(rows[0]);
+  }
+  const rows = await sql.query(
+    "update daily_scan_policies set paused=$1,pause_reason=$2,revision=revision+1,updated_at=now() where newsroom_id=$3 and revision=$4 returning revision",
+    [value, pauseReason, newsroomId, expectedRevision],
+  );
+  return Boolean(rows[0]);
+}
+
 async function pause(
-  context: { role: string; newsroomId: number },
+  /*
+    `userId` is here for the row Pause creates on a desk that never saved a
+    schedule: `configured_by_user_id` is NOT NULL, and the owner who pressed
+    Pause is who configured it.
+  */
+  context: { role: string; newsroomId: number; userId: string },
   revision: number,
   value: boolean,
 ): Promise<DailyScanPolicyResult> {
@@ -415,7 +508,15 @@ async function pause(
     };
   }
   const sql = await getSql();
-  if (!value) {
+  /*
+    Resuming a saved schedule means a run may become due, so the model the row
+    names has to be one this machine can still reach -- checked against the row
+    the revision names, before anything is written. A desk with no row at all
+    (revision 0) has nothing to unpause and nothing that could start running,
+    so there is nothing to probe; `setDailyScanPaused` is where that caller is
+    told whether a row appeared under it.
+  */
+  if (!value && revision > 0) {
     const [current] = await sql.query<{ runtime: StoredDailyScanRuntime; model_effort: ModelEffort | null }>(
       "select runtime,model_effort from daily_scan_policies where newsroom_id=$1 and revision=$2",
       [context.newsroomId, revision],
@@ -442,11 +543,7 @@ async function pause(
       };
     }
   }
-  const rows = await sql.query(
-    "update daily_scan_policies set paused=$1,pause_reason=$2,revision=revision+1,updated_at=now() where newsroom_id=$3 and revision=$4 returning revision",
-    [value, value ? "Paused by the owner." : null, context.newsroomId, revision],
-  );
-  if (!rows[0])
+  if (!(await setDailyScanPaused(sql, context.newsroomId, context.userId, value, revision)))
     return {
       ok: false,
       code: "conflict",

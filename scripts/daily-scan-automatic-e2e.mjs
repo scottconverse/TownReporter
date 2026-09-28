@@ -296,13 +296,12 @@ async function addAcceptedSource() {
   step("an accepted source is on watch, without being fetched");
 }
 
-/** The Daily scan panel on /desk/ops, opened the way an owner opens it. */
+/** The Daily scan panel on its own screen, reached the way an owner reaches it. */
 async function openDailyScanPanel() {
-  await page.goto(`${base}/desk/ops`, { waitUntil: "domcontentloaded" });
-  await page
-    .getByRole("navigation", { name: "Server settings" })
-    .getByRole("button", { name: "Daily scan", exact: true })
-    .click();
+  await page.goto(`${base}/desk/ops/daily-scan`, { waitUntil: "domcontentloaded" });
+  // 0.6.81 (unit CX2): the Server page draws the card, and the card's own
+  // screen is where its panel lives, so reaching it is a `goto`, not a scroll.
+  await page.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const panel = page.locator("section", {
     has: page.getByRole("heading", { name: "Daily scan", exact: true }),
   });

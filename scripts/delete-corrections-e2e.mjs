@@ -1387,8 +1387,11 @@ async function main() {
   // The trash row's own label is the first signal: `listTrash` describes what
   // restoring will bring back, and "with 1 correction" only appears if the
   // snapshot actually captured the correction row before the delete ran.
-  await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("navigation", { name: "Server settings" }).getByRole("button", { name: "Recently deleted", exact: true }).click();
+  await page.goto(`${base}/desk/ops/recently-deleted`, { waitUntil: "networkidle" });
+  // 0.6.81 (unit CX2): the Server page draws the trash card, and the trash
+  // itself is the card's own screen; the wait below is unchanged and still
+  // proves the panel is really there.
+  await page.getByRole("heading", { name: "Recently deleted", exact: true }).first().scrollIntoViewIfNeeded();
   await page.getByRole("heading", { name: "Recently deleted" }).waitFor({ timeout: 20_000 });
   const trashRow = page.locator("li", { hasText: leadHeadline }).first();
   await trashRow.waitFor({ timeout: 20_000 });

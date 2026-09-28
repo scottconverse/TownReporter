@@ -85,7 +85,7 @@ async function ownTheDesk() {
 }
 
 async function openThePanel() {
-  await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
+  await page.goto(`${base}/desk/ops/writing-models`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: "Writing models", exact: true }).waitFor();
   await row("claude").waitFor();
   await row("codex").waitFor();

@@ -473,6 +473,64 @@ export async function claimOwner(userId: string): Promise<EditorContext> {
   return requireEditor(userId);
 }
 
+/**
+ * Who owns this newsroom: the ACCOUNT, not the paper's contact address.
+ *
+ * Server > Editors & access printed `paper_settings.editor_email` under
+ * "Owner", and that is a field the owner types by hand on Paper setup -- a
+ * forwarding address, a blank, or something else entirely. The account that
+ * actually holds the desk is the `newsroom_members` row with role 'owner',
+ * joined to its `"user"` row: the same join `readMyDesk`, `createInvite` and
+ * the leave flow already use. Read that way, the card cannot print an address
+ * with no account behind it, and it prints the name the account signed up with
+ * as the row's longer answer.
+ *
+ * Owner-only, and refused the same way `createInvite` refuses an editor: the
+ * card is drawn for the owner, and a read that answers anyway would be one
+ * more place a non-owner learns the owner's address from.
+ */
+export type NewsroomAccess = {
+  owner: { email: string; name: string | null } | null;
+  /**
+   * How many invite links are open right now: minted, unused, unexpired.
+   *
+   * The same predicate `signupOpenFor` acts on, scoped to this newsroom, so
+   * the number the card prints is the number of addresses that could actually
+   * get in. An invite that was used or has expired is not an open door and
+   * does not count -- the card's row is "Invites open", not "invites minted".
+   */
+  invitesOpen: number;
+};
+
+export async function readNewsroomAccess(userId: string): Promise<NewsroomAccess> {
+  const me = await requireEditor(userId);
+  if (me.role !== "owner") {
+    throw new ForbiddenError("Only the owner can see who owns this newsroom.");
+  }
+  await ensureInviteSchema();
+  const sql = await getSql();
+  /*
+    One row, always: the owner columns are left-joined, so an owner whose
+    account is gone still answers, and the invite count stands on its own
+    (it does not ride on the owner row being there).
+  */
+  const rows = await sql<{ email: string | null; name: string | null; invites_open: number }>`
+    select u.email, u.name,
+      (select count(*)::int from editor_invites i
+        where i.newsroom_id = ${me.newsroomId}
+          and i.used_at is null and i.expires_at > now()) as invites_open
+    from (select 1) as seed
+    left join newsroom_members m on m.newsroom_id = ${me.newsroomId} and m.role = 'owner'
+    left join "user" u on u.id = m.user_id
+    limit 1
+  `;
+  const owner = rows[0];
+  return {
+    owner: owner?.email ? { email: owner.email, name: owner.name ?? null } : null,
+    invitesOpen: owner?.invites_open ?? 0,
+  };
+}
+
 /** One statement gives the role and claimed flag the same database snapshot. */
 export async function readMyDesk(userId: string) {
   await ensureNewsroomSchema();

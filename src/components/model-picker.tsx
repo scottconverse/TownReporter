@@ -490,7 +490,14 @@ export function ModelPicker(props: Props) {
         </summary>
         <div className="mt-2 space-y-2">
           <p>
-            <a className="inline-link" href="/desk/ops#custom-ai-connections">
+            {/*
+              Unit CX: the connections list lives on the Models screen, and the
+              Server page's "All connections" door leads there too. The old
+              `/desk/ops#custom-ai-connections` anchor pointed at a panel that
+              screen no longer draws, so it would have opened Server and sat
+              there. `tab=conn` is the same list, one click from the picker.
+            */}
+            <a className="inline-link" href="/desk/models?tab=conn">
               Add or manage your own AI API
             </a>
             . Saving a connection does not change Automatic or start a model request.

@@ -141,6 +141,35 @@ export function jobsState(running: number, latestFailed: number, oldestRunningMs
 }
 
 /**
+ * A night missed by the backup, read from the backup's own record.
+ *
+ * `ops/lib-backup.ps1` takes one when the newest dump is over 20 hours old
+ * (`Test-TownReporterBackupDue`, Hour=2 / MaxAgeHours=20), so a success older
+ * than this is not a late night -- it is a run that did not happen, and the
+ * only other place that shows up is a missing file in a folder nobody opens.
+ * The threshold is wider than the script's own 20 hours on purpose: an
+ * operator who takes a backup by hand at 11pm pushes the next nightly past
+ * 7pm the following day, and that is still fine.
+ */
+export const BACKUP_STALE_HOURS = 36;
+
+/**
+ * `unknown` where nothing has ever succeeded -- the state that renders as
+ * "Not set" -- rather than `warn`, because a desk that has never run the
+ * backup is not the same fact as a backup that stopped working, and the check
+ * that reads this says which one it was in its own words.
+ */
+export function backupState(lastSuccessAt: string | null, now = new Date()): HealthState {
+  if (!lastSuccessAt) return "unknown";
+  const t = new Date(lastSuccessAt).getTime();
+  if (Number.isNaN(t)) return "unknown";
+  const hours = (now.getTime() - t) / 3_600_000;
+  /* A timestamp in the future is a clock that moved, not a backup problem. */
+  if (hours < 0) return "ok";
+  return hours > BACKUP_STALE_HOURS ? "warn" : "ok";
+}
+
+/**
  * Describe current work separately from retained job history.
  *
  * Failed jobs are deliberately retained for diagnosis. Counting every one as

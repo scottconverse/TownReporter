@@ -144,8 +144,11 @@ async function thePickerIsThere() {
 }
 
 async function theTimeoutFieldSaves() {
-  await page.goto(`${base}/desk/ops`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Writing models", exact: true }).waitFor();
+  // 0.6.81 (unit CX2): the per-call time budgets are the Time budgets card's
+  // own screen (`/desk/ops/time-budgets`), which is the panel that draws one
+  // `[data-provider-time]` row per provider the picker can offer.
+  await page.goto(`${base}/desk/ops/time-budgets`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Time budgets", exact: true }).waitFor();
 
   const field = page.locator('[data-provider-time="claude-frontier"]');
   await field.waitFor({ timeout: 30_000 });
@@ -156,7 +159,7 @@ async function theTimeoutFieldSaves() {
   if (!/default \d+ s/.test(await field.innerText())) {
     throw new Error("the field does not state the shipped default next to the value");
   }
-  step(`the Server page shows a per-call time budget in seconds (${shipped} s)`);
+  step(`the Time budgets screen shows a per-call budget in seconds (${shipped} s)`);
 
   const wanted = String(Number(shipped) + 90);
   await input.fill(wanted);

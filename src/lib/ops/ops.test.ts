@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { OPS_ACTIONS, findOpsAction, isOpsActionId } from "./actions.ts";
 import {
+  BACKUP_STALE_HOURS,
+  backupState,
   databaseValue,
   diskState,
   formatAgo,
@@ -142,6 +144,27 @@ describe("health readings", () => {
     assert.equal(jobsState(1, 0, 5 * 60_000), "ok");
     assert.equal(jobsState(1, 0, 90 * 60_000), "warn");
     assert.equal(jobsState(0, 2, 0), "warn");
+  });
+
+  /**
+   * The backup's own record (CX3). `ops/lib-backup.ps1` takes a backup whenever
+   * the newest dump is over 20 hours old, so a success older than
+   * BACKUP_STALE_HOURS is a night that did not happen -- and the only other
+   * place that shows up is a missing file in a folder nobody opens.
+   */
+  it("reads a backup that stopped working from its own record", () => {
+    const now = new Date("2026-09-28T12:00:00.000Z");
+    const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
+    /* The ordinary case: last night's run. */
+    assert.equal(backupState(hoursAgo(4), now), "ok");
+    assert.equal(backupState(hoursAgo(BACKUP_STALE_HOURS - 1), now), "ok");
+    assert.equal(backupState(hoursAgo(BACKUP_STALE_HOURS + 1), now), "warn");
+    /* Never succeeded, or a record this code cannot read: not a warning. A desk
+       that has never run the backup is a different fact from one that stopped. */
+    assert.equal(backupState(null, now), "unknown");
+    assert.equal(backupState("not a date", now), "unknown");
+    /* A timestamp in the future is a clock that moved, not a backup problem. */
+    assert.equal(backupState(hoursAgo(-1), now), "ok");
   });
 
   it("separates the live queue from retained failure history", () => {

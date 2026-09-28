@@ -5,9 +5,12 @@
   Three probes, always at the same three ports, plus whatever LLM_BASE_URL
   already names: LM Studio's default (http://127.0.0.1:1234/v1), Ollama's
   default (http://127.0.0.1:11434/v1), and llama.cpp's llama-server default
-  (http://127.0.0.1:8080/v1). Owner rule "out of the box, with LM Studio,
-  Ollama, or llama.cpp running, Local model is live with no config" -- this
-  is the module that makes that true.
+  (http://127.0.0.1:8080/v1). Those three addresses are written down once, in
+  `provider-registry.ts` as `DISCOVERED_LOCAL_ADDRESSES` (unit CX3, 0.6.81),
+  because the Server page has to be able to say whether a rung's address was
+  ever looked at and the two answers must come from one list. Owner rule "out
+  of the box, with LM Studio, Ollama, or llama.cpp running, Local model is live
+  with no config" -- this is the module that makes that true.
 
   Server-only by the `.server.ts` suffix: it makes outbound fetches to
   localhost ports and holds an in-memory cache, neither of which belongs in
@@ -25,7 +28,7 @@
   what is safely usable, not to diagnose the operator's network.
 */
 
-import { setLocalDiscoveryReachable } from "./provider-registry.ts";
+import { DISCOVERED_LOCAL_ADDRESSES, setLocalDiscoveryReachable } from "./provider-registry.ts";
 
 export type LocalModelKind = "chat" | "vision" | "embedding" | "unknown";
 
@@ -408,14 +411,16 @@ export async function discoverLocalModels(force = false): Promise<LocalCatalog> 
   }
 
   if (notSwitchedOff("TOWNREPORTER_LOCAL_DISCOVERY")) {
-    const defaults: [string, LocalServerKind][] = [
-      ["http://127.0.0.1:1234/v1", "lmstudio"],
-      ["http://127.0.0.1:11434/v1", "ollama"],
-      ["http://127.0.0.1:8080/v1", "llamacpp"],
-    ];
-    for (const [base, kind] of defaults) {
+    /*
+      The ADDRESSES come from the registry (`DISCOVERED_LOCAL_ADDRESSES`), so
+      the ports this desk visits and the addresses `providerEndpointWatched`
+      lets the Server page call "probed" are one list in one place. The KIND
+      comes from the port (`inferKind`, below), which is what that function is
+      for: 1234 is LM Studio's default, 11434 Ollama's, 8080 llama.cpp's.
+    */
+    for (const base of DISCOVERED_LOCAL_ADDRESSES) {
       if (seen.has(base)) continue;
-      const server = await probeServer(base, kind, false);
+      const server = await probeServer(base, inferKind(base), false);
       if (server) servers.push(server);
     }
   }

@@ -45,6 +45,7 @@ import { Dialog } from "@/components/dialog";
 import { ListSkeleton } from "@/components/states";
 import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
 import { ProviderStatusCard } from "@/components/provider-status-card";
+import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
 import { getProviderStatuses } from "@/lib/news/provider-login";
 import { getLocalModelChoice } from "@/lib/news/provider-settings";
@@ -634,6 +635,27 @@ function JobRow({
   };
   const kind = jobStatusKind(facts);
 
+  /*
+    Unit CX item 3: the word the empty first choice carries.
+
+    Nothing saved is not the word "Default" to the editor reading the row -- it
+    is the model the desk will actually run, and the drawing names a model in
+    every cell (`Desk Models.dc.html`: "Codex Sol · sign-in", "qwen3 32B · LM
+    Studio"). The STORED value is still "" (the desk's own default is what
+    resolves it), so only the option's word changes: the resolved model's own
+    label, from the same `resolveJobModel` answer the chip underneath reads, so
+    the box and the chip cannot name two different models.
+
+    Two cases keep the slot's own word, because naming a model there would be a
+    claim rather than an answer: a row that is not running on the desk's
+    default (the editor saved a choice, and the saved value is what the box
+    holds), and a row where nothing could be resolved at all.
+  */
+  const defaultFirstLabel =
+    facts.fromDefault && resolvedSaved.providerId
+      ? modelChoiceLabel(resolvedSaved.providerId, surface)
+      : jobSlotEmptyLabel("first");
+
   return (
     <div
       style={{
@@ -665,7 +687,7 @@ function JobRow({
             label={`First choice for ${job?.label ?? jobKey}`}
             value={draft.first.providerId}
             options={menu}
-            emptyLabel={jobSlotEmptyLabel("first")}
+            emptyLabel={defaultFirstLabel}
             disabled={disabled}
             onChange={(next) =>
               onPatch(jobKey, "first", {
@@ -1002,57 +1024,10 @@ function ConnectionsTab({
   );
 }
 
-/**
- * The four looks a card's chip can wear.
- *
- * Named after what the color MEANS rather than after a provider, so the same
- * four are available to a job's status chip and to a connection's, and neither
- * has to know the other's words.
- */
-type ChipTone = "ready" | "slow" | "signin" | "quiet";
-
-function chipLook(tone: ChipTone): CSSProperties {
-  if (tone === "ready") return { color: "var(--ok)", border: "1px solid var(--ok)" };
-  if (tone === "slow") return { color: "var(--warn)", border: "2px solid var(--warn)" };
-  if (tone === "signin") return { color: "var(--danger)", border: "2px dashed var(--danger)" };
-  return { color: "var(--fg2)", border: "1px solid var(--fg2)" };
-}
-
-/**
- * One chip, in the card's top-right corner.
- *
- * A flex column so an optional second line costs the card's own columns no
- * width -- the same reason the job row's chip stacks. `title` carries the help
- * sentence: a chip is two words, and the sentence that explains them does not
- * fit on the card.
- */
-function Chip({
-  tone,
-  label,
-  help,
-  below,
-}: {
-  tone: ChipTone;
-  label: string;
-  help: string;
-  below?: string;
-}) {
-  return (
-    <div className="flex flex-col items-end gap-0.5" title={help}>
-      <span
-        className="text-sm font-extrabold"
-        style={{ ...chipLook(tone), padding: "1px 8px", whiteSpace: "nowrap" }}
-      >
-        {label}
-      </span>
-      {below ? (
-        <span className="text-sm text-ink-2" style={{ whiteSpace: "nowrap" }}>
-          {below}
-        </span>
-      ) : null}
-    </div>
-  );
-}
+/* The four tones and the chip itself live in @/components/status-chip since
+   unit CX -- Server draws the same chip on each writing model's card, so the
+   four words ("ready", "slow", "signin", "quiet") have one home rather than two
+   that could drift. This file imports them like any other. */
 
 /**
  * The words a CONNECTION card's chip says.

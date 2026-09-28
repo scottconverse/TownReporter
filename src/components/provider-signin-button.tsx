@@ -4,8 +4,14 @@
  * A failed draft used to end at a sentence — "Claude Code needs you to sign in
  * again" — with no way to act on it from the desk. The editor had to know that
  * meant a terminal. This is the button that closes that loop: it starts the
- * CLI's own headless login and sends the editor to the Server page, where the
- * link and the countdown live.
+ * CLI's own headless login and sends the editor to the panel, where the link and
+ * the countdown live.
+ *
+ * Unit CX2 moved that panel: the sign-in control is on the Writing models
+ * screen (`/desk/ops/writing-models`), not on the Server page, which now draws
+ * that card as a summary with a door. The button follows the control, because
+ * landing on a page of twelve summaries and having to pick the right card is
+ * the same dead end this button was built to close.
  *
  * It renders nothing unless the error really is a lapsed CLI login, and nothing
  * for an ANTHROPIC_API_KEY rejection — a bad key is edited in a file, not signed
@@ -34,7 +40,11 @@ export function ProviderSignInButton({ detail }: { detail: string | null | undef
       is worse than one that hands over to the page that can explain.
     */
     onSettled: () => {
-      void navigate({ to: "/desk/ops", search: { signin: provider ?? undefined } });
+      void navigate({
+        to: "/desk/ops/$card",
+        params: { card: "writing-models" },
+        search: { signin: provider ?? undefined },
+      });
     },
   });
 

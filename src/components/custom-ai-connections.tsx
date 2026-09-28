@@ -113,14 +113,28 @@ export function CustomAiConnections({
     }
   }
   return (
-    <section aria-labelledby={showHeading ? "custom-ai-heading" : undefined} className="grid gap-4">
+    <section
+      /*
+        Unit CX: `/desk/ops#custom-ai-connections` is gone -- the Server page
+        draws no connections panel, and the two doors it does draw ("Assign
+        models to jobs…", "All connections") lead to the Models screen, which
+        owns this list now. The anchor stays on the panel itself rather than on
+        either screen, so the walks (and any bookmark) that used to scroll to
+        `#custom-ai-connections` still land on the same component wherever it is
+        mounted.
+      */
+      id="custom-ai-connections"
+      aria-labelledby={showHeading ? "custom-ai-heading" : undefined}
+      className="grid gap-4"
+    >
       {/*
         Unit BG: the Models screen draws these same cards under its own group
         heading ("Frontier · API key"), and two stacked headings for one list of
-        cards reads as two lists. Server settings keeps its heading -- the prop
-        defaults to true, so nothing there changed. The paragraph below stays
-        either way: "Saving does not call a model" is the sentence that makes
-        the form safe to use.
+        cards reads as two lists. Unit CX leaves `showHeading={false}` the only
+        live call: the Models dialog already says "Add a connection" in its own
+        title, and the Server page no longer mounts this panel at all. The
+        paragraph below stays either way: "Saving does not call a model" is the
+        sentence that makes the form safe to use.
       */}
       {showHeading ? <h2 id="custom-ai-heading">Add your own AI API</h2> : null}
       <p className="meta">
