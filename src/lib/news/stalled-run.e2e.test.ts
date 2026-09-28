@@ -14,6 +14,21 @@ import {
   withDatabase,
   type ChildProcess,
 } from "../test-support/pg-admin.ts";
+import { readFileSync } from "node:fs";
+
+/**
+ * Unit CR (0.6.81): the first account on a fresh install is gated behind the
+ * one-time setup code. Reads the same file `scripts/first-run-setup-step.mjs`
+ * reads (duplicated inline, a few lines, so this strict typed project does not
+ * import an untyped .mjs walk helper).
+ */
+async function fillPendingSetupCodeIfPresent(page: Page): Promise<void> {
+  const field = page.getByLabel("Setup code", { exact: true });
+  if ((await field.count()) === 0) return;
+  const root = process.env.TOWNREPORTER_DATA_ROOT?.trim() || join(process.cwd(), ".townreporter-data");
+  const code = readFileSync(join(root, "logs", "SETUP-CODE.txt"), "utf8").trim();
+  await field.fill(code);
+}
 
 /**
  * A run record that dies without ever writing `finished_at` or `error`.
@@ -102,6 +117,7 @@ if (dbProbe.ok) {
     await page.getByLabel("Email").fill(OWNER_EMAIL);
     await page.getByLabel("Password", { exact: true }).fill(OWNER_PASSWORD);
     await page.getByLabel("Confirm password").fill(OWNER_PASSWORD);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
 

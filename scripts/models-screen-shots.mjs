@@ -43,7 +43,7 @@ import { chromium } from "playwright";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 /** A port of its own, in the 8090+ range the unit was told to use. */
 const PORT_MODELS_SHOTS = 8097;
@@ -309,6 +309,7 @@ try {
   if (fresh) {
     await page.getByLabel("Name").fill("Models Shots Owner");
     await page.getByLabel("Confirm password").fill(password);
+    await fillPendingSetupCodeIfPresent(page);
     await page.getByRole("button", { name: "Create editor account" }).click();
   } else {
     await page.getByRole("button", { name: "Sign in with email" }).click();

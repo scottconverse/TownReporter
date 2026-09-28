@@ -15,9 +15,37 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Same path `setup-code.ts` writes to -- see `dataRoot()`/`setupCodeFilePath()`. */
-export function pendingSetupCodePath() {
-  const root = process.env.TOWNREPORTER_DATA_ROOT?.trim() || join(process.cwd(), ".townreporter-data");
+/**
+ * Same path `setup-code.ts` writes to -- see `dataRoot()`/`setupCodeFilePath()`.
+ *
+ * Resolution order, and why it is not just `process.cwd()`:
+ *
+ *   1. `dataRoot` passed by the caller. The one walk whose data root is NOT
+ *      its own cwd is `windows-install-smoke.mjs`: the packaged server is
+ *      launched by `installer/Common.ps1` with
+ *      `TOWNREPORTER_DATA_ROOT = <the installer's -DataRoot>` (a
+ *      `%LOCALAPPDATA%\TownReporter\ci-<guid>` on CI), and that variable is
+ *      set in the INSTALLER's process -- it does not travel back out to the
+ *      workflow shell that runs the smoke walk. So the walk reads the same
+ *      root from the pointer file it already parses (`config.DataRoot`) and
+ *      passes it in. Unit CJ's version of this helper only ever looked at
+ *      cwd, which is why the Windows install job died with
+ *      "SETUP-CODE.txt could not be read: ENOENT" -- the file was never in
+ *      `D:\a\TownReporter\TownReporter\.townreporter-data`.
+ *   2. `TOWNREPORTER_DATA_ROOT` -- what `setup-code.ts` itself prefers, so a
+ *      job that exports it (or a walk that sets it before importing the
+ *      built server, the way the self-booting walks set PORT) needs nothing
+ *      from the caller.
+ *   3. `<cwd>/.townreporter-data` -- the same fallback `dataRoot()` uses, and
+ *      the right answer for every Linux CI job: the server runs with cwd =
+ *      repo root, so the file lands at
+ *      `$GITHUB_WORKSPACE/.townreporter-data/logs/SETUP-CODE.txt`.
+ */
+export function pendingSetupCodePath(dataRoot) {
+  const root =
+    dataRoot?.trim() ||
+    process.env.TOWNREPORTER_DATA_ROOT?.trim() ||
+    join(process.cwd(), ".townreporter-data");
   return join(root, "logs", "SETUP-CODE.txt");
 }
 
@@ -30,16 +58,15 @@ export function pendingSetupCodePath() {
  * field a human operator would. There is nothing here for production to
  * "ignore": the server has no separate branch for this caller.
  */
-export async function fillPendingSetupCodeIfPresent(page) {
+export async function fillPendingSetupCodeIfPresent(page, opts = {}) {
   const field = page.getByLabel("Setup code", { exact: true });
   if ((await field.count()) === 0) return;
+  const path = pendingSetupCodePath(opts.dataRoot);
   let code = "";
   try {
-    code = readFileSync(pendingSetupCodePath(), "utf8").trim();
+    code = readFileSync(path, "utf8").trim();
   } catch (err) {
-    throw new Error(
-      `Setup code field is showing but ${pendingSetupCodePath()} could not be read: ${err}`,
-    );
+    throw new Error(`Setup code field is showing but ${path} could not be read: ${err}`);
   }
   await field.fill(code);
 }

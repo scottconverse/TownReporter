@@ -208,7 +208,13 @@ async function main() {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
-    await fillPendingSetupCodeIfPresent(page);
+    /*
+      The packaged server writes the setup code under the installer's -DataRoot,
+      which on the Windows CI job is %LOCALAPPDATA%\TownReporter\ci-<guid> --
+      NOT this walk's cwd. `config.DataRoot` is read from the install pointer's
+      config.json, so it is the data root the server itself uses.
+    */
+    await fillPendingSetupCodeIfPresent(page, { dataRoot: config.DataRoot });
     await page.getByRole("button", { name: "Create editor account" }).click();
     await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
     await completeFirstRunSetup(page, base);
