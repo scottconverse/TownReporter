@@ -38,10 +38,55 @@
  * that terminates TLS; the app itself is reached over plain HTTP on loopback,
  * so an HSTS header from here would be both meaningless and, if the operator
  * ever moved to a LAN address, actively harmful.
+ *
+ * ---
+ *
+ * The same header set carries the document cache rule, added for 0.6.81.
+ *
+ * A reviewer saw townreporter.org pages from 0.6.68 and 0.6.76 after 0.6.80
+ * had shipped. The pages were new; the bytes the browser (or Cloudflare, or a
+ * proxy in between) handed over were not. Nothing on a document response said
+ * how long it stayed good, so whatever held it was free to keep it.
+ *
+ * Every HTML page now says. Two answers, one rule each:
+ *
+ * - The desk tree (`/desk` and everything under it) is somebody's own
+ *   workspace: `private, no-store`. Not stored by a shared cache, not stored
+ *   by the browser. A release that changes the desk changes it on the next
+ *   request, always.
+ * - Every other document is the public paper: `no-cache`. That is not "do not
+ *   cache" -- it is "revalidate before you use it", so a browser or an edge
+ *   still serves a fast 304 when nothing changed, and serves the new page the
+ *   moment anything did. That is exactly the property that was missing.
+ *
+ * The hashed bundles under `/assets` are deliberately NOT touched: their names
+ * change when their bytes change, so their long cache is correct and is what
+ * keeps the paper quick. The gate is the response's own content type, so
+ * anything that is not an HTML document -- JS, CSS, the feed, the sitemap,
+ * images, JSON -- keeps whatever policy it already had.
  */
 interface HeaderEvent {
   url: URL;
   req: { method: string; headers: Headers };
+}
+
+/** The desk layout route and every screen under it. */
+const DESK_PREFIX = "/desk";
+
+/**
+ * The cache answer for one document path.
+ *
+ * The split is by path, not by session, and that is on purpose: the HTML of a
+ * public page is the same document whoever asks for it, so `no-cache` is both
+ * sufficient and honest there. The desk is the only surface whose document is
+ * one person's workspace, and it is one path prefix, so there is no guess to
+ * make -- a request either is under `/desk` or is not.
+ */
+function documentCacheControl(pathname: string): string {
+  if (pathname === DESK_PREFIX || pathname.startsWith(`${DESK_PREFIX}/`)) {
+    return "private, no-store";
+  }
+  return "no-cache";
 }
 
 /**
@@ -93,5 +138,17 @@ export default async function securityHeadersMiddleware(
     // something this blanket does not.
     if (!result.headers.has(name)) result.headers.set(name, value);
   }
+
+  /*
+    The document cache rule, gated the same way app-chrome.ts decides what a
+    document is: by the response's own content type. A non-HTML response -- a
+    hashed `/assets` bundle, the feed, an image, a server-function JSON reply --
+    is left alone. Same never-overwrite rule as above.
+  */
+  const contentType = String(result.headers.get("content-type") ?? "").toLowerCase();
+  if (contentType.includes("text/html") && !result.headers.has("Cache-Control")) {
+    result.headers.set("Cache-Control", documentCacheControl(event.url.pathname));
+  }
+
   return result;
 }
