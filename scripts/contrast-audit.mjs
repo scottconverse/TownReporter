@@ -36,12 +36,17 @@ const css = readFileSync(CSS_PATH, "utf8");
 // ── Parse CSS custom properties ─────────────────────────────────────────────
 
 /** Grab the declarations inside the first `{...}` after a literal selector text. */
+function blockAfter(text, selector) {
+  const at = text.indexOf(selector);
+  if (at < 0) throw new Error(`selector not found: ${selector}`);
+  const open = text.indexOf("{", at);
+  const close = text.indexOf("}", open);
+  return text.slice(open + 1, close);
+}
+
+/** The same, against this file's own stylesheet. */
 function block(selector) {
-  const at = css.indexOf(selector);
-  if (at < 0) throw new Error(`selector not found in styles.css: ${selector}`);
-  const open = css.indexOf("{", at);
-  const close = css.indexOf("}", open);
-  return css.slice(open + 1, close);
+  return blockAfter(css, selector);
 }
 
 /** Parse `--name: value;` pairs out of a declaration block. */
@@ -219,10 +224,6 @@ function printTable(data) {
   console.log(lines.join("\n"));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  printTable(rows());
-}
-
 /*
   The pending/error screens ("Opening the desk") are the one surface that
   renders outside the desk shell, so they cannot inherit either palette --
@@ -242,6 +243,146 @@ const SCREEN_PAGE_PAIRS = [
   { fg: "danger", label: "error copy on the pending/error screens (.screen-error, .notice-err)" },
   { fg: "color-danger", label: "error-component.tsx danger text (text-danger)" },
 ];
+
+/*
+  /desk/dark's captured-page panel (Unit CQ, 0.6.81) -- the other place on the
+  desk where a palette is declared in a file instead of inherited.
+
+  The screen's open-file text sits in a `.reader`, the public paper's reader
+  class, whose stylesheet is imported globally (`src/routes/__root.tsx:14`) and
+  whose block declares a light palette on the panel element itself
+  (`src/reader-astra.css:24-40`: `--bg` #fffdf7, `--ink` #111111, `--line`
+  #d8d3c4, ...). A declaration on the element outranks an inherited value, so
+  those literals shadowed the desk's tokens for the panel's whole subtree while
+  the panel's own classes went on painting from the desk's tokens
+  (`src/styles.css:1615-1630`) -- bone `--adeep` and `--mut` text on a cream
+  ground in dark mode, 1.23:1. `src/desk-astra.css` now re-points the reader's
+  names at the desk's tokens on that page only.
+
+  This section computes the panel's colors from whatever that rule actually
+  says, per theme, and holds them against a table -- so deleting the rule puts
+  the literal back, the panel computes a cream ground under the dark theme's
+  bone text, and the tests below go red with the ratio the screen shipped with.
+  The expected table is itself checked against the shell's own tokens, so it
+  cannot drift away from the desk's palette while still passing.
+*/
+const astraCss = readFileSync(join(ROOT, "src", "desk-astra.css"), "utf8");
+const readerCss = readFileSync(join(ROOT, "src", "reader-astra.css"), "utf8");
+
+const astraLight = customProps(blockAfter(astraCss, ".desk-ltr.astra {"));
+const astraDark = customProps(blockAfter(astraCss, ".desk-ltr.astra.night,"));
+const readerOwn = customProps(blockAfter(readerCss, ".reader {"));
+const panelGroundAlias = customProps(blockAfter(astraCss, '[data-desk-page="dark"] {'));
+const panelRemap = customProps(blockAfter(astraCss, '[data-desk-page="dark"] .reader {'));
+
+/** The reader's three non-color declarations: a length and two font stacks. */
+const READER_NON_COLORS = new Set(["reading", "serif"]);
+
+/**
+ * The reader names the panel deliberately leaves alone: they are read only by
+ * rules that need a descendant class this panel does not render
+ * (`.reader .btn`, `.reader .tag`, `.reader .iconbtn`), so nothing inside the
+ * panel reads them, and the desk has no alias to point them at.
+ */
+const PANEL_UNMAPPED = ["a", "sel", "ok", "warn"];
+
+/** Resolve a value the way the browser would: at the element that declares it. */
+function resolvePanelValue(value, shellVars, seen = new Set()) {
+  const m = value.match(/^var\(--([\w-]+)\)$/);
+  if (!m) return value;
+  const name = m[1];
+  if (seen.has(name)) throw new Error(`custom-property cycle on --${name}`);
+  seen.add(name);
+  const declared = panelGroundAlias.get(name) ?? shellVars.get(name);
+  if (declared === undefined) throw new Error(`unresolved var: --${name} (via ${value})`);
+  return resolvePanelValue(declared, shellVars, seen);
+}
+
+/**
+ * The shell's tokens as the browser computes them, for one theme.
+ *
+ * `desk-astra.css` declares the `--color-*` aliases once, in the light block;
+ * the night rule on the same element redefines only the short names those
+ * aliases point at. A var() is substituted on the element where it is
+ * declared -- the same element here -- so in dark mode `--color-paper` still
+ * carries the text `var(--surface)` from the light rule and computes on an
+ * element where the night rule has already replaced `--surface`. Merging the
+ * two blocks in that order is that computation: the aliases first (they are
+ * declared once and never re-declared), then the theme's own values over them.
+ */
+function shellTokens(themeVars) {
+  return new Map([...astraLight, ...themeVars]);
+}
+
+/** What every token the reader declares computes to inside /desk/dark, per theme. */
+function panelTokens(themeVars) {
+  const shellVars = shellTokens(themeVars);
+  const out = {};
+  for (const [name, own] of readerOwn) {
+    out[name] = resolvePanelValue(panelRemap.get(name) ?? own, shellVars);
+  }
+  return out;
+}
+
+/**
+ * The panel's palette, name by name. Light is the reader's own block verbatim
+ * (the re-point is chosen from aliases that hold the same value in light, so
+ * the light build does not move); dark is the desk's dark tokens.
+ */
+const PANEL_EXPECTED = {
+  light: {
+    bg: "#fffdf7", surface: "#f6f2e7", ink: "#111111", muted: "#3a3a3a",
+    line: "#d8d3c4", teal: "#111111", soft: "#f6f2e7", warm: "#f6f2e7",
+    danger: "#b3261e",
+  },
+  dark: {
+    bg: "#1b1916", surface: "#27231f", ink: "#e8e6e1", muted: "#bdbab3",
+    line: "#3b3631", teal: "#e8e6e1", soft: "#27231f", warm: "#27231f",
+    danger: "#f0998c",
+  },
+};
+
+/**
+ * Which desk token each re-pointed reader name lands on -- the mapping the
+ * panel's dark column above is asserted against, so the table is a restatement
+ * of the desk's palette and not a second opinion about it.
+ */
+const PANEL_DESK_SOURCE = {
+  bg: "bg", surface: "surface", ink: "fg", muted: "mut", line: "line",
+  teal: "adeep", soft: "bg2", warm: "bg2", danger: "danger",
+};
+
+/**
+ * The text the panel paints, and the ground it paints on. Every one is 14-15px
+ * at normal weight, so all three are held to 4.5:1. These are the rows the
+ * browser survey of the screen measured at 1.23:1 and 1.9:1 in dark before the
+ * re-point, and the ground is the one the panel actually computes.
+ */
+const PANEL_PAIRS = [
+  { fg: "adeep", source: "desk", label: ".read-kind, .inline-link, .reader-row:hover .read-title" },
+  { fg: "mut", source: "desk", label: ".read-url, .np-meta" },
+  { fg: "ink", source: "panel", label: "the panel's base text and the .read-full body" },
+];
+
+/** The panel's rows, for both the printed table and the assertion below. */
+function panelRows() {
+  const out = [];
+  for (const [themeName, themeVars] of [["light", astraLight], ["dark", astraDark]]) {
+    const shellVars = shellTokens(themeVars);
+    const panel = panelTokens(themeVars);
+    for (const pair of PANEL_PAIRS) {
+      const fgHex = pair.source === "panel" ? panel[pair.fg] : shellVars.get(pair.fg);
+      out.push({
+        theme: themeName,
+        fgHex,
+        bgHex: panel.bg,
+        ratio: contrastRatio(fgHex, panel.bg),
+        label: pair.label,
+      });
+    }
+  }
+  return out;
+}
 
 // ── node:test: fail the build under 4.5:1 for any "text" token pair ────────
 
@@ -281,3 +422,118 @@ test("desk tokens parsed from styles.css are the ones the CSS actually declares"
   assert.equal(dark.bg.toLowerCase(), "#1b1916");
   assert.equal(dark.mut.toLowerCase(), dark.fg2.toLowerCase());
 });
+
+// ── /desk/dark's captured-page panel ────────────────────────────────────────
+
+test("the reader panel section parses the CSS it means to", () => {
+  assert.equal(astraLight.get("bg").toLowerCase(), "#fffdf7", "desk-astra.css .desk-ltr.astra");
+  assert.equal(astraDark.get("bg").toLowerCase(), "#1b1916", "desk-astra.css .desk-ltr.astra.night");
+  assert.equal(readerOwn.get("bg").toLowerCase(), "#fffdf7", "reader-astra.css .reader");
+  assert.equal(readerOwn.get("reading"), "21px", "reader-astra.css .reader");
+  assert.equal(panelRemap.size, 10, "the re-point block in desk-astra.css");
+});
+
+test("the panel re-points every reader name the panel can read", () => {
+  const colors = [...readerOwn.keys()].filter((n) => !READER_NON_COLORS.has(n));
+  assert.deepEqual(
+    colors.filter((n) => !panelRemap.has(n)),
+    PANEL_UNMAPPED,
+    "reader names still carrying their own literal inside /desk/dark",
+  );
+  // Every re-pointed value has to resolve through the shell, in both themes --
+  // a name typed wrong here would silently paint nothing at all.
+  for (const [name, value] of panelRemap) {
+    for (const themeVars of [astraLight, astraDark]) {
+      assert.doesNotThrow(
+        () => resolvePanelValue(value, shellTokens(themeVars)),
+        `--${name}: ${value}`,
+      );
+    }
+  }
+});
+
+test("the panel paints the desk's dark palette when the desk is dark", () => {
+  const panel = panelTokens(astraDark);
+  const drift = [];
+  for (const [name, hex] of Object.entries(PANEL_EXPECTED.dark)) {
+    if (panel[name].toLowerCase() !== hex) {
+      drift.push(`--${name}: computed ${panel[name]}, expected ${hex}`);
+    }
+    // …and the expected hex is the shell's own token, so the table is a
+    // restatement of the desk's palette rather than a second opinion about it.
+    const source = PANEL_DESK_SOURCE[name];
+    if (astraDark.get(source).toLowerCase() !== hex) {
+      drift.push(`desk --${source} is ${astraDark.get(source)}, the table says ${hex}`);
+    }
+  }
+  assert.deepEqual(drift, []);
+});
+
+test("the panel paints the reader's own palette when the desk is light", () => {
+  // The re-point reads aliases that hold the reader's own light values, so the
+  // light build does not move -- which is why light mode was never the defect
+  // and is not changed here.
+  const panel = panelTokens(astraLight);
+  const drift = [];
+  for (const [name, hex] of Object.entries(PANEL_EXPECTED.light)) {
+    if (panel[name].toLowerCase() !== hex) {
+      drift.push(`--${name}: computed ${panel[name]}, expected ${hex}`);
+    }
+    if ((readerOwn.get(name) ?? "").toLowerCase() !== hex) {
+      drift.push(`--${name}: reader-astra.css declares ${readerOwn.get(name)}, the table says ${hex}`);
+    }
+  }
+  assert.deepEqual(drift, []);
+});
+
+test("the panel's text meets WCAG AA on the ground it paints, in both themes", () => {
+  const failures = panelRows().filter((r) => r.ratio < 4.5);
+  assert.deepEqual(
+    failures.map((f) => `${f.theme} ${f.fgHex} on ${f.bgHex} = ${f.ratio.toFixed(2)}:1 (${f.label})`),
+    [],
+    "the panel's text fails WCAG AA on its own ground",
+  );
+  assert.equal(panelRows().length, 6);
+});
+
+test("no /desk/dark rule declares a literal color", () => {
+  // The screen follows the desk's tokens. The rule that used to break this was
+  // a `.nightpanel` sub-palette (--fg #e8e6e1, --line #3b3631, ...) scoped to
+  // this page, which matched nothing on it -- a latent trap, not a live bug.
+  const rules = [...astraCss.matchAll(/\[data-desk-page="dark"\][^{]*\{/g)];
+  assert.ok(rules.length >= 4, `expected the screen's rules to parse, found ${rules.length}`);
+  const literals = [];
+  for (const m of astraCss.matchAll(/\[data-desk-page="dark"\][^{]*\{([^}]*)\}/g)) {
+    for (const hex of m[1].matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
+      literals.push(`${m[0].split("{")[0].trim()} -> ${hex[0]}`);
+    }
+  }
+  assert.deepEqual(literals, []);
+});
+
+/*
+  The CLI print sits at the end of the file, after every top-level `const` it
+  reads. It used to sit above the /desk/dark panel section, which made
+  `panelRows()` reach for `astraLight` while it was still in its temporal dead
+  zone -- `node scripts/contrast-audit.mjs` died with a ReferenceError instead
+  of printing the panel table. Test runs never saw it: under `node --test` this
+  guard is false, so the print block never executed on the path CI takes.
+*/
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  printTable(rows());
+  console.log("");
+  console.log("-- /desk/dark's captured-page panel (the open file's text) --");
+  for (const r of panelRows()) {
+    console.log(
+      [
+        r.theme.padEnd(5),
+        r.ratio.toFixed(2).padStart(5),
+        "4.5:1",
+        r.ratio >= 4.5 ? "PASS" : "FAIL",
+        "text ",
+        `${r.fgHex} on ${r.bgHex}`,
+        r.label,
+      ].join(" | "),
+    );
+  }
+}
