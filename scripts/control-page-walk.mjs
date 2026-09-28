@@ -143,6 +143,18 @@ function fakeStatus() {
       // the rung that runs on this computer runs whatever is loaded, so the
       // card names it instead of checking for one vendor's model.
       { id: "qwen", label: "Model server (LM Studio)", state: "ok", ok: true, optional: true, detail: "halo/qwen3.6-35b-a3b is loaded", fix: null },
+      // The python that runs yt-dlp, in the state a set-up machine shows it: both
+      // tools answer and the row names the interpreter, which is the whole
+      // reason the row exists (0.6.80, Unit CI). See theMeetingToolsRow.
+      {
+        id: "meeting-tools",
+        label: "Meeting video tools",
+        state: "ok",
+        ok: true,
+        optional: true,
+        detail: "yt-dlp 2025.09.05 through C:\\Program Files\\Python313\\python.exe; ffmpeg 7.1.1",
+        fix: null,
+      },
       // The card this walk's first new check is about: a probe that could not
       // read its answer. It is a Note, and it must never be painted green --
       // "OK: Could not read the last scan" was the bug the coordinator found.
@@ -470,6 +482,30 @@ async function theNewCards() {
 }
 
 /**
+ * The row that names the python a meeting capture would run (0.6.80, Unit CI).
+ *
+ * Three Pythons on PATH with only one carrying yt-dlp means the interpreter a
+ * capture starts is decided by PATH order -- so the page has to SAY which one
+ * it is, not merely that some tool answered. The check reads the rendered card:
+ * the label, the green verdict, and the interpreter's own path in the sentence.
+ */
+async function theMeetingToolsRow() {
+  const card = page.locator(".card", { hasText: "Meeting video tools" }).first();
+  must((await card.count()) === 1, "the page draws no card for the meeting video tools");
+  const text = ((await card.textContent()) ?? "").trim().replace(/\s+/g, " ");
+  const verdict = ((await card.locator(".verdict").textContent()) ?? "").trim();
+  must(verdict === "OK:", `the "Meeting video tools" card reads "${verdict}"`);
+  must(/yt-dlp \d/.test(text), `the row names no yt-dlp version: ${text}`);
+  must(/ffmpeg \d/.test(text), `the row names no ffmpeg version: ${text}`);
+  must(
+    /python\.exe/.test(text),
+    `the row does not name the interpreter it runs, which is the point of the row: ${text}`,
+  );
+  facts.push({ meetingTools: text });
+  step(`the "Meeting video tools" card names the interpreter: "${text.slice(0, 60)}..."`);
+}
+
+/**
  * The row that brings the staged copy back after a reboot -- and the one button
  * this walk must not press.
  *
@@ -777,6 +813,7 @@ try {
   await theLightToggle();
   await theWording(server);
   await theNewCards();
+  await theMeetingToolsRow();
   await theTestCopyRow();
   await theHeadline();
   await noGreenOverCouldNot();

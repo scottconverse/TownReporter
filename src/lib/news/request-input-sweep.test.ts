@@ -1084,6 +1084,12 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * name beside it uses. The list, not the call, lagged again; a bare cast
    * still fails below.
    *
+   * Unit CB added `findingIds` to that same schema: the tick boxes the editor
+   * pressed, as ids rather than as findings, bounded by
+   * `LIMITS.styleFindingId` / `LIMITS.styleFindingIds` and required to name at
+   * least one. Extending an already-swept name needs no entry here; the
+   * `draftStyleFixInput` member above is the one that covers it.
+   *
    * Unit BK adds six more, all from the new `editor-dialog-actions.ts`: the
    * Add-a-lead, Hold, Source-kill-pattern, Find-sources, Add-to-story and
    * Choose-headline dialogs. Each is a strict `z.object` in `request-input.ts`

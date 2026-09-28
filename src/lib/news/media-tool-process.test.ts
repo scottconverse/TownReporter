@@ -4,7 +4,11 @@ import { chmodSync, copyFileSync, linkSync, mkdtempSync, readFileSync, rmSync } 
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnMediaTool } from "./media-tool-process.server.ts";
+import {
+  resolveMediaToolPython,
+  spawnMediaTool,
+  TOWNREPORTER_PYTHON,
+} from "./media-tool-process.server.ts";
 
 /*
   yt-dlp is a python program started as a child of this server, and its input is
@@ -245,6 +249,74 @@ describe("a spawned media tool gets an allow-list, not this server's environment
       assert.match(source, /spawnMediaTool\(/, `${file} must start python through the runner`);
     }
     const runner = readFileSync(join(SRC_DIR, "media-tool-process.server.ts"), "utf8");
-    assert.match(runner, /spawn\(MEDIA_TOOL/, "the runner is where the python child is started");
+    assert.match(runner, /resolveMediaToolPython\(\)/, "the runner is where the interpreter is chosen");
+    assert.match(runner, /spawn\(python\.bin, argv/, "the runner is where the python child is started");
+  });
+});
+
+/*
+  Unit CI (0.6.80): this machine has three Pythons on PATH and only one with
+  yt-dlp, so which one a capture starts is decided by PATH order unless the
+  operator names it. The cases below measure the three states of
+  TOWNREPORTER_PYTHON -- set to a real file, set to nothing, unset -- with the
+  same stand-in python the cases above use.
+*/
+describe("an operator can name the python that runs yt-dlp", () => {
+  it("uses TOWNREPORTER_PYTHON when it names a python that is there", async () => {
+    /*
+      PATH is a fresh empty directory on purpose: if the override were ignored,
+      `python` would not resolve and the spawn would fail with ENOENT. The child
+      that runs is the named file, and the dump proves the variable itself
+      reached it through the allow-list.
+    */
+    const binDir = fakePythonDir();
+    const python = join(binDir, process.platform === "win32" ? "python.exe" : "python");
+    const emptyPath = mkdtempSync(join(tmpdir(), "tr-media-tool-nopath-"));
+    const dir = mkdtempSync(join(tmpdir(), "tr-media-tool-named-"));
+    const dump = join(dir, "env.json");
+    try {
+      await withEnv(
+        { TOWNREPORTER_PYTHON: python, FAKE_ENV_DUMP: dump, PATH: emptyPath },
+        async () => {
+          const child = spawnMediaTool(["-e", DUMP_ENV], { stdio: ["ignore", "pipe", "pipe"] });
+          const result = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+            let stderr = "";
+            child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
+            child.on("error", (error) => resolve({ code: null, stderr: String(error) }));
+            child.on("close", (code) => resolve({ code, stderr }));
+          });
+          assert.equal(result.code, 0, `the named python did not run: ${result.stderr}`);
+        },
+      );
+      const env = JSON.parse(readFileSync(dump, "utf8")) as Record<string, string>;
+      assert.equal(env[TOWNREPORTER_PYTHON], python, "the named interpreter is passed to the child");
+    } finally {
+      rmSync(binDir, { recursive: true, force: true });
+      rmSync(emptyPath, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a TOWNREPORTER_PYTHON with no file behind it, naming the variable and the path", async () => {
+    // A set path with no file is refused in words rather than falling back to
+    // whatever `python` PATH happens to offer -- the bug this variable ends.
+    const missing = join(tmpdir(), "tr-no-such-python", "python.exe");
+    await withEnv({ TOWNREPORTER_PYTHON: missing }, async () => {
+      assert.throws(
+        () => spawnMediaTool(["-m", "yt_dlp", "--version"], { stdio: ["ignore", "pipe", "pipe"] }),
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          assert.match(message, /TOWNREPORTER_PYTHON/, `the refusal must name the variable; got ${message}`);
+          assert.ok(message.includes(missing), `the refusal must name the path; got ${message}`);
+          return true;
+        },
+      );
+    });
+  });
+
+  it('uses "python" from PATH only when TOWNREPORTER_PYTHON is unset', async () => {
+    await withEnv({ TOWNREPORTER_PYTHON: undefined }, async () => {
+      assert.deepEqual(resolveMediaToolPython(), { ok: true, bin: "python" });
+    });
   });
 });

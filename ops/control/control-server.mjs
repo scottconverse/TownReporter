@@ -918,6 +918,103 @@ export function resolveOnPath(name, env = process.env) {
   return null;
 }
 
+/** The first and last non-empty line of a spawn's output, trimmed. */
+function firstLine(output) {
+  const line = (output || []).map(String).find((l) => l.trim());
+  return line ? line.trim().slice(0, 240) : "";
+}
+function lastLine(output) {
+  const lines = (output || []).map(String).filter((l) => l.trim());
+  return lines.length ? lines[lines.length - 1].trim().slice(0, 240) : "";
+}
+
+/** The words this row uses for the python fix, in one place. */
+const MEETING_PYTHON_FIX = "Set TOWNREPORTER_PYTHON in .env to the python.exe that has yt-dlp";
+
+/**
+ * The python and ffmpeg a meeting capture would run, named on the page.
+ *
+ * Meeting capture runs `python -m yt_dlp`, and yt-dlp reaches for ffmpeg. This
+ * machine has three Pythons on PATH and only one of them carries yt-dlp, so
+ * which interpreter a capture starts is decided by PATH order -- a decision
+ * nobody can read off anything. This row answers the two questions that settle
+ * it: WHICH interpreter, and does that one actually answer for yt-dlp.
+ *
+ * `TOWNREPORTER_PYTHON` is read the way this page reads the install's other
+ * values: this process's environment first, then the `.env` of the install
+ * being DESCRIBED (`readEnvFile(appRoot)` with `-Root` semantics -- the page can
+ * run from a worktree while the paper it describes is another folder). That is
+ * the same order `probeLastScan` uses for DATABASE_URL, and for the same reason.
+ *
+ * A named interpreter is the ONLY interpreter tried. The app refuses to run a
+ * different python when the named one is not there
+ * (`mediaToolPythonMissing`, src/lib/news/media-tool-process.server.ts), and a
+ * page that quietly fell back to PATH would print a green row in front of a
+ * capture that refuses to start.
+ *
+ * Both executables and the spawner are injectable, so a test holds a version
+ * string -- or a failure -- without spawning python, ffmpeg or anything else:
+ * the same seam `probeQwen` has. What production runs is exactly these two
+ * commands: `<python> -m yt_dlp --version` and `<ffmpeg> -version`, each with
+ * its own short timeout, and never through a shell (`spawnFixed`).
+ */
+export async function probeMeetingTools({
+  appRoot = null,
+  env = process.env,
+  exe = null,
+  ffmpegExe = null,
+  timeoutMs = 15_000,
+  run = spawnFixed,
+} = {}) {
+  const fromFile = appRoot ? readEnvFile(appRoot) : {};
+  const named = String(env.TOWNREPORTER_PYTHON || fromFile.TOWNREPORTER_PYTHON || "").trim();
+
+  let python;
+  if (exe) {
+    python = exe;
+  } else if (named) {
+    // Made absolute the way the app does before it spawns: a capture runs with a
+    // cwd of its own, so a relative operator path means something else by then.
+    const resolved = path.isAbsolute(named) || !/[\\/]/.test(named) ? named : path.resolve(named);
+    if (!fs.existsSync(resolved)) {
+      return {
+        ok: false,
+        python: null,
+        ffmpeg: null,
+        detail: `python did not run for yt-dlp: TOWNREPORTER_PYTHON is set to ${named}, but there is no file there. ${MEETING_PYTHON_FIX}.`,
+      };
+    }
+    python = resolved;
+  } else {
+    // Unset is `python` from PATH, exactly as the app starts it. Resolving it
+    // first is a convenience for the sentence; a bare `python` handed to the
+    // spawner is the app's own behaviour and the OS resolves it the same way.
+    python = resolveOnPath("python", env) || "python";
+  }
+
+  const [ytdlp, ffmpeg] = await Promise.all([
+    run(python, ["-m", "yt_dlp", "--version"], { timeoutMs }),
+    run(ffmpegExe || resolveOnPath("ffmpeg", env) || "ffmpeg", ["-version"], { timeoutMs }),
+  ]);
+
+  const ytdlpVersion = ytdlp?.code === 0 ? firstLine(ytdlp.output) : "";
+  const ffmpegVersion = ffmpeg?.code === 0 ? (firstLine(ffmpeg.output).match(/ffmpeg version (\S+)/) || [null, ""])[1] : "";
+
+  const pythonPart = ytdlpVersion
+    ? `yt-dlp ${ytdlpVersion} through ${python}`
+    : `python did not answer for yt-dlp (${python}): ${lastLine(ytdlp?.output) || `exit ${ytdlp?.code ?? -1}`}. ${MEETING_PYTHON_FIX}.`;
+  const ffmpegPart = ffmpegVersion
+    ? `ffmpeg ${ffmpegVersion}`
+    : `ffmpeg did not answer: ${lastLine(ffmpeg?.output) || `exit ${ffmpeg?.code ?? -1}`}. Install ffmpeg and put it on PATH -- yt-dlp needs it to read a meeting's audio.`;
+
+  return {
+    ok: Boolean(ytdlpVersion && ffmpegVersion),
+    python: { path: python, version: ytdlpVersion || null },
+    ffmpeg: { version: ffmpegVersion || null },
+    detail: `${pythonPart}; ${ffmpegPart}`,
+  };
+}
+
 /**
  * The last scan, read-only, through the app's own environment wrapper so the
  * database URL and the migration state are the app's and not this file's.
@@ -1185,6 +1282,7 @@ export async function collectStatus({
     publicVersion: probePublicVersion,
     testCopy: probeTestCopy,
     qwen: probeQwen,
+    meetingTools: probeMeetingTools,
     lastScan: probeLastScan,
     backup: probeBackup,
     offsite: probeOffsiteCopy,
@@ -1216,11 +1314,12 @@ export async function collectStatus({
   }
 
   const status = probed.status;
-  const [version, publicVersion, testCopy, qwen, lastScan] = await Promise.all([
+  const [version, publicVersion, testCopy, qwen, meetingTools, lastScan] = await Promise.all([
     Promise.resolve(read.version({ repoRoot })),
     read.publicVersion({ site: status.site || "https://townreporter.org" }),
     read.testCopy({ appRoot, pointerFile, localAppData }),
     read.qwen({}),
+    read.meetingTools({ appRoot }),
     read.lastScan({ repoRoot, appRoot, onOutput }),
   ]);
 
@@ -1317,6 +1416,13 @@ export async function collectStatus({
       Array.isArray(qwen.loaded) && qwen.loaded.length ? "ok" : "note",
       qwen.detail,
     ),
+    // Meeting capture runs `python -m yt_dlp`, and this machine has three
+    // Pythons on PATH with only one of them carrying yt-dlp. The row names the
+    // interpreter a capture would start and what it answers with. A paper that
+    // never captures a meeting is not a paper in trouble, so a missing tool is
+    // a Note carrying its fix in words -- the fault it prevents is a capture
+    // that fails with no reason an operator can act on.
+    card("meeting-tools", "Meeting video tools", meetingTools.ok ? "ok" : "note", meetingTools.detail),
     card("last-scan", "Last scan", scan.state, scan.detail),
     // What the owner is asked to read first. The wording when there is nothing
     // wrong is the plainest sentence this page owns, and it says when it was

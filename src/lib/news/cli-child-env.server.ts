@@ -109,6 +109,9 @@ export const CLAUDE_CREDENTIAL_ENV = [
  * that silently fails.
  */
 export const MEDIA_TOOL_EXTRA = [
+  // Where the operator said the interpreter is, the same way TEXTFLOWKIT_CLI_PATH
+  // is passed to a textflowkit child: it names a program path, not a secret.
+  "TOWNREPORTER_PYTHON",
   "PYTHONPATH",
   "PYTHONHOME",
   "PYTHONUTF8",

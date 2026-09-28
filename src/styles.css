@@ -1977,6 +1977,31 @@
 .desk-ltr .meeting-citation-excerpt {margin:2px 0 0;font-size:calc(0.875rem * var(--ts));color:var(--fg2);text-wrap:pretty;border-left:2px solid var(--rule);padding-left:8px}
 
 /*
+  The tick boxes under the style check (unit CB, item 7). One box per finding,
+  so an editor can send a "to read" line to the model as well as the fix-level
+  ones the desk would have sent on its own -- and so the button is never grey
+  without a reason standing next to it.
+
+  Same geometry as `.gate-claim` (it is the same act: a checkbox row inside a
+  note section) and a plain ink accent rather than the warning color, because
+  this is a selection, not a claim of absence. Sizes obey the same 0.875rem
+  floor and --ts scale as everything else in the check, so nothing here drops
+  below 14px in either theme (contrast-audit.mjs, desk-min-font.test.mjs).
+*/
+.desk-ltr .style-tick {display:flex;gap:10px;align-items:flex-start;margin:8px 0 0;font-size:calc(0.875rem * var(--ts));cursor:pointer}
+.desk-ltr .style-tick input {width:17px;height:17px;flex:none;margin:2px 0 0;accent-color:var(--fg);cursor:pointer}
+.desk-ltr .style-tick input:focus-visible {outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .style-tick input:disabled {cursor:not-allowed}
+.desk-ltr .style-tick > span {display:block;min-width:0}
+.desk-ltr .style-tick-t {display:block;color:var(--fg);text-wrap:pretty}
+.desk-ltr .style-tick-q {display:block;margin-top:3px;color:var(--fg2);font-size:calc(0.875rem * var(--ts));text-wrap:pretty}
+/* The reason a disabled "Fix these with the model" is disabled, in words,
+   standing beside the button rather than leaving a grey control unexplained. */
+.desk-ltr .style-fix-act {display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.desk-ltr .style-fix-act .btn {flex:none}
+.desk-ltr .style-fix-why {margin:0}
+
+/*
   The one shared dialog (src/components/dialog.tsx), styled as the redesign's
   design-system/components/desk/Dialog.jsx: an 820px panel, a 2px ink border,
   square corners, one scrim and the one drop shadow the design system allows

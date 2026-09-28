@@ -13,6 +13,7 @@ import {
   probeAlerts,
   probeOffsiteCopy,
   probeQwen,
+  probeMeetingTools,
   probeTestCopy,
   describeTestCopy,
   STAGE_START_WINDOW_MS,
@@ -455,6 +456,17 @@ function probeSet(overrides = {}) {
     // `loaded` is the names LM Studio reports, and this fake is a machine with
     // nothing loaded -- the state the card has to read as a Note, never OK.
     qwen: async () => ({ ok: true, found: true, models: [], loaded: [], detail: "nothing is loaded in LM Studio" }),
+    // The shape probeMeetingTools really returns, for a machine that is NOT set
+    // up: `python` on PATH has no yt-dlp -- the exact bug 0.6.80 names. The
+    // tests that are about this row replace it.
+    meetingTools: async () => ({
+      ok: false,
+      python: { path: "python", version: null },
+      ffmpeg: { version: "7.1.1" },
+      detail:
+        "python did not answer for yt-dlp (python): No module named yt_dlp. " +
+        "Set TOWNREPORTER_PYTHON in .env to the python.exe that has yt-dlp.; ffmpeg 7.1.1",
+    }),
     lastScan: async () => ({ ok: false, reason: "unreachable", detail: "Could not read the last scan" }),
     backup: () => ({ ok: false, found: false, dir: "nowhere" }),
     // A healthy machine: three copies verified on the other drive, nothing
@@ -496,7 +508,7 @@ test("no card is green when its probe did not answer", async () => {
   delete probes.offsite;
   delete probes.alerts;
   const data = await collectStatus({ appRoot: "C:\\no\\such\\install", now: NOW, probes });
-  assert.equal(data.extras.length, 7, "the fixture is expected to be the whole card set");
+  assert.equal(data.extras.length, 8, "the fixture is expected to be the whole card set");
   for (const row of data.extras) {
     assert.equal(row.state, "note", `${row.id} reads green over a soft failure: "${row.detail}"`);
     assert.equal(row.ok, false, `${row.id} still says ok: true`);
@@ -850,7 +862,7 @@ test("the real alerts probe reads firing, and calls an unchecked machine unknown
 
 test("the two new cards say what the reports say, in the owner's words", async () => {
   const healthy = await collectStatus({ appRoot: ".", now: NOW, timeZone: DENVER, probes: probeSet() });
-  assert.equal(healthy.extras.length, 7, "the card set is the whole set");
+  assert.equal(healthy.extras.length, 8, "the card set is the whole set");
   assert.equal(cardFor(healthy, "offsite").state, "ok");
   assert.equal(
     cardFor(healthy, "offsite").detail,
@@ -1604,4 +1616,152 @@ test("the card is green over a loaded model and names it, and a Note when nothin
   assert.equal(cardFor(empty, "qwen").state, "note");
   assert.equal(cardFor(empty, "qwen").ok, false);
   assert.equal(cardFor(empty, "qwen").detail, "nothing is loaded in LM Studio");
+});
+
+/* ───────────── the python that runs yt-dlp (0.6.80, Unit CI) ───────────── */
+
+/** A throwaway install folder whose .env names a python, or does not. */
+function appRootWithEnv(lines) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-meeting-"));
+  fs.writeFileSync(path.join(root, ".env"), lines.join("\n"), "utf8");
+  return root;
+}
+
+test("the meeting tools row runs the python the install's .env names, and says so", async () => {
+  /*
+    The bug this row exists for: three Pythons on PATH and only one with yt-dlp,
+    so which one a capture starts is decided by PATH order. The A/B below is the
+    point -- the SAME probe, with and without a .env naming the interpreter, has
+    to name two different pythons, or reading the file proves nothing.
+
+    `run` is faked and so is PATH: nothing here spawns python, ffmpeg or any
+    other process, which is what makes this test safe to run on the machine that
+    serves the paper. What is real is the .env read and the argv, which are the
+    two claims.
+  */
+  const named = fs.mkdtempSync(path.join(os.tmpdir(), "townreporter-python-"));
+  const python = path.join(named, "python.exe");
+  fs.writeFileSync(python, "not a real interpreter", "utf8");
+  const withEnvFile = appRootWithEnv([`TOWNREPORTER_PYTHON=${python}`]);
+  const bare = appRootWithEnv(["# nothing set here"]);
+  // No PATH at all: the fallback is the bare name the app itself spawns, so the
+  // two cases differ by the .env and by nothing else.
+  const env = { PATH: "", PATHEXT: "" };
+  const calls = [];
+  const run = async (exe, args) => {
+    calls.push([path.basename(exe), ...args]);
+    if (args[0] === "-version") return { code: 0, output: ["ffmpeg version 7.1.1-full_build Copyright (c) 2000-2025"] };
+    return { code: 0, output: ["2025.09.05"] };
+  };
+  try {
+    const configured = await probeMeetingTools({ appRoot: withEnvFile, env, run });
+    assert.equal(configured.ok, true);
+    assert.equal(configured.python.path, python, "the install's own python is the one run");
+    assert.equal(configured.python.version, "2025.09.05");
+    assert.equal(configured.ffmpeg.version, "7.1.1-full_build");
+    // The row shows the versions AND the interpreter -- the path is the answer.
+    assert.equal(
+      configured.detail,
+      `yt-dlp 2025.09.05 through ${python}; ffmpeg 7.1.1-full_build`,
+    );
+    assert.deepEqual(calls, [
+      ["python.exe", "-m", "yt_dlp", "--version"],
+      ["ffmpeg", "-version"],
+    ]);
+
+    // The same install with nothing in its .env: `python` from PATH, as before.
+    calls.length = 0;
+    const fallback = await probeMeetingTools({ appRoot: bare, env, run });
+    assert.equal(fallback.python.path, "python", "unset the interpreter is PATH's python, unchanged");
+    assert.equal(calls[0][0], "python");
+  } finally {
+    fs.rmSync(named, { recursive: true, force: true });
+    fs.rmSync(withEnvFile, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test("a named python that is not there is refused, and nothing is spawned", async () => {
+  /*
+    The app refuses to run a different python when the named one is missing
+    rather than falling back to PATH. The page has to say the same thing, and it
+    must not spawn anything to say it -- a green row over a capture that refuses
+    to start is the failure this whole ticket is about.
+  */
+  const missing = path.join(os.tmpdir(), "townreporter-no-such-python", "python.exe");
+  const root = appRootWithEnv([`TOWNREPORTER_PYTHON=${missing}`]);
+  try {
+    const result = await probeMeetingTools({
+      appRoot: root,
+      env: {},
+      run: async () => {
+        throw new Error("nothing may be spawned for an interpreter that is not there");
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /TOWNREPORTER_PYTHON/, "the refusal must name the variable");
+    assert.ok(result.detail.includes(missing), `the refusal must name the path: ${result.detail}`);
+    assert.match(result.detail, /python\.exe that has yt-dlp/, "the refusal must carry the fix in words");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a tool that does not answer is named, with the fix for that one", async () => {
+  // python is fine and ffmpeg is not: the row must say WHICH one failed, in the
+  // owner's words, rather than "meeting capture is broken".
+  const onlyFfmpegMissing = await probeMeetingTools({
+    env: {},
+    run: async (exe, args) =>
+      args[0] === "-version"
+        ? { code: -1, output: ["could not start ffmpeg: ENOENT"] }
+        : { code: 0, output: ["2025.09.05"] },
+  });
+  assert.equal(onlyFfmpegMissing.ok, false);
+  assert.match(onlyFfmpegMissing.detail, /yt-dlp 2025\.09\.05/);
+  assert.match(onlyFfmpegMissing.detail, /ffmpeg did not answer/);
+  assert.match(onlyFfmpegMissing.detail, /Install ffmpeg and put it on PATH/);
+
+  // The interpreter answers but has no yt-dlp -- the three-pythons bug itself.
+  const onlyPythonWrong = await probeMeetingTools({
+    env: {},
+    run: async (exe, args) =>
+      args[0] === "-version"
+        ? { code: 0, output: ["ffmpeg version 7.1.1 Copyright (c) 2000-2025"] }
+        : { code: 1, output: ["Traceback (most recent call last):", "ModuleNotFoundError: No module named 'yt_dlp'"] },
+  });
+  assert.equal(onlyPythonWrong.ok, false);
+  assert.match(onlyPythonWrong.detail, /python did not answer for yt-dlp/);
+  assert.match(onlyPythonWrong.detail, /No module named 'yt_dlp'/, "the tool's own last word is on the page");
+  assert.match(onlyPythonWrong.detail, /Set TOWNREPORTER_PYTHON in \.env to the python\.exe that has yt-dlp/);
+});
+
+test("the meeting tools row is green over two answering tools and a Note otherwise", async () => {
+  const page = await collectStatus({
+    appRoot: ".",
+    now: NOW,
+    timeZone: DENVER,
+    probes: probeSet({
+      meetingTools: async () => ({
+        ok: true,
+        python: { path: "C:\\Program Files\\Python313\\python.exe", version: "2025.09.05" },
+        ffmpeg: { version: "7.1.1" },
+        detail: "yt-dlp 2025.09.05 through C:\\Program Files\\Python313\\python.exe; ffmpeg 7.1.1",
+      }),
+    }),
+  });
+  const row = cardFor(page, "meeting-tools");
+  assert.equal(row.label, "Meeting video tools");
+  assert.equal(row.optional, true, "a paper that never captures a meeting must not inflate the attention count");
+  assert.equal(row.state, "ok");
+  assert.equal(row.ok, true);
+  assert.match(row.detail, /Python313/, "the interpreter is the answer, so it is on the page");
+
+  // The fixture's own machine is not set up: the same row, as a Note, with the
+  // tool's own words and the fix.
+  const unset = await collectStatus({ appRoot: ".", now: NOW, timeZone: DENVER, probes: probeSet() });
+  assert.equal(cardFor(unset, "meeting-tools").label, "Meeting video tools");
+  assert.equal(cardFor(unset, "meeting-tools").state, "note");
+  assert.equal(cardFor(unset, "meeting-tools").ok, false);
+  assert.match(cardFor(unset, "meeting-tools").detail, /No module named yt_dlp/);
 });
