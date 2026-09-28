@@ -17,11 +17,15 @@ import {
   timeBudgetRows,
   writingModelLines,
   youtubeRows,
+  type OpsModelLine,
   type OpsRow,
 } from "./ops-rows.ts";
 import { OPS_CARDS, DRAWN_ROWS_WITHOUT_A_READ } from "./ops-cards.ts";
 import { automaticLadder, providerEntry } from "../news/provider-registry.ts";
 import type { HealthCheck } from "../ops/health.ts";
+import type { ProviderStatus } from "../news/provider-login.ts";
+import type { ProviderTimeSetting } from "../news/provider-settings.ts";
+import type { LocalCatalog } from "../news/local-models.ts";
 
 /*
   Unit CX2: the row a Server card prints, asserted against the read behind it.
@@ -41,6 +45,60 @@ const row = (rows: OpsRow[], label: string): OpsRow => {
 };
 
 const value = (rows: OpsRow[], label: string): string => row(rows, label).value;
+
+/*
+  The ladder's three reads, as fixtures. `timeRow` is the shipped settings shape
+  with the three facts a chip reads hoisted to the front, so each case below
+  names only the one it is about; `statusRow` is a login's answer the same way.
+*/
+const timeRow = (over: Partial<ProviderTimeSetting>): ProviderTimeSetting => ({
+  providerId: "deepseek-flash",
+  label: "DeepSeek v4.1 Flash",
+  detail: "",
+  kind: "local",
+  callSeconds: 600,
+  defaultCallSeconds: 600,
+  overridden: false,
+  enabled: true,
+  availableOnThisMachine: true,
+  endpoint: "http://127.0.0.1:11434/v1",
+  endpointWatched: true,
+  switchedOffByOperator: false,
+  ...over,
+});
+
+const statusRow = (over: Partial<ProviderStatus>): ProviderStatus => ({
+  provider: "codex",
+  name: "Codex",
+  installed: true,
+  path: "/usr/local/bin/codex",
+  signedIn: true,
+  account: null,
+  disabledByOperator: false,
+  detail: "",
+  lastChecked: "2026-09-28T00:00:00.000Z",
+  lastTest: null,
+  login: null,
+  ...over,
+});
+
+const catalogOf = (
+  servers: LocalCatalog["servers"],
+  defaultModel: LocalCatalog["defaultModel"] = null,
+): LocalCatalog => ({ servers, defaultModel, checkedAt: 0 });
+
+/** The rung's readiness chip, or undefined -- the one thing these cases read. */
+const chipOf = (lines: OpsModelLine[], name: string) => {
+  const found = lines.find((line) => line.name === name);
+  assert.ok(found, `no rung named ${name}`);
+  return found.chip;
+};
+
+/** The words a chip carries, narrowed: the cases below all read a "words" chip. */
+const wordsOf = (chip: OpsModelLine["chip"]) => {
+  assert.equal(chip?.source, "words");
+  return chip as { source: "words"; tone: string; label: string; help: string };
+};
 
 describe("Server card rows (CX2)", () => {
   it("draws the twelve cards the drawing draws, in its order", () => {
@@ -310,5 +368,123 @@ describe("Server card rows (CX2)", () => {
     assert.equal(byName.note, "Only when you choose it by name");
     /* The unnumbered row is not on the ladder: that is what makes it by-name. */
     assert.ok(!ladder.includes("claude-frontier"));
+    /* Called with no read this is the editor's ladder: a rung with no chip,
+       not a rung with a "Not set" where the desk has an answer. */
+    assert.ok(lines.every((line) => line.chip === undefined));
+  });
+
+  it("Writing models: a login rung wears the login's own chip, handed through untouched", () => {
+    /*
+      The whole point of `source: "status"`: the chip on this card and the chip
+      on the Models screen are rendered by the same `WritingModelChip` from the
+      same read, so they cannot say two different things. Identity is the
+      assertion -- a copy would pass a value comparison and still drift.
+    */
+    const codex = statusRow({ provider: "codex", signedIn: false, detail: "codex is not signed in" });
+    const claude = statusRow({ provider: "claude", name: "Claude Code" });
+    const lines = writingModelLines({
+      times: [timeRow({}), timeRow({ providerId: "qwen-local", label: "Local model" })],
+      statuses: [codex, claude],
+      catalog: catalogOf([]),
+    });
+    const onLadder = chipOf(lines, "Codex Terra");
+    assert.equal(onLadder?.source, "status");
+    assert.equal(onLadder?.source === "status" ? onLadder.status : null, codex);
+    const byName = chipOf(lines, "Claude Opus");
+    assert.equal(byName?.source === "status" ? byName.status : null, claude);
+  });
+
+  it("Writing models: a local rung's chip is built from its own settings and the live catalog", () => {
+    const server = { kind: "lmstudio" as const, baseUrl: "http://127.0.0.1:1234/v1", reachable: true, models: [] };
+    const read = (over: {
+      times?: Partial<ProviderTimeSetting>;
+      catalog?: LocalCatalog;
+      statuses?: ProviderStatus[];
+    }) => ({
+      times: [
+        timeRow({}),
+        timeRow({
+          providerId: "qwen-local",
+          label: "Local model",
+          endpoint: "http://127.0.0.1:1234/v1",
+          ...over.times,
+        }),
+      ],
+      statuses: over.statuses ?? [],
+      catalog: over.catalog ?? catalogOf([server]),
+    });
+
+    /* Switched off for the paper, then for the machine: the same two words a
+       login gets, with the help sentence saying which of the two it was. */
+    const paper = wordsOf(chipOf(writingModelLines(read({ times: { enabled: false } })), "Local model"));
+    assert.equal(paper.label, "Turned off");
+    assert.equal(paper.tone, "quiet");
+    assert.match(paper.help, /this paper/);
+    const machine = wordsOf(
+      chipOf(writingModelLines(read({ times: { switchedOffByOperator: true } })), "Local model"),
+    );
+    assert.equal(machine.label, "Turned off");
+    assert.match(machine.help, /this installation/);
+
+    /* An address this installation named: the desk's look never visits it, so
+       the chip says what it knows -- the address -- and not what it does not. */
+    const byHand = wordsOf(
+      chipOf(
+        writingModelLines(read({ times: { endpoint: "http://10.0.0.5:9999/v1", endpointWatched: false } })),
+        "Local model",
+      ),
+    );
+    assert.equal(byHand.label, "Set by hand");
+    assert.match(byHand.help, /http:\/\/10\.0\.0\.5:9999\/v1/);
+
+    /* Watched, and nothing at the other end. */
+    const silent = wordsOf(chipOf(writingModelLines(read({ catalog: catalogOf([]) })), "Local model"));
+    assert.equal(silent.label, "Not answering");
+    assert.equal(silent.tone, "quiet");
+
+    /* Answering, but the rung needs a model in memory and none is loaded: the
+       warn tone, and the same fact a run skips the rung on. */
+    const empty = wordsOf(
+      chipOf(
+        writingModelLines(read({ catalog: catalogOf([server], { baseUrl: "http://127.0.0.1:11434/v1", id: "x" }) })),
+        "Local model",
+      ),
+    );
+    assert.equal(empty.label, "No model loaded");
+    assert.equal(empty.tone, "slow");
+
+    /* Answering with one loaded -- and the rung that needs nothing loaded is
+       Ready on the same catalog, which is the difference the two help lines
+       carry. */
+    const ready = wordsOf(
+      chipOf(
+        writingModelLines(
+          read({ catalog: catalogOf([server], { baseUrl: "http://127.0.0.1:1234/v1", id: "halo/qwen" }) }),
+        ),
+        "Local model",
+      ),
+    );
+    assert.equal(ready.label, "Ready");
+    assert.equal(ready.tone, "ready");
+    assert.match(ready.help, /with a chat model loaded/);
+    const first = wordsOf(
+      chipOf(
+        writingModelLines(
+          read({ catalog: catalogOf([server], { baseUrl: "http://127.0.0.1:1234/v1", id: "halo/qwen" }) }),
+        ),
+        "DeepSeek v4.1 Flash",
+      ),
+    );
+    assert.equal(first.label, "Not answering");
+    assert.match(first.help, /Nothing answered at http:\/\/127\.0\.0\.1:11434\/v1/);
+  });
+
+  it("Writing models: a rung no read covers draws no chip rather than an invented one", () => {
+    const lines = writingModelLines({
+      times: [],
+      statuses: [],
+      catalog: catalogOf([]),
+    });
+    assert.ok(lines.every((line) => line.chip === undefined));
   });
 });

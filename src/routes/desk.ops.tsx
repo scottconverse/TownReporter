@@ -28,7 +28,8 @@ import { useEffect } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
-import { CardDoor, OpsCard, ReadOnlyNote } from "@/components/ops-panels";
+import { CardDoor, OpsCard, ReadOnlyNote, WritingModelChip } from "@/components/ops-panels";
+import { Chip } from "@/components/status-chip";
 import { OPS_CARDS, opsCard, type OpsCardDef, type OpsCardKey } from "@/lib/desk/ops-cards";
 import {
   dailyScanRows,
@@ -43,6 +44,7 @@ import {
   timeBudgetRows,
   writingModelLines,
   youtubeRows,
+  type OpsModelLine,
   type OpsRow,
 } from "@/lib/desk/ops-rows";
 import { editorNamedOutlets } from "@/lib/news/named-outlets";
@@ -55,6 +57,8 @@ import { getRoutineNoticePolicy } from "@/lib/news/routine-notice-policy";
 import { getYouTubeKeyStateFn } from "@/lib/news/youtube-data-settings";
 import { getOpsHealth } from "@/lib/ops/dashboard";
 import { getProviderTimeSettings } from "@/lib/news/provider-settings";
+import { getProviderStatuses } from "@/lib/news/provider-login";
+import { localModelCatalog } from "@/lib/news/provider-availability";
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
 
@@ -132,7 +136,7 @@ type CardBody =
   | { state: "loading" }
   | { state: "error"; message: string }
   | { state: "rows"; rows: OpsRow[] }
-  | { state: "ladder" };
+  | { state: "ladder"; lines: OpsModelLine[] };
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -234,6 +238,27 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     queryFn: () => getProviderTimeSettings(),
     enabled: isOwner,
   });
+  /*
+    The two reads behind the ladder's readiness chips. Both are the reads the
+    Models screen already makes under these same keys, so the chip on a rung
+    here and the card on that screen are one answer: `getProviderStatuses` for
+    the two command-line logins (owner-only) and `localModelCatalog` for what
+    is answering on this machine (any editor may read it; only the owner's
+    ladder uses it). Polled at the Models screen's own 60s, because a sign-in
+    that lapses or a server that stops answering is exactly what this column is
+    for.
+  */
+  const statuses = useQuery({
+    queryKey: ["provider-statuses"],
+    queryFn: () => getProviderStatuses(),
+    enabled: isOwner,
+    refetchInterval: isOwner ? 60_000 : false,
+  });
+  const catalog = useQuery({
+    queryKey: ["local-model-catalog"],
+    queryFn: () => localModelCatalog(),
+    enabled: isOwner,
+  });
 
   /*
     Routine notices is the one card whose rows need two reads, and both of them
@@ -253,14 +278,34 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     };
   })();
 
+  /*
+    Writing models is still drawn without label/value rows -- the drawing prints
+    the ladder as numbered rungs -- but a rung now carries the readiness chip
+    the Models screen shows for the same provider, so the card needs the same
+    three reads that screen makes. An editor gets the ladder without a column,
+    because the reads behind it are the owner's; that is the ladder this card
+    has always drawn for them.
+  */
+  const ladder = ((): CardBody => {
+    if (!isOwner) return { state: "ladder", lines: writingModelLines() };
+    if (times.isError) return { state: "error", message: messageOf(times.error) };
+    if (statuses.isError) return { state: "error", message: messageOf(statuses.error) };
+    if (catalog.isError) return { state: "error", message: messageOf(catalog.error) };
+    if (times.data === undefined || statuses.data === undefined || catalog.data === undefined) {
+      return { state: "loading" };
+    }
+    return {
+      state: "ladder",
+      lines: writingModelLines({
+        times: times.data,
+        statuses: statuses.data,
+        catalog: catalog.data,
+      }),
+    };
+  })();
+
   return {
-    /*
-      Writing models is the one card drawn without label/value rows: the drawing
-      prints its ladder as numbered rungs, and the ladder is the registry's own
-      (`writingModelLines` reads `automaticLadder()`), so it needs no read and
-      no refusal -- it is the same for every reader.
-    */
-    "writing-models": { state: "ladder" },
+    "writing-models": ladder,
     health: bodyOf(health, healthRows),
     "paper-setup": pairBody(paper, sections, paperSetupRows),
     "recently-deleted": bodyOf(trash, recentlyDeletedRows),
@@ -320,29 +365,47 @@ function OpsRows({ rows }: { rows: OpsRow[] }) {
  *
  * Number, name, and the half-line under it -- the three columns the drawing
  * gives every other card's rows, with the ladder's rank in the number slot.
- * The drawing puts a readiness chip in a fourth column; this card does not
- * draw one, because the only readiness read in this app is
- * `getProviderStatuses`, which reports the two subscription command lines and
- * nothing about a local or hosted rung (`deepseek-flash`, `claude-sonnet`,
- * `configured`). A chip per rung would need a second readiness map invented
- * here, and the rungs' real readiness is on this card's own screen, where
- * `WritingModelsPanel` prints a status row per provider from that read. The
- * unit's report names this as the one drawn element not reproduced.
+ *
+ * The fourth column is the readiness chip, and it IS drawn (unit CX3, 0.6.81
+ * fixed this: the card used to leave it out and say so in the report). Two
+ * readers put it together, and `writingModelLines` decides which a rung gets:
+ * the two command-line rungs carry the `ProviderStatus` from the SAME
+ * `getProviderStatuses` read the Models screen uses, so they are handed
+ * straight to `WritingModelChip` and the two screens cannot disagree; a local
+ * rung carries words `rungWords` derived from that rung's own settings and the
+ * local catalog, and they are printed as a `Chip` in the same vocabulary.
+ *
+ * A rung with no chip is a rung with no chip: an editor's ladder has no column
+ * at all (the reads behind it are the owner's), and a provider the registry
+ * cannot line up with a status or a setting draws its name and note alone
+ * rather than a guess.
  */
-function OpsLadder() {
-  const lines = writingModelLines();
+function OpsLadder({ lines }: { lines: OpsModelLine[] }) {
+  const anyChip = lines.some((line) => line.chip !== undefined);
+  const columns = anyChip ? "grid-cols-[28px_minmax(0,1fr)_auto]" : "grid-cols-[28px_minmax(0,1fr)]";
   return (
     <ul className="astra-ops-ladder mt-3">
       {lines.map((line) => (
         <li
           key={line.name}
-          className="astra-ops-rung grid grid-cols-[28px_minmax(0,1fr)] items-center gap-x-3 border-t border-rule py-3"
+          className={`astra-ops-rung grid ${columns} items-center gap-x-3 border-t border-rule py-3`}
         >
           <span className="text-base font-extrabold text-muted">{line.n}</span>
           <span className="flex flex-col gap-0.5">
             <span className="text-base font-extrabold">{line.name}</span>
             <span className="text-sm text-muted">{line.note}</span>
           </span>
+          {line.chip ? (
+            <span data-testid={`ops-rung-chip-${line.name}`}>
+              {line.chip.source === "status" ? (
+                <WritingModelChip status={line.chip.status} />
+              ) : (
+                <Chip tone={line.chip.tone} label={line.chip.label} help={line.chip.help} />
+              )}
+            </span>
+          ) : anyChip ? (
+            <span />
+          ) : null}
         </li>
       ))}
     </ul>
@@ -388,7 +451,7 @@ function SummaryCard({
       ) : body.state === "loading" ? (
         <ListSkeleton rows={card.rows.length || 2} />
       ) : body.state === "ladder" ? (
-        <OpsLadder />
+        <OpsLadder lines={body.lines} />
       ) : (
         <OpsRows rows={body.rows} />
       )}

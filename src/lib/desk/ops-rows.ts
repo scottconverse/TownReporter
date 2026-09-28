@@ -28,18 +28,23 @@
        none, and because a page where everything is green says nothing.
 
   The one place this module is deliberately not the drawing's is the readiness
-  chip on the Writing models ladder: the drawing draws `● Ready` per rung, and
-  no read in this app answers that question per rung -- `getProviderStatuses()`
-  answers it per *connection* (this machine's Claude Code and Codex logins), and
-  a rung is a model, not a connection. The chips stay on that card's own screen,
-  where the connections are listed, and this card lists the order instead.
+  chip on the Writing models ladder: it is drawn only for a reader who may have
+  the reads behind it (unit CX3, 0.6.81). The drawing draws `● Ready` / `! Slow`
+  / `Key rejected` beside each rung; the two command-line rungs wear the login's
+  own chip, from `getProviderStatuses()` (`WritingModelChip`, the same mapping
+  the Models screen uses), and the two local rungs wear a chip built here from
+  the live local-model catalog -- see `rungWords`. An editor, whose reads those
+  are not, gets the ladder without chips and the card's own sentence saying
+  whose they are, rather than a page of "Not set" where the desk has an answer.
 */
 
 import type { HealthCheck, HealthState } from "@/lib/ops/health";
 import type { DailyScanPolicy } from "@/lib/news/daily-scan";
+import type { LocalCatalog } from "@/lib/news/local-models";
 import type { MeetingOperatorSettings } from "@/lib/news/meeting-settings";
 import type { NewsroomAccess } from "@/lib/news/membership";
 import type { NamedOutletRead } from "@/lib/news/named-outlets.server";
+import type { ProviderStatus } from "@/lib/news/provider-login";
 import type { ProviderTimeSetting } from "@/lib/news/provider-settings";
 import type { PaperConfig } from "@/lib/news/paper-settings";
 import type { RoutineNoticeAutomation } from "@/lib/news/routine-notice-automation";
@@ -47,6 +52,10 @@ import type { RoutineNoticePolicy } from "@/lib/news/routine-notice-policy";
 import type { SectionConfig } from "@/lib/news/section-types";
 import type { TrashRow } from "@/lib/news/trash-store";
 import type { YouTubeKeyState } from "@/lib/news/youtube-data-settings";
+/* The chip vocabulary itself, so a rung's words and a row's words are the same
+   four looks. Component-free (a type), so this file stays importable by the
+   node test loader and by the client. */
+import type { ChipTone } from "@/components/status-chip";
 /*
   The two value imports below are relative, and the `import type` lines above
   keep the alias, because the unit tests run this module through Node's own
@@ -57,7 +66,7 @@ import type { YouTubeKeyState } from "@/lib/news/youtube-data-settings";
   written relative resolves. Every other unit-tested module in this tree does
   the same (`src/lib/news/daily-scan.ts` imports `"../db.ts"`).
 */
-import { automaticLadder, providerEntry } from "../news/provider-registry.ts";
+import { automaticLadder, providerEntry, type ProviderEntry } from "../news/provider-registry.ts";
 import { TRASH_DAYS } from "../news/trash-store.ts";
 
 /** The plain words a drawn row prints when the desk has no value for it. */
@@ -334,6 +343,41 @@ export type OpsModelLine = {
   n: string;
   name: string;
   note: string;
+  /**
+   * The drawing's fourth column, when this reader may have it. Undefined for
+   * an editor (the reads behind it are the owner's) and for a rung no read
+   * covers, which is a rung with no chip rather than a rung with a made-up
+   * one.
+   */
+  chip?: OpsRungChip;
+};
+
+/**
+ * A rung's readiness, in the two shapes the desk can honestly back it with.
+ *
+ * `status` is a login's own answer, handed through untouched so the page can
+ * render it with `WritingModelChip` -- the mapping the Models screen already
+ * uses, kept in one place. `words` is a chip this module builds for a rung no
+ * login covers, out of the live local catalog and the same four tones
+ * (`ChipTone`, components/status-chip.tsx).
+ */
+export type OpsRungChip =
+  | { source: "status"; status: ProviderStatus }
+  | { source: "words"; tone: ChipTone; label: string; help: string };
+
+/**
+ * What the page must have read before a ladder can wear its chips.
+ *
+ * Three reads, and every one of them is already on this page under the query
+ * key its own screen uses: the per-provider time settings (the paper's switch
+ * and the machine's, both already read for Time budgets), this machine's two
+ * Claude Code / Codex logins (`getProviderStatuses`), and the live local-model
+ * catalog (`localModelCatalog`).
+ */
+export type OpsModelRead = {
+  times: ProviderTimeSetting[];
+  statuses: ProviderStatus[];
+  catalog: LocalCatalog;
 };
 
 /**
@@ -349,24 +393,160 @@ const BY_NAME_NOTE = "Only when you choose it by name";
 const DRAWN_BY_NAME_PROVIDER = "claude-frontier";
 
 /**
+ * Which of this machine's two logins a rung rides, by the rung's own kind.
+ *
+ * The pairing is the one the Models screen draws, read the other way round
+ * (`desk.models.tsx`: `status.provider === "claude" ? "claude-code" : "codex"`),
+ * and it is written down once here because the Server page needs the same
+ * pairing to put a login's chip on the ladder's rung for that login's model.
+ * A kind that is not in this map rides no login -- a local server, a gateway,
+ * an API key -- and gets no chip from the status read.
+ */
+const LOGIN_FOR_KIND: Record<string, string | undefined> = {
+  "claude-code": "claude",
+  codex: "codex",
+};
+
+/** What the desk calls the local servers it finds, in words a reader knows. */
+const SERVER_WORD: Record<string, string> = {
+  lmstudio: "LM Studio",
+  ollama: "Ollama",
+  llamacpp: "llama.cpp",
+  "openai-compatible": "the server at that address",
+};
+
+/**
+ * The words a rung wears when no login's status covers it.
+ *
+ * Ordered so that every sentence is one this desk can back:
+ *
+ *   - switched off for this paper, or for this machine: `Turned off`, the same
+ *     word `WritingModelChip` prints for a login that is off.
+ *   - an address an installation setting named: `Set by hand`. The desk's own
+ *     local look covers three fixed ports, so it has not visited this one and
+ *     says nothing about what is there.
+ *   - watched, and nothing at the other end: `Not answering`. This one is a
+ *     claim about a probe that ran, which is why `endpointWatched` comes first.
+ *   - answering, but the rung needs a model in memory and none is loaded:
+ *     `No model loaded` -- the amber `slow` look, the same one
+ *     `WritingModelChip` wears for a measured bad fact (a failed test), and the
+ *     same fact `ai.ts`'s preflight skips the rung on
+ *     (`requiresLoadedLocalModel`).
+ *   - answering with what it needs: `Ready`.
+ *
+ * The drawing's `! Slow` is not among them: nothing on this read measures
+ * speed, and a chip that cannot be acted on is worse than one fewer chip.
+ */
+function rungWords(
+  setting: ProviderTimeSetting,
+  needsLoadedModel: boolean,
+  catalog: LocalCatalog | null,
+): OpsRungChip & { source: "words" } {
+  const off = { tone: "quiet" as const, label: "Turned off" };
+  if (!setting.enabled) {
+    return { source: "words", ...off, help: `${setting.label} is switched off for this paper.` };
+  }
+  if (setting.switchedOffByOperator) {
+    return {
+      source: "words",
+      ...off,
+      help: `${setting.label} is switched off for this installation. A start-up setting turns it back on.`,
+    };
+  }
+  if (!setting.endpoint) {
+    /* Unreachable for a rung: both local rungs ship an address. */
+    return {
+      source: "words",
+      tone: "quiet",
+      label: "Not read",
+      help: `Nothing on this page has checked where ${setting.label} calls.`,
+    };
+  }
+  if (!setting.endpointWatched) {
+    return {
+      source: "words",
+      tone: "quiet",
+      label: "Set by hand",
+      help: `${setting.label} calls ${setting.endpoint}, an address this installation named. The desk's own local look visits the three default ports instead, so it cannot say what is there.`,
+    };
+  }
+  const where = setting.endpoint;
+  const server = catalog?.servers.find((s) => s.baseUrl === where);
+  const named = server ? (SERVER_WORD[server.kind] ?? server.kind) : "the server";
+  if (!server || !server.reachable) {
+    return {
+      source: "words",
+      tone: "quiet",
+      label: "Not answering",
+      help: `Nothing answered at ${where} when the desk last looked. A run moves on to the next model.`,
+    };
+  }
+  if (needsLoadedModel && catalog?.defaultModel?.baseUrl !== where) {
+    return {
+      source: "words",
+      tone: "slow",
+      label: "No model loaded",
+      help: `${named} answered at ${where}, but no chat model is loaded in memory there. A run skips this rung until one is.`,
+    };
+  }
+  return {
+    source: "words",
+    tone: "ready",
+    label: "Ready",
+    help: needsLoadedModel
+      ? `${named} is answering at ${where} with a chat model loaded.`
+      : `${named} is answering at ${where}.`,
+  };
+}
+
+/**
+ * The chip beside one rung, or undefined for a rung no read covers.
+ *
+ * A command-line rung wears its LOGIN's answer, handed through as a status so
+ * the page renders it with the one chip mapping this product has. A local rung
+ * has no login and no status -- `getProviderStatuses` loops the two command
+ * lines and nothing else -- so it gets words built from the live catalog.
+ *
+ * Undefined only for a rung missing from the time settings, which cannot
+ * happen while `providerTimeSettings` maps the whole registry; the caller
+ * draws no chip rather than inventing one.
+ */
+function rungChip(entry: ProviderEntry, read: OpsModelRead): OpsRungChip | undefined {
+  const login = LOGIN_FOR_KIND[entry.kind];
+  const status = login ? read.statuses.find((s) => s.provider === login) : undefined;
+  if (status) return { source: "status", status };
+  const setting = read.times.find((t) => t.providerId === entry.id);
+  if (!setting) return undefined;
+  return rungWords(setting, Boolean(entry.requiresLoadedLocalModel), read.catalog);
+}
+
+/**
  * Writing models: the order Automatic tries, from the registry the runs
- * themselves read.
+ * themselves read, with each rung's readiness chip when the page has a read
+ * for it.
  *
  * `automaticLadder()` is the same list `automaticOrderSentence()` and the
  * models screen walk, so this card cannot print an order the desk no longer
  * has. The unnumbered row is the by-name model the drawing names, resolved
  * through the registry -- if that entry ever leaves the registry the row is
  * dropped rather than printed with a stale name.
+ *
+ * Called with no read, the lines are the order alone: that is the ladder an
+ * editor gets, whose chips come from reads the server refuses them.
  */
-export function writingModelLines(): OpsModelLine[] {
+export function writingModelLines(read?: OpsModelRead): OpsModelLine[] {
   const lines: OpsModelLine[] = [];
+  const add = (entry: ProviderEntry, n: string, note: string) => {
+    const chip = read ? rungChip(entry, read) : undefined;
+    lines.push(chip ? { n, name: entry.label, note, chip } : { n, name: entry.label, note });
+  };
   for (const id of automaticLadder()) {
     const entry = providerEntry(id);
     /* Unreachable: every id in the ladder came off the registry. */
     if (!entry) continue;
-    lines.push({ n: String(entry.ladderRank), name: entry.label, note: entry.detail });
+    add(entry, String(entry.ladderRank), entry.detail);
   }
   const byName = providerEntry(DRAWN_BY_NAME_PROVIDER);
-  if (byName) lines.push({ n: "—", name: byName.label, note: BY_NAME_NOTE });
+  if (byName) add(byName, "—", BY_NAME_NOTE);
   return lines;
 }
