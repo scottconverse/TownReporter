@@ -409,6 +409,26 @@ its check, **nothing local is deleted** and the Control page's **Attention** car
 says why. Nothing ever deletes from D:; a full D: stops the copies and alerts,
 and the drive is emptied by a person.
 
+### One-off items: anything else left in the backups folder
+
+The newest-three rule above only ever looks at the dated `<database>_YYYY-MM-DD_HHmm.sql`
+series. Anything else sitting in that folder — a hand-named `.sql` export, an
+old pg_dump `.dump`, or a whole folder someone left there before an upgrade
+(a pre-migration snapshot, a recovery copy, and so on) — is a **one-off item**,
+and every run copies those to D: too, verified the same careful way: a file is
+proved by size and SHA-256, a folder by file count, total bytes, and a SHA-256
+of every file inside it. They land in `D:\TownReporter-backups\other-safety-copies\`,
+never mixed in with the dated series.
+
+One-off items are never touched by the newest-three rule, and they are not
+kept on C: forever either: once a one-off item is **verified on D: and at
+least 14 days old**, it is removed from the local folder — never from D:,
+which keeps everything. An item that is too young, or that has not verified
+yet, is left alone and the log says which. Something that looks like it might
+still be being written — a `.incomplete` or `.partial` file, or anything
+touched in the last 10 minutes — is skipped for that run and picked up again
+once it has settled, rather than copied half-finished.
+
 A backup is taken **once a night** by the five-minute watchdog: after 2:00 AM
 local, when the newest backup is older than 20 hours, and not while an editor
 job is running. A lock file means two never run at once. There is no separate
