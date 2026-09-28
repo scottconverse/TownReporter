@@ -699,3 +699,98 @@ describe('a row title must read as a headline, not a bare fragment (unit BZ, ite
     );
   });
 });
+
+/**
+ * Unit CN, item 2: a "This week" row that is a sentence cut in half.
+ *
+ * Owner review of the staged 0.6.80 front page (2026-09-27): the Thu Oct. 1 row
+ * read "8 regular meeting is cancelled, while agency funding hearings remain
+ * listed for" -- the tail of a longer sentence, stopping on the word "for". Two
+ * shapes reach the panel that way, one at each end of the line: a line that
+ * opens on a day NUMBER, left there when the punctuation `dekClause` breaks on
+ * cut the "Oct." away from its own day, and a line that ENDS on a function word,
+ * because a sentence does not end on the joint to its next word. Both are
+ * checked in `isBareFragment`, and the cut line is refused when it is the dek's
+ * own clause as well (`fallbackLine`), so a day whose only text is a cut
+ * sentence goes rather than being printed under a headline about another day.
+ */
+describe("a This week row that is a sentence cut in half (unit CN, item 2)", () => {
+  const story = (over: Partial<StoryDateSource>): StoryDateSource => ({
+    slug: "story",
+    section: "council",
+    records: [],
+    ...over,
+  });
+
+  const HOUSING_HEADLINE =
+    "Longmont Housing Board Cancels Oct. 8 Regular Meeting; Funding Hearings Still Listed";
+  // The exact row the staged 0.6.80 page printed, on its own day (Thu Oct. 1),
+  // from the dek below on the story above.
+  const STAGED_ROW =
+    "8 regular meeting is cancelled, while agency funding hearings remain listed for";
+
+  it("never prints the staged 0.6.80 row, and keeps the day the headline is about", () => {
+    const items = collectStoryDates([
+      story({
+        slug: "housing",
+        headline: HOUSING_HEADLINE,
+        dek:
+          "The Oct. 8 regular meeting is cancelled, while agency funding hearings remain listed for Oct. 1 and Oct. 15.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    const rows = items.map((i) => [i.date, i.what]);
+    assert.equal(
+      rows.some(([, what]) => what === STAGED_ROW),
+      false,
+      "the cut sentence was printed as a row",
+    );
+    // Two more rows came out of that one sentence before this fix: an Oct. 1 row
+    // reading the cut sentence, and an Oct. 15 row reading "1 and" (the tail of
+    // "Oct. 1 and" with the month cut off it). Both are gone; the day the story
+    // is actually about has its own headline.
+    assert.deepEqual(rows, [["2026-10-08", HOUSING_HEADLINE]]);
+  });
+
+  it("drops a day whose clause for it stops on a preposition", () => {
+    // The headline is about Oct. 8, so it is no answer for Oct. 22, and the
+    // dek's own clause for the 22nd -- "funding hearings remain listed for" --
+    // is a sentence cut off at its object, not a line.
+    const items = collectStoryDates([
+      story({
+        slug: "housing-later",
+        headline: HOUSING_HEADLINE,
+        dek:
+          "The Oct. 8 regular meeting is cancelled; funding hearings remain listed for Oct. 22.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-08", HOUSING_HEADLINE]],
+      "a clause cut off at a preposition was printed as a row's only text",
+    );
+  });
+
+  it("falls back to the headline for a line cut off at a conjunction", () => {
+    // "Public Hearing Set while" is this story's line for Oct. 12 -- four words,
+    // capitalised, no verb the short-line test knows, so only the trailing
+    // conjunction tells it apart from a line. The headline names no day, so it
+    // is safe for the row and is what the row prints.
+    const headline = "Council Sets the Budget Adoption Vote";
+    const items = collectStoryDates([
+      story({
+        slug: "budget-hearing",
+        headline,
+        dek:
+          "The plan goes to an Oct. 12 Public Hearing Set while, separately, the budget vote follows.",
+        published_on: "2026-09-27",
+      }),
+    ]);
+    assert.deepEqual(
+      items.map((i) => [i.date, i.what]),
+      [["2026-10-12", headline]],
+      "a line cut off at a conjunction was printed as the row's text",
+    );
+  });
+});
