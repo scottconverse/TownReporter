@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  UNSAVED_DAILY_SCAN_POLICY,
   cleanDailyScanPolicyInput,
   dailyScanRuntime,
   nextDailyOccurrence,
   nextEligibleDailyOccurrence,
   persistDailyScanPolicy,
   runSnapshotRuntimes,
+  setDailyScanPaused,
 } from "./daily-scan.ts";
 import { getSql } from "../db.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
@@ -149,12 +151,18 @@ describe("daily scan request validation", () => {
   }
 });
 
+/*
+  The policy table as these tests read and write it. PGlite here is not the
+  migrated database (see `getSql`), so the shape the two compare-and-swap tests
+  need is spelled once, in one place, for both of them.
+*/
+const POLICY_TABLE =
+  "create table if not exists daily_scan_policies(newsroom_id integer primary key,enabled boolean not null,paused boolean not null,pause_reason text,local_time text not null,runtime text not null,model_effort text,source_cap integer not null,selected_source_ids jsonb not null,revision integer not null,updated_at timestamptz,configured_by_user_id text not null)";
+
 describe("daily scan policy compare-and-swap", () => {
   it("accepts sequential current revisions and rejects a stale revision", async () => {
     const sql = await getSql();
-    await sql.query(
-      "create table if not exists daily_scan_policies(newsroom_id integer primary key,enabled boolean not null,paused boolean not null,pause_reason text,local_time text not null,runtime text not null,model_effort text,source_cap integer not null,selected_source_ids jsonb not null,revision integer not null,updated_at timestamptz,configured_by_user_id text not null)",
-    );
+    await sql.query(POLICY_TABLE);
     const newsroomId = 88001;
     await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
     const input = {
@@ -192,6 +200,128 @@ describe("daily scan policy compare-and-swap", () => {
       [newsroomId],
     );
     assert.deepEqual(row, { revision: 2, local_time: "07:00" });
+  });
+});
+
+/*
+  Unit CX3 (0.6.81): Pause on a desk that never saved a schedule.
+
+  `readDailyScanPolicy` answers `revision: 0` for a desk with no row, and every
+  row starts at revision 1 -- so Pause and Resume were sending a revision no
+  row could ever match, and a fresh desk was refused with "The schedule changed
+  in another window" about a change nobody had made. 0 means "there is no row":
+  Pause writes the hold its owner asked for, Resume confirms there is nothing
+  to hold, and a 0 that has gone stale is refused like any other.
+*/
+describe("daily scan pause on a desk that never saved a schedule", () => {
+  const OWNER = "owner-91";
+  const policyRow = async (newsroomId: number) => {
+    const sql = await getSql();
+    const [row] = await sql.query<{
+      enabled: boolean;
+      paused: boolean;
+      pause_reason: string | null;
+      local_time: string;
+      runtime: string;
+      model_effort: string | null;
+      source_cap: number;
+      selected_source_ids: number[];
+      revision: number;
+      configured_by_user_id: string;
+    }>(
+      "select enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,selected_source_ids,revision,configured_by_user_id from daily_scan_policies where newsroom_id=$1",
+      [newsroomId],
+    );
+    return row;
+  };
+
+  it("pauses a desk whose schedule was never saved, writing the schedule it already had", async () => {
+    const sql = await getSql();
+    await sql.query(POLICY_TABLE);
+    const newsroomId = 88002;
+    await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
+
+    assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, true, 0), true);
+    assert.deepEqual(await policyRow(newsroomId), {
+      enabled: false,
+      paused: true,
+      pause_reason: "Paused by the owner.",
+      local_time: UNSAVED_DAILY_SCAN_POLICY.localTime,
+      runtime: UNSAVED_DAILY_SCAN_POLICY.runtime,
+      model_effort: UNSAVED_DAILY_SCAN_POLICY.modelEffort,
+      source_cap: UNSAVED_DAILY_SCAN_POLICY.sourceCap,
+      selected_source_ids: [],
+      revision: 1,
+      configured_by_user_id: OWNER,
+    });
+
+    /* And Resume is the same compare-and-swap it always was, on the row Pause wrote. */
+    assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, false, 1), true);
+    const resumed = await policyRow(newsroomId);
+    assert.deepEqual(
+      [resumed.paused, resumed.pause_reason, resumed.revision],
+      [false, null, 2],
+    );
+  });
+
+  it("resumes a desk with no schedule at all without configuring one", async () => {
+    const sql = await getSql();
+    await sql.query(POLICY_TABLE);
+    const newsroomId = 88003;
+    await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
+    /* The desk is not paused, so resuming asks for the state it already has. */
+    assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, false, 0), true);
+    const rows = await sql.query("select 1 from daily_scan_policies where newsroom_id=$1", [
+      newsroomId,
+    ]);
+    assert.equal(rows.length, 0, "resuming an unsaved schedule writes nothing");
+  });
+
+  /*
+    The one thing 0 must not become: a way to write without a revision. Both
+    branches prove no row exists under the caller, so a screen holding a stale
+    0 -- a tab open while another window saved -- is refused like any other
+    stale revision, and the other window's schedule is left alone.
+  */
+  it("still refuses a stale revision, including a stale 0", async () => {
+    const sql = await getSql();
+    await sql.query(POLICY_TABLE);
+    const newsroomId = 88004;
+    await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
+    await sql.query(
+      "insert into daily_scan_policies(newsroom_id,enabled,paused,local_time,runtime,source_cap,selected_source_ids,revision,configured_by_user_id) values($1,true,false,'07:00','codex-terra',12,'[]'::jsonb,5,'other-window')",
+      [newsroomId],
+    );
+    assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, true, 0), false);
+    assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, false, 0), false);
+    assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, true, 4), false);
+    const row = await policyRow(newsroomId);
+    assert.deepEqual([row.revision, row.paused, row.local_time], [5, false, "07:00"]);
+  });
+
+  /*
+    The write's defaults are the READ's, not the table's. `runtime` is the one
+    that would bite: the column default is 'local' and the read's answer for no
+    row is 'auto', so a row built from the column default would have the paper
+    running Local model the moment its owner enabled the scan -- a schedule
+    change nobody asked for, made by pressing Pause.
+  */
+  it("writes the read's defaults, never the table's", () => {
+    assert.equal(UNSAVED_DAILY_SCAN_POLICY.runtime, dailyScanRuntime(undefined));
+    assert.equal(UNSAVED_DAILY_SCAN_POLICY.runtime, "auto");
+    assert.equal(UNSAVED_DAILY_SCAN_POLICY.localTime, "06:00");
+    assert.equal(UNSAVED_DAILY_SCAN_POLICY.sourceCap, 12);
+    assert.equal(UNSAVED_DAILY_SCAN_POLICY.enabled, false);
+    assert.equal(UNSAVED_DAILY_SCAN_POLICY.paused, false);
+    assert.deepEqual(UNSAVED_DAILY_SCAN_POLICY.selectedSourceIds, []);
+    const source = readFileSync(new URL("./daily-scan.ts", import.meta.url), "utf8");
+    /* The array is copied out of the constant rather than handed over by reference. */
+    for (const field of ["localTime", "sourceCap", "selectedSourceIds", "revision"] as const)
+      assert.match(
+        source,
+        new RegExp(`p\\?\\.\\w+ \\?\\? (\\[\\.\\.\\.)?UNSAVED_DAILY_SCAN_POLICY\\.${field}`),
+        `the read's ${field} fallback is the constant Pause writes`,
+      );
   });
 });
 
