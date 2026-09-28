@@ -459,6 +459,37 @@ function sentenceBounds(masked: string): Array<[number, number]> {
   return bounds.filter(([start, end]) => trimEdges(masked.slice(start, end)).length > 0);
 }
 
+/*
+  ── Where the story ends and the receipts begin ─────────────────────────────
+
+  An op-ed is stored with its sourcing block welded onto the end of its body --
+  `editorial.server.ts:443` writes `${ed.body}\n\n---\n\nCLAIMS AND SOURCES\n\n${ed.appendix}`
+  -- and an opinion draft's body renders in this same workbench. So the style
+  check used to measure the receipts as if they were prose: a 391-word
+  "Paragraph 40" that was a list of records and video links, and six-word
+  repeats that were the same URL shape twice. Nobody rewrites a receipts block
+  for rhythm, so everything from that marker down is measured out.
+
+  The marker is the head line `editorial.ts` splits an op-ed on, quoted here so
+  the two cannot drift:
+    appendix: /^\\s*(CLAIMS AND SOURCES(?: APPENDIX)?)\\s*$/im
+  The fact sheet and the image prompt are heads in the same table; a body that
+  still carries one has the same problem, so they cut too.
+
+  Tail only, so paragraph numbers do not move: the editor reads "Paragraph 12"
+  and counts to the twelfth paragraph of the story as the page shows it.
+*/
+const RECEIPTS_HEAD =
+  /^[ \t]*(?:CLAIMS AND SOURCES(?: APPENDIX)?|EDITOR'?S FACT SHEET|SOCIAL MEDIA IMAGE PROMPT|IMAGE PROMPT)[ \t]*$/im;
+
+/** The story the audit measures: everything above the receipts block. */
+export function storyTextForAudit(body: string): string {
+  const at = RECEIPTS_HEAD.exec(body);
+  if (!at) return body;
+  // The rule between the story and its receipts is not story either.
+  return trimEdges(body.slice(0, at.index).replace(/-{3,}[\s]*$/, ""));
+}
+
 const splitParagraphs = (body: string): string[] =>
   body
     .split(/\n{2,}/)
@@ -847,7 +878,8 @@ export function auditDraft(input: { headline: string; dek: string; body: string;
     }
   }
 
-  const paragraphs = splitParagraphs(input.body);
+  const story = storyTextForAudit(input.body);
+  const paragraphs = splitParagraphs(story);
   const bodySentences: string[] = [];
   paragraphs.forEach((paragraph, index) => {
     const masked = maskQuotedText(paragraph);
@@ -927,7 +959,7 @@ export function auditDraft(input: { headline: string; dek: string; body: string;
     measurements: {
       paragraphCount: paragraphs.length,
       sentenceCount: bodySentences.length,
-      wordCount: countWords(input.body),
+      wordCount: countWords(story),
       meanSentenceWords: rhythm.mean,
       sentenceLengthCv: rhythm.cv,
       shortestSentenceWords: rhythm.shortest,
