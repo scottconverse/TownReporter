@@ -193,7 +193,10 @@ describe("structured job progress", () => {
       `;
       return (await stored(id))!;
     };
-    assert.equal(jobProgressStalled(await quietFor(59)), false);
+    // 55, not 59: the beat is stamped by the database clock and judged later by
+    // this process's clock, and a slow CI runner can spend a second in between.
+    // The exact 59/60 boundary is asserted off the clock below.
+    assert.equal(jobProgressStalled(await quietFor(55)), false);
     assert.equal(jobProgressStalled(await quietFor(60)), true);
     // One second past the boundary stays stalled: the state is a threshold, not
     // a window.
