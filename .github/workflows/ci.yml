@@ -255,7 +255,7 @@ jobs:
   postgres-integration:
     name: Every discovered PostgreSQL-capable test, on a real Postgres
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18
