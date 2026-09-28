@@ -29,7 +29,7 @@
  */
 
 import type { DraftAuditFinding } from "./draft-audit.ts";
-import { clockLabel } from "./follow-up-copy.ts";
+import { PAPER } from "../paper.ts";
 import type {
   ClaimEvidenceRow,
   FindingCaptureEvidence,
@@ -181,6 +181,24 @@ export function citedCaptureCount(
 }
 
 /**
+ * "8:14 a.m." in the paper's own time zone, so the server, the reader's
+ * browser and CI (which runs in UTC) all print the same clock.
+ */
+function paperClock(iso: string | null, timeZone: string): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone,
+  }).formatToParts(at);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")} ${part("dayPeriod").toUpperCase() === "AM" ? "a.m." : "p.m."}`;
+}
+
+/**
  * The line under "Evidence check": "Ran 8:14 a.m. · Claude Sonnet · checked
  * against 3 captures".
  *
@@ -191,9 +209,10 @@ export function evidenceRanLine(input: {
   checkedAt: string | null;
   modelLabel: string;
   captures: number;
+  timeZone?: string;
 }): string {
   const parts: string[] = [];
-  const ran = clockLabel(input.checkedAt);
+  const ran = paperClock(input.checkedAt, input.timeZone ?? PAPER.timezone);
   if (ran) parts.push(`Ran ${ran}`);
   if (input.modelLabel.trim()) parts.push(input.modelLabel.trim());
   if (input.captures > 0) {
