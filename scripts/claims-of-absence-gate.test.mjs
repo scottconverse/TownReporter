@@ -20,6 +20,7 @@ const desk = await readFile(new URL("src/lib/news/desk.ts", root), "utf8");
 const pull = await readFile(new URL("src/lib/news/pull.server.ts", root), "utf8");
 const notes = await readFile(new URL("src/lib/news/notes.ts", root), "utf8");
 const styles = await readFile(new URL("src/styles.css", root), "utf8");
+const blockersLib = await readFile(new URL("src/lib/news/publish-blockers.ts", root), "utf8");
 
 test("Publish is disabled while a claim of absence is unchecked", () => {
   assert.match(
@@ -33,24 +34,56 @@ test("Publish is disabled while a claim of absence is unchecked", () => {
     absence is one of the reasons inside `disabled` rather than a label the
     pattern could anchor on. What this test is for is unchanged -- a claim of
     absence keeps the button down until a person confirms it.
+
+    0.6.81 (unit CT) moved every reason into one list. `openClaims.length` is
+    an input to `blockers`, and the button's `disabled` is the length of that
+    list, so the claim still holds the press down; the assertion follows the
+    reason to where it now lives instead of anchoring on the button's own
+    `disabled` expression, which is the stronger arrangement -- a rule cannot
+    sit in the button and never reach the sentence beside it. The claim's
+    refusal is still pinned in `publish-blockers.ts`, checked below.
   */
   assert.match(
     story,
-    /<InkButton[\s\S]{0,1200}?disabled=\{[\s\S]{0,500}?openClaims\.length > 0[\s\S]{0,500}?\}[\s\S]{0,250}?Publish in \$\{sectionNameNow\}/,
-    "the Publish button must be disabled while a claim of absence is unchecked",
+    /<InkButton[\s\S]{0,1200}?disabled=\{publish\.isPending \|\| blockers\.length > 0\}[\s\S]{0,250}?Publish in \$\{sectionNameNow\}/,
+    "the Publish button must be disabled while the blocker list is not empty",
+  );
+  assert.match(
+    story,
+    /const blockers = publishBlockers\(\{[\s\S]{0,500}?openClaims: openClaims\.length,/,
+    "an unconfirmed claim of absence must be one of the reasons in that list",
+  );
+  assert.match(
+    blockersLib,
+    /key: "claims"[\s\S]{0,400}?claims of absence have not been confirmed/,
+    "the claim of absence must still be a reason the editor can read",
   );
 });
 
 test("a disabled Publish says why, in words, not just opacity", () => {
+  /*
+    0.6.81 (unit CT). This used to pin `blockedReason`: one sentence, naming
+    the first reason only, at the far right of the bottom bar. The owner's
+    story had five reasons and four of them turned the button off with nothing
+    said at all, and the one sentence that did print was read as stray text.
+    The replacement is stronger, not weaker, and this test follows it: the bar
+    counts the reasons and offers one press to the list at the top of the
+    Checks tab, where each reason has its own sentence and its own button.
+  */
   assert.match(
     story,
-    /const blockedReason = openClaims\.length[\s\S]{0,240}?Confirm the claim of absence first/,
-    "the reason must be a sentence the editor can read",
+    /publish-blocked">\s*\{publishBlockedSummary\(blockers\)\}/,
+    "the reason must be rendered beside the button",
   );
   assert.match(
     story,
-    /\{blockedReason \?[\s\S]{0,400}?publish-blocked[\s\S]{0,300}?\{blockedReason\}/,
-    "the reason must be rendered beside the button",
+    /\{publishBlockedSummary\(blockers\)\}\.\{" "\}[\s\S]{0,700}?Review/,
+    "the count must offer the press that opens the list",
+  );
+  assert.match(
+    blockersLib,
+    /export function publishBlockedSummary[\s\S]{0,300}?thing(?:s)? blocks Publish/,
+    "the reasons must be counted in words",
   );
   assert.match(
     styles,

@@ -1,4 +1,10 @@
 import { StoryBody } from "@/components/story-body";
+import { BeforeYouCanPublish } from "@/components/publish-blockers";
+import {
+  publishBlockers,
+  publishBlockedSummary,
+  type PublishBlockerTarget,
+} from "@/lib/news/publish-blockers";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
@@ -1385,26 +1391,88 @@ function StoryPage() {
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
   /*
+    Every reason the Publish button is off, in one place (unit CT).
+
+    `publishBlockers` owns the list -- a sentence and a press for each reason --
+    and the button's `disabled` below is `blockers.length > 0`, so what the
+    editor reads and the state of the button cannot disagree. Before this, one
+    reason out of six had a sentence, small text at the far right of the bottom
+    bar, and `evidenceStale`, a running reconcile and a saving evidence
+    decision turned the button grey with nothing said at all.
+
     Naming another newsroom's reporting and not showing the reader where it
     came from blocks printing, the same way an unconfirmed claim of absence
     does -- `namedOutlets` is the server's own answer to that question, so the
     desk cannot disagree with the refusal.
   */
-  const outletBlocked =
-    data.namedOutlets.length === 0
-      ? ""
-      : data.namedOutlets.length === 1
-        ? `Deal with the named outlet first`
-        : `Deal with the ${data.namedOutlets.length} named outlets first`;
-  const blockedReason = openClaims.length
-    ? openClaims.length === 1
-      ? "Confirm the claim of absence first"
-      : `Confirm the ${openClaims.length} claims of absence first`
-    : outletBlocked
-      ? outletBlocked
-      : sectionReady
-        ? ""
-        : "Pick the section this story files under first";
+  const blockers = publishBlockers({
+    headline,
+    dek,
+    body,
+    sectionReady,
+    openClaims: openClaims.length,
+    namedOutlets: data.namedOutlets,
+    evidenceStale,
+    reviewingEvidence: reviewEvidence.isPending,
+    reconcileActive,
+    publishing: publish.isPending,
+  });
+  /*
+    One press per row of the "Before you can publish" list. Every target is
+    the control that already existed -- the same mutation the mid-form button
+    calls, the same details the Reporting tab opens, the same select the
+    section-change link focuses -- so a row is a way to the work, never a
+    second implementation of it.
+  */
+  const openEvidenceReview = () => {
+    setInspector("reporting");
+    const details = document.getElementById("evidence-review")?.closest("details");
+    if (details) details.open = true;
+  };
+  const actOnBlocker = (target: PublishBlockerTarget) => {
+    const focus = (selector: string) => {
+      const el = document.querySelector<HTMLElement>(selector);
+      el?.scrollIntoView({ block: "center" });
+      el?.focus();
+    };
+    switch (target.kind) {
+      case "headline":
+        focus("#story-headline");
+        return;
+      case "dek":
+        focus(".astra-dek");
+        return;
+      case "body":
+        focus(".astra-story-body");
+        return;
+      case "section":
+        focus("#story-topic-select");
+        return;
+      case "outlets":
+        document.getElementById("story-outlets")?.scrollIntoView({ block: "center" });
+        return;
+      case "override-outlet":
+        /* The same mutation the mid-form "Override <outlet>" button calls. */
+        overrideOutlet.mutate(target.outlet);
+        return;
+      case "add-source":
+        setInspector("sources");
+        document.getElementById("story-inspector")?.scrollIntoView({ block: "start" });
+        return;
+      case "claims":
+      case "running-check":
+      case "evidence-review":
+        openEvidenceReview();
+        return;
+      case "keep-evidence":
+        /* The same mutation the evidence review's own "keep" press calls. */
+        reviewEvidence.mutate("keep");
+        return;
+      case "publish-bar":
+        document.getElementById("astra-publish-bar")?.scrollIntoView({ block: "center" });
+        return;
+    }
+  };
 
   /*
     The two rows the drawing puts around the work (Desk Story.dc.html): the
@@ -1458,7 +1526,24 @@ function StoryPage() {
       */}
       {completedDraftNeedsReview ? (
         <Notice kind="err">
-          <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.
+          <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.{" "}
+          {/*
+            This banner told the editor to review and gave them nowhere to go.
+            The reasons are a list on the Checks tab now, so the way there is
+            one press (unit CT).
+          */}
+          <button
+            type="button"
+            className="inline-link"
+            onClick={() => {
+              setInspector("checks");
+              document
+                .getElementById("publish-blockers")
+                ?.scrollIntoView({ block: "start" });
+            }}
+          >
+            Review now
+          </button>
         </Notice>
       ) : null}
       <h1 className="astra-wb-title">Story workspace</h1>
@@ -1589,7 +1674,14 @@ function StoryPage() {
             aria-labelledby="inspector-tab-checks"
             hidden={inspector !== "checks"}
           >
-            <h2>Before you publish</h2>
+            {/*
+              Every reason Publish is off, first thing on the tab the page
+              opens on (unit CT). The heading below was "Before you publish",
+              which would now be two near-identical headings for two different
+              things; the drawing calls this list "Evidence check".
+            */}
+            <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
+            <h2>Evidence check</h2>
             <p className="meta">Review names, claims and supporting records for this draft.</p>
             {data.draft ? (
               <DeskNameCheck
@@ -1621,9 +1713,7 @@ function StoryPage() {
                     sibling "Open reporting notes" button below has always done
                     both; this one now does too.
                   */
-                  setInspector("reporting");
-                  const details = document.getElementById("evidence-review")?.closest("details");
-                  if (details) details.open = true;
+                  openEvidenceReview();
                 }}
               >
                 Review claims and sources
@@ -1638,11 +1728,7 @@ function StoryPage() {
               </p>
               <button
                 className="btn"
-                onClick={() => {
-                  setInspector("reporting");
-                  const detail = document.getElementById("evidence-review")?.closest("details");
-                  if (detail) detail.open = true;
-                }}
+                onClick={() => openEvidenceReview()}
               >
                 Open reporting notes
               </button>
@@ -2570,7 +2656,7 @@ function StoryPage() {
           still exactly the `disabled` list on the button, which is the rule
           the claims-of-absence test pins.
         */
-        <div className="astra-publish-bar">
+        <div className="astra-publish-bar" id="astra-publish-bar">
           <ul className="astra-gates" aria-label="Publish gates">
             {publishGates.map((gate) => (
               <li key={gate.label} className={`astra-gate${gate.done ? "" : " is-todo"}`}>
@@ -2593,15 +2679,15 @@ function StoryPage() {
                         : `The body never names ${uncredited.join(" or ")}, though they're in the sources. If the story leans on their reporting, we said we'd say so.`}
                     </span>
                   ) : null}
+                  {/*
+                    The button and the list above it are one thing (unit CT):
+                    `blockers` is every reason this can be off, and the press
+                    is off exactly when that list is not empty. The old list
+                    named five states here and a sixth on the first press, and
+                    only one of them had a sentence anywhere on the page.
+                  */}
                   <InkButton
-                    disabled={
-                      publish.isPending ||
-                      !sectionReady ||
-                      data.namedOutlets.length > 0 ||
-                      evidenceStale ||
-                      reviewEvidence.isPending ||
-                      reconcileActive
-                    }
+                    disabled={publish.isPending || blockers.length > 0}
                     onClick={() => {
                       setConfirmingPublish(false);
                       publish.mutate();
@@ -2616,17 +2702,7 @@ function StoryPage() {
               ) : (
                 <>
                   <InkButton
-                    disabled={
-                      publish.isPending ||
-                      !headline.trim() ||
-                      !body.trim() ||
-                      openClaims.length > 0 ||
-                      !sectionReady ||
-                      data.namedOutlets.length > 0 ||
-                      evidenceStale ||
-                      reviewEvidence.isPending ||
-                      reconcileActive
-                    }
+                    disabled={publish.isPending || blockers.length > 0}
                     onClick={() => setConfirmingPublish(true)}
                   >
                     {`Publish in ${sectionNameNow}`}
@@ -2651,52 +2727,32 @@ function StoryPage() {
                     {sectionReady ? "change" : "pick the section"}
                   </button>
                   {/*
-                        A greyed button with no sentence beside it is a dead
-                        end -- the editor cannot tell whether it is broken,
-                        still loading, or refusing on purpose. The reason is
-                        text, not opacity, and it points at the work.
-                      */}
-                  {blockedReason ? (
+                    A greyed button with no sentence beside it is a dead end --
+                    the editor cannot tell whether it is broken, still loading,
+                    or refusing on purpose. The reason is text, not opacity.
+
+                    It used to name the first reason only, one at a time, in
+                    small text at the far right of this row: the owner read it
+                    as stray text and never found the button it pointed at. It
+                    counts now, and the one press it offers is the list at the
+                    top of the Checks tab, where every reason has its own
+                    button (unit CT).
+                  */}
+                  {blockers.length > 0 ? (
                     <span className="note publish-blocked">
-                      {blockedReason}.{" "}
-                      {openClaims.length > 0 ? (
-                        <button
-                          type="button"
-                          className="inline-link"
-                          onClick={() => {
-                            setInspector("reporting");
-                            document
-                              .getElementById("story-inspector")
-                              ?.scrollIntoView({ block: "start" });
-                          }}
-                        >
-                          Open reporting notes
-                        </button>
-                      ) : outletBlocked ? (
-                        <button
-                          type="button"
-                          className="inline-link"
-                          onClick={() =>
-                            document
-                              .getElementById("story-outlets")
-                              ?.scrollIntoView({ block: "center" })
-                          }
-                        >
-                          Go to the named outlets
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="inline-link"
-                          onClick={() =>
-                            document
-                              .getElementById("story-topic")
-                              ?.scrollIntoView({ block: "center" })
-                          }
-                        >
-                          Go to the section
-                        </button>
-                      )}
+                      {publishBlockedSummary(blockers)}.{" "}
+                      <button
+                        type="button"
+                        className="inline-link"
+                        onClick={() => {
+                          setInspector("checks");
+                          document
+                            .getElementById("publish-blockers")
+                            ?.scrollIntoView({ block: "start" });
+                        }}
+                      >
+                        Review
+                      </button>
                     </span>
                   ) : null}
                 </>
