@@ -84,7 +84,17 @@ try {
     .getByText(/The story changed after its evidence was gathered/)
     .waitFor({ timeout: 30_000 });
   if (!(await publishButton.isDisabled())) throw new Error("Changed body did not require evidence review");
-  const confirmEvidence = page.getByRole("button", { name: "I checked: keep this evidence" });
+  /*
+    Scoped to the evidence block by name, not to the label alone. 0.6.81's
+    "Reasons Publish is off" panel now carries its own button with this same
+    label, so the bare role query is a strict-mode violation with two matches.
+    This walk is about the evidence block -- the sentence above, and the link
+    pressed below, are both already scoped to `.publish-blocked` -- so the
+    button is scoped the same way rather than disambiguated by index.
+  */
+  const confirmEvidence = page
+    .locator(".publish-blocked")
+    .getByRole("button", { name: "I checked: keep this evidence" });
   await confirmEvidence.waitFor({ state: "visible" });
   const originalViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
