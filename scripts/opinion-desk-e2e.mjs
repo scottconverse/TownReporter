@@ -230,8 +230,9 @@ async function main() {
   const dekClient = new Client({ connectionString: dbUrl });
   await dekClient.connect();
   const dekSet = await dekClient.query(
-    `update drafts set dek = 'Why this piece matters, in one line.' where headline = $1 and newsroom_id = 1`,
-    [`A real editorial ${stamp}`],
+    `update drafts set dek = 'Why this piece matters, in one line.' where headline like $1 and newsroom_id = 1 and form = 'editorial'`,
+    // Filed as "OPINION: A real editorial <stamp>"; the stamp makes it unique.
+    [`%A real editorial ${stamp}`],
   );
   await dekClient.end();
   if (dekSet.rowCount !== 1) throw new Error(`the dek went to ${dekSet.rowCount} drafts; expected 1`);
