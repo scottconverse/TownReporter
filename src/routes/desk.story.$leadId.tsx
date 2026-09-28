@@ -1946,7 +1946,17 @@ function StoryPage() {
                 body={body}
               />
             ) : (
-              <p>Name checks appear after the first draft.</p>
+              /*
+                The same shape its sibling above uses, and the same shape the
+                panel itself has once a draft exists (desk-name-check.tsx), so
+                the tab does not change its outline the moment the first draft
+                lands. This one line was the last unstyled paragraph left on
+                the tab.
+              */
+              <section className="story-name-check" aria-label="Names and spellings">
+                <h2>Names and spellings</h2>
+                <p className="meta">Name checks appear after the first draft.</p>
+              </section>
             )}
           </section>
           <section
