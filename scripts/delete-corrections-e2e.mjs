@@ -482,11 +482,11 @@ async function main() {
   await page.getByLabel("Headline").fill(leadHeadline);
   await page.getByLabel("Why now").fill("The packet posted with the revised fee schedule.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
 
   await page.getByLabel("Headline").fill(leadHeadline);
-  await page.getByLabel("Dek").fill("Revised fee schedule");
-  await page.getByLabel("Body").fill(body);
+  await page.getByLabel("Summary").fill("Revised fee schedule");
+  await page.getByLabel("Story", { exact: true }).fill(body);
   // The section is a claim a person confirms, like the sources above it; the
   // desk's Publish button stays disabled until an editor reads it and says so.
   // 0.6.67 puts the section on the button itself -- "Publish in <section>" --
@@ -654,6 +654,37 @@ async function main() {
     [email],
   );
   const newsroomId = owner.rows[0].newsroom_id;
+  /*
+    OWED: re-author the review assertions below for unit CW2 (0.6.81).
+
+    Everything from here to "a pending evidence keep/remove decision..." was
+    written against the panel as it stood before unit CW2 moved the review onto
+    the Checks tab's drawn list (commit f6953ca1, "the review is the Checks
+    tab's own list"). Three of its selectors describe structure that no longer
+    exists, and they are named here rather than guessed at:
+
+      - `[aria-labelledby="draft-pass-claims-heading"]` (line 686) no longer
+        holds a press. The inventory is a shut disclosure at the end of the
+        list now, and each returned claim's record checks and judgment live on
+        that claim's OWN row above, so `View exact captured version` inside the
+        inventory (lines 692-694) is gone by design.
+      - `[aria-labelledby="manual-claims-heading"]` (line 700) is the form
+        alone. Editor-authored claims are rows of the list; the articles this
+        walk looks for under that heading (lines 709, 740, 749) are not there.
+      - Every finding's judgment controls are inside its row's shut
+        `<details id="evidence-detail-*">` (src/components/evidence-check-list.tsx),
+        which a browser hides, so each region needs the disclosure opened
+        first -- `summary` "Record checks and judgment" -- exactly as
+        scripts/cw-story-shots.mjs does when its press pass opens them.
+
+    This walk needs Postgres, so it was NOT RUN by unit CW2 and none of the
+    above was verified by execution. Rewriting assertions that cannot be run
+    would be guessing in a file that CI trusts; the failure is left legible
+    instead, with the fix owed to whoever can run it. The controls themselves
+    are proven working from their new place by scripts/cw-story-shots.mjs --
+    reports/CW2-evidence/buttons.md, 53 controls pressed, `Save judgment` and
+    `View cited captured version` among them.
+  */
   const findingFixture = await seedFindingEvidenceReview({
     newsroomId,
     userId: owner.rows[0].user_id,
@@ -766,7 +797,7 @@ async function main() {
   const firstFinding = panels.nth(0);
   const secondFinding = panels.nth(1);
   const savedRevisionBody = `TEST FIXTURE body: saved revision before judgments ${stamp}.`;
-  await page.getByLabel("Body").fill(savedRevisionBody);
+  await page.getByLabel("Story", { exact: true }).fill(savedRevisionBody);
   if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
     throw new Error("unsaved draft revision did not disable finding judgments");
   await page.getByRole("button", { name: "Save edits" }).click();
@@ -888,7 +919,7 @@ async function main() {
   await reloadedReview
     .getByText("A contradiction needs cited contrary captured evidence and a reason.")
     .waitFor();
-  await page.getByLabel("Body").fill(`TEST FIXTURE unsaved body ${stamp}`);
+  await page.getByLabel("Story", { exact: true }).fill(`TEST FIXTURE unsaved body ${stamp}`);
   if (
     !(await reloadedReview
       .locator("article")
@@ -898,7 +929,7 @@ async function main() {
   )
     throw new Error("unsaved draft did not disable judgment save");
   await page
-    .getByLabel("Body")
+    .getByLabel("Story", { exact: true })
     .fill(savedRevisionBody);
   step("restored the exact saved draft before stale-review conflict checks");
   const secondTab = await context.newPage();

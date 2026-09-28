@@ -1333,6 +1333,155 @@
   gap: 10px;
 }
 
+/*
+  The drawn Evidence check list (unit CW): one row per claim, the chip in the
+  left column and the sentence, the secondary line and the row's press stacked
+  in the right one. It is the shape unit CT gave the blocker list above it, on
+  purpose -- the drawing draws both the same and an editor reads them the same
+  way -- with one extra line per row for what the check compared against.
+
+  Four chips, and every pair is one `scripts/contrast-audit.mjs` already
+  asserts on this panel: `--ok` and `--warn` text on the surface, `--danger`
+  text (the notice's dashed shape, so "could not check" is a different shape
+  and not only a different color), and `--bg` on the `--fg` fill for the
+  drawing's solid "the check ran and found nothing" chip.
+*/
+.desk-ltr.astra .astra-evidence {
+  margin-top: 18px;
+}
+.desk-ltr.astra .astra-evidence-title {
+  font: 800 calc(20px * var(--ts))/1.3 var(--fd);
+  margin: 0;
+  color: var(--fg);
+}
+.desk-ltr.astra .astra-evidence-ran {
+  margin: 2px 0 6px;
+  font-size: calc(15px * var(--ts));
+  line-height: 1.4;
+  color: var(--mut);
+}
+.desk-ltr.astra .astra-evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.desk-ltr.astra .astra-evidence-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-evidence-chip {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  align-self: start;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  line-height: 1.4;
+  padding: 2px 8px;
+  white-space: nowrap;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-evidence-chip.is-warn {
+  border: 2px solid var(--warn);
+  color: var(--warn);
+}
+.desk-ltr.astra .astra-evidence-chip.is-fail {
+  border: 2px dashed var(--danger);
+  color: var(--danger);
+}
+.desk-ltr.astra .astra-evidence-chip.is-ink {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+.desk-ltr.astra .astra-evidence-what {
+  grid-column: 2;
+  margin: 0;
+  font-weight: 700;
+  font-size: calc(16px * var(--ts));
+  line-height: 1.3;
+  color: var(--fg);
+}
+.desk-ltr.astra .astra-evidence-note {
+  grid-column: 2;
+  margin: 0;
+  font-size: calc(15px * var(--ts));
+  line-height: 1.4;
+  color: var(--mut);
+}
+.desk-ltr.astra .astra-evidence-acts {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+/* Four classes, not three: `.desk-ltr.astra .astra-inspector .btn` above sets
+   this panel's own padding and text size, and a shorter selector here lost to
+   it. The `quiet` arm is the drawn light press (1px line) and the plain one is
+   the drawn heavy press (2px ink, from the `.btn` base). */
+.desk-ltr.astra .astra-inspector .astra-evidence-act {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+}
+.desk-ltr.astra .astra-inspector .astra-evidence-compare {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 14px;
+  padding: 0 12px;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  border: 2px solid var(--fg);
+}
+/*
+  The shut disclosure under a list row (unit CW2). The drawn list has no such
+  element -- the drawing's page ends under it -- so this is the smallest thing
+  that can hold what the screen has to keep: an editor opens the row they are
+  judging, and the list stays a list until they do.
+
+  Column 2, because a row is a 2-column grid and the disclosure belongs under
+  the row's text, not beside its chip. The hover is an underline and not a
+  color: the two yellows on the cream surface are the pairs
+  `scripts/contrast-audit.mjs` rejects.
+*/
+.desk-ltr.astra .astra-evidence-row > .astra-evidence-more {
+  grid-column: 2;
+}
+.desk-ltr.astra .astra-evidence-more {
+  margin-top: 10px;
+}
+.desk-ltr.astra .astra-evidence-more > summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  color: var(--fg);
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-evidence-more > summary:hover,
+.desk-ltr.astra .astra-evidence-more > summary:focus-visible {
+  text-decoration: underline;
+}
+.desk-ltr.astra .astra-evidence-more-body {
+  margin-top: 6px;
+}
+/* The two disclosures the list ends with -- the inventory and the manual-claim
+   form -- set off from the rows above them by the same 1px rule every row has. */
+.desk-ltr.astra .astra-evidence > .astra-evidence-extra {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 .desk-ltr.astra .astra-check-action p {
   margin: 8px 0 12px;
   color: var(--mut);
@@ -2219,6 +2368,50 @@
   color: var(--mut);
   margin-bottom: 8px;
 }
+/*
+  The label row of a field that carries an `aside` (unit CW): the drawn
+  "Headline · yours        A redraft will not replace it", and the drawn
+  "Story                 Saved 8:20 a.m.".
+
+  The label is no longer a child of `.f` here, so `.f > label` above does not
+  reach it and it would fall back to inline; this puts the two on one row and
+  keeps the same 8px gap under them that every other field's label has. The
+  aside takes the right edge with its own auto margin, which means the label
+  needs none of its own -- the drawing puts them at opposite ends of one line,
+  not next to each other.
+
+  No field that passes `htmlFor` without an `aside` gets this wrapper, so this
+  is the only shape that changes.
+*/
+.desk-ltr.astra .f-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  margin-bottom: 8px;
+}
+.desk-ltr.astra .f-head > label {
+  display: block;
+  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--mut);
+}
+.desk-ltr.astra .f-aside {
+  margin-left: auto;
+  text-align: right;
+  font: 500 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--mut);
+}
+/* The drawn right edge survives the narrow screens: the aside drops to its own
+   row rather than squeezing the label or overflowing the box. */
+@media (max-width: 720px) {
+  .desk-ltr.astra .f-head > .f-aside {
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+}
 .desk-ltr.astra .story-composer-heading {
   display: block;
 }
@@ -2481,13 +2674,12 @@
 .desk-ltr.astra .work-form .astra-dek {
   overflow: hidden;
 }
+/* The evidence review no longer draws a box of its own (unit CW2): it is the
+   drawn list now, and the drawing's list has no card around it -- the rows'
+   own 1px rules are the whole structure. Only the anchor's scroll offset is
+   left, for the presses that jump to it. */
 .desk-ltr.astra #finding-evidence-review {
   scroll-margin-top: 92px;
-  border: 1px solid var(--line);
-  border-radius: 0;
-  padding: 24px;
-  background: var(--surface);
-  margin-top: 24px;
 }
 
 /*
@@ -5879,9 +6071,29 @@
   font-weight: 700;
   color: var(--fg2);
 }
-.desk-ltr.astra .astra-wb-writer .astra-save-state {
-  margin-left: auto;
-  margin-right: 0;
+/*
+  The writer row's two drawn lines (unit CW): "● Ready" and "Last draft: Codex
+  Sol, 7:48 a.m.".
+
+  The readiness dot is the one colored word in this row, and it is colored for
+  the same reason the Checks tab's chips are: "this writer can run" and "this
+  writer cannot" must not look alike at a glance. Its two colors are the tokens
+  the rest of the desk uses for those two answers, so nothing here invents a
+  palette. The last-draft line is muted -- it is a record of what happened, not
+  a state anyone has to act on.
+*/
+.desk-ltr.astra .astra-wb-ready {
+  font-family: var(--fd);
+  font-weight: 700;
+}
+.desk-ltr.astra .astra-wb-ready-ok {
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-wb-ready-warn {
+  color: var(--warn);
+}
+.desk-ltr.astra .astra-wb-last {
+  color: var(--mut);
 }
 
 /*
@@ -5902,9 +6114,64 @@
   border: 1px solid currentColor;
   font: 700 calc(14px * var(--ts)) var(--fd);
 }
+/*
+  The save line at the head of the Story field (unit CW). `.astra-wb-saved` is
+  the drawn green "Saved 8:20 a.m."; the two tones the drawing does not draw
+  are here because the line must never be green when it is not true -- an
+  editor with unsaved text is told so in the warn color, and a story already on
+  the paper is not a draft at all (`saveState` in `lib/news/writer-bar.ts`).
+*/
 .desk-ltr.astra .astra-wb-saved {
   color: var(--ok);
   font-weight: 700;
+}
+.desk-ltr.astra .astra-wb-saved-ok {
+  color: var(--ok);
+}
+.desk-ltr.astra .astra-wb-saved-warn {
+  color: var(--warn);
+}
+.desk-ltr.astra .astra-wb-saved-mut {
+  color: var(--mut);
+}
+
+/*
+  STORY DETAILS (unit CW2).
+
+  `Desk Story.dc.html` draws no Topic, no Geography, no named-outlet record and
+  no Pulled notes: its main column ends at the action row. The page still owes
+  every one of those fields, so they live in this one disclosure, shut by
+  default and directly under the action row -- out of the drawn column's way,
+  in one press of the editor's.
+
+  It is a rule-and-label row, not a box: the drawn column has no card here, and
+  a filled box under the action row would put a panel back where the audit
+  found one. The marker stays (the UA's triangle) because it is the only thing
+  that says "there is more behind this" without a sentence.
+*/
+.desk-ltr.astra .astra-story-details {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.desk-ltr.astra .astra-story-details > summary {
+  cursor: pointer;
+  min-height: 28px;
+  color: var(--adeep);
+  font: 700 calc(14px * var(--ts))/28px var(--fd);
+}
+.desk-ltr.astra .astra-story-details > summary:hover,
+.desk-ltr.astra .astra-story-details > summary:focus-visible {
+  color: var(--a);
+}
+.desk-ltr.astra .astra-story-details[open] > summary {
+  margin-bottom: 14px;
+}
+.desk-ltr.astra .astra-story-details > summary::after {
+  content: " ▸";
+}
+.desk-ltr.astra .astra-story-details[open] > summary::after {
+  content: " ▾";
 }
 
 /* The sticky publish bar: the last thing on the page and the first thing in

@@ -98,6 +98,26 @@ const skip = dbProbe.ok ? false : dbProbe.reason;
  * button that is still gated would be measuring the gate, not the publish.
  */
 async function sectionOnTheButton(page: Page): Promise<{ name: string; key: string }> {
+  /*
+    Unit CW2 (0.6.81) moved the section select into the shut "Story details"
+    disclosure under the action row, where the drawing puts the fields the
+    drawing does not draw. A shut `<details>` hides its content from the page --
+    the field is in the DOM and never visible -- so this opens it the way a
+    person would before reading it. Same step as `openStoryDetails` in
+    scripts/confirm-section-step.mjs, which the browser walks share.
+  */
+  const details = page.locator("main#desk details#story-details").first();
+  if (
+    (await details.count()) > 0 &&
+    !(await details.evaluate((element) => (element as HTMLDetailsElement).open))
+  ) {
+    await details.locator("summary").first().click();
+    await page.waitForFunction(
+      () => (document.getElementById("story-details") as HTMLDetailsElement | null)?.open === true,
+      null,
+      { timeout: 15_000 },
+    );
+  }
   await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
   await page.waitForFunction(
     () =>
@@ -244,7 +264,7 @@ describe("two editors on one story", () => {
       const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       // Owner has the workbench open and types a body.
-      await ownerPage.getByLabel("Body").fill("The body the owner is still writing.");
+      await ownerPage.getByLabel("Story", { exact: true }).fill("The body the owner is still writing.");
 
       // The editor deletes the lead out from under them, from THEIR queue --
       // the exact two-click pattern desk-flows-e2e already proves.
@@ -299,12 +319,12 @@ describe("two editors on one story", () => {
       const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
-      await editorPage.getByLabel("Body").waitFor();
+      await editorPage.getByLabel("Story", { exact: true }).waitFor();
 
       const BODY_A = "Body A: the owner's complete paragraph, written first.";
       const BODY_B = "Body B: the editor's complete paragraph, written second.";
-      await ownerPage.getByLabel("Body").fill(BODY_A);
-      await editorPage.getByLabel("Body").fill(BODY_B);
+      await ownerPage.getByLabel("Story", { exact: true }).fill(BODY_A);
+      await editorPage.getByLabel("Story", { exact: true }).fill(BODY_B);
 
       // Fire both saves as close together as two real clicks get.
       await Promise.all([
@@ -334,7 +354,7 @@ describe("two editors on one story", () => {
       const leadId = Number(storyUrl.match(/story\/(\d+)/)![1]);
 
       await ownerPage
-        .getByLabel("Body")
+        .getByLabel("Story", { exact: true })
         .fill("A body long enough to publish, written for the race.");
       await ownerPage.getByRole("button", { name: "Save edits" }).click();
       await ownerPage.waitForTimeout(1200);
@@ -350,7 +370,7 @@ describe("two editors on one story", () => {
       const sectionKey = section.key;
 
       await editorPage.goto(storyUrl, { waitUntil: "domcontentloaded" });
-      await editorPage.getByLabel("Body").waitFor();
+      await editorPage.getByLabel("Story", { exact: true }).waitFor();
 
       /*
       Publish is deliberately two-step (arm, then confirm) -- one unconfirmed

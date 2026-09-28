@@ -162,7 +162,7 @@ async function main() {
     await page.getByLabel("Headline").fill(`Probe lead ${i + 1} of ${LEADS} for the hit test ${stamp}`);
     await page.getByLabel("Why now").fill("Filed by the BN2 hit-test probe; nothing here starts a job.");
     await page.getByRole("button", { name: "File lead" }).click();
-    await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+    await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
     console.log(`  filed lead ${i + 1} of ${LEADS}`);
   }
 

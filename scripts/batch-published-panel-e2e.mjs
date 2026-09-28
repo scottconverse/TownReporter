@@ -44,7 +44,7 @@ import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { confirmSectionAndWaitForPublishable, openStoryDetails } from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen ports, registered with
@@ -260,7 +260,7 @@ async function fileTwoLeads() {
     await page.getByLabel("Why now").fill("Filed by the batch-panel walk.");
     await page.getByRole("button", { name: "File lead" }).click();
     // Filing lands on the story workbench; the Queue is where the batch is run.
-    await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+    await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   }
   step("two leads are filed");
 }
@@ -294,13 +294,18 @@ async function printTheFirstStory() {
   const href = await row.locator("a.hl-link").getAttribute("href");
   assert.match(href ?? "", /^\/desk\/story\/\d+$/, "the row opens its story workbench");
   await row.locator("a.hl-link").click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
   await page.getByLabel("Headline").fill(`Water tower inspection backlog ${stamp}`);
-  await page.getByLabel("Dek").fill("The city has not inspected the tower since 2019.");
+  await page.getByLabel("Summary").fill("The city has not inspected the tower since 2019.");
   /*
     The section a draft files under is read by a person before it prints, and a
     batch draft's section came from the model. Picking it here is that read.
   */
+  /*
+    Unit CW2 moved the section picker into the shut "Story details" disclosure,
+    so it has to be opened before it can be read -- see openStoryDetails.
+  */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic-select");
   const values = await topic.locator("option").evaluateAll((nodes) => nodes.map((n) => n.value));
   await topic.selectOption(values.includes("council") ? "council" : values[0]);

@@ -498,7 +498,7 @@ async function theStoryIsFiledWithItsDraft() {
   const row = page.locator(".lead-row", { hasText: AS_STORY[0] });
   await row.getByRole("link", { name: AS_STORY[0], exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
-  const body = page.getByLabel("Body");
+  const body = page.getByLabel("Story", { exact: true });
   await body.waitFor({ timeout: 45_000 });
   const text = await body.inputValue();
   must(
@@ -510,7 +510,7 @@ async function theStoryIsFiledWithItsDraft() {
     and must not: the reader lifts it into the lead's sources as names, so the
     body is the report's prose and nothing else.
   */
-  const dek = await page.getByLabel("Dek").inputValue();
+  const dek = await page.getByLabel("Summary").inputValue();
   must(
     dek.includes(FIRST_DEK),
     `the imported story's dek is not the report's own line under the headline; it reads: ${dek.slice(0, 160)}`,

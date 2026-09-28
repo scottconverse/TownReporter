@@ -601,7 +601,7 @@ async function theDraftIsTheReportsTextWithoutItsLedger() {
   const row = page.locator(".lead-row", { hasText: TIER1[0] });
   await row.getByRole("link", { name: TIER1[0], exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
-  const body = page.getByLabel("Body");
+  const body = page.getByLabel("Story", { exact: true });
   await body.waitFor({ timeout: 45_000 });
   const text = await body.inputValue();
   must(

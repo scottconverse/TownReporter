@@ -1054,6 +1054,8 @@ export function Field({
   chip,
   hint,
   htmlFor,
+  aside,
+  className,
   children,
 }: {
   label: string;
@@ -1065,6 +1067,20 @@ export function Field({
    * had to stop being a descendant of the label. See the branch below.
    */
   htmlFor?: string;
+  /**
+   * One sentence about the field, drawn at the right edge of the label row --
+   * the story workbench's "A redraft will not replace it" (unit CW). It needs
+   * `htmlFor`: see the branch below.
+   *
+   * It is a node rather than a string because the other thing the drawing puts
+   * in that spot is the story editor's save line, which is not a sentence but
+   * a live status: a `<span class="astra-save-state" role="status">`. What
+   * matters is where the node lands -- a sibling of the label -- not what it
+   * says, so both shapes are the caller's business.
+   */
+  aside?: React.ReactNode;
+  /** Extra class on the wrapper, for a surface that styles its own labels. */
+  className?: string;
   children: React.ReactNode;
 }) {
   const wording = (
@@ -1093,18 +1109,32 @@ export function Field({
     label; the "Edit" span stays reachable as the control's description. The
     wrapper keeps the class `f`, so the CSS that positions the label text is
     the only thing that has to know about the second shape (desk-astra.css).
+
+    `aside` is the same trap one step further: it is a sentence about the
+    field, not the field's name, so it is a sibling of the <label> and never
+    a child of it. It is drawn in the `htmlFor` shape only -- the shape below
+    has its control inside the label, where a sibling is not available and
+    any text added is part of the name. No field on that shape passes one.
   */
   if (htmlFor) {
+    const bound = <label htmlFor={htmlFor}>{wording}</label>;
     return (
-      <div className="f">
-        <label htmlFor={htmlFor}>{wording}</label>
+      <div className={className ? `f ${className}` : "f"}>
+        {aside ? (
+          <div className="f-head">
+            {bound}
+            <span className="f-aside">{aside}</span>
+          </div>
+        ) : (
+          bound
+        )}
         {children}
         {tail}
       </div>
     );
   }
   return (
-    <label className="f">
+    <label className={className ? `f ${className}` : "f"}>
       <span className={chip ? "f-lab" : undefined}>{wording}</span>
       {children}
       {tail}

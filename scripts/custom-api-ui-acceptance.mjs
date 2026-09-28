@@ -266,7 +266,7 @@ try {
   await openTheStoryJustFiled();
   await page.getByRole("heading", { name: "Story workspace", exact: true }).waitFor();
   await page.getByRole("button", { name: "Redraft", exact: true }).waitFor({ timeout: 45_000 });
-  assert.match(await page.getByLabel("Body").inputValue(), new RegExp(documentMarker));
+  assert.match(await page.getByLabel("Story", { exact: true }).inputValue(), new RegExp(documentMarker));
   assert(
     providerRequests.some(
       (request) =>

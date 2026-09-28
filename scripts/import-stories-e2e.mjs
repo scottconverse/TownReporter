@@ -41,7 +41,10 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import {
+  confirmSectionAndWaitForPublishable,
+  openStoryDetails,
+} from "./confirm-section-step.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -462,6 +465,11 @@ async function oneImportedStoryPublishes(chosen) {
   await row.getByRole("link", { name: REFILED, exact: true }).click();
   await page.waitForURL(/\/desk\/story\/\d+/, { timeout: 30_000 });
 
+  /*
+    Unit CW2 put the section picker inside the shut "Story details" disclosure,
+    so a walk that reads it opens that disclosure first -- see openStoryDetails.
+  */
+  await openStoryDetails(page);
   const topic = page.locator("#story-topic");
   await topic.waitFor({ timeout: 45_000 });
   must(

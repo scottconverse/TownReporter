@@ -51,7 +51,7 @@ try {
   await page.getByLabel("Headline").fill(`Longmont council packet proof ${stamp}`);
   await page.getByLabel("Why now").fill("Verify that Pull finds and saves official council records.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor();
+  await page.getByLabel("Story", { exact: true }).waitFor();
   await page.getByRole("tab", { name: "Reporting", exact: true }).click();
 
   await page

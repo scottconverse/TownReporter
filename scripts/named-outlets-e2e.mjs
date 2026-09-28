@@ -139,11 +139,11 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 45_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 45_000 });
 
   await page.getByLabel("Headline").fill(headline);
-  await page.getByLabel("Dek").fill(why);
-  await page.getByLabel("Body").fill(body);
+  await page.getByLabel("Summary").fill(why);
+  await page.getByLabel("Story", { exact: true }).fill(body);
   // The section still has to be saved before the server will read the body
   // against the Sources -- the notice below is computed from the saved draft --
   // but the Publish button is down on purpose from here (0.6.67: pressing it
@@ -160,6 +160,9 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   const print = page.getByRole("button", { name: /^Publish in / });
   assert.equal(await print.isDisabled(), true, "the gate must hold printing down");
   /*
+    Two units wrote the same screen at once, and both halves of this pin are
+    real on the merged page, so both are kept.
+
     Unit CT part 2 (b16a07b5) deleted the mid-form heading this line used to
     wait for -- "Deal with the named outlet first" -- and moved the reasons to
     the top of the Checks tab, one row each with its own press. So the words
@@ -178,6 +181,17 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
     reads naturally and matches the plural only, and a wait on it against this
     page times out with the sentence sitting in `body.innerText` -- the pin has
     to accept either spelling.
+
+    Unit CW replaced the old gate note ("Deal with the named outlet first") in
+    the dark sticky bar with the drawn bar's own sentence -- the first reason,
+    said as the press that clears it (`publishGateNote`,
+    src/lib/news/publish-blockers.ts:248, drawn as "Review 1 name to publish."
+    at `Desk Story.dc.html:183`, rendered at
+    src/routes/desk.story.$leadId.tsx:3105). The assertion is the one the walk
+    always made -- printing is held down IN WORDS, and the words name this
+    draft's own reason -- so it also pins the drawn copy, which is the label on
+    the "Override Denver Post" press the walk clicks next. That press is the
+    same mutation CT's row button calls.
   */
   await page
     .getByText(/\d+ things? blocks? Publish\. Each row has the press that clears it\./)
@@ -187,7 +201,7 @@ async function aStoryCreditingAnOutletIsOnThePaper() {
   await reason
     .getByText("The body names Denver Post and this draft's Sources do not show it.")
     .waitFor({ timeout: 45_000 });
-  step("printing is held down, in words, while Denver Post is named and uncovered");
+  await page.getByText("Override Denver Post to publish.").waitFor({ timeout: 45_000 });
 
   await outlets.getByRole("button", { name: "Override Denver Post" }).click();
   await outlets.getByText(/Overrides recorded for this draft/).waitFor({ timeout: 45_000 });

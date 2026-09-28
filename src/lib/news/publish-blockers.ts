@@ -231,3 +231,21 @@ export function publishBlockedSummary(blockers: readonly PublishBlocker[]): stri
   if (n === 0) return "";
   return n === 1 ? "1 thing blocks Publish" : `${n} things block Publish`;
 }
+
+/**
+ * The sticky bar's own line (unit CW), drawn as "Review 1 name to publish.":
+ * the first reason, said as the press that clears it, then what it stands
+ * between the editor and.
+ *
+ * The phrase is the blocker's own `action.label` -- the same words on the
+ * row at the top of the Checks tab and on the button that clears it -- so the
+ * bar cannot describe a fix in words the control does not use, and the first
+ * reason on the bar is provably the first row of the list it points at.
+ *
+ * An empty list returns "", because "All checks done." is the page's sentence
+ * about the button being live, not this function's answer about a reason.
+ */
+export function publishGateNote(blockers: readonly PublishBlocker[]): string {
+  const first = blockers[0];
+  return first ? `${first.action.label} to publish.` : "";
+}

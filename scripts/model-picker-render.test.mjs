@@ -39,6 +39,24 @@ const choices = moduleUrl(
 const choiceModule = await import(choices);
 
 /*
+  Unit CW (0.6.81) drew the Writer bar above the three editors and put its own
+  rule -- "is the chosen writer usable on this server" -- in
+  `lib/news/writer-bar.ts`, so `ModelPicker` imports it now. A data: URL cannot
+  resolve a relative import any more than it can resolve `@/`, so the reader
+  module is transpiled in and mapped like the registry and the preflight above,
+  with its own two imports filled in the same way.
+*/
+const followUpCopyUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/follow-up-copy.ts", import.meta.url), "utf8"),
+  "follow-up-copy.ts",
+);
+const writerBarUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/writer-bar.ts", import.meta.url), "utf8"),
+  "writer-bar.ts",
+  { "./model-choice.ts": choices, "./follow-up-copy.ts": followUpCopyUrl },
+);
+
+/*
   0.6.19: the picker now asks the server which offered providers are actually
   usable on this machine (see src/lib/news/provider-availability.ts) instead
   of trusting `enabled()` -- which reads `process.env` and does not exist in
@@ -86,6 +104,7 @@ const { ModelPicker } = await import(
     "model-picker.tsx",
     {
       "@/lib/news/model-choice": choices,
+      "@/lib/news/writer-bar": writerBarUrl,
       "@/lib/news/provider-registry": registryUrl,
       "@/lib/news/provider-availability": availabilityStubUrl,
       "@/lib/news/provider-availability-key": availabilityStubUrl,

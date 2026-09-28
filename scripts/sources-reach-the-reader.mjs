@@ -62,10 +62,10 @@ try {
   const url = page.getByLabel(/source|link|url/i).first();
   await url.fill(SOURCE);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("filed a lead carrying a source URL");
 
-  await page.getByLabel("Body").fill(
+  await page.getByLabel("Story", { exact: true }).fill(
     "The water board posted the Kimbark packet on Tuesday. A hearing follows on the 14th.",
   );
   await page.getByRole("button", { name: /^Save/ }).first().click();
@@ -98,8 +98,22 @@ try {
     scope this walk already uses for this block -- and it holds the same
     guarantee: the reasons list is drawn inside `#inspector-checks`
     (`astra-blocker-list`, `src/routes/desk.story.$leadId.tsx:1676`), which is
-    outside `.publish-blocked`. Neither is a `.nth(0)`/`.nth(1)` position, so
-    neither breaks the moment the reasons list grows a second row.
+    outside `.publish-blocked`. Unit CW2 moved the drawn list again, onto the
+    Checks tab's own evidence list (`src/components/evidence-check-list.tsx`),
+    which is still outside this notice, so the scope holds unchanged. Neither is
+    a `.nth(0)`/`.nth(1)` position, so neither breaks the moment the reasons
+    list grows a second row.
+
+    The label is on the page twice, and the assertion is the same one either
+    way: the evidence decision has to be reachable from the screen that says
+    Publish is off. Unit CT's drawn list of reasons carries it
+    (src/components/publish-blockers.ts:187), and so does the notice this walk
+    is about -- the one that links to #evidence-review --
+    at src/routes/desk.story.$leadId.tsx:2192. Both are the same mutation, the
+    `keep` press the evidence review itself calls. The press is scoped to that
+    notice (the element the walk already clicks the "Review claims and sources"
+    link out of, and the one the label was on before the reasons list existed),
+    so neither copy can shadow the other.
   */
   const confirmEvidence = page
     .locator(".publish-blocked")

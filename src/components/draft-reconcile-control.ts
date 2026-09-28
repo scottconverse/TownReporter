@@ -108,20 +108,32 @@ export function DraftReconcileControl(props: {
   onReload: () => void;
   onKeepChecked: () => void;
   onRestoreOriginal: () => void;
+  /**
+   * Which half of this control to draw (unit CW).
+   *
+   * `Desk Story.dc.html:112` draws "Check draft against evidence" SECOND in
+   * the action row, between "Save edits" and "+ Add to story" -- but
+   * everything this control has to say afterwards (the progress, the dirty
+   * note, the finished notice, the review panel) is a block of its own, and
+   * a block inside that row would break it in half. So the row asks for
+   * `"button"` and the page renders `"notes"` underneath the row, where the
+   * drawing puts the job cards. `"all"` is the old shape, for any caller that
+   * still wants the two together.
+   */
+  render?: "all" | "button" | "notes";
 }) {
-  const children: ReactNode[] = [
-    createElement(
-      "button",
-      {
-        key: "start",
-        type: "button",
-        className: "btn",
-        disabled: props.disabled,
-        onClick: props.onStart,
-      },
-      props.active ? "Checking evidence…" : "Check draft against evidence",
-    ),
-  ];
+  const button = createElement(
+    "button",
+    {
+      key: "start",
+      type: "button",
+      className: "btn",
+      disabled: props.disabled,
+      onClick: props.onStart,
+    },
+    props.active ? "Checking evidence…" : "Check draft against evidence",
+  );
+  const children: ReactNode[] = [];
   if (props.active) {
     const stage =
       props.status?.status === "running"
@@ -213,5 +225,7 @@ export function DraftReconcileControl(props: {
       ),
     );
   }
-  return createElement(Fragment, null, ...children);
+  if (props.render === "button") return button;
+  if (props.render === "notes") return createElement(Fragment, null, ...children);
+  return createElement(Fragment, null, button, ...children);
 }

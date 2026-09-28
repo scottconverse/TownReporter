@@ -463,7 +463,7 @@ async function main() {
   await page.getByLabel("Headline").fill(headline);
   await page.getByLabel("Why now").fill(why);
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor({ timeout: 30_000 });
+  await page.getByLabel("Story", { exact: true }).waitFor({ timeout: 30_000 });
   step("filed a lead by hand and landed on its story page");
 
   // --- leave the picker on Automatic, click Draft with AI ----------------
@@ -612,7 +612,7 @@ async function main() {
   );
 
   // --- the landed draft is really there, on the page -----------------------
-  const bodyText = await page.getByLabel("Body").inputValue();
+  const bodyText = await page.getByLabel("Story", { exact: true }).inputValue();
   if (bodyText.trim().length < 20) {
     throw new Error(`the draft body looks empty/too short: ${JSON.stringify(bodyText)}`);
   }

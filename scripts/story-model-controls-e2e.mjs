@@ -29,7 +29,7 @@ try {
   await page.getByLabel("Headline").fill(`Story model controls ${stamp}`);
   await page.getByLabel("Why now").fill("Browser regression fixture for Story settings.");
   await page.getByRole("button", { name: "File lead" }).click();
-  await page.getByLabel("Body").waitFor();
+  await page.getByLabel("Story", { exact: true }).waitFor();
   await page.getByLabel("Pulled notes").fill(
     "TEST SOURCE MATERIAL: On September 15, 2026, the fictional Testerville City Council voted 5-0 to authorize a $42,000 roof repair at the town library. The public works director, Morgan Ellis, said work would begin October 1 and take about three weeks. The authorization covers replacement of storm-damaged shingles and repair of two roof drains. This paragraph is a browser-test fixture supplied by the editor; do not add facts beyond it.",
   );
@@ -79,7 +79,7 @@ try {
   let draftedBody = "";
   for (let elapsed = 0; elapsed < 12 * 60_000; elapsed += 2_000) {
     await page.waitForTimeout(2_000);
-    draftedBody = await page.getByLabel("Body").inputValue();
+    draftedBody = await page.getByLabel("Story", { exact: true }).inputValue();
     if (draftedBody.trim().length >= 200) break;
     const failure = await page.locator('[role="alert"]:visible').allInnerTexts();
     if (failure.some((text) => /No model job was started|did not finish|failed/i.test(text))) {

@@ -536,7 +536,7 @@ async function main() {
   await page.getByRole("button", { name: "Redraft", exact: true }).waitFor({ timeout: 5_000 });
   const readPress = snapshots.slice(beforeReadingPress);
   const stages = readPress.map((entry) => entry.job.stage);
-  const firstDraft = await page.getByLabel("Body").inputValue();
+  const firstDraft = await page.getByLabel("Story", { exact: true }).inputValue();
   await openSourcesTab();
   await waitForText(/Read all [\d,]+ characters in \d+ parts? across 13 pages\./);
   const deskAfterRead = await page.locator("body").innerText();
@@ -648,7 +648,7 @@ async function main() {
   }
   const redraft = snapshots.slice(beforeRedraftPress);
   const redraftStages = redraft.map((entry) => entry.job.stage);
-  const body = await page.getByLabel("Body").inputValue();
+  const body = await page.getByLabel("Story", { exact: true }).inputValue();
   await openSourcesTab();
   await waitForText(/Read all [\d,]+ characters in \d+ parts? across 13 pages\./);
   const desk = await page.locator("body").innerText();
@@ -737,7 +737,7 @@ async function main() {
   );
 
   // ---- Screenshots, 1280 light and dark.
-  await page.getByLabel("Body").scrollIntoViewIfNeeded().catch(() => {});
+  await page.getByLabel("Story", { exact: true }).scrollIntoViewIfNeeded().catch(() => {});
   await screenshot("redraft-scan-draft-1280-light.png");
   await page.getByRole("button", { name: "Switch to dark appearance" }).click();
   await page.waitForTimeout(400);

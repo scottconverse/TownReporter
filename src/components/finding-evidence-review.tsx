@@ -1,20 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   getFindingEvidenceCapture,
   getFindingEvidenceReview,
   saveManualClaim,
   saveFindingEvidenceJudgment,
+  type FindingCaptureEvidence,
   type FindingEvidenceCaptureResult,
   type FindingEvidenceReview,
   type FindingJudgment,
   type ManualClaimReferenceRelation,
 } from "@/lib/news/finding-evidence-review";
 import { InkButton } from "@/components/desk-chrome";
+import { EvidenceCheckList } from "@/components/evidence-check-list";
 import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 import { groupDisplayCaptures } from "@/lib/news/finding-evidence-display";
+import {
+  citedCaptureCount,
+  evidenceCheckRows,
+  evidenceRanLine,
+  type EvidenceListRow,
+} from "@/lib/news/evidence-check-list";
+import type { DraftAuditFinding } from "@/lib/news/draft-audit";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
+import type { NameCheck } from "@/lib/news/name-check";
+import type { NoteTodo } from "@/lib/news/notes";
 import { citationResolution, meetingCitationUrl, meetingClock } from "@/components/meeting-source-block-utils";
 import { transcriptViewPath } from "@/lib/news/meeting-transcript-view";
 
@@ -167,12 +178,360 @@ function TranscriptCitationEvidence({ evidence }: { evidence: DraftMeetingEviden
   );
 }
 
+/**
+ * The page's half of the drawn Checks list (unit CW2).
+ *
+ * The panel is the only thing holding the review's state, so it is the thing
+ * that draws the list; these are the pieces the page owns. `ranLine` is the
+ * line the page already words from the draft's check and the chosen writer, and
+ * the other three are facts the list states beside a judgment row that the
+ * review itself does not carry: the claims of absence still waiting on a
+ * person, the saved name check, and the draft audit's findings behind the style
+ * row. The three presses are the page's own -- they open the compare dialog,
+ * the captured record and the style section, none of which live in here.
+ */
+/** One capture row, as any of the three stacks carries it. A manual claim's
+    captures also carry the role the editor gave them. */
+type CaptureRow = FindingCaptureEvidence & { relation?: ManualClaimReferenceRelation };
+
+/**
+ * The record checks a list row opens into (unit CW2).
+ *
+ * This is the markup the page's main column used to carry, moved under the row
+ * it belongs to. The two variants differ only in what the desk calls things and
+ * in one decision: a recorded finding offers a newer capture as a press, while
+ * a claim returned by a draft pass states in words that a newer capture exists
+ * and is not substituted -- the draft pass's exact record is the one the claim
+ * was returned with, and the page has always said so rather than offered the
+ * swap.
+ */
+const citedRecordCopy = {
+  finding: {
+    heading: "Mechanical record checks",
+    fallback: "Cited capture",
+    view: "View cited captured version",
+    newer: "Review newer capture",
+    empty: "No cited captured version or capture event was recorded for this finding.",
+  },
+  claim: {
+    heading: "Exact draft provenance",
+    fallback: "Recorded provenance",
+    view: "View exact captured version",
+    newer: "",
+    empty: "No exact captured version or capture event was recorded for this returned URL.",
+  },
+} as const;
+
+function CitedRecordChecks({
+  variant,
+  captures,
+  onOpen,
+  pending,
+}: {
+  variant: "finding" | "claim";
+  captures: readonly CaptureRow[];
+  onOpen: (versionId: number) => void;
+  pending: boolean;
+}) {
+  const copy = citedRecordCopy[variant];
+  const displayedCaptures = groupDisplayCaptures([...captures]);
+  return (
+    <div className="mt-4 border-t border-rule pt-3">
+      <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">{copy.heading}</p>
+      {displayedCaptures.length ? (
+        <ul className="mt-2 space-y-3">
+          {displayedCaptures.map((group, captureIndex) => {
+            const capture = group.capture;
+            return (
+              <li
+                key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
+                className="border-l border-rule pl-3 text-sm"
+              >
+                <p className="font-medium text-ink">
+                  {capture.title ?? capture.url ?? copy.fallback}
+                </p>
+                <p className="mt-1 text-muted">
+                  {captureState(capture)}
+                  {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
+                </p>
+                {group.artifactVersionReference || group.captureEventIds.length ? (
+                  <p className="mt-1 text-muted">
+                    {group.artifactVersionReference && capture.versionId != null
+                      ? `Artifact version ${capture.versionId}`
+                      : ""}
+                    {group.artifactVersionReference && group.captureEventIds.length ? " · " : ""}
+                    {group.captureEventIds
+                      .map((captureEventId) =>
+                        capture.versionId != null
+                          ? `Capture event ${captureEventId} (version ${capture.versionId})`
+                          : `Capture event ${captureEventId}`,
+                      )
+                      .join(" · ")}
+                  </p>
+                ) : null}
+                {variant === "finding" ? (
+                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {capture.viewHref && capture.versionId != null ? (
+                      <button
+                        type="button"
+                        className="inline-link"
+                        onClick={() => onOpen(capture.versionId!)}
+                        disabled={pending}
+                      >
+                        {copy.view}
+                      </button>
+                    ) : null}
+                    {capture.newerCapture ? (
+                      <button
+                        type="button"
+                        className="inline-link"
+                        onClick={() => onOpen(capture.newerCapture!.versionId)}
+                        disabled={pending}
+                      >
+                        {copy.newer}
+                        {capture.newerCapture.capturedAt
+                          ? ` (${capture.newerCapture.capturedAt})`
+                          : ""}
+                      </button>
+                    ) : null}
+                  </p>
+                ) : (
+                  <>
+                    {capture.viewHref && capture.versionId != null ? (
+                      <button
+                        type="button"
+                        className="inline-link mt-1"
+                        onClick={() => onOpen(capture.versionId!)}
+                        disabled={pending}
+                      >
+                        {copy.view}
+                      </button>
+                    ) : null}
+                    {capture.newerCapture ? (
+                      <p className="mt-1 text-muted">
+                        A newer capture exists for review; it is not substituted for this draft’s
+                        exact record.
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-muted">{copy.empty}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The record checks for a claim an editor added by hand: the exact captured
+ * records they picked out, each with the role they gave it. No newer-capture
+ * press here -- nothing was cited to compare against, so there is nothing a
+ * newer capture could be better than.
+ */
+function ManualRecordChecks({
+  captures,
+  onOpen,
+  pending,
+}: {
+  captures: readonly CaptureRow[];
+  onOpen: (versionId: number) => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="mt-4 border-t border-rule pt-3">
+      <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+        Selected captured records
+      </p>
+      <ul className="mt-2 space-y-3">
+        {captures.map((capture, captureIndex) => (
+          <li
+            key={`${capture.versionId ?? "missing"}-${captureIndex}`}
+            className="border-l border-rule pl-3 text-sm"
+          >
+            <p className="font-medium text-ink">
+              Selected captured record · {capture.title ?? capture.url ?? "Captured record"} ·{" "}
+              {capture.relation}
+            </p>
+            <p className="mt-1 text-muted">
+              {captureState(capture, "Selected captured record")}
+              {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
+            </p>
+            {capture.viewHref && capture.versionId != null ? (
+              <button
+                type="button"
+                className="inline-link mt-1"
+                onClick={() => onOpen(capture.versionId!)}
+                disabled={pending}
+              >
+                View selected captured version
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The judgment controls a list row opens into (unit CW2): the select, the
+ * reason, the contrary record when the judgment is a contradiction, and the
+ * save.
+ *
+ * One component for all three stacks, because the three forms were copies of
+ * each other -- the same fields, the same wording, the same reasons a save is
+ * refused. What differed is only what is passed in: the id prefix, which keeps
+ * the per-stack ids `delete-corrections-e2e.mjs` reads, the label and
+ * placeholder of the contrary select, and which captures a contradiction may
+ * cite.
+ */
+function JudgmentControls({
+  idBase,
+  index,
+  judgment,
+  citedVersions,
+  contraryLabel,
+  contraryPlaceholder,
+  noneNote,
+  locked,
+  maySave,
+  savePending,
+  localDraftChanged,
+  onChange,
+  onSave,
+}: {
+  /** "finding" | "claim" | "manual-claim" -- the id prefix the walks read. */
+  idBase: string;
+  index: number;
+  judgment: JudgmentDraft;
+  citedVersions: readonly CaptureRow[];
+  contraryLabel: string;
+  contraryPlaceholder: string;
+  /** Said under the contrary select when no capture can support it, or "". */
+  noneNote: string;
+  /** The controls' own disabled state: a save in flight, or an unapplied review. */
+  locked: boolean;
+  maySave: boolean;
+  /** Which save is in flight, for the button's word. */
+  savePending: boolean;
+  localDraftChanged: boolean;
+  onChange: (update: Partial<JudgmentDraft>) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="mt-5 border-t border-rule pt-4">
+      <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p>
+      <label className="mt-2 block text-sm font-medium text-ink" htmlFor={`${idBase}-judgment-${index}`}>
+        Judgment
+      </label>
+      <select
+        id={`${idBase}-judgment-${index}`}
+        className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
+        value={judgment.value}
+        disabled={locked}
+        onChange={(event) =>
+          onChange({
+            value: event.target.value as FindingJudgment,
+            contraryVersionId:
+              event.target.value === "contradicts" ? judgment.contraryVersionId : null,
+          })
+        }
+      >
+        {(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => (
+          <option key={value} value={value}>
+            {judgmentLabels[value]}
+          </option>
+        ))}
+      </select>
+      <label className="mt-3 block text-sm font-medium text-ink" htmlFor={`${idBase}-reason-${index}`}>
+        Reason{" "}
+        {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}
+      </label>
+      <textarea
+        id={`${idBase}-reason-${index}`}
+        className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
+        value={judgment.reason}
+        maxLength={2000}
+        disabled={locked}
+        onChange={(event) => onChange({ reason: event.target.value })}
+      />
+      {judgment.value === "contradicts" ? (
+        <>
+          <label
+            className="mt-3 block text-sm font-medium text-ink"
+            htmlFor={`${idBase}-contrary-${index}`}
+          >
+            {contraryLabel}
+          </label>
+          <select
+            id={`${idBase}-contrary-${index}`}
+            className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
+            value={judgment.contraryVersionId ?? ""}
+            disabled={locked}
+            onChange={(event) =>
+              onChange({
+                contraryVersionId: event.target.value ? Number(event.target.value) : null,
+              })
+            }
+          >
+            <option value="">{contraryPlaceholder}</option>
+            {citedVersions.map((capture) => (
+              <option key={capture.versionId} value={capture.versionId!}>
+                {capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}
+              </option>
+            ))}
+          </select>
+          {!citedVersions.length && noneNote ? (
+            <p className="mt-1 text-sm text-muted">{noneNote}</p>
+          ) : null}
+        </>
+      ) : null}
+      <div className="mt-4 flex flex-wrap gap-3">
+        <InkButton disabled={!maySave} onClick={onSave}>
+          {savePending ? "Saving judgment…" : "Save judgment"}
+        </InkButton>
+        {localDraftChanged ? (
+          <span className="self-center text-sm text-muted">Save the draft first.</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export type EvidenceListInputs = {
+  /** When the checks ran, for the drawn "Ran 8:14 a.m." line. */
+  checkedAt: string | null;
+  /** The writer they ran with, or "" when no check is on the books. */
+  modelLabel: string;
+  /** `uncheckedGateTodos(notes)` -- the absence claims still unticked. */
+  openClaims: readonly NoteTodo[];
+  nameCheck: NameCheck | null;
+  /** Every finding this draft's audit raises, fixes and reviews together. */
+  styleFindings: readonly DraftAuditFinding[];
+  /**
+   * The page's Style check section (unit CW2), which the style row opens into.
+   * It is markup from the route rather than a second implementation here
+   * because the tick state and the repair mutation it needs are the page's:
+   * this panel draws the row, and the row is a way to that one section.
+   */
+  styleDetail: ReactNode;
+  /** The drawn footer press, or "" when there is no checked version to compare. */
+  compareLabel: string;
+  onCompare: () => void;
+  onStylePress: () => void;
+};
+
 export function FindingEvidenceReviewPanel({
   leadId,
   reviewRevision,
   currentDraft,
   meetingEvidence = null,
   disabled = false,
+  list,
 }: {
   leadId: number;
   reviewRevision: string;
@@ -180,6 +539,8 @@ export function FindingEvidenceReviewPanel({
   /** The draft's transcript citations, when it has any. See `TranscriptCitationEvidence`. */
   meetingEvidence?: DraftMeetingEvidence | null;
   disabled?: boolean;
+  /** The drawn list, as the page sees it: the run line, the extra rows, the presses. */
+  list: EvidenceListInputs;
 }) {
   const qc = useQueryClient();
   const [drafts, setDrafts] = useState<Record<string, JudgmentDraft>>({});
@@ -416,32 +777,554 @@ export function FindingEvidenceReviewPanel({
     }));
   }
 
-  return (
-    <section
-      id="finding-evidence-review"
-      className="mt-8 border-t border-rule pt-5"
-      aria-labelledby="finding-evidence-review-heading"
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <p className="kick">Recorded findings</p>
-          <h2 id="finding-evidence-review-heading" className="h2">
-            Finding evidence review
-          </h2>
-        </div>
-        {review ? (
-          <p className="meta">
-            {review.rows.length} recorded {review.rows.length === 1 ? "finding" : "findings"}
-          </p>
-        ) : null}
-      </div>
-      <p className="mt-2 max-w-3xl text-sm text-muted">
-        This list contains only recorded findings. A passage match confirms that the recorded words
-        appear in a cited version; it does not decide whether a finding is true. A missing capture
-        or passage is a mechanical state, not a contradiction. A newer capture is material to
-        review, not proof that the cited record is false.
-      </p>
+  /*
+    ── The drawn list (unit CW2) ─────────────────────────────────────────────
+    What the Checks tab draws is this review, row by row. `evidenceCheckRows` is
+    the same list unit CW built -- the chip, the sentence, what it was checked
+    against and the press to the record -- and every row with a review row
+    behind it now opens into that row's record checks and its judgment controls.
+    A row with nothing behind it opens to nothing.
 
+    The screen this replaces stacked three sets of judgment forms in the page's
+    main column below the editors, so an editor met a form before the check it
+    judges, and the page ran thousands of pixels past the action row the drawing
+    ends on. Here the form sits where the claim it judges sits.
+  */
+  /*
+    The drawn line under "Evidence check". Every piece of it comes from the
+    review this panel owns, so the list and the judgments can never disagree
+    about how many captures the check ran against.
+  */
+  const ranLine = evidenceRanLine({
+    checkedAt: list.checkedAt,
+    modelLabel: list.modelLabel,
+    captures: review
+      ? citedCaptureCount(review.rows, review.claimRows, review.manualClaimRows)
+      : 0,
+  });
+  /*
+    Three of the list's rows -- the claims of absence, the name row and the
+    style row -- are measurements the page holds itself and not rows of the
+    review, so they are drawn whether or not the review has arrived; the review
+    only adds the findings and the claims it holds. With no review at all (a
+    draft that has never been checked) the list is then exactly those three,
+    which is what the page measured, and the style row keeps the repair press
+    where the drawing puts it.
+  */
+  const listRows: EvidenceListRow[] = evidenceCheckRows({
+    rows: review?.rows ?? [],
+    claimRows: review?.claimRows ?? [],
+    manualClaimRows: review?.manualClaimRows ?? [],
+    openClaims: list.openClaims,
+    nameCheck: list.nameCheck,
+    styleFindings: list.styleFindings,
+  });
+
+  /*
+    A list row's key is the review row's own key -- the one the judgment save
+    takes -- so one map from key to that row's place in its stack is all a
+    disclosure body needs to find its form back.
+  */
+  const reviewRowAt = new Map<string, { kind: "finding" | "claim" | "manual"; index: number }>();
+  if (review) {
+    review.rows.forEach((row, index) =>
+      reviewRowAt.set(`finding:${row.key}`, { kind: "finding", index }),
+    );
+    review.claimRows.forEach((row, index) =>
+      reviewRowAt.set(`claim:${row.key}`, { kind: "claim", index }),
+    );
+    review.manualClaimRows.forEach((row, index) =>
+      reviewRowAt.set(`manual:${row.key}`, { kind: "manual", index }),
+    );
+  }
+
+  /*
+    One answer for every Save judgment on the page. The reasons a judgment
+    cannot be saved are the same for all three stacks -- the review this page
+    holds is not the one the row was drawn from, the page is busy, the draft
+    moved under the judgment -- so computing them per row only made three copies
+    of one sentence.
+  */
+  const saveBusy = save.isPending || manualSave.isPending;
+  const maySave = reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !saveBusy;
+  /** The controls' own disabled state: a save in flight, or an unapplied review. */
+  const locked = disabled || saveBusy || !reviewApplied;
+
+  /** The captures a contradiction may cite: available, readable, once each. */
+  const citedVersionsOf = (captures: readonly CaptureRow[]) =>
+    captures.filter(
+      (capture, captureIndex, all) =>
+        capture.available &&
+        capture.readable &&
+        capture.versionId != null &&
+        all.findIndex((candidate) => candidate.versionId === capture.versionId) === captureIndex,
+    );
+
+  /**
+   * The body of one list row's shut disclosure. A row with no review row behind
+   * it -- a claim of absence, the name row -- opens to nothing and gets no
+   * disclosure at all.
+   */
+  const renderRowDetail = (row: EvidenceListRow): ReactNode => {
+    /*
+      The style row (unit CW2) is the one row that opens into something which is
+      not a judgment: the page's Style check section, handed in as markup. It is
+      checked before the review is, because the section is the page's own -- it
+      is there whether or not a check has run.
+    */
+    if (row.ref?.kind === "style") return list.styleDetail;
+    const source = review;
+    if (!source) return null;
+    const at = reviewRowAt.get(row.key);
+    if (!at) return null;
+
+    if (at.kind === "finding") {
+      const finding = source.rows[at.index]!;
+      const judgment = drafts[finding.key] ?? {
+        value: finding.judgment.value,
+        reason: finding.judgment.reason,
+        contraryVersionId: finding.judgment.contraryVersionId,
+      };
+      const citedVersions = citedVersionsOf(finding.captures);
+      return (
+        <article className="border border-rule bg-paper p-4 sm:p-5">
+          <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+            Finding {at.index + 1}
+          </p>
+          <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{finding.finding.text}</p>
+          {finding.finding.excerpt ? (
+            <blockquote className="mt-3 border-l-2 border-rust pl-3 text-sm text-ink-2">
+              <span className="font-medium">Recorded passage: </span>
+              {finding.finding.excerpt}
+            </blockquote>
+          ) : (
+            <p className="mt-3 text-sm text-muted">
+              No recorded passage was supplied for this finding.
+            </p>
+          )}
+          {finding.finding.locators.length ? (
+            <p className="mt-2 text-sm text-muted">
+              Locator: {finding.finding.locators.join(" · ")}
+            </p>
+          ) : null}
+          {finding.finding.sourceUrls.length ? (
+            <p className="mt-2 break-all text-sm text-muted">
+              Source: {finding.finding.sourceUrls.join(" · ")}
+            </p>
+          ) : null}
+          <CitedRecordChecks
+            variant="finding"
+            captures={finding.captures}
+            onOpen={(versionId) => captureRead.mutate(versionId)}
+            pending={captureRead.isPending}
+          />
+          <JudgmentControls
+            idBase="finding"
+            index={at.index}
+            judgment={judgment}
+            citedVersions={citedVersions}
+            contraryLabel="Cited contrary captured evidence"
+            contraryPlaceholder="Choose a cited captured version"
+            noneNote="No available cited capture can support a contradiction judgment."
+            locked={locked}
+            maySave={maySave}
+            savePending={save.isPending}
+            localDraftChanged={localDraftChanged}
+            onChange={(update) => updateDraft(finding.key, update)}
+            onSave={() =>
+              save.mutate({
+                findingKey: finding.key,
+                judgment,
+                hasReadableCapture: citedVersions.length > 0,
+              })
+            }
+          />
+        </article>
+      );
+    }
+
+    if (at.kind === "claim") {
+      const claim = source.claimRows[at.index]!;
+      const judgment = drafts[claim.key] ?? claim.judgment;
+      const citedVersions = citedVersionsOf(claim.captures);
+      return (
+        <article className="border border-rule bg-paper p-4 sm:p-5">
+          <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+            Claim {at.index + 1} · {claim.claim.kind}
+          </p>
+          <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{claim.claim.fact}</p>
+          <p className="mt-2 break-all text-sm text-muted">Returned URL: {claim.claim.url}</p>
+          <CitedRecordChecks
+            variant="claim"
+            captures={claim.captures}
+            onOpen={(versionId) => captureRead.mutate(versionId)}
+            pending={captureRead.isPending}
+          />
+          <JudgmentControls
+            idBase="claim"
+            index={at.index}
+            judgment={judgment}
+            citedVersions={citedVersions}
+            contraryLabel="Cited contrary captured evidence"
+            contraryPlaceholder="Choose an exact captured version"
+            noneNote=""
+            locked={locked}
+            maySave={maySave}
+            savePending={save.isPending}
+            localDraftChanged={localDraftChanged}
+            onChange={(update) => updateDraft(claim.key, update)}
+            onSave={() =>
+              save.mutate({
+                findingKey: claim.key,
+                judgment,
+                hasReadableCapture: citedVersions.length > 0,
+              })
+            }
+          />
+        </article>
+      );
+    }
+
+    const manual = source.manualClaimRows[at.index]!;
+    const judgment = drafts[manual.key] ?? manual.judgment;
+    const corroborating = manual.captures.filter(
+      (capture) =>
+        capture.available &&
+        capture.readable &&
+        capture.relation === "corroborating" &&
+        capture.versionId != null,
+    );
+    const contrary = manual.captures.filter(
+      (capture) =>
+        capture.available &&
+        capture.readable &&
+        capture.relation === "contrary" &&
+        capture.versionId != null,
+    );
+    return (
+      <article className="border border-rule bg-paper p-4 sm:p-5">
+        <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+          Manual claim {at.index + 1} · {manual.claim.kind}
+        </p>
+        <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{manual.claim.fact}</p>
+        <ManualRecordChecks
+          captures={manual.captures}
+          onOpen={(versionId) => captureRead.mutate(versionId)}
+          pending={captureRead.isPending}
+        />
+        <JudgmentControls
+          idBase="manual-claim"
+          index={at.index}
+          judgment={judgment}
+          citedVersions={contrary}
+          contraryLabel="Explicit contrary captured record"
+          contraryPlaceholder="Choose a contrary record"
+          noneNote=""
+          locked={locked}
+          maySave={maySave}
+          savePending={save.isPending}
+          localDraftChanged={localDraftChanged}
+          onChange={(update) => updateDraft(manual.key, update)}
+          onSave={() =>
+            save.mutate({
+              findingKey: manual.key,
+              judgment,
+              hasReadableCapture: corroborating.length > 0,
+            })
+          }
+        />
+        <div className="mt-4 flex flex-wrap gap-3 border-t border-rule pt-4">
+          <InkButton
+            tone="quiet"
+            small
+            disabled={manualSave.isPending}
+            onClick={() => {
+              /*
+                Editing a claim whose form is shut. The token says which saved
+                review the form was filled from, and the form's own disclosure is
+                opened so the editor lands on the form the press just filled.
+              */
+              manualDraftToken.current = source.evidenceToken;
+              setManualClaim({
+                id: manual.claim.id,
+                fact: manual.claim.fact,
+                kind: manual.claim.kind,
+                references: manual.captures
+                  .filter((capture) => capture.versionId != null)
+                  .map((capture) => ({ versionId: capture.versionId!, relation: capture.relation })),
+              });
+              const form = document.getElementById("manual-claims-disclosure");
+              if (form instanceof HTMLDetailsElement) {
+                form.open = true;
+                form.scrollIntoView({ block: "center" });
+              }
+            }}
+          >
+            Edit claim
+          </InkButton>
+        </div>
+      </article>
+    );
+  };
+
+  /*
+    What the list ends with: the two shut disclosures the drawing's own list has
+    no room for, and the note that says what the list is and is not. Both
+    disclosures are shut by default -- the drawn page ends under the list, and an
+    editor reads the list first.
+  */
+  const extras = review ? (
+    <>
+      <details className="astra-evidence-more astra-evidence-extra">
+        <summary>All claims and records</summary>
+        <div className="astra-evidence-more-body">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <p className="kick">Draft-pass inventory</p>
+              <h2 id="draft-pass-claims-heading" className="h2">
+                Claims returned by this draft pass
+              </h2>
+            </div>
+            <p className="meta">
+              {review.claimRows.length} returned{" "}
+              {review.claimRows.length === 1 ? "claim" : "claims"}
+            </p>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm text-muted">
+            This inventory records only claims returned with this draft pass. A matching URL or
+            captured record does not establish that a claim is true, complete, or supported.
+          </p>
+          {review.claimRows.length === 0 ? (
+            <div className="mt-4 border border-rule bg-paper-2 p-4" role="status">
+              <p className="font-medium text-ink">No claims were returned with this draft pass.</p>
+            </div>
+          ) : null}
+          {review.claimRows.length ? (
+            <ul className="mt-3 space-y-3">
+              {review.claimRows.map((claim, index) => (
+                <li key={claim.key} className="border-l border-rule pl-3 text-sm">
+                  <p className="font-medium text-ink">
+                    Claim {index + 1} · {claim.claim.kind}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-ink-2">{claim.claim.fact}</p>
+                  <p className="mt-1 break-all text-muted">Returned URL: {claim.claim.url}</p>
+                  <p className="mt-1 text-muted">
+                    This claim’s record checks and judgment are on its own row in the list above.
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {review.manualClaimRows.length ? (
+            <>
+              <p className="kick mt-6">Editor-authored claims</p>
+              <p className="meta">
+                {review.manualClaimRows.length} manual{" "}
+                {review.manualClaimRows.length === 1 ? "claim" : "claims"}, each with its own row in
+                the list above
+              </p>
+            </>
+          ) : null}
+        </div>
+      </details>
+
+      <details className="astra-evidence-more astra-evidence-extra" id="manual-claims-disclosure">
+        <summary>+ Add a claim</summary>
+        <div className="astra-evidence-more-body">
+          <h2 id="manual-claims-heading" className="h2">
+            Claims added by an editor
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm text-muted">
+            Add only a fact an editor wants to review. Select exact already captured records and
+            name their role; record count or host names do not establish independence, truth, or
+            support.
+          </p>
+          <div className="mt-4 border border-rule bg-paper-2 p-4 sm:p-5">
+            <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
+              {manualClaim.id ? "Edit manual claim" : "Add manual claim"}
+            </p>
+            <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-fact">
+              Claim text
+            </label>
+            <textarea
+              id="manual-claim-fact"
+              className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
+              maxLength={400}
+              disabled={disabled || saveBusy || localDraftChanged || reloadRequired}
+              value={manualClaim.fact}
+              onChange={(event) =>
+                updateManualClaim((current) => ({ ...current, fact: event.target.value }))
+              }
+            />
+            <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-kind">
+              Claim kind
+            </label>
+            <select
+              id="manual-claim-kind"
+              className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
+              disabled={disabled || saveBusy || localDraftChanged || reloadRequired}
+              value={manualClaim.kind}
+              onChange={(event) =>
+                updateManualClaim((current) => ({
+                  ...current,
+                  kind: event.target.value as ManualClaimForm["kind"],
+                }))
+              }
+            >
+              <option value="primary">Primary</option>
+              <option value="record">Record</option>
+              <option value="news">News</option>
+            </select>
+            <div className="mt-4 border-t border-rule pt-4">
+              <p className="text-sm font-medium text-ink">Explicit captured records</p>
+              <p className="mt-1 text-sm text-muted">
+                The first choices are records saved with this draft. Other options are already
+                captured records in this newsroom; no URL is fetched or substituted.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <label
+                  className="min-w-56 flex-1 text-sm font-medium text-ink"
+                  htmlFor="manual-claim-record"
+                >
+                  Named, dated record
+                  <select
+                    id="manual-claim-record"
+                    className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm"
+                    value={recordToAdd}
+                    disabled={disabled || saveBusy || localDraftChanged || reloadRequired}
+                    onChange={(event) => setRecordToAdd(event.target.value)}
+                  >
+                    <option value="">Choose a captured record</option>
+                    {review.manualClaimCaptureOptions.map((record) => (
+                      <option key={record.versionId} value={record.versionId}>
+                        {record.title ?? record.url} · {record.capturedAt ?? "date unavailable"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label
+                  className="min-w-44 text-sm font-medium text-ink"
+                  htmlFor="manual-claim-relation"
+                >
+                  Relationship
+                  <select
+                    id="manual-claim-relation"
+                    className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm"
+                    value={recordRelation}
+                    disabled={disabled || saveBusy || localDraftChanged || reloadRequired}
+                    onChange={(event) =>
+                      setRecordRelation(event.target.value as ManualClaimReferenceRelation)
+                    }
+                  >
+                    <option value="corroborating">Corroborating</option>
+                    <option value="contrary">Contrary</option>
+                    <option value="context">Context</option>
+                  </select>
+                </label>
+                <InkButton
+                  small
+                  disabled={
+                    !recordToAdd ||
+                    manualClaim.references.length >= 6 ||
+                    disabled ||
+                    saveBusy ||
+                    localDraftChanged ||
+                    reloadRequired
+                  }
+                  onClick={() => {
+                    const versionId = Number(recordToAdd);
+                    if (!manualClaim.references.some((reference) => reference.versionId === versionId))
+                      updateManualClaim((current) => ({
+                        ...current,
+                        references: [...current.references, { versionId, relation: recordRelation }],
+                      }));
+                    setRecordToAdd("");
+                  }}
+                >
+                  Add record
+                </InkButton>
+              </div>
+              {manualClaim.references.length ? (
+                <ul className="mt-3 space-y-2">
+                  {manualClaim.references.map((reference) => {
+                    const record = review.manualClaimCaptureOptions.find(
+                      (candidate) => candidate.versionId === reference.versionId,
+                    );
+                    return (
+                      <li
+                        key={reference.versionId}
+                        className="flex flex-wrap items-center justify-between gap-2 border-l border-rule pl-3 text-sm"
+                      >
+                        <span>
+                          {record?.title ?? `Captured version ${reference.versionId}`} ·{" "}
+                          {reference.relation}
+                        </span>
+                        <button
+                          type="button"
+                          className="inline-link"
+                          disabled={manualSave.isPending}
+                          onClick={() =>
+                            updateManualClaim((current) => ({
+                              ...current,
+                              references: current.references.filter(
+                                (candidate) => candidate.versionId !== reference.versionId,
+                              ),
+                            }))
+                          }
+                        >
+                          Remove record
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-muted">Select at least one exact captured record.</p>
+              )}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <InkButton
+                disabled={
+                  !manualClaim.fact.trim() ||
+                  manualClaim.references.length === 0 ||
+                  disabled ||
+                  saveBusy ||
+                  localDraftChanged ||
+                  reloadRequired
+                }
+                onClick={() => manualSave.mutate("upsert")}
+              >
+                {manualSave.isPending
+                  ? "Saving manual claim…"
+                  : manualClaim.id
+                    ? "Save manual claim"
+                    : "Add manual claim"}
+              </InkButton>
+              {manualClaim.id ? (
+                <InkButton tone="quiet" disabled={manualSave.isPending} onClick={resetManualClaim}>
+                  Cancel edit
+                </InkButton>
+              ) : null}
+              {manualClaim.id ? (
+                <InkButton
+                  tone="danger"
+                  disabled={
+                    disabled || saveBusy || localDraftChanged || reloadRequired || !reviewApplied
+                  }
+                  onClick={() => manualSave.mutate("remove")}
+                >
+                  Remove manual claim
+                </InkButton>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </details>
+    </>
+  ) : null;
+
+  return (
+    <div id="finding-evidence-review">
       {reviewQuery.isPending ? <BusyLine label="Loading recorded finding evidence…" /> : null}
       {reviewQuery.isError ? (
         <Notice kind="err">
@@ -460,14 +1343,17 @@ export function FindingEvidenceReviewPanel({
         <Notice kind="err">
           {reviewQuery.data.error}
           {reviewQuery.data.code !== "invalid-input" ? (
-            <>{" "}<button
-              type="button"
-              className="inline-link"
-              onClick={() => void reload()}
-              disabled={reviewQuery.isRefetching}
-            >
-              Try again
-            </button></>
+            <>
+              {" "}
+              <button
+                type="button"
+                className="inline-link"
+                onClick={() => void reload()}
+                disabled={reviewQuery.isRefetching}
+              >
+                Try again
+              </button>
+            </>
           ) : null}
         </Notice>
       ) : null}
@@ -475,10 +1361,16 @@ export function FindingEvidenceReviewPanel({
 
       {captureRead.isPending ? <BusyLine label="Opening captured text…" /> : null}
       {openedCapture ? (
-        <div className="mt-4 border border-rule bg-paper-2 p-4" role="region" aria-label="Captured text">
+        <div
+          className="mt-4 border border-rule bg-paper-2 p-4"
+          role="region"
+          aria-label="Captured text"
+        >
           {openedCapture.ok ? (
             <>
-              <p className="font-medium text-ink">{openedCapture.capture.title ?? "Captured version"}</p>
+              <p className="font-medium text-ink">
+                {openedCapture.capture.title ?? "Captured version"}
+              </p>
               <p className="mt-1 break-all text-sm text-muted">{openedCapture.capture.url}</p>
               <p className="mt-1 text-sm text-muted">
                 {openedCapture.capture.capturedAt
@@ -488,7 +1380,9 @@ export function FindingEvidenceReviewPanel({
               {openedCapture.capture.fullText.trim() ? (
                 <pre className="read-full mt-3">{openedCapture.capture.fullText}</pre>
               ) : (
-                <p className="mt-3 text-sm text-muted">This captured version has no readable text.</p>
+                <p className="mt-3 text-sm text-muted">
+                  This captured version has no readable text.
+                </p>
               )}
             </>
           ) : (
@@ -537,456 +1431,22 @@ export function FindingEvidenceReviewPanel({
         </div>
       ) : null}
 
-      {review?.rows.map((row, index) => {
-        const judgment = drafts[row.key] ?? {
-          value: row.judgment.value,
-          reason: row.judgment.reason,
-          contraryVersionId: row.judgment.contraryVersionId,
-        };
-        const citedVersions = row.captures.filter(
-          (capture, captureIndex, captures) =>
-            capture.available &&
-            capture.readable &&
-            capture.versionId != null &&
-            captures.findIndex((candidate) => candidate.versionId === capture.versionId) ===
-              captureIndex,
-        );
-        const displayedCaptures = groupDisplayCaptures(row.captures);
-        const maySave =
-          reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending && !manualSave.isPending;
-        return (
-          <article key={row.key} className="mt-5 border border-rule bg-paper p-4 sm:p-5">
-            <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
-              Finding {index + 1}
-            </p>
-            <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{row.finding.text}</p>
-            {row.finding.excerpt ? (
-              <blockquote className="mt-3 border-l-2 border-rust pl-3 text-sm text-ink-2">
-                <span className="font-medium">Recorded passage: </span>
-                {row.finding.excerpt}
-              </blockquote>
-            ) : (
-              <p className="mt-3 text-sm text-muted">
-                No recorded passage was supplied for this finding.
-              </p>
-            )}
-            {row.finding.locators.length ? (
-              <p className="mt-2 text-sm text-muted">Locator: {row.finding.locators.join(" · ")}</p>
-            ) : null}
-            {row.finding.sourceUrls.length ? (
-              <p className="mt-2 break-all text-sm text-muted">
-                Source: {row.finding.sourceUrls.join(" · ")}
-              </p>
-            ) : null}
+      <EvidenceCheckList
+        ranLine={ranLine}
+        rows={listRows}
+        compareLabel={list.compareLabel}
+        onCompare={list.onCompare}
+        onStylePress={list.onStylePress}
+        detail={renderRowDetail}
+        footer={extras}
+      />
 
-            <div className="mt-4 border-t border-rule pt-3">
-              <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
-                Mechanical record checks
-              </p>
-              {displayedCaptures.length ? (
-                <ul className="mt-2 space-y-3">
-                  {displayedCaptures.map((group, captureIndex) => {
-                    const capture = group.capture;
-                    return (
-                    <li
-                      key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
-                      className="border-l border-rule pl-3 text-sm"
-                    >
-                      <p className="font-medium text-ink">
-                        {capture.title ?? capture.url ?? "Cited capture"}
-                      </p>
-                      <p className="mt-1 text-muted">
-                        {captureState(capture)}
-                        {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
-                      </p>
-                      {group.artifactVersionReference || group.captureEventIds.length ? (
-                        <p className="mt-1 text-muted">
-                          {group.artifactVersionReference && capture.versionId != null
-                            ? `Artifact version ${capture.versionId}`
-                            : ""}
-                          {group.artifactVersionReference && group.captureEventIds.length ? " · " : ""}
-                          {group.captureEventIds
-                            .map((captureEventId) =>
-                              capture.versionId != null
-                                ? `Capture event ${captureEventId} (version ${capture.versionId})`
-                                : `Capture event ${captureEventId}`,
-                            )
-                            .join(" · ")}
-                        </p>
-                      ) : null}
-                      <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                        {capture.viewHref && capture.versionId != null ? (
-                          <button
-                            type="button"
-                            className="inline-link"
-                            onClick={() => captureRead.mutate(capture.versionId!)}
-                            disabled={captureRead.isPending}
-                          >
-                            View cited captured version
-                          </button>
-                        ) : null}
-                        {capture.newerCapture ? (
-                          <button
-                            type="button"
-                            className="inline-link"
-                            onClick={() => captureRead.mutate(capture.newerCapture!.versionId)}
-                            disabled={captureRead.isPending}
-                          >
-                            Review newer capture
-                            {capture.newerCapture.capturedAt
-                              ? ` (${capture.newerCapture.capturedAt})`
-                              : ""}
-                          </button>
-                        ) : null}
-                      </p>
-                    </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-muted">
-                  No cited captured version or capture event was recorded for this finding.
-                </p>
-              )}
-            </div>
-
-            <div className="mt-5 border-t border-rule pt-4">
-              <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
-                Editor judgment
-              </p>
-              <label
-                className="mt-2 block text-sm font-medium text-ink"
-                htmlFor={`finding-judgment-${index}`}
-              >
-                Judgment
-              </label>
-              <select
-                id={`finding-judgment-${index}`}
-                className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
-                value={judgment.value}
-                disabled={disabled || save.isPending || manualSave.isPending || !reviewApplied}
-                onChange={(event) =>
-                  updateDraft(row.key, {
-                    value: event.target.value as FindingJudgment,
-                    contraryVersionId:
-                      event.target.value === "contradicts" ? judgment.contraryVersionId : null,
-                  })
-                }
-              >
-                {(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => (
-                  <option key={value} value={value}>
-                    {judgmentLabels[value]}
-                  </option>
-                ))}
-              </select>
-              <label
-                className="mt-3 block text-sm font-medium text-ink"
-                htmlFor={`finding-reason-${index}`}
-              >
-                Reason{" "}
-                {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}
-              </label>
-              <textarea
-                id={`finding-reason-${index}`}
-                className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
-                value={judgment.reason}
-                maxLength={2000}
-                disabled={disabled || save.isPending || manualSave.isPending || !reviewApplied}
-                onChange={(event) => updateDraft(row.key, { reason: event.target.value })}
-              />
-              {judgment.value === "contradicts" ? (
-                <>
-                  <label
-                    className="mt-3 block text-sm font-medium text-ink"
-                    htmlFor={`finding-contrary-${index}`}
-                  >
-                    Cited contrary captured evidence
-                  </label>
-                  <select
-                    id={`finding-contrary-${index}`}
-                    className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
-                    value={judgment.contraryVersionId ?? ""}
-                    disabled={disabled || save.isPending || manualSave.isPending || !reviewApplied}
-                    onChange={(event) =>
-                      updateDraft(row.key, {
-                        contraryVersionId: event.target.value ? Number(event.target.value) : null,
-                      })
-                    }
-                  >
-                    <option value="">Choose a cited captured version</option>
-                    {citedVersions.map((capture) => (
-                      <option key={capture.versionId} value={capture.versionId!}>
-                        {capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}
-                      </option>
-                    ))}
-                  </select>
-                  {!citedVersions.length ? (
-                    <p className="mt-1 text-sm text-muted">
-                      No available cited capture can support a contradiction judgment.
-                    </p>
-                  ) : null}
-                </>
-              ) : null}
-              <div className="mt-4 flex flex-wrap gap-3">
-                <InkButton
-                  disabled={!maySave}
-                  onClick={() =>
-                    save.mutate({
-                      findingKey: row.key,
-                      judgment,
-                      hasReadableCapture: citedVersions.length > 0,
-                    })
-                  }
-                >
-                  {save.isPending ? "Saving judgment…" : "Save judgment"}
-                </InkButton>
-                {localDraftChanged ? (
-                  <span className="self-center text-sm text-muted">Save the draft first.</span>
-                ) : null}
-              </div>
-            </div>
-          </article>
-        );
-      })}
-      {review ? (
-        <div className="mt-8 border-t border-rule pt-5" aria-labelledby="draft-pass-claims-heading">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <p className="kick">Draft-pass inventory</p>
-              <h2 id="draft-pass-claims-heading" className="h2">
-                Claims returned by this draft pass
-              </h2>
-            </div>
-            <p className="meta">
-              {review.claimRows.length} returned {review.claimRows.length === 1 ? "claim" : "claims"}
-            </p>
-          </div>
-          <p className="mt-2 max-w-3xl text-sm text-muted">
-            This inventory records only claims returned with this draft pass. A matching URL or
-            captured record does not establish that a claim is true, complete, or supported.
-          </p>
-          {review.claimRows.length === 0 ? (
-            <div className="mt-4 border border-rule bg-paper-2 p-4" role="status">
-              <p className="font-medium text-ink">No claims were returned with this draft pass.</p>
-            </div>
-          ) : null}
-          {review.claimRows.map((row, index) => {
-            const judgment = drafts[row.key] ?? row.judgment;
-            const citedVersions = row.captures.filter(
-              (capture, captureIndex, captures) =>
-                capture.available &&
-                capture.readable &&
-                capture.versionId != null &&
-                captures.findIndex((candidate) => candidate.versionId === capture.versionId) === captureIndex,
-            );
-            const displayedCaptures = groupDisplayCaptures(row.captures);
-            const maySave =
-              reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending && !manualSave.isPending;
-            return (
-              <article key={row.key} className="mt-5 border border-rule bg-paper p-4 sm:p-5">
-                <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
-                  Claim {index + 1} · {row.claim.kind}
-                </p>
-                <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{row.claim.fact}</p>
-                <p className="mt-2 break-all text-sm text-muted">Returned URL: {row.claim.url}</p>
-                <div className="mt-4 border-t border-rule pt-3">
-                  <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
-                    Exact draft provenance
-                  </p>
-                  {displayedCaptures.length ? (
-                    <ul className="mt-2 space-y-3">
-                      {displayedCaptures.map((group, captureIndex) => {
-                        const capture = group.capture;
-                        return (
-                        <li
-                          key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
-                          className="border-l border-rule pl-3 text-sm"
-                        >
-                          <p className="font-medium text-ink">{capture.title ?? capture.url ?? "Recorded provenance"}</p>
-                          <p className="mt-1 text-muted">
-                            {captureState(capture)}
-                            {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
-                          </p>
-                          {group.artifactVersionReference || group.captureEventIds.length ? (
-                            <p className="mt-1 text-muted">
-                              {group.artifactVersionReference && capture.versionId != null
-                                ? `Artifact version ${capture.versionId}`
-                                : ""}
-                              {group.artifactVersionReference && group.captureEventIds.length ? " · " : ""}
-                              {group.captureEventIds
-                                .map((captureEventId) =>
-                                  capture.versionId != null
-                                    ? `Capture event ${captureEventId} (version ${capture.versionId})`
-                                    : `Capture event ${captureEventId}`,
-                                )
-                                .join(" · ")}
-                            </p>
-                          ) : null}
-                          {capture.viewHref && capture.versionId != null ? (
-                            <button
-                              type="button"
-                              className="inline-link mt-1"
-                              onClick={() => captureRead.mutate(capture.versionId!)}
-                              disabled={captureRead.isPending}
-                            >
-                              View exact captured version
-                            </button>
-                          ) : null}
-                          {capture.newerCapture ? (
-                            <p className="mt-1 text-muted">
-                              A newer capture exists for review; it is not substituted for this draft’s exact record.
-                            </p>
-                          ) : null}
-                        </li>
-                        );
-                      })}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-sm text-muted">
-                      No exact captured version or capture event was recorded for this returned URL.
-                    </p>
-                  )}
-                </div>
-                <div className="mt-5 border-t border-rule pt-4">
-                  <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p>
-                  <label className="mt-2 block text-sm font-medium text-ink" htmlFor={`claim-judgment-${index}`}>
-                    Judgment
-                  </label>
-                  <select
-                    id={`claim-judgment-${index}`}
-                    className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
-                    value={judgment.value}
-                    disabled={disabled || save.isPending || manualSave.isPending || !reviewApplied}
-                    onChange={(event) => updateDraft(row.key, {
-                      value: event.target.value as FindingJudgment,
-                      contraryVersionId: event.target.value === "contradicts" ? judgment.contraryVersionId : null,
-                    })}
-                  >
-                    {(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => (
-                      <option key={value} value={value}>{judgmentLabels[value]}</option>
-                    ))}
-                  </select>
-                  <label className="mt-3 block text-sm font-medium text-ink" htmlFor={`claim-reason-${index}`}>
-                    Reason {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}
-                  </label>
-                  <textarea
-                    id={`claim-reason-${index}`}
-                    className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
-                    value={judgment.reason}
-                    maxLength={2000}
-                    disabled={disabled || save.isPending || manualSave.isPending || !reviewApplied}
-                    onChange={(event) => updateDraft(row.key, { reason: event.target.value })}
-                  />
-                  {judgment.value === "contradicts" ? (
-                    <>
-                      <label className="mt-3 block text-sm font-medium text-ink" htmlFor={`claim-contrary-${index}`}>
-                        Cited contrary captured evidence
-                      </label>
-                      <select
-                        id={`claim-contrary-${index}`}
-                        className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
-                        value={judgment.contraryVersionId ?? ""}
-                        disabled={disabled || save.isPending || manualSave.isPending || !reviewApplied}
-                        onChange={(event) => updateDraft(row.key, { contraryVersionId: event.target.value ? Number(event.target.value) : null })}
-                      >
-                        <option value="">Choose an exact captured version</option>
-                        {citedVersions.map((capture) => (
-                          <option key={capture.versionId} value={capture.versionId!}>{capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}</option>
-                        ))}
-                      </select>
-                    </>
-                  ) : null}
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <InkButton
-                      disabled={!maySave}
-                      onClick={() => save.mutate({ findingKey: row.key, judgment, hasReadableCapture: citedVersions.length > 0 })}
-                    >
-                      {save.isPending ? "Saving judgment…" : "Save judgment"}
-                    </InkButton>
-                    {localDraftChanged ? <span className="self-center text-sm text-muted">Save the draft first.</span> : null}
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      ) : null}
-      {review ? (
-        <div className="mt-8 border-t border-rule pt-5" aria-labelledby="manual-claims-heading">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <p className="kick">Editor-authored claims</p>
-              <h2 id="manual-claims-heading" className="h2">Claims added by an editor</h2>
-            </div>
-            <p className="meta">{review.manualClaimRows.length} manual {review.manualClaimRows.length === 1 ? "claim" : "claims"}</p>
-          </div>
-          <p className="mt-2 max-w-3xl text-sm text-muted">
-            Add only a fact an editor wants to review. Select exact already captured records and name their role;
-            record count or host names do not establish independence, truth, or support.
-          </p>
-          <div className="mt-4 border border-rule bg-paper-2 p-4 sm:p-5">
-            <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">
-              {manualClaim.id ? "Edit manual claim" : "Add manual claim"}
-            </p>
-            <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-fact">Claim text</label>
-            <textarea id="manual-claim-fact" className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm" maxLength={400}
-              disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-              value={manualClaim.fact} onChange={(event) => updateManualClaim((current) => ({ ...current, fact: event.target.value }))} />
-            <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-kind">Claim kind</label>
-            <select id="manual-claim-kind" className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm"
-              disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-              value={manualClaim.kind} onChange={(event) => updateManualClaim((current) => ({ ...current, kind: event.target.value as ManualClaimForm["kind"] }))}>
-              <option value="primary">Primary</option><option value="record">Record</option><option value="news">News</option>
-            </select>
-            <div className="mt-4 border-t border-rule pt-4">
-              <p className="text-sm font-medium text-ink">Explicit captured records</p>
-              <p className="mt-1 text-sm text-muted">The first choices are records saved with this draft. Other options are already captured records in this newsroom; no URL is fetched or substituted.</p>
-              <div className="mt-3 flex flex-wrap gap-3">
-                <label className="min-w-56 flex-1 text-sm font-medium text-ink" htmlFor="manual-claim-record">Named, dated record
-                  <select id="manual-claim-record" className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm" value={recordToAdd}
-                    disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-                    onChange={(event) => setRecordToAdd(event.target.value)}>
-                    <option value="">Choose a captured record</option>
-                    {review.manualClaimCaptureOptions.map((record) => <option key={record.versionId} value={record.versionId}>{record.title ?? record.url} · {record.capturedAt ?? "date unavailable"}</option>)}
-                  </select>
-                </label>
-                <label className="min-w-44 text-sm font-medium text-ink" htmlFor="manual-claim-relation">Relationship
-                  <select id="manual-claim-relation" className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm" value={recordRelation}
-                    disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-                    onChange={(event) => setRecordRelation(event.target.value as ManualClaimReferenceRelation)}>
-                    <option value="corroborating">Corroborating</option><option value="contrary">Contrary</option><option value="context">Context</option>
-                  </select>
-                </label>
-                <InkButton small disabled={!recordToAdd || manualClaim.references.length >= 6 || disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired}
-                  onClick={() => { const versionId = Number(recordToAdd); if (!manualClaim.references.some((reference) => reference.versionId === versionId)) updateManualClaim((current) => ({ ...current, references: [...current.references, { versionId, relation: recordRelation }] })); setRecordToAdd(""); }}>
-                  Add record
-                </InkButton>
-              </div>
-              {manualClaim.references.length ? <ul className="mt-3 space-y-2">{manualClaim.references.map((reference) => {
-                const record = review.manualClaimCaptureOptions.find((candidate) => candidate.versionId === reference.versionId);
-                return <li key={reference.versionId} className="flex flex-wrap items-center justify-between gap-2 border-l border-rule pl-3 text-sm"><span>{record?.title ?? `Captured version ${reference.versionId}`} · {reference.relation}</span><button type="button" className="inline-link" disabled={manualSave.isPending} onClick={() => updateManualClaim((current) => ({ ...current, references: current.references.filter((candidate) => candidate.versionId !== reference.versionId) }))}>Remove record</button></li>;
-              })}</ul> : <p className="mt-3 text-sm text-muted">Select at least one exact captured record.</p>}
-            </div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <InkButton disabled={!manualClaim.fact.trim() || manualClaim.references.length === 0 || disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired} onClick={() => manualSave.mutate("upsert")}>{manualSave.isPending ? "Saving manual claim…" : manualClaim.id ? "Save manual claim" : "Add manual claim"}</InkButton>
-              {manualClaim.id ? <InkButton tone="quiet" disabled={manualSave.isPending} onClick={resetManualClaim}>Cancel edit</InkButton> : null}
-              {manualClaim.id ? <InkButton tone="danger" disabled={disabled || save.isPending || manualSave.isPending || localDraftChanged || reloadRequired || !reviewApplied} onClick={() => manualSave.mutate("remove")}>Remove manual claim</InkButton> : null}
-            </div>
-          </div>
-          {review.manualClaimRows.map((row, index) => {
-            const judgment = drafts[row.key] ?? row.judgment;
-            const corroborating = row.captures.filter((capture) => capture.available && capture.readable && capture.relation === "corroborating" && capture.versionId != null);
-            const contrary = row.captures.filter((capture) => capture.available && capture.readable && capture.relation === "contrary" && capture.versionId != null);
-            const maySave = reviewApplied && !disabled && !localDraftChanged && !reloadRequired && !save.isPending && !manualSave.isPending;
-            return <article key={row.key} className="mt-5 border border-rule bg-paper p-4 sm:p-5"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Manual claim {index + 1} · {row.claim.kind}</p><p className="mt-2 whitespace-pre-wrap font-medium text-ink">{row.claim.fact}</p>
-              <div className="mt-4 border-t border-rule pt-3"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Selected captured records</p><ul className="mt-2 space-y-3">{row.captures.map((capture, captureIndex) => <li key={`${capture.versionId ?? "missing"}-${captureIndex}`} className="border-l border-rule pl-3 text-sm"><p className="font-medium text-ink">Selected captured record · {capture.title ?? capture.url ?? "Captured record"} · {capture.relation}</p><p className="mt-1 text-muted">{captureState(capture, "Selected captured record")}{capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}</p>{capture.viewHref && capture.versionId != null ? <button type="button" className="inline-link mt-1" onClick={() => captureRead.mutate(capture.versionId!)} disabled={captureRead.isPending}>View selected captured version</button> : null}</li>)}</ul></div>
-              <div className="mt-5 border-t border-rule pt-4"><p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p><label className="mt-2 block text-sm font-medium text-ink" htmlFor={`manual-claim-judgment-${index}`}>Judgment</label><select id={`manual-claim-judgment-${index}`} className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm" value={judgment.value} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { value: event.target.value as FindingJudgment, contraryVersionId: event.target.value === "contradicts" ? judgment.contraryVersionId : null })}>{(Object.keys(judgmentLabels) as FindingJudgment[]).map((value) => <option key={value} value={value}>{judgmentLabels[value]}</option>)}</select><label className="mt-3 block text-sm font-medium text-ink" htmlFor={`manual-claim-reason-${index}`}>Reason {judgment.value === "contradicts" ? "(required for contradiction)" : "(optional)"}</label><textarea id={`manual-claim-reason-${index}`} className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm" value={judgment.reason} maxLength={2000} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { reason: event.target.value })} />
-              {judgment.value === "contradicts" ? <><label className="mt-3 block text-sm font-medium text-ink" htmlFor={`manual-claim-contrary-${index}`}>Explicit contrary captured record</label><select id={`manual-claim-contrary-${index}`} className="mt-1 min-h-11 w-full border border-rule bg-paper px-3 text-sm sm:max-w-sm" value={judgment.contraryVersionId ?? ""} disabled={!reviewApplied || disabled || save.isPending || manualSave.isPending} onChange={(event) => updateDraft(row.key, { contraryVersionId: event.target.value ? Number(event.target.value) : null })}><option value="">Choose a contrary record</option>{contrary.map((capture) => <option key={capture.versionId} value={capture.versionId!}>{capture.title ?? capture.url ?? `Captured version ${capture.versionId}`}</option>)}</select></> : null}
-              <div className="mt-4 flex flex-wrap gap-3"><InkButton disabled={!maySave} onClick={() => save.mutate({ findingKey: row.key, judgment, hasReadableCapture: corroborating.length > 0 })}>{save.isPending ? "Saving judgment…" : "Save judgment"}</InkButton><InkButton tone="quiet" small disabled={manualSave.isPending} onClick={() => { manualDraftToken.current = review.evidenceToken; setManualClaim({ id: row.claim.id, fact: row.claim.fact, kind: row.claim.kind, references: row.captures.filter((capture) => capture.versionId != null).map((capture) => ({ versionId: capture.versionId!, relation: capture.relation })) }); }}>Edit claim</InkButton></div></div>
-            </article>;
-          })}
-        </div>
-      ) : null}
-    </section>
+      <p className="mt-4 max-w-3xl text-sm text-muted">
+        This list contains only recorded findings. A passage match confirms that the recorded words
+        appear in a cited version; it does not decide whether a finding is true. A missing capture
+        or passage is a mechanical state, not a contradiction. A newer capture is material to
+        review, not proof that the cited record is false.
+      </p>
+    </div>
   );
 }

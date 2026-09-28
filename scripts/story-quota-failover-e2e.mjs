@@ -464,7 +464,7 @@ async function main() {
   assert.deepEqual(leaked, [], `rung 1 was asked to draft after the hop: ${JSON.stringify(leaked)}`);
   step(`rung 1 answered the probe with 200 and ${documents.length} document read(s) with 429, nothing more`);
 
-  const body = await page.getByLabel("Body").inputValue();
+  const body = await page.getByLabel("Story", { exact: true }).inputValue();
   assert.match(
     body,
     new RegExp(marker),
