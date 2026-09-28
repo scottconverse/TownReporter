@@ -976,9 +976,8 @@
   color: var(--muted);
   padding-top: 10px;
 }
-.reader .articleaside .tag {
-  margin-bottom: 8px;
-}
+/* `.reader .articleaside p` and `a` stay: they match the dates panel's own
+   empty state and its foot link, which are still in the rail. */
 .reader .articleaside p {
   margin-bottom: 12px;
 }
@@ -2981,27 +2980,10 @@
   padding-top: 0;
   min-width: 0;
 }
-.reader .articleaside .asidecard {
-  margin-top: 22px;
-  border: 2px solid var(--grid);
-  padding: 18px;
-}
-.reader .articleaside .asidecard .tag {
-  margin-bottom: 10px;
-}
-.reader .articleaside .asidecard p {
-  font-size: 15px;
-  line-height: 1.55;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-.reader .articleaside .asidecard .textlink {
-  color: var(--ink);
-  text-decoration: underline;
-  text-decoration-thickness: 3px;
-  text-decoration-color: var(--yel);
-  text-underline-offset: 4px;
-}
+/* The rail is the dates panel alone now. The OPEN RECORD card that used to sit
+   under it -- its .asidecard box, its kicker, its line and its "How we report"
+   link -- is not in the drawing (Article Daily.dc.html has no such card beside
+   the story), so it and every rule that styled it are gone. */
 /* The panels stack into one column once the aside is under the story, so the
    two of them are not sticky there (a sticky aside inside a short column
    detaches from the thing it describes). */

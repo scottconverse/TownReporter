@@ -510,13 +510,6 @@ function ArticlePage() {
               items={storyDates}
               empty="No published record attached to this story carries a date of its own."
             />
-            <div className="asidecard">
-              <span className="tag">OPEN RECORD</span>
-              <p>Good reporting should let you look over its shoulder.</p>
-              <Link className="textlink" to="/how-we-report">
-                How we report →
-              </Link>
-            </div>
           </aside>
         </div>
       </article>
