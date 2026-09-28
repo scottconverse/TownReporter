@@ -63,6 +63,7 @@ import {
   leadIdInput,
   leadStatusInput,
   leadDuplicateResolutionInput,
+  editLeadInput,
   meetingArticleReviewInput,
   outletInput,
   packDeleteInput,
@@ -384,6 +385,7 @@ export const listLeads = createServerFn({ method: "GET" })
     >`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
              l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+             l.edited_at, l.edited_by,
              -- "import" = read out of a report the editor pasted; null = not
              -- recorded. The Queue shows the Imported badge off this.
              l.origin,
@@ -2973,6 +2975,23 @@ export const setLeadStatus = createServerFn({ method: "POST" })
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
+  });
+
+/**
+ * "Edit the lead" (design review note 2, 0.6.80): the drawn row's own
+ * subtitle is "Change the title, notes or section before drafting"
+ * (`docs/design/handoff-2026-09-26/design/Desk Dialogs.dc.html:152`). The
+ * behavior lives in `lead-edit.server.ts`, thin-wrapped here the way
+ * `saveDraft` wraps `saveDraftForEditor` -- so a test can call it directly
+ * against a real `leads` table without importing this file (see the comment
+ * on `updateLeadForEditor`).
+ */
+export const updateLead = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => editLeadInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { updateLeadForEditor } = await import("./lead-edit.server.ts");
+    return updateLeadForEditor({ userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 /**

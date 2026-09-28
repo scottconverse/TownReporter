@@ -18,6 +18,7 @@ import {
   `editor-dialogs` only. `/desk/story/$leadId` and Today import it the same way.
 */
 import { KillDialog } from "@/components/dialogs/KillDialog";
+import { EditLeadDialog } from "@/components/dialogs/EditLeadDialog";
 import { AddFollowUpButton } from "@/components/add-follow-up-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
@@ -266,6 +267,13 @@ function QueuePage() {
     the press opens the dialog and the reason it writes reaches the lead.
   */
   const [killFor, setKillFor] = useState<LeadRow | null>(null);
+  /*
+    Design review note 2 (0.6.80): the fourth of those dialogs, and the
+    drawing's first-listed row menu item. Mounted the same way as
+    holdFor/darkFor/killFor above -- once for the table, re-pointed by the
+    lead this press was for.
+  */
+  const [editFor, setEditFor] = useState<LeadRow | null>(null);
   const fileFormRef = useRef<HTMLFormElement>(null);
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
@@ -980,6 +988,7 @@ function QueuePage() {
                   */
                   onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
                   onHoldWithReason={() => setHoldFor(l)}
+                  onEdit={() => setEditFor(l)}
                   onDarkDesk={() => setDarkFor(l)}
                   /*
                     The drawn row is a button that owns its own dialog, which a
@@ -1393,6 +1402,24 @@ function QueuePage() {
             if (!open) setKillFor(null);
           }}
           onKilled={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+        />
+      ) : null}
+      {/*
+        Design review note 2 (0.6.80): "Edit the lead", mounted once for the
+        table and re-pointed by `editFor`, the same shape as `holdFor` above.
+      */}
+      {editFor ? (
+        <EditLeadDialog
+          leadId={editFor.id}
+          headline={editFor.headline}
+          why={editFor.why}
+          topic={editFor.topic}
+          sourceUrls={editFor.source_urls}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditFor(null);
+          }}
+          onSaved={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
         />
       ) : null}
     </DeskShell>
