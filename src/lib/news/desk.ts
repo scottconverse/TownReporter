@@ -27,6 +27,7 @@ import {
 } from "./schema";
 import { reportAndDraft } from "./report";
 import { cleanListWindow, takeWindow } from "./list-window.ts";
+import { cleanQueueWindow, queueCounts, queueNeedle, queueSelect } from "./queue-rows.ts";
 import {
   DESK_DRAFT_FILTERS,
   deskDraftFilterCounts,
@@ -389,69 +390,120 @@ export const reviewSuggestedSources = createServerFn({ method: "POST" })
   .validator((input: unknown) => suggestedSourceReviewInput.parse(input))
   .handler(async ({ context, data }) => performReviewSuggestedSources(context, data));
 
+/**
+ * Every lead the newsroom holds, in the Queue's own order.
+ *
+ * Extracted from `listLeads` by Unit CZ-long-lists so the Queue's window can
+ * read the same rows: `listQueuePage` narrows this list and cuts a page out of
+ * it, while the batch dialog and the Sources screen still want all of it. One
+ * query with one order -- a second copy would be a second answer to "which
+ * leads are there", and the two would drift.
+ */
+async function queryLeadRows(context: { newsroomId: number }) {
+  const sql = await getSql();
+  return sql<
+    LeadRow & {
+      article_slug: string | null;
+      investigation_id: number | null;
+      story_headline: string | null;
+    }
+  >`
+    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
+           l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
+           -- "import" = read out of a report the editor pasted; null = not
+           -- recorded. The Queue shows the Imported badge off this.
+           l.origin,
+           coalesce(a.headline, (select nullif(d.headline, '') from drafts d
+             where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
+             order by d.updated_at desc,d.id desc limit 1)) as story_headline,
+           l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
+           l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+           -- Unit AK item 5: the Compare view shows both leads side by side
+           -- without a second round trip, so the prior lead's why, sources,
+           -- dates and kill record travel with the row.
+           case when prior.id is null then null else jsonb_build_object(
+             'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+             'why', prior.why, 'source_urls', prior.source_urls,
+             'created_at', prior.created_at,
+             'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
+             'killed_at', prior.killed_at
+           ) end as possible_duplicate
+    from leads l
+    left join articles a on a.lead_id = l.id and a.status = 'published'
+    left join leads prior on prior.id = l.possible_duplicate_of
+      and prior.newsroom_id = l.newsroom_id
+    where l.newsroom_id = ${owned(context)}
+    -- An editor who just filed a lead by hand sinks below the batch first.
+    --
+    -- fileLead, writeStoryFromInput and a Dark Desk promotion all leave
+    -- newsworthiness at 0 (or whatever the editor typed), and a scan's own
+    -- output routinely scores higher -- so an operator who pasted a link
+    -- into "Write a story" watched it land at the bottom of the same
+    -- minute's scan batch instead of at the top where the thing they just
+    -- asked for belongs. Every lead a scan files carries that scan's
+    -- scan_run_id; nothing an editor files by hand ever does. Leads with no
+    -- scan_run_id sort as one group ahead of every scan-filed lead, in
+    -- their own recency order; scan-filed leads keep exactly the ordering
+    -- below among themselves.
+    --
+    -- Newest batch first, best story first WITHIN the batch.
+    --
+    -- Ordering on the raw timestamp alone put a 14-point "no minutes posted
+    -- for any 2026 council session" below an 8-point flag-committee item:
+    -- a scan writes all its leads inside the same second, so the tie was
+    -- broken arbitrarily and newsworthiness never entered into it. For a
+    -- queue whose entire job is "what should I work on next", the score has
+    -- to lead. Truncating to the minute keeps one scan's output together
+    -- instead of interleaving batches by millisecond.
+    order by (l.scan_run_id is null) desc,
+             date_trunc('minute', l.created_at) desc,
+             l.newsworthiness desc,
+             l.id desc
+  `;
+}
+
+/**
+ * Every lead, for the readers that genuinely need all of them: the batch
+ * dialog's eligible pool, the Sources screen's kill-pattern gate, the import
+ * screen and `findDuplicate`. The Queue SCREEN does not call this any more --
+ * it calls `listQueuePage` below, which sends it 25 rows.
+ */
 export const listLeads = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const sql = await getSql();
-    return sql<
-      LeadRow & {
-        article_slug: string | null;
-        investigation_id: number | null;
-        story_headline: string | null;
-      }
-    >`
-      select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
-             l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
-             -- "import" = read out of a report the editor pasted; null = not
-             -- recorded. The Queue shows the Imported badge off this.
-             l.origin,
-             coalesce(a.headline, (select nullif(d.headline, '') from drafts d
-               where d.lead_id=l.id and d.newsroom_id=l.newsroom_id
-               order by d.updated_at desc,d.id desc limit 1)) as story_headline,
-             l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
-             l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
-             -- Unit AK item 5: the Compare view shows both leads side by side
-             -- without a second round trip, so the prior lead's why, sources,
-             -- dates and kill record travel with the row.
-             case when prior.id is null then null else jsonb_build_object(
-               'id', prior.id, 'headline', prior.headline, 'status', prior.status,
-               'why', prior.why, 'source_urls', prior.source_urls,
-               'created_at', prior.created_at,
-               'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
-               'killed_at', prior.killed_at
-             ) end as possible_duplicate
-      from leads l
-      left join articles a on a.lead_id = l.id and a.status = 'published'
-      left join leads prior on prior.id = l.possible_duplicate_of
-        and prior.newsroom_id = l.newsroom_id
-      where l.newsroom_id = ${owned(context)}
-      -- An editor who just filed a lead by hand sinks below the batch first.
-      --
-      -- fileLead, writeStoryFromInput and a Dark Desk promotion all leave
-      -- newsworthiness at 0 (or whatever the editor typed), and a scan's own
-      -- output routinely scores higher -- so an operator who pasted a link
-      -- into "Write a story" watched it land at the bottom of the same
-      -- minute's scan batch instead of at the top where the thing they just
-      -- asked for belongs. Every lead a scan files carries that scan's
-      -- scan_run_id; nothing an editor files by hand ever does. Leads with no
-      -- scan_run_id sort as one group ahead of every scan-filed lead, in
-      -- their own recency order; scan-filed leads keep exactly the ordering
-      -- below among themselves.
-      --
-      -- Newest batch first, best story first WITHIN the batch.
-      --
-      -- Ordering on the raw timestamp alone put a 14-point "no minutes posted
-      -- for any 2026 council session" below an 8-point flag-committee item:
-      -- a scan writes all its leads inside the same second, so the tie was
-      -- broken arbitrarily and newsworthiness never entered into it. For a
-      -- queue whose entire job is "what should I work on next", the score has
-      -- to lead. Truncating to the minute keeps one scan's output together
-      -- instead of interleaving batches by millisecond.
-      order by (l.scan_run_id is null) desc,
-               date_trunc('minute', l.created_at) desc,
-               l.newsworthiness desc,
-               l.id desc
-    `;
+  .handler(({ context }) => queryLeadRows(context));
+
+/**
+ * The Queue screen's window (Unit CZ-long-lists).
+ *
+ * The real desk holds 41 live leads -- well over a screen of scroll -- and the
+ * screen drew every one. This returns the tab-and-search match, in the chosen
+ * order, cut to the page the editor asked for, plus the true total and the tab
+ * counts, so the pills can say "All · 41" while 25 rows are on screen.
+ *
+ * The narrowing runs HERE, before the cut, and lives in `queue-rows.ts` as a
+ * named rule rather than inline in the route: a window cut before the filter
+ * would page the unfiltered list and show the wrong rows.
+ *
+ * `printed` is read because the "≈ Printed" tab and each row's duplicate chip
+ * are decided against the published list, the same `nearDuplicate` the client
+ * used to run. The two reads are sequential, not `Promise.all`: the dev desk
+ * runs one PGlite connection and the driver does not want two queries in
+ * flight on it.
+ */
+export const listQueuePage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => cleanQueueWindow(input))
+  .handler(async ({ context, data }) => {
+    const all = await queryLeadRows(context);
+    const printed = await queryPublishedRows(context);
+    const matched = queueSelect(all, printed, {
+      filter: data.filter,
+      section: data.section,
+      sort: data.sort,
+      needle: queueNeedle(data.search),
+    });
+    const { rows, total } = takeWindow(matched, data.offset, data.limit);
+    return { rows, total, counts: queueCounts(all, printed) };
   });
 
 /**

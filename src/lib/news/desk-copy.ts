@@ -429,12 +429,12 @@ export function excerptForEditor(text: string, max = 280): string {
 }
 
 /** Leads still on the queue: published stories live on Published. */
-export function workingLeads<T extends { status: string }>(leads: T[]): T[] {
+export function workingLeads<T extends { status: string }>(leads: readonly T[]): T[] {
   return leads.filter((l) => l.status !== "published");
 }
 
 /** Open work for the command center: not published, not killed. */
-export function openLeads<T extends { status: string }>(leads: T[]): T[] {
+export function openLeads<T extends { status: string }>(leads: readonly T[]): T[] {
   return leads.filter((l) => l.status !== "killed" && l.status !== "published");
 }
 
@@ -1306,7 +1306,7 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
-  published: { slug: string; headline: string; topic?: string; published_at: string }[],
+  published: readonly { slug: string; headline: string; topic?: string; published_at: string }[],
 ): PrintedDup | null {
   for (const p of published) {
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
