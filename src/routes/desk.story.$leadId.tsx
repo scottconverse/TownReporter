@@ -2338,6 +2338,7 @@ function StoryPage() {
               leadId={id}
               reviewRevision={data.evidenceToken}
               currentDraft={{ headline, dek, body, topic }}
+              meetingEvidence={data.draftMeetingEvidence}
               disabled={
                 locked ||
                 onPaper ||
