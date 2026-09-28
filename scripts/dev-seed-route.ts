@@ -705,9 +705,15 @@ async function seedPublished(sql: Sql, user: string) {
     values (${user}, ${NEWSROOM_ID}, ${"HOPE for Longmont"},
             ${"Contract extension and the missing audit."}, ${made[0]!.id})
   `;
+  /*
+    `lead_id` on this one row: the story page's manual section was scoped
+    `f.lead_id === leadId`, so a manual row with a null lead never reached it
+    and the BEFORE capture of `/desk/story/$leadId` would have shown an empty
+    section instead of the section this unit removes.
+  */
   await sql`
-    insert into follow_ups (newsroom_id, user_id, article_id, who, what, due_on, status)
-    values (${NEWSROOM_ID}, ${user}, ${made[0]!.id}, ${"City Clerk"},
+    insert into follow_ups (newsroom_id, user_id, lead_id, article_id, who, what, due_on, status)
+    values (${NEWSROOM_ID}, ${user}, ${council[0]!.id}, ${made[0]!.id}, ${"City Clerk"},
             ${"Ask when the March audit will be published."}, current_date + 3, ${"open"})
   `;
   await sql`
@@ -728,6 +734,64 @@ async function seedPublished(sql: Sql, user: string) {
     insert into follow_ups (newsroom_id, user_id, who, what, status)
     values (${NEWSROOM_ID}, ${user}, ${"Former council candidate"},
             ${"Interview about the parking study."}, ${"dropped"})
+  `;
+
+  /*
+    The four rows above are the pre-0.6.81 manual ask -- who owes you an answer,
+    what they owe, when it is due. They STAY in the seed on purpose: 0.6.81
+    retires the manual workflow without deleting a single row
+    (migrations/0106_retire_manual_follow_ups.sql), so the seed keeps writing
+    them and the screenshots show that a live manual row no longer reaches any
+    screen. `who`/`what`/`due_on`/`reply_text` are still readable in the table.
+
+    The three rows below are what replaced them: agents. One per kind, and one
+    per interesting last_state, because the card draws those states differently
+    and a screenshot with only healthy agents would not show that.
+  */
+  await sql`
+    insert into follow_ups (newsroom_id, user_id, lead_id, article_id, who, what, status,
+                            agent_kind, targets_json, schedule, model_choice, last_state,
+                            last_run_at, next_run_at, finding_json)
+    values (${NEWSROOM_ID}, ${user}, ${council[0]!.id}, ${made[0]!.id},
+            ${"Re-check"}, ${"Has the March audit been published?"}, ${"active"},
+            ${"recheck"},
+            ${'["https://longmont.primegov.com/public/portal","https://www.longmontcolorado.gov/audit"]'},
+            ${"daily"}, ${"auto"}, ${"found"},
+            now() - interval '6 hours', now() + interval '18 hours',
+            ${JSON.stringify({
+              title: "Audit page now lists a September entry",
+              summary:
+                "The city auditor's page gained a row dated September 12 for the HOPE contract audit.",
+              url: "https://www.longmontcolorado.gov/audit",
+              checked_at: "2026-09-28T05:00:00.000Z",
+              changed: true,
+            })})
+  `;
+  await sql`
+    insert into follow_ups (newsroom_id, user_id, lead_id, who, what, status, agent_kind,
+                            targets_json, schedule, model_choice, last_state, last_run_at,
+                            next_run_at)
+    values (${NEWSROOM_ID}, ${user}, ${council[0]!.id}, ${"Search"},
+            ${"Who signed the HOPE contract on the city's side?"}, ${"active"}, ${"search"},
+            ${'[]'}, ${"6h"}, ${"auto"}, ${"running"},
+            now() - interval '2 hours', now() + interval '4 hours')
+  `;
+  await sql`
+    insert into follow_ups (newsroom_id, user_id, who, what, status, agent_kind, targets_json,
+                            schedule, model_choice, last_state, last_run_at, next_run_at,
+                            finding_json)
+    values (${NEWSROOM_ID}, ${user}, ${"Agenda watch"}, ${"Watch the council portal for the audit item."},
+            ${"active"}, ${"agenda"}, ${'["https://longmont.primegov.com/public/portal"]'},
+            ${"weekly"}, ${"auto"}, ${"could-not-check"},
+            now() - interval '3 days', now() + interval '4 days',
+            ${JSON.stringify({
+              title: "Portal did not answer",
+              summary: "The portal returned a 502 twice in a row; nothing was read from the agenda.",
+              url: "https://longmont.primegov.com/public/portal",
+              reason: "503 Service Unavailable after two retries",
+              checked_at: "2026-09-25T11:00:00.000Z",
+              changed: false,
+            })})
   `;
 }
 
@@ -779,7 +843,19 @@ async function seed() {
     union all select 'anomalies', count(*)::int from anomalies where newsroom_id = ${NEWSROOM_ID}
     union all select 'reviews', count(*)::int from meeting_article_revision_reviews where newsroom_id = ${NEWSROOM_ID}
   `;
-  return { ok: true, user, counts };
+  /*
+    The story page the shot walk opens, named by the seed rather than guessed
+    from Today's link order. It is the lead the manual follow-up rows hang on,
+    which is the only lead where a BEFORE capture has anything to show in
+    "People who still need to respond" -- so both runs open the same story, and
+    the pair of images differs by the unit's diff and nothing else.
+  */
+  const storyLead = await sql<{ lead_id: number }>`
+    select lead_id from follow_ups
+     where newsroom_id = ${NEWSROOM_ID} and lead_id is not null
+     order by id limit 1
+  `;
+  return { ok: true, user, counts, storyLead: storyLead[0]?.lead_id ?? null };
 }
 
 export const Route = createFileRoute("/api/dev-seed")({

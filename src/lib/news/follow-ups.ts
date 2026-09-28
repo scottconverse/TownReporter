@@ -142,49 +142,52 @@ function owned(context: { newsroomId?: number }) {
 }
 
 /*
-  The two branches below inline the same 22-column list by hand. The shim in
-  src/lib/db.ts has no `unsafe()`, and a tagged template would bind an
-  interpolated column list as one parameter, so a shared constant is not
-  available to a query builder here. The duplication is covered by a test:
-  follow-ups.test.ts writes every 0101 column and reads it back through
-  `performListFollowUps`, so a column missing from a branch fails there rather
-  than silently on the screen.
+  This inlines the 22-column list by hand. The shim in src/lib/db.ts has no
+  `unsafe()`, and a tagged template would bind an interpolated column list as
+  one parameter, so a shared constant is not available to a query builder here.
+  The column set is covered by a test: follow-ups.test.ts writes every 0101
+  column and reads it back through `performListFollowUps`, so a column missing
+  here fails there rather than silently on the screen.
+
+  AGENT ROWS ONLY. `agent_kind is not null` is the read half of retiring the
+  manual workflow (0.6.81, unit CU; the data half is
+  migrations/0106_retire_manual_follow_ups.sql): a row without an agent kind is
+  a manual ask -- who to call, what they owe, when -- and there is no screen
+  left that draws one, no way to create one and no way to work one. Filtering
+  here rather than in each screen is what makes "a manual row cannot reach any
+  view" a property of the one query every view goes through, instead of three
+  render-time filters that a fourth view could forget. The rows themselves stay
+  in the table for the record (the migration only closes them).
+
+  The `status` filter that used to be the second branch went with the manual
+  workflow: its only legal values were open | answered | dropped, no caller
+  passed one, and the screen narrows what it was given with
+  `matchesFollowUpFilter` client-side. The order lost its `due_on` clause for
+  the same reason -- no insert has set `due_on` since the manual create was the
+  only writer, so `(due_on is null), due_on` sorted nothing and the clause is
+  now `created_at desc`, which is what it already resolved to.
 */
 export async function performListFollowUps(
   context: { userId: string; newsroomId?: number },
-  input: { status?: FollowUpStatus; limit?: number } = {},
+  input: { limit?: number } = {},
 ): Promise<FollowUpRow[]> {
   await ensureFollowUpsSchema();
   const sql = await getSql();
   const limit = Math.min(Math.max(input.limit ?? 100, 1), 200);
-  const rows = input.status
-    ? await sql<FollowUpRow>`
-        select f.id, f.newsroom_id, f.user_id, f.lead_id, f.article_id, f.who, f.what, f.due_on,
-               f.status, f.nudged_at, f.answered_at, f.reply_text, f.created_at, f.updated_at,
-               f.agent_kind, f.targets_json, f.schedule, f.model_choice,
-               f.last_run_at, f.next_run_at, f.last_state, f.finding_json,
-               l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline
-        from follow_ups f
-        left join leads l on l.id = f.lead_id
-        left join articles a on a.id = f.article_id
-        where f.newsroom_id = ${owned(context)} and f.status = ${input.status}
-        order by (f.due_on is null), f.due_on asc, f.created_at desc
-        limit ${limit}
-      `
-    : await sql<FollowUpRow>`
-        select f.id, f.newsroom_id, f.user_id, f.lead_id, f.article_id, f.who, f.what, f.due_on,
-               f.status, f.nudged_at, f.answered_at, f.reply_text, f.created_at, f.updated_at,
-               f.agent_kind, f.targets_json, f.schedule, f.model_choice,
-               f.last_run_at, f.next_run_at, f.last_state, f.finding_json,
-               l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline
-        from follow_ups f
-        left join leads l on l.id = f.lead_id
-        left join articles a on a.id = f.article_id
-        where f.newsroom_id = ${owned(context)}
-        order by (f.status = 'open') desc, (f.due_on is null), f.due_on asc, f.created_at desc
-        limit ${limit}
-      `;
-  return rows;
+  return sql<FollowUpRow>`
+    select f.id, f.newsroom_id, f.user_id, f.lead_id, f.article_id, f.who, f.what, f.due_on,
+           f.status, f.nudged_at, f.answered_at, f.reply_text, f.created_at, f.updated_at,
+           f.agent_kind, f.targets_json, f.schedule, f.model_choice,
+           f.last_run_at, f.next_run_at, f.last_state, f.finding_json,
+           l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline
+    from follow_ups f
+    left join leads l on l.id = f.lead_id
+    left join articles a on a.id = f.article_id
+    where f.newsroom_id = ${owned(context)}
+      and f.agent_kind is not null
+    order by f.created_at desc
+    limit ${limit}
+  `;
 }
 
 /**
@@ -230,25 +233,19 @@ export async function performListFollowUpFindings(
   `;
 }
 
-export async function performCreateFollowUp(
-  context: { userId: string; newsroomId?: number },
-  input: { leadId?: number | null; articleId?: number | null; who: string; what: string; dueOn?: string | null },
-): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
-  await ensureFollowUpsSchema();
-  const who = input.who.trim().slice(0, 200);
-  const what = input.what.trim().slice(0, 400);
-  if (!who || !what) return { ok: false as const, error: "Who and what are both required." };
-  const sql = await getSql();
-  const rows = await sql<{ id: number }>`
-    insert into follow_ups (user_id, newsroom_id, lead_id, article_id, who, what, due_on)
-    values (
-      ${context.userId}, ${owned(context)}, ${input.leadId ?? null}, ${input.articleId ?? null},
-      ${who}, ${what}, ${input.dueOn ?? null}
-    )
-    returning id
-  `;
-  return { ok: true as const, id: rows[0]!.id };
-}
+/**
+ * The manual write functions that were here -- `performCreateFollowUp`
+ * (who/what/due), `performRecordFollowUpReply`, `performNudgeFollowUp` and
+ * `performDropFollowUp` -- were removed in 0.6.81 (unit CU). They were the
+ * server half of the human "seek a response" step, which DECISIONS.md:44
+ * retires outright ("No human 'seek a response' step anywhere"; see also
+ * DECISIONS.md:38, "Follow-ups are AI agents ... not a list of people to
+ * call"). Nothing replaces them: an editor who wants a question watched
+ * starts an agent (`performCreateAiFollowUp` below), and the four statuses
+ * they wrote (open | answered | dropped) are only ever read now, by
+ * migrations/0106_retire_manual_follow_ups.sql closing the rows that were
+ * still open. The rows themselves are kept, and so is their table.
+ */
 
 /**
  * One follow-up by id, in the same shape the list returns -- including the
@@ -279,65 +276,6 @@ export async function performReadFollowUp(
     where f.id = ${id} and f.newsroom_id = ${owned(context)}
   `;
   return rows[0] ?? null;
-}
-
-export async function performRecordFollowUpReply(
-  context: { userId: string; newsroomId?: number },
-  input: { id: number; replyText: string; repliedOn?: string | null },
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  await ensureFollowUpsSchema();
-  const replyText = input.replyText.trim().slice(0, 2000);
-  if (!replyText) return { ok: false as const, error: "Add what they said before saving." };
-  const sql = await getSql();
-  const rows = await sql<{ id: number; lead_id: number | null; who: string }>`
-    update follow_ups
-    set status = 'answered', answered_at = now(), reply_text = ${replyText}, updated_at = now()
-    where id = ${input.id} and newsroom_id = ${owned(context)}
-    returning id, lead_id, who
-  `;
-  const row = rows[0];
-  if (!row) return { ok: false as const, error: "That follow-up is gone." };
-  if (row.lead_id) {
-    const when = input.repliedOn ?? new Date().toISOString().slice(0, 10);
-    const leadRows = await sql<{ notes_json: string | null }>`
-      select notes_json from leads where id = ${row.lead_id} and newsroom_id = ${owned(context)}
-    `;
-    if (leadRows[0]) {
-      const notes = parseNotes(leadRows[0].notes_json);
-      notes.found.push({ t: `Reply from ${row.who} (${when}): ${replyText}` });
-      await sql`
-        update leads set notes_json = ${packNotes(notes)}
-        where id = ${row.lead_id} and newsroom_id = ${owned(context)}
-      `;
-    }
-  }
-  return { ok: true as const };
-}
-
-export async function performNudgeFollowUp(
-  context: { userId: string; newsroomId?: number },
-  id: number,
-): Promise<{ ok: true }> {
-  await ensureFollowUpsSchema();
-  const sql = await getSql();
-  await sql`
-    update follow_ups set nudged_at = now(), updated_at = now()
-    where id = ${id} and newsroom_id = ${owned(context)} and status = 'open'
-  `;
-  return { ok: true as const };
-}
-
-export async function performDropFollowUp(
-  context: { userId: string; newsroomId?: number },
-  id: number,
-): Promise<{ ok: true }> {
-  await ensureFollowUpsSchema();
-  const sql = await getSql();
-  await sql`
-    update follow_ups set status = 'dropped', updated_at = now()
-    where id = ${id} and newsroom_id = ${owned(context)}
-  `;
-  return { ok: true as const };
 }
 
 /* ==========================================================================

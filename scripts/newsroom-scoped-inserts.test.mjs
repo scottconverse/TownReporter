@@ -69,8 +69,10 @@ const SCOPED_TABLES = [
   // proof this table's inserts land in the caller's own newsroom).
   "source_monitors",
   // 0.6.21: the Follow-ups object (migrations/0042_follow_ups.sql). Every
-  // insert lives in createFollowUp (src/lib/news/desk.ts) and writes
-  // newsroom_id from the caller's own context, never a hardcoded constant.
+  // insert writes newsroom_id from the caller's own context, never a hardcoded
+  // constant. 0.6.81 (unit CU): the manual createFollowUp insert is gone with
+  // the manual workflow; what is left is the AI agent insert in follow-ups.ts
+  // and the ensure-schema mirror in this repo's test fixtures.
   "follow_ups",
 ];
 

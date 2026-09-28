@@ -271,10 +271,14 @@ export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter):
  * ordering is the whole of the rule and the reason this is a function rather
  * than a chain of ternaries in the component.
  *
- * `manual` is not a drawing state: an agent_kind of null is a manual ask, whose
- * card is FollowUpItem. It is in the union so a caller that hands one in gets
- * an honest answer instead of the nearest agent state, which would show an
- * editor's ask as an agent's finding.
+ * `manual` is not a drawing state: an agent_kind of null is a manual ask, and
+ * since 0.6.81 (unit CU) the manual workflow is retired -- the component that
+ * drew those rows (`FollowUpItem`) is deleted with its reply/nudge/drop
+ * buttons, and `listFollowUps` no longer returns a row without an agent_kind,
+ * so no screen hands one in. It stays in the union so the answer for such a row
+ * is still honest rather than the nearest agent state, which would show an
+ * editor's old ask as an agent's finding. The rows themselves are kept by
+ * migrations/0106_retire_manual_follow_ups.sql.
  */
 export type FollowUpCardState =
   | "manual"

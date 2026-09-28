@@ -57,11 +57,8 @@ import {
   aiFollowUpInput,
   aiFollowUpUpdateInput,
   followUpActionInput,
-  followUpCreateInput,
   followUpFindingsInput,
-  followUpReplyInput,
   followUpsInput,
-  idOnlyInput,
   jobIdInput,
   leadIdInput,
   leadStatusInput,
@@ -3096,10 +3093,6 @@ export const resolveLeadDuplicate = createServerFn({ method: "POST" })
 export {
   ensureFollowUpsSchema,
   performListFollowUps,
-  performCreateFollowUp,
-  performRecordFollowUpReply,
-  performNudgeFollowUp,
-  performDropFollowUp,
   performCreateAiFollowUp,
   performUpdateAiFollowUp,
   performFollowUpAction,
@@ -3107,10 +3100,6 @@ export {
 } from "./follow-ups.ts";
 import {
   performListFollowUps as _performListFollowUps,
-  performCreateFollowUp as _performCreateFollowUp,
-  performRecordFollowUpReply as _performRecordFollowUpReply,
-  performNudgeFollowUp as _performNudgeFollowUp,
-  performDropFollowUp as _performDropFollowUp,
   performCreateAiFollowUp as _performCreateAiFollowUp,
   performUpdateAiFollowUp as _performUpdateAiFollowUp,
   performFollowUpAction as _performFollowUpAction,
@@ -3121,6 +3110,14 @@ import {
 // the `run-now` handler above, which is the only place it is needed.
 import type { FollowUpRunStart } from "./follow-up-scheduler.ts";
 
+/**
+ * The one list read, and it is agent-only (`performListFollowUps` filters on
+ * `agent_kind is not null`). `createFollowUp`, `recordFollowUpReply`,
+ * `nudgeFollowUp` and `dropFollowUp` were here until 0.6.81 (unit CU) and are
+ * gone with the manual workflow they served -- see the note in
+ * ./follow-ups.ts where their `perform*` bodies were. Nothing calls them: the
+ * three screens that used to are on the agent half below.
+ */
 export const listFollowUps = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   // `input ?? {}` is preserved by the schema: listing with no filter is real.
@@ -3138,35 +3135,12 @@ export const listFollowUps = createServerFn({ method: "GET" })
     }
   });
 
-export const createFollowUp = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  .validator((input: unknown) => followUpCreateInput.parse(input))
-  .handler(async ({ context, data }) => _performCreateFollowUp(context, data));
-
-export const recordFollowUpReply = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  .validator((input: unknown) => followUpReplyInput.parse(input))
-  .handler(async ({ context, data }) => _performRecordFollowUpReply(context, data));
-
-export const nudgeFollowUp = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  .validator((input: unknown) => idOnlyInput.parse(input))
-  .handler(async ({ context, data }) => _performNudgeFollowUp(context, data.id));
-
-export const dropFollowUp = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  .validator((input: unknown) => idOnlyInput.parse(input))
-  .handler(async ({ context, data }) => _performDropFollowUp(context, data.id));
-
 /* ==========================================================================
    Redesign phase 6 (lane 2): the AI follow-ups.
 
-   The screen lists rows through the EXISTING `listFollowUps` and splits them
-   itself: an agent row carries an `agent_kind`, a manual ask does not, and the
-   one query already orders both the way the two sections want. What is new
-   here is what only an agent row needs -- being made, being edited, being moved
-   through the states its cards offer, and the findings query the Today rail
-   mounts.
+   What only an agent row needs -- being made, being edited, being moved through
+   the states its cards offer, and the findings query the Today rail mounts. The
+   list they are drawn from is the one `listFollowUps` above.
    ========================================================================== */
 
 export const createAiFollowUp = createServerFn({ method: "POST" })
