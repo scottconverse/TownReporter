@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * The daily scan on Automatic, end to end through the desk (0.6.64, Unit AA).
+ * The daily scan on Automatic and the manual General path, end to end through
+ * the desk (0.6.64, Unit AA; manual Scan receipt follow-up).
  *
  * Before this walk the scheduled scan had to name ONE provider: the picker
  * refused Automatic with an `if (runtime !== "auto")` guard, because a
@@ -21,6 +22,8 @@
  *     pair;
  *  5. the queued job actually WRITES: it fetches its source, calls rung 1's
  *     chat endpoint, files the lead the stub answered with, and completes.
+ *  6. after the scheduled assertions, the owner clicks General Run scan and
+ *     its exact new job and run settle with the latest result visible.
  *
  * Model-free, the way the Y2 failover walks are: rung 1 (DeepSeek v4.1 Flash)
  * is an OpenAI-compatible endpoint, so the walk starts
@@ -549,6 +552,159 @@ async function theScanHistoryListsTheRun() {
   step("the scan history lists the scheduled run the tick reserved");
 }
 
+/** The manual General action is last, after the scheduled-run proof is complete. */
+async function theOwnerRunsAndSeesTheManualGeneralScan() {
+  const pg = await globalThis.__pgliteInstance__;
+  const accepted = (
+    await pg.query(
+      "select id,url,title from sources where newsroom_id=1 and status='accepted' order by id",
+    )
+  ).rows;
+  must(
+    accepted.length === 1 && accepted[0]?.url === SOURCE_URL,
+    `manual General precondition needs exactly the accepted ${SOURCE_URL} source; found ${JSON.stringify(accepted)}`,
+  );
+
+  const [baseline] = (
+    await pg.query(
+      `select coalesce((select max(id) from scan_runs),0) as scan_id,
+              coalesce((select max(id) from desk_jobs),0) as job_id`,
+    )
+  ).rows;
+  const baselineLog = await fakeLog();
+  const baselineScanCalls = (baselineLog?.requests ?? []).filter(
+    (r) => r.class === "scan" && r.path.endsWith("/chat/completions"),
+  ).length;
+  must(
+    baselineScanCalls === 1,
+    `the scheduled proof left ${baselineScanCalls} scan calls before the manual click; expected exactly 1`,
+  );
+  facts.push({
+    manualPrecondition: { acceptedSources: accepted.length, sourceUrl: accepted[0].url },
+    manualBaseline: { scanId: baseline.scan_id, jobId: baseline.job_id, scanCalls: baselineScanCalls },
+  });
+
+  const scope = page.locator(".astra-toolbar select").first();
+  await scope.waitFor({ timeout: 30_000 });
+  await scope.selectOption("general");
+  const runButton = page.getByRole("button", { name: "Run scan", exact: true });
+  await runButton.waitFor({ state: "visible", timeout: 30_000 });
+  must(await runButton.isEnabled(), "General Run scan is disabled before the manual click");
+  await runButton.click();
+
+  const manualJob = await waitForTruth(
+    "the exact new manual scan job to finish",
+    async () => {
+      const rows = (
+        await pg.query(
+          `select id,kind,status,stage,error,subject_id,model_choice_source
+           from desk_jobs where id > $1 and kind='scan' order by id asc`,
+          [baseline.job_id],
+        )
+      ).rows;
+      if (rows.length > 1)
+        throw new Error(`manual click created ${rows.length} new scan jobs: ${JSON.stringify(rows)}`);
+      const row = rows[0];
+      return row && (row.status === "completed" || row.status === "failed") ? row : null;
+    },
+  );
+  must(
+    manualJob.status === "completed",
+    `manual scan job ${manualJob.id} ended ${manualJob.status} (${manualJob.model_choice_source}): ${JSON.stringify(manualJob.error)}`,
+  );
+
+  const newRuns = (
+    await pg.query(
+      `select id,execution_origin,finished_at,error,sources_selected,sources_attempted,
+              sources_fetched,sources_failed,sources_analyzed,model_batches_used,
+              model_batches_failed,leads_created,summary
+       from scan_runs where id > $1 order by id asc`,
+      [baseline.scan_id],
+    )
+  ).rows;
+  must(
+    newRuns.length === 1,
+    `expected one scan run newer than baseline ${baseline.scan_id}; found ${JSON.stringify(newRuns)}`,
+  );
+  const manualRun = newRuns[0];
+  must(
+    manualRun.id === manualJob.subject_id && manualRun.execution_origin === "manual",
+    `new run ${manualRun.id} is not the manual job's run ${manualJob.subject_id}: ${JSON.stringify(manualRun)}`,
+  );
+  must(
+    Boolean(manualRun.finished_at) && manualRun.error == null && manualRun.sources_selected === 1 &&
+      manualRun.sources_attempted === 1 && manualRun.sources_fetched === 1 && manualRun.sources_failed === 0 &&
+      manualRun.sources_analyzed === 1 && manualRun.model_batches_used === 1 &&
+      manualRun.model_batches_failed === 0,
+    `manual General run did not settle with full one-source coverage: ${JSON.stringify(manualRun)}`,
+  );
+  const manualLeads = (
+    await pg.query("select headline from leads where scan_run_id=$1 order by id", [manualRun.id])
+  ).rows;
+  must(
+    manualLeads.length === manualRun.leads_created,
+    `manual run ${manualRun.id} has ${manualLeads.length} linked leads, receipt says ${manualRun.leads_created}`,
+  );
+
+  await page.goto(`${base}/desk/scan`, { waitUntil: "domcontentloaded" });
+  const latestRow = page.locator(".scan-hist .scan-row").first();
+  await latestRow.waitFor({ state: "visible", timeout: 45_000 });
+  const latestMeta = latestRow.locator("p.meta");
+  await latestMeta.waitFor({ state: "visible", timeout: 45_000 });
+  const metaText = (await latestMeta.innerText()).replace(/\s+/g, " ").trim();
+  must(metaText.endsWith("· Manual scan"), `latest visible history row is not this manual scan: ${JSON.stringify(metaText)}`);
+  const latestChip = latestRow.locator(".astra-row-acts .astra-chip");
+  const expectedLeadChip = manualRun.leads_created > 0
+    ? `Filed ${manualRun.leads_created} lead${manualRun.leads_created === 1 ? "" : "s"}`
+    : "No leads";
+  must(
+    (await latestChip.innerText()).trim() === expectedLeadChip,
+    `latest manual result chip is ${JSON.stringify(await latestChip.innerText().catch(() => "missing"))}`,
+  );
+  const latestCoverage = (await latestRow.locator(".scan-line").innerText()).replace(/\s+/g, " ").trim();
+  const leadLabel = `${manualRun.leads_created} lead${manualRun.leads_created === 1 ? "" : "s"}`;
+  must(
+    latestCoverage === `1 selected · 1 fetched · 1 analyzed · ${leadLabel} · 1 batch.`,
+    `latest manual coverage is ${JSON.stringify(latestCoverage)}`,
+  );
+  const latestSummary = (await latestRow.locator(".wire-sum").innerText()).replace(/\s+/g, " ").trim();
+  must(
+    latestSummary.startsWith("Rung 1 read the fetched page and filed one lead"),
+    `latest manual summary is ${JSON.stringify(latestSummary)}`,
+  );
+  const topResult = page.locator(".scan-result").first();
+  await topResult.waitFor({ state: "visible", timeout: 30_000 });
+  const topResultText = (await topResult.innerText()).replace(/\s+/g, " ").trim();
+  const expectedTopLine = manualRun.leads_created > 0 ? "Done." : "Fetched 1. Filed nothing.";
+  must(
+    topResultText.includes(expectedTopLine) && topResultText.includes(latestSummary),
+    "the rendered current result does not show the terminal manual scan summary",
+  );
+
+  const afterLog = await fakeLog();
+  const afterScanCalls = (afterLog?.requests ?? []).filter(
+    (r) => r.class === "scan" && r.path.endsWith("/chat/completions"),
+  ).length;
+  must(
+    afterScanCalls === baselineScanCalls + 1,
+    `manual General scan made ${afterScanCalls - baselineScanCalls} scan calls; expected exactly one`,
+  );
+  facts.push({
+    manualJob: { id: manualJob.id, status: manualJob.status, modelChoiceSource: manualJob.model_choice_source },
+    manualRun: {
+      id: manualRun.id,
+      status: manualRun.finished_at ? "completed" : "open",
+      sourcesSelected: manualRun.sources_selected,
+      sourcesFetched: manualRun.sources_fetched,
+      sourcesAnalyzed: manualRun.sources_analyzed,
+      leadsCreated: manualRun.leads_created,
+    },
+    visibleLatestManualResult: { metaText, latestCoverage, latestSummary },
+    manualScanCalls: afterScanCalls - baselineScanCalls,
+  });
+  step("the owner ran General manually and saw its exact terminal result at the top of history");
+}
+
 async function main() {
   preconditions();
   const fake = await startFake("scripts/fakes/fake-deepseek-endpoint.mjs", {
@@ -580,6 +736,7 @@ async function main() {
     await theQueuedJobWritesOnTheResolvedRung();
     await theRunRecordNamesTheResolvedModel();
     await theScanHistoryListsTheRun();
+    await theOwnerRunsAndSeesTheManualGeneralScan();
   } catch (err) {
     await dump(err);
   }

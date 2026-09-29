@@ -735,6 +735,34 @@ describe("authenticated Codex commit boundary", () => {
       model_choice_source: "editor",
     });
 
+    // A repeated click on the same active scan coalesces onto its one durable
+    // job without charging rate budget or enqueuing a duplicate.
+    let repeatedRateCalls = 0;
+    const repeated = await commitScanForAuthenticatedEditor(
+      {
+        context: { userId, newsroomId: 1 },
+        modelChoice: "codex-frontier",
+      },
+      {
+        probeProvider: async () => ({
+          ok: true as const,
+          label: "Codex Sol",
+          choice: "codex-frontier" as const,
+        }),
+        assertRate: async () => {
+          repeatedRateCalls += 1;
+        },
+        enqueueJob: async () => {
+          throw new Error("a repeated click must reuse the active scan");
+        },
+      },
+    );
+    assert.equal(repeated.ok, true);
+    if (!repeated.ok) assert.fail((repeated as any).error);
+    assert.equal(repeated.jobId, editorPick.jobId);
+    assert.equal(repeatedRateCalls, 0);
+    assert.equal(editorEnqueueCalls, 1);
+
     // The same newsroom, same job still open, on a DIFFERENT model: mirrors
     // Story's model-conflict behaviour exactly, and spends no rate on it.
     let conflictRateCalls = 0;
