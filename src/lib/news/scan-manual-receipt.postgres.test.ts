@@ -172,7 +172,8 @@ async function waitForClaimSelectWait(observer: Client): Promise<void> {
       `select exists (
          select 1 from pg_stat_activity
          where application_name=$1 and state='active' and wait_event_type='Lock'
-           and position('select id from desk_jobs' in lower(query)) > 0
+           and regexp_replace(lower(query), '[[:space:]]+', ' ', 'g')
+             like '%select id from desk_jobs%for update%'
        ) as waiting`,
       [appName],
     );
