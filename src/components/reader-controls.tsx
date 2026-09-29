@@ -13,9 +13,19 @@ import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/co
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
-import { readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
+import {
+  normalizeReaderSize,
+  readMinutes,
+  readerStorageKey,
+  type ReaderStory,
+} from "@/lib/reader";
 import { readReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
+
+const READER_TEXT_SIZES = [
+  { size: 21, label: "Normal" },
+  { size: 25, label: "Large" },
+] as const;
 
 export function ReaderProvider({ children }: { children: ReactNode }) {
   const paper = usePaper();
@@ -58,7 +68,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
       const value = JSON.parse(localStorage.getItem(key) || "{}");
       setPrefs({
         dark: value.dark === true,
-        size: [18, 21, 25].includes(value.size) ? value.size : 21,
+        size: normalizeReaderSize(value.size),
         saved: Array.isArray(value.saved)
           ? value.saved.filter((s: unknown) => typeof s === "string").slice(0, 500)
           : [],
@@ -114,7 +124,7 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     <ReaderContext.Provider value={{ ...prefs, ready, update, notify: setMessage }}>
       <div
         className={`reader${prefs.dark ? " mode-dark" : ""}`}
-        style={{ "--reading": `${prefs.size}px` } as CSSProperties}
+        style={{ "--reader-scale": prefs.size === 25 ? "1.2" : "1" } as CSSProperties}
       >
         {children}
         {message && (
@@ -182,19 +192,15 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
           <div className="setting">
             <strong>Story text size</strong>
             <div className="segmented">
-              {[
-                [18, "Standard"],
-                [21, "Comfortable"],
-                [25, "Large"],
-              ].map(([n, s]) => (
+              {READER_TEXT_SIZES.map(({ size, label }) => (
                 <button
                   type="button"
-                  key={n}
-                  className={`btn ${r.size === n ? "selected" : ""}`}
-                  aria-pressed={r.size === n}
-                  onClick={() => r.update({ size: Number(n) })}
+                  key={size}
+                  className={`btn ${r.size === size ? "selected" : ""}`}
+                  aria-pressed={r.size === size}
+                  onClick={() => r.update({ size })}
                 >
-                  {s}
+                  {label}
                 </button>
               ))}
             </div>
@@ -216,7 +222,7 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
             </div>
           </div>
           <div className="reading-sample">
-            A clearer view of your community. Comfortable reading, at your own pace.
+            A clearer view of your community. Read at your own pace.
           </div>
           <button className="btn primary more" type="button" onClick={() => setOpen(false)}>
             Done
