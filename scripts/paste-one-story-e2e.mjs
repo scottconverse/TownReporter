@@ -53,7 +53,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
-import { fromCrossJSON, toJSONAsync } from "seroval";
+import { fromCrossJSON, fromJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { openStoryDetails } from "./confirm-section-step.mjs";
@@ -417,6 +417,22 @@ function leadIdOnScreen() {
   return Number(found[1]);
 }
 
+/** The current Publish call carries this story's id and the section on its button. */
+function isPublishRequest(payload, leadId) {
+  try {
+    const decoded = fromJSON(JSON.parse(payload), {});
+    const data = decoded?.data;
+    return (
+      data?.leadId === leadId &&
+      typeof data.topic === "string" &&
+      data.topic.trim().length > 0 &&
+      !Object.hasOwn(data, "headline")
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ask the server to publish without a section, and read back its refusal.
  *
@@ -506,8 +522,10 @@ async function publishIt() {
     The desk's own publish request is taken and thrown away before it leaves:
     the story must still be a draft when the server is asked the unconfirmed
     question below, and the request's address is the only way to ask it. The
-    draft save the same press fires is let through -- it carries the headline
-    and the body, which is how the publish request is told apart from it.
+    notes and draft saves the same press fires are let through. Notes carry a
+    leadId but no topic, and draft saves carry a headline. The current publish
+    input carries this leadId and the section named on the button, without a
+    draft headline.
   */
   const leadId = leadIdOnScreen();
   let publishUrl = null;
@@ -517,7 +535,7 @@ async function publishIt() {
     const payload = request.postData() ?? "";
     if (request.method() === "POST" && request.headers()["x-tsr-serverfn"] === "true") {
       taken.push(payload);
-      if (payload.includes("leadId") && !payload.includes("headline")) publishUrl = request.url();
+      if (isPublishRequest(payload, leadId)) publishUrl = request.url();
       if (publishUrl && request.url() === publishUrl) {
         await route.abort();
         return;
