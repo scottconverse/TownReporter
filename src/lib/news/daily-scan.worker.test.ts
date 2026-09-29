@@ -9,6 +9,7 @@ let getPglite: typeof import("../db.ts").getPglite;
 let getSql: typeof import("../db.ts").getSql;
 let performScanWork: typeof import("./desk.ts").performScanWork;
 let runDailyScanWork: typeof import("./daily-scan.server.ts").runDailyScanWork;
+const SOURCE_TEXT = "Council votes Tuesday on a water contract.\u0000 Agenda item 7.";
 
 before(async () => {
   vite = await createServer({
@@ -23,7 +24,7 @@ before(async () => {
 });
 after(async () => vite.close());
 
-it("the scheduled worker persists actual scan outputs through its fenced commit", async () => {
+it("the scheduled worker persists actual scan outputs when fetched text contains NUL", async () => {
   const sql = await getSql();
   await sql.query("delete from daily_scan_reservations where newsroom_id=1");
   await sql.query("delete from desk_jobs where newsroom_id=1");
@@ -111,7 +112,7 @@ it("the scheduled worker persists actual scan outputs through its fenced commit"
     await runDailyScanWork(job, {
       performScan: (workJob, workDeps) => performScanWork(workJob, workDeps),
       scanDeps: {
-        ingestUrl: async () => ({ text: "Council votes Tuesday on a water contract.", extras: [] }),
+        ingestUrl: async () => ({ text: SOURCE_TEXT, extras: [] }),
         setJobStage: async () => undefined,
       },
       chatAdapters: {
@@ -157,6 +158,11 @@ it("the scheduled worker persists actual scan outputs through its fenced commit"
     (await sql.query("select 1 from snapshots where source_id=$1", [source.id])).length,
     1,
   );
+  const [savedSnapshot] = await sql.query<{ excerpt: string }>(
+    "select excerpt from snapshots where source_id=$1",
+    [source.id],
+  );
+  assert.equal(savedSnapshot.excerpt, SOURCE_TEXT.replace("\u0000", "\uFFFD"));
   assert.equal((await sql.query("select 1 from leads where scan_run_id=$1", [run.id])).length, 1);
   const [savedRun] = await sql.query<{ leads_created: number; execution_origin: string }>(
     "select leads_created,execution_origin from scan_runs where id=$1",
