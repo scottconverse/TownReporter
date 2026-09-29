@@ -394,7 +394,7 @@ async function chooseDark() {
   step("dark is chosen through the desk's own toggle and survives");
 }
 
-async function assertReaderState(dark, label) {
+async function assertReaderState(dark, label, timeout = 15_000) {
   await page.waitForFunction(
     (expected) => {
       const reader = document.querySelector(".reader");
@@ -410,7 +410,7 @@ async function assertReaderState(dark, label) {
       );
     },
     dark,
-    { timeout: 15_000 },
+    { timeout },
   );
   step(`${label}: the hydrated reader class and toggle agree (${dark ? "dark" : "light"})`);
 }
@@ -431,6 +431,13 @@ async function verifyFreshDefaults() {
 
   await hardLoad("Fresh reader system dark (desktop)", "/", READER_DARK, "reader-dark");
   await assertReaderState(true, "System-dark reader");
+
+  // An unset preference should continue following the OS while this document
+  // stays open; a reload or route change must not be needed.
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertReaderState(false, "Live system-light change", 2_000);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertReaderState(true, "Live system-dark change", 2_000);
 
   // Change only the system setting, then make an unrelated reader preference
   // edit. It must not persist the inferred dark value as an explicit choice.
@@ -472,6 +479,11 @@ async function verifyFreshDefaults() {
   );
 
   await page.emulateMedia({ colorScheme: "light" });
+  await assertReaderState(false, "Explicit light remains pinned under system light", 2_000);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertReaderState(false, "Explicit light remains pinned under system dark", 2_000);
+
+  await page.emulateMedia({ colorScheme: "light" });
   await page.getByRole("button", { name: "Dark mode" }).click();
   await assertReaderState(true, "Reader toggle to explicit dark under system light");
   const explicitDark = await page.evaluate(
@@ -482,6 +494,11 @@ async function verifyFreshDefaults() {
     explicitDark.dark === true,
     `the reader's Dark toggle was not saved: ${JSON.stringify(explicitDark)}`,
   );
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertReaderState(true, "Explicit dark remains pinned under system dark", 2_000);
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertReaderState(true, "Explicit dark remains pinned under system light", 2_000);
 
   await page.setViewportSize({ width: 1280, height: 900 });
   step("reader toggles save explicit appearance opposite the current system preference");

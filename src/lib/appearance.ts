@@ -61,6 +61,7 @@ export type Appearance = {
 
 export const DESK_MODE_KEY = "townreporter.desk.mode";
 export const DESK_TEXT_SIZE_KEY = "townreporter.desk.textsize";
+export const READER_COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 /** The attribute the stylesheets key on, and the script stamps. */
 export const APPEARANCE_ATTR = "data-appearance";
 /** The desk's Normal/Large text-size attribute (see `--ts` in styles.css). */
@@ -146,27 +147,39 @@ export function readStoredDesk(): Pick<Appearance, "desk" | "size"> {
   };
 }
 
-/**
- * The reader's appearance, out of its own per-paper blob. The reader owns that
- * blob (it also carries text size and bookmarks) -- this only reads the one
- * bit the document needs.
- */
-export function readReaderMode(readerKey: string): ReaderMode {
-  if (typeof document === "undefined" || !readerKey) return "light";
+/** System reader appearance, used only when the reader has no explicit choice. */
+export function readSystemReaderMode(): ReaderMode {
+  try {
+    return typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(READER_COLOR_SCHEME_QUERY).matches
+      ? "dark"
+      : "light";
+  } catch {
+    return "light";
+  }
+}
+
+/** The reader's explicit saved choice, or undefined when it should follow the system. */
+export function readStoredReaderMode(readerKey: string): ReaderMode | undefined {
+  if (typeof document === "undefined" || !readerKey) return undefined;
   try {
     const value = JSON.parse(localStorage.getItem(readerKey) || "{}") as { dark?: unknown };
     if (typeof value?.dark === "boolean") return value.dark ? "dark" : "light";
   } catch {
     // An unavailable or unreadable saved value is unset; use the system below.
   }
-  try {
-    return typeof window !== "undefined" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-  } catch {
-    return "light";
-  }
+  return undefined;
+}
+
+/**
+ * The reader's appearance, out of its own per-paper blob. The reader owns that
+ * blob (it also carries text size and bookmarks) -- this only reads the one
+ * bit the document needs.
+ */
+export function readReaderMode(readerKey: string): ReaderMode {
+  if (typeof document === "undefined") return "light";
+  return readStoredReaderMode(readerKey) ?? readSystemReaderMode();
 }
 
 export function writeStoredDesk(next: Pick<Appearance, "desk" | "size">): void {

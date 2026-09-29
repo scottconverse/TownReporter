@@ -13,7 +13,7 @@ import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { normalizeReaderSize, readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
-import { readReaderMode } from "@/lib/appearance";
+import { readReaderMode, readStoredReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
 
 const READER_TEXT_SIZES = [
@@ -24,7 +24,7 @@ const READER_TEXT_SIZES = [
 export function ReaderProvider({ children }: { children: ReactNode }) {
   const paper = usePaper();
   const key = readerStorageKey(paper.name, paper.city);
-  const { refreshReader } = useAppearance();
+  const { appearance, refreshReader } = useAppearance();
   /*
     The dark bit is known BEFORE the first render of a client-side navigation.
 
@@ -45,15 +45,19 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     below calls `refreshReader()` so the document attribute follows the class.
   */
   const hydrated = useHydrated();
+  const systemReader = appearance.reader;
   const [prefs, setPrefs] = useState<ReaderPrefs>(() =>
     hydrated ? { ...readerDefaults, dark: readReaderMode(key) === "dark" } : readerDefaults,
   );
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
-  // Server markup stays light, but the first post-hydration render resolves
-  // the system preference before the effect loads the rest of the saved blob.
+  // Server markup stays light. An unset choice follows the system both before
+  // the saved blob loads and when the OS color scheme changes later.
+  const storedReader = readStoredReaderMode(key);
   const renderedPrefs =
-    hydrated && !ready ? { ...prefs, dark: readReaderMode(key) === "dark" } : prefs;
+    hydrated && (storedReader === undefined || !ready)
+      ? { ...prefs, dark: (storedReader ?? systemReader) === "dark" }
+      : prefs;
   /*
     The current preferences, readable synchronously. `update` writes storage
     BEFORE it queues any state change, and it cannot do that from inside a

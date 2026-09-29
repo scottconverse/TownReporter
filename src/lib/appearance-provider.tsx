@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { AppearanceContext, useHydrated, useIsoLayoutEffect } from "./appearance-context";
+import {
+  AppearanceContext,
+  useHydrated,
+  useIsoLayoutEffect,
+  useSystemReaderMode,
+} from "./appearance-context";
 import {
   APPEARANCE_ATTR,
   DESK_SIZE_ATTR,
@@ -32,6 +37,7 @@ export function AppearanceProvider({
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const hydrated = useHydrated();
+  useSystemReaderMode();
   // The server and hydration render use a stable value. On the first
   // post-hydration render, read localStorage synchronously so the attributes
   // agree with the pre-paint script before a navigation/toggle can paint.
