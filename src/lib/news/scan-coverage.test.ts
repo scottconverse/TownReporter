@@ -29,6 +29,16 @@ describe("listScans honest history (P0-4)", () => {
       assert.ok(desk.includes(col), `listScans must select ${col}`);
     }
   });
+
+  it("annotates every displayed open run through one batched latest-job lookup", () => {
+    const listScansBlock = desk.slice(desk.indexOf("export const listScans"), desk.indexOf("export const runScan"));
+    assert.match(
+      listScansBlock,
+      /annotateScanRowsWithStallStatus\(rows,\s*owned\(context\)\)/,
+      "all displayed rows must receive their own stall status",
+    );
+    assert.doesNotMatch(listScansBlock, /latestJob\(/, "history must not issue one lookup per row");
+  });
 });
 
 describe("scan run writes coverage accounting (P0-3)", () => {
