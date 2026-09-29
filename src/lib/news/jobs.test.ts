@@ -1217,6 +1217,7 @@ describe("scan history stall annotations", () => {
       freshOld: 800_004,
       cold: 800_005,
       finished: 800_006,
+      oldQueued: 800_007,
     };
     const subjectIds = Object.values(subject);
     const now = Date.now();
@@ -1226,7 +1227,7 @@ describe("scan history stall annotations", () => {
     await ensureJobsSchema();
 
     try {
-      for (const id of [subject.newest, subject.terminal, subject.cold]) {
+      for (const id of [subject.newest, subject.terminal, subject.cold, subject.oldQueued]) {
         await enqueueJob({
           userId: `scan-history-${id}`,
           newsroomId,
@@ -1279,6 +1280,11 @@ describe("scan history stall annotations", () => {
       `;
       await sql`
         update desk_jobs
+        set created_at = ${old}, updated_at = ${old}
+        where newsroom_id = ${newsroomId} and kind = 'scan' and subject_id = ${subject.oldQueued}
+      `;
+      await sql`
+        update desk_jobs
         set status = 'running', started_at = ${recent}, updated_at = ${recent}
         where newsroom_id = ${otherNewsroomId} and kind = 'scan' and subject_id = ${subject.missing}
       `;
@@ -1296,6 +1302,7 @@ describe("scan history stall annotations", () => {
         { id: subject.cold, started_at: old, finished_at: null, error: null },
         { id: subject.missing, started_at: old, finished_at: null, error: null },
         { id: subject.finished, started_at: old, finished_at: recent, error: null },
+        { id: subject.oldQueued, started_at: old, finished_at: null, error: null },
       ];
       const annotated = await annotateScanRowsWithStallStatus(rows, newsroomId, now);
       const byId = new Map(annotated.map((row) => [row.id, row]));
@@ -1305,6 +1312,7 @@ describe("scan history stall annotations", () => {
       assert.equal(byId.get(subject.terminal)?.stalled, true, "a terminal job cannot finish the open run");
       assert.equal(byId.get(subject.cold)?.stalled, true, "a cold job heartbeat marks the open run stalled");
       assert.equal(byId.get(subject.missing)?.stalled, true, "an orphaned open run is stalled");
+      assert.equal(byId.get(subject.oldQueued)?.stalled, false, "an old queued job remains eligible for a lane worker");
       assert.equal(Object.hasOwn(byId.get(subject.finished)!, "stalled"), false, "finished rows remain untouched");
     } finally {
       await sql.query(
