@@ -256,12 +256,17 @@ membership at run time, so editing a pack never rewrites a scan already
 started, and a source that later stops being accepted drops out of the pack
 automatically. Running a pack does not change any section configuration.
 
-**What each run reports.** Every scan records the whole path from selection to
-filing — how many sources were selected, attempted, fetched, failed and
+**What completed runs report.** A completed scan records the path from selection
+to filing — how many sources were selected, attempted, fetched, failed and
 actually analysed by the model; how many analysis batches ran and how many
 failed; and which sources failed, by name. A successful scan that finds nothing
 is shown as a success with zero leads, not as an error. A provider failure is
 shown as a failure, not as a quiet zero. A partial scan says so plainly.
+
+If a scan row remains **Running** or **Stalled** with zero recorded coverage, a
+failure while saving results may have left its receipt unfinished. Zero counts
+do not prove that no source was fetched. Inspect the run and job details; if you
+still cannot tell what was fetched, ask the owner before retrying.
 
 Large scans are split into bounded batches, one model call each, so a scan with
 a hundred sources is no longer silently cut off part-way through the list. If

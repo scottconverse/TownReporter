@@ -63,6 +63,11 @@ flowchart TB
 
 ## How a run reports itself
 
+This flow covers provider and batch outcomes. A failure while saving results
+can leave an open receipt with zero recorded coverage; those counts do not
+prove that no source was fetched. See [the manual's Scan guidance](../manual.md#scan)
+before retrying.
+
 ```mermaid
 flowchart LR
     R["One scan run"]

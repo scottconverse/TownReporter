@@ -45,9 +45,9 @@ A town does not need a newsroom to be covered. It needs a watch list and one per
 - Keep a **watch list** of the city's own sources: city site, council, agenda portal, school district, utility, meeting-video channels. A **scheduled daily scan** reads them at the time you set. It files leads. It does not draft or publish.
 - Leads land in the **Queue**.
 - Open a lead, give **story direction** — the decision or question to cover — then **Draft with AI**. The draft shows the sources it used. **Redraft** runs it again, and your saved draft stays until the new one finishes.
-- **A person publishes.** Scan does not publish, Draft does not publish, Dark Desk does not publish.
+- **Ordinary stories require an editor's Publish click.** Scan does not publish, Draft does not publish, and Dark Desk does not publish.
 - Council meetings arrive as recordings. Capture files them as leads with transcript citations, so a meeting story starts from the tape instead of a blank page.
-- Approved routine notices become automatic roundups from fixed templates. Everything else waits for an editor.
+- Only owner-approved routine notices from approved sources and fixed templates can become automatic roundups. Everything else waits for an editor.
 - Long trails, competing hypotheses and unresolved identities live in **Dark Desk**. It digs. It never prints.
 - Corrections are public at `/corrections`, with a date and an explanation of what changed.
 
