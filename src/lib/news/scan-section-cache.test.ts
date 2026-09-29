@@ -188,6 +188,7 @@ type NulScanFixture = {
   fetchError?: string;
   generalScope?: boolean;
   throwAtBatchBoundary?: boolean;
+  throwAfterFirstModelCallAtBatchBoundary?: boolean;
   sourceCount?: number;
   failFirstBatch?: boolean;
   supersedeClaimBeforeCommit?: boolean;
@@ -260,6 +261,8 @@ async function runNulScanFixture(input: NulScanFixture) {
           guardCalls += 1;
           if (input.throwAtBatchBoundary && guardCalls === 3)
             throw new Error("Injected worker failure before the model call.");
+          if (input.throwAfterFirstModelCallAtBatchBoundary && modelCalls === 1)
+            throw new Error("Injected worker failure before the second model call.");
         },
         beforeScheduledCommit: async () => {
           if (input.supersedeClaimBeforeCommit)
@@ -366,9 +369,25 @@ it("settles the manual run when the worker throws before its result transaction"
   assert.equal(result.scanRun.sources_fetched, 1);
   assert.equal(result.scanRun.sources_failed, 0);
   assert.equal(result.scanRun.sources_analyzed, 0);
-  assert.equal(result.scanRun.model_batches_used, 1);
+  assert.equal(result.scanRun.model_batches_used, 0);
   assert.equal(result.modelCalls, 0);
   assert.ok(result.scanRun.error?.includes("Injected worker failure before the model call"));
+});
+
+it("counts only started model batches when failure interrupts the next batch boundary", async () => {
+  const result = await runNulScanFixture({
+    sourceCount: 41,
+    throwAfterFirstModelCallAtBatchBoundary: true,
+  });
+  assert.ok(result.error instanceof Error);
+  assert.match(result.error.message, /before the second model call/);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.sources_selected, 41);
+  assert.equal(result.scanRun.sources_fetched, 41);
+  assert.equal(result.scanRun.sources_analyzed, 40, "the first batch should have completed");
+  assert.equal(result.modelCalls, 1, "one model call must precede the second-boundary failure");
+  assert.equal(result.scanRun.model_batches_used, 1);
+  assert.equal(result.scanRun.model_batches_failed, 0);
 });
 
 it("counts successful later batches when an earlier batch fails", async () => {

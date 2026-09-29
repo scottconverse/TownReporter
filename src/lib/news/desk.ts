@@ -1475,7 +1475,6 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     };
   });
   const batches = buildScanBatches({ sources: batchSources });
-  failureReceipt.modelBatchesUsed = batches.length;
 
   const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
     applyJobLocalModelSnapshot(
@@ -1519,8 +1518,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const ai = await waitForModel({
       jobId: job.id,
       label: () => liveLabel,
-      run: () =>
-        runScanChatWithFailover({
+      run: () => {
+        failureReceipt.modelBatchesUsed += 1;
+        return runScanChatWithFailover({
           job,
           newsroomId: job.newsroom_id,
           localModel: scanOverrides["local-model"]?.localModel,
@@ -1558,7 +1558,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             liveLabel = receipt.nextLabel;
             await deps.onModelSwitch?.(receipt);
           },
-        }),
+        });
+      },
     });
     if (!ai.ok) {
       batchesFailed += 1;
