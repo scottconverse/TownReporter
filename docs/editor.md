@@ -1198,7 +1198,8 @@ A correction can attach only to a published story in your newsroom. If the selec
 - Captions passed off as minutes
 - Private-citizen dossiers with no material public-interest trail
 
-If it is not on `/articles/…` with your publish click behind it, it is not the paper.
+Ordinary stories reach `/articles/…` only after an editor clicks **Publish**. Only owner-approved
+routine notices from approved sources and fixed templates may reach the paper automatically.
 
 ---
 
