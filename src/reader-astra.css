@@ -558,7 +558,7 @@
   letter-spacing: -0.35px;
 }
 .reader .newsrow p {
-  font-size: 14px;
+  font-size: calc(14px * var(--reader-scale));
   color: var(--muted);
   margin-top: 10px;
   line-height: 1.6;
@@ -2679,7 +2679,7 @@
 }
 .reader .regionlist a {
   font-family: var(--serif);
-  font-size: 20px;
+  font-size: calc(20px * var(--reader-scale));
   line-height: 1.35;
   color: var(--ink);
 }
@@ -2724,7 +2724,7 @@
 }
 .reader .opinionpanel p {
   font-family: var(--serif);
-  font-size: 16px;
+  font-size: calc(16px * var(--reader-scale));
   line-height: 1.55;
   color: #111;
   margin-bottom: 14px;
