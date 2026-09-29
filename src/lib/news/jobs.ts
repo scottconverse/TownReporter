@@ -911,13 +911,47 @@ export function jobHeartbeatStale(
  */
 export function runLooksStalled(opts: {
   runOpen: boolean;
-  job: DeskJob | null | undefined;
+  job: Pick<DeskJob, "status" | "updated_at"> | null | undefined;
   now?: number;
 }): boolean {
   if (!opts.runOpen) return false;
   if (!opts.job) return true;
   if (opts.job.status === "completed" || opts.job.status === "failed") return true;
   return jobHeartbeatStale(opts.job, opts.now);
+}
+
+/**
+ * Annotate every open Scan run in one newsroom-scoped latest-job query. The
+ * history can contain several interrupted runs; checking only the newest row
+ * leaves older orphaned or settled rows looking active forever. Finished rows
+ * are left untouched, and an old run with a fresh queued/running job remains
+ * active because `runLooksStalled` uses the job heartbeat, not run age.
+ */
+export async function annotateScanRowsWithStallStatus<
+  T extends { id: number; finished_at: string | null; error: string | null; stalled?: boolean },
+>(rows: T[], newsroomId: number, now = Date.now()): Promise<T[]> {
+  const openRows = rows.filter((row) => !row.finished_at && !row.error);
+  if (!openRows.length) return rows;
+
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const latestJobs = await sql<{ subject_id: number; status: JobStatus; updated_at: string }>`
+    select distinct on (subject_id) subject_id, status, updated_at
+    from desk_jobs
+    where newsroom_id = ${newsroomId}
+      and kind = 'scan'
+      and subject_id = any(${openRows.map((row) => row.id)}::int[])
+    order by subject_id, id desc
+  `;
+  const jobsByRunId = new Map(latestJobs.map((job) => [job.subject_id, job]));
+  for (const row of openRows) {
+    row.stalled = runLooksStalled({
+      runOpen: true,
+      job: jobsByRunId.get(row.id),
+      now,
+    });
+  }
+  return rows;
 }
 
 /* ---------------------------------------------------------------------------
