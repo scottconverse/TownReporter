@@ -79,9 +79,38 @@ function Get-CleanPath {
   return $full
 }
 
-# Resolve existing parents before comparing paths. This also turns an 8.3
-# spelling into the same path that PowerShell reports for the install itself,
-# while still handling a destination that does not exist yet.
+# Resolve a path through existing junctions/symlinks and 8.3 spellings before
+# comparing it. For a not-yet-created destination, resolve its deepest existing
+# parent and append the remaining components.
+if (-not ("TownReporterPathIdentity" -as [type])) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class TownReporterPathIdentity {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern uint GetFinalPathNameByHandle(IntPtr handle, StringBuilder path, uint length, uint flags);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool CloseHandle(IntPtr handle);
+  public static string Resolve(string path) {
+    IntPtr handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+    if (handle == new IntPtr(-1)) return null;
+    try {
+      StringBuilder result = new StringBuilder(32768);
+      uint length = GetFinalPathNameByHandle(handle, result, (uint)result.Capacity, 0);
+      if (length == 0 || length >= result.Capacity) return null;
+      string resolved = result.ToString();
+      if (resolved.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + resolved.Substring(8);
+      if (resolved.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)) return resolved.Substring(4);
+      return resolved;
+    } finally { CloseHandle(handle); }
+  }
+}
+"@
+}
+
 function Get-PathIdentity {
   param([string]$Path)
   $clean = Get-CleanPath $Path
@@ -94,8 +123,9 @@ function Get-PathIdentity {
     $probe = $parent
   }
   if (Test-Path -LiteralPath $probe) {
-    $item = Get-Item -LiteralPath $probe -Force
-    $identity = Get-CleanPath $item.FullName
+    $identity = [TownReporterPathIdentity]::Resolve($probe)
+    if (-not $identity) { $identity = (Get-Item -LiteralPath $probe -Force).FullName }
+    $identity = Get-CleanPath $identity
     foreach ($part in $tail) { $identity = Join-Path $identity ([string]$part) }
     return (Get-CleanPath $identity)
   }
@@ -355,8 +385,9 @@ if ($samePlace -and (Test-InstallAt -Root $target)) {
   exit 0
 }
 
-if ($null -ne (Get-PathRelativeToRoot -Path $target -Root $source)) {
-  Write-Say "  The destination is the source install or is inside it. Nothing was changed."
+if ($null -ne (Get-PathRelativeToRoot -Path $target -Root $source) -or
+    $null -ne (Get-PathRelativeToRoot -Path $source -Root $target)) {
+  Write-Say "  The destination overlaps the source install as a parent or child. Nothing was changed."
   Write-Say "  Choose a separate destination directory."
   Write-Say ""
   exit 1

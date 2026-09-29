@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, realpathSync, symlinkSync } from "node:fs";
 import { join, dirname, win32 as win32Path } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -1625,6 +1625,43 @@ test(
         && sourceBytes(sameSource).equals(sameBytes)
         && readdirSync(sameSource).sort().join(",") === "config.toml,install.json,redlib.exe";
 
+      const junctionSource = join(base, "junction-source");
+      const junctionAlias = join(base, "junction-alias");
+      plant(junctionSource);
+      symlinkSync(junctionSource, junctionAlias, "junction");
+      const junctionBytes = sourceBytes(junctionSource);
+      const junctionEntriesBefore = readdirSync(junctionSource).sort();
+      const junctionRun = run(["-From", junctionSource, "-To", junctionAlias, "-Force", "-EnvFile", noEnv]);
+      const junctionLine = envLine(junctionRun.out);
+      const junctionPrintedRoot = junctionLine?.slice(junctionLine.indexOf("=") + 1).trim();
+      const sameJunctionEvidence = {
+        exit: junctionRun.code,
+        printedEnv: Boolean(junctionPrintedRoot),
+        sourceBytesPreserved: sourceBytes(junctionSource).equals(junctionBytes),
+        sourceEntriesPreserved: readdirSync(junctionSource).sort().join(",") === junctionEntriesBefore.join(","),
+        printedRootResolvesToSource: Boolean(junctionPrintedRoot)
+          && win32Path.normalize(realpathSync.native(junctionPrintedRoot)).toLowerCase()
+            === win32Path.normalize(realpathSync.native(junctionSource)).toLowerCase(),
+      };
+
+      const junctionChildSource = join(base, "junction-child-source");
+      const junctionChild = join(junctionChildSource, "existing-child");
+      const junctionChildAlias = join(base, "junction-child-alias");
+      plant(junctionChildSource);
+      mkdirSync(junctionChild);
+      symlinkSync(junctionChild, junctionChildAlias, "junction");
+      const junctionChildBytes = sourceBytes(junctionChildSource);
+      const junctionChildEntriesBefore = readdirSync(junctionChildSource).sort();
+      const redirectedChildEntriesBefore = readdirSync(junctionChild).sort();
+      const junctionChildRun = run(["-From", junctionChildSource, "-To", junctionChildAlias, "-Force", "-EnvFile", noEnv]);
+      const targetJunctionChildEvidence = {
+        exit: junctionChildRun.code,
+        printedEnv: Boolean(envLine(junctionChildRun.out)),
+        sourceBytesPreserved: sourceBytes(junctionChildSource).equals(junctionChildBytes),
+        sourceEntriesPreserved: readdirSync(junctionChildSource).sort().join(",") === junctionChildEntriesBefore.join(","),
+        redirectedChildEntries: readdirSync(junctionChild).sort(),
+      };
+
       const nestedSource = join(base, "nested-source");
       const nestedTarget = join(nestedSource, "nested-target");
       plant(nestedSource);
@@ -1635,6 +1672,28 @@ test(
         && !envLine(nestedRun.out)
         && sourceBytes(nestedSource).equals(nestedBytes)
         && readdirSync(nestedSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+
+      const ancestorTarget = join(base, "ancestor-target");
+      const ancestorSource = join(ancestorTarget, "source");
+      plant(ancestorTarget);
+      plant(ancestorSource);
+      writeFileSync(join(ancestorTarget, "config.toml"), "preserve parent config\n", "utf8");
+      writeFileSync(join(ancestorTarget, "unrelated.keep"), "preserve unrelated file\n", "utf8");
+      const ancestorParentEntriesBefore = readdirSync(ancestorTarget).sort();
+      const ancestorParentConfigBefore = readFileSync(join(ancestorTarget, "config.toml"));
+      const ancestorParentInstallBefore = sourceBytes(ancestorTarget);
+      const ancestorParentExeBefore = readFileSync(join(ancestorTarget, "redlib.exe"));
+      const ancestorSourceBytes = sourceBytes(ancestorSource);
+      const ancestorRun = run(["-From", ancestorSource, "-To", ancestorTarget, "-Force", "-EnvFile", noEnv]);
+      const ancestorTargetEvidence = {
+        exit: ancestorRun.code,
+        printedEnv: Boolean(envLine(ancestorRun.out)),
+        parentEntriesPreserved: readdirSync(ancestorTarget).sort().join(",") === ancestorParentEntriesBefore.join(","),
+        parentConfigPreserved: readFileSync(join(ancestorTarget, "config.toml")).equals(ancestorParentConfigBefore),
+        parentInstallPreserved: sourceBytes(ancestorTarget).equals(ancestorParentInstallBefore),
+        parentExecutablePreserved: readFileSync(join(ancestorTarget, "redlib.exe")).equals(ancestorParentExeBefore),
+        sourceInstallPreserved: sourceBytes(ancestorSource).equals(ancestorSourceBytes),
+      };
 
       const invalidMetadata = {};
       for (const field of ["installRoot", "executable", "logPath"]) {
@@ -1658,7 +1717,10 @@ test(
         sandboxedLogicalRoot: sandboxLogicalMappingCorrect,
         similarPathOutsideSandboxRejected: similarPathRejected,
         forceSamePlaceAliasPreservesSource: samePlaceSafe,
+        forceJunctionToSource: sameJunctionEvidence,
+        junctionToSourceChild: targetJunctionChildEvidence,
         nestedTargetRejectedBeforeSourceMutation: nestedSafe,
+        ancestorTarget: ancestorTargetEvidence,
         invalidRequiredMetadataRejectedBeforeAdvice: invalidMetadata,
       };
       assert.deepEqual(
@@ -1669,10 +1731,33 @@ test(
           sandboxedLogicalRoot: true,
           similarPathOutsideSandboxRejected: true,
           forceSamePlaceAliasPreservesSource: true,
+          forceJunctionToSource: {
+            exit: 0,
+            printedEnv: true,
+            sourceBytesPreserved: true,
+            sourceEntriesPreserved: true,
+            printedRootResolvesToSource: true,
+          },
+          junctionToSourceChild: {
+            exit: 1,
+            printedEnv: false,
+            sourceBytesPreserved: true,
+            sourceEntriesPreserved: true,
+            redirectedChildEntries: redirectedChildEntriesBefore,
+          },
           nestedTargetRejectedBeforeSourceMutation: true,
+          ancestorTarget: {
+            exit: 1,
+            printedEnv: false,
+            parentEntriesPreserved: true,
+            parentConfigPreserved: true,
+            parentInstallPreserved: true,
+            parentExecutablePreserved: true,
+            sourceInstallPreserved: true,
+          },
           invalidRequiredMetadataRejectedBeforeAdvice: { installRoot: true, executable: true, logPath: true },
         },
-        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, nestedOutput: nestedRun.out, invalidMetadata }, null, 2),
+        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, junctionOutput: junctionRun.out, junctionChildOutput: junctionChildRun.out, nestedOutput: nestedRun.out, ancestorOutput: ancestorRun.out, invalidMetadata }, null, 2),
       );
     } finally {
       rmSync(base, { recursive: true, force: true });
