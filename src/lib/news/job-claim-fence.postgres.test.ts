@@ -14,15 +14,17 @@ const probe = integrationRequested()
 const skip = probe.ok ? false : probe.reason;
 const databaseName = `townreporter_test_job_claim_fence_${process.pid}_${Date.now()}`;
 const newsroomId = 81001;
+const NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE = 1_414_670_918;
 let created = false;
 let db: typeof import("../db.ts");
 let jobs: typeof import("./jobs.ts");
 
-type WorkerMessage = { type: "entered" | "settled"; jobId: number; took?: boolean };
+type WorkerMessage = { type: "attempting" | "entered" | "settled"; jobId: number; took?: boolean };
 
 type JobWorker = {
   child: ChildProcess;
   waitFor(type: WorkerMessage["type"]): Promise<WorkerMessage>;
+  waitForOutcome(): Promise<WorkerMessage>;
   release(): void;
   waitForExit(): Promise<void>;
 };
@@ -50,6 +52,7 @@ function startWorker(job: { id: number; kind: string; subject_id: number }, hold
         process.send({ type: "entered", jobId: job.id });
       }
     });
+    process.send({ type: "attempting", jobId: job.id });
     const took = await jobs.executeJob(job);
     await new Promise((resolve, reject) => process.send({ type: "settled", jobId: job.id, took }, error => error ? reject(error) : resolve()));
     await db.closePoolForTests();
@@ -120,6 +123,34 @@ function startWorker(job: { id: number; kind: string; subject_id: number }, hold
         failures.set(type, [...(failures.get(type) ?? []), rejectWithCleanup]);
       });
     },
+    waitForOutcome() {
+      const index = messages.findIndex((message) => message.type === "entered" || message.type === "settled");
+      if (index >= 0) return Promise.resolve(messages.splice(index, 1)[0]!);
+      if (exitState) return Promise.reject(new Error(`worker exited before an execution outcome: ${exitState.code ?? exitState.signal}; ${stderr}`));
+      return new Promise((resolveMessage, rejectMessage) => {
+        const timer = setTimeout(() => {
+          cleanup();
+          rejectMessage(new Error(`worker timed out before an execution outcome; ${stderr}`));
+        }, 10000);
+        const onMessage = (raw: unknown) => {
+          const message = raw as WorkerMessage;
+          if (message.type !== "entered" && message.type !== "settled") return;
+          cleanup();
+          resolveMessage(message);
+        };
+        const onExit = () => {
+          cleanup();
+          rejectMessage(new Error(`worker exited before an execution outcome: ${exitState?.code ?? exitState?.signal}; ${stderr}`));
+        };
+        const cleanup = () => {
+          clearTimeout(timer);
+          child.off("message", onMessage);
+          child.off("exit", onExit);
+        };
+        child.on("message", onMessage);
+        child.once("exit", onExit);
+      });
+    },
     release() {
       if (child.connected) child.send("release", () => undefined);
     },
@@ -136,6 +167,28 @@ function startWorker(job: { id: number; kind: string; subject_id: number }, hold
       await exited;
     },
   };
+}
+
+/** Wait until every worker is visibly queued on the same PostgreSQL claim lock. */
+async function waitForAdvisoryWaiters(client: Client, expected: number): Promise<void> {
+  let observed = 0;
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    const result = await client.query<{ waiting: string }>(
+      `select count(*)::text as waiting
+       from pg_locks
+       where locktype = 'advisory'
+         and database = (select oid from pg_database where datname = current_database())
+         and classid = $1::oid
+         and objid = $2::oid
+         and objsubid = 2
+         and not granted`,
+      [NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE, newsroomId],
+    );
+    observed = Number(result.rows[0]?.waiting ?? 0);
+    if (observed === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`expected ${expected} workers waiting on the claim advisory lock; observed ${observed}`);
 }
 
 if (probe.ok) {
@@ -221,5 +274,79 @@ it("independent PostgreSQL processes enforce and release the newsroom execution 
     for (const worker of workers) worker.release();
     await Promise.all(workers.map((worker) => worker.waitForExit()));
     await sql`delete from desk_jobs where newsroom_id = ${newsroomId}`;
+  }
+});
+
+it("simultaneous PostgreSQL follow-up claims contend before either can enter", { skip, timeout: 30000 }, async () => {
+  const sql = await db.getSql();
+  const gate = new Client({ connectionString: process.env.DATABASE_URL });
+  const workers: JobWorker[] = [];
+  const firstSubject = 8201;
+  const secondSubject = 8202;
+  let gateOpen = false;
+
+  try {
+    const first = await jobs.enqueueJob({
+      userId: "eng001-postgres-test",
+      newsroomId,
+      kind: "follow-up",
+      subjectId: firstSubject,
+      kick: false,
+    });
+    const second = await jobs.enqueueJob({
+      userId: "eng001-postgres-test",
+      newsroomId,
+      kind: "follow-up",
+      subjectId: secondSubject,
+      kick: false,
+    });
+
+    await gate.connect();
+    await gate.query("begin");
+    gateOpen = true;
+    // Keep both independent workers inside executeJob's claim transaction
+    // until pg_stat_activity confirms both are waiting on this exact lock.
+    // This namespace is intentionally mirrored from jobs.ts; drift fails the
+    // waiter assertion instead of weakening the concurrency proof.
+    await gate.query("select pg_advisory_xact_lock($1, $2)", [NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE, newsroomId]);
+
+    const firstWorker = startWorker(first, true);
+    const secondWorker = startWorker(second, true);
+    workers.push(firstWorker, secondWorker);
+    await Promise.all([firstWorker.waitFor("attempting"), secondWorker.waitFor("attempting")]);
+    await waitForAdvisoryWaiters(gate, 2);
+
+    await gate.query("commit");
+    gateOpen = false;
+
+    const outcomes = await Promise.all([firstWorker.waitForOutcome(), secondWorker.waitForOutcome()]);
+    const entered = outcomes.filter((outcome) => outcome.type === "entered");
+    const settled = outcomes.filter((outcome) => outcome.type === "settled");
+    assert.equal(entered.length, 1, "exactly one process may enter follow-up work");
+    assert.equal(settled.length, 1, "the losing process must return without entering work");
+    assert.equal(settled[0]?.took, false, "the losing claim must be refused");
+
+    const winnerId = entered[0]!.jobId;
+    const loser = winnerId === first.id ? second : first;
+    const winner = winnerId === first.id ? first : second;
+    assert.equal((await jobs.latestJob({ newsroomId, kind: "follow-up", subjectId: winner.subject_id }))?.status, "running");
+    assert.equal((await jobs.latestJob({ newsroomId, kind: "follow-up", subjectId: loser.subject_id }))?.status, "queued");
+
+    const winnerWorker = winnerId === first.id ? firstWorker : secondWorker;
+    winnerWorker.release();
+    assert.equal((await winnerWorker.waitFor("settled")).took, true);
+    assert.equal((await jobs.latestJob({ newsroomId, kind: "follow-up", subjectId: winner.subject_id }))?.status, "completed");
+
+    const retryWorker = startWorker(loser, false);
+    workers.push(retryWorker);
+    assert.equal((await retryWorker.waitFor("settled")).took, true, "the queued claim must remain runnable after the winner completes");
+    assert.equal((await jobs.latestJob({ newsroomId, kind: "follow-up", subjectId: loser.subject_id }))?.status, "completed");
+    await Promise.all([firstWorker.waitForExit(), secondWorker.waitForExit(), retryWorker.waitForExit()]);
+  } finally {
+    if (gateOpen) await gate.query("rollback").catch(() => undefined);
+    for (const worker of workers) worker.release();
+    await Promise.all(workers.map((worker) => worker.waitForExit()));
+    await sql`delete from desk_jobs where newsroom_id = ${newsroomId} and subject_id in (${firstSubject}, ${secondSubject})`;
+    await gate.end().catch(() => undefined);
   }
 });
