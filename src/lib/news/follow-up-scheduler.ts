@@ -1,6 +1,6 @@
 import { getSql } from "../db.ts";
 import { ensureFollowUpsSchema, performDueFollowUps, performFollowUpAction, performReadFollowUp, performReleaseFollowUpRun } from "./follow-ups.ts";
-import { enqueueJob, kickJobs } from "./jobs.ts";
+import { enqueueJob } from "./jobs.ts";
 import { FOLLOW_UP_HARD_CAP_MS } from "./follow-up-agents.ts";
 
 /**
@@ -146,8 +146,8 @@ export async function tickFollowUpsFor(
     subjectId: row.id,
     modelChoice: row.model_choice,
     modelChoiceSource: "auto",
+    kick: deps.kick,
   });
-  if (deps.kick !== false) kickJobs();
   return { started: 1, reconciled, skipped: null };
 }
 
@@ -207,8 +207,8 @@ export async function startFollowUpRun(
     subjectId: id,
     modelChoice: row.model_choice,
     modelChoiceSource: "auto",
+    kick: deps.kick,
   });
-  if (deps.kick !== false) kickJobs();
   return { started: true, skipped: null };
 }
 
