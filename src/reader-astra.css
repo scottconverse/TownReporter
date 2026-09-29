@@ -3431,7 +3431,7 @@
     padding-bottom: 12px;
   }
   .reader .brand {
-    font-size: 36px;
+    font-size: clamp(24px, 7.8vw, 36px);
     letter-spacing: -1.4px;
   }
   .reader header .locality {
