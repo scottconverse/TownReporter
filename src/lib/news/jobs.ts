@@ -860,23 +860,20 @@ export function jobIsOpen(job: DeskJob | null | undefined) {
 }
 
 /**
- * The heartbeat is the one signal that actually distinguishes "still
- * working" from "the process that owned this is gone": `executeJob` touches
- * `updated_at` every 30s for as long as it is alive, on every job kind,
- * including the 10-40 minute editorial pieces. A queued-or-running job whose
- * heartbeat is older than the reclaim window (`STALE_RUNNING_SECONDS`) was
- * not written to by anything in the last four heartbeats -- the executor
- * died. `drainQueuedJobs` will eventually reclaim and rerun it, but that can
- * take a while, and nothing about the row itself changes in the meantime, so
- * a screen polling naively would show the same "still going" state whether
- * the job is seconds old or has been dead for an hour.
+ * A running job's heartbeat distinguishes "still working" from "the process
+ * that owned this is gone": `executeJob` touches `updated_at` every 30s for
+ * as long as it is alive, on every job kind, including the 10-40 minute
+ * editorial pieces. A running job older than the reclaim window
+ * (`STALE_RUNNING_SECONDS`) can be reclaimed by `drainQueuedJobs`. Queued
+ * jobs are different: they remain eligible for a lane worker regardless of
+ * age, so a quiet queue is not evidence that the job is dead.
  */
 export function jobHeartbeatStale(
   job: Pick<DeskJob, "status" | "updated_at"> | null | undefined,
   nowMs = Date.now(),
 ): boolean {
   if (!job) return false;
-  if (job.status !== "running" && job.status !== "queued") return false;
+  if (job.status !== "running") return false;
   const updated = Date.parse(job.updated_at);
   if (Number.isNaN(updated)) return false;
   return nowMs - updated > STALE_RUNNING_SECONDS * 1000;

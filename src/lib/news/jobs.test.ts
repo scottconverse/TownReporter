@@ -1199,6 +1199,11 @@ describe("runLooksStalled", () => {
     const job = fakeJob({ status: "queued", updated_at: new Date(freshTime).toISOString() });
     assert.equal(runLooksStalled({ runOpen: true, job, now }), false);
   });
+
+  it("keeps an old queued job active while it waits for a lane worker", () => {
+    const job = fakeJob({ status: "queued", updated_at: new Date(pastWindow).toISOString() });
+    assert.equal(runLooksStalled({ runOpen: true, job, now }), false);
+  });
 });
 
 describe("scan history stall annotations", () => {

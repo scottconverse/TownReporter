@@ -191,6 +191,19 @@ describe("a run that died mid-work", () => {
         [userId, freshActiveRun.rows[0].id],
       );
 
+      const oldQueuedRun = await db.query<{ id: number }>(
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '60 minutes', 1, 'Fixture identity: old queued worker') returning id`,
+        [userId],
+      );
+      await db.query(
+        `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage,
+                                created_at, updated_at)
+         values (1, $1, 'scan', $2, 'queued', 'queued',
+                 now() - interval '60 minutes', now() - interval '60 minutes')`,
+        [userId, oldQueuedRun.rows[0].id],
+      );
+
       const terminalRun = await db.query<{ id: number }>(
         `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
          values ($1, 1, now() - interval '30 minutes', 1, 'Fixture identity: terminal job') returning id`,
@@ -261,6 +274,7 @@ describe("a run that died mid-work", () => {
 
     const historyRows = [
       ["Fixture identity: fresh active worker", "Running"],
+      ["Fixture identity: old queued worker", "Running"],
       ["Fixture identity: terminal job", "Stalled"],
       ["Fixture identity: missing job", "Stalled"],
       ["Fixture identity: newest orphan", "Stalled"],
