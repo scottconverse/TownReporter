@@ -38,13 +38,15 @@ describe("scan run writes coverage accounting (P0-3)", () => {
     assert.match(block, /sources_analyzed = \$\{analyzedSourceCount\}/);
     assert.match(block, /model_batches_used = \$\{batches\.length\}/);
     assert.match(block, /model_batches_failed = \$\{batchesFailed\}/);
-    assert.match(block, /failed_sources = \$\{JSON\.stringify\(failedSources\)/);
+    assert.match(block, /failed_sources = \$\{postgresText\(JSON\.stringify\(failedSources\)\)/);
   });
 
   it("writes the accounting columns on total batch failure", () => {
-    const block = desk.slice(desk.indexOf("if (!batchResults.length)"), desk.indexOf("const merged = mergeScanBatchResults"));
+    const block = desk.slice(desk.indexOf("const recordFailedRun"), desk.indexOf("const merged = mergeScanBatchResults"));
+    assert.match(block, /sources_analyzed = \$\{sourcesAnalyzed\}/);
+    assert.match(block, /sources_failed = \$\{failedSources\.length\}/);
     assert.match(block, /model_batches_failed = \$\{batchesFailed\}/);
-    assert.match(block, /error = \$\{error\}/);
+    assert.match(block, /error = \$\{postgresText\(failure\)\.slice\(0, 800\)\}/);
   });
 
   /*
@@ -73,13 +75,20 @@ describe("scan run writes coverage accounting (P0-3)", () => {
     */
     const branch = /if \(deps\.scheduledCommit\) \{([\s\S]*?)\} else \{([\s\S]*?)\n {4}\}/.exec(block);
     assert.ok(branch, "the outage write must branch on scheduledCommit with an else");
-    assert.match(branch[1], /deps\.scheduledCommit\(recordFailedRun\)/, "scheduled path commits through its transaction");
-    assert.match(branch[2], /recordFailedRun\(sql\)/, "manual path writes directly");
+    assert.match(branch[1], /deps\.scheduledCommit\(\(writeSql\) => recordFailedRun\(writeSql, error\)\)/, "scheduled path commits through its transaction");
+    assert.match(branch[2], /recordManualFailure\(error\)/, "manual path uses its claim-locked transaction");
     assert.doesNotMatch(
       block,
       /if \(!deps\.scheduledCommit\)/,
       "the write must not be gated on the ABSENCE of a scheduled commit",
     );
+  });
+
+  it("locks the current manual job claim before committing scan results", () => {
+    const block = desk.slice(desk.indexOf("const commitResults"), desk.indexOf("let committed"));
+    assert.match(block, /lockManualScanClaim\(writeSql, job\)/);
+    assert.match(block, /finished_at is null[\s\S]*?for update/);
+    assert.match(block, /refreshManualScanClaim\(writeSql, job\)/);
   });
 });
 

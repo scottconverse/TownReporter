@@ -197,6 +197,33 @@ function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
 }
 
+function postgresText(value: string) {
+  // PostgreSQL text cannot contain U+0000. Preserve its position as a visible
+  // replacement character so fetched pages and source failures remain reportable.
+  return value.split("\u0000").join("\uFFFD");
+}
+
+async function lockManualScanClaim(writeSql: Sql, job: DeskJob): Promise<boolean> {
+  if (!job.claim_token) return false;
+  const rows = await writeSql<{ id: number }>`
+    select id from desk_jobs
+    where id = ${job.id} and newsroom_id = ${job.newsroom_id} and kind = 'scan'
+      and status = 'running' and claim_token = ${job.claim_token}
+    for update
+  `;
+  return rows.length > 0;
+}
+
+async function refreshManualScanClaim(writeSql: Sql, job: DeskJob) {
+  const rows = await writeSql<{ id: number }>`
+    update desk_jobs set updated_at = clock_timestamp()
+    where id = ${job.id} and newsroom_id = ${job.newsroom_id} and kind = 'scan'
+      and status = 'running' and claim_token = ${job.claim_token}
+    returning id
+  `;
+  if (!rows[0]) throw new Error("Scan job claim changed before its transaction finished.");
+}
+
 function effortFromJob(job: Pick<DeskJob, "model_choice" | "result_json">): ModelEffort | null {
   try {
     const value = JSON.parse(job.result_json || "{}") as { modelEffort?: unknown };
@@ -1124,6 +1151,19 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   job: DeskJob,
   deps: PerformScanWorkDeps = {},
 ) {
+  let failureRunId = job.subject_id;
+  const failureReceipt = {
+    sourcesSelected: 0,
+    sourcesAttempted: 0,
+    sourcesFetched: 0,
+    sourcesFailed: 0,
+    sourcesAnalyzed: 0,
+    modelBatchesUsed: 0,
+    modelBatchesFailed: 0,
+    failedSources: "[]",
+  };
+  let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
+  try {
   const runChat = deps.grokChat ?? grokChat;
   const probe = deps.probe ?? probeProvider;
   const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
@@ -1147,7 +1187,6 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   const meetingChannels = paperConfig.youtubeChannels ?? [];
-  let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
   if (meetingChannels.length > 0) {
     try {
       const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
@@ -1204,6 +1243,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `;
     runId = runRows[0]!.id;
   }
+  failureRunId = runId;
 
   const [scanRun] = await sql<{
     section_snapshot: string | null;
@@ -1245,6 +1285,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const sources = customSnapshot
     ? selectCustomScanSources(customSnapshot, allSources)
     : selectedScanSources(sectionSnapshot, allSources);
+  failureReceipt.sourcesSelected = sources.length;
   if (sectionSnapshot && !sources.length)
     throw new Error(
       "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
@@ -1270,6 +1311,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   let fetchedCount = 0;
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
+  failureReceipt.sourcesAttempted = watchSlice.length;
 
   const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
@@ -1295,6 +1337,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         await deps.scheduledGuard?.();
         return fetchUrl(src.url);
       });
+      const sourceText = postgresText(bundle.text);
       const extras: { url: string; text: string }[] = [];
       for (const extra of bundle.extras.slice(0, 4)) {
         await deps.scheduledGuard?.();
@@ -1303,7 +1346,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             await deps.scheduledGuard?.();
             return fetchUrl(extra);
           });
-          extras.push({ url: extra, text: doc.text });
+          extras.push({ url: extra, text: postgresText(doc.text) });
         } catch (err) {
           if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(String(err)))
             throw err;
@@ -1311,7 +1354,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         }
       }
       const extraBits = extras.map((e) => `DOCUMENT ${e.url}\n${e.text.slice(0, 2500)}`);
-      const text = extraBits.length ? `${bundle.text}\n\n${extraBits.join("\n\n")}` : bundle.text;
+      const text = extraBits.length ? `${sourceText}\n\n${extraBits.join("\n\n")}` : sourceText;
       const hash = await sha256(text);
       const changed = hash !== src.last_hash;
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
@@ -1322,16 +1365,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       `;
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
+      failureReceipt.sourcesFetched = fetchedCount;
       fetched.push({
         id: src.id,
         title: src.tier === "C" ? `[discovery] ${src.title}` : src.title,
         url: src.url,
-        text: bundle.text.slice(0, 4500),
+        text: sourceText.slice(0, 4500),
         extras,
         changed,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "fetch failed";
+      const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: msg });
       else
@@ -1340,6 +1384,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
+      failureReceipt.sourcesFailed = failedSources.length;
+      failureReceipt.failedSources = postgresText(JSON.stringify(failedSources)).slice(0, 32000);
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
         if (deps.scheduledCommit)
           pendingDisappeared.push({ title: src.title, url: src.url, error: msg });
@@ -1472,8 +1518,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const ai = await waitForModel({
       jobId: job.id,
       label: () => liveLabel,
-      run: () =>
-        runScanChatWithFailover({
+      run: () => {
+        failureReceipt.modelBatchesUsed += 1;
+        return runScanChatWithFailover({
           job,
           newsroomId: job.newsroom_id,
           localModel: scanOverrides["local-model"]?.localModel,
@@ -1511,21 +1558,57 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             liveLabel = receipt.nextLabel;
             await deps.onModelSwitch?.(receipt);
           },
-        }),
+        });
+      },
     });
     if (!ai.ok) {
       batchesFailed += 1;
+      failureReceipt.modelBatchesFailed = batchesFailed;
       lastBatchError = ai.error;
       continue;
     }
     const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics, topicChoices);
     if (parsed.parseError) {
       batchesFailed += 1;
+      failureReceipt.modelBatchesFailed = batchesFailed;
       lastBatchError = parsed.parseError;
       continue;
     }
     batchResults.push(parsed);
+    failureReceipt.sourcesAnalyzed += batch.sources.length;
   }
+
+  const recordFailedRun = async (writeSql: Sql, failure: string, sourcesAnalyzed = 0) => {
+    await writeSql`
+      update scan_runs
+      set finished_at = now(),
+          sources_fetched = ${fetchedCount},
+          leads_created = 0,
+          sources_proposed = 0,
+          sources_selected = ${sources.length},
+          sources_attempted = ${watchSlice.length},
+          sources_failed = ${failedSources.length},
+          sources_analyzed = ${sourcesAnalyzed},
+          model_batches_used = ${batches.length},
+          model_batches_failed = ${batchesFailed},
+          failed_sources = ${postgresText(JSON.stringify(failedSources)).slice(0, 32000)},
+          meetings_found = ${meetingAwareness?.found.length ?? 0},
+          meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
+          meetings_failed = ${meetingAwareness?.failed.length ?? 0},
+          meeting_failures = ${postgresText(JSON.stringify(meetingAwareness?.failures ?? [])).slice(0, 32000)},
+          summary = null,
+          error = ${postgresText(failure).slice(0, 800)}
+      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+    `;
+  };
+
+  const recordManualFailure = async (failure: string, sourcesAnalyzed = 0) =>
+    withTransaction(async (writeSql) => {
+      if (!(await lockManualScanClaim(writeSql, job))) return false;
+      await recordFailedRun(writeSql, failure, sourcesAnalyzed);
+      await refreshManualScanClaim(writeSql, job);
+      return true;
+    });
 
   if (!batchResults.length) {
     /*
@@ -1559,22 +1642,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       The scheduled path commits through the caller-supplied transaction so the
       write lands in the same unit of work as the rest of a scheduled run.
     */
-    const recordFailedRun = async (writeSql: Sql) => {
-      await writeSql`
-        update scan_runs
-        set finished_at = now(), sources_fetched = ${fetchedCount},
-            sources_selected = ${sources.length}, sources_attempted = ${watchSlice.length},
-            sources_failed = ${failedSources.length},
-            model_batches_used = ${batches.length}, model_batches_failed = ${batchesFailed},
-            failed_sources = ${JSON.stringify(failedSources).slice(0, 32000)},
-            error = ${error}
-        where id = ${runId} and newsroom_id = ${owned(context)}
-      `;
-    };
     if (deps.scheduledCommit) {
-      await deps.scheduledCommit(recordFailedRun);
+      await deps.scheduledCommit((writeSql) => recordFailedRun(writeSql, error));
     } else {
-      await recordFailedRun(sql);
+      await recordManualFailure(error);
     }
     throw new Error(error);
   }
@@ -1592,11 +1663,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     proposed_sources: merged.proposed_sources,
     parseError: null,
   };
-  const analyzedSourceCount = batches
-    .slice(0, batches.length - batchesFailed)
-    .reduce((n, b) => n + b.sources.length, 0);
+  const analyzedSourceCount = failureReceipt.sourcesAnalyzed;
 
   const commitResults = async (writeSql: Sql) => {
+    if (!deps.scheduledCommit && !(await lockManualScanClaim(writeSql, job)))
+      throw new Error("Scan job claim was superseded; refusing stale result writes.");
+    const openRun = await writeSql<{ id: number }>`
+      select id from scan_runs
+      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+      for update
+    `;
+    if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
     for (const touch of pendingSourceTouches) {
       await writeSql`
         update sources set last_error = ${touch.error}, last_fetched_at = now()
@@ -1688,7 +1765,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         proposed += 1;
     }
 
-    let summary = String(data.editor_summary ?? "").slice(0, 1200);
+    let summary = postgresText(String(data.editor_summary ?? "")).slice(0, 1200);
     if (leadsCreated === 0 && !summary)
       summary = composeZeroLeadSummary({
         fetched: fetchedCount,
@@ -1723,11 +1800,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           sources_analyzed = ${analyzedSourceCount},
           model_batches_used = ${batches.length},
           model_batches_failed = ${batchesFailed},
-          failed_sources = ${JSON.stringify(failedSources).slice(0, 32000)},
+          failed_sources = ${postgresText(JSON.stringify(failedSources)).slice(0, 32000)},
           meetings_found = ${meetingAwareness?.found.length ?? 0},
           meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
           meetings_failed = ${meetingAwareness?.failed.length ?? 0},
-          meeting_failures = ${JSON.stringify(meetingAwareness?.failures ?? []).slice(0, 32000)},
+          meeting_failures = ${postgresText(JSON.stringify(meetingAwareness?.failures ?? [])).slice(0, 32000)},
           summary = ${summary}
       where id = ${runId} and newsroom_id = ${owned(context)}
     `;
@@ -1736,14 +1813,35 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         insert into audit_events (user_id, action, detail, newsroom_id)
         values (${context.userId}, 'scan', ${`run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`}, ${owned(context)})
       `;
+    } else {
+      await refreshManualScanClaim(writeSql, job);
     }
     return { leadsCreated };
   };
 
-  await deps.beforeScheduledCommit?.();
-  const committed = deps.scheduledCommit
-    ? await deps.scheduledCommit(commitResults)
-    : await withTransaction(commitResults);
+  let committed: { leadsCreated: number };
+  try {
+    await deps.beforeScheduledCommit?.();
+    committed = deps.scheduledCommit
+      ? await deps.scheduledCommit(commitResults)
+      : await withTransaction(commitResults);
+  } catch (error) {
+    if (!deps.scheduledCommit) {
+      const failure = postgresText(error instanceof Error ? error.message : String(error));
+      try {
+        // `withTransaction` has rolled back before control reaches here. Save a
+        // terminal receipt separately so a failed manual result write does not
+        // leave scan_runs looking active forever with zero coverage.
+        await recordManualFailure(failure, analyzedSourceCount);
+      } catch (settleError) {
+        const settleMessage = postgresText(
+          settleError instanceof Error ? settleError.message : String(settleError),
+        );
+        throw new Error(`Scan result could not be saved: ${failure}. The run receipt could not be finalized: ${settleMessage}`);
+      }
+    }
+    throw error;
+  }
   if (!deps.scheduledCommit)
     await audit(
       context.userId,
@@ -1751,6 +1849,42 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`,
       owned(context),
     );
+  } catch (error) {
+    if (!deps.scheduledCommit) {
+      const failure = postgresText(error instanceof Error ? error.message : String(error));
+      try {
+        await withTransaction(async (receiptSql) => {
+          if (!(await lockManualScanClaim(receiptSql, job))) return;
+          await receiptSql`
+            update scan_runs
+            set finished_at = now(),
+                sources_fetched = ${failureReceipt.sourcesFetched},
+                sources_selected = ${failureReceipt.sourcesSelected},
+                sources_attempted = ${failureReceipt.sourcesAttempted},
+                sources_failed = ${failureReceipt.sourcesFailed},
+                sources_analyzed = ${failureReceipt.sourcesAnalyzed},
+                model_batches_used = ${failureReceipt.modelBatchesUsed},
+                model_batches_failed = ${failureReceipt.modelBatchesFailed},
+                failed_sources = ${failureReceipt.failedSources},
+                meetings_found = ${meetingAwareness?.found.length ?? 0},
+                meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
+                meetings_failed = ${meetingAwareness?.failed.length ?? 0},
+                meeting_failures = ${postgresText(JSON.stringify(meetingAwareness?.failures ?? [])).slice(0, 32000)},
+                summary = null,
+                error = coalesce(error, ${failure.slice(0, 800)})
+            where id = ${failureRunId} and newsroom_id = ${job.newsroom_id} and finished_at is null
+          `;
+          await refreshManualScanClaim(receiptSql, job);
+        });
+      } catch (settleError) {
+        const settleMessage = postgresText(
+          settleError instanceof Error ? settleError.message : String(settleError),
+        );
+        throw new Error(`Scan failed: ${failure}. Its run receipt could not be finalized: ${settleMessage}`);
+      }
+    }
+    throw error;
+  }
 });
 
 // PerformDraftWorkDeps, failOverAndRetry, and its DraftInput/ReportedDraftResult
