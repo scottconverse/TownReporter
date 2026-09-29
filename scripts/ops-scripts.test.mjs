@@ -1846,7 +1846,7 @@ test(
       code = err.status ?? -1;
     }
     assert.doesNotMatch(out, /FAIL/, `a hash check failed:\n${out}`);
-    assert.match(out, /file hashing without a module: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.match(out, /file hashing without Get-FileHash: every check passed/, `the fixture did not reach its end:\n${out}`);
     assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
   },
 );
