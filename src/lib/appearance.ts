@@ -7,18 +7,17 @@
   announces where it's going like 'opening desk' then switches back to dark
   mode. Late at night, in a dark room, it's a shock."
 
-  Cause: every one of these preferences lived in `localStorage` and was read in
-  a `useEffect`, i.e. after first paint. On a hard reload the server could not
-  see localStorage at all, so it rendered the light theme -- pending screens,
-  error screens and the desk shell alike -- and the page flipped dark a paint
-  later.
+  Cause: these preferences live in `localStorage`, which the server cannot
+  read. The server markup therefore uses hydration-safe state; the head script
+  resolves explicit values, the desk's dark default and the reader's system
+  preference before first paint.
 
   How it is fixed, and why this way:
 
-    The values still live in localStorage (nothing to migrate, nothing to keep
-    in sync). What changed is who applies them and when. An inline script in
-    <head> (see `appearanceHeadScript`) reads the same localStorage, before any
-    React bundle is evaluated and before the first paint, and stamps two
+    Explicit values still live in localStorage (nothing to migrate, nothing
+    to keep in sync). An inline script in <head> (see `appearanceHeadScript`)
+    reads those values and the reader's system preference, before any React
+    bundle is evaluated and before the first paint, and stamps two
     attributes on <html>. Every dark style in the app is keyed on those
     attributes -- see `:root[data-appearance=...]` in styles.css,
     desk-astra.css and reader-astra.css -- so the first painted frame is
@@ -35,9 +34,8 @@
 
     The React-side classNames (`night`, `large`, `mode-dark`) are kept, but
     they are now redundant: they say the same thing as the attributes. That
-    redundancy is deliberate, because it means React can hydrate at the light
-    default (which is what keeps hydration warning-free) and the frame is still
-    dark -- the class arriving late changes no pixel.
+    redundancy is deliberate: React can hydrate with server-safe state while
+    the script has already painted the user's stored or default appearance.
 */
 
 export type DeskMode = "light" | "dark";
@@ -63,12 +61,14 @@ export type Appearance = {
 
 export const DESK_MODE_KEY = "townreporter.desk.mode";
 export const DESK_TEXT_SIZE_KEY = "townreporter.desk.textsize";
+export const READER_COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 /** The attribute the stylesheets key on, and the script stamps. */
 export const APPEARANCE_ATTR = "data-appearance";
 /** The desk's Normal/Large text-size attribute (see `--ts` in styles.css). */
 export const DESK_SIZE_ATTR = "data-desk-size";
 
-export const DEFAULT_APPEARANCE: Appearance = { desk: "light", size: "normal", reader: "light" };
+/** Static baseline; an unset reader appearance is resolved from system preference in-browser. */
+export const DEFAULT_APPEARANCE: Appearance = { desk: "dark", size: "normal", reader: "light" };
 
 /** The dark page color, for both surfaces: the desk's `.desk-ltr.astra.night`
     `--bg` / `:root[data-appearance="desk-dark"]` and the paper's
@@ -133,7 +133,7 @@ export function surfaceBackground(surface: AppearanceSurface): string {
 /** localStorage, in a try/catch: private windows and blocked storage throw on
     access rather than returning null, and a page must still render. */
 export function readStoredDesk(): Pick<Appearance, "desk" | "size"> {
-  if (typeof document === "undefined") return { desk: "light", size: "normal" };
+  if (typeof document === "undefined") return { desk: "dark", size: "normal" };
   const read = (key: string): string | null => {
     try {
       return localStorage.getItem(key);
@@ -142,9 +142,34 @@ export function readStoredDesk(): Pick<Appearance, "desk" | "size"> {
     }
   };
   return {
-    desk: oneOf(read(DESK_MODE_KEY), ["light", "dark"] as const, "light"),
+    desk: oneOf(read(DESK_MODE_KEY), ["light", "dark"] as const, "dark"),
     size: oneOf(read(DESK_TEXT_SIZE_KEY), ["normal", "large"] as const, "normal"),
   };
+}
+
+/** System reader appearance, used only when the reader has no explicit choice. */
+export function readSystemReaderMode(): ReaderMode {
+  try {
+    return typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(READER_COLOR_SCHEME_QUERY).matches
+      ? "dark"
+      : "light";
+  } catch {
+    return "light";
+  }
+}
+
+/** The reader's explicit saved choice, or undefined when it should follow the system. */
+export function readStoredReaderMode(readerKey: string): ReaderMode | undefined {
+  if (typeof document === "undefined" || !readerKey) return undefined;
+  try {
+    const value = JSON.parse(localStorage.getItem(readerKey) || "{}") as { dark?: unknown };
+    if (typeof value?.dark === "boolean") return value.dark ? "dark" : "light";
+  } catch {
+    // An unavailable or unreadable saved value is unset; use the system below.
+  }
+  return undefined;
 }
 
 /**
@@ -153,13 +178,8 @@ export function readStoredDesk(): Pick<Appearance, "desk" | "size"> {
  * bit the document needs.
  */
 export function readReaderMode(readerKey: string): ReaderMode {
-  if (typeof document === "undefined" || !readerKey) return "light";
-  try {
-    const value = JSON.parse(localStorage.getItem(readerKey) || "{}") as { dark?: unknown };
-    return value.dark === true ? "dark" : "light";
-  } catch {
-    return "light";
-  }
+  if (typeof document === "undefined") return "light";
+  return readStoredReaderMode(readerKey) ?? readSystemReaderMode();
 }
 
 export function writeStoredDesk(next: Pick<Appearance, "desk" | "size">): void {
@@ -198,9 +218,9 @@ function jsString(value: string): string {
  * all (see the `data-stranded` fallback in `__root.tsx` for the same hard
  * constraint).
  *
- * Every read is guarded: a browser that blocks storage, or an unparseable
- * reader blob, leaves the light defaults in place and the page renders exactly
- * as it does today.
+ * Every read is guarded: an unavailable desk choice falls back to dark, while
+ * an unset or unreadable reader choice follows the system when available and
+ * otherwise falls back to light.
  *
  * `readerKey` is inlined from the resolved paper identity rather than guessed,
  * because the reader's store is per-paper (`townreporter:reader:<name>:<city>`)
@@ -211,15 +231,17 @@ export function appearanceHeadScript(readerKey: string): string {
     "(function(){try{" +
     "var d=document.documentElement;" +
     "function read(k){try{return localStorage.getItem(k)||''}catch(e){return ''}}" +
+    "function systemDark(){try{return typeof window!=='undefined'&&typeof window.matchMedia==='function'&&window.matchMedia('(prefers-color-scheme: dark)').matches}catch(e){return false}}" +
     "var m=read('" +
     DESK_MODE_KEY +
     "'),s=read('" +
     DESK_TEXT_SIZE_KEY +
     "'),r='';" +
-    "try{r=(JSON.parse(read(" +
+    "var o=null;try{o=JSON.parse(read(" +
     jsString(readerKey) +
-    ")||'{}').dark===true)?'dark':'light'}catch(e){r='light'}" +
-    "if(m!=='dark'&&m!=='light')m='light';" +
+    ")||'{}')}catch(e){/* tampercheck: allow corrupt saved reader JSON falls back to system preference */}" +
+    "r=o&&typeof o.dark==='boolean'?(o.dark?'dark':'light'):(systemDark()?'dark':'light');" +
+    "if(m!=='dark'&&m!=='light')m='dark';" +
     "if(s!=='large'&&s!=='normal')s='normal';" +
     "var desk=/^\\/desk(\\/|$)/.test(location.pathname);" +
     "var dark=desk?m==='dark':r==='dark';" +

@@ -41,6 +41,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
 import {
   confirmSectionAndWaitForPublishable,
   openStoryDetails,
@@ -704,6 +705,7 @@ async function main() {
   });
   try {
     await ownTheDesk();
+    await chooseDeskAppearance(page, "light");
     await theDeskOffersTheSecondChoice();
     await theReportIsReadIntoReviewableCards();
     const chosen = await theEditorRefilesOneStoryByHand();
