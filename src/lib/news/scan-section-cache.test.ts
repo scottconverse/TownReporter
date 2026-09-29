@@ -8,7 +8,7 @@ import { getPglite, getSql } from "../db.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
 import { ingestUrl } from "./ingest.ts";
 import { sha256 } from "./url-guard.ts";
-import type { DeskJob } from "./jobs.ts";
+import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
 import type { SectionScanSnapshot } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
 
@@ -84,15 +84,23 @@ async function modelPack(
     id: number;
   }>`insert into scan_runs(user_id,newsroom_id,section_snapshot)
     values(${user},${room},${section ? JSON.stringify(snapshot) : null}) returning id`;
+  await ensureJobsSchema();
+  const claimToken = `scan-cache-claim-${room}`;
+  const [jobRow] = await sql<{ id: number }>`
+    insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,claim_token)
+    values(${room},${user},'scan',${run.id},'grok','editor','default','running','Working',${claimToken})
+    returning id
+  `;
   let pack = "";
   await scan(
     {
-      id: room,
+      id: jobRow.id,
       user_id: user,
       newsroom_id: room,
       subject_id: run.id,
       model_choice: "grok",
       model_choice_source: "editor",
+      claim_token: claimToken,
     } as DeskJob,
     {
       ...(attachment
@@ -126,6 +134,7 @@ async function modelPack(
       setJobModelChoice: async () => {},
     },
   );
+  await sql`update desk_jobs set status='completed',finished_at=now(),claim_token=null where id=${jobRow.id}`;
   assert.ok(pack.includes("SOURCE: Shared report"), "actual fetched source must reach the model");
   return pack;
 }
@@ -170,4 +179,246 @@ it("four fetched documents keep separate attribution within either existing scan
       assert.ok(excerpt.includes(`DOCUMENT ${extra.url}\nEXCERPT:\nDOCUMENT_FACT_${i}`));
     }
   }
+});
+
+const NUL = String.fromCharCode(0);
+const REPLACEMENT = String.fromCharCode(0xfffd);
+type NulScanFixture = {
+  sourceText?: string;
+  fetchError?: string;
+  generalScope?: boolean;
+  throwAtBatchBoundary?: boolean;
+  sourceCount?: number;
+  failFirstBatch?: boolean;
+  supersedeClaimBeforeCommit?: boolean;
+  response?: Record<string, unknown>;
+};
+
+async function runNulScanFixture(input: NulScanFixture) {
+  const sql = await getSql();
+  const room = roomCounter++;
+  const user = `scan-nul-${room}`;
+  const sourceIds: number[] = [];
+  const sourceCount = input.sourceCount ?? 1;
+  for (let i = 0; i < sourceCount; i += 1) {
+    const [source] = await sql<{ id: number }>`
+      insert into sources(user_id,newsroom_id,url,title,kind,tier,status)
+      values(${user},${room},${`https://example.org/scan-nul-${room}-${i}`},${`NUL fixture ${i + 1}`},'official','A','accepted')
+      returning id
+    `;
+    sourceIds.push(source.id);
+  }
+  const [run] = await sql<{ id: number }>`
+    insert into scan_runs(user_id,newsroom_id,section_snapshot)
+    values(${user},${room},${input.generalScope ? null : JSON.stringify({ kind: "custom", sourceIds })})
+    returning id
+  `;
+  await ensureJobsSchema();
+  const claimToken = `scan-nul-claim-${room}`;
+  const [jobRow] = await sql<{ id: number }>`
+    insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,claim_token)
+    values(${room},${user},'scan',${run.id},'grok','editor','default','running','Working',${claimToken})
+    returning id
+  `;
+  let modelPrompt = "";
+  let modelCalls = 0;
+  let guardCalls = 0;
+  let error: unknown;
+  try {
+    await scan(
+      {
+        id: jobRow.id,
+        user_id: user,
+        newsroom_id: room,
+        subject_id: run.id,
+        model_choice: "grok",
+        model_choice_source: "editor",
+        claim_token: claimToken,
+      } as DeskJob,
+      {
+        ingestUrl: async () => {
+          if (input.fetchError) throw new Error(input.fetchError);
+          return { text: input.sourceText ?? "Council votes Tuesday on a water contract.", titleHint: "Council", extras: [] };
+        },
+        grokChat: async (_system, userMessage) => {
+          modelCalls += 1;
+          modelPrompt = userMessage;
+          if (input.failFirstBatch && modelCalls === 1)
+            return { ok: false as const, error: "First analysis batch failed." };
+          return {
+            ok: true,
+            text: JSON.stringify(input.response ?? {
+              leads: [],
+              proposed_sources: [],
+              editor_summary: "The scan finished.",
+            }),
+          };
+        },
+        setJobStage: async () => {},
+        setJobModelChoice: async () => {},
+        scheduledGuard: async () => {
+          guardCalls += 1;
+          if (input.throwAtBatchBoundary && guardCalls === 3)
+            throw new Error("Injected worker failure before the model call.");
+        },
+        beforeScheduledCommit: async () => {
+          if (input.supersedeClaimBeforeCommit)
+            await sql`update desk_jobs set claim_token='new-worker-lease', updated_at=clock_timestamp() where id=${jobRow.id}`;
+        },
+      },
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  await sql`
+    update desk_jobs set status='failed',error='fixture complete',finished_at=now(),claim_token=null
+    where id=${jobRow.id} and claim_token=${claimToken}
+  `;
+  const [scanRun] = await sql<{
+    finished_at: string | null;
+    sources_selected: number;
+    sources_attempted: number;
+    sources_fetched: number;
+    sources_failed: number;
+    sources_analyzed: number;
+    model_batches_used: number;
+    model_batches_failed: number;
+    failed_sources: string | null;
+    error: string | null;
+    summary: string | null;
+  }>`
+    select finished_at,sources_selected,sources_attempted,sources_fetched,sources_failed,
+      sources_analyzed,model_batches_used,model_batches_failed,failed_sources,error,summary
+    from scan_runs where id=${run.id}
+  `;
+  const [savedSource] = await sql<{ last_error: string | null }>`
+    select last_error from sources where id=${sourceIds[0]}
+  `;
+  const [snapshot] = await sql<{ excerpt: string }>`
+    select excerpt from snapshots where source_id=${sourceIds[0]} order by id desc limit 1
+  `;
+  const [jobAfter] = await sql<{ status: string; claim_token: string | null }>`
+    select status,claim_token from desk_jobs where id=${jobRow.id}
+  `;
+  return { error, modelPrompt, modelCalls, scanRun, savedSource, snapshot, jobAfter };
+}
+
+it("normalizes NUL in fetched source text before the transactional snapshot write", async () => {
+  const result = await runNulScanFixture({
+    sourceText: `Council votes Tuesday on a water contract.${NUL} Agenda item 7.`,
+  });
+  assert.equal(result.error, undefined, `scan should finish: ${String(result.error)}`);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.sources_selected, 1);
+  assert.equal(result.scanRun.sources_attempted, 1);
+  assert.equal(result.scanRun.sources_fetched, 1);
+  assert.equal(result.scanRun.sources_failed, 0);
+  assert.equal(result.scanRun.sources_analyzed, 1);
+  assert.equal(result.scanRun.model_batches_used, 1);
+  assert.equal(result.modelCalls, 1);
+  assert.ok(result.modelPrompt.includes(REPLACEMENT));
+  assert.ok(!result.modelPrompt.includes(NUL));
+  assert.ok(result.snapshot?.excerpt.includes(REPLACEMENT));
+  assert.ok(!result.snapshot?.excerpt.includes(NUL));
+});
+
+it("settles a default General scan through the same NUL-safe result path", async () => {
+  const result = await runNulScanFixture({
+    generalScope: true,
+    sourceText: `Council votes Tuesday on a water contract.${NUL} Agenda item 7.`,
+  });
+  assert.equal(result.error, undefined, `General scan should finish: ${String(result.error)}`);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.sources_selected, 1);
+  assert.equal(result.scanRun.sources_fetched, 1);
+  assert.equal(result.scanRun.sources_analyzed, 1);
+  assert.ok(result.snapshot?.excerpt.includes(REPLACEMENT));
+  assert.ok(!result.snapshot?.excerpt.includes(NUL));
+});
+
+it("keeps a NUL-bearing source-specific fetch failure in the settled scan receipt", async () => {
+  const failure = `upstream parser failed${NUL} while reading the page`;
+  const result = await runNulScanFixture({ fetchError: failure });
+  assert.ok(result.error instanceof Error);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.sources_selected, 1);
+  assert.equal(result.scanRun.sources_attempted, 1);
+  assert.equal(result.scanRun.sources_fetched, 0);
+  assert.equal(result.scanRun.sources_failed, 1);
+  assert.equal(result.modelCalls, 0);
+  assert.equal(result.savedSource.last_error, failure.replace(NUL, REPLACEMENT));
+  const [sourceFailure] = JSON.parse(result.scanRun.failed_sources ?? "[]") as {
+    title: string;
+    error: string;
+  }[];
+  assert.equal(sourceFailure?.title, "NUL fixture 1");
+  assert.equal(sourceFailure?.error, failure.replace(NUL, REPLACEMENT));
+  assert.ok(result.scanRun.error?.includes(failure.replace(NUL, REPLACEMENT)));
+});
+
+it("settles the manual run when the worker throws before its result transaction", async () => {
+  const result = await runNulScanFixture({ throwAtBatchBoundary: true });
+  assert.ok(result.error instanceof Error);
+  assert.match(result.error.message, /Injected worker failure before the model call/);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.sources_selected, 1);
+  assert.equal(result.scanRun.sources_attempted, 1);
+  assert.equal(result.scanRun.sources_fetched, 1);
+  assert.equal(result.scanRun.sources_failed, 0);
+  assert.equal(result.scanRun.sources_analyzed, 0);
+  assert.equal(result.scanRun.model_batches_used, 1);
+  assert.equal(result.modelCalls, 0);
+  assert.ok(result.scanRun.error?.includes("Injected worker failure before the model call"));
+});
+
+it("counts successful later batches when an earlier batch fails", async () => {
+  const result = await runNulScanFixture({ sourceCount: 41, failFirstBatch: true });
+  assert.equal(result.error, undefined, `partial scan should settle: ${String(result.error)}`);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.sources_selected, 41);
+  assert.equal(result.scanRun.sources_attempted, 41);
+  assert.equal(result.scanRun.sources_fetched, 41);
+  assert.equal(result.scanRun.model_batches_used, 2);
+  assert.equal(result.scanRun.model_batches_failed, 1);
+  assert.equal(result.scanRun.sources_analyzed, 1, "only the final one-source batch succeeded");
+  assert.ok(result.scanRun.summary?.includes("1 of 2 analysis batches failed"));
+});
+
+it("finalizes the manual run with coverage when the result transaction fails", async () => {
+  const result = await runNulScanFixture({
+    response: {
+      leads: [
+        {
+          headline: `Council approves the contract${NUL}`,
+          why: "The vote is Tuesday.",
+          topic: "council",
+          source_urls: ["https://example.org/agenda"],
+          evidence: "Council approved the contract.",
+          newsworthiness: 10,
+        },
+      ],
+      proposed_sources: [],
+      editor_summary: "The council approved the contract.",
+    },
+  });
+  assert.ok(result.error instanceof Error, "invalid model text should be reported as a failed result write");
+  assert.ok(result.scanRun.finished_at, "the run row must settle after the transaction rolls back");
+  assert.equal(result.scanRun.sources_selected, 1);
+  assert.equal(result.scanRun.sources_attempted, 1);
+  assert.equal(result.scanRun.sources_fetched, 1);
+  assert.equal(result.scanRun.sources_failed, 0);
+  assert.equal(result.scanRun.sources_analyzed, 1);
+  assert.ok(result.scanRun.error?.includes("0x00"));
+  assert.equal(result.snapshot, undefined, "the failed result transaction must roll back its snapshot");
+});
+
+it("does not let a superseded scan claim commit results or settle its run", async () => {
+  const result = await runNulScanFixture({ supersedeClaimBeforeCommit: true });
+  assert.ok(result.error instanceof Error);
+  assert.match(result.error.message, /claim was superseded/);
+  assert.equal(result.scanRun.finished_at, null, "the newer claim owns the still-open run");
+  assert.equal(result.scanRun.error, null);
+  assert.equal(result.snapshot, undefined, "stale result writes must roll back");
+  assert.equal(result.jobAfter.status, "running");
+  assert.equal(result.jobAfter.claim_token, "new-worker-lease");
 });
