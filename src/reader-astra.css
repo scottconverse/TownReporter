@@ -16,10 +16,8 @@
   no stylesheet still asks for the ones they replaced -- scripts/font-licenses.test.mjs
   fails on the family names, so they are deliberately not written here either.
 
-  `--reading` is deliberately still 21px. The token sheet's `--fs-body-article`
-  is 20px, but the whole archive is set at 21px and re-setting the measure would
-  rewrap every article -- a layout change, which this pass is not allowed to
-  make. 21px is above the 14px floor the gate asserts.
+  The accepted Normal/Large reader scale is shared by story text, headlines and
+  deks. Normal body text is 20px on desktop and 18px on phones; Large is 1.2x.
 */
 .reader {
   --bg: #fffdf7;
@@ -35,7 +33,8 @@
   --ok: #1e6b34;
   --warn: #8a4b00;
   --danger: #b3261e;
-  --reading: 21px;
+  --reader-scale: 1;
+  --reading: calc(20px * var(--reader-scale));
   --serif: "Literata", Georgia, serif;
   --fd: "Bricolage Grotesque", system-ui, sans-serif;
   font-family: "Bricolage Grotesque", system-ui, sans-serif;
@@ -554,7 +553,7 @@
 }
 .reader .newsrow h3 {
   font-family: var(--fd);
-  font-size: 23px;
+  font-size: calc(23px * var(--reader-scale));
   line-height: 1.3;
   letter-spacing: -0.35px;
 }
@@ -676,7 +675,7 @@
 }
 .reader .opinionfeature h3 {
   font-family: var(--serif);
-  font-size: 28px;
+  font-size: calc(28px * var(--reader-scale));
   line-height: 1.3;
   letter-spacing: -0.6px;
 }
@@ -907,7 +906,7 @@
 }
 .reader .articlebody h2 {
   font-family: var(--fd);
-  font-size: 24px;
+  font-size: calc(24px * var(--reader-scale));
   line-height: 1.4;
   font-weight: 700;
   margin: 35px 0 18px;
@@ -924,7 +923,7 @@
 }
 .reader .articlebody blockquote {
   font-family: var(--serif);
-  font-size: 28px;
+  font-size: calc(28px * var(--reader-scale));
   line-height: 1.45;
   color: var(--teal);
   border-left: 3px solid var(--teal);
@@ -1383,7 +1382,7 @@
     display: none;
   }
   .reader .newsrow h3 {
-    font-size: 23px;
+    font-size: calc(23px * var(--reader-scale));
   }
   .reader .sectionhead h2 {
     font-size: 22px;
@@ -1497,10 +1496,10 @@
     font-size: var(--reading);
   }
   .reader .articlebody h2 {
-    font-size: 23px;
+    font-size: calc(23px * var(--reader-scale));
   }
   .reader .articlebody blockquote {
-    font-size: 25px;
+    font-size: calc(25px * var(--reader-scale));
   }
   .reader .articleaside {
     display: none;
@@ -1844,7 +1843,7 @@
   border-top: 1px solid var(--line);
 }
 .reader .river .newsrow h3 {
-  font-size: 20px;
+  font-size: calc(20px * var(--reader-scale));
 }
 /* One line, clamped to two: the river is a list, not a second front page. */
 .reader .river .newsrow p {
@@ -2344,7 +2343,7 @@
 }
 .reader .lead h2.leadhead {
   font-family: var(--fd);
-  font-size: 50px;
+  font-size: calc(50px * var(--reader-scale));
   font-weight: 800;
   line-height: 1.02;
   letter-spacing: -1.9px;
@@ -2361,7 +2360,7 @@
 }
 .reader .lead .dek {
   font-family: var(--serif);
-  font-size: 20px;
+  font-size: calc(20px * var(--reader-scale));
   line-height: 1.55;
   color: var(--muted);
   margin-top: 18px;
@@ -2420,7 +2419,7 @@
 .reader .leadcolumn .leadalso h3 {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 17px;
+  font-size: calc(17px * var(--reader-scale));
   line-height: 1.3;
 }
 .reader .leadcolumn .leadalso .storymeta {
@@ -2616,7 +2615,7 @@
 }
 .reader .storycell h3 {
   font-family: var(--fd);
-  font-size: 23px;
+  font-size: calc(23px * var(--reader-scale));
   font-weight: 700;
   line-height: 1.22;
   letter-spacing: -0.5px;
@@ -2711,7 +2710,7 @@
 }
 .reader .opinionpanel h3 {
   font-family: var(--fd);
-  font-size: 23px;
+  font-size: calc(23px * var(--reader-scale));
   font-weight: 700;
   line-height: 1.22;
   letter-spacing: -0.4px;
@@ -2762,7 +2761,7 @@
 }
 .reader .river .newsrow h3 {
   font-family: var(--fd);
-  font-size: 21px;
+  font-size: calc(21px * var(--reader-scale));
   font-weight: 700;
   letter-spacing: -0.35px;
 }
@@ -2839,14 +2838,14 @@
 }
 .reader .articlehead h1 {
   font-family: var(--fd);
-  font-size: 56px;
+  font-size: calc(56px * var(--reader-scale));
   font-weight: 800;
   line-height: 1.02;
   letter-spacing: -2px;
 }
 .reader .articlehead .dek {
   font-family: var(--serif);
-  font-size: 22px;
+  font-size: calc(22px * var(--reader-scale));
   line-height: 1.5;
   color: var(--muted);
   max-width: 62ch;
@@ -3323,7 +3322,7 @@
 }
 .reader .keepreadinggrid .newsrow h3 {
   font-family: var(--fd);
-  font-size: 21px;
+  font-size: calc(21px * var(--reader-scale));
   font-weight: 700;
   letter-spacing: -0.35px;
 }
@@ -3333,7 +3332,7 @@
    --------------------------------------------------------------------------- */
 @media (max-width: 1280px) {
   .reader .lead h2.leadhead {
-    font-size: 44px;
+    font-size: calc(44px * var(--reader-scale));
   }
 }
 @media (max-width: 1024px) {
@@ -3522,11 +3521,11 @@
     box-shadow: inset 4px 0 0 var(--yel);
   }
   .reader .lead h2.leadhead {
-    font-size: 32px;
+    font-size: calc(32px * var(--reader-scale));
     letter-spacing: -1.1px;
   }
   .reader .lead .dek {
-    font-size: 18px;
+    font-size: calc(18px * var(--reader-scale));
   }
   .reader .ledgerow > .leadcolumn,
   .reader .ledgerow > .datespanel {
@@ -3576,11 +3575,11 @@
     gap: 18px;
   }
   .reader .articlehead h1 {
-    font-size: 34px;
+    font-size: calc(34px * var(--reader-scale));
     letter-spacing: -1.2px;
   }
   .reader .articlehead .dek {
-    font-size: 19px;
+    font-size: calc(19px * var(--reader-scale));
   }
   .reader .bylinebar {
     padding: 12px 0;
@@ -3603,8 +3602,12 @@
   }
 }
 @media (max-width: 560px) {
+  .reader {
+    --reading: calc(18px * var(--reader-scale));
+  }
+
   .reader .lead h2.leadhead {
-    font-size: 30px;
+    font-size: calc(30px * var(--reader-scale));
   }
   .reader .datenum {
     font-size: 21px;
@@ -3613,7 +3616,7 @@
     font-size: 27px;
   }
   .reader .articlehead h1 {
-    font-size: 32px;
+    font-size: calc(32px * var(--reader-scale));
   }
 }
 /* Anchors the jump list points at have to clear nothing more than the gap

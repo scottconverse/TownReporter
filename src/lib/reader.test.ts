@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { correctionMailto, readerSearch, readerStorageKey } from "./reader.ts";
+import * as readerApi from "./reader.ts";
 test("reader navigation rejects invalid pages and unsupported views", () => {
   assert.equal(readerSearch({ page: -3 }).page, undefined);
   assert.equal(readerSearch({ page: "2", view: "saved", q: " water " }).page, 2);
@@ -23,4 +24,14 @@ test("correction email preserves multiline details and URL punctuation without e
   assert.match(parsed.searchParams.get("body")!, /Name: José\nTime: 6:30/);
   assert.ok(parsed.searchParams.get("body")!.includes(d.evidence));
   assert.notEqual(readerStorageKey("Paper", "City A"), readerStorageKey("Paper", "City B"));
+});
+
+test("reader text-size preferences normalize the saved choices", () => {
+  const normalizeReaderSize = (Reflect.get(readerApi, "normalizeReaderSize") ?? (() => undefined)) as (
+    value: unknown,
+  ) => number;
+  assert.deepEqual(
+    [18, 21, 25, 0, -1, "25", null, undefined, 99].map(normalizeReaderSize),
+    [21, 21, 25, 21, 21, 21, 21, 21, 21],
+  );
 });
