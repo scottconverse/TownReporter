@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { join, dirname, win32 as win32Path } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -1426,10 +1426,12 @@ test(
       const envLine = copy.out.split(/\r?\n/).map((line) => line.trim()).find((line) => /^REDLIB_INSTALL_ROOT=/i.test(line));
       assert.ok(envLine, `the standalone .env assignment must be printed:\n${copy.out}`);
       const printedRoot = envLine.slice(envLine.indexOf("=") + 1).trim();
+      const canonicalPrintedRoot = realpathSync.native(printedRoot);
+      const canonicalTarget = realpathSync.native(dst);
       assert.equal(
-        win32Path.normalize(printedRoot).toLowerCase(),
-        win32Path.normalize(dst).toLowerCase(),
-        `the printed .env assignment must name the copied target (expected ${JSON.stringify(dst)}, got ${JSON.stringify(printedRoot)}):\n${copy.out}`,
+        win32Path.normalize(canonicalPrintedRoot).toLowerCase(),
+        win32Path.normalize(canonicalTarget).toLowerCase(),
+        `the printed .env assignment must name the copied target (expected ${JSON.stringify(dst)} => ${JSON.stringify(canonicalTarget)}, got ${JSON.stringify(printedRoot)} => ${JSON.stringify(canonicalPrintedRoot)}):\n${copy.out}`,
       );
       assert.match(copy.out, /inside AppData/, "a target under AppData must be called out");
       assert.match(copy.out, /was not changed or deleted/, "the run must say the original is still there");
