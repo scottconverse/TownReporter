@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { AppearanceContext, useHydrated, useIsoLayoutEffect } from "./appearance-context";
 import {
@@ -32,18 +32,24 @@ export function AppearanceProvider({
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const hydrated = useHydrated();
+  // The server and hydration render use a stable value. On the first
+  // post-hydration render, read localStorage synchronously so the attributes
+  // agree with the pre-paint script before a navigation/toggle can paint.
   const [stored, setStored] = useState<Pick<Appearance, "desk" | "size">>({
     desk: "light",
     size: "normal",
   });
+  const [storedInitialized, setStoredInitialized] = useState(false);
+  const currentStored = hydrated && !storedInitialized ? readStoredDesk() : stored;
   // Bumped when the reader's own toggle moves, to re-read below. The read is
   // the source of truth, so this carries no value.
   const [, setReaderNonce] = useState(0);
 
-  useEffect(() => {
-    const next = readStoredDesk();
-    setStored((prev) => (prev.desk === next.desk && prev.size === next.size ? prev : next));
-  }, []);
+  useIsoLayoutEffect(() => {
+    if (!hydrated || storedInitialized) return;
+    setStored(currentStored);
+    setStoredInitialized(true);
+  }, [hydrated, storedInitialized, currentStored.desk, currentStored.size]);
 
   const deskPath = isDeskPath(pathname);
   /*
@@ -59,7 +65,7 @@ export function AppearanceProvider({
     already true for any render after hydration.
   */
   const reader: ReaderMode = hydrated && !deskPath ? readReaderMode(readerKey) : "light";
-  const surface = appearanceSurface(stored.desk, reader, pathname);
+  const surface = appearanceSurface(currentStored.desk, reader, pathname);
 
   useIsoLayoutEffect(() => {
     // Before hydration the <head> script's value IS the right one; writing
@@ -67,34 +73,38 @@ export function AppearanceProvider({
     if (!hydrated) return;
     const root = document.documentElement;
     root.setAttribute(APPEARANCE_ATTR, surface);
-    root.setAttribute(DESK_SIZE_ATTR, stored.size);
+    root.setAttribute(DESK_SIZE_ATTR, currentStored.size);
     // A phone's address bar is part of the screen. The <head> script sets this
     // before the first paint; this keeps it right when the toggle moves
     // afterwards, which the script cannot see.
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", surfaceBackground(surface));
-  }, [hydrated, surface, stored.size]);
+  }, [hydrated, surface, currentStored.size]);
 
   const setDesk = useCallback(
     (patch: { desk?: DeskMode; size?: DeskTextSize }) => {
-      const next = { desk: patch.desk ?? stored.desk, size: patch.size ?? stored.size };
-      if (next.desk === stored.desk && next.size === stored.size) return;
+      const next = {
+        desk: patch.desk ?? currentStored.desk,
+        size: patch.size ?? currentStored.size,
+      };
+      if (next.desk === currentStored.desk && next.size === currentStored.size) return;
       writeStoredDesk(next);
       setStored(next);
+      setStoredInitialized(true);
     },
-    [stored],
+    [currentStored.desk, currentStored.size],
   );
 
   const refreshReader = useCallback(() => setReaderNonce((n) => n + 1), []);
 
   const value = useMemo(
     () => ({
-      appearance: { desk: stored.desk, size: stored.size, reader },
+      appearance: { desk: currentStored.desk, size: currentStored.size, reader },
       surface,
       setDesk,
       refreshReader,
     }),
-    [stored.desk, stored.size, reader, surface, setDesk, refreshReader],
+    [currentStored.desk, currentStored.size, reader, surface, setDesk, refreshReader],
   );
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
