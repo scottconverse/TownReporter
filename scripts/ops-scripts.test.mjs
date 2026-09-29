@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, win32 as win32Path } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -1423,9 +1423,13 @@ test(
       plant(src);
       const copy = run(["-From", src, "-To", dst, "-Force", "-EnvFile", noEnv]);
       assert.equal(copy.code, 0, `the copy exited ${copy.code}:\n${copy.out}`);
-      assert.ok(
-        copy.out.toLowerCase().includes(`redlib_install_root=${dst}`.toLowerCase()),
-        `the .env line must be printed:\n${copy.out}`,
+      const envLine = copy.out.split(/\r?\n/).map((line) => line.trim()).find((line) => /^REDLIB_INSTALL_ROOT=/i.test(line));
+      assert.ok(envLine, `the standalone .env assignment must be printed:\n${copy.out}`);
+      const printedRoot = envLine.slice(envLine.indexOf("=") + 1).trim();
+      assert.equal(
+        win32Path.normalize(printedRoot).toLowerCase(),
+        win32Path.normalize(dst).toLowerCase(),
+        `the printed .env assignment must name the copied target (expected ${JSON.stringify(dst)}, got ${JSON.stringify(printedRoot)}):\n${copy.out}`,
       );
       assert.match(copy.out, /inside AppData/, "a target under AppData must be called out");
       assert.match(copy.out, /was not changed or deleted/, "the run must say the original is still there");
@@ -1710,6 +1714,7 @@ test(
     assert.match(text, /\$script:backupDir = Join-Path \$script:world "townreporter-backups"/, "with the local folder inside that temp world, never the real sibling");
     assert.match(text, /throw 'there is no pg_dump on this machine'/, "the dumps must be written by a stub, so no database is ever dumped");
     assert.ok(text.includes("-DumpCommand $dumpGood"), "and every run must be given that stub");
+    assert.match(text, /\$conds = Get-TownReporterBackupAlertConditions[^\r\n]*-MinFreeGb 1/, "the fake temp volume must use an explicit small reserve rather than assume the CI host has 100 GB free");
     // 5433 appears twice, and both times as text written into a fake .env --
     // the port is read for the database NAME off the URL and never connected
     // to. Anything else containing the live port is the start of a real
@@ -1832,7 +1837,6 @@ test(
       "the fixture must touch nothing live -- a temp directory only",
     );
     assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
-
     let out = "";
     let code = 0;
     try {
@@ -2116,6 +2120,7 @@ test(
     assert.match(text, /WATCHDOG_STAGE_APP/, "the harness must run the real watchdog against its disposable stage world");
     assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
     assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+    assert.match(text, /function Wait-ForStub\([\s\S]*?\.AddSeconds\(\$Seconds\)[\s\S]*?OwningProcess -eq \$ProcessId/, "stub readiness must be bounded and belong to this harness's child process");
     /*
       Unit BX. The machine-wide staged-copy pointer is read at call time from
       %LOCALAPPDATA%, and this machine has one (it names the 3100 copy), so the
@@ -2131,6 +2136,9 @@ test(
       "the fixture must point LOCALAPPDATA inside its own world, so the operator's real pointer is neither read nor written",
     );
     assert.match(text, /\$env:LOCALAPPDATA = \$fakeLocalAppData/, "and it must actually set it");
+    const pgReadyAt = text.indexOf("Wait-ForStub $pgPort $stubPgPid 30");
+    const firstWatchdogAt = text.indexOf("$run = Invoke-Watchdog 'reboot'");
+    assert.ok(pgReadyAt >= 0 && pgReadyAt < firstWatchdogAt, "the bounded wait for this run's PostgreSQL listener must finish before the watchdog starts");
     assert.match(
       text,
       /\$env:LOCALAPPDATA = \$previousLocalAppData|Remove-Item Env:\\LOCALAPPDATA/,
