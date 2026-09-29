@@ -1,5 +1,12 @@
 import { type StoryArea, cleanStoryArea } from "./story-area.ts";
 
+export type ReaderTextSize = 21 | 25;
+
+/** Keep old saved sizes readable while the reader exposes only Normal and Large. */
+export function normalizeReaderSize(value: unknown): ReaderTextSize {
+  return value === 25 ? 25 : 21;
+}
+
 export type ReaderStory = {
   id: number;
   slug: string;

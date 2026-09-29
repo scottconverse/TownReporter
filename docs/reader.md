@@ -12,9 +12,9 @@ Below the front page's lead and Opinion there is a **Latest stories** list: ever
 
 The bookmark beside any story adds it to **Saved**. Select it again to remove the bookmark. Up to 500 bookmarks stay in this browser and publication; they do not sync between devices. An unpublished or deleted story no longer appears in the reading list.
 
-## Comfortable reading
+## Text size and appearance
 
-**Reading preferences** in the header and **Text size** on a story offer Standard, Comfortable and Large text plus Light/Dark appearance. Preferences stay in this browser. On a narrow screen, **Explore the publication** opens the section menu.
+**Reading preferences** in the header and **Text size** on a story offer Normal and Large text plus Light/Dark appearance. Large text scales story text, headlines and deks. Preferences stay in this browser. On a narrow screen, **Explore the publication** opens the section menu.
 
 Story controls jump to the story, claims appendix when present, sources, corrections and related coverage. Source links open original records; **View captured version** opens the publication's retained record. Records with multiple observations offer comparisons and links to the underlying captures. The design does not manufacture claims, records or correction entries.
 
