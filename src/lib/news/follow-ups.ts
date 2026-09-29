@@ -566,9 +566,9 @@ export async function performFollowUpAction(
  * does not know, and neither is due.
  *
  * `limit` is small and the caller runs them one at a time; this returns the
- * CANDIDATES, it does not claim them. `performClaimFollowUpRun` below is what
- * makes a pick exclusive, and the scheduler's open-job fence is what keeps two
- * runs from overlapping.
+ * CANDIDATES, it does not claim them. `performClaimFollowUpRun` below makes a
+ * pick exclusive, while the atomic desk-job claim is the final per-newsroom
+ * fence against overlapping follow-ups and drafts.
  *
  * A row already `running` is NOT due, even though its `next_run_at` is still
  * in the past: a run in flight does not reschedule itself until it records an
@@ -613,10 +613,10 @@ export async function performDueFollowUps(
  * between "the scheduler chose this row" and "a run is actually happening":
  * the queue may have held the job for minutes, and the editor may have stopped
  * the follow-up in that time. A worker that gets `false` records nothing and
- * returns; the fence in ./follow-up-scheduler.ts keeps the queue from holding
- * two of them anyway. `last_state` moves to `running` here so a process that
- * dies mid-run leaves a row that says it was running rather than one that
- * looks idle -- `performReconcileFollowUpRuns` clears those.
+ * returns; the desk-job claim independently prevents a second follow-up from
+ * executing in the same newsroom. `last_state` moves to `running` here so a
+ * process that dies mid-run leaves a row that says it was running rather than
+ * one that looks idle -- `performReconcileFollowUpRuns` clears those.
  */
 export async function performClaimFollowUpRun(
   newsroomId: number,

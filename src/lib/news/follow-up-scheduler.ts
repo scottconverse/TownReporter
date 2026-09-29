@@ -17,16 +17,16 @@ import { FOLLOW_UP_HARD_CAP_MS } from "./follow-up-agents.ts";
  *  - `performDueFollowUps` (./follow-ups.ts) is the whole of "is it due", and
  *    it excludes a row already `running`, so a run in flight is not picked
  *    again on the next tick.
- *  - Serialisation is a fence in THIS file, not a table. `enqueueJob`'s
- *    partial unique index already coalesces two enqueues for the same
- *    follow-up, but the brief asks for something stronger and different:
- *    follow-ups run ONE AT A TIME, and never alongside a running draft. Both
- *    are read from `desk_jobs` here, before anything is enqueued.
+ *  - The checks in this file avoid queueing work when a blocker is already
+ *    visible. They are only a preflight: concurrent callers can both pass
+ *    them, so `executeJob` in jobs.ts makes the final atomic database claim.
+ *    That claim serializes follow-ups and gives queued drafts priority over
+ *    follow-ups in the same newsroom.
  *
  * Why the draft fence: a follow-up that shares a newsroom with an in-flight
  * draft would compete for the same provider budget and the same lane, and the
- * draft is the editor's foreground work. The scan has no such guard; this is
- * the one the brief asks for, so it is built here rather than assumed.
+ * draft is the editor's foreground work. The scheduler checks this early for
+ * a clear skip result; the job claim enforces it when workers actually start.
  *
  * Why the `running` reconcile: a process that dies mid-run leaves a row whose
  * `last_state` says `running` and whose job is gone. Nothing else ever clears

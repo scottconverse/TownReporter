@@ -1,4 +1,4 @@
-import { ensureSchemaOnce, getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 /**
@@ -224,6 +224,8 @@ export async function ensureJobsSchema() {
  * so only a genuinely dead process trips it.
  */
 export const STALE_RUNNING_SECONDS = 120;
+/** Reserved advisory-lock namespace for serializing one newsroom's draft/follow-up claims. */
+const NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE = 1_414_670_918;
 /** Exported so a test can assert the timing invariant that makes the
  * heartbeat actually work: it must fire well inside the reclaim window, or a
  * slow-but-alive job would still get mistaken for a dead one. */
@@ -612,11 +614,39 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
             select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                    stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
                    created_at, updated_at, started_at, finished_at
-            from desk_jobs
+            from desk_jobs candidate
             where lane = ${lane}
               and (
                 status = 'queued'
                 or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
+              )
+              and not (
+                candidate.kind = 'follow-up'
+                and exists (
+                  select 1 from desk_jobs draft
+                  where draft.newsroom_id = candidate.newsroom_id
+                    and draft.kind = 'draft' and draft.status in ('queued', 'running')
+                )
+              )
+              and not (
+                candidate.kind = 'follow-up'
+                and exists (
+                  select 1 from desk_jobs active_follow_up
+                  where active_follow_up.newsroom_id = candidate.newsroom_id
+                    and active_follow_up.kind = 'follow-up'
+                    and active_follow_up.id <> candidate.id
+                    and active_follow_up.status = 'running'
+                )
+              )
+              and not (
+                candidate.kind = 'draft'
+                and exists (
+                  select 1 from desk_jobs active_follow_up
+                  where active_follow_up.newsroom_id = candidate.newsroom_id
+                    and active_follow_up.kind = 'follow-up'
+                    and active_follow_up.status = 'running'
+                    and active_follow_up.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+                )
               )
             order by id asc
             limit 1
@@ -671,7 +701,6 @@ export async function reattachDurableJobsOnStartup(): Promise<{ ran: number }> {
 }
 
 export async function executeJob(job: DeskJob): Promise<boolean> {
-  const sql = await getSql();
   const token = mintClaimToken();
   /*
     The stage list is part of the claim, and the row handed to the worker below
@@ -682,21 +711,60 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     missing.
   */
   const stages = JOB_STAGE_LISTS[job.kind] ?? null;
-  const claimed = await sql<{ id: number }>`
-    update desk_jobs
-    set status = ${"running"}, stage = ${"Working…"}, claim_token = ${token},
-        started_at = coalesce(started_at, now()), updated_at = now(),
-        beat_at = now(),
-        stages_json = ${stages && stages.length ? JSON.stringify(stages) : null},
-        stage_index = 0
-    where id = ${job.id}
-      and (
-        status = ${"queued"}
-        or (status = ${"running"} and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
-      )
-    returning id
-  `;
+  const claimed = await withTransaction(async (tx) => {
+    if (job.kind === "draft" || job.kind === "follow-up") {
+      // The transaction lock makes the conflict read and this row transition
+      // one atomic newsroom admission decision across every server process.
+      await tx.query("select pg_advisory_xact_lock($1, $2)", [
+        NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE,
+        job.newsroom_id,
+      ]);
+    }
+    return tx<{ id: number }>`
+      update desk_jobs candidate
+      set status = ${"running"}, stage = ${"Working…"}, claim_token = ${token},
+          started_at = coalesce(started_at, now()), updated_at = now(),
+          beat_at = now(),
+          stages_json = ${stages && stages.length ? JSON.stringify(stages) : null},
+          stage_index = 0
+      where candidate.id = ${job.id}
+        and (
+          candidate.status = ${"queued"}
+          or (candidate.status = ${"running"} and candidate.updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
+        )
+        and not (
+          candidate.kind = 'follow-up'
+          and exists (
+            select 1 from desk_jobs draft
+            where draft.newsroom_id = candidate.newsroom_id
+              and draft.kind = 'draft' and draft.status in ('queued', 'running')
+          )
+        )
+        and not (
+          candidate.kind = 'follow-up'
+          and exists (
+            select 1 from desk_jobs active_follow_up
+            where active_follow_up.newsroom_id = candidate.newsroom_id
+              and active_follow_up.kind = 'follow-up'
+              and active_follow_up.id <> candidate.id
+              and active_follow_up.status = 'running'
+          )
+        )
+        and not (
+          candidate.kind = 'draft'
+          and exists (
+            select 1 from desk_jobs active_follow_up
+            where active_follow_up.newsroom_id = candidate.newsroom_id
+              and active_follow_up.kind = 'follow-up'
+              and active_follow_up.status = 'running'
+              and active_follow_up.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+          )
+        )
+      returning candidate.id
+    `;
+  });
   if (!claimed[0]) return false;
+  const sql = await getSql();
   const seeded: DeskJob = {
     ...job,
     stages_json: stages && stages.length ? JSON.stringify(stages) : null,
