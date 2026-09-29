@@ -1,25 +1,19 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { sendTrustEvent } from "@/components/read-beacon-send";
-import { ReaderContext, readerDefaults, useReader, type ReaderPrefs } from "@/components/reader-context";
+import {
+  ReaderContext,
+  readerDefaults,
+  useReader,
+  type ReaderPrefs,
+} from "@/components/reader-context";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
-import {
-  normalizeReaderSize,
-  readMinutes,
-  readerStorageKey,
-  type ReaderStory,
-} from "@/lib/reader";
-import { readReaderMode } from "@/lib/appearance";
+import { normalizeReaderSize, readMinutes, readerStorageKey, type ReaderStory } from "@/lib/reader";
+import { readReaderMode, readStoredReaderMode } from "@/lib/appearance";
 import { useAppearance, useHydrated } from "@/lib/appearance-context";
 
 const READER_TEXT_SIZES = [
@@ -30,7 +24,7 @@ const READER_TEXT_SIZES = [
 export function ReaderProvider({ children }: { children: ReactNode }) {
   const paper = usePaper();
   const key = readerStorageKey(paper.name, paper.city);
-  const { refreshReader } = useAppearance();
+  const { appearance, refreshReader } = useAppearance();
   /*
     The dark bit is known BEFORE the first render of a client-side navigation.
 
@@ -51,30 +45,38 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     below calls `refreshReader()` so the document attribute follows the class.
   */
   const hydrated = useHydrated();
+  const systemReader = appearance.reader;
   const [prefs, setPrefs] = useState<ReaderPrefs>(() =>
     hydrated ? { ...readerDefaults, dark: readReaderMode(key) === "dark" } : readerDefaults,
   );
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
+  // Server markup stays light. An unset choice follows the system both before
+  // the saved blob loads and when the OS color scheme changes later.
+  const storedReader = readStoredReaderMode(key);
+  const renderedPrefs =
+    hydrated && (storedReader === undefined || !ready)
+      ? { ...prefs, dark: (storedReader ?? systemReader) === "dark" }
+      : prefs;
   /*
     The current preferences, readable synchronously. `update` writes storage
     BEFORE it queues any state change, and it cannot do that from inside a
     `setPrefs` updater -- see the note on `update`.
   */
-  const prefsRef = useRef(prefs);
-  prefsRef.current = prefs;
+  const prefsRef = useRef(renderedPrefs);
+  prefsRef.current = renderedPrefs;
   useEffect(() => {
     try {
       const value = JSON.parse(localStorage.getItem(key) || "{}");
       setPrefs({
-        dark: value.dark === true,
+        dark: readReaderMode(key) === "dark",
         size: normalizeReaderSize(value.size),
         saved: Array.isArray(value.saved)
           ? value.saved.filter((s: unknown) => typeof s === "string").slice(0, 500)
           : [],
       });
     } catch {
-      setPrefs(readerDefaults);
+      setPrefs({ ...readerDefaults, dark: readReaderMode(key) === "dark" });
     }
     setReady(true);
   }, [key]);
@@ -84,7 +86,8 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(id);
   }, [message]);
   function update(value: Partial<ReaderPrefs>) {
-    const next = { ...prefsRef.current, ...value };
+    const current = prefsRef.current;
+    const next = { ...current, ...value };
     prefsRef.current = next;
     /*
       Storage first, and in the handler rather than in a `setPrefs` updater.
@@ -101,7 +104,18 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
       the value it just published.
     */
     try {
-      localStorage.setItem(key, JSON.stringify(next));
+      let hasExplicitDark = false;
+      try {
+        const stored = JSON.parse(localStorage.getItem(key) || "{}");
+        hasExplicitDark = typeof stored?.dark === "boolean";
+      } catch {
+        // An unreadable theme is unset.
+      }
+      const persisted: Record<string, unknown> =
+        value.dark === undefined && !hasExplicitDark
+          ? Object.fromEntries(Object.entries(next).filter(([name]) => name !== "dark"))
+          : next;
+      localStorage.setItem(key, JSON.stringify(persisted));
     } catch {
       setMessage("Your browser cannot keep these preferences after you leave.");
     }
@@ -115,16 +129,16 @@ export function ReaderProvider({ children }: { children: ReactNode }) {
     // state updater on purpose: React calls an updater twice in development,
     // and these are counts of presses, so a press must count once. Fire only on
     // a real change -- re-pressing the button already selected is not a choice.
-    if (value.dark === true && prefs.dark !== true) sendTrustEvent("dark-mode-chosen");
-    if (typeof value.size === "number" && value.size > 21 && value.size !== prefs.size) {
+    if (value.dark === true && current.dark !== true) sendTrustEvent("dark-mode-chosen");
+    if (typeof value.size === "number" && value.size > 21 && value.size !== current.size) {
       sendTrustEvent("larger-text-chosen");
     }
   }
   return (
-    <ReaderContext.Provider value={{ ...prefs, ready, update, notify: setMessage }}>
+    <ReaderContext.Provider value={{ ...renderedPrefs, ready, update, notify: setMessage }}>
       <div
-        className={`reader${prefs.dark ? " mode-dark" : ""}`}
-        style={{ "--reader-scale": prefs.size === 25 ? "1.2" : "1" } as CSSProperties}
+        className={`reader${renderedPrefs.dark ? " mode-dark" : ""}`}
+        style={{ "--reader-scale": renderedPrefs.size === 25 ? "1.2" : "1" } as CSSProperties}
       >
         {children}
         {message && (

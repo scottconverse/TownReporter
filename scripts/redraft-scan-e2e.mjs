@@ -104,6 +104,7 @@ import { chromium } from "playwright";
 import { fromCrossJSON } from "seroval";
 import { checkedUrl, checkedOutputPath } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -451,6 +452,7 @@ async function main() {
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor();
   await completeFirstRunSetup(page, base);
   await page.goto(`${base}/desk`, { waitUntil: "domcontentloaded" });
+  await chooseDeskAppearance(page, "light");
   /*
     Unit BW3: the composer an editor actually reaches is the drawn New story
     dialog (`NewStoryDialog`, `src/components/dialogs/editor-dialogs.tsx`),

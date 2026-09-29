@@ -190,9 +190,9 @@ export type ScanRow = {
   error: string | null;
   execution_origin?: "manual" | "scheduled";
   /**
-   * Set only on the most recent row by `listScans` -- true when the run
-   * looks open (no finished_at, no error) but the desk_jobs heartbeat behind
-   * it has gone cold or never existed. See `runLooksStalled` in `./jobs`.
+   * Set by `listScans` on every open row -- true when its run has no error or
+   * finish receipt but the corresponding desk_jobs row is missing, terminal,
+   * or has a cold heartbeat. See `runLooksStalled` in `./jobs`.
    */
   stalled?: boolean;
 };

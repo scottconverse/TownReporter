@@ -151,6 +151,7 @@ import {
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
 import {
+  annotateScanRowsWithStallStatus,
   enqueueJob,
   findOpenJob,
   kickJobs,
@@ -997,20 +998,7 @@ export const listScans = createServerFn({ method: "GET" })
     const [count] = await sql<{ total: number }>`
       select count(*)::int as total from scan_runs where newsroom_id = ${owned(context)}
     `;
-    /*
-      Only the most recent row can be the one a screen is watching, and it is
-      the only one worth a job lookup -- older rows are either finished or,
-      if a still-open older row exists too, will resolve on their own turn.
-    */
-    const newest = rows[0];
-    if (newest && !newest.finished_at && !newest.error) {
-      const job = await latestJob({
-        newsroomId: owned(context),
-        kind: "scan",
-        subjectId: newest.id,
-      });
-      newest.stalled = runLooksStalled({ runOpen: true, job });
-    }
+    await annotateScanRowsWithStallStatus(rows, owned(context));
     // P0-4: rows and the true total in one response, so the panel can say
     // "showing latest N of M" and page older runs without re-running a scan.
     return { rows, total: count?.total ?? rows.length };

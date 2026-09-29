@@ -38,6 +38,7 @@ import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
 
 const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -1203,6 +1204,7 @@ async function main() {
   await page.goto(`${base}/desk/story/${findingFixture.leadId}`, { waitUntil: "networkidle" });
   mkdirSync(evidenceArtifactDir, { recursive: true });
   const originalViewport = page.viewportSize();
+  await chooseDeskAppearance(page, "light");
   await page
     .locator("#finding-evidence-review")
     .screenshot({ path: join(evidenceArtifactDir, "finding-evidence-review-desktop.png") });

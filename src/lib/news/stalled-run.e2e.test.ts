@@ -174,13 +174,50 @@ describe("a run that died mid-work", () => {
     const db = new Client({ connectionString: dbUrl });
     await db.connect();
     try {
+      // Keep the scan desk's newest row orphaned, then put an older open row
+      // behind a fresh worker heartbeat and two older rows whose jobs are
+      // terminal or absent. This covers the rendered history state as well as
+      // the banner/button behavior for the newest interrupted run.
+      const freshActiveRun = await db.query<{ id: number }>(
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '20 minutes', 1, 'Fixture identity: fresh active worker') returning id`,
+        [userId],
+      );
+      await db.query(
+        `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage,
+                                created_at, started_at, updated_at)
+         values (1, $1, 'scan', $2, 'running', 'fetching',
+                 now() - interval '20 minutes', now() - interval '20 minutes', now())`,
+        [userId, freshActiveRun.rows[0].id],
+      );
+
+      const terminalRun = await db.query<{ id: number }>(
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '30 minutes', 1, 'Fixture identity: terminal job') returning id`,
+        [userId],
+      );
+      await db.query(
+        `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, status, stage,
+                                created_at, started_at, updated_at, finished_at)
+         values (1, $1, 'scan', $2, 'failed', 'failed',
+                 now() - interval '30 minutes', now() - interval '30 minutes', now(), now())`,
+        [userId, terminalRun.rows[0].id],
+      );
+
+      await db.query(
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '40 minutes', 1, 'Fixture identity: missing job')`,
+        [userId],
+      );
+
       // The exact shape a crash between "insert the run row" and "enqueue
       // the desk_jobs row" leaves behind: an open scan_runs row with nothing
       // in desk_jobs that could ever reclaim it. started_at is set well in
       // the past so a reviewer reading a screenshot cannot mistake this for
       // a fresh, still-plausible run.
       await db.query(
-        `insert into scan_runs (user_id, newsroom_id, started_at) values ($1, 1, now() - interval '10 minutes')`,
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '10 minutes', 1, 'Fixture identity: newest orphan')`,
         [userId],
       );
     } finally {
@@ -221,5 +258,21 @@ describe("a run that died mid-work", () => {
       !/Scanning sources/i.test(bodyText),
       "the page is still showing the busy 'Scanning sources...' label for a run nothing is working on",
     );
+
+    const historyRows = [
+      ["Fixture identity: fresh active worker", "Running"],
+      ["Fixture identity: terminal job", "Stalled"],
+      ["Fixture identity: missing job", "Stalled"],
+      ["Fixture identity: newest orphan", "Stalled"],
+    ] as const;
+    for (const [identity, expectedChip] of historyRows) {
+      const row = page.locator(".scan-row").filter({ hasText: identity });
+      assert.equal(await row.count(), 1, `history must render exactly one row for ${identity}`);
+      assert.equal(
+        (await row.locator(".astra-chip").innerText()).trim(),
+        expectedChip,
+        `${identity} must be labeled ${expectedChip}`,
+      );
+    }
   });
 });
