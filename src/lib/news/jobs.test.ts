@@ -786,6 +786,205 @@ describe("job lanes (ENG-105)", () => {
 });
 
 /**
+ * The claim boundary is the final shared point for Story drafts and scheduled
+ * follow-ups: each arrives as a desk_jobs row, then drainLane calls
+ * executeJob. Hold the first fake worker open so the assertions observe the
+ * actual overlap window without contacting a model provider.
+ */
+async function assertSecondClaimWaitsForFirst(
+  firstKind: "draft" | "follow-up",
+  secondKind: "draft" | "follow-up",
+  newsroomId: number,
+): Promise<void> {
+  const first = await enqueueJob({
+    userId: "claim-fence-test",
+    newsroomId,
+    kind: firstKind,
+    subjectId: 1,
+    kick: false,
+  });
+  let second: DeskJob | undefined;
+  let releaseFirst!: () => void;
+  const held = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let firstEntered!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    firstEntered = resolve;
+  });
+  const started: number[] = [];
+  let firstRun: Promise<boolean> | undefined;
+  __setJobWorkForTest(async (job) => {
+    started.push(job.id);
+    if (job.id === first.id) {
+      firstEntered();
+      await held;
+    }
+  });
+  try {
+    firstRun = executeJob(first);
+    await entered;
+    second = await enqueueJob({
+      userId: "claim-fence-test",
+      newsroomId,
+      kind: secondKind,
+      subjectId: 2,
+      kick: false,
+    });
+    assert.equal(await executeJob(second), false, `${secondKind} must remain queued while ${firstKind} is running`);
+    assert.deepEqual(started, [first.id], "only the first execution may enter worker code");
+
+    releaseFirst();
+    assert.equal(await firstRun, true);
+    assert.equal(await executeJob(second), true, "the blocked queue row must be claimable after the fence clears");
+    assert.deepEqual(started, [first.id, second.id]);
+  } finally {
+    releaseFirst();
+    await firstRun?.catch(() => undefined);
+    __setJobWorkForTest();
+    const sql = await getSql();
+    if (second) await sql`delete from desk_jobs where id = ${second.id}`;
+    await sql`delete from desk_jobs where id = ${first.id}`;
+  }
+}
+
+describe("newsroom execution claim fence (ENG-001)", () => {
+  it("does not overlap distinct follow-up executions in one newsroom", async () => {
+    await assertSecondClaimWaitsForFirst(
+      "follow-up",
+      "follow-up",
+      98001,
+    );
+  });
+
+  it("lets a running draft finish before a follow-up starts", async () => {
+    await assertSecondClaimWaitsForFirst(
+      "draft",
+      "follow-up",
+      99002,
+    );
+  });
+
+  it("lets a running follow-up finish before a draft starts", async () => {
+    await assertSecondClaimWaitsForFirst(
+      "follow-up",
+      "draft",
+      99003,
+    );
+  });
+
+  it("gives a queued draft the claim ahead of an older queued follow-up", async () => {
+    const newsroomId = 99004;
+    const followUp = await enqueueJob({
+      userId: "claim-fence-priority-test",
+      newsroomId,
+      kind: "follow-up",
+      subjectId: 1,
+      kick: false,
+    });
+    const draft = await enqueueJob({
+      userId: "claim-fence-priority-test",
+      newsroomId,
+      kind: "draft",
+      subjectId: 2,
+      kick: false,
+    });
+    let releaseDraft!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseDraft = resolve;
+    });
+    let draftEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      draftEntered = resolve;
+    });
+    const started: number[] = [];
+    let drain: Promise<{ ran: number }> | undefined;
+    __setJobWorkForTest(async (job) => {
+      started.push(job.id);
+      if (job.id === draft.id) {
+        draftEntered();
+        await held;
+      }
+    });
+    try {
+      assert.ok(followUp.id < draft.id, "the test must place the follow-up first in the queue");
+      drain = drainQueuedJobs();
+      await entered;
+      assert.deepEqual(started, [draft.id], "a queued draft must win even when the follow-up has the older id");
+      assert.equal((await latestJob({ newsroomId, kind: "follow-up", subjectId: 1 }))?.status, "queued");
+
+      releaseDraft();
+      await drain;
+      assert.deepEqual(started, [draft.id, followUp.id]);
+      assert.equal((await latestJob({ newsroomId, kind: "draft", subjectId: 2 }))?.status, "completed");
+      assert.equal((await latestJob({ newsroomId, kind: "follow-up", subjectId: 1 }))?.status, "completed");
+    } finally {
+      releaseDraft();
+      await drain?.catch(() => undefined);
+      __setJobWorkForTest();
+      const sql = await getSql();
+      await sql`delete from desk_jobs where id in (${followUp.id}, ${draft.id})`;
+    }
+  });
+
+  it("keeps draft/draft and different-newsroom work concurrent", async () => {
+    const newsroomId = 99005;
+    const otherNewsroomId = 99006;
+    const firstDraft = await enqueueJob({
+      userId: "claim-fence-parallel-test",
+      newsroomId,
+      kind: "draft",
+      subjectId: 1,
+      kick: false,
+    });
+    const secondDraft = await enqueueJob({
+      userId: "claim-fence-parallel-test",
+      newsroomId,
+      kind: "draft",
+      subjectId: 2,
+      kick: false,
+    });
+    const otherFollowUp = await enqueueJob({
+      userId: "claim-fence-parallel-test",
+      newsroomId: otherNewsroomId,
+      kind: "follow-up",
+      subjectId: 3,
+      kick: false,
+    });
+    let releaseFirst!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      firstEntered = resolve;
+    });
+    const started: number[] = [];
+    let firstRun: Promise<boolean> | undefined;
+    __setJobWorkForTest(async (job) => {
+      started.push(job.id);
+      if (job.id === firstDraft.id) {
+        firstEntered();
+        await held;
+      }
+    });
+    try {
+      firstRun = executeJob(firstDraft);
+      await entered;
+      assert.equal(await executeJob(secondDraft), true);
+      assert.equal(await executeJob(otherFollowUp), true);
+      assert.deepEqual(started, [firstDraft.id, secondDraft.id, otherFollowUp.id]);
+    } finally {
+      releaseFirst();
+      await firstRun?.catch(() => undefined);
+      __setJobWorkForTest();
+      const sql = await getSql();
+      await sql`delete from desk_jobs where id in (${firstDraft.id}, ${secondDraft.id}, ${otherFollowUp.id})`;
+    }
+  });
+});
+
+/**
  * One open job per subject, even when twenty callers ask at once.
  *
  * enqueueJob ran findOpenJob and then a separate insert, with no transaction

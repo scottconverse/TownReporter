@@ -11,6 +11,7 @@ import { enqueueJob, ensureJobsSchema } from "./jobs.ts";
 import {
   FOLLOW_UP_STALE_RUN_MS,
   performReconcileFollowUpRuns,
+  startFollowUpRun,
   tickFollowUps,
   tickFollowUpsFor,
 } from "./follow-up-scheduler.ts";
@@ -75,6 +76,32 @@ async function agentFollowUp(
 const past = (minutes: number) => new Date(Date.now() - minutes * 60_000);
 const future = (minutes: number) => new Date(Date.now() + minutes * 60_000);
 
+/** Observe real zero-delay dispatch timers, forwarding all callbacks normally. */
+async function withDispatchObserver<T>(run: () => Promise<T>): Promise<{ value: T; dispatches: number }> {
+  const realSetTimeout = globalThis.setTimeout;
+  let dispatches = 0;
+  globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
+    const isDispatch = delay === 0 && new Error().stack?.includes("at kickJobs (") === true;
+    if (isDispatch) dispatches += 1;
+    // Let the test remove the queued row before the forwarded real drainer runs.
+    return realSetTimeout(callback, isDispatch ? 500 : delay, ...args);
+  }) as typeof setTimeout;
+  try {
+    const value = await run();
+    // The tests delete their queue row before yielding, so the forwarded real
+    // callback settles without claiming work or invoking a provider.
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 510));
+    return { value, dispatches };
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+}
+
+async function removeQueuedFollowUp(newsroomId: number): Promise<void> {
+  const sql = await getSql();
+  await sql`delete from desk_jobs where newsroom_id = ${newsroomId} and kind = 'follow-up'`;
+}
+
 /** The follow-up jobs this newsroom's queue is holding, oldest first. */
 async function followUpJobs(newsroomId: number): Promise<{ subject_id: number; status: string; model_choice: string; model_choice_source: string }[]> {
   const sql = await getSql();
@@ -96,10 +123,40 @@ before(async () => {
     await sql.query("alter table " + table + " add column if not exists newsroom_id integer not null default 1");
   await ensureJobsSchema();
   await ensureFollowUpsSchema();
-  for (let n = 1; n <= 9; n += 1) await clean(NEWSRoom(n));
+  for (let n = 1; n <= 15; n += 1) await clean(NEWSRoom(n));
 });
 
 describe("the follow-up tick", () => {
+  it("does not schedule worker dispatch when a scheduled tick opts out", async () => {
+    const newsroomId = NEWSRoom(10);
+    await agentFollowUp(newsroomId, "Dispatch observation", { nextRunAt: past(5) });
+    const observed = await withDispatchObserver(async () => {
+      const result = await tickFollowUpsFor(newsroomId, new Date(), { kick: false });
+      await removeQueuedFollowUp(newsroomId);
+      return result;
+    });
+    assert.equal(observed.value.started, 1);
+    assert.equal(observed.dispatches, 0, "kick:false must enqueue without scheduling dispatch");
+  });
+
+  for (const kick of [undefined, true] as const) {
+    it(`schedules one worker dispatch for scheduled tick with kick=${String(kick)}`, async () => {
+      const newsroomId = NEWSRoom(kick === undefined ? 12 : 13);
+      await agentFollowUp(newsroomId, "Positive dispatch observation", { nextRunAt: past(5) });
+      const observed = await withDispatchObserver(async () => {
+        const result = await tickFollowUpsFor(
+          newsroomId,
+          new Date(),
+          kick === undefined ? {} : { kick },
+        );
+        await removeQueuedFollowUp(newsroomId);
+        return result;
+      });
+      assert.equal(observed.value.started, 1);
+      assert.equal(observed.dispatches, 1);
+    });
+  }
+
   it("starts a due row and leaves one whose time has not come alone", async () => {
     const newsroomId = NEWSRoom(1);
     const due = await agentFollowUp(newsroomId, "Has the road reopened?", { nextRunAt: past(5) });
@@ -238,7 +295,7 @@ describe("the follow-up tick", () => {
   it("visits the newsrooms that have an agent follow-up, and no others", async () => {
     // Only the newsrooms this test builds: the earlier ones are cleared so the
     // desk-wide sweep is asserted exactly rather than with a >=.
-    for (let n = 1; n <= 5; n += 1) await clean(NEWSRoom(n));
+    for (let n = 1; n <= 15; n += 1) await clean(NEWSRoom(n));
     const dueHere = await agentFollowUp(NEWSRoom(6), "Due here", { nextRunAt: past(5) });
     const manualOnly = NEWSRoom(7);
     const sql = await getSql();
@@ -258,4 +315,37 @@ describe("the follow-up tick", () => {
       "select count(*) from desk_jobs where newsroom_id = 97307 and kind = 'follow-up' returned no row",
     );
   });
+});
+
+describe("Run now dispatch", () => {
+  it("does not schedule worker dispatch when Run now opts out", async () => {
+    const newsroomId = NEWSRoom(11);
+    const id = await agentFollowUp(newsroomId, "Manual dispatch observation", { nextRunAt: future(60) });
+    const observed = await withDispatchObserver(async () => {
+      const result = await startFollowUpRun({ userId: EDITOR, newsroomId }, id, new Date(), { kick: false });
+      await removeQueuedFollowUp(newsroomId);
+      return result;
+    });
+    assert.equal(observed.value.started, true);
+    assert.equal(observed.dispatches, 0, "kick:false must enqueue without scheduling dispatch");
+  });
+
+  for (const kick of [undefined, true] as const) {
+    it(`schedules one worker dispatch for Run now with kick=${String(kick)}`, async () => {
+      const newsroomId = NEWSRoom(kick === undefined ? 14 : 15);
+      const id = await agentFollowUp(newsroomId, "Positive Run now observation", { nextRunAt: future(60) });
+      const observed = await withDispatchObserver(async () => {
+        const result = await startFollowUpRun(
+          { userId: EDITOR, newsroomId },
+          id,
+          new Date(),
+          kick === undefined ? {} : { kick },
+        );
+        await removeQueuedFollowUp(newsroomId);
+        return result;
+      });
+      assert.equal(observed.value.started, true);
+      assert.equal(observed.dispatches, 1);
+    });
+  }
 });

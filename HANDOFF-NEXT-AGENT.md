@@ -1,10 +1,18 @@
 # TownReporter — current development handoff
 
-## Current release work — 2026-09-16
+## Current review baseline — 2026-09-29
 
-The current release is [0.6.51](docs/releases/0.6.51.md). It implements source-level model effort selection; named/Automatic first-choice routing with requested-versus-actual model and effort receipts, unfinished-call technical recovery, terminal refusals, Codex-first unattended order, and Claude Sonnet last with no automatic Opus; editable Daily scan time/model/effort/source cap/source list; migration of blank-model saved Gemini connections without replacing their key; Grok popup/link recovery; Queue batch Redraft; work-queue history semantics; direct Story/Opinion full readable-PDF intake within 20 million extracted characters; resumable generic/Dark OCR with a 12-page per-call boundary; and the Windows `csrss` shutdown safety repair. The release record does not establish GitHub publication, a fresh packaged-install result, production deployment, or provider-run acceptance.
+Reviewed baseline: software version [0.6.82](docs/releases/0.6.82.md) at source commit `7cff3d6c`; GitHub confirms it was published on 2026-09-28. The bundled release guide still carries candidate-era wording, so use GitHub for publication state. Resolve the current branch tip, package assets and running deployment separately before making later release claims. Publication does not establish fresh packaged-install or provider-run acceptance. [TODO.md](TODO.md) is the current in-repository queue; the 0.6.51 snapshot and dated entries below are historical receipts, not the current implementation queue.
 
-Before a GitHub-publication or production-promotion claim, obtain a fresh Windows packaged-install result, perform authorized per-model checks, complete at least five useful Dark Desk runs and the September 3–8 replay, and resolve or explicitly accept the remaining post-crash detached-child limitation. This handoff does not assert GitHub publication, production deployment, a fresh package result, or live-model success.
+Owner decision, 2026-09-29: retain the bounded automatic routine-notice publication exception; ordinary stories still require editor Publish. This records policy, not evidence that the routine-notice path is running in production.
+
+The 64-entry gap ledger named in [the 0.6.81 release guide](docs/releases/0.6.81.md) as `design/SPEC-GAPS-0681.md` is unavailable in this checkout. Its entries and dispositions are not reconstructed here; an external copy may exist.
+
+## Archived release snapshot — 0.6.51 (2026-09-16)
+
+The 0.6.51 release implemented source-level model effort selection; named/Automatic first-choice routing with requested-versus-actual model and effort receipts, unfinished-call technical recovery, terminal refusals, Codex-first unattended order, and Claude Sonnet last with no automatic Opus; editable Daily scan time/model/effort/source cap/source list; migration of blank-model saved Gemini connections without replacing their key; Grok popup/link recovery; Queue batch Redraft; work-queue history semantics; direct Story/Opinion full readable-PDF intake within 20 million extracted characters; resumable generic/Dark OCR with a 12-page per-call boundary; and the Windows `csrss` shutdown safety repair. Its release record does not establish GitHub publication, a fresh packaged-install result, production deployment, or provider-run acceptance.
+
+Before that historical candidate's GitHub publication or production promotion, its dated record called for a fresh Windows packaged-install result, authorized per-model checks, at least five useful Dark Desk runs and the September 3–8 replay, and resolution or explicit acceptance of the then-recorded post-crash detached-child limitation. This handoff does not assert production deployment, a fresh package result, or live-model success for that candidate.
 
 ## Historical work record
 

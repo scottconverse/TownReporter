@@ -599,12 +599,22 @@ cp .env.example .env
 npm run dev
 ```
 
-Open `http://localhost:8080/login` and create an editor account. The first
-account becomes the newsroom owner. There is no setup token: it was removed in
-0.5.1, because a one-person newsroom that could not re-issue the token had a
-lock with no locksmith. Sign-in is limited to ten attempts every five minutes
-from any one address, which is what keeps an open desk from being a guessable
-one.
+Open `http://localhost:8080/login` and create an editor account. On an
+unclaimed desk, enter the one-time setup code when prompted. The login form
+points to `logs/SETUP-CODE.txt` in the server data folder and the server prints
+the code once in its log. For a source checkout, that folder is
+`TOWNREPORTER_DATA_ROOT` when set, otherwise `.townreporter-data` under the
+project directory. The code is generated in development as well as by the
+built server. Sign-in is limited to ten attempts every five minutes from any
+one address.
+
+While signed in, generate and securely save owner recovery codes from
+**Server → Recovery codes**. If you lose the password, use **Lost your
+password? Use a recovery code** on the sign-in screen. A valid unused code
+provides a one-time temporary password; sign in with it and then change your
+password. TownReporter does not send email password-reset links. **Give up the
+desk** unclaims the newsroom; the next owner must enter the setup code required
+for an unclaimed desk. It is not password recovery.
 
 After account creation, complete **Set up the paper**. The public paper remains
 neutral and empty until that form is saved.
