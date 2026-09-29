@@ -79,6 +79,71 @@ function Get-CleanPath {
   return $full
 }
 
+# Resolve existing parents before comparing paths. This also turns an 8.3
+# spelling into the same path that PowerShell reports for the install itself,
+# while still handling a destination that does not exist yet.
+function Get-PathIdentity {
+  param([string]$Path)
+  $clean = Get-CleanPath $Path
+  $probe = $clean
+  $tail = New-Object System.Collections.ArrayList
+  while (-not (Test-Path -LiteralPath $probe)) {
+    $parent = Split-Path -Parent $probe
+    if (-not $parent -or $parent -eq $probe) { break }
+    [void]$tail.Insert(0, (Split-Path -Leaf $probe))
+    $probe = $parent
+  }
+  if (Test-Path -LiteralPath $probe) {
+    $item = Get-Item -LiteralPath $probe -Force
+    $identity = Get-CleanPath $item.FullName
+    foreach ($part in $tail) { $identity = Join-Path $identity ([string]$part) }
+    return (Get-CleanPath $identity)
+  }
+  return $clean
+}
+
+function Get-PathRelativeToRoot {
+  param([string]$Path, [string]$Root)
+  if (-not $Path -or -not $Root) { return $null }
+  $identity = Get-PathIdentity $Path
+  $rootIdentity = Get-PathIdentity $Root
+  if ($identity.Equals($rootIdentity, [StringComparison]::OrdinalIgnoreCase)) { return "" }
+  $prefix = $rootIdentity
+  if (-not $prefix.EndsWith('\')) { $prefix += '\' }
+  if ($identity.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+    return $identity.Substring($prefix.Length)
+  }
+  return $null
+}
+
+function Get-OldRootSpellings {
+  param([string[]]$Roots)
+  $seen = @{}
+  $ordered = @()
+  foreach ($root in $Roots) {
+    if (-not $root) { continue }
+    $clean = $root.TrimEnd('\', '/')
+    foreach ($spelling in @($clean, $clean.Replace('\', '/'))) {
+      $key = $spelling.ToLowerInvariant()
+      if (-not $seen.ContainsKey($key)) {
+        $seen[$key] = $true
+        $ordered += $spelling
+      }
+    }
+  }
+  return $ordered
+}
+
+function Test-StringReferencesOldRoot {
+  param([string]$Value, [string[]]$OldRoots)
+  if ($null -eq $Value) { return $false }
+  foreach ($old in $OldRoots) {
+    $pattern = '(?<![A-Za-z0-9._-])' + [regex]::Escape($old) + '(?=$|[\\/])'
+    if ([regex]::IsMatch($Value, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)) { return $true }
+  }
+  return $false
+}
+
 # An install is install.json at the root, and nothing else counts. A directory
 # that merely exists is not one -- half of this bug is directories that exist
 # and hold nothing a Task Scheduler process can see.
@@ -128,36 +193,64 @@ function Get-RelocateCandidates {
   script having to know the field names.
 #>
 function Convert-PathInValue {
-  param($Value, [string]$Old, [string]$New, [ref]$Changed)
+  param($Value, [string[]]$OldRoots, [string]$New, [ref]$Changed)
   if ($null -eq $Value) { return $null }
   if ($Value -is [string]) {
-    if ($Value.IndexOf($Old, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-      $Changed.Value = $Changed.Value + 1
-      return ([regex]::Replace($Value, [regex]::Escape($Old), $New, [Text.RegularExpressions.RegexOptions]::IgnoreCase))
+    $updated = $Value
+    $replacement = $New.Replace('$', '$$')
+    foreach ($old in $OldRoots) {
+      $pattern = '(?<![A-Za-z0-9._-])' + [regex]::Escape($old) + '(?=$|[\\/])'
+      if ([regex]::IsMatch($updated, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        $updated = [regex]::Replace($updated, $pattern, $replacement, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+      }
     }
-    return $Value
+    if ($updated -cne $Value) {
+      $Changed.Value = $Changed.Value + 1
+    }
+    return $updated
   }
   if ($Value -is [System.Array]) {
     $items = New-Object System.Collections.ArrayList
     foreach ($item in $Value) {
-      [void]$items.Add((Convert-PathInValue -Value $item -Old $Old -New $New -Changed $Changed))
+      [void]$items.Add((Convert-PathInValue -Value $item -OldRoots $OldRoots -New $New -Changed $Changed))
     }
     return ,$items.ToArray()
   }
   if ($Value -is [hashtable]) {
     foreach ($key in @($Value.Keys)) {
-      $Value[$key] = Convert-PathInValue -Value $Value[$key] -Old $Old -New $New -Changed $Changed
+      $Value[$key] = Convert-PathInValue -Value $Value[$key] -OldRoots $OldRoots -New $New -Changed $Changed
     }
     return $Value
   }
   if ($Value -is [System.Management.Automation.PSCustomObject]) {
     foreach ($property in @($Value.PSObject.Properties)) {
       if (-not $property.IsSettable) { continue }
-      $property.Value = Convert-PathInValue -Value $property.Value -Old $Old -New $New -Changed $Changed
+      $property.Value = Convert-PathInValue -Value $property.Value -OldRoots $OldRoots -New $New -Changed $Changed
     }
     return $Value
   }
   return $Value
+}
+
+function Get-StringValues {
+  param($Value)
+  if ($Value -is [string]) { return ,@($Value) }
+  if ($Value -is [System.Array]) {
+    $values = @()
+    foreach ($item in $Value) { $values += @(Get-StringValues $item) }
+    return ,$values
+  }
+  if ($Value -is [hashtable]) {
+    $values = @()
+    foreach ($key in $Value.Keys) { $values += @(Get-StringValues $Value[$key]) }
+    return ,$values
+  }
+  if ($Value -is [System.Management.Automation.PSCustomObject]) {
+    $values = @()
+    foreach ($property in $Value.PSObject.Properties) { $values += @(Get-StringValues $property.Value) }
+    return ,$values
+  }
+  return ,@()
 }
 
 $source = ""
@@ -183,8 +276,67 @@ if (-not $source) {
   exit 1
 }
 
+# Refuse an install whose own required paths do not describe the directory we
+# found. The printed .env line must never make a copy look usable when its
+# executable or configured in-tree log still points somewhere else.
+$sourceConfigPath = Join-Path $source "install.json"
+try {
+  $sourceConfig = Get-Content -Raw -LiteralPath $sourceConfigPath | ConvertFrom-Json
+} catch {
+  Write-Say "  The selected install has an unreadable install.json. Nothing was changed."
+  Write-Say ""
+  exit 1
+}
+$sourceConfigRoot = [string]$sourceConfig.installRoot
+$sourceIdentity = Get-PathIdentity $source
+$sourceConfigRootIdentity = if ($sourceConfigRoot) { Get-PathIdentity $sourceConfigRoot } else { "" }
+$sandboxedSource = $false
+foreach ($sandboxedRoot in @(Get-RedlibSandboxedRoots)) {
+  if ((Get-PathIdentity $sandboxedRoot).Equals($sourceIdentity, [StringComparison]::OrdinalIgnoreCase)) {
+    $sandboxedSource = $true
+    break
+  }
+}
+$logicalInstallRoot = ""
+if ($env:LOCALAPPDATA) { $logicalInstallRoot = Join-Path $env:LOCALAPPDATA "RedditSearch\Redlib" }
+$usesSandboxLogicalRoot = $sandboxedSource -and $logicalInstallRoot -and
+  $sourceConfigRootIdentity.Equals((Get-PathIdentity $logicalInstallRoot), [StringComparison]::OrdinalIgnoreCase)
+if (-not $sourceConfigRoot -or
+    (-not $sourceConfigRootIdentity.Equals($sourceIdentity, [StringComparison]::OrdinalIgnoreCase) -and -not $usesSandboxLogicalRoot)) {
+  Write-Say "  install.json does not identify the selected source install. Nothing was changed."
+  Write-Say ""
+  exit 1
+}
+$configPathBase = $source
+if ($usesSandboxLogicalRoot) { $configPathBase = $sourceConfigRoot }
+$sourceExecutable = [string]$sourceConfig.executable
+$executableRelative = Get-PathRelativeToRoot -Path $sourceExecutable -Root $configPathBase
+if ($null -eq $executableRelative -and $usesSandboxLogicalRoot) {
+  $executableRelative = Get-PathRelativeToRoot -Path $sourceExecutable -Root $source
+}
+$sourceExecutableCopy = if ($null -ne $executableRelative) { Join-Path $source $executableRelative } else { "" }
+if ($null -eq $executableRelative -or -not $executableRelative -or -not (Test-Path -LiteralPath $sourceExecutableCopy -PathType Leaf)) {
+  Write-Say "  install.json executable does not identify a file inside the selected source install. Nothing was changed."
+  Write-Say ""
+  exit 1
+}
+$sourceLogPath = [string]$sourceConfig.logPath
+$logRelative = $null
+if ($sourceLogPath) {
+  $logRelative = Get-PathRelativeToRoot -Path $sourceLogPath -Root $configPathBase
+  if ($null -eq $logRelative -and $usesSandboxLogicalRoot) {
+    $logRelative = Get-PathRelativeToRoot -Path $sourceLogPath -Root $source
+  }
+  $initialOldRoots = Get-OldRootSpellings @($source, $sourceConfigRoot)
+  if ($null -eq $logRelative -and (Test-StringReferencesOldRoot -Value $sourceLogPath -OldRoots $initialOldRoots)) {
+    Write-Say "  install.json logPath still refers to the source but resolves outside it. Nothing was changed."
+    Write-Say ""
+    exit 1
+  }
+}
+
 $target = Get-CleanPath $To
-$samePlace = ($source.ToLowerInvariant() -eq $target.ToLowerInvariant())
+$samePlace = (Get-PathIdentity $source).Equals((Get-PathIdentity $target), [StringComparison]::OrdinalIgnoreCase)
 
 Write-Say ""
 Write-Say "  Local Redlib, being moved somewhere a scheduled task can see it"
@@ -201,6 +353,13 @@ if ($samePlace -and (Test-InstallAt -Root $target)) {
   Write-Say ("      REDLIB_INSTALL_ROOT=" + $target)
   Write-Say ""
   exit 0
+}
+
+if ($null -ne (Get-PathRelativeToRoot -Path $target -Root $source)) {
+  Write-Say "  The destination is the source install or is inside it. Nothing was changed."
+  Write-Say "  Choose a separate destination directory."
+  Write-Say ""
+  exit 1
 }
 
 <#
@@ -297,9 +456,13 @@ Remove-Item -LiteralPath (Join-Path $target "redlib.pid") -Force -ErrorAction Si
 
 $configPath = Join-Path $target "install.json"
 $rewritten = 0
+$oldRoots = Get-OldRootSpellings @($source, $sourceConfigRoot)
 try {
   $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
-  $config = Convert-PathInValue -Value $config -Old $source -New $target -Changed ([ref]$rewritten)
+  $config = Convert-PathInValue -Value $config -OldRoots $oldRoots -New $target -Changed ([ref]$rewritten)
+  $config.installRoot = $target
+  $config.executable = Join-Path $target $executableRelative
+  if ($null -ne $logRelative) { $config.logPath = Join-Path $target $logRelative }
   $text = $config | ConvertTo-Json -Depth 10
   # UTF-8 with no BOM: readable by both Windows PowerShell and PowerShell 7, and
   # the file holds nothing but ASCII paths.
@@ -313,14 +476,39 @@ try {
   exit 1
 }
 
-$stillNames = @(Get-Content -Raw -LiteralPath $configPath) | Where-Object { $_.IndexOf($source, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+$writtenConfig = $null
+try {
+  $writtenConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+  $writtenRootIdentity = Get-PathIdentity ([string]$writtenConfig.installRoot)
+  $expectedRootIdentity = Get-PathIdentity $target
+  $writtenExecutableIdentity = Get-PathIdentity ([string]$writtenConfig.executable)
+  $expectedExecutableIdentity = Get-PathIdentity (Join-Path $target $executableRelative)
+  if (-not $writtenRootIdentity.Equals($expectedRootIdentity, [StringComparison]::OrdinalIgnoreCase) -or
+      -not $writtenExecutableIdentity.Equals($expectedExecutableIdentity, [StringComparison]::OrdinalIgnoreCase) -or
+      -not (Test-Path -LiteralPath ([string]$writtenConfig.executable) -PathType Leaf)) {
+    throw "the copied install root or executable does not resolve to the destination"
+  }
+  if ($null -ne $logRelative) {
+    $writtenLogIdentity = Get-PathIdentity ([string]$writtenConfig.logPath)
+    $expectedLogIdentity = Get-PathIdentity (Join-Path $target $logRelative)
+    if (-not $writtenLogIdentity.Equals($expectedLogIdentity, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "the copied log path does not resolve to the destination"
+    }
+  }
+  $stillNames = @()
+  foreach ($value in (Get-StringValues $writtenConfig)) {
+    if (Test-StringReferencesOldRoot -Value ([string]$value) -OldRoots $oldRoots) { $stillNames += $value }
+  }
+  if (@($stillNames).Count -gt 0) { throw "install.json still contains a source-root path" }
+} catch {
+  Write-Say "  The files were copied, but the copied install.json did not pass path validation: $($_.Exception.Message)"
+  Write-Say "  The copy at $target is not verified and must not be used. The original install and .env are unchanged."
+  Write-Say ""
+  exit 1
+}
 Write-Say ""
 Write-Say ("  copied              " + $copied + " top-level item(s)")
 Write-Say ("  install.json        " + $rewritten + " path value(s) rewritten to name the new root")
-if (@($stillNames).Count -gt 0) {
-  Write-Say "  WARNING: install.json still mentions the old path somewhere. Read it before"
-  Write-Say "  relying on it: $configPath"
-}
 Write-Say ("  the old copy        is still at " + $source + " and was not changed or deleted.")
 Write-Say ("                      Delete it once the paper has read Reddit through the new one.")
 Write-Say ""

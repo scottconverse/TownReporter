@@ -1490,6 +1490,196 @@ test(
   },
 );
 
+test(
+  "redlib-relocate.ps1 resolves path aliases, rejects unsafe targets, and fails closed on stale metadata",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    const script = join(OPS, "redlib-relocate.ps1");
+    const base = mkdtempSync(join(tmpdir(), "redlib-relocate-edge-"));
+    const noEnv = join(base, "absent.env");
+    const run = (args, extraEnv = {}) => {
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
+            {
+              encoding: "utf8",
+              timeout: 120_000,
+              env: { ...process.env, REDLIB_INSTALL_ROOT: "", ...extraEnv },
+            },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
+    const plant = (root, overrides = {}) => {
+      mkdirSync(root, { recursive: true });
+      const config = {
+        installRoot: root,
+        executable: join(root, "redlib.exe"),
+        baseUrl: "http://127.0.0.1:65533",
+        logPath: join(root, "redlib.log"),
+        notes: [`built at ${root}`, "unrelated"],
+        commit: "b6a2a5e",
+        ...overrides,
+      };
+      writeFileSync(join(root, "install.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+      writeFileSync(join(root, "redlib.exe"), "stub, never run\n", "utf8");
+      writeFileSync(join(root, "config.toml"), "port = 65533\n", "utf8");
+    };
+    const envLine = (out) => out.split(/\r?\n/).map((line) => line.trim()).find((line) => /^REDLIB_INSTALL_ROOT=/i.test(line));
+    const sourceBytes = (root) => readFileSync(join(root, "install.json"));
+    try {
+      const shortBase = execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$source = $env:REDLIB_ALIAS_SOURCE; $buffer = New-Object System.Text.StringBuilder 1024; Add-Type -TypeDefinition 'using System.Runtime.InteropServices; using System.Text; public static class AliasPathProbe { [DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode)] public static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint bufferLength); }'; [void][AliasPathProbe]::GetShortPathName($source, $buffer, [uint32]$buffer.Capacity); $buffer.ToString()",
+        ],
+        { encoding: "utf8", env: { ...process.env, REDLIB_ALIAS_SOURCE: base } },
+      ).trim();
+      assert.ok(shortBase && shortBase.toLowerCase() !== base.toLowerCase(), `the Windows fixture needs a real 8.3 alias for ${base}`);
+
+      const aliasSource = join(shortBase, "alias-from");
+      const aliasTarget = join(base, "alias-to");
+      plant(aliasSource);
+      const aliasRun = run(["-From", aliasSource, "-To", aliasTarget, "-Force", "-EnvFile", noEnv]);
+      const aliasConfig = existsSync(join(aliasTarget, "install.json"))
+        ? JSON.parse(readFileSync(join(aliasTarget, "install.json"), "utf8"))
+        : {};
+      const aliasFieldsCorrect = aliasConfig.installRoot?.toLowerCase() === aliasTarget.toLowerCase()
+        && aliasConfig.executable?.toLowerCase() === join(aliasTarget, "redlib.exe").toLowerCase()
+        && aliasConfig.logPath?.toLowerCase() === join(aliasTarget, "redlib.log").toLowerCase()
+        && JSON.stringify(aliasConfig.notes) === JSON.stringify([`built at ${aliasTarget}`, "unrelated"]);
+
+      const autoAliasSource = join(shortBase, "auto-from");
+      const autoLongSource = join(base, "auto-from");
+      const autoTarget = join(base, "auto-to");
+      const autoEnv = join(base, "auto.env");
+      plant(autoAliasSource);
+      writeFileSync(autoEnv, `REDLIB_INSTALL_ROOT=${autoLongSource}\n`, "utf8");
+      const autoRun = run(["-To", autoTarget, "-Force", "-EnvFile", autoEnv]);
+      const autoConfig = existsSync(join(autoTarget, "install.json"))
+        ? JSON.parse(readFileSync(join(autoTarget, "install.json"), "utf8"))
+        : {};
+      const autoFieldsCorrect = autoConfig.installRoot?.toLowerCase() === autoTarget.toLowerCase()
+        && autoConfig.executable?.toLowerCase() === join(autoTarget, "redlib.exe").toLowerCase()
+        && autoConfig.logPath?.toLowerCase() === join(autoTarget, "redlib.log").toLowerCase()
+        && JSON.stringify(autoConfig.notes) === JSON.stringify([`built at ${autoTarget}`, "unrelated"]);
+
+      const fixtureLocalAppData = join(base, "fixture-localappdata");
+      const sandboxSource = join(fixtureLocalAppData, "Packages", "FakePackage", "LocalCache", "Local", "RedditSearch", "Redlib");
+      const logicalRoot = join(fixtureLocalAppData, "RedditSearch", "Redlib");
+      const sandboxTarget = join(base, "sandbox-to");
+      plant(sandboxSource, {
+        installRoot: logicalRoot,
+        executable: join(logicalRoot, "redlib.exe"),
+        logPath: join(logicalRoot, "redlib.log"),
+        notes: [`built at ${logicalRoot}`, "unrelated"],
+      });
+      const sandboxBytes = sourceBytes(sandboxSource);
+      const sandboxRun = run(["-To", sandboxTarget, "-Force", "-EnvFile", noEnv], { LOCALAPPDATA: fixtureLocalAppData });
+      const sandboxConfig = existsSync(join(sandboxTarget, "install.json"))
+        ? JSON.parse(readFileSync(join(sandboxTarget, "install.json"), "utf8"))
+        : {};
+      const printedSandboxRoot = envLine(sandboxRun.out)?.slice(envLine(sandboxRun.out).indexOf("=") + 1).trim();
+      const sandboxPrintedTargetCorrect = Boolean(printedSandboxRoot)
+        && win32Path.normalize(realpathSync.native(printedSandboxRoot)).toLowerCase()
+          === win32Path.normalize(realpathSync.native(sandboxTarget)).toLowerCase();
+      const sandboxLogicalMappingCorrect = sandboxRun.code === 0
+        && sandboxPrintedTargetCorrect
+        && sandboxConfig.installRoot?.toLowerCase() === sandboxTarget.toLowerCase()
+        && sandboxConfig.executable?.toLowerCase() === join(sandboxTarget, "redlib.exe").toLowerCase()
+        && sandboxConfig.logPath?.toLowerCase() === join(sandboxTarget, "redlib.log").toLowerCase()
+        && JSON.stringify(sandboxConfig.notes) === JSON.stringify([`built at ${sandboxTarget}`, "unrelated"])
+        && sourceBytes(sandboxSource).equals(sandboxBytes);
+
+      const ordinarySource = join(base, "ordinary-source");
+      const ordinaryTarget = join(base, "ordinary-target");
+      plant(ordinarySource, {
+        installRoot: logicalRoot,
+        executable: join(logicalRoot, "redlib.exe"),
+        logPath: join(logicalRoot, "redlib.log"),
+      });
+      const ordinaryBytes = sourceBytes(ordinarySource);
+      const ordinaryRun = run(
+        ["-From", ordinarySource, "-To", ordinaryTarget, "-Force", "-EnvFile", noEnv],
+        { LOCALAPPDATA: fixtureLocalAppData },
+      );
+      const similarPathRejected = ordinaryRun.code === 1
+        && !envLine(ordinaryRun.out)
+        && !existsSync(ordinaryTarget)
+        && sourceBytes(ordinarySource).equals(ordinaryBytes);
+
+      const sameSource = join(base, "same-source");
+      plant(sameSource);
+      const sameBytes = sourceBytes(sameSource);
+      const sameRun = run(["-From", sameSource, "-To", join(shortBase, "same-source"), "-Force", "-EnvFile", noEnv]);
+      const samePlaceSafe = sameRun.code === 0
+        && Boolean(envLine(sameRun.out))
+        && sourceBytes(sameSource).equals(sameBytes)
+        && readdirSync(sameSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+
+      const nestedSource = join(base, "nested-source");
+      const nestedTarget = join(nestedSource, "nested-target");
+      plant(nestedSource);
+      const nestedBytes = sourceBytes(nestedSource);
+      const nestedRun = run(["-From", nestedSource, "-To", nestedTarget, "-Force", "-EnvFile", noEnv]);
+      const nestedSafe = nestedRun.code === 1
+        && !existsSync(nestedTarget)
+        && !envLine(nestedRun.out)
+        && sourceBytes(nestedSource).equals(nestedBytes)
+        && readdirSync(nestedSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+
+      const invalidMetadata = {};
+      for (const field of ["installRoot", "executable", "logPath"]) {
+        const root = join(base, `bad-${field}-source`);
+        const destination = join(base, `bad-${field}-target`);
+        const invalidPath = field === "installRoot"
+          ? join(base, `unrelated-${field}`)
+          : `${root}\\..\\unrelated-${field}\\redlib.${field === "executable" ? "exe" : "log"}`;
+        plant(root, { [field]: invalidPath });
+        const before = sourceBytes(root);
+        const result = run(["-From", root, "-To", destination, "-Force", "-EnvFile", noEnv]);
+        invalidMetadata[field] = result.code === 1
+          && !envLine(result.out)
+          && !existsSync(destination)
+          && sourceBytes(root).equals(before);
+      }
+
+      const evidence = {
+        explicitAlias: { exit: aliasRun.code, printedEnv: Boolean(envLine(aliasRun.out)), allPathFieldsAndArrayNoteRewritten: aliasFieldsCorrect },
+        autoDiscoveredAlias: { exit: autoRun.code, printedEnv: Boolean(envLine(autoRun.out)), allPathFieldsAndArrayNoteRewritten: autoFieldsCorrect },
+        sandboxedLogicalRoot: sandboxLogicalMappingCorrect,
+        similarPathOutsideSandboxRejected: similarPathRejected,
+        forceSamePlaceAliasPreservesSource: samePlaceSafe,
+        nestedTargetRejectedBeforeSourceMutation: nestedSafe,
+        invalidRequiredMetadataRejectedBeforeAdvice: invalidMetadata,
+      };
+      assert.deepEqual(
+        evidence,
+        {
+          explicitAlias: { exit: 0, printedEnv: true, allPathFieldsAndArrayNoteRewritten: true },
+          autoDiscoveredAlias: { exit: 0, printedEnv: true, allPathFieldsAndArrayNoteRewritten: true },
+          sandboxedLogicalRoot: true,
+          similarPathOutsideSandboxRejected: true,
+          forceSamePlaceAliasPreservesSource: true,
+          nestedTargetRejectedBeforeSourceMutation: true,
+          invalidRequiredMetadataRejectedBeforeAdvice: { installRoot: true, executable: true, logPath: true },
+        },
+        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, nestedOutput: nestedRun.out, invalidMetadata }, null, 2),
+      );
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
+
 /* -------------------------------------------------------------------------
    The backups, the copy to D: and the alerts (unit AJ, 0.6.68).
 
