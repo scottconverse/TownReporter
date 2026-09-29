@@ -179,8 +179,8 @@ describe("a run that died mid-work", () => {
       // terminal or absent. This covers the rendered history state as well as
       // the banner/button behavior for the newest interrupted run.
       const freshActiveRun = await db.query<{ id: number }>(
-        `insert into scan_runs (user_id, newsroom_id, started_at)
-         values ($1, 1, now() - interval '20 minutes') returning id`,
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '20 minutes', 1, 'Fixture identity: fresh active worker') returning id`,
         [userId],
       );
       await db.query(
@@ -192,8 +192,8 @@ describe("a run that died mid-work", () => {
       );
 
       const terminalRun = await db.query<{ id: number }>(
-        `insert into scan_runs (user_id, newsroom_id, started_at)
-         values ($1, 1, now() - interval '30 minutes') returning id`,
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '30 minutes', 1, 'Fixture identity: terminal job') returning id`,
         [userId],
       );
       await db.query(
@@ -205,8 +205,8 @@ describe("a run that died mid-work", () => {
       );
 
       await db.query(
-        `insert into scan_runs (user_id, newsroom_id, started_at)
-         values ($1, 1, now() - interval '40 minutes')`,
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '40 minutes', 1, 'Fixture identity: missing job')`,
         [userId],
       );
 
@@ -216,7 +216,8 @@ describe("a run that died mid-work", () => {
       // the past so a reviewer reading a screenshot cannot mistake this for
       // a fresh, still-plausible run.
       await db.query(
-        `insert into scan_runs (user_id, newsroom_id, started_at) values ($1, 1, now() - interval '10 minutes')`,
+        `insert into scan_runs (user_id, newsroom_id, started_at, leads_created, summary)
+         values ($1, 1, now() - interval '10 minutes', 1, 'Fixture identity: newest orphan')`,
         [userId],
       );
     } finally {
@@ -258,11 +259,20 @@ describe("a run that died mid-work", () => {
       "the page is still showing the busy 'Scanning sources...' label for a run nothing is working on",
     );
 
-    const historyChips = await page.locator(".scan-row .astra-chip").allTextContents();
-    assert.deepEqual(
-      historyChips.slice(0, 4),
-      ["Stalled", "Running", "Stalled", "Stalled"],
-      "history must mark each orphaned/terminal open run Stalled while an older row with a fresh worker heartbeat stays Running",
-    );
+    const historyRows = [
+      ["Fixture identity: fresh active worker", "Running"],
+      ["Fixture identity: terminal job", "Stalled"],
+      ["Fixture identity: missing job", "Stalled"],
+      ["Fixture identity: newest orphan", "Stalled"],
+    ] as const;
+    for (const [identity, expectedChip] of historyRows) {
+      const row = page.locator(".scan-row").filter({ hasText: identity });
+      assert.equal(await row.count(), 1, `history must render exactly one row for ${identity}`);
+      assert.equal(
+        (await row.locator(".astra-chip").innerText()).trim(),
+        expectedChip,
+        `${identity} must be labeled ${expectedChip}`,
+      );
+    }
   });
 });
