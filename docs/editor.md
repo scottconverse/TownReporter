@@ -106,7 +106,7 @@ A draft, a reporting note, a research memo, a Dark Desk file — none of that is
 
 ## Reading the desk: Light/Dark and Text size
 
-Top right of every desk page, next to **View paper**: a **Light / Dark** toggle and a **Text: Normal / Large** toggle. Both remember your choice (browser local storage) and default to Light and Normal for a new browser. Dark Desk is always dark and does not offer the Light/Dark toggle, but Text size still applies there.
+Top right of every desk page, next to **View paper**: a **Light / Dark** toggle and a **Text: Normal / Large** toggle. The desk remembers your choices in browser local storage; a new browser starts in Dark with Text: Normal. On the public paper, Light/Dark follows the reader’s system color scheme until the reader saves a choice for that paper. Dark Desk is always dark and does not offer the Light/Dark toggle, but Text size still applies there.
 
 Large scales body text, meta-lines, chips, labels, headlines and reading panes. The informational-text floor is 14px. The theme-token contrast check in `scripts/contrast-audit.mjs` covers those tokens; it is not certification of every rendered state.
 
