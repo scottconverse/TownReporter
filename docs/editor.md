@@ -114,15 +114,16 @@ Large scales body text, meta-lines, chips, labels, headlines and reading panes. 
 
 ## Sign in
 
-1. On a new paper, top right: **Create editor**. That opens `/login`. Email + password. You own the desk. The button is gone after that.
+1. On an unclaimed paper, top right: **Create editor**. That opens `/login`. Create your account with email and password, then enter the one-time setup code when prompted. The sign-in form identifies its location. You own the desk after claiming it; the button is gone after that.
 2. The first time, **Set up the paper** opens next. Name the paper and city, choose the timezone, add the starting sources and tell it which YouTube channels and title phrases identify local meetings. Save to open the desk.
 3. Later visits: **Editor desk** or **Sign in**. Anyone can still read the paper without an account.
-4. **Give up the desk** (Server page, at the bottom) drops the owner. The paper stays, Create editor comes back, and the next person to open the sign-in page owns the desk -- including the archive, the Dark Desk files and the Server controls. You cannot take it back, so it asks you to type your email address first. It used to be a button in the header of every desk page; an audit showed how easily that is mistaken for Sign out.
+4. **Give up the desk** (Server page, at the bottom) unclaims the newsroom. The paper stays, Create editor comes back, and the next owner must enter the one-time setup code required for an unclaimed desk. You cannot take it back, so it asks you to type your email address first. It used to be a button in the header of every desk page; an audit showed how easily that is mistaken for Sign out.
 
 Notes:
 
 - Self-host uses email + password. Google / X buttons only appear on the grok.me preview.
-- The first account is the owner. There is no setup token; it was removed in 0.5.1.
+- The first account on an unclaimed desk is the owner and must enter its one-time setup code. For a source checkout, see [the first-run setup notes](setup.md#first-run) for the data-folder path.
+- To prepare for password loss, generate and securely save recovery codes from **Server → Recovery codes**. On the sign-in screen, **Lost your password? Use a recovery code** accepts an unused code and returns a one-time temporary password; sign in with it and then change your password. There is no email reset link. **Give up the desk** transfers ownership and is not recovery.
 - A second person joins by invite: the owner mints a one-time link under **Invite an editor** on the Server page. See [setup.md](setup.md#a-second-editor).
 - If the desk sits on “Opening the desk,” use Sign in again. Session expired.
 

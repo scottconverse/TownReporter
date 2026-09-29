@@ -144,7 +144,7 @@ cp .env.example .env              # choose local, CLI login, or optional API set
 npm run dev                       # http://localhost:8080
 ```
 
-Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). The first account becomes the newsroom owner — there is no setup token. TownReporter then opens **Set up the paper**: enter the paper name, city, state, timezone, contact details, starting watch list, meeting-video channels and meeting-title keywords. Nothing is published before that setup is saved. The account and paper settings live in your database, and sign-in is limited to ten attempts every five minutes per address.
+Open [http://localhost:8080/login](http://localhost:8080/login) and **create an editor account** (email + password). On an unclaimed desk, enter its one-time setup code when prompted. The login form points to `logs/SETUP-CODE.txt` in the server data folder; in a source checkout, that folder is `TOWNREPORTER_DATA_ROOT` if set, otherwise `.townreporter-data` under the project directory. The server prints the code once in its log, and this gate also applies in development. TownReporter then opens **Set up the paper**: enter the paper name, city, state, timezone, contact details, starting watch list, meeting-video channels and meeting-title keywords. Nothing is published before that setup is saved. The account and paper settings live in your database, and sign-in is limited to ten attempts every five minutes per address.
 
 The public paper is `/`. The desk is `/desk`; first-run setup is `/desk/setup`, and the owner can revise it later under **Server → Paper identity** (**Paper setup** panel).
 
@@ -317,7 +317,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 
 ## Sign-in
 
-- **Self-host:** first visit, **Create editor** on the paper (top right). After that the button is gone and the first account owns the desk — there is no setup token, removed in 0.5.1. **Give up the desk**, at the bottom of the Server page, hands the newsroom to the next person who signs in; it asks you to type your email address, because there is no way back.
+- **Self-host:** on an unclaimed desk, the first account must enter the one-time setup code; the sign-in form identifies its location. After that account owns the desk. Generate and securely save owner recovery codes from **Server → Recovery codes** before you need them. If you lose the password, use **Lost your password? Use a recovery code** on the sign-in screen; an unused code supplies a one-time temporary password to sign in with and then change. This is not an email password-reset service. **Give up the desk** unclaims it; the next owner must enter the setup code required for an unclaimed desk. It is not password recovery.
 - **This grok.me preview:** Google / X via Grok’s broker (those buttons only show on `*.grok.me`).
 - Local with no login at all: `VITE_AUTH_ENABLED=false`. Do not do that on a public host.
 
