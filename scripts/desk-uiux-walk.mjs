@@ -235,6 +235,37 @@ async function flushAuthTelemetry() {
   report.authTelemetry.sort((left, right) => left.sequence - right.sequence);
 }
 
+function authSessionTelemetryFailures(events) {
+  return events.flatMap((event) => {
+    if (event.method !== "GET" || event.path !== "/api/auth/get-session") return [];
+
+    let problem = null;
+    if (event.kind === "request-failed") {
+      problem = "request failed: " + (event.failure || "unknown network error");
+    } else if (event.kind === "response" && (!Number.isInteger(event.status) || event.status < 200 || event.status >= 300)) {
+      problem = "returned HTTP " + (Number.isInteger(event.status) ? event.status : "unknown");
+    }
+    if (!problem) return [];
+
+    const capture = event.capture
+      ? [
+          [
+            event.capture.scenario,
+            event.capture.viewport,
+            event.capture.theme,
+            event.capture.size,
+            event.capture.surface,
+          ].filter(Boolean).join("/"),
+          event.capture.path ? "path=" + event.capture.path : "",
+        ].filter(Boolean).join(" ")
+      : "outside a capture";
+    return [
+      "GET /api/auth/get-session " + problem +
+        " (telemetry sequence " + event.sequence + "; " + capture + ")",
+    ];
+  });
+}
+
 function safeName(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -1350,6 +1381,8 @@ async function run() {
     }
   }
   await context.close();
+  await flushAuthTelemetry();
+  report.failures.push(...authSessionTelemetryFailures(report.authTelemetry));
   checkScaleRatios();
   if (report.failures.length) throw new Error(report.failures.join("\n"));
   if (report.completedCaptures !== EXPECTED_CAPTURES) {
