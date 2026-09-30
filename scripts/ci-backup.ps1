@@ -800,7 +800,9 @@ $script:events = New-Object System.Collections.ArrayList
 
 # A fresh machine: no backup has ever been taken, and no copy has been judged.
 $now = [datetime]"2026-09-25 10:00"
-$conds = Get-TownReporterBackupAlertConditions -App $script:app -EnvFile $envFile -BackupDir $script:backupDir -StateFile $script:state -OffsiteDir $script:offsite -Now $now
+# This fake D: shares the temp volume. Use a small explicit reserve so the
+# fixture does not assume the CI host has the production 100 GB reserve free.
+$conds = Get-TownReporterBackupAlertConditions -App $script:app -EnvFile $envFile -BackupDir $script:backupDir -StateFile $script:state -OffsiteDir $script:offsite -MinFreeGb 1 -Now $now
 Check "three conditions come back for a caller that assigns the result straight" ($conds.Count -eq 3) "got $($conds.Count)"
 Check "and they are the three ids the alert table knows" ((($conds | ForEach-Object { $_.Id }) -join ',') -eq 'backup-stale,offsite-failing,offsite-low-space') (($conds | ForEach-Object { $_.Id }) -join ',')
 $byId = @{}
