@@ -11,6 +11,15 @@ export const Route = createFileRoute("/evidence/$versionId")({
   component: EvidencePage,
 });
 
+/** The host a reader would be reading if they followed the link out. */
+function originalHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "") || url;
+  } catch {
+    return url;
+  }
+}
+
 function observationLabel(kind: string, disappeared: boolean): string {
   if (disappeared || kind === "unavailable") return "Source unavailable at this check";
   if (kind === "changed") return "Changed";
@@ -113,7 +122,7 @@ function EvidencePage() {
           <div>
             <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Original file</dt>
             <dd className="mt-1">
-              TownReporter kept the original bytes. The extracted text is below.
+              TownReporter kept the original bytes. The excerpt below is from its extracted text.
             </dd>
           </div>
         ) : null}
@@ -137,11 +146,47 @@ function EvidencePage() {
           </ol>
         </section>
       ) : null}
-      <div className="mt-8 max-w-2xl whitespace-pre-wrap text-sm leading-6 text-ink-2">
-        {record.disappeared
-          ? "(source unavailable at this check)"
-          : record.extraction_text || "(no extractable text in this capture)"}
-      </div>
+      {/*
+        An excerpt, and it says so.
+
+        This block used to print up to 80,000 characters of the page we
+        captured -- somebody else's article, whole, on a public page. The
+        record still shows what we cited and where it came from; the reading
+        happens at the source, which is what the link below is for.
+      */}
+      <section className="mt-8 max-w-2xl">
+        <h2 className="text-[11px] tracking-[0.16em] text-muted uppercase">
+          Excerpt of the captured record
+        </h2>
+        <div className="mt-3 whitespace-pre-wrap border-l-2 border-rule pl-4 text-sm leading-6 text-ink-2">
+          {record.disappeared && !record.excerpt
+            ? "(source unavailable at this check)"
+            : record.excerpt || "(no extractable text in this capture)"}
+        </div>
+        <p className="mt-3 text-sm text-muted">
+          A short excerpt. TownReporter keeps the full capture for its own records and does not
+          republish the original page.
+        </p>
+        {record.url ? (
+          <p className="mt-4 text-base">
+            {record.disappeared ? (
+              <span className="text-muted">
+                The original is no longer available at{" "}
+                <span className="break-all">{record.url}</span>.
+              </span>
+            ) : (
+              <a
+                href={record.url}
+                className="text-rust underline hover:text-rust-2"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Read the original on {originalHost(record.url)}
+              </a>
+            )}
+          </p>
+        ) : null}
+      </section>
       {record.timeline.length > 1 ? (
         <p className="mt-8">
           <Link

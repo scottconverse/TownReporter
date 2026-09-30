@@ -8,9 +8,18 @@ import {
   listPublicCaptureHistory,
   classifyCaptureTimeline,
   selectComparePair,
+  PUBLIC_EXCERPT_MAX,
+  PUBLIC_CHANGE_SNIPPETS_MAX,
+  PUBLIC_CHANGE_SNIPPET_MAX,
+  PUBLIC_CHANGE_CHARS_MAX,
 } from "./evidence.ts";
-import { describeTextChanges } from "./retrieve.ts";
-import { parseFindings, provenanceFromUrls, resolvePublicFindings } from "./report.ts";
+import { CHANGE_SENTENCES_MAX } from "./retrieve.ts";
+import {
+  parseFindings,
+  provenanceFromUrls,
+  resolvePublicFindings,
+  serializeFindings,
+} from "./report.ts";
 
 async function ensureArticlesSchema() {
   await ensureInvestigateSchema();
@@ -57,7 +66,7 @@ describe("public evidence publication", { timeout: 60000 }, () => {
       insert into articles (user_id, slug, headline, body, topic, source_urls, status)
       values ('reader-test', ${suffix}, 'Reader citation', 'Story', 'council', ${JSON.stringify([`${url}/`])}, 'published')
     `;
-    assert.equal((await loadPublicEvidence(capture!.id))?.extraction_text, 'The original published source text.');
+    assert.equal((await loadPublicEvidence(capture!.id))?.excerpt, 'The original published source text.');
     assert.equal((await listPublicCaptureHistory(`${url}/`))[0]?.version_id, capture!.id);
     assert.ok(await comparePublishedEvidence({ url: `${url}/` }));
     assert.deepEqual(await listPublicCaptureHistory(`${url}?document=private`), []);
@@ -138,7 +147,7 @@ describe("public evidence publication", { timeout: 60000 }, () => {
     const pub = await loadPublicEvidence(v2[0]!.id);
     assert.ok(pub);
     assert.equal(pub!.url, url);
-    assert.match(pub!.extraction_text, /August 31/);
+    assert.match(pub!.excerpt, /August 31/);
     assert.match(pub!.content_hash, /bbb/);
 
     const earlier = await loadPublicEvidence(v1[0]!.id);
@@ -181,8 +190,243 @@ describe("public evidence publication", { timeout: 60000 }, () => {
     );
     assert.deepEqual(crossed, []);
 
-    const diff = describeTextChanges(earlier!.extraction_text, pub!.extraction_text);
-    assert.ok(diff.added.length + diff.removed.length > 0);
+    /*
+      The comparison still diffs the two CAPTURES, which is why the added
+      sentence is the whole added sentence and not an excerpt of one.
+    */
+    assert.ok(compared!.changes.added.some((s) => /begins August 31 after a delay/.test(s)));
+  });
+
+  /*
+    A reader must not be handed the article.
+
+    The public evidence page printed `full_text.slice(0, 80_000)` -- a
+    crawlable copy of somebody else's page, up to 80,000 characters of it,
+    from a newsroom whose own "How we report" page says "We do not copy their
+    article". The owner's decision (2026-09-30) is that a public evidence page
+    shows an excerpt and a link.
+
+    The bound is asserted where the RECORD is built, not where it is printed:
+    the page is one consumer of `loadPublicEvidence`, `listPublicCaptureHistory`
+    is another, and the compare payload is a third. A fix that only trimmed the
+    JSX would leave all three serving the article.
+  */
+  it("bounds every public view of a long capture to a short excerpt", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-bound-${Date.now()}`;
+    const url = `https://example.org/excerpt-bound-${Date.now()}`;
+    const full = Array.from(
+      { length: 100 },
+      (_, i) => `Paragraph ${i + 1} of the captured record holds roughly fifty characters.`,
+    ).join(" ");
+    assert.ok(full.length >= 5_000, `fixture should be a long capture, was ${full.length}`);
+    const [capture] = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"long-hash"}, ${"A long captured page"}, ${full}, ${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into articles (user_id, slug, headline, body, topic, source_urls, status)
+      values (${user}, ${`excerpt-bound-${Date.now()}`}, ${"Long capture"}, ${"Story"}, ${"council"}, ${JSON.stringify([url])}, ${"published"})
+    `;
+
+    const pub = await loadPublicEvidence(capture!.id);
+    assert.ok(pub);
+    assert.ok(
+      pub!.excerpt.length <= PUBLIC_EXCERPT_MAX + 1,
+      `a public record carried ${pub!.excerpt.length} characters of the capture`,
+    );
+    assert.ok(pub!.excerpt.startsWith("Paragraph 1 of the captured record"));
+    assert.ok(pub!.excerpt.endsWith("…"), "a truncated excerpt must say so");
+    assert.doesNotMatch(
+      pub!.excerpt,
+      /Paragraph 40 /,
+      "the middle of the capture reached the reader",
+    );
+
+    const history = await listPublicCaptureHistory(url);
+    assert.equal(history.length, 1);
+    assert.ok(history[0]!.excerpt.length <= PUBLIC_EXCERPT_MAX + 1);
+    assert.doesNotMatch(JSON.stringify(history), /Paragraph 40 /);
+
+    const compared = await comparePublishedEvidence({ a: capture!.id, b: capture!.id });
+    assert.ok(compared);
+    assert.ok(compared!.older.excerpt.length <= PUBLIC_EXCERPT_MAX + 1);
+    assert.ok(compared!.newer.excerpt.length <= PUBLIC_EXCERPT_MAX + 1);
+    assert.doesNotMatch(JSON.stringify(compared), /Paragraph 40 /);
+  });
+
+  /*
+    The excerpt is centred on what the story actually quoted.
+
+    A finding's `excerpt` is the receipt the desk copied out of the capture
+    when it wrote the story. It is the one passage we have already decided is
+    worth showing a reader, so the window opens on it rather than on the page's
+    navigation and cookie banner.
+  */
+  it("centres the public excerpt on a receipt a published story recorded", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-receipt-${Date.now()}`;
+    const url = `https://example.org/excerpt-receipt-${Date.now()}`;
+    const quote = "The council approved the annexation on a 5-2 vote.";
+    const full = `${"Earlier procedural text. ".repeat(60)}${quote} ${"Later procedural text. ".repeat(60)}`;
+    const [capture] = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"receipt-hash"}, ${"A quoted captured page"}, ${full}, ${"fetched"})
+      returning id
+    `;
+    const provenance = provenanceFromUrls(
+      [url],
+      [{ url, title: "A quoted captured page", version_id: capture!.id, role: "source" }],
+    );
+    const found = serializeFindings([
+      {
+        text: "The council approved the annexation.",
+        source_urls: [url],
+        artifact_version_ids: [capture!.id],
+        capture_event_ids: [],
+        locators: [],
+        excerpt: quote,
+      },
+    ]);
+    await sql`
+      insert into articles (
+        user_id, slug, headline, body, topic, source_urls, status, provenance_json, found_note
+      )
+      values (
+        ${user}, ${`excerpt-receipt-${Date.now()}`}, ${"Annexation approved"}, ${"Story"},
+        ${"council"}, ${JSON.stringify([url])}, ${"published"}, ${JSON.stringify(provenance)}, ${found}
+      )
+    `;
+
+    const pub = await loadPublicEvidence(capture!.id);
+    assert.ok(pub);
+    assert.ok(
+      pub!.excerpt.includes(quote),
+      `the receipt the story quoted is missing from the excerpt: ${pub!.excerpt}`,
+    );
+    assert.ok(
+      pub!.excerpt.length <= PUBLIC_EXCERPT_MAX + 1,
+      `a centred excerpt carried ${pub!.excerpt.length} characters`,
+    );
+    const at = pub!.excerpt.indexOf(quote);
+    assert.ok(
+      at > 0 && at < 300,
+      `the receipt should sit in the middle of the window, was at ${at}`,
+    );
+    assert.match(pub!.excerpt, /^…/, "a window that starts mid-capture must say so");
+    assert.match(pub!.excerpt, /…$/, "a window that ends mid-capture must say so");
+  });
+
+  /*
+    Counts and a few sentences, never the diff of two articles.
+
+    The budget is ONE budget. A cap per side would let a comparison hand back
+    six snippets of 200 characters -- 1,200 characters of two third-party
+    pages, twice the evidence page's own 600-character excerpt -- so the caps
+    that matter are on the whole payload: at most three snippets together and
+    at most 600 characters together, spent removed-first so the set is stable
+    between two identical requests.
+  */
+  it("never returns more than three changed snippets or 600 characters in total", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-diff-${Date.now()}`;
+    const url = `https://example.org/excerpt-diff-${Date.now()}`;
+    const sentence = (word: string) => `${word} ${"filler word ".repeat(20)}changed here.`;
+    const olderText = ["alpha", "bravo", "charlie", "delta", "echo"].map(sentence).join(" ");
+    const newerText = ["foxtrot", "golf", "hotel", "india", "juliett"].map(sentence).join(" ");
+    const vOlder = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"older-hash"}, ${"Old state"}, ${olderText}, ${"fetched"})
+      returning id
+    `;
+    const vNewer = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"newer-hash"}, ${"New state"}, ${newerText}, ${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into articles (user_id, slug, headline, body, topic, source_urls, status)
+      values (${user}, ${`excerpt-diff-${Date.now()}`}, ${"Changed page"}, ${"Story"}, ${"council"}, ${JSON.stringify([url])}, ${"published"})
+    `;
+
+    const compared = await comparePublishedEvidence({ a: vOlder[0]!.id, b: vNewer[0]!.id });
+    assert.ok(compared);
+    assert.ok(compared!.changes.added_total >= 5, "the diff should have seen all five sentences");
+    assert.ok(compared!.changes.removed_total >= 5);
+
+    const snippets = [...compared!.changes.removed, ...compared!.changes.added];
+    assert.equal(
+      snippets.length,
+      PUBLIC_CHANGE_SNIPPETS_MAX,
+      `a comparison returned ${snippets.length} snippets in total`,
+    );
+    const characters = snippets.reduce((sum, snippet) => sum + snippet.length, 0);
+    assert.ok(
+      characters <= PUBLIC_CHANGE_CHARS_MAX,
+      `a comparison returned ${characters} characters of changed text in total`,
+    );
+    for (const snippet of snippets) {
+      assert.ok(
+        snippet.length <= PUBLIC_CHANGE_SNIPPET_MAX + 1,
+        `a changed snippet carried ${snippet.length} characters`,
+      );
+    }
+
+    // Removed first: the whole budget went to the side that comes first, and
+    // the side that got nothing still reports its own count honestly.
+    assert.equal(compared!.changes.removed.length, PUBLIC_CHANGE_SNIPPETS_MAX);
+    assert.deepEqual(compared!.changes.added, []);
+    assert.ok(compared!.changes.added_total >= 5);
+    assert.ok(!compared!.changes.added_total_at_least, "five is below the diff's own cap");
+
+    // The sentences the budget cut must not be in the diff that is sent. (The
+    // records' own excerpts legitimately open with some of these words, so the
+    // assertion is about `changes`, which is the diff.)
+    assert.doesNotMatch(JSON.stringify(compared!.changes), /echo |golf |juliett /);
+  });
+
+  /*
+    A total that sits on the diff's cap is a floor, not a count.
+
+    `describeTextChanges` stops counting at 24 sentences a side, so a
+    comparison of two long captures reports "24" for a difference that may be
+    hundreds of sentences long. The public payload has to carry that
+    uncertainty, or the compare page prints a number it does not know as
+    though it were exact.
+  */
+  it("says a total that reached the diff's own cap is a floor", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-floor-${Date.now()}`;
+    const url = `https://example.org/excerpt-floor-${Date.now()}`;
+    const sentence = (word: string) => `${word} ${"padding words ".repeat(12)}the end.`;
+    const words = (prefix: string) =>
+      Array.from({ length: 30 }, (_, i) => `${prefix}${i + 1}`).map(sentence).join(" ");
+    const vOlder = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"floor-older"}, ${"Old state"}, ${words("old")}, ${"fetched"})
+      returning id
+    `;
+    const vNewer = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"floor-newer"}, ${"New state"}, ${words("new")}, ${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into articles (user_id, slug, headline, body, topic, source_urls, status)
+      values (${user}, ${`excerpt-floor-${Date.now()}`}, ${"Long changed page"}, ${"Story"}, ${"council"}, ${JSON.stringify([url])}, ${"published"})
+    `;
+
+    const compared = await comparePublishedEvidence({ a: vOlder[0]!.id, b: vNewer[0]!.id });
+    assert.ok(compared);
+    assert.equal(compared!.changes.removed_total, CHANGE_SENTENCES_MAX);
+    assert.equal(compared!.changes.added_total, CHANGE_SENTENCES_MAX);
+    assert.equal(compared!.changes.removed_total_at_least, true);
+    assert.equal(compared!.changes.added_total_at_least, true);
   });
 });
 

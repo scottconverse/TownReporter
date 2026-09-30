@@ -318,6 +318,7 @@ create table if not exists investigations (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create index if not exists investigations_user_idx on investigations (user_id, updated_at desc);
 create table if not exists frontier_items (
   id serial primary key,
   user_id text not null,
@@ -332,6 +333,7 @@ create table if not exists frontier_items (
   status text not null default 'open',
   created_at timestamptz not null default now()
 );
+create index if not exists frontier_inv_idx on frontier_items (investigation_id, status, priority desc);
 create table if not exists artifacts (
   id serial primary key,
   user_id text not null,
@@ -347,6 +349,8 @@ create table if not exists artifacts (
   fetch_status integer,
   created_at timestamptz not null default now()
 );
+create index if not exists artifacts_url_idx on artifacts (user_id, url, created_at desc);
+create index if not exists artifacts_inv_idx on artifacts (investigation_id);
 create table if not exists entities (
   id serial primary key,
   user_id text not null,
@@ -410,6 +414,7 @@ create table if not exists dead_ends (
   unresolved text not null default '',
   created_at timestamptz not null default now()
 );
+create index if not exists dead_ends_user_idx on dead_ends (user_id, created_at desc);
 create table if not exists search_log (
   id serial primary key,
   user_id text not null,
@@ -440,9 +445,11 @@ create table if not exists artifact_versions (
   fetch_status integer,
   fetch_outcome text not null default 'fetched',
   content_type text not null default 'html',
+  extraction_method text not null default '',
   captured_at timestamptz not null default now(),
   unique (user_id, url, content_hash)
 );
+create index if not exists artifact_versions_url_idx on artifact_versions (user_id, url, captured_at desc);
 create table if not exists entity_aliases (
   id serial primary key,
   user_id text not null,
@@ -471,6 +478,8 @@ create table if not exists capture_events (
   content_type text not null default '',
   extraction_method text not null default ''
 );
+create index if not exists capture_events_url_idx on capture_events (user_id, source_url, observed_at);
+create index if not exists capture_events_inv_idx on capture_events (investigation_id, observed_at);
 create table if not exists artifact_chunks (
   id serial primary key,
   version_id integer not null,
@@ -481,6 +490,8 @@ create table if not exists artifact_chunks (
   excerpt text not null,
   locator text not null default ''
 );
+create index if not exists artifact_chunks_version_idx on artifact_chunks (version_id, chunk_index);
+create index if not exists artifact_chunks_user_idx on artifact_chunks (user_id, version_id);
 create table if not exists investigation_entities (
   id serial primary key,
   user_id text not null,
@@ -493,6 +504,8 @@ create table if not exists investigation_entities (
   status text not null default 'active',
   unique (investigation_id, entity_id)
 );
+create index if not exists investigation_entities_inv_idx on investigation_entities (investigation_id);
+create index if not exists investigation_entities_user_idx on investigation_entities (user_id, entity_id);
 create table if not exists entity_matches (
   id serial primary key,
   user_id text not null,
@@ -504,6 +517,7 @@ create table if not exists entity_matches (
   investigation_id integer,
   unique (user_id, left_canonical, right_canonical)
 );
+create index if not exists entity_matches_user_idx on entity_matches (user_id, verdict);
 create table if not exists source_monitors (
   id serial primary key,
   user_id text not null,
@@ -523,6 +537,7 @@ create table if not exists source_monitors (
   typical_structure text not null default '',
   unique (user_id, url)
 );
+create index if not exists source_monitors_due_idx on source_monitors (user_id, enabled, next_check_at);
 create table if not exists search_attempts (
   id serial primary key,
   user_id text not null,
@@ -536,6 +551,7 @@ create table if not exists search_attempts (
   error text,
   created_at timestamptz not null default now()
 );
+create index if not exists search_attempts_inv_idx on search_attempts (investigation_id, created_at);
 alter table artifacts add column if not exists version_id integer;
 alter table artifacts add column if not exists fetch_outcome text;
 alter table artifacts add column if not exists capture_event_id integer;
@@ -701,6 +717,88 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
   `drop index if exists recurring_baselines_user_id_key_key`,
   `create unique index if not exists recurring_baselines_newsroom_key on recurring_baselines (newsroom_id, key)`,
+  /*
+    Class A drift, found by schema-parity.test.ts once it started comparing
+    types/nullability/defaults instead of column names alone.
+
+    migrations/0007_forensics.sql declares extraction_method inline in
+    artifact_versions as `text not null default ''`. This file's mirror
+    omitted it from the create table and let the `add column if not exists
+    extraction_method text` above create it instead -- so a migrated database
+    got `not null default ''` and a runtime-created one got a nullable column
+    with no default. The create table above now carries the column, which
+    fixes every database built from here on; this block converges the ones
+    already built the old way.
+
+    Guarded on information_schema so it is a no-op -- no ACCESS EXCLUSIVE
+    lock, no table scan -- when the column is already correct, which is the
+    case for every migrated database and every fresh one. Only a database
+    that actually carries the drifted shape pays for the update.
+  */
+  `do $$
+  declare
+    missing_default boolean;
+    still_nullable boolean;
+  begin
+    select (column_default is null), (is_nullable = 'YES')
+      into missing_default, still_nullable
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'artifact_versions'
+        and column_name = 'extraction_method';
+    if coalesce(missing_default, false) then
+      alter table artifact_versions alter column extraction_method set default '';
+    end if;
+    if coalesce(still_nullable, false) then
+      update artifact_versions set extraction_method = '' where extraction_method is null;
+      alter table artifact_versions alter column extraction_method set not null;
+    end if;
+  end $$`,
+  /*
+    migrations/0006_investigate.sql declares these two foreign keys inline on
+    a fresh table, which `create table if not exists` cannot retro-fit onto a
+    database this ensure path already built. Same guarded shape as
+    migrations/0051_draft_batches.sql and draft-batch.server.ts use for theirs.
+
+    If existing rows would violate the constraint, it is added NOT VALID
+    rather than failing the statement: ensureSchemaOnce swallows a throw and
+    still records the fingerprint, so a hard failure here would silently leave
+    the database without the constraint forever. A fresh database has no rows
+    to violate it and ends up with the validated constraint, exactly like the
+    migration.
+  */
+  `do $$
+  begin
+    if not exists (
+      select 1 from pg_constraint
+      where conname = 'frontier_items_investigation_id_fkey'
+        and conrelid = 'frontier_items'::regclass
+    ) then
+      begin
+        alter table frontier_items add constraint frontier_items_investigation_id_fkey
+          foreign key (investigation_id) references investigations(id) on delete cascade;
+      exception when foreign_key_violation then
+        alter table frontier_items add constraint frontier_items_investigation_id_fkey
+          foreign key (investigation_id) references investigations(id) on delete cascade not valid;
+      end;
+    end if;
+  end $$`,
+  `do $$
+  begin
+    if not exists (
+      select 1 from pg_constraint
+      where conname = 'artifacts_investigation_id_fkey'
+        and conrelid = 'artifacts'::regclass
+    ) then
+      begin
+        alter table artifacts add constraint artifacts_investigation_id_fkey
+          foreign key (investigation_id) references investigations(id) on delete set null;
+      exception when foreign_key_violation then
+        alter table artifacts add constraint artifacts_investigation_id_fkey
+          foreign key (investigation_id) references investigations(id) on delete set null not valid;
+      end;
+    end if;
+  end $$`,
 ];
 
 export async function ensureInvestigateSchema() {

@@ -337,7 +337,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | `/?topic=opinion`                            | Editorials — unsigned, the paper's own position. The Opinion link in the masthead; the same route as the paper, filtered. |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                                                            |
 | `/sitemap.xml` · `/robots.txt`               | For search engines                                                                                                        |
-| `/evidence/:versionId`                       | The captured copy of a source a printed story cited                                                                       |
+| `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited                                                                    |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                                                |
 | `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                                                       |
 | `/desk`                                      | Editor home (sign-in)                                                                                                     |
@@ -352,12 +352,17 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | `/feed`                                      | RSS                                                                                                                       |
 | `/login`                                     | Create account / sign in                                                                                                  |
 
-`AGENTS.md`, `AGENTS.project.md`, and `.grok/` at the repo root are not
-TownReporter documentation — they are the build-tool contract and personal
-handoff notes from the App Builder sandbox this repo was originally
-scaffolded with. Some of it (`.grok/app-env.json`, read by
-`scripts/with-app-env.mjs`) is still load-bearing for `npm run dev`/`build`;
-the rest is inert. If you are here to understand the newspaper, start at the
+`AGENTS.md`, `AGENTS.project.md`, `.grok/`, and the dated `HANDOFF-*.md` session
+records at the repo root are not TownReporter documentation — they are the
+build-tool contract, the skill trees and the personal handoff notes from the
+App Builder sandbox this repo was originally scaffolded with. They stay in this
+repository as history and are excluded from every release archive
+(`.gitattributes` marks them `export-ignore`), so an installed copy never
+carries them. (`HANDOFF-NEXT-AGENT.md` is the current handoff, is linked from
+`SELF-HOSTING.md` and the release guides, and does ship.) They carry nothing at
+runtime either: `.grok/app-env.json` holds no `VITE_`-prefixed keys, and
+`scripts/with-app-env.mjs` keeps only those, treating a missing file as an
+empty environment. If you are here to understand the newspaper, start at the
 top of this file, not there.
 
 ---

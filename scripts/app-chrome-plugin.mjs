@@ -1,26 +1,18 @@
 /**
- * Dev/preview (Vite) half of the app head chrome: serves the ?install=1
- * tutorial and the per-app manifest, and injects missing PWA head tags into
- * app documents. The deployed-app half lives in server/middleware/app-chrome.ts;
- * both share scripts/app-chrome-shared.mjs.
+ * Dev/preview (Vite) half of the app head chrome: serves the per-app manifest
+ * and injects missing PWA head tags into app documents. The deployed-app half
+ * lives in server/middleware/app-chrome.ts; both share
+ * scripts/app-chrome-shared.mjs.
  */
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
-  acceptsHtml,
   createHeadInjector,
   injectAppHead,
   isDocumentPath,
-  isInstallQuery,
-  renderInstallPageHtml,
   renderWebManifest,
   snapshotOgIdentity,
 } from "./app-chrome-shared.mjs";
 
 export const APP_OG_IDENTITY_ID = "virtual:app-og-identity";
-
-const INSTALL_PAGE_PATH = join(dirname(fileURLToPath(import.meta.url)), "install-page.html");
 
 function requestHost(req) {
   const forwarded = req.headers["x-forwarded-host"];
@@ -28,24 +20,9 @@ function requestHost(req) {
   return Array.isArray(host) ? host[0] : host;
 }
 
-export function renderInstallPage(hostHeader, url = "/") {
-  const template = readFileSync(INSTALL_PAGE_PATH, "utf8");
-  return renderInstallPageHtml(template, { host: hostHeader, url });
-}
-
-function sendHtml(res, html) {
-  const body = Buffer.from(html, "utf8");
-  res.statusCode = 200;
-  res.setHeader("content-type", "text/html; charset=utf-8");
-  res.setHeader("cache-control", "no-cache");
-  res.setHeader("content-length", String(body.byteLength));
-  res.end(body);
-}
-
 function serveAppChrome(middlewares) {
   middlewares.use((req, res, next) => {
-    const rawUrl = req.url ?? "";
-    const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+    const pathOnly = (req.url ?? "").split("?", 1)[0] ?? "";
     const method = (req.method ?? "GET").toUpperCase();
     if (method !== "GET") {
       next();
@@ -62,17 +39,6 @@ function serveAppChrome(middlewares) {
       return;
     }
 
-    if (isInstallQuery(rawUrl) && isDocumentPath(pathOnly) && acceptsHtml(req.headers.accept)) {
-      try {
-        sendHtml(res, renderInstallPage(requestHost(req), rawUrl));
-      } catch (err) {
-        console.error("[app-builder] install page missing:", err);
-        res.statusCode = 500;
-        res.end("install page unavailable");
-      }
-      return;
-    }
-
     next();
   });
 }
@@ -86,13 +52,11 @@ function serveAppChrome(middlewares) {
  */
 function wrapHtmlResponses(middlewares, cwd) {
   middlewares.use((req, res, next) => {
-    const rawUrl = req.url ?? "";
-    const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+    const pathOnly = (req.url ?? "").split("?", 1)[0] ?? "";
     const method = (req.method ?? "GET").toUpperCase();
     const looksLikeDocument =
       method === "GET" &&
       String(req.headers.accept ?? "").includes("text/html") &&
-      !isInstallQuery(rawUrl) &&
       isDocumentPath(pathOnly);
     if (!looksLikeDocument) {
       next();

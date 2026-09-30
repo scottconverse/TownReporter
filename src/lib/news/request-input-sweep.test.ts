@@ -586,25 +586,25 @@ const rows: Row[] = [
 
   /* evidence.ts */
   {
-    fn: "evidence.ts:433 getPublicEvidence",
+    fn: "evidence.ts:638 getPublicEvidence",
     run: rowId.parse.bind(rowId),
     valid: 3,
     bad: [{ why: "negative id", value: -3 }],
   },
   {
-    fn: "evidence.ts:437 listPublicHistory",
+    fn: "evidence.ts:642 listPublicHistory",
     run: evidenceUrl.parse.bind(evidenceUrl),
     valid: "https://longmontcitycouncil.org/2026-09-22",
     bad: [{ why: "oversize url", value: x(LIMITS.url + 1) }],
   },
   {
-    fn: "evidence.ts:441 listPublicVersionsForUrl",
+    fn: "evidence.ts:646 listPublicVersionsForUrl",
     run: evidenceUrl.parse.bind(evidenceUrl),
     valid: "https://longmontcitycouncil.org/2026-09-22",
     bad: [{ why: "not text", value: 7 }],
   },
   {
-    fn: "evidence.ts:445 comparePublicEvidence",
+    fn: "evidence.ts:650 comparePublicEvidence",
     run: evidenceCompareInput.parse.bind(evidenceCompareInput),
     valid: { url: "https://a.test/", a: 1, b: 2 },
     bad: [{ why: "negative id", value: { a: -1, b: 2 } }],

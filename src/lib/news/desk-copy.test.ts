@@ -1017,8 +1017,47 @@ describe("Worth a Look presentation", () => {
     assert.match(copy.body, /already has an editor/i);
     assert.match(copy.body, /paper/i);
     assert.doesNotMatch(copy.body, /Create editor/i);
-    assert.match(copy.unknownEmail, /already claimed/i);
-    assert.doesNotMatch(copy.unknownEmail, /Create editor/i);
+    assert.match(copy.api, /already has an editor/i);
+  });
+
+  /*
+    UX-2 (QA-007). The owner of a claimed desk who typed the wrong password was
+    shown the missing-account line: "No editor with that email. This desk is
+    already claimed -- read the paper without an account." Better Auth returns
+    one message for a wrong password and for an address that does not exist, so
+    the screen cannot tell the two apart -- but it was choosing the wording that
+    says the account is gone for both, and then sending the owner away to read
+    the paper.
+
+    The check is on the shape of the failure copy, not just its words: there is
+    no missing-account string left to reach for, the one line names the pair
+    that failed, and it points at the recovery code the sign-in screen renders
+    below the form.
+  */
+  it("gives a claimed desk one honest, non-enumerating sign-in failure", () => {
+    const copy = deskTakenLoginCopy();
+    assert.equal(
+      "unknownEmail" in copy,
+      false,
+      "the missing-account string is gone -- one failure line covers an unknown address and a wrong password alike",
+    );
+    assert.match(copy.signInFailed, /email and password/i);
+    assert.match(copy.signInFailed, /don't match/i);
+    assert.match(copy.signInFailed, /recovery code/i);
+    for (const claim of [
+      /no editor with that email/i,
+      /not exist/i,
+      /unknown/i,
+      /already claimed/i,
+      /without an account/i,
+      /Create editor/i,
+    ]) {
+      assert.doesNotMatch(
+        copy.signInFailed,
+        claim,
+        `a failed sign-in must not say whether the address is on this desk: ${claim}`,
+      );
+    }
   });
 
   /*

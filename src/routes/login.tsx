@@ -13,6 +13,7 @@ import {
   redeemMyRecoveryCode,
 } from "@/lib/news/claim";
 import { deskTakenLoginCopy } from "@/lib/news/desk-copy";
+import { FormError } from "@/components/form-error";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/login")({
@@ -219,10 +220,16 @@ function Login() {
     } catch (err) {
       setBusy(null);
       const raw = failMessage(err, "Sign-in failed");
+      /*
+        UX-2: on a claimed desk one line covers a wrong password and an address
+        that is not on this desk. The desk never says whether the email exists,
+        and it never tells the owner their own account is gone (see
+        `deskTakenLoginCopy().signInFailed`).
+      */
       setError(
         looksLikeMissingAccount(raw)
           ? claimed
-            ? taken.unknownEmail
+            ? taken.signInFailed
             : "No editor account with that email yet. Use Create editor account — this is not your Grok password."
           : raw,
       );
@@ -361,9 +368,13 @@ function Login() {
           </p>
         ) : null}
         {error ? (
-          <p className="border border-rust/40 bg-paper-2 px-3 py-2 text-sm text-ink">
+          // UX-3: announced. This is the line "Passwords do not match.", "Wrong
+          // setup code." and every failed sign-in arrive on -- it used to be a
+          // plain paragraph, so a screen reader was told nothing at all. The
+          // class is the one it already had.
+          <FormError className="border border-rust/40 bg-paper-2 px-3 py-2 text-sm text-ink">
             {error}
-          </p>
+          </FormError>
         ) : null}
 
         {claim.isPending ? (
@@ -569,9 +580,14 @@ function RecoveryCodeSignIn() {
       <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Recovery code</p>
       {tempPassword ? (
         <div className="border border-rule bg-paper-2 p-3 text-sm">
-          <p>
+          {/*
+            UX-3: `status`, not `alert` -- this reveal is the way back in, not a
+            failure. Same class situation as before: none was set, so none is
+            passed.
+          */}
+          <FormError role="status">
             One-time temporary password: <span className="font-mono">{tempPassword}</span>
-          </p>
+          </FormError>
           <p className="mt-2 text-muted">
             Sign in with it above, then change your password from the desk.
           </p>
@@ -588,7 +604,8 @@ function RecoveryCodeSignIn() {
               placeholder="XXXX-XXXX"
             />
           </label>
-          {error ? <p className="text-sm text-rust">{error}</p> : null}
+          {/* UX-3: a refused recovery code is a failure, so it is announced. */}
+          {error ? <FormError className="text-sm text-rust">{error}</FormError> : null}
           <button
             type="button"
             disabled={busy || !code.trim()}

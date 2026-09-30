@@ -28,6 +28,7 @@ import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Field, InkButton, LeaveEditorControl, SecHead } from "@/components/desk-chrome";
+import { FormError } from "@/components/form-error";
 import { announceToDesk, inputClass } from "@/components/desk-chrome-utils";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { ListSkeleton } from "@/components/states";
@@ -282,7 +283,9 @@ export function HealthPanel() {
         {health.isPending ? (
           <ListSkeleton />
         ) : health.isError ? (
-          <p className="mt-4 text-rust">Could not read the server. {String(health.error)}</p>
+          <FormError className="mt-4 text-rust">
+            Could not read the server. {String(health.error)}
+          </FormError>
         ) : (
           <ul className="mt-4 divide-y divide-rule border-y border-rule">
             {checks.map((c) => (
@@ -442,7 +445,9 @@ export function TimeBudgets() {
       {times.isPending ? (
         <ListSkeleton rows={2} />
       ) : times.isError ? (
-        <p className="mt-4 text-rust">Could not read the time limits. {String(times.error)}</p>
+        <FormError className="mt-4 text-rust">
+          Could not read the time limits. {String(times.error)}
+        </FormError>
       ) : rows.length === 0 ? (
         <p className="mt-2 max-w-2xl text-sm text-muted">
           No model on this machine takes a time limit yet. One appears here as soon as a model is
@@ -591,9 +596,9 @@ export function WritingModelsPanel({
       ) : statuses.isPending ? (
         <ListSkeleton rows={2} />
       ) : statuses.isError ? (
-        <p className="mt-4 text-rust">
+        <FormError className="mt-4 text-rust">
           Could not read the writing models. {String(statuses.error)}
-        </p>
+        </FormError>
       ) : (
         <ul className="mt-4 space-y-3">
           {(statuses.data ?? []).map((s) => (
@@ -1034,7 +1039,7 @@ export function DarkDeskCounty() {
           {save.isPending ? "Saving…" : "Save county"}
         </InkButton>
         {savedAt ? <p className="text-sm text-ink-2">Saved.</p> : null}
-        {err ? <p className="text-sm text-rust">{err}</p> : null}
+        {err ? <FormError className="text-sm text-rust">{err}</FormError> : null}
       </div>
     </div>
   );
@@ -1146,7 +1151,7 @@ export function InviteAnEditorPanel() {
             {mint.isPending ? "Minting…" : "Make the invite link"}
           </InkButton>
         </div>
-        {err ? <p className="text-sm text-rust">{err}</p> : null}
+        {err ? <FormError className="text-sm text-rust">{err}</FormError> : null}
         {link ? (
           <div className="border border-rule bg-paper-2 p-3">
             <p className="astra-label">Shown once — copy it now</p>
@@ -1265,7 +1270,7 @@ export function RecoveryCodesPanel() {
               ? `${status.data.remaining} of 10 unused codes remain from the current set.`
               : "Checking your current codes…"}
         </p>
-        {err ? <p className="text-sm text-rust">{err}</p> : null}
+        {err ? <FormError className="text-sm text-rust">{err}</FormError> : null}
         {!codes ? (
           <InkButton disabled={mint.isPending} onClick={() => mint.mutate()}>
             {mint.isPending
@@ -1276,7 +1281,14 @@ export function RecoveryCodesPanel() {
           </InkButton>
         ) : (
           <div className="border border-rule bg-paper-2 p-3">
-            <p className="astra-label">Shown once — save these now</p>
+            {/*
+              UX-3: `status` -- minting a fresh set is the success this panel
+              exists for, and the line that says so was as silent to a screen
+              reader as the errors were. Not an alert: nothing went wrong.
+            */}
+            <FormError role="status" className="astra-label">
+              Shown once — save these now
+            </FormError>
             <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm">
               {codes.map((c) => (
                 <li key={c}>{c}</li>
