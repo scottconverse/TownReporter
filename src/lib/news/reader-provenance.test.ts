@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readerProvenanceItems, sourceIdentity } from "./reader-provenance.ts";
+import { readerProvenanceItems, readerSourceKey } from "./reader-provenance.ts";
 import type { ProvenanceItem } from "./findings.ts";
 
 /*
@@ -89,10 +89,15 @@ describe("the reader's source list", () => {
   });
 
   it("gives an address identity even when it cannot be parsed", () => {
-    assert.equal(sourceIdentity("not a url"), "not a url");
+    /*
+      `readerSourceKey`, not `url-guard.ts`'s `sourceIdentity`. That one returns
+      null for a page it will not fetch, and a null key would drop a printed
+      source out of the reader's list rather than leave it where it was.
+    */
+    assert.equal(readerSourceKey("not a url"), "not a url");
     assert.equal(
-      sourceIdentity("https://records.example.test/agenda/"),
-      sourceIdentity("https://records.example.test/agenda"),
+      readerSourceKey("https://records.example.test/agenda/"),
+      readerSourceKey("https://records.example.test/agenda"),
     );
   });
 });

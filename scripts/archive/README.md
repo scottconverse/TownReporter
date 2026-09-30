@@ -24,6 +24,19 @@ These live outside `scripts/`, so they are NOT discovered by
 `scripts/` only) and are NOT covered by the orphan test above. A file moved
 back into `scripts/` must be wired into a CI job in the same change.
 
+Their relative imports are written for `scripts/`, not for `scripts/archive/`,
+and moving one back is the only way they resolve again. Seven of them import
+`./browser-guard.mjs`, which stayed in `scripts/` (`bn2-probe.mjs`,
+`desk-route-regression.mjs`, `model-picker-fit-e2e.mjs`,
+`preview-thumbnail.mjs`, `pull-progress-e2e.mjs`, `readability-0.6.2-e2e.mjs`,
+`story-model-controls-e2e.mjs`), and several import the app's own modules as
+`../src/...` (`codex-reporting-boundary-proof.mjs`, `file-editorial-from-json.mjs`,
+`golden-score.mjs`, `sweep-claims.mjs`), which from here would be
+`../../src/...`. Neither is a reason to keep them here, and neither import was
+rewritten when they moved: a path that resolves only after the file is put
+back makes the move visible rather than half-done. Fix the paths as part of
+moving one back, not before.
+
 The proofs and reports under `docs/` and `artifacts/` that name these paths
 still name them as they were when they were written. They are records of what
 was done, so they have not been rewritten to point here.
