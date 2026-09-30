@@ -12,6 +12,7 @@ import {
   type CheckFacts,
 } from "@/lib/news/check-gates";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { SaveShortcut } from "@/components/desk-save-shortcut";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { StoryBody } from "@/components/story-body";
 import { editorActionError } from "@/lib/news/desk-copy";
@@ -137,6 +138,15 @@ function EditorialPage() {
           "That did not save. Try again.",
       ),
   });
+
+  /*
+    FB5: the ⌘S badge this screen's "Save edits" carries had nothing behind it
+    (FB0-REPORT.md Table B, "⌘S badge … DEAD"). Bound, not removed: saving here
+    is manual — there is a press, a `dirty` flag and an "Unsaved changes" line,
+    and no autosave — and README "Interactions & behavior" names ⌘S as the
+    workbench's save. The binding rides the button's own condition and adds no
+    announcement of its own; the save already answers through `setMsg`.
+  */
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -364,6 +374,7 @@ function EditorialPage() {
       <div className="work-bar astra-story-actions">
         {!onPaper ? (
           <>
+            <SaveShortcut save={() => save.mutate()} enabled={dirty && !save.isPending} />
             <InkButton
               tone="ghost"
               disabled={save.isPending || !dirty}

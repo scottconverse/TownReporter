@@ -26,9 +26,27 @@ function moduleUrl(source, fileName, imports = {}) {
 }
 
 const REACT_URL = import.meta.resolve("react");
+/*
+  FB5: `desk-chrome-utils.ts` reaches for the desk's toast now -- announceToDesk
+  draws the visible bar as well as speaking into `#desk-announcer`. Nothing the
+  markup below asserts is about toasts, so the module is stubbed shut here the
+  same way every other specifier in this file is: what is under test is the
+  markup that renders, not what the desk says while it renders it.
+*/
+const deskToastStub = moduleUrl(
+  `export function deskToast() {}
+export function deskToastHostMounted() { return false; }`,
+  "desk-toast-stub.ts",
+);
+const deskToasterStub = moduleUrl(
+  `export function DeskToaster() { return null; }`,
+  "desk-toaster-stub.ts",
+);
+
 const deskChromeUtils = moduleUrl(
   await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
   "desk-chrome-utils.ts",
+  { "@/components/desk-toast": deskToastStub },
 );
 /*
   Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
@@ -209,6 +227,8 @@ const { LeadRowView } = await import(
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+
+      "@/components/desk-toaster": deskToasterStub,
       "@/lib/paper": paperStub,
       "@/lib/paper-context": paperContextStub,
       "@/lib/paper-context-state": paperContextStub,
@@ -681,6 +701,8 @@ const { Chip } = await import(
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+
+      "@/components/desk-toaster": deskToasterStub,
       "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,
       /*

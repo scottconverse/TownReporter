@@ -180,7 +180,7 @@ function usePress(): Press {
 
   const fail = React.useCallback((text: string) => {
     setProblem(text);
-    announceToDesk(text);
+    announceToDesk(text, "err");
   }, []);
 
   const run = React.useCallback(async (work: () => Promise<PressAnswer>) => {
@@ -193,7 +193,7 @@ function usePress(): Press {
       const answer = await work();
       if (answer?.problem) {
         setProblem(answer.problem);
-        announceToDesk(answer.problem);
+        announceToDesk(answer.problem, "err");
       }
       if (answer?.note) {
         setNote(answer.note);
@@ -202,7 +202,7 @@ function usePress(): Press {
     } catch (err) {
       const text = `That press did not go through: ${err instanceof Error ? err.message : String(err)}`;
       setProblem(text);
-      announceToDesk(text);
+      announceToDesk(text, "err");
     } finally {
       lock.current = false;
       setBusy(false);

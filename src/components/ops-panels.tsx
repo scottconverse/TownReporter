@@ -1006,7 +1006,7 @@ export function DarkDeskCounty() {
       const msg =
         editorActionError(e instanceof Error ? e.message : "", "save the county") ?? "That did not save.";
       setErr(msg);
-      announceToDesk("County did not save.");
+      announceToDesk("County did not save.", "err");
     },
   });
 

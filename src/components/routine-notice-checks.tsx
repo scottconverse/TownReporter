@@ -105,7 +105,7 @@ export function RoutineNoticeChecks({ policy }: { policy: RoutineNoticePolicy })
       const key = pairKey(variables.approval);
       if (!result.ok) {
         setFeedback((current) => ({ ...current, [key]: { kind: "error", text: result.error } }));
-        announceToDesk(result.error);
+        announceToDesk(result.error, "err");
         if (result.code === "conflict") void checks.refetch();
         return;
       }
@@ -131,7 +131,7 @@ export function RoutineNoticeChecks({ policy }: { policy: RoutineNoticePolicy })
         ...current,
         [key]: { kind: "error", text, retryRequestId: variables.requestId },
       }));
-      announceToDesk(text);
+      announceToDesk(text, "err");
     },
     onSettled: (_result, _error, variables) => {
       const key = pairKey(variables.approval);
@@ -149,7 +149,7 @@ export function RoutineNoticeChecks({ policy }: { policy: RoutineNoticePolicy })
     onError: (error, checkId) => {
       const text = error instanceof Error ? error.message : "Could not open captured text.";
       setOpened({ checkId, result: { ok: false, code: "not-found", error: text } });
-      announceToDesk(text);
+      announceToDesk(text, "err");
     },
   });
 

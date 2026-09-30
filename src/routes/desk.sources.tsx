@@ -26,6 +26,7 @@ import {
 } from "@/lib/news/desk-copy";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useDeskMutation } from "@/components/desk-action";
 import type { SourceRow } from "@/lib/news/types";
 
 export const Route = createFileRoute("/desk/sources")({
@@ -252,10 +253,26 @@ function SourcesPage() {
       delete next[rowId];
       return next;
     });
-  const setStatus = useMutation({
+  /*
+    FB5: this one mutation is every single-row source action -- Pause, Resume,
+    the row's Remove, and Accept/Drop from the suggested list -- and none of
+    them said anything when the write failed (FB0-REPORT.md Table B, Sources:
+    "Pause / Resume … SILENT FAIL", "Remove … SILENT FAIL", "Accept / Drop …
+    SILENT FAIL"). It reports through the shared action family now: the reason
+    the server gave, visibly, on every one of those presses.
+  */
+  const setStatus = useDeskMutation({
     mutationFn: (input: { id: number; status: "accepted" | "rejected" | "paused" }) =>
       setSourceStatus({ data: input }),
-    onSuccess: async (_res, input) => {
+    pending: "Saving…",
+    done: (_result, input) =>
+      input.status === "paused"
+        ? "Paused: the desk skips this source until you resume it."
+        : input.status === "accepted"
+          ? "Accepted: the scanner may fetch this source."
+          : "Removed: this source is out of the watch list.",
+    failedLead: "Could not change that source. ",
+    after: async (_res, input) => {
       await qc.invalidateQueries({ queryKey: ["sources"] });
       const keys = rowKeys[input.id] ?? [];
       if (input.status !== "accepted" || !keys.length) {

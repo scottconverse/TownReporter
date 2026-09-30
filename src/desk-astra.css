@@ -6562,3 +6562,169 @@
   gap: 10px;
   margin: 10px 0 4px;
 }
+
+/* ---------------------------------------------------------------------------
+   FB5: THE DESK'S TOAST, AND THE ONE THAT SPEAKS.
+
+   docs/design/handoff-2026-09-26/README.md §Toasts: "Use `sonner`: a yellow
+   bar with `#111` text … Keep `announceToDesk` for screen readers." Until this
+   unit the desk had only the second half: every press answered into an sr-only
+   region and a sighted editor saw nothing (FB0-REPORT.md R3 -- "there is no
+   toast layer, and `announceToDesk` is invisible").
+
+   Sonner draws the stack, the enter/leave and the hover-pause;
+   `desk-toaster.tsx` mounts it `unstyled`, so nothing below fights sonner's own
+   per-toast card -- these rules are the whole look of it. Positioning, z-index
+   and reduced motion are settled in that file's comment; this is only paint.
+
+   Three rules from the design system decide the colours, and none of them is
+   negotiable:
+
+     1. Text on yellow is `#111` in BOTH themes (design-system §3). So the ok
+        card hardcodes `#111` rather than reading `--fg`, which is bone in
+        night mode and would be unreadable on `--a`.
+     2. State colours appear as borders and text only, never as page
+        backgrounds (§3). So a failure is `--danger` text inside a dashed
+        `--danger` border on the panel ground -- the same shape `.notice-err`
+        already uses in styles.css, which is where the desk's own "a check that
+        failed" treatment is defined.
+     3. Square, ruled, flat: no radius, no shadow (§11 item 8, §12).
+
+   Every size is `calc(Npx * var(--ts))` so Text: Large reaches the toast too,
+   and every one of them is at or above the 14px floor
+   (scripts/desk-min-font.test.mjs) -- the walk measures computed type across
+   the whole body, so a 12px toast would fail it exactly like a 12px label.
+--------------------------------------------------------------------------- */
+
+/*
+   The host, not the stack. `position: fixed` with `inset: 0` takes it out of
+   the shell's grid flow entirely, so mounting it as a child of
+   `.desk-ltr.astra` beside the nav and the workspace cannot add a track or a
+   row to that layout. `pointer-events: none` so the invisible full-viewport box
+   never eats a click meant for the page; the stack inside takes them back.
+*/
+.desk-ltr .desk-toaster-host {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+}
+.desk-ltr .desk-toaster {
+  pointer-events: auto;
+}
+
+/* The card. Sonner positions and animates the <li>; everything visible is here. */
+.desk-ltr .desk-toaster [data-sonner-toast] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 2px solid #111;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--a);
+  color: #111;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* The message, and the space it is allowed to take before the buttons. */
+.desk-ltr .desk-toaster [data-title] {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(14px * var(--ts));
+  font-weight: 600;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+/*
+   A failure: the reason, not an apology and not a second accent. Dashed
+   --danger is the desk's existing "a check that failed" edge -- `.notice-err`
+   in styles.css -- and the leading "!" the message carries is aria-hidden, so
+   the kind survives without colour for a reader and without repeating itself
+   for a screen reader.
+*/
+.desk-ltr .desk-toaster .desk-toast-err {
+  border: 2px dashed var(--danger);
+  background: var(--bg2);
+  color: var(--danger);
+}
+
+/* "Needs attention", the amber the design system gives it -- not a failure. */
+.desk-ltr .desk-toaster .desk-toast-warn {
+  border: 2px solid var(--warn);
+  background: var(--bg2);
+  color: var(--warn);
+}
+
+/* The Undo press on a done toast. The ink-button family: 44px, square, ruled. */
+.desk-ltr .desk-toaster [data-button] {
+  flex-shrink: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 2px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  cursor: pointer;
+}
+.desk-ltr .desk-toaster [data-button]:hover {
+  background: rgba(17, 17, 17, 0.08);
+}
+.desk-ltr .desk-toaster .desk-toast-err [data-button]:hover,
+.desk-ltr .desk-toaster .desk-toast-warn [data-button]:hover {
+  background: var(--hover);
+}
+
+/* Dismiss. A text "✕", not sonner's SVG, and a real 44px target. */
+.desk-ltr .desk-toaster [data-close-button] {
+  position: static;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transform: none;
+}
+.desk-ltr .desk-toaster [data-close-button]:hover {
+  background: rgba(17, 17, 17, 0.08);
+}
+.desk-ltr .desk-toaster .desk-toast-err [data-close-button]:hover,
+.desk-ltr .desk-toaster .desk-toast-warn [data-close-button]:hover {
+  background: var(--hover);
+}
+
+/*
+   No icons (design-system §9: "Icons: avoid them. Words are clearer"). The
+   Toaster nulls every sonner icon so no wrapper is rendered at all; this is the
+   second lock, in case a future sonner version renders the wrapper regardless.
+*/
+.desk-ltr .desk-toaster [data-icon] {
+  display: none;
+}
+
+/*
+   Reduced motion: `.desk-ltr.astra *` (above) already sets `animation: none`
+   and `transition: none` for everyone who asks for it, and sonner's visible
+   state is carried by `[data-mounted=true] { opacity: 1 }` rather than by an
+   animation -- so a toast with motion turned off still appears, fully drawn,
+   with no pulsing or sliding. Nothing extra is needed here, and this note is
+   here so the next person does not add an animation that assumes otherwise.
+*/

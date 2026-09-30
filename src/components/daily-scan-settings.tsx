@@ -132,7 +132,7 @@ export function DailyScanSettings() {
         text,
         reload: result.ok === false && result.code === "conflict",
       });
-      announceToDesk(text);
+      announceToDesk(text, "err");
       return;
     }
     const next = policyDraft(result.policy);
@@ -157,7 +157,7 @@ export function DailyScanSettings() {
     onError: (error) => {
       const text = error instanceof Error ? error.message : "That change did not save.";
       setFeedback({ kind: "error", text });
-      announceToDesk(text);
+      announceToDesk(text, "err");
     },
   });
   const reloadLatest = useMutation({
@@ -179,7 +179,7 @@ export function DailyScanSettings() {
       if (!result?.ok) {
         const text = result?.error ?? "Could not reload settings.";
         setFeedback({ kind: "error", text, reload: true });
-        announceToDesk(text);
+        announceToDesk(text, "err");
         return;
       }
       const next = policyDraft(result.policy);
@@ -194,7 +194,7 @@ export function DailyScanSettings() {
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Could not reload settings.";
       setFeedback({ kind: "error", text, reload: true });
-      announceToDesk(text);
+      announceToDesk(text, "err");
     },
   });
   const receivePauseResult = (

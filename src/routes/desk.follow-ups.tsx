@@ -130,7 +130,7 @@ function FollowUpsPage() {
     },
     // The refusals ("A draft is being written right now…") are thrown by the
     // server on purpose, so the press that could not do anything says why.
-    onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not do that."),
+    onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not do that.", "err"),
   });
 
   const save = useMutation({
@@ -140,7 +140,7 @@ function FollowUpsPage() {
         : createAiFollowUp({ data: asWireInput(input) }),
     onSuccess: (result) => {
       if (result && result.ok === false) {
-        announceToDesk(result.error);
+        announceToDesk(result.error, "err");
         return;
       }
       invalidate();
@@ -148,7 +148,7 @@ function FollowUpsPage() {
       setDialog(null);
     },
     onError: (err) =>
-      announceToDesk(err instanceof Error ? err.message : "Could not save that follow-up."),
+      announceToDesk(err instanceof Error ? err.message : "Could not save that follow-up.", "err"),
   });
 
   const cancel = useMutation({
@@ -158,7 +158,7 @@ function FollowUpsPage() {
       announceToDesk("Cancelling — the run stops at its next step.");
     },
     onError: (err) =>
-      announceToDesk(err instanceof Error ? err.message : "Could not cancel that run."),
+      announceToDesk(err instanceof Error ? err.message : "Could not cancel that run.", "err"),
   });
 
   return (

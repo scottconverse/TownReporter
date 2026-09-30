@@ -38,13 +38,16 @@ import { myDesk } from "@/lib/news/claim";
 import { writerIsReady } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
+import { announceToDesk } from "@/components/desk-chrome-utils";
 
-/** Speaks through DeskShell's always-mounted `#desk-announcer` region. */
-function announceToDesk(text: string): void {
-  if (typeof document === "undefined") return;
-  const el = document.getElementById("desk-announcer");
-  if (el) el.textContent = text;
-}
+/*
+  FB5: this file used to carry its own copy of `announceToDesk`, writing
+  `#desk-announcer` itself. That copy is exactly what the unit could not leave
+  behind: a second helper with the same name that would have gone on being
+  invisible after the shared one learned to draw a toast. It now imports the
+  one in `desk-chrome-utils.ts`, so the local-model picks below say what they
+  did on screen as well as to a screen reader.
+*/
 
 const LOCAL_SERVER_LABELS: Record<string, string> = {
   lmstudio: "LM Studio",

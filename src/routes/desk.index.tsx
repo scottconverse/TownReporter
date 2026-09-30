@@ -10,7 +10,14 @@ import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
-import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
+import {
+  announceOnly,
+  announceToDesk,
+  areaClass,
+  inputClass,
+  leadOrigin,
+} from "@/components/desk-chrome-utils";
+import { useDeskMutation } from "@/components/desk-action";
 import { LeadFlags } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
@@ -247,10 +254,26 @@ function DeskHome() {
     matchesFollowUpFilter(row, "active"),
   ).length;
 
-  const setStatus = useMutation({
+  /*
+    FB5: Hold, Kill, Undo and the U key all go through this one mutation, and a
+    failure was invisible — the row either stayed dimmed or looked unchanged and
+    said nothing (FB0-REPORT.md Table B, "Undo / U": "SILENT FAIL — the row
+    stays dimmed with no message"). It reports through the shared action family
+    now, so a failure carries whatever the server said and a refusal
+    (`{ok:false}`) is reported rather than passing as a success.
+  */
+  const setStatus = useDeskMutation({
     mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
       setLeadStatus({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Saving…",
+    done: (_result, input) =>
+      input.status === "new"
+        ? "Undone: the lead is back on the Queue."
+        : input.status === "held"
+          ? "The lead is on hold, off the Queue until you release it."
+          : "The lead moved to Killed, and its row keeps an Undo.",
+    failedLead: "Could not change that lead. ",
   });
   const srcStatus = useMutation({
     mutationFn: (input: { id: number; status: "accepted" | "rejected" }) =>
@@ -375,7 +398,7 @@ function DeskHome() {
       if (!result.ok) {
         const line = result.error || "That story was not added. Nothing was changed.";
         setPasteNotice(line);
-        announceToDesk(line);
+        announceToDesk(line, "err");
         return;
       }
       const first = result.imported[0];
@@ -392,7 +415,7 @@ function DeskHome() {
       const line =
         err instanceof Error ? err.message : "That story was not added. Nothing was changed.";
       setPasteNotice(line);
-      announceToDesk(line);
+      announceToDesk(line, "err");
     },
   });
   const writeStory = useMutation({
@@ -686,11 +709,18 @@ function DeskHome() {
     mutationFn: (leadId: number) =>
       draftLead({ data: { leadId, modelChoice: "auto", modelEffort: defaultModelEffort("auto") } }),
     onSuccess: (res) => {
-      announceToDesk(
-        res?.ok
-          ? "Draft queued — it is writing now."
-          : (res && "error" in res && res.error) || "That draft did not start.",
-      );
+      /*
+        FB5: the two answers are announced with their own tone rather than one
+        ternary with the default. "Draft queued" is a finished press and gets
+        the yellow bar; a refusal is a failure and gets the danger one, so the
+        reason is never painted as the next step.
+      */
+      if (res?.ok) announceToDesk("Draft queued — it is writing now.");
+      else
+        announceToDesk(
+          (res && "error" in res && res.error) || "That draft did not start.",
+          "err",
+        );
       void qc.invalidateQueries({ queryKey: ["recent-story-work"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
     },
@@ -734,7 +764,13 @@ function DeskHome() {
         if (newLeads.length === 0) return;
         const i = Math.max(0, Math.min(next, newLeads.length - 1));
         setCursor(i);
-        announceToDesk(`Selected: ${newLeads[i]!.headline}`);
+        /*
+          FB5: spoken, not drawn. Moving the cursor is not the outcome of a
+          press — J and K fire on every keypress — so it goes through
+          `announceOnly`, which writes the desk's sr-only region and shows
+          nothing. A toast per keystroke would be noise, not feedback.
+        */
+        announceOnly(`Selected: ${newLeads[i]!.headline}`);
       };
       const lead = at(cursor);
       switch (e.key.toLowerCase()) {

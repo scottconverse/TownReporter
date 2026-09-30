@@ -7,6 +7,7 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
 import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useDeskAction } from "@/components/desk-action";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -447,14 +448,40 @@ function CustomSourcePicker(props: {
       onSaved();
     },
   });
+  /*
+    FB5: the two presses that could fail without a word (FB0-REPORT.md Table B,
+    Scan: "Delete pack … SILENT FAIL + NO UNDO + no confirm", "Rename … SILENT
+    FAIL"). Unlike the mutations converted this unit, each of these has exactly
+    ONE press site, so the press itself is what carries the states: the button
+    disables itself and draws "Deleting…", and the outcome — the pack gone, or
+    the reason the server refused — arrives as a toast. That is the
+    press→pending→done/failed shape of `useDeskAction`, and it is why these two
+    keep a plain `useMutation` underneath: the work is one call, not a shared
+    mutation reporting for four different buttons.
+  */
   const del = useMutation({
     mutationFn: async (id: number) => deleteScanSourcePackFn({ data: { packId: id } }),
     onSuccess: () => onSaved(),
+  });
+  const deletePack = useDeskAction<unknown>({
+    pending: "Deleting…",
+    done: () => "Pack deleted: the saved set is gone from this list.",
+    failedLead: "Could not delete that pack. ",
   });
   const rename = useMutation({
     mutationFn: async (input: { packId: number; name: string }) =>
       renameScanSourcePackFn({ data: input }),
     onSuccess: () => onSaved(),
+  });
+  const renamePack = useDeskAction<{ name: string }>({
+    pending: "Renaming…",
+    /*
+      The name comes back from the press rather than read from `renameTo` at
+      the end: the work clears the box, and a toast that read the live field
+      would race that clear and finish the sentence with an empty name.
+    */
+    done: (result) => `Pack renamed to “${result.name}”.`,
+    failedLead: "Could not rename that pack. ",
   });
   const [renameTo, setRenameTo] = useState("");
 
@@ -508,10 +535,13 @@ function CustomSourcePicker(props: {
             <button
               type="button"
               className="btn danger"
-              disabled={disabled || del.isPending}
-              onClick={() => { if (packId) del.mutate(packId); }}
+              disabled={disabled || deletePack.isPending}
+              aria-busy={deletePack.isPending || undefined}
+              onClick={() => {
+                if (packId) void deletePack.run(() => del.mutateAsync(packId));
+              }}
             >
-              Delete pack
+              {deletePack.isPending ? deletePack.pendingLabel : "Delete pack"}
             </button>
           </>
         ) : null}
@@ -527,12 +557,19 @@ function CustomSourcePicker(props: {
           <button
             type="button"
             className="btn"
-            disabled={rename.isPending || !renameTo.trim()}
+            disabled={renamePack.isPending || !renameTo.trim()}
+            aria-busy={renamePack.isPending || undefined}
             onClick={() => {
-              if (packId) rename.mutate({ packId, name: renameTo }, { onSuccess: () => setRenameTo("") });
+              const name = renameTo.trim();
+              if (!packId || !name) return;
+              void renamePack.run(async () => {
+                await rename.mutateAsync({ packId, name });
+                setRenameTo("");
+                return { name };
+              });
             }}
           >
-            Save name
+            {renamePack.isPending ? renamePack.pendingLabel : "Save name"}
           </button>
         </div>
       ) : null}

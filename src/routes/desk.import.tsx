@@ -172,7 +172,7 @@ function ImportPage() {
     onSuccess: (result) => {
       if (result.error) {
         setNotice({ text: result.error, kind: "error" });
-        announceToDesk(result.error);
+        announceToDesk(result.error, "err");
         return;
       }
       if (result.stories.length === 0) {

@@ -113,6 +113,17 @@ export const saveLocalModelFn = async () => ({ ok: true });
 const availabilityStubUrl = `data:text/javascript;base64,${Buffer.from(availabilityStubSrc).toString("base64")}`;
 const availabilityStub = await import(availabilityStubUrl);
 
+/*
+  FB5: model-picker.tsx used to carry a private copy of `announceToDesk` and now
+  imports the desk's one, so this specifier has to resolve. It is stubbed with
+  the picker's other server functions -- the markup under test never calls it.
+*/
+const deskChromeUtilsStubUrl = moduleUrl(
+  `export function announceToDesk() {}
+export function announceOnly() {}`,
+  "desk-chrome-utils-stub.ts",
+);
+
 const { ModelPicker } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
@@ -127,6 +138,8 @@ const { ModelPicker } = await import(
       "@/lib/news/custom-ai-settings": availabilityStubUrl,
       "@/lib/news/claim": availabilityStubUrl,
       "@tanstack/react-query": availabilityStubUrl,
+
+      "@/components/desk-chrome-utils": deskChromeUtilsStubUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

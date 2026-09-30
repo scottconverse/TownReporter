@@ -47,6 +47,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
+import { useDeskMutation } from "@/components/desk-action";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
@@ -122,14 +123,29 @@ function QueuePage() {
       void qc.invalidateQueries({ queryKey: ["sources"] });
     },
   });
-  const setStatus = useMutation({
+  /*
+    FB5: the Queue reaches this mutation from its rows, its bulk Hold and its
+    bulk Kill, and every one of those paths reported nothing at all when the
+    write failed (FB0-REPORT.md Table B, "bulk Hold": "partial failure leaves
+    rows held silently"). The shared action family reports the refusal with the
+    server's own reason, so a partial failure is at least said out loud.
+  */
+  const setStatus = useDeskMutation({
     mutationFn: (input: {
       id: number;
       status: "held" | "killed" | "new";
       killReason?: string;
       killReasonUrl?: string;
     }) => setLeadStatus({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Saving…",
+    done: (_result, input) =>
+      input.status === "new"
+        ? "Undone: the lead is back on the Queue."
+        : input.status === "held"
+          ? "The lead is on hold, off the Queue until you release it."
+          : "The lead moved to Killed, and its row keeps an Undo.",
+    failedLead: "Could not change that lead. ",
   });
   /*
    * Unit AK item 4: "Kill as duplicate" is the same kill with a reason

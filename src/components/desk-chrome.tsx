@@ -17,6 +17,7 @@ import { Dialog } from "@/components/dialog";
   proves it rather than this comment.
 */
 import { NewStoryDialog } from "@/components/dialogs";
+import { DeskToaster } from "@/components/desk-toaster";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
@@ -522,6 +523,16 @@ export function DeskShell({
         from one mount rather than each page carrying its own.
       */}
       <NewStoryDialog open={newStoryOpen} onClose={() => setNewStoryOpen(false)} />
+      {/*
+        FB5: the visible half of every announcement, mounted exactly once.
+        A sibling of the announcer above and of the shell's dialogs rather than
+        a child of <main>, so it is outside the scroll column and out of the
+        grid the shell lays its nav and workspace out with. `announceToDesk`
+        finds it by its host attribute and stops writing the sr-only region
+        while it is here -- see `desk-toast.ts` for why only one of the two may
+        speak. See `desk-toaster.tsx` for its position and z-index.
+      */}
+      <DeskToaster />
     </div>
   );
 }
@@ -873,6 +884,8 @@ export function InkButton({
   tone = "solid",
   type = "button",
   small = false,
+  pending = false,
+  pendingLabel,
   ariaLabel,
 }: {
   children: React.ReactNode;
@@ -895,6 +908,17 @@ export function InkButton({
   tone?: "solid" | "ghost" | "danger" | "invert" | "quiet" | "quiet-danger";
   type?: "button" | "submit";
   small?: boolean;
+  /**
+   * FB5: the button is mid-press. It disables itself and draws
+   * `pendingLabel` instead of its own word, which is the "Write draft →
+   * Starting draft…" behaviour the desk already had in its composer and
+   * almost nowhere else. `useDeskAction` (`desk-action.ts`) hands both of
+   * these to the caller's `isPending`/`pendingLabel` so a press that takes
+   * time does not look like a press that did nothing.
+   */
+  pending?: boolean;
+  /** The word drawn while pending. Ignored unless `pending`. */
+  pendingLabel?: React.ReactNode;
   ariaLabel?: string;
 }) {
   const cls =
@@ -907,11 +931,12 @@ export function InkButton({
     <button
       type={type}
       onClick={onClick}
-      disabled={disabled}
+      disabled={disabled || pending}
       className={cls}
       aria-label={ariaLabel}
+      aria-busy={pending || undefined}
     >
-      {children}
+      {pending && pendingLabel != null ? pendingLabel : children}
     </button>
   );
 }
@@ -1203,8 +1228,21 @@ export function SecHead({
 
 export function Busy({ label }: { label: string }) {
   return (
-    <div className="busy">
-      <div className="busy-rule" />
+    /*
+      FB5: a live region, because this sentence is the only thing the desk says
+      while a screen's own long work is running and it was arriving unannounced
+      (FB0-REPORT.md rows "Run scan now", "Keep digging", "Read selected pages").
+
+      The wording is already the state ("Scanning sources…"), so `label` is the
+      whole message and it is `aria-atomic` so the region reads as one sentence
+      rather than as a fragment joining whatever was there before. Explicit
+      `aria-live` for the reason `Notice` gives in states.tsx: an element that
+      arrives together with its text is frequently not announced at all, which
+      is why the desk's always-mounted `#desk-announcer` and the toast host
+      exist beside it for the outcomes that must not be missed.
+    */
+    <div className="busy" role="status" aria-live="polite" aria-atomic="true">
+      <div className="busy-rule" aria-hidden />
       <p className="busy-label">{label}</p>
     </div>
   );

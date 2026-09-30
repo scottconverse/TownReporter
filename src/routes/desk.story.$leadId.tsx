@@ -35,6 +35,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
+import { SaveShortcut } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   draftLead,
@@ -2622,12 +2623,29 @@ function StoryPage() {
           saved are the heavy 2px ink (`.btn`), the two that only look are
           the light 1px rule (`.btn.quiet`).
         */}
+        {/*
+          FB5: the ⌘S chip below had nothing behind it. README "Interactions &
+          behavior" lists "⌘S saves in the story workbench", and the key fell
+          through to the browser's Save-page dialog instead (FB0-REPORT.md
+          Table B, "⌘S badge … DEAD"). It is bound rather than removed, because
+          saving here is manual -- there is a press, an "Unsaved changes" line
+          and no autosave.
+
+          `SaveShortcut` rides the button's own condition, so the key can never
+          save what the button would refuse, and it adds no announcement of its
+          own: this save already answers visibly and out loud through `setMsg`.
+        */}
         {data.draft && !locked && !onPaper ? (
-          <InkButton
-            tone="ghost"
-            disabled={save.isPending || reconcileActive}
-            onClick={() => save.mutate()}
-          >
+          <>
+            <SaveShortcut
+              save={() => save.mutate()}
+              enabled={!save.isPending && !reconcileActive}
+            />
+            <InkButton
+              tone="ghost"
+              disabled={save.isPending || reconcileActive}
+              onClick={() => save.mutate()}
+            >
             Save edits
             {/*
               The drawn ⌘S chip, aria-hidden so the press's accessible name
@@ -2638,7 +2656,8 @@ function StoryPage() {
             <span className="astra-wb-kbd" aria-hidden="true">
               ⌘S
             </span>
-          </InkButton>
+            </InkButton>
+          </>
         ) : null}
         {data.draft && !locked && !onPaper ? (
           <DraftReconcileControl {...reconcileControlProps} render="button" />
