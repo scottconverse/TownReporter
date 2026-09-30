@@ -7,7 +7,7 @@ import {
   NO_STRUCTURED_VOTE_SOURCE,
   type StructuredVoteFetchResult,
 } from "./meeting-vote-sources.ts";
-import { structuredVoteOriginForNewsroom } from "./structured-vote-source.ts";
+import { structuredVoteBaseUrlForNewsroom } from "./structured-vote-source.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -26,7 +26,7 @@ export type Section5Deps = {
   /** Test seam: which portal this newsroom watches. See ./primegov-source.ts. */
   primeGovOrigin?: typeof primeGovOriginForNewsroom;
   /** Test seam: which structured vote source this paper configured. See ./structured-vote-source.ts. */
-  structuredVoteOrigin?: typeof structuredVoteOriginForNewsroom;
+  structuredVoteBaseUrl?: typeof structuredVoteBaseUrlForNewsroom;
   /** Test seam: the structured vote read itself, so a test never reaches a real council site. */
   structuredVotesForDate?: typeof fetchStructuredVotesForDate;
 };
@@ -122,18 +122,22 @@ export async function runSection5ForArtifact(
     constant inside the fetch adapter (Longmont's council site), so every
     paper's section 5 read Longmont's motions; with no structured source
     configured there is no lookup at all, and the result says so.
+
+    What comes back is the paper's whole setting -- path included -- not just
+    its host, so a site that publishes under a path is read under that path.
+    See ./structured-vote-source.ts.
   */
-  const voteOrigin = await (deps.structuredVoteOrigin ?? structuredVoteOriginForNewsroom)(
+  const voteBase = await (deps.structuredVoteBaseUrl ?? structuredVoteBaseUrlForNewsroom)(
     sql,
     input.newsroomId,
   ).catch(() => null);
-  const structured: StructuredVoteFetchResult = voteOrigin
+  const structured: StructuredVoteFetchResult = voteBase
     ? await (deps.structuredVotesForDate ?? fetchStructuredVotesForDate)(
         input.meetingDate ?? "",
-        voteOrigin,
+        voteBase,
       ).catch(() => ({
         found: false,
-        reason: `structured vote lookup failed at ${voteOrigin}`,
+        reason: `structured vote lookup failed at ${voteBase}`,
         records: [],
         url: "",
       }))

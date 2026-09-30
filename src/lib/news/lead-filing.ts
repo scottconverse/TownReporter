@@ -161,7 +161,6 @@ export async function fileScanLeads(
   const insertedThisRun: MatchCandidateLead[] = [];
 
   for (const lead of aiLeads) {
-    if (!lead.headline?.trim()) continue;
     /*
       Sanitize ONCE, at the top, and read from these locals for the rest of the
       loop -- matching included.
@@ -187,6 +186,26 @@ export async function fileScanLeads(
     const topic = storableText(lead.topic ?? "council");
     const evidence = storableText(lead.evidence ?? "");
     const candidateUrls = sanitizePublicUrls(lead.source_urls);
+
+    /*
+      The headline is judged AFTER cleaning, not before.
+
+      A headline the model wrote out of C0 bytes alone -- a NUL and a BEL, two
+      characters rather than none -- is not empty, so the trim check that used
+      to sit at the top of this loop passed it. `storableText` then dropped
+      both bytes, so the row filed below carried headline `""`: a lead on the
+      Queue with nothing to read, counted as one the run found. Nothing about
+      such a candidate is usable, so it is skipped the way every other unusable
+      model lead is skipped -- no row, no count, nothing for an editor to open.
+
+      This is SCAN-001's sibling. The NUL is gone either way; here the whole
+      candidate was nothing but NUL.
+
+      It also has to be `headline` and not `lead.headline`: the string matched
+      against `existing` a few lines below must be the string that would be
+      stored.
+    */
+    if (!headline.trim()) continue;
 
     const sibling = insertedThisRun.find((prior) =>
       sameStoryForMerge({ headline, source_urls: candidateUrls }, prior),

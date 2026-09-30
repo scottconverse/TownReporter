@@ -104,8 +104,8 @@ describe("meeting section 5 real pipeline integration", () => {
     assert.ok(writes.some((w) => /from sources/i.test(w.text) && w.params[0] === 1), "the portal comes from this newsroom's watch list");
     assert.deepEqual(
       votes.origins,
-      ["https://longmontcitycouncil.org"],
-      "a newsroom with no paper_settings row reads the shipped install's configured council-votes site",
+      ["https://longmontcitycouncil.org/"],
+      "a newsroom with no paper_settings row reads the shipped install's configured council-votes site, as configured",
     );
     assert.equal(result.aligned, true);
     assert.ok(result.chunkCount >= 1, "chunks were produced");
@@ -176,12 +176,27 @@ describe("meeting section 5 real pipeline integration", () => {
       { newsroomId: 1, videoId: "L1AnMLsLwtk", title: "City Council Regular Session", artifactId: 5, meetingDate: "2026-07-28" },
       { packetForTitle: async () => null, structuredVotesForDate: votes.structuredVotesForDate },
     );
-    assert.deepEqual(votes.origins, ["https://council.example.test"]);
+    assert.deepEqual(votes.origins, ["https://council.example.test/"]);
     assert.equal(
       JSON.stringify({ origins: votes.origins, reason: result.structuredVoteReason }).toLowerCase().includes("longmont"),
       false,
       "another city's paper must not have its votes read from, or reported against, the shipped paper's site",
     );
+  });
+
+  it("hands the paper's configured PATH to the vote read, not just its host", async () => {
+    const { runSection5ForArtifact } = await import("./meeting-story-section5-run.ts");
+    // A paper whose council publishes its motions under a path. Cutting the
+    // setting down to its origin sent the read to https://city.example/ --
+    // a page that has never existed -- so every meeting reported "no record".
+    const { sql } = harness(["https://boulder.primegov.com/public/portal"], "https://city.example/council/votes/");
+    const votes = voteSeam();
+    await runSection5ForArtifact(
+      sql,
+      { newsroomId: 1, videoId: "L1AnMLsLwtk", title: "City Council Regular Session", artifactId: 5, meetingDate: "2026-07-28" },
+      { packetForTitle: async () => null, structuredVotesForDate: votes.structuredVotesForDate },
+    );
+    assert.deepEqual(votes.origins, ["https://city.example/council/votes/"]);
   });
 
   it("runs no structured vote lookup and says why when the paper configured none", async () => {

@@ -103,11 +103,21 @@ export function parseStructuredVotePage(html: string): ParsedVoteRecord[] {
   return out;
 }
 
-/** The meeting page for a date, at the origin the paper's own setting names. */
-export function structuredVoteMeetingUrl(origin: string, date: string): string {
+/**
+ * The meeting page for a date, under the base URL the paper's own setting
+ * names.
+ *
+ * `baseUrl` is what ./structured-vote-source.ts read out of the paper's
+ * "council votes" setting, path included and ending in exactly one slash, so
+ * the meeting path is appended to whatever the paper configured rather than to
+ * its host. A base handed in without its slash still produces one URL with one
+ * slash between the two parts.
+ */
+export function structuredVoteMeetingUrl(baseUrl: string, date: string): string {
+  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const iso = date.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
-  if (!iso) return `${origin}/meetings/`;
-  return `${origin}/meetings/${iso[1]}-${iso[2]}-${iso[3]}/`;
+  if (!iso) return `${base}meetings/`;
+  return `${base}meetings/${iso[1]}-${iso[2]}-${iso[3]}/`;
 }
 
 export type StructuredVoteFetchResult = {
@@ -126,20 +136,20 @@ export const NO_STRUCTURED_VOTE_SOURCE: StructuredVoteFetchResult = {
 };
 
 /**
- * Fetch structured vote records for a meeting date from the origin this paper
+ * Fetch structured vote records for a meeting date from the base URL this paper
  * configured. Returns an explicit reason when the record does not exist (a
  * council site typically trails by weeks), never an invented vote.
  *
- * There is no built-in origin. The caller passes the one its newsroom's setting
+ * There is no built-in base. The caller passes the one its newsroom's setting
  * names, and a newsroom with none passes nothing at all
  * (./structured-vote-source.ts).
  */
 export async function fetchStructuredVotesForDate(
   date: string,
-  origin: string,
+  baseUrl: string,
 ): Promise<StructuredVoteFetchResult> {
-  const host = voteSourceHost(origin);
-  const url = structuredVoteMeetingUrl(origin, date);
+  const host = voteSourceHost(baseUrl);
+  const url = structuredVoteMeetingUrl(baseUrl, date);
   try {
     const res = await fetchPublicHttp(new URL(url));
     if (!res.ok) {

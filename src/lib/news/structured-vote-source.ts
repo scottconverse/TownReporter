@@ -18,23 +18,41 @@ import { COUNCIL_VOTES_URL } from "../paper.ts";
  * city's website. (Before this, the origin was the constant
  * `https://longmontcitycouncil.org` inside the fetch adapter, so every paper's
  * section 5 read Longmont's council motions.)
+ *
+ * The whole URL is kept, path included. Reducing the setting to `url.origin`
+ * kept the host and threw the path away, so a paper whose records live under a
+ * path -- `https://city.example/council/votes/` -- was read at
+ * `https://city.example/meetings/<date>/`, a page that has never existed:
+ * the lookup answered "no record for this meeting" for every meeting, for
+ * ever, and said nothing about having asked the wrong page. The shipped site
+ * sits at a root, which is why it never showed.
  */
 
-/** An http(s) origin, or null when the setting is blank or is not a usable URL. */
-export function structuredVoteOriginFromSetting(raw: string | null | undefined): string | null {
+/**
+ * The base URL meeting pages are read under, or null when the setting is blank
+ * or is not a usable URL.
+ *
+ * Normalised to exactly one trailing slash, so the meeting URL built from it
+ * (./meeting-vote-sources.ts) never has a doubled slash and never has none. A
+ * setting written without a path is its host and that same one slash, so the
+ * shipped `https://longmontcitycouncil.org/` yields byte-for-byte the meeting
+ * URLs it always did. A query or fragment on the setting is not part of a base
+ * a meeting URL sits under and is dropped.
+ */
+export function structuredVoteBaseUrlFromSetting(raw: string | null | undefined): string | null {
   const value = (raw ?? "").trim();
   if (!value) return null;
   try {
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    return url.origin;
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}/`;
   } catch {
     return null;
   }
 }
 
 /**
- * The origin for one newsroom, read through the caller's own `Sql` so the
+ * The base URL for one newsroom, read through the caller's own `Sql` so the
  * section-5 run asks inside the transaction it is already in (the same shape as
  * `primeGovOriginForNewsroom`).
  *
@@ -45,7 +63,7 @@ export function structuredVoteOriginFromSetting(raw: string | null | undefined):
  * handle. A read that fails is treated as "nothing configured" -- never as
  * another city's site.
  */
-export async function structuredVoteOriginForNewsroom(
+export async function structuredVoteBaseUrlForNewsroom(
   sql: Sql,
   newsroomId: number,
 ): Promise<string | null> {
@@ -56,5 +74,5 @@ export async function structuredVoteOriginForNewsroom(
     )
     .catch(() => [] as { council_votes_url: string | null }[]);
   const stored = rows[0]?.council_votes_url;
-  return structuredVoteOriginFromSetting(stored == null ? COUNCIL_VOTES_URL : stored);
+  return structuredVoteBaseUrlFromSetting(stored == null ? COUNCIL_VOTES_URL : stored);
 }
