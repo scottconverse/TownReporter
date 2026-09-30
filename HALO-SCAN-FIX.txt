@@ -1,0 +1,20 @@
+TASK (owner-approved): update the production TownReporter on Halo from v0.6.82 to origin/main commit 32ef34ea, using the repo's own promotion script, to restore Scan. Change nothing else.
+
+WHY: production is v0.6.82. Manual scans stick at "Running - 0 fetched" and the Sep 29 6 AM scan failed with: invalid byte sequence for encoding "UTF8": 0x00. Both are fixed on main after 0.6.82 (PR #136 manual scan settlement, PR #139 stuck scan rows, PR #156 NUL fix). That code passed a full 200-source scan test on 2026-09-30.
+
+STEPS (see SELF-HOSTING.md, "Updating this installation"):
+1. Work in the production install: C:\Users\scott\Desktop\Code\townreporter-web . Do not build there by hand. Never kill processes by name (no taskkill /IM node.exe). Stop only this installation's server, through its scripts.
+2. Run: git fetch origin
+   Then: git rev-parse origin/main
+   It must start with 32ef34ea. If it does not, STOP and report back. Do not promote anything else.
+3. Confirm no desk job is running or queued (Server > Health shows "0 running, 0 queued"). If one is, use -WaitForJobs. Do not use -Force.
+4. In Task Scheduler, DISABLE the task "TownReporter Watchdog".
+5. From the production install, run: ops\promote.ps1   (no -Force). It backs up the database, stops this server, fast-forwards the checkout, builds, migrates, and restarts. Note the backup name it prints.
+6. Check the script's own verification output. Then confirm: git rev-parse HEAD in the install starts with 32ef34ea.
+7. In logs\ right after start, look for one "[schema-warmup] <module> <ms>ms <status>" line per module. Report any line that says failed.
+8. RE-ENABLE the task "TownReporter Watchdog".
+9. Report back: backup name, git rev-parse HEAD, the migrations it applied (expect up to 0108_welcome_article_copy), and any warnings or errors.
+
+IF SOMETHING GOES WRONG: do not roll back a migration by hand. Stop, keep the backup, and report the exact error plus the last 50 lines of the promotion output and of logs\. The site being briefly down during the build is expected.
+
+DO NOT CHANGE: the Node version (it is 25.9.0; just report it) or cloudflared (it says it is outdated; leave it).
