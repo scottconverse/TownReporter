@@ -3,13 +3,27 @@
   configured city at first-run setup time.
 
   migrations/0002_newsroom.sql seeds one article, slug
-  `welcome-to-townreporter`, written about Longmont -- that migration file
-  is never touched by this feature, so an existing install that already ran
-  it keeps that exact row, byte-identical, unless its owner explicitly runs
-  setup (see completeFirstRunSetup in paper-settings.ts, which is the only
-  caller of writeWelcomeArticle below). This module only UPDATEs that row
-  (or inserts it if, somehow, it is missing) with copy generated from the
-  paper's now-configured name/city/state/tagline -- never a new migration.
+  `welcome-to-townreporter`, and migrations/0009_reporting.sql and
+  0040_welcome_nonprofit.sql rewrite its dek, body and headline before any
+  install serves it. None of those three files is touched by this feature.
+  An install that already ran them keeps whatever copy it has until its owner
+  runs setup (see completeFirstRunSetup in paper-settings.ts, which is the
+  only caller of writeWelcomeArticle below).
+
+  `completeFirstRunSetup` IS NOT THE ONLY WAY THAT ROW EVER MOVES, which this
+  comment used to claim. It is the only caller of this function, but a copy
+  fix that has to reach a desk nobody re-runs setup on is a forward
+  migration, and migrations/0108_welcome_article_copy.sql is one: it rewrites
+  the specific sentences this template replaced (the dek's gate clause, the
+  body's overclaim, and the two sentences that named a model vendor) on any
+  row still carrying them, and leaves an owner's own edits alone. So the
+  template is one of two writers, and the two must agree -- if this file's
+  copy changes again, the sentences it stops writing are exactly the
+  sentences a later migration has to find and correct.
+
+  This module only UPDATEs that row (or inserts it if, somehow, it is
+  missing) with copy generated from the paper's now-configured
+  name/city/state/tagline.
 */
 import { getSql } from "../db.ts";
 import type { PaperConfig } from "./paper-settings.ts";

@@ -2,6 +2,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
+import { CorrectionOriginMark } from "@/components/correction-origin-mark";
 import { StoryBody } from "@/components/story-body";
 import { AiDisclosure } from "@/components/ai-disclosure";
 import { EmptyState, StorySkeleton } from "@/components/states";
@@ -498,6 +499,14 @@ function ArticlePage() {
             article.corrections.map((c, i) => (
               <div className="sourcecard" key={i}>
                 <strong>{formatDate(c.date)}</strong>
+                {/*
+                  A correction the routine-notice worker appended says so here
+                  too, and it is the same chip, from the same component, with
+                  the same label the corrections feed uses -- a reader who
+                  meets this row on the story after meeting it on /corrections
+                  must not be told two different things about who wrote it.
+                */}
+                <CorrectionOriginMark body={c.body} />
                 <p>{c.body}</p>
               </div>
             ))

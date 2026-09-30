@@ -21,23 +21,36 @@ import { fileURLToPath } from "node:url";
  * WHAT COUNTS AS A PUBLISH SITE. Two statement forms, both read off the real
  * code rather than invented:
  *
- *   1. `insert into articles`. A new article row is the only way a story
- *      appears, and three of the four sites use this form. It is matched
- *      case-insensitively and across newlines because `desk.ts` and
- *      `opinion.ts` split the statement over a dozen lines and
- *      `routine-notice-worker.server.ts` writes it as a one-line string.
- *   2. `update articles ... status = 'published'`. No site in the tree does
- *      this today, and that is the point of matching it: the obvious cheap
- *      way to add a fifth publish path later is to promote a row that is
- *      already there.
+ *   1. An insert into `articles`, however the table is spelled --
+ *      `articles`, `"articles"`, `public.articles`, `"public"."articles"`.
+ *      A new article row is the only way a story appears, and three of the
+ *      four sites use this form. It is matched case-insensitively and across
+ *      newlines because `desk.ts` and `opinion.ts` split the statement over a
+ *      dozen lines and `routine-notice-worker.server.ts` writes it as a
+ *      one-line string. An upsert is this same statement -- `insert ... on
+ *      conflict do update set ...` -- so one pattern covers both, and the
+ *      `articles.status` column defaults to `'published'`, so an insert that
+ *      never mentions the status is still a publish.
+ *   2. An update of `articles` whose SET list touches `status`, whatever the
+ *      value looks like: `'published'`, `$1`, `${next}`, `excluded.status`.
+ *      No site in the tree does this today, and that is the point of matching
+ *      it. The obvious cheap way to add a fifth publish path later is to
+ *      promote a row that is already there, and the narrow version of this
+ *      rule -- a literal `status = 'published'` -- would have missed every
+ *      spelling of that except the first.
  *
  * The scan is deliberately text-level, like `newsroom-scoped-inserts.test.mjs`
  * beside it: a statement inside a comment or a string would be flagged, which
  * is the safe direction to be wrong in. For the second form the scan reads
  * only the statement's SET list -- the text between `set` and `where` -- so a
- * read that merely mentions the word, `... where status = 'published'`, is
- * not mistaken for a write. A sub-select inside a SET list would confuse it,
- * and there is none in the tree.
+ * read that merely mentions the column, `... where status = 'published'`, is
+ * not mistaken for a write, and neither is an edit that leaves the status
+ * alone. A sub-select inside a SET list would confuse it, and there is none in
+ * the tree.
+ *
+ * The matcher is proven by its own case list below, not only by this tree, so
+ * a future edit that narrows it back fails a test instead of going quietly
+ * blind to whatever spelling this tree does not happen to use.
  */
 
 /** The four files allowed to write a published article, and nothing else. */
@@ -49,18 +62,18 @@ const ALLOWED = [
 ];
 
 /*
-  A SECOND FORM THE LITERAL SCAN CANNOT SEE, named so it is not a hole.
+  A THIRD FORM THE LITERAL SCAN CANNOT SEE, named so it is not a hole.
 
   `trash-store.ts`'s `reinsert()` builds `insert into ${table} (...)` from a
   snapshot the trash took, so a restored article is inserted by a statement
-  whose table name is a variable -- `insert\s+into\s+articles` never matches
-  it, and no regex for a literal table name ever will. It is not a publish
-  path in the sense above: the row coming back is the same row that was
-  deleted, `status`, `published_at` and all, and `trash.ts` restores it only
-  when an editor presses Restore on the Trash screen. But it can write a
-  published article, so it is listed here rather than left for a reader of
-  this test to discover. Any OTHER file that inserts into a variable table
-  name fails the second assertion below.
+  whose table name is a variable -- no regex for a table name, however it is
+  spelled, can match that, and none ever will. It is not a publish path in the
+  sense above: the row coming back is the same row that was deleted, `status`,
+  `published_at` and all, and `trash.ts` restores it only when an editor
+  presses Restore on the Trash screen. But it can write a published article,
+  so it is listed here rather than left for a reader of this test to discover.
+  Any OTHER file that inserts into a variable table name fails the second
+  assertion below.
 */
 const ALLOWED_DYNAMIC_TABLE_INSERTS = ["src/lib/news/trash-store.ts"];
 
@@ -77,10 +90,30 @@ function sourceFiles() {
     .map((f) => f.split("\\").join("/"));
 }
 
-const INSERT_INTO_ARTICLES = /insert\s+into\s+articles\b/gi;
-const UPDATE_ARTICLES = /update\s+articles\b/gi;
+/*
+  Naming the table, not the word `articles`.
+
+  A regex for the bare word was the first version of this test and it was
+  evadable: `insert into public.articles` and `insert into "articles"` are the
+  same write spelled two other ways, and both walked straight past it. The
+  table is recognized as an identifier -- optionally schema-qualified,
+  optionally quoted on either part -- whose LAST segment is `articles`, so
+  `public.articles`, `"public"."articles"`, `"articles"` and the bare name all
+  land, while `article_body_history` and `articles_archive` do not (the
+  lookahead refuses a name that merely starts with `articles`).
+*/
+const IDENTIFIER = String.raw`(?:"[A-Za-z_][A-Za-z0-9_]*"|[A-Za-z_][A-Za-z0-9_]*)`;
+const ARTICLES_TABLE = String.raw`(?:${IDENTIFIER}\s*\.\s*)?(?:"articles"|articles(?![A-Za-z0-9_]))`;
+const INSERT_INTO_ARTICLES = new RegExp(String.raw`\binsert\s+into\s+${ARTICLES_TABLE}`, "gi");
+const UPDATE_ARTICLES = new RegExp(String.raw`\bupdate\s+${ARTICLES_TABLE}`, "gi");
 const DYNAMIC_TABLE_INSERT = /insert\s+into\s+\$\{/i;
-const SETS_PUBLISHED = /status\s*=\s*'published'/i;
+/**
+ * A SET-list assignment to `status`, whatever it is assigned. The character
+ * class before the name is what keeps `updated_status = ...` out (it has no
+ * whitespace, comma or paren before `status`); the optional quotes let the
+ * column be spelled `"status"`.
+ */
+const SETS_STATUS = /[\s,(]"?status"?\s*=/i;
 const SET_KEYWORD = /\bset\b/i;
 const WHERE_KEYWORD = /\bwhere\b/i;
 /** Only used for a SET list with no `where` at all, which is malformed SQL. */
@@ -92,8 +125,17 @@ function lineOf(text, index) {
 
 /**
  * The publish statements in one file's source, with the line each starts on.
- * `kind` is `insert` for a new article row, `promote` for an update that sets
- * a row's status to published.
+ * `kind` is `insert` for a new article row, `promote` for an update that
+ * writes an article's `status`.
+ *
+ * The SET list is the text between `set` and the statement's own `where`, so a
+ * read that merely names the column -- `... where status = 'published'` -- is
+ * not mistaken for a write, and neither is an edit that leaves the status
+ * alone. The rule inside that region is the column, not the value: a status
+ * write is a publish-gate act whatever it is set to and whatever shape the
+ * value has, so `$1`, `${next}` and `excluded.status` are all caught by the
+ * same `status =`. A sub-select inside a SET list would confuse the `where`
+ * search, and there is none in the tree.
  */
 function publishSitesIn(text) {
   const sites = [];
@@ -107,7 +149,7 @@ function publishSitesIn(text) {
     const setList = statement.slice(set.index + set[0].length);
     const where = WHERE_KEYWORD.exec(setList);
     const assignments = where ? setList.slice(0, where.index) : setList.slice(0, UNBOUNDED_SET_WINDOW);
-    if (SETS_PUBLISHED.test(assignments)) {
+    if (SETS_STATUS.test(assignments)) {
       sites.push({ kind: "promote", line: lineOf(text, match.index) });
     }
   }
@@ -153,43 +195,82 @@ test("the one insert with a variable table name is the trash restore, and stays 
   );
 });
 
-/* The scanner's own behavior, so a future edit to the regexes cannot make the
-   test above pass by matching nothing at all. */
-test("the scanner recognizes the forms the four sites use", () => {
-  assert.equal(publishSitesIn("select 1").length, 0);
-  assert.equal(
-    publishSitesIn("insert into articles (user_id, slug) values ('masthead', 'w')").length,
-    1,
-  );
-  assert.equal(
-    publishSitesIn(`
-      insert into articles (
+/*
+  The scanner's own behavior, fed strings rather than the tree.
+
+  The assertions above run against whatever `src/` happens to contain, so they
+  cannot tell a matcher that sees a write from one that has stopped seeing
+  anything at all -- a regex narrowed back to the bare word `articles` would
+  keep them green as long as this tree keeps spelling the table that way, and
+  go blind the first time a caller wrote `public.articles`. Every case below is
+  a spelling somebody could use, so the matcher is proven here and not only
+  against today's source.
+*/
+test("the scanner recognizes every spelling of a publish, and only a publish", () => {
+  const INSERTS = [
+    "insert into articles (user_id, slug) values ('masthead', 'w')",
+    'insert into "articles" (user_id, slug) values (\'masthead\', \'w\')',
+    "insert into public.articles (user_id, slug) values ('masthead', 'w')",
+    'insert into public."articles" (user_id, slug) values (\'masthead\', \'w\')',
+    'insert into "public"."articles" (user_id, slug) values (\'masthead\', \'w\')',
+    // The upsert: the same insert, with a `do update` on the end. It is an
+    // insert-into-articles either way, which is why one pattern covers both.
+    `insert into public.articles (user_id, slug, status) values ($1, $2, 'published')
+       on conflict (slug) do update set status = excluded.status`,
+    `      insert into articles (
         user_id, newsroom_id, slug, status, published_at
       )
       values (
         $1, $2, $3, 'published', now()
-      ) returning id
-    `).length,
-    1,
-  );
-  assert.equal(
-    publishSitesIn("insert into article_body_history (a) values (1)").length,
-    0,
-    "a table whose name merely starts with 'articles' is not the articles table",
-  );
-  assert.equal(publishSitesIn("insert into articles_archive (a) values (1)").length, 0);
+      ) returning id`,
+  ];
+  for (const sql of INSERTS) {
+    assert.deepEqual(
+      publishSitesIn(sql).map((s) => s.kind),
+      ["insert"],
+      `must be read as a publish: ${sql}`,
+    );
+  }
 
-  const promote = "update articles set status = 'published' where id = $1";
-  assert.deepEqual(publishSitesIn(promote), [{ kind: "promote", line: 1 }]);
-  assert.equal(
-    publishSitesIn("update articles set headline = $1 where id = $2").length,
-    0,
-    "an edit that leaves the status alone is not a publish",
-  );
-  assert.equal(
-    publishSitesIn(`update articles set headline = $1 where id = $2
-      and status = 'published'`).length,
-    0,
-    "reading 'published' in the where clause is not writing it",
-  );
+  const PROMOTES = [
+    "update articles set status = 'published' where id = $1",
+    'update "articles" set status = $1 where id = $2',
+    "update public.articles set status = $1 where id = $2",
+    "update public.articles set status = ${next} where id = $1",
+    "update articles set status = excluded.status from staging where staging.id = articles.id",
+    `update articles
+        set headline = $2,
+            status = $3
+      where id = $1 and newsroom_id = $4`,
+    'update articles set "status" = $1 where id = $2',
+  ];
+  for (const sql of PROMOTES) {
+    assert.deepEqual(
+      publishSitesIn(sql).map((s) => s.kind),
+      ["promote"],
+      `must be read as a publish: ${sql}`,
+    );
+  }
+
+  const NOT_A_PUBLISH = [
+    "select 1",
+    "insert into article_body_history (a) values (1)",
+    "insert into articles_archive (a) values (1)",
+    "insert into public.articles_archive (a) values (1)",
+    "insert into correction_articles (a) values (1)",
+    "select slug from articles where status = 'published' limit 1",
+    "update articles set headline = $1 where id = $2",
+    `update articles set headline = $1 where id = $2
+      and status = 'published'`,
+    "update articles set updated_status = $1 where id = $2",
+    "update leads set status = 'published' where id = $1",
+  ];
+  for (const sql of NOT_A_PUBLISH) {
+    assert.deepEqual(publishSitesIn(sql), [], `must NOT be read as a publish: ${sql}`);
+  }
+});
+
+test("a publish is reported with the line it starts on", () => {
+  const text = `const a = 1;\n\nupdate public.articles set status = $1 where id = $2;\n`;
+  assert.deepEqual(publishSitesIn(text), [{ kind: "promote", line: 3 }]);
 });

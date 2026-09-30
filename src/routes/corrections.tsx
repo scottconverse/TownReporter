@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { CorrectionForm } from "@/components/correction-form";
-import { correctionIsAutomatic, ROUTINE_EDITION_UPDATE_LABEL } from "@/lib/news/correction-origin";
+import { CorrectionOriginMark } from "@/components/correction-origin-mark";
 import { listPublicCorrections } from "@/lib/news/public";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
@@ -65,14 +65,14 @@ function Corrections() {
                 sent as a flag by `listPublicCorrections`, because the read
                 cannot be exercised without the framework's request runtime:
                 `public.ts`'s server functions throw outside it (see
-                public-surfaces.no-leak.test.ts). Here the rule is the shared
-                one in `correction-origin.ts`, and
+                public-surfaces.no-leak.test.ts). The rule is the shared one in
+                `correction-origin.ts`, the chip is the shared one in
+                `components/correction-origin-mark.tsx` -- so this page and the
+                story page cannot label the same row differently -- and
                 scripts/corrections-automatic-render.test.mjs renders this
-                route against it.
+                route against both.
               */}
-              {correctionIsAutomatic(c.body) && (
-                <span className="correctionauto">{ROUTINE_EDITION_UPDATE_LABEL}</span>
-              )}
+              <CorrectionOriginMark body={c.body} />
               <h3>{c.headline}</h3>
               <p>{c.body}</p>
               {"slug" in c && typeof c.slug === "string" && (
