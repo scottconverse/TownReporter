@@ -48,7 +48,10 @@ it("subreddit comes only from one unambiguous accepted source set, never a city 
 it("runtime planner and synthesis use configured place; Reddit endpoint is newsroom scoped and fails closed", () => {
   const dark = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
   const investigate = readFileSync(new URL("./investigate.ts", import.meta.url), "utf8");
-  assert.match(dark, /grokChat\(darkSystemFor\(dials, place\)/);
+  // The synthesis call goes through a test seam (`chat`) that must default to
+  // the real `grokChat`, so production still sends the configured place.
+  assert.match(dark, /\bchat\(darkSystemFor\(dials, place\)/);
+  assert.match(dark, /const chat = deps\.chat \?\? grokChat;/);
   assert.match(
     investigate,
     /grokPlanner\(\s*pack,\s*opts\.choice,\s*opts\.providerOverrides,\s*place,\s*newsroomId,\s*opts\.runBudget/,
