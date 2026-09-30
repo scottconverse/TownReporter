@@ -2345,7 +2345,11 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const scope: ResearchScope = {
     city: place.city ?? "",
     state: place.state ?? "",
-    officialHost: settings ? officialSiteHost(settings.city, settings.seedSources) : null,
+    // City and state are read together, from the same settings row they
+    // describe: the state is what makes `boulderco.gov` this city's host.
+    officialHost: settings
+      ? officialSiteHost(settings.city, settings.seedSources, settings.state)
+      : null,
   };
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? ((url: string) => defaultFetch(url, {

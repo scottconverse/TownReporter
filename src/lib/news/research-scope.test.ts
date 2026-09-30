@@ -4,6 +4,7 @@ import { PAPER, SEED_SOURCES } from "../paper.ts";
 import { queriesForRef, primarySourceQueries } from "./extract.ts";
 import {
   NO_RESEARCH_SCOPE,
+  cityOfficialHost,
   officialSiteHost,
   researchScopeOf,
   scopedQuery,
@@ -108,6 +109,19 @@ describe("research scope", () => {
       "longmontcolorado.gov",
       "the shipped watch list still identifies the shipped city's own site",
     );
+    assert.equal(
+      officialSiteHost(SHIPPED.city, SEED_SOURCES, SHIPPED.state),
+      "longmontcolorado.gov",
+      "and it identifies the same site with the newsroom's state in hand",
+    );
+    // The shipped watch list files bouldercounty.gov (Boulder County) and
+    // longmont.primegov.com (the vendor's portal) as official. Neither is the
+    // city, however the list is ordered.
+    assert.equal(
+      officialSiteHost(SHIPPED.city, [...SEED_SOURCES].reverse(), SHIPPED.state),
+      "longmontcolorado.gov",
+      "the county and the portal do not become the city's site from the other end of the list",
+    );
     assert.ok(company.some((s) => s.query === `"Acme Holdings LLC" Longmont`));
     assert.ok(company.some((s) => s.query === `"Acme Holdings LLC" site:longmontcolorado.gov`));
     assert.ok(company.some((s) => s.query === `"Acme Holdings LLC" site:sos.state.co.us`));
@@ -165,6 +179,47 @@ describe("research scope", () => {
       false,
       "no identifiable city site means no site: operator, never someone else's",
     );
+  });
+
+  it("matches the city's own label, never a substring of a neighbouring jurisdiction", () => {
+    /*
+      Boulder County's host carries the city's name, and a substring rule takes
+      the county for the city -- the failure ENG-3 was meant to fix, still live
+      in the host pick one layer below it. The city's name has to BE the label
+      the host is registered under.
+    */
+    assert.equal(
+      cityOfficialHost("Boulder", ["bouldercounty.gov", "bouldercolorado.gov"]),
+      "bouldercolorado.gov",
+      "the county is listed first and is still not the city",
+    );
+    assert.equal(cityOfficialHost("Boulder", ["bouldercounty.gov"]), null);
+    // A label that merely starts with the city's name is somebody else's.
+    assert.equal(cityOfficialHost("Longmont", ["notlongmont-news.us"]), null);
+    // Nor is the city's name a subdomain of somebody else's host.
+    assert.equal(cityOfficialHost("Longmont", ["longmontcolorado.gov.evil.us"]), null);
+    assert.equal(cityOfficialHost("Longmont", ["longmontcolorado.gov"]), "longmontcolorado.gov");
+  });
+
+  it("prefers the plain city label over a state-qualified one, whatever the order", () => {
+    assert.equal(cityOfficialHost("Boulder", ["bouldercolorado.gov", "boulder.gov"]), "boulder.gov");
+    assert.equal(cityOfficialHost("Boulder", ["boulder.gov", "bouldercolorado.gov"]), "boulder.gov");
+  });
+
+  it("settles the one ambiguous label -- `co` -- with the newsroom's own state", () => {
+    // `boulderco.gov` is Boulder, Colorado and it is also Boulder County.
+    assert.equal(cityOfficialHost("Boulder", ["boulderco.gov"], "Colorado"), "boulderco.gov");
+    assert.equal(cityOfficialHost("Boulder", ["boulderco.gov"], "CO"), "boulderco.gov");
+    // Everywhere else the county reading is the only one left standing.
+    assert.equal(cityOfficialHost("Boulder", ["boulderco.gov"], "Oregon"), null);
+    assert.equal(cityOfficialHost("Boulder", ["boulderco.gov"]), null, "no state, no answer");
+    // The unambiguous spellings need no state, and a state that is not this
+    // city's state does not qualify it.
+    assert.equal(cityOfficialHost("Boulder", ["bouldercolorado.gov"]), "bouldercolorado.gov");
+    assert.equal(cityOfficialHost("Boulder", ["bouldercolorado.gov"], "Colorado"), "bouldercolorado.gov");
+    assert.equal(cityOfficialHost("Boulder", ["bouldercolorado.gov"], "Oregon"), null);
+    assert.equal(cityOfficialHost("Boulder", ["boulderor.gov"], "Oregon"), "boulderor.gov");
+    assert.equal(cityOfficialHost("Boulder", ["boulderor.gov"], "Colorado"), null);
   });
 
   it("joins a multi-word city the way a host joins it, and does not guess at short or abbreviated names", () => {
