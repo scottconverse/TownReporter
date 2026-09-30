@@ -52,6 +52,19 @@ export class ForbiddenError extends Error {
   }
 }
 
+/**
+ * What every model-connection refusal says, in one place.
+ *
+ * A newsroom's model connections are how its prompts and its stored provider
+ * keys leave the building, so the writes and the key-using actions are the
+ * owner's -- the same class of decision as `savePaperConfig` or `createInvite`,
+ * not an editorial one. `saveLocalModel` (provider-settings.ts) and the four
+ * custom-connection actions (custom-ai-connections.server.ts) all refuse with
+ * this exact sentence, so an editor who meets two of them reads one rule
+ * rather than two similar ones that might be two different rules.
+ */
+export const ONLY_OWNER_CHANGES_MODEL_CONNECTIONS = "Only the owner can change model connections.";
+
 export type EditorRole = "owner" | "editor";
 
 export type EditorContext = {

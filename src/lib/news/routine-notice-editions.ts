@@ -39,6 +39,59 @@ function decodeText(value: string | undefined) {
   const escaped = value.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   return parseHTML(`<span>${escaped}</span>`).document.querySelector("span")?.textContent ?? value;
 }
+/*
+  A routine edition publishes with no editor, so nothing a source supplies may
+  reach the reader as markup. `plainField` decodes the source's entities the way
+  `decodeText` does, flattens its whitespace and drops the characters that
+  `story-body.tsx` would otherwise turn into a link or emphasis (`[`, `]`, `(`
+  and the scheme stay readable, but `](` can no longer pair up). Ordinary
+  punctuation — `,` `.` `:` `-` `'` `&` `(` `)` — survives untouched.
+*/
+const MARKUP_CHARACTERS = /[*_`#[\]<>]/g;
+export function plainField(value: string | undefined) {
+  return decodeText(value).replace(MARKUP_CHARACTERS, "").replace(/\s+/g, " ").trim();
+}
+// Every free-text field `logisticsLine` interpolates. Values here come from the
+// source, not from the owner-approved source URL that ends each edition.
+const SOURCE_TEXT_FIELDS = [
+  "program",
+  "branch",
+  "location",
+  "hours",
+  "closure",
+  "title",
+  "venue",
+  "service",
+  "area",
+  "scheduleChange",
+  "collectionInstructions",
+] as const;
+/*
+  A web address or markdown link in source text is the one thing an editor must
+  look at before it could ever be published; a very long field is the other.
+
+  Detection runs on the raw value *and* on `plainField(raw)`, because cleaning
+  is what the reader sees: `&#104;ttps://…`, `https&colon;//…`, `ht*tps://…`
+  and `htt[]ps://…` all read as an ordinary field until entity decoding and
+  markup removal turn them into a live `https://…` in the published line. `://`
+  catches the same trick behind any other scheme.
+*/
+const SOURCE_WEB_ADDRESS = /https?:\/\/|www\.|\]\(/i;
+const ANY_URL_SCHEME = /:\/\//;
+const MAXIMUM_PLAIN_FIELD = 160;
+function needsEditorForSourceText(fields: Record<string, string>) {
+  return SOURCE_TEXT_FIELDS.some((field) => {
+    const raw = fields[field];
+    if (!raw) return false;
+    const cleaned = plainField(raw);
+    return (
+      SOURCE_WEB_ADDRESS.test(raw) ||
+      SOURCE_WEB_ADDRESS.test(cleaned) ||
+      ANY_URL_SCHEME.test(cleaned) ||
+      cleaned.length > MAXIMUM_PLAIN_FIELD
+    );
+  });
+}
 function displayDateOnly(value: string) {
   const instant = new Date(`${value}T12:00:00Z`);
   return Number.isNaN(instant.valueOf())
@@ -111,17 +164,17 @@ function logisticsLine(n: StructurallyValidRoutineNotice, newsroomTimezone: stri
   const when = (value: string | undefined) => `${displayWhen(value, newsroomTimezone, f.timezone)}${value?.includes("T") && f.timezone ? ` ${newsroomTimezone}` : ""}`;
   switch (n.formatKey) {
     case "library-notice":
-      return `${decodeText(f.program ?? f.branch)}: ${when(f.start ?? f.effectiveDate)}${f.location ? ` at ${decodeText(f.location)}` : ""}${f.hours ? ` · ${f.hours}` : ""}${f.closure ? ` · ${f.closure}` : ""}`;
+      return `${plainField(f.program ?? f.branch)}: ${when(f.start ?? f.effectiveDate)}${f.location ? ` at ${plainField(f.location)}` : ""}${f.hours ? ` · ${plainField(f.hours)}` : ""}${f.closure ? ` · ${plainField(f.closure)}` : ""}`;
     case "parks-recreation-notice":
-      return `${decodeText(f.program)}: ${when(f.start)} at ${decodeText(f.location)}`;
+      return `${plainField(f.program)}: ${when(f.start)} at ${plainField(f.location)}`;
     case "community-arts-event-logistics":
-      return `${decodeText(f.title)}: ${when(f.start)}${f.venue ? ` at ${decodeText(f.venue)}` : f.onlineUrl ? " online" : ""}`;
+      return `${plainField(f.title)}: ${when(f.start)}${f.venue ? ` at ${plainField(f.venue)}` : f.onlineUrl ? " online" : ""}`;
     case "registration-deadline":
-      return `${decodeText(f.program)}: applications close ${when(f.deadline)}`;
+      return `${plainField(f.program)}: applications close ${when(f.deadline)}`;
     case "waste-recycling-schedule":
-      return `${decodeText(f.service)}: ${when(f.serviceDate)}${f.endDate ? `–${displayWhen(f.endDate, newsroomTimezone)}` : ""} · ${decodeText(f.area)}${f.scheduleChange ? ` · ${decodeText(f.scheduleChange)}` : ""}${f.collectionInstructions ? ` · ${decodeText(f.collectionInstructions)}` : ""}`;
+      return `${plainField(f.service)}: ${when(f.serviceDate)}${f.endDate ? `–${displayWhen(f.endDate, newsroomTimezone)}` : ""} · ${plainField(f.area)}${f.scheduleChange ? ` · ${plainField(f.scheduleChange)}` : ""}${f.collectionInstructions ? ` · ${plainField(f.collectionInstructions)}` : ""}`;
     case "public-meeting-logistics":
-      return `${decodeText(f.title)}: ${when(f.start)}${f.venue ? ` at ${decodeText(f.venue)}` : ""}`;
+      return `${plainField(f.title)}: ${when(f.start)}${f.venue ? ` at ${plainField(f.venue)}` : ""}`;
   }
 }
 export function eligibleRoutineNotices(
@@ -139,6 +192,10 @@ export function eligibleRoutineNotices(
       continue;
     }
     const f = notice.normalizedFields;
+    if (needsEditorForSourceText(f)) {
+      review.push(notice);
+      continue;
+    }
     if (
       f.cancellation ||
       (f.eventStatus && f.eventStatus !== "scheduled" && !/(?:^|\/)EventScheduled$/.test(f.eventStatus))

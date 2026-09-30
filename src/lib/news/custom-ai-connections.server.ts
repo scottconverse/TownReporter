@@ -279,11 +279,28 @@ export async function listCustomAiConnections(userId: string): Promise<PublicCus
     .map(fromRow)
     .map(publicConnection);
 }
+/**
+ * The owner, or a 403 with the one sentence every model-connection refusal
+ * shares (`ONLY_OWNER_CHANGES_MODEL_CONNECTIONS`).
+ *
+ * A connection is an address the desk sends prompts to AND the place a stored
+ * provider key is spent, so creating one, re-pointing one, switching one on or
+ * off, deleting one, and asking one to answer are all the owner's decisions --
+ * the same class as `savePaperConfig` or `createInvite`. Listing them stays
+ * open to every editor (`listCustomAiConnections`), because knowing which
+ * connections exist is not a way to change one.
+ */
+async function requireModelConnectionOwner(userId: string) {
+  const me = await requireEditor(userId);
+  if (me.role !== "owner") throw new ForbiddenError(ONLY_OWNER_CHANGES_MODEL_CONNECTIONS);
+  return me;
+}
+
 export async function saveCustomAiConnection(
   userId: string,
   input: CustomAiConnectionInput & { id?: string },
 ): Promise<PublicCustomAiConnection> {
-  const me = await requireEditor(userId);
+  const me = await requireModelConnectionOwner(userId);
   const value = normalizeConnectionInput(input);
   await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
@@ -294,11 +311,22 @@ export async function saveCustomAiConnection(
       )[0]
     : undefined;
   if (input.id && !existing) throw new Error("Connection not found.");
+  /*
+    Key follows the address. The stored key was entered for the address that
+    was stored with it, so editing the address without supplying a key CLEARS
+    it rather than carrying it to a new host -- otherwise an edit that only
+    looked like a rename would post the newsroom's provider key to whatever
+    address was typed in. `removeApiKey` still clears explicitly, and a new key
+    replaces the old one.
+  */
+  const keyStillMatchesAddress = existing ? existing.base_url === value.baseUrl : false;
   const encrypted = value.removeApiKey
     ? null
     : value.apiKey
       ? encryptApiKey(value.apiKey)
-      : (existing?.encrypted_api_key ?? null);
+      : keyStillMatchesAddress
+        ? (existing?.encrypted_api_key ?? null)
+        : null;
   if (isGeminiOpenAiEndpoint(value.baseUrl) && !encrypted)
     throw new Error("Google Gemini requires an API key. Enter it before saving this connection.");
   let rows: Row[];
@@ -314,7 +342,7 @@ export async function saveCustomAiConnection(
   return publicConnection(fromRow(rows[0]));
 }
 export async function setCustomAiConnectionEnabled(userId: string, id: string, enabled: boolean) {
-  const me = await requireEditor(userId);
+  const me = await requireModelConnectionOwner(userId);
   await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   await sql.query(
@@ -323,7 +351,7 @@ export async function setCustomAiConnectionEnabled(userId: string, id: string, e
   );
 }
 export async function deleteCustomAiConnection(userId: string, id: string) {
-  const me = await requireEditor(userId);
+  const me = await requireModelConnectionOwner(userId);
   await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   await sql.query(`delete from custom_ai_connections where id=$1 and newsroom_id=$2`, [
@@ -354,8 +382,19 @@ export async function resolveCustomAiChoice(
     apiKey: decryptApiKey(row.encrypted_api_key),
   };
 }
+/**
+ * One connection this newsroom owns, for a caller who may use its key.
+ *
+ * Owner-only, because both callers below decrypt the stored key and PUT it on
+ * the wire to whatever address the row currently names -- `discoverCustomAiModels`
+ * sends it as a bearer token to `<baseUrl>/models`, and `testCustomAiConnection`
+ * sends it with a real prompt to `<baseUrl>/chat/completions`. An editor who
+ * could re-point the row (`saveCustomAiConnection`) and then press Discover
+ * would be an editor spending the owner's key at an address of their choosing,
+ * which is the whole reason the address edit is owner-only too.
+ */
 async function ownedConnection(userId: string, id: string): Promise<StoredCustomAiConnection> {
-  const me = await requireEditor(userId);
+  const me = await requireModelConnectionOwner(userId);
   await ensureCustomAiConnectionsSchema();
   const sql = await getSql();
   const row = (
@@ -388,4 +427,4 @@ export async function testCustomAiConnection(
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { ensureSchemaOnce, getSql } from "../db.ts";
-import { requireEditor } from "./membership.ts";
+import { requireEditor, ForbiddenError, ONLY_OWNER_CHANGES_MODEL_CONNECTIONS } from "./membership.ts";

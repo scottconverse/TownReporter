@@ -981,11 +981,16 @@ function ConnectionsTab({
       Not an apology and not a broken panel. An editor whose page said "Could
       not load your API connections" would be reading a lie about a 403, so the
       read is never attempted for them and the sentence says what is true.
+
+      The first sentence is the one the server refuses with
+      (`ONLY_OWNER_CHANGES_MODEL_CONNECTIONS`, src/lib/news/membership.ts):
+      every connection write AND every key-using action is owner-only, so this
+      tab names no action for an editor to press.
     */
     return (
       <p className="mt-4 max-w-3xl text-base text-ink-2">
-        Only the owner sees and changes the paper&rsquo;s connections. Which model the paper is
-        allowed to write with is on the other tab, with each job&rsquo;s live state beside it.
+        Only the owner can change model connections. Which model the paper is allowed to write with
+        is on the other tab, with each job&rsquo;s live state beside it.
       </p>
     );
   }

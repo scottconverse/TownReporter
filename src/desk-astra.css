@@ -6352,6 +6352,14 @@
   border: 2px solid var(--warn);
   color: var(--warn);
 }
+/* Unit U9: a check that never ran. The dashed outline is the desk home's
+   "not run" chip (.chip.d-quiet), so the one chip on this bar that is not
+   about something the editor has to do still cannot be read as a pass. */
+.desk-ltr.astra .astra-gate.is-quiet {
+  border-style: dashed;
+  border-color: var(--fg2);
+  color: var(--fg2);
+}
 
 /* The tabs: three equal cells, 48px, the active one a 4px yellow underline
    sitting on the panel it names. */
