@@ -30,7 +30,7 @@ describe("scan preflight", () => {
     const p = scanPreflight({
       ok: false,
       error:
-        "AI is not available. Set ANTHROPIC_API_KEY for Claude (default), or XAI_API_KEY for Grok, or LLM_BASE_URL for any OpenAI-compatible gateway.",
+        "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
     });
     assert.equal(p.ok, false);
     if (p.ok) return;
@@ -198,7 +198,8 @@ describe("scan preflight", () => {
     const p = scanPreflight(
       {
         ok: false,
-        error: "AI is not available. Set ANTHROPIC_API_KEY, XAI_API_KEY, or LLM_BASE_URL.",
+        error:
+          "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
       },
       "claude-frontier",
     );

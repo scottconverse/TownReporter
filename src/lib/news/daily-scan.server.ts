@@ -17,6 +17,7 @@ import {
   modelEffort,
   type ModelEffort,
   type PickerProviderId,
+  type RetiredProviderId,
 } from "./provider-registry.ts";
 import { automaticFailoverReason, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
@@ -71,7 +72,7 @@ export async function validateDailyRuntime(
     const at = ladder.indexOf(runtime);
     const forward = at >= 0 ? ladder.slice(at + 1) : ladder;
     const candidates = (forward.length ? forward : ladder).filter(
-      (choice): choice is Exclude<PickerProviderId, "grok-oauth"> =>
+      (choice): choice is Exclude<PickerProviderId, RetiredProviderId> =>
         choice !== runtime && (PICKER_PROVIDER_IDS as readonly string[]).includes(choice),
     );
     for (const choice of candidates) {
@@ -533,10 +534,6 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
             return grokChat(...input);
           },
           custom: async (...input) => {
-            const { grokChat } = await import("./ai.ts");
-            return grokChat(...input);
-          },
-          xai: async (...input) => {
             const { grokChat } = await import("./ai.ts");
             return grokChat(...input);
           },

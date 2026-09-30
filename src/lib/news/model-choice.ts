@@ -9,6 +9,7 @@
 */
 
 import {
+  RETIRED_PROVIDER_IDS,
   automaticLadder,
   isAutomaticChoiceId,
   isAutomaticRungId,
@@ -172,8 +173,8 @@ export type ForcedModelChoice = Exclude<StoryModelChoice, "auto" | AutomaticRung
  * rungs are not options in any menu: a job Automatic pinned to
  * `deepseek-flash` has to keep that id when it is read back, or the mid-run
  * failover re-probes the ladder from the top and can land on the very rung
- * that just failed. A retired id (`grok-oauth`) is not in either list, so a
- * stored Grok choice still normalises to Automatic.
+ * that just failed. A retired id is not in either list, so a stored Grok
+ * choice still normalises to Automatic.
  */
 export function storyModelChoice(value: unknown): StoryModelChoice {
   if (isCustomModelChoice(value)) return value;
@@ -231,16 +232,21 @@ export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story
  * no longer offers, or null when it holds anything else.
  *
  * 0.6.63 (Unit Y item 4) retired SuperGrok from every model picker and from
- * Automatic. A stored `grok-oauth` therefore normalises to Automatic -- see
- * `storyModelChoice` -- and this is the sentence that says so out loud, so an
- * editor who chose it does not read the change as the desk forgetting.
- * Sign-in is deliberately untouched by the retirement, which is why the
- * sentence says so.
+ * Automatic; GR-C then removed Grok (xAI) as a provider entirely -- the
+ * connection, the transport and the registry entry are gone. A stored retired
+ * id therefore normalises to Automatic -- see `storyModelChoice` -- and this is
+ * the sentence that says so out loud, so an editor who chose it does not read
+ * the change as the desk forgetting.
+ *
+ * The list is `RETIRED_PROVIDER_IDS` rather than one hardcoded string, so a
+ * provider retired in future gets the same treatment by being added there. The
+ * wording names Grok because that is the only id on it and the editor needs to
+ * know WHICH choice went away and what to do next.
  */
 export function retiredModelChoiceNote(value: unknown): string | null {
-  return value === "grok-oauth"
-    ? "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected."
-    : null;
+  if (typeof value !== "string") return null;
+  if (!(RETIRED_PROVIDER_IDS as readonly string[]).includes(value)) return null;
+  return "Grok (SuperGrok) has been removed from TownReporter, so this falls back to Automatic. Choose another model on the Models screen.";
 }
 
 /**

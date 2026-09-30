@@ -28,7 +28,6 @@ import {
 const ENV_KEYS = [
   "TOWNREPORTER_CODEX",
   "TOWNREPORTER_CLAUDE_CODE",
-  "TOWNREPORTER_GROK_OAUTH",
   "TOWNREPORTER_LOCAL",
   "TOWNREPORTER_DEEPSEEK",
   "TOWNREPORTER_QWEN",
@@ -119,7 +118,9 @@ describe("model-specific thinking effort", () => {
       [],
       "an unknown OpenAI-compatible model must not advertise unverified levels",
     );
-    assert.deepEqual(modelEffortsFor("grok-oauth"), ["low", "medium", "high"]);
+    // A retired id has no entry and therefore no effort vocabulary at all --
+    // it names nothing this desk can call (GR-C removed Grok/xAI).
+    assert.deepEqual(modelEffortsFor("grok-oauth"), []);
     assert.equal(defaultModelEffort("local-model"), null);
     assert.equal(
       defaultModelEffort("local-model", "deepseek-v4.1-flash:cloud"),
@@ -187,10 +188,20 @@ describe("the provider registry is the one description of a writing model", () =
   it("keeps unique ids, and the id lists agree with the registry itself", () => {
     const ids = PROVIDER_REGISTRY.map((entry) => entry.id);
     assert.equal(new Set(ids).size, ids.length, "two entries share an id");
+    /*
+      Two lists name registry entries: the pickers' and the internal ones.
+      `RETIRED_PROVIDER_IDS` is deliberately NOT in this assertion any more.
+      While Grok was only retired from the pickers, a retired id still had an
+      entry -- its transport was live -- so the three lists together named the
+      registry exactly. GR-C removed the provider, the transport and the entry,
+      so a retired id is now a NAME with nothing behind it, and asserting it
+      against the registry would be asserting the thing that was deleted.
+      The loop below states what is true of it instead.
+    */
     assert.deepEqual(
       [...ids].sort(),
-      [...PICKER_PROVIDER_IDS, ...INTERNAL_PROVIDER_IDS, ...RETIRED_PROVIDER_IDS].sort(),
-      "the picker list, the internal list and the retired list must name exactly the registry's entries",
+      [...PICKER_PROVIDER_IDS, ...INTERNAL_PROVIDER_IDS].sort(),
+      "the picker list and the internal list must name exactly the registry's entries",
     );
     // An INTERNAL id is one no picker offers; that is what makes it internal.
     for (const id of INTERNAL_PROVIDER_IDS) {
@@ -200,16 +211,14 @@ describe("the provider registry is the one description of a writing model", () =
         `${id} is an internal provider but some picker offers it`,
       );
     }
-    // A RETIRED id keeps its registry entry -- the transport and the Server
-    // page's sign-in card read it -- but no picker and no ladder offers it.
+    // A RETIRED id is a stored string an older build could write, and nothing
+    // else: no entry, no transport, no picker and no rung. That is exactly what
+    // makes a row holding it normalise to Automatic instead of running.
     for (const id of RETIRED_PROVIDER_IDS) {
-      const entry = providerEntry(id)!;
-      assert.ok(
-        SURFACES.every((surface) => !entry.offeredFor[surface]),
-        `${id} is retired but some picker offers it`,
-      );
+      assert.equal(providerEntry(id), null, `${id} is retired but the registry still describes it`);
       assert.ok(!automaticLadder().includes(id), `${id} is retired but still on the ladder`);
       assert.ok(!(PICKER_PROVIDER_IDS as readonly string[]).includes(id));
+      assert.ok(!(INTERNAL_PROVIDER_IDS as readonly string[]).includes(id));
     }
   });
 
@@ -271,12 +280,14 @@ describe("the Automatic ladder is derived, not typed out", () => {
     assert.equal(providerEntry("deepseek-flash")!.requiresLoadedLocalModel, undefined);
   });
 
-  it("leaves the frontier model and the gateway out of the ladder", () => {
+  it("leaves the frontier model, the gateway and the retired id out of the ladder", () => {
     // Codex Sol is a deliberate, expensive choice; the gateway is resolved
-    // before the ladder runs at all.
+    // before the ladder runs at all; and `grok-oauth` has no entry since GR-C
+    // removed Grok (xAI), so it cannot be a rung.
     assert.ok(!automaticLadder().includes("codex-frontier"));
     assert.ok(!automaticLadder().includes("configured"));
     assert.ok(!automaticLadder().includes("grok-oauth"));
+    assert.equal(providerEntry("grok-oauth"), null);
   });
 
   it("drops a rung the machine has switched off, without changing the static ladder", () => {

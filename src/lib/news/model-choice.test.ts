@@ -21,7 +21,7 @@ import {
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
 import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
-import { automaticLadder, providersFor } from "./provider-registry.ts";
+import { RETIRED_PROVIDER_IDS, automaticLadder, providersFor } from "./provider-registry.ts";
 
 const STORY_VALUES = [
   "auto",
@@ -152,16 +152,24 @@ describe("model choice contract", () => {
     assert.equal(modelChoiceLabel("qwen-local"), "Local model");
   });
 
-  it("falls a stored SuperGrok choice back to Automatic and says so", () => {
-    // Sign-in is untouched by the retirement, so the note says so.
+  it("falls a stored Grok choice back to Automatic and says the provider was removed", () => {
+    /*
+      GR-C removed Grok (xAI) as a provider. A row stored by an older build
+      still holds the id, and it must keep LOADING -- as Automatic, with the
+      note that says why. The note no longer mentions a sign-in, because there
+      is no sign-in: the connection and its transport are gone.
+    */
     assert.equal(modelChoiceLabel("grok-oauth"), "Automatic");
     assert.equal(storyModelChoice("grok-oauth"), "auto");
     assert.equal(opinionModelChoice("grok-oauth"), "codex-frontier");
     assert.equal(darkModelChoice("grok-oauth"), "auto");
     assert.equal(
       retiredModelChoiceNote("grok-oauth"),
-      "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected.",
+      "Grok (SuperGrok) has been removed from TownReporter, so this falls back to Automatic. Choose another model on the Models screen.",
     );
+    // Every id on the retired list gets the same note, so a future retirement
+    // does not need this function edited again.
+    for (const value of RETIRED_PROVIDER_IDS) assert.ok(retiredModelChoiceNote(value));
     for (const value of [...STORY_VALUES, ...RUNG_VALUES, undefined, null, "custom:x"]) {
       assert.equal(retiredModelChoiceNote(value), null);
     }

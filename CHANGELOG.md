@@ -2,6 +2,13 @@
 
 Current software version: **0.6.82**. Publication state is recorded by GitHub.
 
+## Unreleased
+
+- **Grok (xAI) support was removed.** The SuperGrok sign-in connection is gone — its card on **Server → Writing models** and on the Models screen, its device-code login, its stored credential and its transport. `XAI_API_KEY` (and its `GROK_API_KEY` alias) is no longer read, so an install whose only writing model was that key now falls to the next rung of the ladder, which on a machine with nothing else configured is no provider at all. That is said out loud once at start-up: **"Grok (xAI) is no longer supported; XAI_API_KEY is ignored. Choose another model on the Models screen."** Anyone who wants an xAI endpoint can still add a generic OpenAI-compatible connection — that feature is unchanged and unrelated.
+- **A stored Grok choice keeps loading.** A newsroom, a `desk_jobs` row, a draft batch or a `model_assignments` row written by a build that still offered Grok keeps the string `grok-oauth`. Those rows load exactly as before and the desk normalises the retired id to **Automatic**, with the note "Grok (SuperGrok) has been removed from TownReporter, so this falls back to Automatic. Choose another model on the Models screen." Nothing throws and nothing silently switches to a provider you did not choose.
+- **One migration, 0112**, drops `xai_oauth_connections`. It is a drop only: a newsroom that had signed in to SuperGrok loses that sign-in, which is the point of the change, and the Models screen offered an explicit **Remove** button for it first. `custom_ai_connections` — where a saved API key lives — is untouched.
+- Sign-in is not part of this change and is unaffected. Past entries below that describe Grok or SuperGrok are history and are left as written.
+
 ## 0.6.82 — 2026-09-28
 
 - Fixes from the 0.6.81 live walk: Tonight's edition rows print the names chip once; the Queue's "Looks already printed" chip wraps instead of widening the desk; "This week" keeps "St." with its name and never ends a name on "beginning"; source cards print their role in words ("Announcing source").

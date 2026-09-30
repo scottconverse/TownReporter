@@ -361,17 +361,18 @@ describe("ordinary public-document OCR model routing", () => {
     }
   });
 
-  it("routes explicit Grok OCR to a verified vision fallback", async () => {
-    let grokCalls = 0;
+  /*
+    A scan row stored by an older build can still name `grok-oauth`. GR-C
+    removed that provider, so it is a text-only non-provider with no adapter at
+    all: OCR must reach a verified vision fallback and must never invent a call
+    to it.
+  */
+  it("routes a stored Grok OCR pick to a verified vision fallback", async () => {
     let codexCalls = 0;
     const result = await productionOcr(singleRenderedPdfFixture(), {
       provider: "grok-oauth",
       visionFallbackPlans: [{ kind: "codex", model: "gpt-5.6-terra" }],
       adapters: {
-        "xai-oauth": async () => {
-          grokCalls++;
-          throw new Error("Grok OCR must not be attempted");
-        },
         codex: async () => {
           codexCalls++;
           return OCR_TEXT;
@@ -379,11 +380,17 @@ describe("ordinary public-document OCR model routing", () => {
       },
     });
     assert.match(result.text, /water contract was approved/);
-    assert.equal(grokCalls, 0);
     assert.equal(codexCalls, 1);
   });
 
   it("keeps every explicit Story picker choice, newsroom, and local override on the OCR read", async () => {
+    /*
+      `grok-oauth` is in this list on purpose even though GR-C removed the
+      provider: a scan row stored by an older build still carries the string,
+      and the rule under test is that whatever the row says is what the OCR
+      read is handed -- the transport, not this function, decides it cannot be
+      called.
+    */
     const choices = [
       "codex-astra",
       "codex-frontier",

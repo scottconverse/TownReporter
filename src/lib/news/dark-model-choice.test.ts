@@ -22,8 +22,6 @@ import { startBriefJob, startDarkRound } from "./dark.ts";
  */
 
 const ENV_KEYS = [
-  "XAI_API_KEY",
-  "GROK_API_KEY",
   "LLM_API_KEY",
   "LLM_BASE_URL",
   "LLM_MODEL",

@@ -104,17 +104,11 @@ export type CodexConfig = {
   label: string;
 };
 
-export type XaiOauthConfig = {
-  model: string;
-  label: string;
-};
-
 /** The desk speaks to exactly one of these per call. */
 export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
-  | ({ kind: "xai-oauth" } & XaiOauthConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 type GrokChatAdapter = (
@@ -134,18 +128,6 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     modelId: string;
     apiKey: string | null;
   }>;
-  /** Test-only seam for the server-owned SuperGrok OAuth connection. */
-  resolveXaiOauth?: (newsroomId: number) => Promise<{ modelId: string; label?: string }>;
-  /** Test-only seam proving an explicit SuperGrok pick reaches only OAuth inference. */
-  xaiChat?: (input: {
-    newsroomId: number;
-    system?: string;
-    user: string;
-    maxTokens?: number;
-    model?: string;
-    timeoutMs?: number;
-    reasoningEffort?: ModelEffort | null;
-  }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
   /**
@@ -303,24 +285,19 @@ export function rungLocalModel(choice: string | undefined | null): LocalModelOve
   return gateway ? { baseUrl: gateway.baseUrl, id: gateway.model } : null;
 }
 
-function xaiGateway(): LlmConfig | null {
-  const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
-  if (!xai) return null;
-  return {
-    apiKey: xai,
-    baseUrl: trimSlash(env("XAI_BASE_URL") || "https://api.x.ai/v1"),
-    model: env("XAI_MODEL") || "grok-4.5",
-    label: "xAI",
-  };
-}
-
 /**
- * The OpenAI-compatible leg only. Unchanged contract: an explicitly named
- * gateway wins, otherwise Grok. Claude is resolved separately because it is
- * NOT an OpenAI-compatible endpoint — see `resolveAnthropic`.
+ * The OpenAI-compatible leg only: the gateway the operator named. Claude is
+ * resolved separately because it is NOT an OpenAI-compatible endpoint — see
+ * `resolveAnthropic`.
+ *
+ * This used to fall back to an xAI (`XAI_API_KEY`) gateway. Grok was removed
+ * as a provider entirely (GR-C), so there is no second rung here: with no
+ * LLM_BASE_URL/LLM_API_KEY there is no OpenAI-compatible provider at all, and
+ * the caller falls to the Claude ladder. An operator who still wants that
+ * endpoint can point a generic custom connection at it — that feature stays.
  */
 export function resolveLlm(): LlmConfig | null {
-  return customGateway() ?? xaiGateway();
+  return customGateway();
 }
 
 /**
@@ -363,8 +340,7 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
  * Claude is the default brain, and it prefers the operator's existing Claude
  * Code login over an API key — this desk is run by someone who does not keep
  * API keys. An explicitly configured gateway still wins, so a local model on
- * the box can take over without touching code; Grok stays as the last fallback
- * for an existing XAI_API_KEY.
+ * the box can take over without touching code.
  */
 function explicitProvider(
   choice: StoryModelChoice,
@@ -413,10 +389,6 @@ function explicitProvider(
 
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
-  if (entry.kind === "xai-oauth") {
-    return { kind: "xai-oauth", model, label: entry.label };
-  }
-
   if (entry.kind === "openai") {
     const llm = customGateway();
     return llm ? { kind: "openai", ...llm } : null;
@@ -462,49 +434,11 @@ export function resolveProvider(
   if (claude) return { kind: "anthropic", ...claude };
   const cli = resolveClaudeCode();
   if (cli) return { kind: "claude-code", ...cli };
-  const xai = xaiGateway();
-  if (xai) return { kind: "openai", ...xai };
   return null;
 }
 
 type CustomProviderResolution =
   { ok: true; provider: Extract<Provider, { kind: "openai" }> } | { ok: false; error: string };
-
-type XaiOauthProviderResolution =
-  { ok: true; provider: Extract<Provider, { kind: "xai-oauth" }> } | { ok: false; error: string };
-
-async function resolveXaiOauthProvider(
-  newsroomId: number | undefined,
-  injected?: GrokChatAdapters["resolveXaiOauth"],
-): Promise<XaiOauthProviderResolution> {
-  if (!Number.isInteger(newsroomId) || newsroomId == null) {
-    return {
-      ok: false,
-      error:
-        "The selected SuperGrok connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
-    };
-  }
-  try {
-    const resolve = injected ?? (await import("./xai-oauth.server.ts")).resolveXaiOauthConnection;
-    const connection = await resolve(newsroomId);
-    return {
-      ok: true,
-      provider: {
-        kind: "xai-oauth",
-        model: connection.modelId,
-        label: connection.label ?? "Grok (SuperGrok)",
-      },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error && error.message
-          ? error.message
-          : "SuperGrok is unavailable. Connect it on Server, or choose another model. TownReporter will not fall back automatically.",
-    };
-  }
-}
 
 /**
  * Resolve a stored custom connection only at the server call boundary. The
@@ -766,7 +700,7 @@ export async function probeProvider(
   newsroomId?: number,
   adapters?: Pick<
     GrokChatAdapters,
-    "resolveCustom" | "resolveLocal" | "resolveXaiOauth" | "resolveLocalCatalog"
+    "resolveCustom" | "resolveLocal" | "resolveLocalCatalog"
   >,
   scope?: "story" | "scan" | "opinion" | "dark" | "forced",
   exactLocalModel?: LocalModelOverride,
@@ -778,24 +712,6 @@ export async function probeProvider(
       allowManualModelWhenCatalogUnsupported: true,
     });
     return result.ok ? { ...result, choice } : result;
-  }
-  if (choice === "grok-oauth") {
-    const resolved = await resolveXaiOauthProvider(newsroomId, adapters?.resolveXaiOauth);
-    if (!resolved.ok) return resolved;
-    try {
-      if (!adapters?.resolveXaiOauth) {
-        await (await import("./xai-oauth.server.ts")).refreshXaiOauthModels(newsroomId!);
-      }
-      return { ok: true, label: resolved.provider.label, choice: "grok-oauth" };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error && error.message
-            ? error.message
-            : "SuperGrok could not verify its account models.",
-      };
-    }
   }
   /*
     0.6.63 (Unit Y item 2), at the rung itself.
@@ -1122,16 +1038,9 @@ export async function grokChat(
       ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
       : null;
   if (custom && !custom.ok) return custom;
-  const xai =
-    opts?.choice === "grok-oauth"
-      ? await resolveXaiOauthProvider(opts.newsroomId, adapters?.resolveXaiOauth)
-      : null;
-  if (xai && !xai.ok) return xai;
   const provider = custom?.ok
     ? custom.provider
-    : xai?.ok
-      ? xai.provider
-      : resolveProvider(opts?.choice, opts?.localModel, rungModel);
+    : resolveProvider(opts?.choice, opts?.localModel, rungModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -1168,25 +1077,6 @@ export async function grokChat(
   if (provider.kind === "codex") {
     const { codexChat } = await import("./ai-codex.server.ts");
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
-  }
-  if (provider.kind === "xai-oauth") {
-    if (!Number.isInteger(opts?.newsroomId) || opts?.newsroomId == null) {
-      return {
-        ok: false,
-        error: "SuperGrok requires an authenticated newsroom. Choose another model.",
-      };
-    }
-    const xaiChat = adapters?.xaiChat ?? (await import("./xai-oauth.server.ts")).xaiOauthChat;
-    const result = await xaiChat({
-      newsroomId: opts.newsroomId,
-      system,
-      user,
-      maxTokens,
-      model,
-      timeoutMs,
-      reasoningEffort: opts?.reasoningEffort,
-    });
-    return { ok: true, text: result.text };
   }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;

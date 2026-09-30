@@ -11,11 +11,12 @@ export function computeProviderAvailability(): Record<string, boolean> {
 export async function getProviderAvailability(
   newsroomId: number,
 ): Promise<Record<string, boolean>> {
+  // `newsroomId` is kept in the signature: this map is drawn per paper, and a
+  // provider that needed a per-newsroom connection (the removed SuperGrok
+  // sign-in was one) is added here. Today every entry is environment-only.
+  void newsroomId;
   await refreshLocalCatalog();
-  const availability = computeProviderAvailability();
-  const status = await (await import("./xai-oauth.server.ts")).getXaiOauthStatus(newsroomId);
-  availability["grok-oauth"] = availability["grok-oauth"] !== false && status.connected;
-  return availability;
+  return computeProviderAvailability();
 }
 
 export function getLocalModelCatalog(): Promise<LocalCatalog> {

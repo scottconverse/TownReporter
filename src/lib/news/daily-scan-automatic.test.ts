@@ -33,14 +33,10 @@ import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>) {
   const prev: Record<string, string | undefined> = {};
   const keys = [
-    "XAI_API_KEY",
-    "GROK_API_KEY",
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
     "OPENAI_API_KEY",
-    "XAI_MODEL",
-    "XAI_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
     "ANTHROPIC_EFFORT",
