@@ -63,7 +63,16 @@ export type CheckChip = {
 export type CheckFacts = {
   /** Is there a draft row at all? */
   hasDraft: boolean;
-  /** An evidence check ran and a person recorded a decision on it. */
+  /**
+   * Did the evidence check RUN on this draft?
+   *
+   * Two records answer yes, and either is enough: a person's decision on the
+   * review (`evidenceReview.decision`), or the stamp a completed "Check draft
+   * against evidence" run leaves behind (`evidenceReconciledAt`, see
+   * `recordedChecks`). It says nothing about whether the answer still covers
+   * the text -- `evidenceOutstanding` and `evidenceRequired` are read first and
+   * win over it.
+   */
   evidenceChecked: boolean;
   /** An evidence check ran and is still waiting on a person's decision. */
   evidenceRequired: boolean;
@@ -99,27 +108,45 @@ export function recordedChecks(research: string | null | undefined): {
   namesUnresolved: number;
 } {
   let review: { required?: unknown; decision?: unknown } | undefined;
+  let reconciledAt: unknown;
   let nameCheckKey: unknown;
   try {
     const parsed: unknown = JSON.parse(research ?? "{}");
     if (parsed && typeof parsed === "object") {
       const value = (parsed as { evidenceReview?: unknown }).evidenceReview;
       if (value && typeof value === "object") review = value as { required?: unknown; decision?: unknown };
+      reconciledAt = (parsed as { evidenceReconciledAt?: unknown }).evidenceReconciledAt;
       nameCheckKey = (parsed as { nameCheck?: unknown }).nameCheck;
     }
   } catch {
     /* A malformed legacy memo reads as "nothing recorded", not as a crash. */
   }
   const check = readNameCheck(research);
+  const decided = typeof review?.decision === "string" && review.decision.trim() !== "";
   return {
     /*
-      A decision is the only proof the evidence check ran and was READ: the
-      pass `reconcileDraftEvidence` writes is `{ required: false, decision }`,
-      and it writes `required: true` with no decision for as long as the answer
-      is still the editor's to give. A draft with no `evidenceReview` key at all
-      is one nothing has ever been run against.
+      TWO RECORDS SAY AN EVIDENCE CHECK RAN, and either is enough (U9c, from the
+      PR #154 review).
+
+        1. A person's decision on the review: the pass `reconcileDraftEvidence`
+           writes is `{ required: false, decision }`.
+        2. The stamp a completed "Check draft against evidence" run leaves:
+           `evidenceReconciledAt`, written by `draft-reconcile.server.ts:217`
+           into the checked draft's `research_json` -- and by nothing else. The
+           incomplete path writes `writerCheckpoint.evidenceCheckIncomplete`
+           with no stamp, so the stamp really does mean "the run finished".
+
+      THE STAMP IS NOT REDUNDANT WITH (1). That run copies the draft's research
+      forward untouched -- it sets no decision and no `required` -- so a checked
+      draft can carry the stamp with no `evidenceReview` key at all, or with
+      `required: true` still on it from before the check. Reading only the
+      decision made the workbench show "○ Evidence check not run" and leave the
+      Check stage open for a draft the Checks tab was describing as checked.
+
+      A draft with NEITHER record is the one nothing has ever been run against,
+      which is the empty hand-filed tip this unit exists for.
     */
-    evidenceChecked: typeof review?.decision === "string" && review.decision.trim() !== "",
+    evidenceChecked: decided || (typeof reconciledAt === "string" && reconciledAt.trim() !== ""),
     evidenceRequired: review?.required === true,
     nameCheckComplete: check?.complete === true,
     /* The key is written only by a check pass (`draft-reconcile.server.ts`,
@@ -138,11 +165,12 @@ export function recordedChecks(research: string | null | undefined): {
  * checks and nothing else, so it carries no staleness, no claim and no running
  * check -- the story page is where those are read, and it says so there.
  *
- * THE TWO ROWS THAT MOVED (U9b). The chip this replaced was written inline as
+ * THE ROWS THAT MOVED. The chip this replaced was written inline as
  * `required ? (decision ? ✓ : !) : ○`, which read `required` as the whole
- * question. `reconcileDraftEvidence` writes `required: !decision` and keeps an
- * old decision when the story is edited again, so two recorded rows exist where
- * the old chip and this rule disagree, and this rule is the honest one:
+ * question, and the row's third recorded field -- the reconciliation stamp the
+ * query already projects as `evidence_checked_at` -- was not read at all. So
+ * three recorded rows exist where the old chip and this rule disagree, and this
+ * rule is the honest one:
  *
  *   - `required: false` with a decision -- the editor has just answered the
  *     review. The old chip said "○ Evidence check not run"; this says
@@ -150,17 +178,26 @@ export function recordedChecks(research: string | null | undefined): {
  *   - `required: true` with a kept decision -- the story moved on since that
  *     answer. The old chip said "✓ Evidence checked"; this says
  *     "! Evidence to check", because the review is open on this text.
+ *   - a reconciliation stamp and no decision (U9c) -- a "Check draft against
+ *     evidence" run finished and left its record. This says
+ *     "✓ Evidence checked"; reading the decision alone said "not run".
  */
 export function deskRowChecks(row: {
   evidence_required: boolean;
   evidence_decision: string | null;
+  evidence_checked_at: string | null;
   names_checked_at: string | null;
   names_unresolved: number;
   name_check_complete: boolean;
 }): CheckFacts {
   return {
     hasDraft: true,
-    evidenceChecked: Boolean(row.evidence_decision),
+    /* `evidence_checked_at` is the list query's own projection of the
+       reconciliation stamp (`evidence_checked_at` at `desk.ts:2879` is
+       `v.research->>'evidenceReconciledAt'`), so the desk home reads the same
+       two records the workbench does -- U9c: it used to ignore this one and
+       call a checked draft "not run". */
+    evidenceChecked: Boolean(row.evidence_decision) || Boolean(row.evidence_checked_at),
     evidenceRequired: row.evidence_required,
     evidenceOutstanding: false,
     namesUnresolved: row.names_unresolved,

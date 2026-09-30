@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   checkStageDone,
   deskRowChecks,
@@ -151,6 +152,7 @@ describe("U9b: the desk home's chips, on the two rows its old inline chip read d
   const row = (patch: Partial<Parameters<typeof deskRowChecks>[0]> = {}) => ({
     evidence_required: false,
     evidence_decision: null as string | null,
+    evidence_checked_at: null as string | null,
     names_checked_at: null as string | null,
     names_unresolved: 0,
     name_check_complete: false,
@@ -325,6 +327,97 @@ describe("check-gates: the stepper reads the same facts", () => {
   it("ticks Publish from the paper, not from the checks", () => {
     assert.equal(storyStages(PASSED, true).at(-1)!.label, "✓ Publish");
     assert.equal(storyStages(NEVER_RUN, false).at(-1)!.state, "next");
+  });
+});
+
+describe("U9c: a completed evidence reconciliation counts as an evidence check", () => {
+  /*
+    PR #154 review (P2). A successful "Check draft against evidence" run writes
+    the checked draft's `research_json` as `draft-reconcile.server.ts:217` does
+    -- the draft's own research spread forward untouched, plus `nameCheck`,
+    `reportedClaims` and `evidenceReconciledAt`. It sets no decision and no
+    `required`, so a checked draft can hold the stamp with no `evidenceReview`
+    key at all, and reading the decision alone called it "never run" while the
+    Checks tab read "checked 8:02 a.m." off that same stamp.
+
+    The fixture below is the writer's own object shape; the end-to-end case
+    against a real run of that worker is in `check-gates-reconcile.test.ts`.
+  */
+  const CHECKED_AT = "2026-09-30T14:02:00.000Z";
+  const reconciledResearch = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      nameCheck: {
+        version: 1,
+        checkedAt: CHECKED_AT,
+        checkedText: "Headline\n\nDek\n\nBody",
+        complete: true,
+        note: "0 names need editor review.",
+        rows: [],
+      },
+      reportedClaims: { version: 1, rows: [] },
+      evidenceReconciledAt: CHECKED_AT,
+      ...extra,
+    });
+
+  it("the key this rule reads is the key that worker writes", () => {
+    /* A rename in the producer would silently turn every checked draft back
+       into "not run"; this is the tripwire. */
+    const writer = readFileSync(new URL("./draft-reconcile.server.ts", import.meta.url), "utf8");
+    assert.match(writer, /evidenceReconciledAt:new Date\(\)\.toISOString\(\)/);
+  });
+
+  it("reads the stamp as a check that ran, on the workbench and on the desk home row", () => {
+    const research = reconciledResearch();
+    const recorded = recordedChecks(research);
+    assert.equal(recorded.evidenceChecked, true);
+    assert.equal(recorded.evidenceRequired, false);
+    assert.equal(recorded.nameCheckComplete, true);
+
+    const facts: CheckFacts = { ...NEVER_RUN, ...recorded };
+    assert.deepEqual(evidenceChip(facts), { text: "✓ Evidence checked", tone: "ok", done: true });
+    assert.equal(checkStageDone(facts), true);
+    assert.equal(publishBarNote(facts), "All checks done.");
+
+    /* The desk home row: `evidence_checked_at` is the list query's projection
+       of the same stamp, and the row it hands over is real the moment the
+       checked draft is the newest one. */
+    const deskFact = deskRowChecks({
+      evidence_required: false,
+      evidence_decision: null,
+      evidence_checked_at: JSON.parse(research).evidenceReconciledAt,
+      names_checked_at: CHECKED_AT,
+      names_unresolved: 0,
+      name_check_complete: true,
+    });
+    assert.deepEqual(evidenceChip(deskFact), { text: "✓ Evidence checked", tone: "ok", done: true });
+    assert.deepEqual(namesChip(deskFact), { text: "✓ Names checked", tone: "ok", done: true });
+  });
+
+  it("keeps required and outstanding ahead of the stamp", () => {
+    /* The stamp says the check ran; it does not say the answer still covers
+       what is on screen or that the editor has answered the review. */
+    const required = recordedChecks(reconciledResearch({ evidenceReview: { required: true, decision: null } }));
+    assert.equal(required.evidenceRequired, true);
+    assert.deepEqual(evidenceChip({ ...NEVER_RUN, ...required }), {
+      text: "! Evidence to check",
+      tone: "warn",
+      done: false,
+    });
+
+    const outstanding: CheckFacts = {
+      ...NEVER_RUN,
+      ...recordedChecks(reconciledResearch()),
+      namesOutstanding: false,
+      evidenceOutstanding: true,
+    };
+    assert.deepEqual(evidenceChip(outstanding), { text: "! Evidence to check", tone: "warn", done: false });
+    assert.equal(checkStageDone(outstanding), false);
+    assert.doesNotMatch(publishBarNote(outstanding), /All checks done\./);
+  });
+
+  it("still calls a draft with neither record not-run", () => {
+    assert.equal(recordedChecks(JSON.stringify({ nameCheck: { version: 1, rows: [], checkedText: "", complete: true, checkedAt: CHECKED_AT, note: "" } })).evidenceChecked, false);
+    assert.equal(recordedChecks(JSON.stringify({ evidenceReconciledAt: "   " })).evidenceChecked, false);
   });
 });
 
