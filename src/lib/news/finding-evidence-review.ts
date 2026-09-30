@@ -169,6 +169,27 @@ class ReviewError extends Error {
   }
 }
 
+/**
+ * Is this the error a draft with UNREADABLE STORED FINDINGS raises -- the one
+ * case where "there is no review to resolve" is the honest answer? (Unit U24b.)
+ *
+ * WHY THE DISTINCTION IS LOAD-BEARING. `unreviewedClaimCount` (desk.ts) is the
+ * publish gate's counter, and it used to catch everything and answer 0: a
+ * transient database error therefore read as "no claims outstanding" and
+ * OPENED the gate. Only the invalid-input branch -- `assertReadableStoredFindings`
+ * and the two stored-shape readers throwing on a draft whose memo will not
+ * parse -- genuinely means there is nothing to count; the Checks pane shows
+ * those very rows as unreadable, so a publish that hard-failed on them would be
+ * a story nobody could print or fix.
+ *
+ * Everything else must propagate: `not-found` (the draft vanished mid-request),
+ * `conflict`, and every infrastructure error. A gate that cannot tell "nothing
+ * to count" from "I could not count" fails OPEN, and this is the difference.
+ */
+export function isUnreadableFindingsError(error: unknown): boolean {
+  return error instanceof ReviewError && error.code === "invalid-input";
+}
+
 type StoredJudgment = FindingEvidenceRow["judgment"] & { evidenceBinding?: string };
 type ReviewMemo = {
   contentToken?: string;

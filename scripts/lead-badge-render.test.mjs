@@ -61,6 +61,17 @@ const deskJobsUrl = moduleUrl(
 );
 const { leadOrigin } = await import(deskChromeUtils);
 
+/*
+  Unit U24: the nav list and the active-item rule moved out of desk-chrome.tsx
+  into src/lib/desk-nav.ts, so a test can read them. It imports nothing, so the
+  REAL module compiles here and the shell draws the nav this file asserts on
+  rather than a stand-in that would keep passing if the shell stopped using it.
+*/
+const deskNavUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
+  "desk-nav.ts",
+);
+
 function inlineModule(source) {
   const rewritten = source.replaceAll('"react"', JSON.stringify(REACT_URL));
   return `data:text/javascript;base64,${Buffer.from(rewritten).toString("base64")}`;
@@ -700,6 +711,7 @@ const { Chip } = await import(
       "@/lib/auth/use-current-user": currentUserStub,
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
+      "@/lib/desk-nav": deskNavUrl,
       "@/components/desk-chrome-utils": deskChromeUtils,
 
       "@/components/desk-toaster": deskToasterStub,

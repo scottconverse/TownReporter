@@ -30,6 +30,8 @@ import {
 const NEVER_RUN: CheckFacts = {
   hasDraft: true,
   evidenceChecked: false,
+  evidenceRan: false,
+  evidenceToReview: 0,
   evidenceRequired: false,
   evidenceOutstanding: false,
   namesUnresolved: 0,

@@ -59,3 +59,50 @@ export function accumulateScanPages<T extends { id: number }>(
   for (const row of incoming) byId.set(row.id, row);
   return [...byId.values()].sort((a, b) => b.id - a.id);
 }
+
+/**
+ * Is the newest run this page is holding the run the editor is waiting for, or
+ * the one they were looking at BEFORE they pressed Run? (Unit U24.)
+ *
+ * THE CONTRADICTION THIS CLOSES. `scanning` was "our own press is in flight,
+ * OR the newest row is still open". Between those two there is a window:
+ * `runScan` returns the moment the job is queued, and the invalidated history
+ * query has not come back yet -- so the newest row on screen is still the
+ * PREVIOUS, finished run. In that window the Scan page drew "Scanning
+ * sources…" above the old run's finished "Done. Partial coverage: 200 selected
+ * · 186 fetched · 44 leads" report, with nothing saying which was which. On the
+ * stand-in editorial day it read as though the new scan had already finished
+ * and filed 44 leads; it fooled the walkthrough's own completion check.
+ *
+ * `reportBeforePress` is the id of the run the page was showing when the press
+ * happened. While the newest row still carries it, the page is waiting for a
+ * report that has not arrived, so there is no report to draw.
+ *
+ * A page that has not pressed anything has `reportBeforePress: null` and is
+ * not waiting on anybody: whatever it holds is current.
+ */
+export function scanReportIsCurrent(input: {
+  newestRunId: number | null;
+  reportBeforePress: number | null;
+}): boolean {
+  if (input.reportBeforePress == null) return true;
+  return input.newestRunId !== input.reportBeforePress;
+}
+
+/**
+ * Should the page say a scan is in flight? (Unit U24.)
+ *
+ * Three ways to be running, and the third is the one that was missing: the
+ * editor's own press is in flight, the newest run has no finish yet, or the
+ * newest run this page holds is the one from BEFORE the press
+ * (`scanReportIsCurrent`) -- the page has started a scan and has not been told
+ * about it yet.
+ */
+export function scanIsRunning(input: {
+  pressInFlight: boolean;
+  newestOpen: boolean;
+  newestRunId: number | null;
+  reportBeforePress: number | null;
+}): boolean {
+  return input.pressInFlight || input.newestOpen || !scanReportIsCurrent(input);
+}

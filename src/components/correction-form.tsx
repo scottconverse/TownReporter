@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { usePaper } from "@/lib/paper-context-state";
-import { correctionMailto, readerStorageKey, type CorrectionDraft } from "@/lib/reader";
+import {
+  correctionMailto,
+  correctionRecipient,
+  readerStorageKey,
+  type CorrectionDraft,
+} from "@/lib/reader";
 
 const blank: CorrectionDraft = { article: "", details: "", evidence: "", name: "", email: "" };
 export function CorrectionForm({ article = "" }: { article?: string }) {
   const paper = usePaper();
-  const recipient =
-    paper.name.toLowerCase() === "townreporter" ? "townreporter@gmail.com" : paper.editorEmail;
+  /*
+    Unit U24: the paper's own configured contact, and nothing else. A hard-coded
+    `townreporter@gmail.com` for papers named TownReporter made this page answer
+    a different address from `/about` on the same install -- see
+    `correctionRecipient` in lib/reader.ts.
+  */
+  const recipient = correctionRecipient(paper);
   const key = readerStorageKey(paper.name, paper.city) + ":correction";
   const [draft, setDraft] = useState({ ...blank, article });
   const [ready, setReady] = useState(false);

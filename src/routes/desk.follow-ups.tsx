@@ -28,6 +28,8 @@ import {
 import {
   FOLLOW_UP_FILTERS,
   FOLLOW_UP_FILTER_LABELS,
+  followUpFilterLabel,
+  followUpStoppedNotice,
   followUpTargets,
   isAgentKind,
   isFollowUpSchedule,
@@ -124,7 +126,7 @@ function FollowUpsPage() {
         input.action === "run-now"
           ? "Run started."
           : input.action === "stop"
-            ? "Stopped. Any run in flight stops at its next step."
+            ? followUpStoppedNotice()
             : "Follow-up updated.",
       );
     },
@@ -198,9 +200,7 @@ function FollowUpsPage() {
             aria-pressed={filter === key}
             onClick={() => setFilter(key)}
           >
-            {key === "stopped"
-              ? FOLLOW_UP_FILTER_LABELS[key]
-              : `${FOLLOW_UP_FILTER_LABELS[key]} · ${counts.get(key) ?? 0}`}
+            {followUpFilterLabel(key, counts.get(key) ?? 0)}
           </button>
         ))}
       </div>

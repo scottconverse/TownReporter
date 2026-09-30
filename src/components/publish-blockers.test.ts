@@ -20,6 +20,9 @@ const CLEAN: PublishBlockerState = {
   sectionReady: true,
   openClaims: 0,
   namedOutlets: [],
+  /* Unit U24: the evidence check left nothing for a person to judge. */
+  unreviewedClaims: 0,
+  unreviewedAccepted: false,
   evidenceStale: false,
   reviewingEvidence: false,
   reconcileActive: false,

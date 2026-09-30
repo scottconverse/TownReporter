@@ -196,6 +196,15 @@ function EditorialPage() {
     sectionReady: topic.trim() !== "",
     openClaims: 0,
     namedOutlets: [],
+    /*
+      Unit U24: an editorial resolves no findings review (that pane lives on
+      the reported workbench), so there is no count to gate on here and the
+      editorial publish path `performPublishEditorial` does not read one.
+      Leaving both out of the list is the same as the server not gating on
+      them -- the same reason `openClaims` and `namedOutlets` above are empty.
+    */
+    unreviewedClaims: 0,
+    unreviewedAccepted: false,
     evidenceStale,
     reviewingEvidence: review.isPending,
     reconcileActive: false,
@@ -224,6 +233,17 @@ function EditorialPage() {
   const checkFacts: CheckFacts = {
     hasDraft: Boolean(q.data),
     evidenceChecked: recorded.evidenceChecked,
+    /* Unit U24b: an editorial resolves no review, so "it ran" is the same pass
+       record and nothing else -- the note below says the same for the count. */
+    evidenceRan: recorded.evidenceChecked,
+    /*
+      Unit U24: an editorial has no findings review behind it -- the editorial
+      desk resolves no review and this bar has no Checks pane to agree with --
+      so it keeps the record-only reading it has always had rather than
+      inventing a count. `deskRowChecks` does the same for the desk home's
+      projected row.
+    */
+    evidenceToReview: 0,
     evidenceRequired: recorded.evidenceRequired,
     evidenceOutstanding: evidenceStale || review.isPending,
     namesUnresolved: namesPending,

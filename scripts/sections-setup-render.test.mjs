@@ -189,6 +189,17 @@ const deskChromeUtilsUrl = moduleUrl(
 );
 
 /*
+  Unit U24: the nav list and the active-item rule moved out of desk-chrome.tsx
+  into src/lib/desk-nav.ts, so a test can read them. It imports nothing, so the
+  REAL module compiles here and the shell this file renders draws the real nav
+  rather than a stand-in that would keep passing if the shell stopped using it.
+*/
+const deskNavUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
+  "desk-nav.ts",
+);
+
+/*
   Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
   desk-chrome.tsx into src/components/desk-jobs.ts (react-refresh wants a file
   that exports components to export components only). Its only bare import is
@@ -225,6 +236,7 @@ const DESK_CHROME_IMPORTS = {
   "@/lib/news/follow-up-copy": inlineModule(
     "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
   ),
+  "@/lib/desk-nav": deskNavUrl,
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
 
   "@/components/desk-toaster": deskToasterStub,

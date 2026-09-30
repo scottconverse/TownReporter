@@ -807,6 +807,24 @@ export function cleanOrRaw<T>(schema: z.ZodType): (raw: unknown) => T {
 
 /** `String(v ?? "")`: junk already became "", so an oversize token does too. */
 export const claimToken = z.string().max(LIMITS.evidenceToken).catch("");
+
+/**
+ * "Publish anyway — I accept these claims are unreviewed" (unit U24b).
+ *
+ * `evidenceToken` is the REVIEW's own token -- `FindingEvidenceReview.evidenceToken`,
+ * which the Checks pane holds and every judgment save already sends back. It
+ * WRAPS the draft evidence token (it is that token plus each finding's
+ * reference binding), so it is sized by the same generous ceiling and for the
+ * same reason: a token the desk itself handed out must never come back as
+ * `too_big`, which is the 2026-09-25 walk's own bug. Absent means a stale
+ * client, and the server refuses an acceptance that carries no review to
+ * compare against; it is `.default("")` rather than `.optional()` so the
+ * refusal is a sentence about the review, not a schema dump.
+ */
+export const acceptUnreviewedClaimsInput = z.object({
+  leadId: rowId,
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken).default(""),
+});
 export const claimEmail = z.string().max(LIMITS.email).catch("");
 /**
  * Unit CJ (0.6.80): the first-owner setup code, typed with or without

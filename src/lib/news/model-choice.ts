@@ -412,8 +412,32 @@ export function opinionProviderProblem(
 ): string {
   if (!/AI is not available/i.test(error)) return error;
   if (candidate === "local-model") return LOCAL_MODEL_UNCONFIGURED;
-  if (candidate !== "claude-frontier") return error;
-  return "No Opinion model is available. Open Claude Code on this machine and sign in.";
+  /*
+    UNIT U24 -- THE MESSAGE NAMES OPINION'S OWN MODELS.
+
+    It used to hand the generic "AI is not available. No model is set up yet:
+    open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL"
+    straight through for the two rungs Opinion actually walks. On the stand-in
+    editorial day that appeared on /desk/opinion minutes after the desk had
+    written a draft with DeepSeek, so the desk looked as though it could not
+    see its own writer. Nothing was broken -- Opinion's Automatic is a
+    different ladder (`OPINION_AUTOMATIC_LADDER`, Codex Sol then Claude
+    Sonnet) and deliberately contains none of the story ladder's rungs -- but
+    the message said "no model is set up" without saying WHOSE models it meant.
+
+    So each rung now names itself and the one step that fixes it, and
+    `checkOpinionReadiness` adds the sentence that says which models Opinion
+    has at all (see `OPINION_MODEL_UNIVERSE`). Every other failure -- an
+    unreachable server, a rejected login -- is already specific and passes
+    through untouched.
+  */
+  if (candidate === "codex-frontier") {
+    return "Opinion can write with Codex Sol, and Codex is not set up on this machine: open Codex and log in.";
+  }
+  if (candidate === "claude-frontier" || candidate === "claude-sonnet") {
+    return "Opinion can write with Claude, and Claude Code is not signed in on this machine: open Claude Code and sign in.";
+  }
+  return error;
 }
 
 /**

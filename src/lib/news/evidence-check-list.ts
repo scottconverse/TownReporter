@@ -29,6 +29,7 @@
  */
 
 import type { DraftAuditFinding } from "./draft-audit.ts";
+import type { EvidenceCheckState } from "./evidence-check-state.ts";
 import { PAPER } from "../paper.ts";
 import type {
   ClaimEvidenceRow,
@@ -122,6 +123,31 @@ export function captureIsReadable(capture: FindingCaptureEvidence): boolean {
 }
 
 /**
+ * The words on the review chip, in one place because two rules read them: the
+ * chip this file draws, and the count the publish blocker prints (unit U24,
+ * `evidence-check-state.ts`). A rename here without a rename there would put
+ * the bar and the pane back to disagreeing, which is the thing U24 exists for.
+ */
+export const NEEDS_REVIEW_CHIP = "! Needs review";
+
+/**
+ * Is this row one the pane chips `! Needs review`?
+ *
+ * The chip's own predicate, named so both the chip and the count read ONE
+ * expression instead of two rules kept in step by hand: no judgment recorded,
+ * and a captured record that could actually be read. A row with no readable
+ * record is chipped `Could not check` instead -- there is nothing to judge it
+ * against, so it is not review work and a "review the claims" press would be
+ * a dead end.
+ */
+export function claimNeedsReview(
+  judgment: FindingJudgment,
+  captures: readonly FindingCaptureEvidence[],
+): boolean {
+  return judgment === "unreviewed" && captures.some(captureIsReadable);
+}
+
+/**
  * The chip for one judgment. The default arm is the interesting one: a row
  * with no recorded judgment and no readable capture has nothing the check
  * could have looked at, so it says "could not check" rather than sending the
@@ -144,10 +170,10 @@ export function judgmentChip(
     case "needs-reporting":
       return { chip: "Could not check", tone: "fail" };
     case "contradicts":
-      return { chip: "! Needs review", tone: "warn" };
+      return { chip: NEEDS_REVIEW_CHIP, tone: "warn" };
     default:
-      return captures.some(captureIsReadable)
-        ? { chip: "! Needs review", tone: "warn" }
+      return claimNeedsReview(judgment, captures)
+        ? { chip: NEEDS_REVIEW_CHIP, tone: "warn" }
         : { chip: "Could not check", tone: "fail" };
   }
 }
@@ -200,17 +226,30 @@ function paperClock(iso: string | null, timeZone: string): string {
 
 /**
  * The line under "Evidence check": "Ran 8:14 a.m. · Claude Sonnet · checked
- * against 3 captures".
+ * against 3 captures · 7 claims need review".
  *
  * Each piece is dropped when it is not known, and the whole line is empty when
  * none of them are, so the heading is never followed by "Ran · · ".
+ *
+ * UNIT U24: the line is now a reading of the SHARED state
+ * (`evidence-check-state.ts`) rather than of its own facts. Before, it printed
+ * "checked against N captures" off the cited-capture count alone, which said a
+ * check had run even on the drafts where the publish bar was saying none had --
+ * the two facts were computed here and in `check-gates.ts` and nothing made
+ * them agree. `state.ran` is now the one answer both read, and the count of
+ * claims waiting on a person is the same number the blocker prints.
  */
 export function evidenceRanLine(input: {
+  state: EvidenceCheckState;
   checkedAt: string | null;
   modelLabel: string;
   captures: number;
   timeZone?: string;
 }): string {
+  /* No run, no line. The heading then stands alone over the pane's own rows,
+     which is honest: there is nothing to say about a check that did not
+     happen. */
+  if (!input.state.ran) return "";
   const parts: string[] = [];
   const ran = paperClock(input.checkedAt, input.timeZone ?? PAPER.timezone);
   if (ran) parts.push(`Ran ${ran}`);
@@ -218,7 +257,21 @@ export function evidenceRanLine(input: {
   if (input.captures > 0) {
     parts.push(`checked against ${input.captures} capture${input.captures === 1 ? "" : "s"}`);
   }
+  if (input.state.toReview > 0) {
+    const n = input.state.toReview;
+    parts.push(`${claimCount(n)} ${n === 1 ? "needs" : "need"} review`);
+  }
   return parts.join(" · ");
+}
+
+/**
+ * "1 claim" / "7 claims", the count exactly as the bar, the ran line and the
+ * publish blocker print it. Here rather than in the state module so that the
+ * chip file, the bar and the state module all read one spelling without a
+ * circular import between them.
+ */
+export function claimCount(n: number): string {
+  return `${n} claim${n === 1 ? "" : "s"}`;
 }
 
 /** The sentence a finding row is about, trimmed for one line of the list. */

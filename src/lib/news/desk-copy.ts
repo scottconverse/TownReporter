@@ -1093,7 +1093,52 @@ export function scanCoverageLine(s: {
   if (batchesUsed > 0) {
     parts.push(`${batchesUsed} batch${batchesUsed === 1 ? "" : "es"}${batchesFailed ? `, ${batchesFailed} failed` : ""}`);
   }
+  /*
+    ── WHOSE FAILURE (UNIT U24) ───────────────────────────────────────────────
+
+    This arm used to read `errorBit && analyzed === 0` and nothing else, and
+    the sentence it wrote named the model provider. On the stand-in editorial
+    day that produced, in one paragraph, "Provider failure after 0 fetched —
+    nothing was analyzed" and "First source failed: Page had almost no
+    readable text" -- two diagnoses pointing at two different culprits, of
+    which only the second was true. No model was called at all.
+
+    `model_batches_used` is the discriminator, and it is the same one
+    `performScanWork` uses to choose that error string in the first place: a
+    run records `model_batches_used = batches.length`, and `buildScanBatches`
+    returns nothing when no source yielded text, so ZERO batches means the run
+    never reached a model. The desk must not send its reader to the provider
+    for that -- the sources are what to look at, and the Sources screen is
+    where they are.
+
+    A run that DID send batches and got nothing usable back keeps the provider
+    sentence: that one really is about the model.
+  */
   if (errorBit && analyzed === 0) {
+    if (batchesUsed === 0) {
+      /*
+        UNIT U24b -- "FETCH FAILURE" NEEDS THE FETCH TO HAVE FAILED.
+
+        U24 split this arm on `model_batches_used === 0` (the run never reached
+        a model) and called the whole half "Fetch failure". That is only true
+        when nothing was fetched: a scan cancelled or errored AFTER it had read
+        40 pages but before the first batch was built also records zero
+        batches, and the desk told its reader the FETCH had failed -- pointing
+        at the sources when the run had in fact stopped between the two halves.
+        Two different failures, two different sentences:
+
+          - not one source yielded text: the fetch really is what failed, and
+            the Sources screen is where the work is;
+          - sources came back and the run ended anyway: it stopped before the
+            writing pass, which is about the run, not about the sites.
+      */
+      if (fetched === 0) {
+        const read =
+          attempted > 0 ? ` ${failed || attempted} of ${attempted} sources could not be read.` : "";
+        return `Fetch failure after 0 fetched — no source text reached the desk, so no writing pass ran.${read} ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+      }
+      return `Stopped before the writing pass (${fetched} fetched) — no source reached the model, so nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+    }
     return `Provider failure after ${fetched} fetched — nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
   }
   if (partial) {

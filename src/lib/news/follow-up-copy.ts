@@ -247,6 +247,36 @@ export const FOLLOW_UP_FILTER_LABELS: Record<FollowUpFilter, string> = {
   stopped: "Stopped",
 };
 
+/**
+ * What a filter pill says, count and all (unit U24).
+ *
+ * EVERY pill carries its count, and that is the point: the design drawing
+ * writes "Stopped" bare, and on the stand-in editorial day that is why a
+ * stopped agent vanished -- the card left Active, Active read "Nothing is
+ * running or waiting right now", and the only place the agent still existed
+ * was behind a filter with no number on it. An editor who has just pressed
+ * Stop needs to see that something is over there, and a count is the whole of
+ * that signal.
+ *
+ * One function rather than a ternary at the call site so a test can walk every
+ * filter and fail if one of them ever drops its count again.
+ */
+export function followUpFilterLabel(key: FollowUpFilter, count: number): string {
+  return `${FOLLOW_UP_FILTER_LABELS[key]} · ${count}`;
+}
+
+/**
+ * The line the desk says when an agent is stopped (unit U24).
+ *
+ * "Stopped" alone was true and useless: the card had already left the list the
+ * editor was looking at. This says the two things that happened -- the agent is
+ * ended now, and a run that was in flight ends at its next step -- and then
+ * says where to find it, which is the fact that was missing.
+ */
+export function followUpStoppedNotice(): string {
+  return "Stopped — find it under Stopped. Any run in flight stops at its next step.";
+}
+
 export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter): boolean {
   const live = row.status === "active" || row.status === "paused";
   switch (filter) {

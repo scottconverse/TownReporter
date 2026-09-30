@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import {
   publishBlockers,
   publishBlockedSummary,
+  publishGateNote,
+  showsPublishPrep,
   type PublishBlockerState,
 } from "./publish-blockers.ts";
 
@@ -27,6 +29,10 @@ const CLEAN: PublishBlockerState = {
   sectionReady: true,
   openClaims: 0,
   namedOutlets: [],
+  /* Unit U24: the evidence check found nothing to judge, or everything it
+     found has been judged, and nobody has had to accept anything. */
+  unreviewedClaims: 0,
+  unreviewedAccepted: false,
   evidenceStale: false,
   reviewingEvidence: false,
   reconcileActive: false,
@@ -184,6 +190,7 @@ describe("publishBlockers", () => {
         sectionReady: false,
         openClaims: 2,
         namedOutlets: ["Longmont Leader"],
+        unreviewedClaims: 7,
         evidenceStale: true,
         reviewingEvidence: true,
         reconcileActive: true,
@@ -199,6 +206,7 @@ describe("publishBlockers", () => {
         "section",
         "outlet:Longmont Leader",
         "claims",
+        "claims-unreviewed",
         "evidence-stale",
         "reconcile-running",
         "evidence-review-saving",
@@ -244,5 +252,72 @@ describe("publishBlockers", () => {
       publishBlockedSummary(publishBlockers(withState({ sectionReady: false, dek: "" }))),
       "2 things block Publish",
     );
+  });
+});
+
+describe("U24: a killed lead is not on its way anywhere", () => {
+  /*
+    The stand-in editorial day: a killed lead's Checks tab still carried
+    "Before you can publish — 4 things block Publish" with four ENABLED buttons
+    -- "Write the headline", "Write the story", "Write a dek", "Pick a section"
+    -- while the editors, "Draft with AI" and the publish bar were all correctly
+    gone. The action on a killed lead is Reopen, and that panel is on the page
+    already; a countdown to a publish that cannot happen is the desk
+    contradicting itself.
+  */
+  it("is the only status that hides the list", () => {
+    assert.equal(showsPublishPrep("killed"), false);
+    for (const status of ["new", "drafted", "held", "published"]) {
+      assert.equal(showsPublishPrep(status), true, `${status} leads still show their blockers`);
+    }
+  });
+
+  it("agrees with the server that a killed lead cannot print at all", () => {
+    /* The list is work toward a press, so hiding it is right exactly when the
+       press is refused. `performPublish` refuses this status by name. */
+    const desk = readFileSync(new URL("./desk.ts", import.meta.url), "utf8");
+    assert.match(desk, /if \(lead\.status === "killed"\) \{[\s\S]{0,120}Killed leads cannot print\./);
+  });
+});
+
+describe("U24: claims the evidence check raised and nobody judged", () => {
+  /*
+    The stand-in editorial day: seven claims chipped `! Needs review` on the
+    Checks pane, and a story that printed without one word about them. This is
+    the row that stops that, and the two presses that are its honest answers.
+  */
+  it("blocks, in the pane's own count, and offers both answers", () => {
+    const [only] = publishBlockers(withState({ unreviewedClaims: 7 }));
+    assert.equal(only?.key, "claims-unreviewed");
+    assert.match(only?.sentence ?? "", /^7 claims need review\./);
+    assert.deepEqual(only?.action, {
+      label: "Review the claims",
+      target: { kind: "evidence-review" },
+    });
+    assert.deepEqual(only?.altAction, {
+      label: "Publish anyway — I accept these claims are unreviewed",
+      target: { kind: "accept-unreviewed" },
+    });
+  });
+
+  it("says one claim, not one claims", () => {
+    const [only] = publishBlockers(withState({ unreviewedClaims: 1 }));
+    assert.match(only?.sentence ?? "", /^1 claim needs review\./);
+  });
+
+  it("is the first reason the sticky bar names, because it is the first row of the list", () => {
+    assert.equal(publishGateNote(publishBlockers(withState({ unreviewedClaims: 3 }))), "Review the claims to publish.");
+  });
+
+  it("stands down once the editor has accepted them for this draft version", () => {
+    assert.deepEqual(
+      publishBlockers(withState({ unreviewedClaims: 7, unreviewedAccepted: true })),
+      [],
+      "an accepted draft has no reason left on this row",
+    );
+  });
+
+  it("does not fire for a draft whose claims were all judged, or that raised none", () => {
+    assert.deepEqual(publishBlockers(withState({ unreviewedClaims: 0 })), []);
   });
 });

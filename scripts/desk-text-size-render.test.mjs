@@ -206,6 +206,17 @@ const deskJobsUrl = moduleUrl(
   { react: import.meta.resolve("react") },
 );
 
+/*
+  Unit U24: the nav list and the active-item rule moved out of desk-chrome.tsx
+  into src/lib/desk-nav.ts, so a test can read them. It imports nothing, so the
+  REAL module compiles here and the header this file renders draws the real nav
+  rather than a stand-in that would keep passing if the shell stopped using it.
+*/
+const deskNavUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
+  "desk-nav.ts",
+);
+
 const { DeskShell } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-chrome.tsx", import.meta.url), "utf8"),
@@ -235,6 +246,7 @@ const { DeskShell } = await import(
       "@/lib/news/follow-up-copy": inlineModule(
         "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
       ),
+      "@/lib/desk-nav": deskNavUrl,
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
 
       "@/components/desk-toaster": deskToasterStub,

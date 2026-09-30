@@ -258,6 +258,14 @@
   font-size: calc(16px * var(--ts));
   transition: background 0.15s;
 }
+/* Unit U24: a second screen that belongs to the item above it. Indented and a
+   step quieter, so the nav still reads as the eleven destinations it draws and
+   "Scan the wire" reads as what is under "Sources & scan". */
+.desk-ltr.astra .astra-nav.sub {
+  padding-left: 26px;
+  font-weight: 600;
+  font-size: calc(15px * var(--ts));
+}
 .desk-ltr.astra .astra-nav:hover {
   background: var(--hover);
   color: var(--fg);
@@ -5653,6 +5661,11 @@
   font-size: calc(0.875rem * var(--ts));
   color: var(--fg2);
 }
+/* Unit U24: what the press on one source row answered. A result, not a status:
+   it is the desk's answer to the check the editor just asked for, so it is read
+   in ink and marked ok/fail by its own colour rather than by a chip word. */
+.desk-ltr.astra .astra-row-result { font-weight: 700; color: var(--fg); }
+.desk-ltr.astra .astra-row-result.is-fail { color: var(--danger); }
 .desk-ltr.astra .astra-row-num {
   font-weight: 800;
   font-size: calc(1.0625rem * var(--ts));
