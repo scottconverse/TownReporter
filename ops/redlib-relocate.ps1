@@ -20,9 +20,11 @@
 
   It is a ONE-TIME helper and it is deliberately timid:
 
-    * it copies, it does not move. The old install is left exactly as it was,
-      so a mistake here costs nothing. Delete it yourself once the paper has
-      read Reddit through the new one for a day.
+    * it copies, it does not move. The source install is left exactly as it was.
+      When -Force replaces an existing install, only matching regular files in
+      the destination are unlinked after the full copy tree passes preflight;
+      target-only files stay in place. Delete the old source yourself once the
+      paper has read Reddit through the new one for a day.
     * it refuses to touch an install that is RUNNING. Redlib's executable is
       the file being copied, and a live one is usually locked; more to the
       point, copying the files out from under a running reader and then
@@ -283,6 +285,33 @@ function Get-StringValues {
   return ,@()
 }
 
+function Get-RelocationTree {
+  param([string]$Root, [string]$Destination)
+  $items = New-Object System.Collections.ArrayList
+  $pending = New-Object System.Collections.Queue
+  $pending.Enqueue($Root)
+  while ($pending.Count -gt 0) {
+    $directory = [string]$pending.Dequeue()
+    foreach ($item in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)) {
+      if ($directory.Equals($Root, [StringComparison]::OrdinalIgnoreCase) -and $item.Name -eq 'redlib.pid') { continue }
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "The source tree contains a reparse point at $($item.FullName). Nothing was changed."
+      }
+      $relative = Get-PathRelativeToRoot -Path $item.FullName -Root $Root
+      if ($null -eq $relative -or -not $relative) {
+        throw "Could not map source item into the selected install: $($item.FullName). Nothing was changed."
+      }
+      [void]$items.Add([PSCustomObject]@{
+        SourcePath = $item.FullName
+        TargetPath = Join-Path $Destination $relative
+        IsDirectory = [bool]$item.PSIsContainer
+      })
+      if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
+    }
+  }
+  return $items.ToArray()
+}
+
 $source = ""
 $candidates = Get-RelocateCandidates
 if ($From -and -not (Test-InstallAt -Root (Get-CleanPath $From))) {
@@ -438,7 +467,7 @@ if (Test-InstallAt -Root $target) {
 # reader to a second path inside the same sandbox fixes nothing and looks like
 # it did.
 $inAppData = $false
-if ($env:LOCALAPPDATA -and $target.ToLowerInvariant().StartsWith($env:LOCALAPPDATA.ToLowerInvariant())) { $inAppData = $true }
+if ($env:LOCALAPPDATA -and $null -ne (Get-PathRelativeToRoot -Path $target -Root $env:LOCALAPPDATA)) { $inAppData = $true }
 if ($inAppData) {
   Write-Say "  NOTE: $target is inside AppData."
   Write-Say "  MSIX redirects AppData writes made from inside a packaged app, so a scheduled"
@@ -447,6 +476,79 @@ if ($inAppData) {
   Write-Say ""
   if (-not $Force) {
     Write-Say "  Nothing was changed. Re-run with -Force if that is really where you want it."
+    Write-Say ""
+    exit 1
+  }
+}
+
+# Refuse an occupied directory that is not an install. -Force is permission to
+# replace a Redlib install, not permission to overwrite arbitrary operator data.
+$targetExists = Test-Path -LiteralPath $target
+$targetIsInstall = Test-InstallAt -Root $target
+if ($targetExists) {
+  $targetItem = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+  if (($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Write-Say "  The destination is a reparse point. Nothing was changed. Choose its resolved directory explicitly."
+    Write-Say ""
+    exit 1
+  }
+  if (-not $targetItem.PSIsContainer) {
+    Write-Say "  $target is a file, not a directory. Nothing was changed."
+    Write-Say ""
+    exit 1
+  }
+  if (-not $targetIsInstall -and @(Get-ChildItem -LiteralPath $target -Force -ErrorAction Stop).Count -gt 0) {
+    Write-Say "  $target is not an existing Redlib install and is not empty. Nothing was changed."
+    Write-Say "  Choose an empty destination directory; -Force only replaces an existing install."
+    Write-Say ""
+    exit 1
+  }
+}
+
+# Build and validate the entire tree before unlinking any matching destination
+# leaf. Copy-Item can write through a hard link, changing the source or another
+# file that shares the same data, and can follow a destination junction.
+$relocationItems = @()
+try {
+  $relocationItems = @(Get-RelocationTree -Root $source -Destination $target)
+} catch {
+  Write-Say "  $($_.Exception.Message)"
+  Write-Say ""
+  exit 1
+}
+$replacementFiles = New-Object System.Collections.ArrayList
+foreach ($planItem in $relocationItems) {
+  if (-not (Test-Path -LiteralPath $planItem.TargetPath)) { continue }
+  $existing = Get-Item -LiteralPath $planItem.TargetPath -Force -ErrorAction Stop
+  if (($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Write-Say "  The destination tree contains a reparse point at $($planItem.TargetPath). Nothing was changed."
+    Write-Say ""
+    exit 1
+  }
+  if ($planItem.IsDirectory -and -not $existing.PSIsContainer) {
+    Write-Say "  The destination has a file where a source directory belongs: $($planItem.TargetPath). Nothing was changed."
+    Write-Say ""
+    exit 1
+  }
+  if (-not $planItem.IsDirectory) {
+    if ($existing.PSIsContainer) {
+      Write-Say "  The destination has a directory where a source file belongs: $($planItem.TargetPath). Nothing was changed."
+      Write-Say ""
+      exit 1
+    }
+    if (-not ($targetIsInstall -and $Force)) {
+      Write-Say "  The destination file already exists outside an install that -Force may replace: $($planItem.TargetPath). Nothing was changed."
+      Write-Say ""
+      exit 1
+    }
+    [void]$replacementFiles.Add($planItem.TargetPath)
+  }
+}
+$targetPidPath = Join-Path $target "redlib.pid"
+if (Test-Path -LiteralPath $targetPidPath) {
+  $targetPidItem = Get-Item -LiteralPath $targetPidPath -Force -ErrorAction Stop
+  if (($targetPidItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $targetPidItem.PSIsContainer) {
+    Write-Say "  The destination redlib.pid is not a regular file. Nothing was changed."
     Write-Say ""
     exit 1
   }
@@ -461,6 +563,13 @@ if ($DryRun) {
   Write-Say "  Every check above it has already been made; this is the same run without the copy."
   Write-Say ""
   exit 0
+}
+
+# Unlink only the exact colliding regular destination files after all source and
+# destination shapes have passed preflight. This breaks hard links safely while
+# preserving target-only files and every source file.
+foreach ($replacementFile in $replacementFiles) {
+  Remove-Item -LiteralPath ([string]$replacementFile) -Force -ErrorAction Stop
 }
 
 Write-Say "  copying..."

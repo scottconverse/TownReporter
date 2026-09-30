@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, realpathSync, symlinkSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, realpathSync, symlinkSync, linkSync, unlinkSync } from "node:fs";
 import { join, dirname, win32 as win32Path } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,47 @@ import { ACTIONS, STAGE_START_WINDOW_MS } from "../ops/control/control-server.mj
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
+
+function canonicalWindowsPath(path) {
+  const tail = [];
+  let probe = win32Path.resolve(path);
+  while (!existsSync(probe)) {
+    const parent = win32Path.dirname(probe);
+    if (parent === probe) throw new Error(`could not resolve an existing parent for ${path}`);
+    tail.unshift(win32Path.basename(probe));
+    probe = parent;
+  }
+  return win32Path.normalize(win32Path.join(realpathSync.native(probe), ...tail));
+}
+
+function configFieldsResolveAtTarget(config, target, oldRoots) {
+  try {
+    const installRoot = canonicalWindowsPath(config.installRoot);
+    const targetRoot = canonicalWindowsPath(target);
+    const executable = canonicalWindowsPath(config.executable);
+    const logPath = canonicalWindowsPath(config.logPath);
+    const note = typeof config.notes?.[0] === "string" && config.notes[0].startsWith("built at ")
+      ? canonicalWindowsPath(config.notes[0].slice("built at ".length))
+      : null;
+    const oldSpellings = oldRoots.flatMap((root) => [root, canonicalWindowsPath(root)]).map((root) => root.toLowerCase());
+    const serializedFields = [config.installRoot, config.executable, config.logPath, ...(Array.isArray(config.notes) ? config.notes : [])];
+    const noOldRootText = serializedFields.every((value) => typeof value === "string"
+      && oldSpellings.every((oldRoot) => !value.toLowerCase().includes(oldRoot)));
+    const relativeExecutable = win32Path.relative(installRoot, executable).toLowerCase();
+    const relativeLog = win32Path.relative(installRoot, logPath).toLowerCase();
+
+    return win32Path.normalize(installRoot).toLowerCase() === win32Path.normalize(targetRoot).toLowerCase()
+      && existsSync(config.executable)
+      && relativeExecutable === "redlib.exe"
+      && relativeLog === "redlib.log"
+      && note !== null
+      && win32Path.normalize(note).toLowerCase() === win32Path.normalize(installRoot).toLowerCase()
+      && JSON.stringify(config.notes) === JSON.stringify([config.notes[0], "unrelated"])
+      && noOldRootText;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The Windows operations layer ran in no automated check of any kind.
@@ -1448,17 +1489,13 @@ test(
       assert.match(copy.out, /inside AppData/, "a target under AppData must be called out");
       assert.match(copy.out, /was not changed or deleted/, "the run must say the original is still there");
       const moved = JSON.parse(readFileSync(join(dst, "install.json"), "utf8"));
-      assert.equal(moved.installRoot.toLowerCase(), dst.toLowerCase(), "installRoot must name the new place");
-      assert.equal(moved.executable.toLowerCase(), join(dst, "redlib.exe").toLowerCase(), "so must executable");
-      assert.equal(moved.logPath.toLowerCase(), join(dst, "redlib.log").toLowerCase(), "and any other path in it");
-      assert.deepEqual(moved.notes, [`built at ${dst}`, "unrelated"], "a path inside an ARRAY must be rewritten, and the array must stay an array");
+      assert.ok(
+        configFieldsResolveAtTarget(moved, dst, [src]),
+        `install.json paths and array notes must resolve inside the copied install, with no old-root references: ${JSON.stringify(moved, null, 2)}`,
+      );
       assert.equal(moved.commit, "b6a2a5e", "a value that is not a path must be left alone");
       assert.ok(existsSync(join(dst, "config.toml")), "the whole install must be copied");
       assert.ok(!existsSync(join(dst, "redlib.pid")), "the pid file belongs to a process, not to an install");
-      assert.ok(
-        !readFileSync(join(dst, "install.json"), "utf8").toLowerCase().includes(src.toLowerCase()),
-        "the copy must not still name the old root anywhere",
-      );
       const kept = JSON.parse(readFileSync(join(src, "install.json"), "utf8"));
       assert.equal(kept.installRoot, src, "the original install.json must be untouched");
       assert.ok(existsSync(join(src, "redlib.exe")), "and the original executable must still be there -- this copies, it does not move");
@@ -1602,10 +1639,7 @@ test(
       const aliasConfig = existsSync(join(aliasTarget, "install.json"))
         ? JSON.parse(readFileSync(join(aliasTarget, "install.json"), "utf8"))
         : {};
-      const aliasFieldsCorrect = aliasConfig.installRoot?.toLowerCase() === aliasTarget.toLowerCase()
-        && aliasConfig.executable?.toLowerCase() === join(aliasTarget, "redlib.exe").toLowerCase()
-        && aliasConfig.logPath?.toLowerCase() === join(aliasTarget, "redlib.log").toLowerCase()
-        && JSON.stringify(aliasConfig.notes) === JSON.stringify([`built at ${aliasTarget}`, "unrelated"]);
+      const aliasFieldsCorrect = configFieldsResolveAtTarget(aliasConfig, aliasTarget, [aliasSource]);
 
       const autoAliasSource = join(shortBase, "auto-from");
       const autoLongSource = join(base, "auto-from");
@@ -1617,10 +1651,7 @@ test(
       const autoConfig = existsSync(join(autoTarget, "install.json"))
         ? JSON.parse(readFileSync(join(autoTarget, "install.json"), "utf8"))
         : {};
-      const autoFieldsCorrect = autoConfig.installRoot?.toLowerCase() === autoTarget.toLowerCase()
-        && autoConfig.executable?.toLowerCase() === join(autoTarget, "redlib.exe").toLowerCase()
-        && autoConfig.logPath?.toLowerCase() === join(autoTarget, "redlib.log").toLowerCase()
-        && JSON.stringify(autoConfig.notes) === JSON.stringify([`built at ${autoTarget}`, "unrelated"]);
+      const autoFieldsCorrect = configFieldsResolveAtTarget(autoConfig, autoTarget, [autoAliasSource, autoLongSource]);
 
       const fixtureLocalAppData = join(base, "fixture-localappdata");
       const sandboxSource = join(fixtureLocalAppData, "Packages", "FakePackage", "LocalCache", "Local", "RedditSearch", "Redlib");
@@ -1643,10 +1674,7 @@ test(
           === win32Path.normalize(realpathSync.native(sandboxTarget)).toLowerCase();
       const sandboxLogicalMappingCorrect = sandboxRun.code === 0
         && sandboxPrintedTargetCorrect
-        && sandboxConfig.installRoot?.toLowerCase() === sandboxTarget.toLowerCase()
-        && sandboxConfig.executable?.toLowerCase() === join(sandboxTarget, "redlib.exe").toLowerCase()
-        && sandboxConfig.logPath?.toLowerCase() === join(sandboxTarget, "redlib.log").toLowerCase()
-        && JSON.stringify(sandboxConfig.notes) === JSON.stringify([`built at ${sandboxTarget}`, "unrelated"])
+        && configFieldsResolveAtTarget(sandboxConfig, sandboxTarget, [sandboxSource, logicalRoot])
         && sourceBytes(sandboxSource).equals(sandboxBytes);
 
       const ordinarySource = join(base, "ordinary-source");
@@ -1665,6 +1693,35 @@ test(
         && !envLine(ordinaryRun.out)
         && !existsSync(ordinaryTarget)
         && sourceBytes(ordinarySource).equals(ordinaryBytes);
+
+      const siblingPrefixSource = join(base, "sibling-prefix-source");
+      const siblingPrefixTarget = `${fixtureLocalAppData}-sibling`;
+      plant(siblingPrefixSource);
+      const siblingPrefixRun = run(
+        ["-From", siblingPrefixSource, "-To", siblingPrefixTarget, "-EnvFile", noEnv],
+        { LOCALAPPDATA: fixtureLocalAppData },
+      );
+      const siblingPrefixStaysOutside = siblingPrefixRun.code === 0
+        && Boolean(envLine(siblingPrefixRun.out))
+        && !/inside AppData/.test(siblingPrefixRun.out)
+        && existsSync(join(siblingPrefixTarget, "install.json"));
+
+      const appDataJunctionSource = join(base, "appdata-junction-source");
+      const appDataJunctionDestination = join(fixtureLocalAppData, "junction-destination");
+      const externalLookingJunction = join(base, "external-looking-junction");
+      plant(appDataJunctionSource);
+      mkdirSync(appDataJunctionDestination);
+      symlinkSync(appDataJunctionDestination, externalLookingJunction, "junction");
+      const appDataJunctionSourceBytes = sourceBytes(appDataJunctionSource);
+      const appDataJunctionRun = run(
+        ["-From", appDataJunctionSource, "-To", externalLookingJunction, "-EnvFile", noEnv],
+        { LOCALAPPDATA: fixtureLocalAppData },
+      );
+      const appDataJunctionRejected = appDataJunctionRun.code === 1
+        && /inside AppData/.test(appDataJunctionRun.out)
+        && !envLine(appDataJunctionRun.out)
+        && !existsSync(join(appDataJunctionDestination, "install.json"))
+        && sourceBytes(appDataJunctionSource).equals(appDataJunctionSourceBytes);
 
       const sameSource = join(base, "same-source");
       plant(sameSource);
@@ -1772,11 +1829,102 @@ test(
           && sourceBytes(root).equals(before);
       }
 
+      const hardlinkSource = join(base, "hardlink-source");
+      const hardlinkTarget = join(base, "hardlink-target");
+      const hardlinkExternal = join(base, "hardlink-external.txt");
+      const hardlinkNestedExternal = join(base, "hardlink-nested-external.txt");
+      plant(hardlinkSource);
+      writeFileSync(join(hardlinkSource, "redlib.exe"), "SOURCE-EXE-CONTENT", "utf8");
+      writeFileSync(join(hardlinkSource, "config.toml"), "SOURCE-CONFIG-CONTENT", "utf8");
+      mkdirSync(join(hardlinkSource, "assets", "nested"), { recursive: true });
+      writeFileSync(join(hardlinkSource, "assets", "nested", "payload.txt"), "SOURCE-NESTED-CONTENT", "utf8");
+      plant(hardlinkTarget);
+      unlinkSync(join(hardlinkTarget, "redlib.exe"));
+      unlinkSync(join(hardlinkTarget, "config.toml"));
+      mkdirSync(join(hardlinkTarget, "assets", "nested"), { recursive: true });
+      writeFileSync(join(hardlinkTarget, "keep.txt"), "KEEP-TARGET-ONLY", "utf8");
+      writeFileSync(join(hardlinkTarget, "assets", "nested", "keep.txt"), "KEEP-NESTED-TARGET-ONLY", "utf8");
+      writeFileSync(hardlinkExternal, "EXTERNAL-KEEP-CONTENT", "utf8");
+      writeFileSync(hardlinkNestedExternal, "EXTERNAL-NESTED-KEEP-CONTENT", "utf8");
+      linkSync(join(hardlinkSource, "config.toml"), join(hardlinkTarget, "redlib.exe"));
+      linkSync(hardlinkExternal, join(hardlinkTarget, "config.toml"));
+      linkSync(hardlinkNestedExternal, join(hardlinkTarget, "assets", "nested", "payload.txt"));
+      const hardlinkSourceExeBefore = readFileSync(join(hardlinkSource, "redlib.exe"));
+      const hardlinkSourceConfigBefore = readFileSync(join(hardlinkSource, "config.toml"));
+      const hardlinkExternalBefore = readFileSync(hardlinkExternal);
+      const hardlinkNestedExternalBefore = readFileSync(hardlinkNestedExternal);
+      const hardlinkRun = run(["-From", hardlinkSource, "-To", hardlinkTarget, "-Force", "-EnvFile", noEnv]);
+      const hardlinkEvidence = {
+        exit: hardlinkRun.code,
+        sourceExecutablePreserved: readFileSync(join(hardlinkSource, "redlib.exe")).equals(hardlinkSourceExeBefore),
+        sourceConfigPreserved: readFileSync(join(hardlinkSource, "config.toml")).equals(hardlinkSourceConfigBefore),
+        externalHardlinkTargetPreserved: readFileSync(hardlinkExternal).equals(hardlinkExternalBefore),
+        nestedExternalHardlinkTargetPreserved: readFileSync(hardlinkNestedExternal).equals(hardlinkNestedExternalBefore),
+        copiedExecutableCorrect: existsSync(join(hardlinkTarget, "redlib.exe"))
+          && readFileSync(join(hardlinkTarget, "redlib.exe")).equals(hardlinkSourceExeBefore),
+        copiedConfigCorrect: readFileSync(join(hardlinkTarget, "config.toml")).equals(hardlinkSourceConfigBefore),
+        copiedNestedFileCorrect: readFileSync(join(hardlinkTarget, "assets", "nested", "payload.txt")).equals(Buffer.from("SOURCE-NESTED-CONTENT", "utf8")),
+        targetOnlyEntriesPreserved: readFileSync(join(hardlinkTarget, "keep.txt"), "utf8") === "KEEP-TARGET-ONLY"
+          && readFileSync(join(hardlinkTarget, "assets", "nested", "keep.txt"), "utf8") === "KEEP-NESTED-TARGET-ONLY",
+      };
+
+      const unownedSource = join(base, "unowned-source");
+      const unownedTarget = join(base, "unowned-target");
+      plant(unownedSource);
+      mkdirSync(unownedTarget);
+      writeFileSync(join(unownedTarget, "redlib.exe"), "UNOWNED-EXE-MUST-SURVIVE", "utf8");
+      writeFileSync(join(unownedTarget, "operator-data.txt"), "UNOWNED-DATA-MUST-SURVIVE", "utf8");
+      const unownedEntriesBefore = readdirSync(unownedTarget).sort();
+      const unownedExeBefore = readFileSync(join(unownedTarget, "redlib.exe"));
+      const unownedDataBefore = readFileSync(join(unownedTarget, "operator-data.txt"));
+      const unownedRun = run(["-From", unownedSource, "-To", unownedTarget, "-Force", "-EnvFile", noEnv]);
+      const unownedTargetRefused = unownedRun.code === 1
+        && /not an existing Redlib install|unowned/i.test(unownedRun.out)
+        && !envLine(unownedRun.out)
+        && !existsSync(join(unownedTarget, "install.json"))
+        && readdirSync(unownedTarget).sort().join(",") === unownedEntriesBefore.join(",")
+        && readFileSync(join(unownedTarget, "redlib.exe")).equals(unownedExeBefore)
+        && readFileSync(join(unownedTarget, "operator-data.txt")).equals(unownedDataBefore);
+
+      const shapeSource = join(base, "shape-source");
+      const shapeTarget = join(base, "shape-target");
+      plant(shapeSource);
+      writeFileSync(join(shapeSource, "zz-collision.txt"), "SOURCE-FILE", "utf8");
+      plant(shapeTarget);
+      mkdirSync(join(shapeTarget, "zz-collision.txt"));
+      writeFileSync(join(shapeTarget, "zz-collision.txt", "keep.txt"), "TARGET-DIRECTORY", "utf8");
+      const shapeTargetInstallBefore = sourceBytes(shapeTarget);
+      const shapeRun = run(["-From", shapeSource, "-To", shapeTarget, "-Force", "-EnvFile", noEnv]);
+      const shapeConflictRejectedBeforeWrite = shapeRun.code === 1
+        && !envLine(shapeRun.out)
+        && sourceBytes(shapeTarget).equals(shapeTargetInstallBefore)
+        && readFileSync(join(shapeTarget, "zz-collision.txt", "keep.txt"), "utf8") === "TARGET-DIRECTORY";
+
+      const reparseSource = join(base, "reparse-source");
+      const reparseTarget = join(base, "reparse-target");
+      const reparseExternal = join(base, "reparse-external");
+      plant(reparseSource);
+      mkdirSync(join(reparseSource, "collision"));
+      writeFileSync(join(reparseSource, "collision", "payload.txt"), "SOURCE-PAYLOAD", "utf8");
+      plant(reparseTarget);
+      mkdirSync(reparseExternal);
+      writeFileSync(join(reparseExternal, "keep.txt"), "EXTERNAL-KEEP", "utf8");
+      symlinkSync(reparseExternal, join(reparseTarget, "collision"), "junction");
+      const reparseTargetInstallBefore = sourceBytes(reparseTarget);
+      const reparseExternalBefore = readFileSync(join(reparseExternal, "keep.txt"));
+      const reparseRun = run(["-From", reparseSource, "-To", reparseTarget, "-Force", "-EnvFile", noEnv]);
+      const reparseConflictRejectedBeforeWrite = reparseRun.code === 1
+        && !envLine(reparseRun.out)
+        && sourceBytes(reparseTarget).equals(reparseTargetInstallBefore)
+        && readFileSync(join(reparseExternal, "keep.txt")).equals(reparseExternalBefore);
+
       const evidence = {
         explicitAlias: { exit: aliasRun.code, printedEnv: Boolean(envLine(aliasRun.out)), allPathFieldsAndArrayNoteRewritten: aliasFieldsCorrect },
         autoDiscoveredAlias: { exit: autoRun.code, printedEnv: Boolean(envLine(autoRun.out)), allPathFieldsAndArrayNoteRewritten: autoFieldsCorrect },
         sandboxedLogicalRoot: sandboxLogicalMappingCorrect,
         similarPathOutsideSandboxRejected: similarPathRejected,
+        localAppDataSiblingPrefixStaysOutside: siblingPrefixStaysOutside,
+        externalLookingAppDataJunctionRejected: appDataJunctionRejected,
         forceSamePlaceAliasPreservesSource: samePlaceSafe,
         unresolvedExistingPathIdentityFailsClosed: unresolvedIdentityRejected,
         forceJunctionToSource: sameJunctionEvidence,
@@ -1784,6 +1932,10 @@ test(
         nestedTargetRejectedBeforeSourceMutation: nestedSafe,
         ancestorTarget: ancestorTargetEvidence,
         invalidRequiredMetadataRejectedBeforeAdvice: invalidMetadata,
+        hardlinkReplacementPreservesAllOtherLinks: hardlinkEvidence,
+        unownedNonemptyTargetRefusedEvenWithForce: unownedTargetRefused,
+        fileDirectoryConflictRejectedBeforeWrite: shapeConflictRejectedBeforeWrite,
+        targetReparseConflictRejectedBeforeWrite: reparseConflictRejectedBeforeWrite,
       };
       assert.deepEqual(
         evidence,
@@ -1792,6 +1944,8 @@ test(
           autoDiscoveredAlias: { exit: 0, printedEnv: true, allPathFieldsAndArrayNoteRewritten: true },
           sandboxedLogicalRoot: true,
           similarPathOutsideSandboxRejected: true,
+          localAppDataSiblingPrefixStaysOutside: true,
+          externalLookingAppDataJunctionRejected: true,
           forceSamePlaceAliasPreservesSource: true,
           unresolvedExistingPathIdentityFailsClosed: true,
           forceJunctionToSource: {
@@ -1819,8 +1973,22 @@ test(
             sourceInstallPreserved: true,
           },
           invalidRequiredMetadataRejectedBeforeAdvice: { installRoot: true, executable: true, logPath: true },
+          hardlinkReplacementPreservesAllOtherLinks: {
+            exit: 0,
+            sourceExecutablePreserved: true,
+            sourceConfigPreserved: true,
+            externalHardlinkTargetPreserved: true,
+            nestedExternalHardlinkTargetPreserved: true,
+            copiedExecutableCorrect: true,
+            copiedConfigCorrect: true,
+            copiedNestedFileCorrect: true,
+            targetOnlyEntriesPreserved: true,
+          },
+          unownedNonemptyTargetRefusedEvenWithForce: true,
+          fileDirectoryConflictRejectedBeforeWrite: true,
+          targetReparseConflictRejectedBeforeWrite: true,
         },
-        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, unresolvedIdentityOutput: unresolvedRun.out, junctionOutput: junctionRun.out, junctionChildOutput: junctionChildRun.out, nestedOutput: nestedRun.out, ancestorOutput: ancestorRun.out, invalidMetadata }, null, 2),
+        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, siblingPrefixOutput: siblingPrefixRun.out, appDataJunctionOutput: appDataJunctionRun.out, unresolvedIdentityOutput: unresolvedRun.out, junctionOutput: junctionRun.out, junctionChildOutput: junctionChildRun.out, nestedOutput: nestedRun.out, ancestorOutput: ancestorRun.out, invalidMetadata, unownedOutput: unownedRun.out, shapeOutput: shapeRun.out, reparseOutput: reparseRun.out }, null, 2),
       );
     } finally {
       rmSync(base, { recursive: true, force: true });
