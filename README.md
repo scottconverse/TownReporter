@@ -320,7 +320,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 ## Sign-in
 
 - **Self-host:** on an unclaimed desk, the first account must enter the one-time setup code; the sign-in form identifies its location. After that account owns the desk. Generate and securely save owner recovery codes from **Server → Recovery codes** before you need them. If you lose the password, use **Lost your password? Use a recovery code** on the sign-in screen; an unused code supplies a one-time temporary password to sign in with and then change. This is not an email password-reset service. **Give up the desk** unclaims it; the next owner must enter the setup code required for an unclaimed desk. It is not password recovery.
-- **This grok.me preview:** Google / X via Grok’s broker (those buttons only show on `*.grok.me`).
+- Email and password on `/login` is the only door, on every host. There is no broker and no third-party sign-in.
 - Local with no login at all: `VITE_AUTH_ENABLED=false`. Do not do that on a public host.
 
 ---

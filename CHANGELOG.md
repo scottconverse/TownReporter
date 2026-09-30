@@ -2,6 +2,12 @@
 
 Current software version: **0.6.82**. Publication state is recorded by GitHub.
 
+## Unreleased
+
+- **Grok sign-in is removed, and the session cookie is renamed.** The desk signs in one way now: the email and password you set on it. Removed: the popup OAuth flow (`src/lib/auth/popup.server.ts` and its Vite middleware), the preview client and broker federation (`preview.ts`, `grok-federation.ts`), the gate-identity session bridge (`gate-identity.server.ts`, `gate-session.server.ts`), the Google/X buttons and their provider list (`providers.ts`), the `bearer()` plugin and every preview-bearer path in the client, and the `GROK_AUTH_*`, `GROK_PROJECT_ID`, `GROK_GATE_ORIGIN`, `GROK_CONNECTORS_URL`, `VITE_GROK_OAUTH` and `TOWNREPORTER_GROK_PREVIEW` variables. None of it was reachable on a self-hosted paper — every branch was behind an env var no installer sets — but the code shipped and one of its effects was user-visible: the session cookie was named after another product.
+- **Every editor signs in once after updating.** The session cookie is now `__Host-tr-auth.session_token` (was `__Host-grok-auth.session_token`), and `session_data`, `account_data` and `dont_remember` are renamed with it. The browser simply stops sending the old name. A stale `__Host-grok-auth.*` cookie left in the jar is ignored rather than acted on — the request is merely unauthenticated and lands on `/login`, with no error and no redirect loop. Sign in again with the password you already have; nothing else about your account, articles or settings changes.
+- **No migration.** Nothing under `migrations/` changed; the database schema is untouched by this release.
+
 ## 0.6.82 — 2026-09-28
 
 - Fixes from the 0.6.81 live walk: Tonight's edition rows print the names chip once; the Queue's "Looks already printed" chip wraps instead of widening the desk; "This week" keeps "St." with its name and never ends a name on "beginning"; source cards print their role in words ("Announcing source").

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
+import { authClient } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { inputClass } from "@/components/desk-chrome-utils";
 import { inkGhost, inkSolid } from "@/components/desk-chrome-utils";
@@ -23,9 +23,6 @@ export const Route = createFileRoute("/login")({
   component: Login,
 });
 
-/** Must match `BEARER_KEY` in `@/lib/auth/client` — preview iframe can't read cookies. */
-const PREVIEW_BEARER_KEY = "grok-auth.bearer-token";
-
 function failMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
   if (err && typeof err === "object" && "message" in err) {
@@ -43,32 +40,6 @@ function looksLikeMissingAccount(message: string) {
 
 function looksLikeExistingAccount(message: string) {
   return /already|exist|been registered/i.test(message);
-}
-
-function storePreviewBearer(token: string | null | undefined) {
-  if (!token || typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(PREVIEW_BEARER_KEY, token);
-  } catch {
-    /* storage blocked */
-  }
-}
-
-function tokenFromResult(data: unknown, headers?: Headers | null) {
-  const headerToken = headers?.get("set-auth-token");
-  if (headerToken) return headerToken;
-  if (data && typeof data === "object" && "token" in data) {
-    const token = (data as { token?: unknown }).token;
-    if (typeof token === "string" && token) return token;
-  }
-  return null;
-}
-
-function showGrokOAuth() {
-  if (import.meta.env.VITE_GROK_OAUTH === "true") return true;
-  if (typeof window === "undefined") return false;
-  const host = window.location.hostname;
-  return host === "grok.me" || host.endsWith(".grok.me") || host.endsWith(".grok-sandbox.com");
 }
 
 function Login() {
@@ -165,8 +136,7 @@ function Login() {
   */
   if (user && !claim.isPending && claimed) return <Navigate to="/desk" />;
 
-  async function finishEmail(data?: unknown, headers?: Headers | null) {
-    storePreviewBearer(tokenFromResult(data, headers));
+  async function finishEmail() {
     await authClient.getSession();
     if (invited && invite) {
       // Burn the invite and take the editor seat before the desk asks who we are.
@@ -205,18 +175,12 @@ function Login() {
     setError(null);
     setBusy("email-in");
     try {
-      let headerBag: Headers | null = null;
-      const { data, error: authError } = await authClient.signIn.email({
+      const { error: authError } = await authClient.signIn.email({
         email: email.trim(),
         password,
-        fetchOptions: {
-          onSuccess(ctx) {
-            headerBag = ctx.response.headers;
-          },
-        },
       });
       if (authError) throw new Error(authError.message ?? "Sign-in failed");
-      await finishEmail(data, headerBag);
+      await finishEmail();
     } catch (err) {
       setBusy(null);
       const raw = failMessage(err, "Sign-in failed");
@@ -230,7 +194,7 @@ function Login() {
         looksLikeMissingAccount(raw)
           ? claimed
             ? taken.signInFailed
-            : "No editor account with that email yet. Use Create editor account — this is not your Grok password."
+            : "No editor account with that email yet. Use Create editor account — this password is the one you set on this desk."
           : raw,
       );
     }
@@ -284,17 +248,11 @@ function Login() {
     }
     setBusy("email-up");
     try {
-      let headerBag: Headers | null = null;
       const display = name.trim() || email.trim().split("@")[0] || "Editor";
-      const { data, error: authError } = await authClient.signUp.email({
+      const { error: authError } = await authClient.signUp.email({
         email: email.trim(),
         password,
         name: display,
-        fetchOptions: {
-          onSuccess(ctx) {
-            headerBag = ctx.response.headers;
-          },
-        },
       });
       if (authError) {
         const message = authError.message ?? "Could not create that account";
@@ -304,7 +262,7 @@ function Login() {
         }
         throw new Error(message);
       }
-      await finishEmail(data, headerBag);
+      await finishEmail();
     } catch (err) {
       setBusy(null);
       setError(failMessage(err, "Could not create that account"));
@@ -501,41 +459,6 @@ function Login() {
         )}
 
         {mode === "signin" && !claim.isPending ? <RecoveryCodeSignIn /> : null}
-
-        {showGrokOAuth() && !claim.isPending ? (
-          <div className="space-y-2 border-t border-rule pt-4">
-            <p className="text-[11px] tracking-[0.14em] text-muted uppercase">
-              Or a small window
-            </p>
-            {GROK_PROVIDERS.map((p) => (
-              <button
-                key={p.providerId}
-                type="button"
-                disabled={busy !== null}
-                className="pressable w-full min-h-11 border border-ink bg-paper px-4 text-sm hover:bg-paper-2 disabled:cursor-wait disabled:opacity-60"
-                onClick={() => {
-                  setError(null);
-                  setBusy(p.providerId);
-                  void signIn(p.providerId, { callbackURL: "/desk" }).catch(
-                    (err: unknown) => {
-                      setBusy(null);
-                      setError(
-                        failMessage(
-                          err,
-                          "Sign-in failed. Allow pop-ups and try again.",
-                        ),
-                      );
-                    },
-                  );
-                }}
-              >
-                {busy === p.providerId
-                  ? "Opening sign-in…"
-                  : `Continue with ${p.label}`}
-              </button>
-            ))}
-          </div>
-        ) : null}
 
         <Link
           to="/"

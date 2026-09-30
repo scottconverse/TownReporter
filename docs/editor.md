@@ -121,7 +121,7 @@ Large scales body text, meta-lines, chips, labels, headlines and reading panes. 
 
 Notes:
 
-- Self-host uses email + password. Google / X buttons only appear on the grok.me preview.
+- Sign-in is email + password on this desk. There is no Google, X or other third-party button to look for.
 - The first account on an unclaimed desk is the owner and must enter its one-time setup code. For a source checkout, see [the first-run setup notes](setup.md#first-run) for the data-folder path.
 - To prepare for password loss, generate and securely save recovery codes from **Server → Recovery codes**. On the sign-in screen, **Lost your password? Use a recovery code** accepts an unused code and returns a one-time temporary password; sign in with it and then change your password. There is no email reset link. **Give up the desk** transfers ownership and is not recovery.
 - A second person joins by invite: the owner mints a one-time link under **Invite an editor** on the Server page. See [setup.md](setup.md#a-second-editor).

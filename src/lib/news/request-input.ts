@@ -655,9 +655,9 @@ export function cleanConnectionEnabled(raw: unknown): { id: string; enabled: boo
   afterwards, so a sign-up POST of any size was deserialised in full.
 
   The handler cannot be imported by a plain node test -- it reaches
-  `@/lib/auth/server`, which `--experimental-strip-types` rejects (see
-  grok-federation.test.ts:38-44) -- so the cap and its predicate live here,
-  where that decision can be stated and tested.
+  `@/lib/auth/server`, which `--experimental-strip-types` rejects because it
+  pulls in `pg` and server-only Better Auth internals -- so the cap and its
+  predicate live here, where that decision can be stated and tested.
 
   256 KB is roughly a thousand times the largest real auth body (a sign-up is
   a name, an address and a password, a few hundred bytes). It is generous on

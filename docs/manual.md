@@ -863,7 +863,7 @@ fields remain blank; they do not inherit Longmont's values.
 | Framework | [TanStack Start](https://tanstack.com/start) on Vite, React 19 | File-based routes, typed server functions, SSR without a separate API                                          |
 | Server    | Nitro, `node-server` preset                                    | A long-lived process: Chromium stays warm and background jobs are not chopped into request-sized pieces        |
 | Database  | PostgreSQL (PGLite for a throwaway look)                       | Plain SQL through `pg`; migrations are numbered `.sql` files                                                   |
-| Auth      | [better-auth](https://better-auth.com)                         | Email/password, with a bearer path for partitioned-cookie previews                                             |
+| Auth      | [better-auth](https://better-auth.com)                         | Email/password against the desk's own database                                                                 |
 | Styling   | Tailwind 4                                                     |                                                                                                                |
 | Fetching  | `undici`, with a connect-time SSRF guard                       | The address approved is the address connected to                                                               |
 | Rendering | Playwright Chromium                                            | JS-heavy civic portals and YouTube "Show transcript"                                                           |

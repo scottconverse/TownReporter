@@ -15,7 +15,8 @@
   copy-paste out of an old branch -- or out of `.git` history, where the
   scaffold still lives -- would quietly restore it. So this file is the guard:
   it fails if the paths come back, if source starts referencing the deleted
-  modules again, or if the environment wrapper starts reading `.grok` again.
+  modules again, if the environment wrapper starts reading `.grok` again, or if
+  the sign-in tree starts carrying the name at all.
 
   Scope is deliberate. `docs/`, `CHANGELOG.md`, the dated `HANDOFF-*.md`
   records and `artifacts/` still name all of this, and they are supposed to:
@@ -56,6 +57,17 @@ const DELETED_PATHS = [
   "src/lib/preview-embedder-origin.ts",
   "src/components/preview-host-bridge.tsx",
   "scripts/archive/preview-thumbnail.mjs",
+  // The sign-in half of the same inheritance, removed in 0.6.83. Same rule:
+  // these files are gone, and a copy-paste out of an old branch or out of
+  // `.git` history must not quietly bring them back.
+  "src/lib/auth/popup.server.ts",
+  "src/lib/auth/preview.ts",
+  "src/lib/auth/grok-federation.ts",
+  "src/lib/auth/grok-federation.test.ts",
+  "src/lib/auth/gate-identity.server.ts",
+  "src/lib/auth/gate-identity.test.ts",
+  "src/lib/auth/gate-session.server.ts",
+  "src/lib/auth/providers.ts",
 ];
 
 /**
@@ -67,6 +79,10 @@ const DELETED_MODULE_NAMES = [
   "preview-host-bridge",
   "preview-embedder-origin",
   "app-env-plugin",
+  "popup.server",
+  "grok-federation",
+  "gate-identity",
+  "gate-session",
 ];
 
 /** Where a deleted module must not be referenced from (the product tree). */
@@ -83,15 +99,15 @@ const NAME_SAYERS = ["scripts/no-grok-scaffold.test.mjs"];
  * Files matching `pattern`, via `git grep` (exit 1 = no match).
  *
  * `--untracked` so a file that has been written but not staged is caught too;
- * ignored paths are still skipped, and the scan is scoped to SOURCE_PATHS, so
- * it never reaches `node_modules`. In CI everything is tracked and the flag
+ * ignored paths are still skipped, and the scan is scoped to the given paths,
+ * so it never reaches `node_modules`. In CI everything is tracked and the flag
  * changes nothing.
  */
-function trackedFilesMatching(pattern) {
+function trackedFilesMatching(pattern, paths = SOURCE_PATHS) {
   try {
     return execFileSync(
       "git",
-      ["grep", "-l", "--untracked", "-i", "-e", pattern, "--", ...SOURCE_PATHS],
+      ["grep", "-l", "--untracked", "-i", "-e", pattern, "--", ...paths],
       { cwd: ROOT, encoding: "utf8" },
     )
       .split("\n")
@@ -122,6 +138,35 @@ test("nothing in the product tree references the deleted scaffold modules", () =
       `"${name}" was deleted, but these files still name it:\n  ${offenders.join("\n  ")}`,
     );
   }
+});
+
+/**
+ * The sign-in surface must carry no Grok name at all.
+ *
+ * The deletion above is checked by path, and a path check cannot see a *word*.
+ * The name can come back without any file coming back: a re-export, a comment
+ * explaining what used to be here, a cookie literal, a header name, an env var
+ * read. The sign-in tree is where that matters most, because these are the
+ * three files where a stranger reads how this paper signs its editor in — and
+ * every remnant there is inherited from another product's sandbox rather than
+ * from anything TownReporter decided.
+ *
+ * Scoped, deliberately: `src/lib/news/**` still names xAI as a *model* provider,
+ * which is a separate, live product decision (see the `XAI_API_KEY` block in
+ * `.env.example` and `docs/setup.md`). That is not this removal, and a guard
+ * that failed on it would be a guard nobody could keep green honestly.
+ */
+const SIGN_IN_TREE = ["src/lib/auth", "src/routes/login.tsx", "vite.config.ts"];
+
+test("no Grok name survives in the sign-in tree", () => {
+  const offenders = trackedFilesMatching("grok", SIGN_IN_TREE);
+  assert.deepEqual(
+    offenders,
+    [],
+    "the Grok sign-in machinery was removed in 0.6.83 -- popup OAuth, the broker " +
+      "federation, the gate-identity bridge, the Google/X buttons and the " +
+      `__Host-grok-auth.* cookies. These files still name it:\n  ${offenders.join("\n  ")}`,
+  );
 });
 
 test("the environment wrapper does not read a .grok file", () => {
