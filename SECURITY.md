@@ -83,8 +83,9 @@ not be named. There is no bug bounty.
   the sitemap, or the evidence routes.
 - Anything that puts a third-party asset onto a reader's page. The paper is
   self-contained — fonts self-hosted, no third-party script — and a cold load
-  of it makes zero requests to an outside host (`docs/manual.md` §"What the
-  reader gets"; `npm run smoke` proves it in a real browser). The desk's own
+  of it makes zero requests to an outside host
+  (`docs/manual.md` §"What the reader gets"; `npm run smoke` proves it in a
+  real browser). The desk's own
   outbound calls are a different surface, documented in `docs/setup.md`
   §"What leaves this machine": that documented egress is not itself a
   vulnerability.
