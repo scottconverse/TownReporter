@@ -90,6 +90,7 @@ const report = {
       "other public informational/legal routes and desk routes outside the existing nine",
       "cross-combinations where desk and reader use different explicit themes or text sizes",
       "interactive workflow outcomes beyond entering the desk and opening the seeded published story",
+      "conditional front-page More sections navigation is absent from the fresh fixture's section set; content-rich navigation is reserved for the final installed walkthrough",
     ],
     disclosurePolicy:
       "Collapsed details descendants and inert mobile-drawer controls are excluded from the collapsed-state control denominator. Visible details summaries and the mobile navigation toggle are checked in the collapsed state; the walk temporarily opens existing disclosures and the mobile drawer, checks revealed controls and overflow, then restores their original state.",
@@ -314,6 +315,15 @@ function accessibleControlFromSnapshot(snapshot) {
 
 function normalizedSnapshotText(value) {
   return String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+function missingInteractiveRoleFailure(measured) {
+  if (!(measured.missingInteractiveRoleControls > 0)) return null;
+  return measured.missingInteractiveRoleControls +
+    " rendered interactive controls have no role in Chromium's accessibility tree (" +
+    measured.missingViewportRoleControls + " initially in viewport; " +
+    measured.belowFoldMissingRoleControls + " initially below fold): " +
+    measured.missingRoleExamples.join("; ");
 }
 
 function screenshotPathFor(scenario, surfaceName) {
@@ -970,7 +980,7 @@ async function captureSurface(page, scenario, surface) {
   }
   const missingRoleControls = measuredControlNames.filter((control) => !control.role);
   const missingViewportRoleControls = missingRoleControls.filter((control) => control.initialViewport);
-  const unrenderedBelowFoldControls = missingRoleControls.filter((control) => !control.initialViewport);
+  const belowFoldMissingRoleControls = missingRoleControls.filter((control) => !control.initialViewport);
   const unnamedAccessibleControls = measuredControlNames.filter((control) => control.role && !control.name);
   const summariesMissingComputedText = measuredSummarySnapshots.filter((summary) => !summary.snapshotContainsLabel);
   const expandedMissingRoleControls = measuredExpandedDisclosureNames.filter((control) => !control.role);
@@ -996,13 +1006,17 @@ async function captureSurface(page, scenario, surface) {
   measured.belowFoldAccessibilityNameChecks = measuredControlNames.filter(
     (control) => !control.initialViewport && control.role,
   ).length;
-  measured.unrenderedBelowFoldControls = unrenderedBelowFoldControls.length;
-  measured.unrenderedExamples = unrenderedBelowFoldControls
+  measured.belowFoldMissingRoleControls = belowFoldMissingRoleControls.length;
+  measured.belowFoldMissingRoleExamples = belowFoldMissingRoleControls
     .slice(0, 8)
     .map((control) => control.selector + " " + control.html);
+  measured.missingInteractiveRoleControls = missingRoleControls.length;
+  measured.missingRoleExamples = missingRoleControls
+    .slice(0, 8)
+    .map((control) => control.selector + " " + control.snapshot);
   measured.missingViewportRoleControls = missingViewportRoleControls.length;
   measured.unnamedControls = unnamedAccessibleControls.length;
-  measured.unnamedExamples = [...missingViewportRoleControls, ...unnamedAccessibleControls]
+  measured.unnamedExamples = unnamedAccessibleControls
     .slice(0, 8)
     .map((control) => control.selector + " " + control.snapshot);
   measured.summaryChecks = measuredSummarySnapshots.length;
@@ -1028,6 +1042,8 @@ async function captureSurface(page, scenario, surface) {
     : (scenario.theme === "dark" ? "reader-dark" : "light");
   const expectedColor = scenario.theme === "dark" ? DARK_RGB : LIGHT_RGB;
   const violations = [];
+  const missingRoleFailure = missingInteractiveRoleFailure(measured);
+  if (missingRoleFailure) violations.push(missingRoleFailure);
   const status = response?.status() ?? null;
   if (status !== 200) violations.push("HTTP status was " + status + ", expected 200");
   if (measured.pathname !== new URL(surface.path, base).pathname) {
@@ -1051,13 +1067,6 @@ async function captureSurface(page, scenario, surface) {
     );
   }
   if (measured.renderedControlCandidates === 0) violations.push("no rendered interactive controls were found");
-  if (measured.missingViewportRoleControls > 0) {
-    violations.push(
-      "Chromium exposed no interactive role for " + measured.missingViewportRoleControls +
-        " controls already visible in the captured viewport: " +
-        measured.unnamedExamples.join("; "),
-    );
-  }
   if (measured.unnamedControls > 0) {
     violations.push(
       measured.unnamedControls + " visible interactive controls have no accessible name: " +
@@ -1199,8 +1208,10 @@ async function captureSurface(page, scenario, surface) {
     summaryComputedTextFailures: measured.summaryComputedTextFailures,
     expandedDisclosureMetrics: measured.expandedDisclosureMetrics,
     expandedDisclosureScreenshot: measured.expandedDisclosureScreenshot,
-    unrenderedBelowFoldControls: measured.unrenderedBelowFoldControls,
-    unrenderedExamples: measured.unrenderedExamples,
+    belowFoldMissingRoleControls: measured.belowFoldMissingRoleControls,
+    belowFoldMissingRoleExamples: measured.belowFoldMissingRoleExamples,
+    missingInteractiveRoleControls: measured.missingInteractiveRoleControls,
+    missingRoleExamples: measured.missingRoleExamples,
     missingViewportRoleControls: measured.missingViewportRoleControls,
     unnamedControls: measured.unnamedControls,
     unnamedExamples: measured.unnamedExamples,
