@@ -1668,6 +1668,7 @@ function StoryPage() {
       evidenceStale || openClaims.length > 0 || reconcileActive || reviewEvidence.isPending,
     namesUnresolved: draftChecks.namesUnresolved,
     namedOutlets: data.namedOutlets.length,
+    nameCheckRecorded: draftChecks.nameCheckRecorded,
     /*
       The same staleness `DeskNameCheck` prints on the Checks tab: a name check
       applies to the text it was run against, so a check that finished before

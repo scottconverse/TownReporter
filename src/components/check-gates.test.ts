@@ -35,6 +35,7 @@ const NEVER_RUN: CheckFacts = {
   namesUnresolved: 0,
   namedOutlets: 0,
   nameCheckComplete: false,
+  nameCheckRecorded: false,
   namesOutstanding: false,
 };
 
@@ -140,12 +141,23 @@ describe("both workbenches read the rule instead of printing the old words", () 
     }
   });
 
-  it("the desk home's own chips come from the same rule, so the two screens cannot disagree", () => {
+  it("the desk home's own chips read the shared rule too, from the shared row facts", () => {
+    /* Not a byte-for-byte reproduction of the inline chip that used to sit
+       here -- U9b: two recorded rows print differently, and more honestly
+       (see the `deskRowChecks` cases in lib/news/check-gates.test.ts). */
+    assert.match(home, /const facts = deskRowChecks\(row\)/);
     assert.match(home, /evidenceChip\(facts\)/);
     assert.match(home, /namesChip\(facts\)/);
     /* And its sub line no longer promises a rule the desk does not have: a
        story may print with no check run, which is what the chips now say. */
     assert.doesNotMatch(home, /Each story needs every check before it can print\./);
     assert.match(home, /the chips show which checks ran/);
+  });
+
+  it("both workbenches hand the bar a name check RECORD, not just a pass", () => {
+    /* U9b: without this the bar could say "No name check ran" beside a chip
+       saying the check is older than the text. */
+    assert.match(lead, /nameCheckRecorded: draftChecks\.nameCheckRecorded/);
+    assert.match(editorial, /nameCheckRecorded: recorded\.nameCheckRecorded/);
   });
 });

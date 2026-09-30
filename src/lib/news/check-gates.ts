@@ -11,13 +11,19 @@
  * empty draft carried four green claims, next to a Checks tab saying "This
  * draft has no recorded name check."
  *
- * The rule is the desk home's (`desk.index.tsx`, `tonightChips`): a gate that
- * was never run says so -- `○`, the quiet dashed chip -- and a pass has to be
- * recorded before it can be claimed. This file is that rule once, for the three
- * readers that were each deciding it for themselves: the gate chips, the stage
- * stepper and the line beside the Publish button, on both the lead workbench
- * (`desk.story.$leadId.tsx`) and the editorial workbench
+ * The rule is the desk home's (`desk.index.tsx`, `tonightChips`) in spirit: a
+ * gate that was never run says so -- `○`, the quiet dashed chip -- and a pass
+ * has to be recorded before it can be claimed. This file is that rule once, for
+ * the three readers that were each deciding it for themselves: the gate chips,
+ * the stage stepper and the line beside the Publish button, on both the lead
+ * workbench (`desk.story.$leadId.tsx`) and the editorial workbench
  * (`desk.story.draft.$draftId.tsx`).
+ *
+ * IT IS NOT A BYTE-FOR-BYTE COPY OF THE DESK HOME'S OLD INLINE CHIP, and no
+ * comment here should say it is. The old chip read `required` as the whole
+ * question; this reads `required` and the recorded decision, so two rows the
+ * desk can really hold print differently -- and more honestly. They are named
+ * one by one on `deskRowChecks` below, with the test that pins each.
  *
  * NONE OF THIS DECIDES ANYTHING. What Publish allows is still exactly the
  * `disabled` list on the button, computed by `publishBlockers` -- these chips,
@@ -73,6 +79,13 @@ export type CheckFacts = {
   namedOutlets: number;
   /** The name check ran to completion (`nameCheck.complete`). */
   nameCheckComplete: boolean;
+  /**
+   * Is there a name check RECORD on this draft at all -- complete or not? A
+   * check that ran and did not finish (`complete: false`, "Name check did not
+   * complete") is not a pass, but it is also not "no check ran", and the bar's
+   * sentence has to be able to tell those two apart (U9b).
+   */
+  nameCheckRecorded: boolean;
   /** The story changed after the name check, so it no longer covers this text. */
   namesOutstanding: boolean;
 };
@@ -82,14 +95,17 @@ export function recordedChecks(research: string | null | undefined): {
   evidenceChecked: boolean;
   evidenceRequired: boolean;
   nameCheckComplete: boolean;
+  nameCheckRecorded: boolean;
   namesUnresolved: number;
 } {
   let review: { required?: unknown; decision?: unknown } | undefined;
+  let nameCheckKey: unknown;
   try {
     const parsed: unknown = JSON.parse(research ?? "{}");
     if (parsed && typeof parsed === "object") {
       const value = (parsed as { evidenceReview?: unknown }).evidenceReview;
       if (value && typeof value === "object") review = value as { required?: unknown; decision?: unknown };
+      nameCheckKey = (parsed as { nameCheck?: unknown }).nameCheck;
     }
   } catch {
     /* A malformed legacy memo reads as "nothing recorded", not as a crash. */
@@ -106,7 +122,55 @@ export function recordedChecks(research: string | null | undefined): {
     evidenceChecked: typeof review?.decision === "string" && review.decision.trim() !== "",
     evidenceRequired: review?.required === true,
     nameCheckComplete: check?.complete === true,
+    /* The key is written only by a check pass (`draft-reconcile.server.ts`,
+       `editorial.server.ts`), so its presence is the record -- read raw rather
+       than through `readNameCheck`, which answers null for a record it cannot
+       parse and would turn a malformed one into "no check ever ran". */
+    nameCheckRecorded: check !== null || (Boolean(nameCheckKey) && typeof nameCheckKey === "object"),
     namesUnresolved: (check?.rows ?? []).filter((row) => row.status === "unresolved").length,
+  };
+}
+
+/**
+ * The desk home row's facts (`tonightChips`).
+ *
+ * This row is a projection: the list query hands the desk the two recorded
+ * checks and nothing else, so it carries no staleness, no claim and no running
+ * check -- the story page is where those are read, and it says so there.
+ *
+ * THE TWO ROWS THAT MOVED (U9b). The chip this replaced was written inline as
+ * `required ? (decision ? ✓ : !) : ○`, which read `required` as the whole
+ * question. `reconcileDraftEvidence` writes `required: !decision` and keeps an
+ * old decision when the story is edited again, so two recorded rows exist where
+ * the old chip and this rule disagree, and this rule is the honest one:
+ *
+ *   - `required: false` with a decision -- the editor has just answered the
+ *     review. The old chip said "○ Evidence check not run"; this says
+ *     "✓ Evidence checked", which is what the record holds.
+ *   - `required: true` with a kept decision -- the story moved on since that
+ *     answer. The old chip said "✓ Evidence checked"; this says
+ *     "! Evidence to check", because the review is open on this text.
+ */
+export function deskRowChecks(row: {
+  evidence_required: boolean;
+  evidence_decision: string | null;
+  names_checked_at: string | null;
+  names_unresolved: number;
+  name_check_complete: boolean;
+}): CheckFacts {
+  return {
+    hasDraft: true,
+    evidenceChecked: Boolean(row.evidence_decision),
+    evidenceRequired: row.evidence_required,
+    evidenceOutstanding: false,
+    namesUnresolved: row.names_unresolved,
+    namedOutlets: 0,
+    nameCheckComplete: row.name_check_complete,
+    /* `names_checked_at` is the query's own projection of `nameCheck.checkedAt`,
+       written by every pass including one that did not complete. */
+    nameCheckRecorded:
+      row.name_check_complete || row.names_unresolved > 0 || Boolean(row.names_checked_at),
+    namesOutstanding: false,
   };
 }
 
@@ -213,7 +277,7 @@ export function publishBarNote(facts: CheckFacts): string {
   if (evidence.done && names.done) return "All checks done.";
 
   const evidenceRan = facts.evidenceChecked || facts.evidenceRequired;
-  const namesRan = facts.nameCheckComplete || namesToReview(facts) > 0;
+  const namesRan = nameCheckRan(facts);
   if (!evidenceRan && !namesRan) {
     return "Nothing blocks Publish. No evidence or name check ran on this draft.";
   }
@@ -232,8 +296,29 @@ export function publishBarNote(facts: CheckFacts): string {
     const n = namesToReview(facts);
     if (n > 0) said.push(`${namesWord(n)} still need${n === 1 ? "s" : ""} review`);
     else if (facts.namesOutstanding) said.push("the name check is older than the story");
+    else if (facts.nameCheckRecorded) said.push("the name check did not complete");
     else said.push("no name check ran");
   }
   const sentence = said.join(" and ");
   return `Nothing blocks Publish. ${sentence.slice(0, 1).toUpperCase()}${sentence.slice(1)}.`;
+}
+
+/**
+ * Did a name check run on this draft at all?
+ *
+ * U9b: "no name check ran" is a sentence about the RECORD, not about the pass,
+ * and the first version of this got it wrong -- it asked whether the check
+ * completed or found something to review, so a check that ran and did not
+ * finish, or one that finished before the last edit, had the bar saying "No
+ * name check ran" beside a chip saying "! Name check is older than the text".
+ * Any record at all means a check ran; what it found, and whether it still
+ * covers this text, is the rest of the sentence's business.
+ */
+function nameCheckRan(facts: CheckFacts): boolean {
+  return (
+    facts.nameCheckRecorded ||
+    facts.nameCheckComplete ||
+    facts.namesOutstanding ||
+    namesToReview(facts) > 0
+  );
 }

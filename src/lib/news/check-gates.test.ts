@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   checkStageDone,
+  deskRowChecks,
   evidenceChip,
   namesChip,
   pageGateChip,
@@ -31,6 +32,7 @@ const NEVER_RUN: CheckFacts = {
   namesUnresolved: 0,
   namedOutlets: 0,
   nameCheckComplete: false,
+  nameCheckRecorded: false,
   namesOutstanding: false,
 };
 
@@ -39,6 +41,7 @@ const PASSED: CheckFacts = {
   ...NEVER_RUN,
   evidenceChecked: true,
   nameCheckComplete: true,
+  nameCheckRecorded: true,
 };
 
 describe("check-gates: a check that never ran says so", () => {
@@ -136,6 +139,61 @@ describe("check-gates: a check that never ran says so", () => {
   });
 });
 
+describe("U9b: the desk home's chips, on the two rows its old inline chip read differently", () => {
+  /*
+    The desk home's chip was written inline as `required ? (decision ? ✓ : !) :
+    ○`, which read `required` as the whole question. `reconcileDraftEvidence`
+    writes `required: !decision` and keeps an old decision when the story is
+    edited again, so these two rows exist and the inline chip got each of them
+    backwards. The shared rule is the honest one; it is NOT the old chip's
+    output reproduced byte for byte, and the comment on `deskRowChecks` says so.
+  */
+  const row = (patch: Partial<Parameters<typeof deskRowChecks>[0]> = {}) => ({
+    evidence_required: false,
+    evidence_decision: null as string | null,
+    names_checked_at: null as string | null,
+    names_unresolved: 0,
+    name_check_complete: false,
+    ...patch,
+  });
+
+  it("prints ✓ Evidence checked for a just-decided review, where the old chip printed 'not run'", () => {
+    const facts = deskRowChecks(row({ evidence_decision: "keep" }));
+    assert.deepEqual(evidenceChip(facts), { text: "✓ Evidence checked", tone: "ok", done: true });
+    assert.deepEqual(namesChip(deskRowChecks(row({ evidence_decision: "keep", name_check_complete: true }))), {
+      text: "✓ Names checked",
+      tone: "ok",
+      done: true,
+    });
+  });
+
+  it("prints ! Evidence to check for a decided review the story moved past, where the old chip printed ✓", () => {
+    const facts = deskRowChecks(row({ evidence_required: true, evidence_decision: "keep" }));
+    assert.deepEqual(evidenceChip(facts), { text: "! Evidence to check", tone: "warn", done: false });
+  });
+
+  it("keeps the rows the old chip already read right", () => {
+    /* Required, no decision: an open review, a warning in both readings. */
+    assert.equal(evidenceChip(deskRowChecks(row({ evidence_required: true }))).text, "! Evidence to check");
+    /* Nothing recorded at all: "not run", in both readings. */
+    assert.deepEqual(evidenceChip(deskRowChecks(row())), {
+      text: "○ Evidence check not run",
+      tone: "quiet",
+      done: false,
+    });
+    /* The names side is unchanged: unresolved first, then completion. */
+    assert.equal(namesChip(deskRowChecks(row({ names_unresolved: 2 }))).text, "! 2 names to review");
+    assert.equal(namesChip(deskRowChecks(row())).text, "○ Names not checked");
+  });
+
+  it("reads the name check record off the row's own projection", () => {
+    assert.equal(deskRowChecks(row({ names_checked_at: "2026-09-29T12:00:00.000Z" })).nameCheckRecorded, true);
+    assert.equal(deskRowChecks(row({ name_check_complete: true })).nameCheckRecorded, true);
+    assert.equal(deskRowChecks(row({ names_unresolved: 1 })).nameCheckRecorded, true);
+    assert.equal(deskRowChecks(row()).nameCheckRecorded, false);
+  });
+});
+
 describe("check-gates: the names chip", () => {
   it("counts a name with nothing to show it, in the bar's own words", () => {
     assert.deepEqual(namesChip({ ...NEVER_RUN, namesUnresolved: 1 }), {
@@ -168,6 +226,51 @@ describe("check-gates: the names chip", () => {
     const facts: CheckFacts = { ...NEVER_RUN, evidenceChecked: true };
     assert.equal(namesChip(facts).done, false);
     assert.equal(publishBarNote(facts), "Nothing blocks Publish. No name check ran on this draft.");
+  });
+});
+
+describe("U9b: the bar's sentence and the chip say the same thing about the name check", () => {
+  /*
+    The first version asked `nameCheckComplete || namesToReview > 0` for "did a
+    name check run", which is a question about the PASS. Two real records fell
+    through it to "No name check ran" beside a chip that said otherwise: a check
+    that ran and did not finish, and one that finished before the last edit.
+  */
+  it("does not say 'No name check ran' when the check ran and is older than the text", () => {
+    const stale: CheckFacts = {
+      ...PASSED,
+      nameCheckComplete: false,
+      nameCheckRecorded: true,
+      namesOutstanding: true,
+    };
+    assert.equal(namesChip(stale).text, "! Name check is older than the text");
+    assert.doesNotMatch(publishBarNote(stale), /No name check ran/);
+    assert.equal(
+      publishBarNote(stale),
+      "Nothing blocks Publish. The name check is older than the story.",
+    );
+  });
+
+  it("does not say 'No name check ran' when the check ran and did not complete", () => {
+    const incomplete: CheckFacts = { ...NEVER_RUN, evidenceChecked: true, nameCheckRecorded: true };
+    assert.equal(namesChip(incomplete).text, "○ Names not checked");
+    assert.doesNotMatch(publishBarNote(incomplete), /No name check ran/);
+    assert.equal(
+      publishBarNote(incomplete),
+      "Nothing blocks Publish. The name check did not complete.",
+    );
+  });
+
+  it("keeps 'No name check ran' for the rows that really have no record", () => {
+    assert.equal(NEVER_RUN.nameCheckRecorded, false);
+    assert.equal(
+      publishBarNote(NEVER_RUN),
+      "Nothing blocks Publish. No evidence or name check ran on this draft.",
+    );
+    assert.equal(
+      publishBarNote({ ...NEVER_RUN, evidenceChecked: true }),
+      "Nothing blocks Publish. No name check ran on this draft.",
+    );
   });
 });
 
@@ -232,9 +335,19 @@ describe("recordedChecks reads the draft's own memo", () => {
         evidenceChecked: false,
         evidenceRequired: false,
         nameCheckComplete: false,
+        nameCheckRecorded: false,
         namesUnresolved: 0,
       });
     }
+  });
+
+  it("tells a record it cannot parse from no record at all", () => {
+    /* `nameCheck` present but not the version-1 shape `readNameCheck` accepts:
+       it is still a record -- a check pass wrote it -- so the bar must not say
+       no name check ran. */
+    const malformed = JSON.stringify({ nameCheck: { version: 2, rows: [] } });
+    assert.equal(recordedChecks(malformed).nameCheckComplete, false);
+    assert.equal(recordedChecks(malformed).nameCheckRecorded, true);
   });
 
   it("reads the two shapes reconcileDraftEvidence actually writes", () => {
@@ -277,6 +390,7 @@ describe("recordedChecks reads the draft's own memo", () => {
       evidenceChecked: false,
       evidenceRequired: false,
       nameCheckComplete: true,
+      nameCheckRecorded: true,
       namesUnresolved: 1,
     });
   });

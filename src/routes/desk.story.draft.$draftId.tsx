@@ -219,6 +219,7 @@ function EditorialPage() {
     namesUnresolved: namesPending,
     namedOutlets: 0,
     nameCheckComplete: recorded.nameCheckComplete,
+    nameCheckRecorded: recorded.nameCheckRecorded,
     namesOutstanding: namesStale,
   };
   const publishGates = [

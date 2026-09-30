@@ -7,11 +7,7 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
-import {
-  evidenceChip,
-  namesChip,
-  type CheckFacts,
-} from "@/lib/news/check-gates";
+import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
@@ -653,22 +649,19 @@ function DeskHome() {
     Unit U9 moved the two check chips' words into `lib/news/check-gates.ts` and
     the workbench now reads the same rule, so the desk and the story page
     cannot drift into telling an editor two different things about one draft.
-    The section chip is this row's own -- the workbench has no equivalent -- so
-    it stays here.
+    That rule is the desk home's own reading of a gate -- a pass only from the
+    record -- but it is NOT this chip's old output reproduced line for line:
+    U9b found two recorded rows it reads differently, and more honestly (see
+    `deskRowChecks`). The section chip is this row's own -- the workbench has no
+    equivalent -- so it stays here.
   */
   const tonightChips = (row: DraftRow) => {
-    const facts: CheckFacts = {
-      hasDraft: true,
-      evidenceChecked: Boolean(row.evidence_decision),
-      evidenceRequired: row.evidence_required,
-      /* This row carries no staleness, claim or running-check state; the story
-         page is where those are read, and it says so there. */
-      evidenceOutstanding: false,
-      namesUnresolved: row.names_unresolved,
-      namedOutlets: 0,
-      nameCheckComplete: row.name_check_complete,
-      namesOutstanding: false,
-    };
+    /*
+      U9b: the facts come from `deskRowChecks`, and its comment names the two
+      recorded rows where these chips deliberately print something different
+      from the inline chip that used to be written here (`required` alone).
+    */
+    const facts = deskRowChecks(row);
     const tone = { ok: "d-ok", warn: "d-warn", quiet: "d-quiet" } as const;
     const evidence = evidenceChip(facts);
     const names = namesChip(facts);
