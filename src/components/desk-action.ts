@@ -27,11 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 
-import {
-  deskErrorReason,
-  deskToast,
-  type DeskUndo,
-} from "@/components/desk-toast";
+import { deskErrorReason, deskToast, type DeskUndo } from "@/components/desk-toast";
 
 /** Where a press is between being pressed and answering. */
 export type DeskPhase = "idle" | "pending" | "done" | "failed";
@@ -50,6 +46,14 @@ export type DeskActionCopy<Result, Variables = void> = {
    * pack. ". The reason follows whatever this says, always.
    */
   failedLead?: string;
+  /**
+   * The press in a verb phrase -- "publish", "save the notes" -- for the
+   * failures `deskErrorReason` has to build a sentence for rather than carry
+   * through (a schema dump, a bare 500). Optional: a press that does not name
+   * itself gets "do that", which is only ever read by an editor whose press
+   * failed in one of those two ways.
+   */
+  what?: string;
   /**
    * The way back, for a press that can be taken back. Drawn on the done toast.
    * Returning null means this particular outcome is not reversible.
@@ -97,8 +101,11 @@ export function deskAnswerFailure(result: unknown): string | null {
  * path cannot be quietly shortened to a generic sentence without a test
  * noticing.
  */
-export function deskActionFailure(error: unknown, copy: { failedLead?: string }): string {
-  return `${copy.failedLead ?? ""}${deskErrorReason(error)}`;
+export function deskActionFailure(
+  error: unknown,
+  copy: { failedLead?: string; what?: string },
+): string {
+  return `${copy.failedLead ?? ""}${deskErrorReason(error, copy.what)}`;
 }
 
 export type DeskAction<Result> = {
@@ -191,6 +198,21 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
    * the absence of.
    */
   after?: (data: Data, variables: Variables) => void | Promise<void>;
+  /**
+   * Suppress this mutation's own toasts while this says so.
+   *
+   * M7 of the batch-6 pre-merge audit. A bulk press that fans out over twenty
+   * leads through this mutation would otherwise raise twenty toasts -- and the
+   * twenty-first press buries the first, so a partial failure scrolls away
+   * before it can be read. The caller doing the fan-out owns the outcome: it
+   * sets this while its batch is in flight and reports the whole batch in one
+   * sentence with one Undo, rather than leaving the editor to count toasts.
+   *
+   * A predicate and not a boolean because the fan-out is asynchronous: the
+   * caller flips its own ref either side of the batch, and this is read at the
+   * moment each item settles.
+   */
+  muted?: () => boolean;
 };
 
 /**
@@ -214,14 +236,18 @@ export function useDeskMutation<Data, Variables>(
     onSuccess: (data: Data, variables: Variables) => {
       const refusal = deskAnswerFailure(data);
       if (refusal) {
-        deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err" });
+        if (!optionsRef.current.muted?.())
+          deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err" });
         return;
       }
-      const { message, undo } = deskActionDone(data, variables, optionsRef.current);
-      if (message) deskToast(message, { tone: "ok", undo });
+      if (!optionsRef.current.muted?.()) {
+        const { message, undo } = deskActionDone(data, variables, optionsRef.current);
+        if (message) deskToast(message, { tone: "ok", undo });
+      }
       void optionsRef.current.after?.(data, variables);
     },
     onError: (error: Error) => {
+      if (optionsRef.current.muted?.()) return;
       deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
     },
   });
@@ -240,14 +266,63 @@ export function useDeskMutation<Data, Variables>(
   changes" line -- so the badge was describing a shortcut that ought to exist.
 */
 
-/** Is this press the desk's Save key? Cmd+S on a Mac, Ctrl+S everywhere else. */
+/**
+ * An open dialog, whichever way the desk draws one.
+ *
+ * A native `<dialog>` that has been shown carries `open`; the desk's own
+ * overlays are `role=dialog` with Radix's `data-state=open`. Both mean a
+ * surface owns the keyboard right now.
+ */
+export const DESK_DIALOG_OPEN_SELECTOR = "dialog[open], [role=dialog][data-state=open]";
+
+/** Is a dialog open over the desk? `root` is injectable so this stays testable. */
+export function deskDialogOpen(
+  root: ParentNode | null = typeof document === "undefined" ? null : document,
+): boolean {
+  return root?.querySelector(DESK_DIALOG_OPEN_SELECTOR) != null;
+}
+
+/**
+ * Is this press the desk's Save key? Cmd+S on a Mac, Ctrl+S everywhere else.
+ *
+ * M9 of the batch-6 pre-merge audit. The three fields beyond the modifier are
+ * the ones that made a bound ⌘S do something the editor did not ask for:
+ *
+ *  - `repeat` -- a held key fires this event dozens of times a second, and each
+ *    one is a save.
+ *  - `isComposing` -- mid-IME, the `s` is part of a character being built, not
+ *    a shortcut at all.
+ *  - `defaultPrevented` -- something closer to the keystroke already claimed
+ *    it. The desk's own dialogs handle keys on their own surfaces, and the
+ *    last thing that should happen is the workbench behind them saving too.
+ *
+ * They are optional in the signature because the callers that only construct
+ * the modifier half (tests, and anything synthesising a press) should not have
+ * to spell out fields whose absence means "not a repeat".
+ */
 export function isSaveShortcut(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> &
+    Partial<Pick<KeyboardEvent, "repeat" | "isComposing" | "defaultPrevented">>,
 ): boolean {
   if (!event.metaKey && !event.ctrlKey) return false;
   // Shift+Ctrl+S and Alt+Ctrl+S belong to the browser and the OS.
   if (event.altKey || event.shiftKey) return false;
+  if (event.repeat || event.isComposing || event.defaultPrevented) return false;
   return event.key.toLowerCase() === "s";
+}
+
+/**
+ * The whole decision: is this keystroke the desk's save, right now?
+ *
+ * Separate from `isSaveShortcut` because "a dialog is open" is not a property
+ * of the key -- it is a property of the screen at the moment it was pressed --
+ * and keeping the two apart is what lets both be tested without a browser.
+ */
+export function deskShouldSave(
+  event: Parameters<typeof isSaveShortcut>[0],
+  dialogOpen: boolean,
+): boolean {
+  return !dialogOpen && isSaveShortcut(event);
 }
 
 /**
@@ -266,7 +341,7 @@ export function useSaveShortcut(save: () => void, enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
     function onKey(event: KeyboardEvent) {
-      if (!isSaveShortcut(event)) return;
+      if (!deskShouldSave(event, deskDialogOpen())) return;
       // The browser's "Save page as…" is never what the editor meant.
       event.preventDefault();
       saveRef.current();

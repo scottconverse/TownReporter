@@ -69,6 +69,11 @@ export type EvidenceCheckState = {
    * and claims the record contradicts (unit U24b).
    */
   toReview: number;
+  /**
+   * How many of `toReview` the record CONTRADICTS (M5). Always `<= toReview`:
+   * a subset of the same rows, by the same predicate.
+   */
+  contradicted: number;
 };
 
 /**
@@ -135,6 +140,34 @@ export function claimsNeedingReview(
 }
 
 /**
+ * How many of those rows the captured record CONTRADICTS.
+ *
+ * M5 of the batch-6 pre-merge audit. `claimsNeedingReview` counts a
+ * contradiction with the unreviewed, because both are work a person has to do
+ * before this prints -- but they are not the same sentence to the editor. "Five
+ * claims need review" reads as five claims nobody has looked at; "three
+ * contradicted by the record" is the one an editor has to change the story for.
+ * Folding them together is how a story whose claim the record contradicts
+ * prints with a head count that never mentioned it.
+ *
+ * A subset of `claimsNeedingReview`, by construction: the same `judgmentChip`
+ * predicate decides both, and this one keeps only the `contradicts` rows. So
+ * this can never exceed the count on the blocker that carries it.
+ */
+export function contradictedClaims(
+  rows: readonly FindingEvidenceRow[],
+  claimRows: readonly ClaimEvidenceRow[],
+  manualClaimRows: readonly ManualClaimEvidenceRow[],
+): number {
+  let count = 0;
+  for (const row of [...rows, ...claimRows, ...manualClaimRows] as ReviewableRow[]) {
+    if (row.judgment.value !== "contradicts") continue;
+    if (judgmentChip(row.judgment.value, row.captures).chip === NEEDS_REVIEW_CHIP) count += 1;
+  }
+  return count;
+}
+
+/**
  * The state, from the two records and the run's own output.
  *
  * Every input is a count of something the desk already stores:
@@ -156,11 +189,15 @@ export function evidenceCheckState(input: {
   manualClaims: number;
   openClaims: number;
   toReview: number;
+  /** How many of `toReview` the record contradicts. Defaults to none. */
+  contradicted?: number;
 }): EvidenceCheckState {
   const fromTheRun = input.findings + input.claims + input.manualClaims;
   return {
     ran: input.recorded || fromTheRun > 0 || input.openClaims > 0,
     toReview: input.toReview,
+    // Cannot exceed the head count it is a subset of, whatever a caller passes.
+    contradicted: Math.min(input.contradicted ?? 0, input.toReview),
   };
 }
 
@@ -194,6 +231,9 @@ export function reviewEvidenceCheckState(input: {
     openClaims: input.openClaims,
     toReview: review
       ? claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows)
+      : 0,
+    contradicted: review
+      ? contradictedClaims(review.rows, review.claimRows, review.manualClaimRows)
       : 0,
   });
 }

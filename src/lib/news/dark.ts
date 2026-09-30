@@ -65,7 +65,7 @@ import {
 import { storableText } from "./storable-text.ts";
 import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
-import { usableLeadSources } from "./result-quality.ts";
+import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
@@ -656,6 +656,30 @@ type CapturedArtifactRow = {
   fetch_outcome: string | null;
   full_text: string | null;
 };
+
+/**
+ * One `artifacts` row as `leadSourceRefusalReason` reads it.
+ *
+ * The two handoff writers select these rows with snake_cased columns, and they
+ * used to hand the row straight to `usableLeadSources`, which reads
+ * `CapturedPage` -- `fetchStatus`, `fetchOutcome`, `text`. Every one of those
+ * was `undefined` on a raw row, and TypeScript never said so: `CapturedPage`'s
+ * fields are all optional, so a snake_cased row structurally *satisfies* it.
+ * The whole capture check was therefore skipped and a 404, a 403 or a
+ * soft-404 whose title happened to share a word with the lead was still listed
+ * as a source on it.
+ *
+ * The translation is explicit and in one place so a later column can be added
+ * without the judge silently reading `undefined` for it. A capture read any
+ * other way is a capture the desk has not judged.
+ */
+const capturedPageOf = (row: CapturedArtifactRow): CapturedPage => ({
+  url: row.url,
+  title: row.title,
+  fetchStatus: row.fetch_status,
+  fetchOutcome: row.fetch_outcome,
+  text: row.full_text,
+});
 
 const HANDOFFS = new Set([
   "HOLD FOR PATTERN",
@@ -3046,7 +3070,9 @@ export async function sendDarkSignalToQueueFor(
         order by id desc limit 40
       `;
   const urls = JSON.stringify(
-    sanitizePublicUrls(usableLeadSources(arts, sig.name).map((a) => a.url)).slice(0, 12),
+    sanitizePublicUrls(
+      usableLeadSources(arts.map(capturedPageOf), sig.name).map((a) => a.url),
+    ).slice(0, 12),
   );
   /*
     `why` is ASSEMBLED from the signal, and every part of it is the model's --
@@ -3160,7 +3186,7 @@ export async function queueInvestigationFor(
     order by id desc limit 40
   `;
   const leadWords = `${inv[0].title}\n${inv[0].summary}`;
-  const leadSources = usableLeadSources(arts, leadWords);
+  const leadSources = usableLeadSources(arts.map(capturedPageOf), leadWords);
   const urls = JSON.stringify(sanitizePublicUrls(leadSources.map((a) => a.url)).slice(0, 12));
   /*
     Same reading as the Write box (Unit P item 2): this newsroom's own section
@@ -3287,7 +3313,9 @@ export async function queueInvestigationFor(
     section: topicUnchosen ? null : topic,
     pages: leadSources.slice(0, 12).map((art) => ({
       url: art.url,
-      title: art.title,
+      // `CapturedPage.title` is nullable because a capture may have none;
+      // a proposed source with no title is one with the field absent.
+      title: art.title ?? undefined,
       reason: `Read while developing "${inv[0].title.slice(0, 120)}" on the Dark Desk.`,
     })),
   });

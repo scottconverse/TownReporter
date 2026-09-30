@@ -68,13 +68,21 @@ const SEARCH_ENGINE_HOSTS = [
   "duckduckgo.com",
   "search.brave.com",
   "support.google.com",
-  "google.com",
   "baidu.com",
   "yandex.com",
 ];
 
-/** A consent wall, a captcha or a redirect interstitial is not the article. */
-const INTERSTITIAL_PATH = /\/(?:consent|cookie|cookies|sorry|redirect|captcha|login|signin|sign-in)\b/i;
+/**
+ * A consent wall, a captcha or a redirect interstitial is not the article.
+ *
+ * M2 of the batch-6 pre-merge audit: the trailing `\b` matched a segment that
+ * merely STARTS with one of these words, so `/city-council/consent-agenda` --
+ * a real council agenda -- was refused as a consent page. The segment has to BE
+ * the interstitial, not begin with it: the word, then the end of the path or a
+ * query string. `/cityclerk/consent/2024.pdf` is a document filed under a
+ * directory named `consent`, and it survives for the same reason.
+ */
+const INTERSTITIAL_PATH = /\/(?:consent|cookie|cookies|sorry|redirect|captcha|login|signin|sign-in)\/?$/i;
 
 function hostOf(url: string): string {
   try {
@@ -83,6 +91,23 @@ function hostOf(url: string): string {
     return "";
   }
 }
+
+/**
+ * Google is the one host that is both a search engine and a document store.
+ *
+ * M2 of the batch-6 pre-merge audit: `google.com` sat in `SEARCH_ENGINE_HOSTS`,
+ * and `onList` matches a host that ends with `.google.com` -- so Docs, Drive,
+ * Sites and News, which the desk reads on purpose (a council packet shared from
+ * Drive is a record), were all refused as "another search engine's own page".
+ * The search surface is the bare host, or `/search`; nothing else on the domain
+ * is the engine answering with itself.
+ */
+function isGoogleSearchSurface(host: string, pathname: string): boolean {
+  if (host !== "google.com") return false;
+  const path = pathname.replace(/\/+$/, "");
+  return path === "" || path === "/search" || path.startsWith("/search/");
+}
+
 
 const onList = (host: string, list: readonly string[]) =>
   list.some((entry) => host === entry || host.endsWith(`.${entry}`));
@@ -98,11 +123,12 @@ const onList = (host: string, list: readonly string[]) =>
 export function boilerplatePageReason(url: string): string | null {
   const host = hostOf(url);
   if (!host) return "the address could not be read";
+  const pathname = new URL(url, "https://x/").pathname;
   if (onList(host, DICTIONARY_HOSTS)) return "a dictionary entry, not a record";
   if (onList(host, APP_LANDING_HOSTS)) return "an app or video landing page, not a record";
-  if (onList(host, SEARCH_ENGINE_HOSTS)) return "another search engine's own page";
-  if (INTERSTITIAL_PATH.test(new URL(url, "https://x/").pathname))
-    return "a consent, sign-in or redirect page, not the article";
+  if (onList(host, SEARCH_ENGINE_HOSTS) || isGoogleSearchSurface(host, pathname))
+    return "another search engine's own page";
+  if (INTERSTITIAL_PATH.test(pathname)) return "a consent, sign-in or redirect page, not the article";
   return null;
 }
 

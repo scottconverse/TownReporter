@@ -91,6 +91,52 @@ describe("reading a truncated planner reply", () => {
     assert.equal(plan.searches.length, 1, "an object that opened as an object must read as one");
   });
 
+  /*
+    M4 of the batch-6 pre-merge audit. Closing the open quote is right for the
+    `summary` above and wrong for everything else: at that point the string is
+    an item, and completing it turns however much of it the cap left into a real
+    one. A cut URL becomes a URL the dig fetches; a cut claim becomes a claim
+    the editor reads. Three probes, one per kind of item a plan carries.
+
+    THE MUTATION THAT MATTERS. Dropping the `openStack.length === 1 &&
+    openStack[0] === "{"` guard -- closing the string wherever the cut landed,
+    which is what this did before -- fails all three.
+  */
+  it("drops a cut fetch_urls entry instead of completing the address", () => {
+    const CUT_INSIDE_FETCH_URLS =
+      '{"searches":["Kid City USA license"],' +
+      ' "fetch_urls":["https://cdhs.colorado.gov/child-care-facility-search",' +
+      ' "https://www.longmontcolorado.gov/agen';
+    const plan = parsePlan(parseJsonBlockSalvage<unknown>(CUT_INSIDE_FETCH_URLS));
+    assert.deepEqual(
+      plan.fetch_urls,
+      ["https://cdhs.colorado.gov/child-care-facility-search"],
+      "a half-written address was completed into one the dig would fetch",
+    );
+    assert.deepEqual(plan.searches, ["Kid City USA license"], "the complete searches were lost");
+  });
+
+  it("drops a cut claim instead of completing it", () => {
+    const CUT_INSIDE_A_CLAIM =
+      '{"searches":[],"fetch_urls":[],"stop":false,' +
+      ' "entities":[{"name":"Kid City USA","kind":"company","why":"the licensee"},' +
+      ' {"name":"Colora';
+    const plan = parsePlan(parseJsonBlockSalvage<unknown>(CUT_INSIDE_A_CLAIM));
+    assert.equal(plan.entities.length, 1, "a half-written claim came back as a whole one");
+    assert.equal(plan.entities[0]!.name, "Kid City USA");
+  });
+
+  it("drops a cut query instead of completing it", () => {
+    const CUT_INSIDE_SEARCHES =
+      '{"searches":["Kid City USA closure Longmont","Colorado child care lic';
+    const plan = parsePlan(parseJsonBlockSalvage<unknown>(CUT_INSIDE_SEARCHES));
+    assert.deepEqual(
+      plan.searches,
+      ["Kid City USA closure Longmont"],
+      "a half-written query was completed into one the dig would run",
+    );
+  });
+
   it("still refuses a reply with no JSON in it", () => {
     assert.equal(parseJsonBlockSalvage("I could not produce a plan for this hop."), null);
   });

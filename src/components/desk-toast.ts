@@ -38,6 +38,7 @@
  */
 import { createElement, type MouseEvent } from "react";
 import { toast } from "sonner";
+import { editorActionError, looksLikeValidationDump } from "../lib/news/desk-copy.ts";
 
 /** How a finished press reads. `ok` is the spec's yellow bar; `err` a failure. */
 export type DeskTone = "ok" | "err" | "warn";
@@ -55,6 +56,17 @@ export type DeskToastOptions = {
   undo?: DeskUndo | null;
   /** Override the tone's default life. Milliseconds. */
   duration?: number;
+  /**
+   * Coalesce with the toast already carrying this id.
+   *
+   * M7 of the batch-6 pre-merge audit. Pressing a bulk control twice used to
+   * leave two summaries stacked, the second describing the same leads as the
+   * first, and three presses left three. Sonner replaces a toast that is handed
+   * an id it already knows, so a caller reporting the progress of one action
+   * passes the same id every time and the editor sees one line that updates.
+   * A caller reporting a *new* action leaves this out and stacks as before.
+   */
+  id?: string | number;
 };
 
 /*
@@ -70,6 +82,78 @@ export const DESK_TOAST_ERR_MS = 12_000;
 export const DESK_TOAST_HOST_ATTR = "data-desk-toaster";
 
 /**
+ * How far the toast stack is held off the bottom of the screen, in px.
+ *
+ * M6 of the batch-6 pre-merge audit. Two bars live at the bottom of a desk
+ * screen -- the story workbench's publish bar (`position: sticky; bottom: 0`,
+ * `desk-astra.css`, holding the gates between a draft and the paper) and the
+ * unsaved-changes bar (`fixed bottom-0`, `unsaved-changes-guard.tsx`) -- and a
+ * toast that covers either is a toast covering a control. This is the clear
+ * height: both bars are a 44px button in ~14px of padding either side, so
+ * anything at or above 88px clears the taller of them, and `desk-astra.css`
+ * carries the same number as `--desk-toast-lift` for the phone override. A test
+ * in `desk-toaster.test.ts` holds the two together.
+ */
+export const DESK_TOAST_LIFT = 96;
+
+/*
+  The stack's geometry, as values rather than as markup.
+
+  M6 again: `desk-toaster.tsx` draws them, and they live here so a test can hold
+  them to their rules -- the position, the lift and the nav-aware left offset
+  are the three things M6 is about, and all three are data. `offset.left` is
+  `--desk-nav-w` plus a gutter rather than a number because the sidebar is
+  230px, 206px under 1200px and 0px on a phone, where the nav is off-canvas.
+*/
+export const DESK_TOASTER_POSITION = "bottom-left" as const;
+/**
+ * On a phone the stack is anchored to the TOP, not the bottom.
+ *
+ * M6: a phone's keyboard and its browser chrome own the bottom of a 390px
+ * screen, and the sticky phone topbar (`.astra-topbar`, `desk-astra.css`,
+ * `≤700px`) already owns the top with a known height. `DeskToaster` picks this
+ * one at mount from {@link DESK_TOASTER_PHONE_QUERY}.
+ *
+ * IT IS THE ATTRIBUTE, NOT THE BOX. An earlier cut of this left `position` at
+ * `bottom-left` and moved the stack with a `≤700px` stylesheet rule setting
+ * `top: …; bottom: auto`. Measured in a 390px frame, that put the CARD at
+ * y=28px -- overlapping the very header the offset was meant to clear --
+ * because sonner still laid the toast out as a bottom-anchored stack and only
+ * the box moved. Sonner writes `data-y-position` from this prop and lays the
+ * cards out by it, so the prop is the only honest way to change the edge.
+ */
+export const DESK_TOASTER_PHONE_POSITION = "top-left" as const;
+/** The width at which the desk is a phone, the same one `desk-astra.css` uses. */
+export const DESK_TOASTER_PHONE_QUERY = "(max-width: 700px)";
+
+/**
+ * `bottom` and `top` are BOTH the clear height, and that is deliberate.
+ *
+ * Sonner swaps to `--mobile-offset-*` at its own 600px breakpoint, which is not
+ * this desk's 700px, so a 620px frame is "a phone" to one of them and not the
+ * other. Both variables carrying the same number is what makes that
+ * disagreement harmless.
+ */
+export const DESK_TOASTER_OFFSET = {
+  bottom: DESK_TOAST_LIFT,
+  top: DESK_TOAST_LIFT,
+  left: "calc(var(--desk-nav-w, 0px) + 16px)",
+  right: 16,
+};
+/** On a phone the nav is off-canvas, so the left offset is a plain gutter. */
+export const DESK_TOASTER_MOBILE_OFFSET = {
+  top: DESK_TOAST_LIFT,
+  bottom: DESK_TOAST_LIFT,
+  left: 16,
+  right: 16,
+};
+
+/** Which edge the stack hangs from, decided by the frame it is drawn in. */
+export function deskStackPosition(phone: boolean): "bottom-left" | "top-left" {
+  return phone ? DESK_TOASTER_PHONE_POSITION : DESK_TOASTER_POSITION;
+}
+
+/**
  * Is a toast host mounted on this page?
  *
  * `announceToDesk` asks this before deciding which live region speaks, so the
@@ -81,30 +165,84 @@ export function deskToastHostMounted(): boolean {
   return document.querySelector("[" + DESK_TOAST_HOST_ATTR + "]") !== null;
 }
 
-/**
- * The real reason a press failed, in words.
- *
- * Not a lookup table of friendly replacements: the desk's server functions
- * already answer with sentences written for an editor, so the honest thing is
- * to carry that sentence through. A thrown non-Error still gets named rather
- * than swallowed, and an empty message falls back to a sentence that at least
- * says which half of the exchange broke.
- */
-export function deskErrorReason(error: unknown): string {
-  const nothingToSay = "the desk gave no reason";
-  if (error instanceof Error) return error.message.trim() || nothingToSay;
-  if (typeof error === "string") return error.trim() || nothingToSay;
+/** The message an error-shaped value carries, or "" when it carries none. */
+function deskErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message.trim();
+  if (typeof error === "string") return error.trim();
   if (error && typeof error === "object") {
     /*
       An error-shaped object with no `message` has nothing to carry through, and
-      `String({})` would put "[object Object]" in front of the editor. The
-      generic sentence is the honest answer for it.
+      `String({})` would put "[object Object]" in front of the editor.
     */
-    const message = String((error as { message?: unknown }).message ?? "").trim();
-    return message || nothingToSay;
+    return String((error as { message?: unknown }).message ?? "").trim();
   }
-  if (error == null) return nothingToSay;
-  return String(error);
+  if (error == null) return "";
+  return String(error).trim();
+}
+
+/*
+  The three shapes the desk's own sentences do not cover.
+
+  M8 of the batch-6 pre-merge audit: `deskErrorReason` returned `error.message`
+  verbatim, so the most common failure of all -- the desk not being up, or the
+  editor's connection dropping -- reached the editor as the browser's own
+  "Failed to fetch", which names nothing they can act on and says nothing about
+  whether their press landed. The wording below is the desk's, and each one
+  answers the two questions a failed press raises: what happened, and did
+  anything change.
+*/
+const NETWORK_FAILURE = /failed to fetch|load failed|networkerror|network request failed/i;
+const TIMEOUT_FAILURE = /abort|timed out|timeout/i;
+const SIGNED_OUT_FAILURE = /\b401\b|unauthorized|forbidden/i;
+
+export const DESK_UNREACHABLE_REASON =
+  "The desk could not be reached. Check that it is running and your connection. Nothing was changed.";
+export const DESK_TOO_SLOW_REASON =
+  "The desk took too long. It may have finished — reload before pressing again.";
+export const DESK_SIGNED_OUT_REASON = "You are signed out or not allowed to do that. Sign in again.";
+
+/**
+ * The real reason a press failed, in words.
+ *
+ * The desk's server functions already answer with sentences written for an
+ * editor, so the honest thing is to carry that sentence through -- that is
+ * still the bulk of this function, and `what` is not decoration: it is the word
+ * `editorActionError` needs to say which press failed.
+ *
+ * What is NOT carried through is a message that only names the transport. A
+ * browser's `TypeError: Failed to fetch` and a Zod dump are both true and both
+ * useless to an editor, and the second one also prints the schema's own field
+ * paths at them (see `editorActionError`, desk-copy.ts). A thrown non-Error is
+ * still named rather than swallowed, and an empty message falls back to a
+ * sentence that at least says which half of the exchange broke.
+ */
+export function deskErrorReason(error: unknown, what = "do that"): string {
+  const raw = deskErrorMessage(error);
+  if (!raw) return "the desk gave no reason";
+  /*
+    The transport never got an answer. Checked before everything else because
+    each of these is a sentence that has to be *replaced*: the browser's text
+    says nothing about whether the press landed, and the editor's next move
+    (start the desk / reload before pressing again / sign in) is the whole
+    point of saying anything at all.
+  */
+  if (NETWORK_FAILURE.test(raw)) return DESK_UNREACHABLE_REASON;
+  if (TIMEOUT_FAILURE.test(raw)) return DESK_TOO_SLOW_REASON;
+  if (SIGNED_OUT_FAILURE.test(raw)) return DESK_SIGNED_OUT_REASON;
+  /*
+    A schema dump or a bare 500 is not a sentence either, and `editorActionError`
+    is the one place that turns either into one -- the same words the rest of
+    the desk uses for the same failure. The predicates are repeated here rather
+    than called through, because `editorActionError` also rewrites ordinary
+    text through `plainEditorText`, and a real refusal must pass through
+    untouched.
+  */
+  if (
+    looksLikeValidationDump(raw) ||
+    /unexpected server error|internal server error|status code 500/i.test(raw)
+  )
+    return editorActionError(raw, what) ?? raw;
+  return raw;
 }
 
 /**
@@ -131,6 +269,9 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
   const data: Parameters<typeof toast.success>[1] = {
     className: "desk-toast desk-toast-" + tone,
     duration: options.duration ?? (tone === "err" ? DESK_TOAST_ERR_MS : DESK_TOAST_OK_MS),
+    // Undefined is sonner's own "a fresh toast"; an id replaces the one on
+    // screen. See `DeskToastOptions.id`.
+    id: options.id,
   };
 
   /*
@@ -149,7 +290,9 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
         void Promise.resolve()
           .then(() => undo.run())
           .catch((err: unknown) => {
-            deskToast(`The undo did not go through: ${deskErrorReason(err)}`, { tone: "err" });
+            deskToast(`The undo did not go through: ${deskErrorReason(err, "take that back")}`, {
+              tone: "err",
+            });
           })
           .finally(() => toast.dismiss(id));
       },

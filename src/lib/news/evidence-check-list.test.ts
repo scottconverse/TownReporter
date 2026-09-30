@@ -180,7 +180,7 @@ describe("evidenceRanLine", () => {
   /* Unit U24: the line is a reading of the shared state, so every case below
      says what a check that RAN looks like. The state's own cases -- a line for
      a draft nothing ran on -- are in `evidence-check-state.test.ts`. */
-  const RAN = { ran: true, toReview: 0 } as const;
+  const RAN = { ran: true, toReview: 0, contradicted: 0 } as const;
 
   it("writes the drawn line from the record, in the drawn order", () => {
     assert.equal(
@@ -246,7 +246,7 @@ describe("evidenceRanLine", () => {
   it("says nothing when the shared state says no check ran, whatever the captures", () => {
     assert.equal(
       evidenceRanLine({
-        state: { ran: false, toReview: 0 },
+        state: { ran: false, toReview: 0, contradicted: 0 },
         checkedAt: null,
         modelLabel: "",
         captures: 2,
@@ -258,7 +258,7 @@ describe("evidenceRanLine", () => {
   it("counts the claims waiting on a person, the count the blocker prints", () => {
     assert.equal(
       evidenceRanLine({
-        state: { ran: true, toReview: 7 },
+        state: { ran: true, toReview: 7, contradicted: 0 },
         checkedAt: null,
         modelLabel: "",
         captures: 2,
@@ -267,7 +267,7 @@ describe("evidenceRanLine", () => {
     );
     assert.equal(
       evidenceRanLine({
-        state: { ran: true, toReview: 1 },
+        state: { ran: true, toReview: 1, contradicted: 0 },
         checkedAt: null,
         modelLabel: "",
         captures: 0,

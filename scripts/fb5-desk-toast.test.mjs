@@ -225,6 +225,89 @@ test("deskErrorReason never swallows a failure, however it arrives", () => {
   assert.equal(deskErrorReason(undefined), "the desk gave no reason");
 });
 
+/*
+  M8 of the batch-6 pre-merge audit, on the live path.
+
+  The sentences themselves are pinned in `src/components/desk-toast.test.ts`,
+  which can load `desk-toast.ts` directly. What only this file can prove is that
+  the mapping survives the trip through the toast: a press that failed on the
+  transport is DRAWN with the desk's sentence, not the browser's -- which is
+  what the editor actually reads.
+*/
+test("a failure that never reached the desk is drawn with the desk's own sentence", async () => {
+  await withDesk(async (scope) => {
+    await say(deskErrorReason(new Error("TypeError: Failed to fetch")), "err");
+    const { text } = scope.redraw();
+    assert.equal(text.length, 1);
+    assert.match(text[0], /The desk could not be reached/);
+    assert.match(text[0], /Nothing was changed/);
+    assert.doesNotMatch(text[0], /Failed to fetch/, "the browser's words reached the editor");
+  });
+});
+
+/*
+  M6 of the batch-6 pre-merge audit, on the element sonner actually builds.
+
+  `src/components/desk-toaster.test.ts` pins the geometry as data; this pins
+  that the mounted component hands it over. Sonner writes `data-y-position` and
+  the `--offset-*` custom properties onto the positioned `<ol>` it creates, and
+  it only creates that once there is a toast to put in it -- so the stack has to
+  be drawn first.
+*/
+test("the mounted stack is bottom-left, lifted clear of the bottom bars", async () => {
+  await withDesk(async (scope) => {
+    await say("Held 12.");
+    const { bars } = scope.redraw();
+    assert.equal(bars.length, 1, "no stack was drawn to measure");
+
+    const stack = scope.container.querySelector("[data-sonner-toaster]");
+    assert.ok(stack, "sonner built no positioned host");
+    assert.equal(stack.getAttribute("data-y-position"), "bottom");
+    assert.equal(stack.getAttribute("data-x-position"), "left");
+    const style = stack.getAttribute("style") ?? "";
+    const bottom = /--offset-bottom:\s*(\d+)px/.exec(style);
+    assert.ok(bottom, `no bottom offset on the stack: ${style}`);
+    assert.ok(
+      Number(bottom[1]) >= 88,
+      `the stack sits ${bottom[1]}px off the bottom, under the publish bar`,
+    );
+    assert.match(style, /--offset-left:\s*calc\(var\(--desk-nav-w/);
+  });
+});
+
+/*
+  The phone half. The edge is sonner's `data-y-position`, and that attribute
+  comes from the `position` prop, so it is the prop that has to change -- an
+  earlier cut moved the box with a `≤700px` stylesheet rule and left the
+  attribute saying bottom, which laid the card out bottom-anchored and put it
+  at y=28px, over the header it was meant to clear. The frame is stubbed here
+  because `matchMedia` is what `DeskToaster` reads at mount.
+*/
+test("on a phone the mounted stack hangs from the top, at the same clear height", async () => {
+  const original = globalThis.matchMedia;
+  globalThis.matchMedia = (query) => ({
+    matches: query === "(max-width: 700px)",
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  });
+  try {
+    await withDesk(async (scope) => {
+      await say("Killed 2.");
+      const stack = scope.container.querySelector("[data-sonner-toaster]");
+      assert.ok(stack, "sonner built no positioned host");
+      assert.equal(stack.getAttribute("data-y-position"), "top");
+      assert.equal(stack.getAttribute("data-x-position"), "left");
+      const style = stack.getAttribute("style") ?? "";
+      const top = /--offset-top:\s*(\d+)px/.exec(style);
+      assert.ok(top, `no top offset on the stack: ${style}`);
+      assert.ok(Number(top[1]) >= 88, `the stack hangs ${top[1]}px from the top, under the header`);
+    });
+  } finally {
+    globalThis.matchMedia = original;
+  }
+});
+
 test("deskToast is callable with no host at all and does not throw", () => {
   assert.doesNotThrow(() => deskToast("Nowhere to draw this, but the call is safe."));
 });

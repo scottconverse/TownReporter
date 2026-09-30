@@ -320,4 +320,51 @@ describe("U24: claims the evidence check raised and nobody judged", () => {
   it("does not fire for a draft whose claims were all judged, or that raised none", () => {
     assert.deepEqual(publishBlockers(withState({ unreviewedClaims: 0 })), []);
   });
+
+  /*
+    M5 of the batch-6 pre-merge audit. `claimsNeedingReview` counts a claim the
+    record CONTRADICTS with the claims nobody has got to, which is right for the
+    head count and silent about the part that matters: the record says the story
+    is wrong. The count now carries it, and so does the override -- nobody
+    presses "Publish anyway" without being told what they are accepting.
+
+    THE MUTATION THAT MATTERS. Passing `contradictedClaims` but not wiring it
+    into the sentence or the alt action fails both cases below.
+  */
+  it("says how many of them the record contradicts", () => {
+    const [only] = publishBlockers(
+      withState({ unreviewedClaims: 7, contradictedClaims: 3 }),
+    );
+    assert.match(only?.sentence ?? "", /^7 claims need review \(3 contradicted by the record\)\./);
+    assert.match(only?.sentence ?? "", /the record contradicts 3 of them/);
+    assert.deepEqual(only?.altAction, {
+      label: "Publish anyway — I accept these claims, including 3 the record contradicts",
+      target: { kind: "accept-unreviewed" },
+    });
+  });
+
+  it("says it for one claim too, without the plural", () => {
+    const [only] = publishBlockers(withState({ unreviewedClaims: 1, contradictedClaims: 1 }));
+    assert.match(only?.sentence ?? "", /^1 claim needs review \(1 contradicted by the record\)\./);
+    assert.match(only?.sentence ?? "", /the record contradicts it/);
+    assert.match(only?.altAction?.label ?? "", /including 1 the record contradicts/);
+  });
+
+  it("keeps the old wording when nothing is contradicted", () => {
+    const [only] = publishBlockers(
+      withState({ unreviewedClaims: 7, contradictedClaims: 0 }),
+    );
+    assert.equal(
+      only?.sentence,
+      "7 claims need review. The evidence check raised them and no one has judged them against the record.",
+    );
+    assert.equal(only?.altAction?.label, "Publish anyway — I accept these claims are unreviewed");
+  });
+
+  it("never lets the contradicted count outrun the head count", () => {
+    const [only] = publishBlockers(
+      withState({ unreviewedClaims: 2, contradictedClaims: 9 }),
+    );
+    assert.match(only?.sentence ?? "", /^2 claims need review \(2 contradicted by the record\)\./);
+  });
 });

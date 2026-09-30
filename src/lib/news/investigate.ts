@@ -2694,10 +2694,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         It used to be handed `graph` -- the whole retrieved pack, captured page
         text and scraped titles included -- and derived its searches from that.
         That is where `"Under - Paducah, KY 42001 - Menu, Reviews, Hours &amp;
-        Contact — https://restaurantjump" Longmont` and `"UNDER Definition &amp;
-        Meaning - Merriam-Webster — https://merriam-webster" Longmont` came
-        from: the fallback was searching for the pages it had already fetched,
-        site names, dashes and all.
+        Contact — https://restaurantjump" <the paper's city>` and `"UNDER
+        Definition &amp; Meaning - Merriam-Webster — https://merriam-webster"
+        <the paper's city>` came from: the fallback was searching for the pages
+        it had already fetched, site names, dashes and all.
 
         The fallback runs when the planner could not, which is the moment the
         desk knows least. It now reads the lead itself: the investigation's own

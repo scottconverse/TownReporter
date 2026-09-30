@@ -62,6 +62,60 @@ describe("pages that are never the article", () => {
     ])
       assert.equal(boilerplatePageReason(url), null, `a real record was refused: ${url}`);
   });
+
+  /*
+    M2 of the batch-6 pre-merge audit. Two rules were wider than the shapes
+    that produced them and refused real records. Both sides are pinned here: the
+    page that must survive, and the page of the same shape that must not.
+
+    THE MUTATIONS THAT MATTER. Putting the trailing `\b` back on
+    `INTERSTITIAL_PATH` fails "keeps a record filed under a consent directory"
+    and "keeps a council consent agenda"; putting `google.com` back in
+    `SEARCH_ENGINE_HOSTS` fails "keeps the Google documents the desk reads".
+  */
+  it("keeps a record filed under a consent directory", () => {
+    for (const url of [
+      "https://www.longmontcolorado.gov/city-council/consent-agenda",
+      "https://www.longmontcolorado.gov/cityclerk/consent/2024.pdf",
+      "https://example.gov/redirects/2024-budget.pdf",
+      "https://example.gov/login-history/meeting-notes",
+    ])
+      assert.equal(boilerplatePageReason(url), null, `a real record was refused: ${url}`);
+  });
+
+  it("still refuses the interstitial of the same shape", () => {
+    for (const url of [
+      "https://outlook.office.com/mail/signin",
+      "https://example.com/consent?next=/article",
+      "https://example.com/cookie",
+      "https://example.com/sorry/",
+      "https://example.com/captcha",
+    ])
+      assert.ok(boilerplatePageReason(url), `an interstitial was kept: ${url}`);
+    assert.match(
+      boilerplatePageReason("https://outlook.office.com/mail/signin")!,
+      /consent, sign-in or redirect/,
+    );
+  });
+
+  it("keeps the Google documents the desk reads", () => {
+    for (const url of [
+      "https://docs.google.com/document/d/1abc/edit",
+      "https://drive.google.com/file/d/1abc/view",
+      "https://sites.google.com/view/longmont-neighborhoods",
+      "https://news.google.com/articles/abc",
+    ])
+      assert.equal(boilerplatePageReason(url), null, `a real record was refused: ${url}`);
+  });
+
+  it("still refuses Google answering with itself", () => {
+    for (const url of ["https://www.google.com/", "https://google.com/search?q=council+packet"])
+      assert.ok(boilerplatePageReason(url), `a search engine page was kept: ${url}`);
+    assert.match(
+      boilerplatePageReason("https://google.com/search?q=x")!,
+      /another search engine/,
+    );
+  });
 });
 
 describe("what may be listed as a source on a lead", () => {

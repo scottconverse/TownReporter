@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   acceptanceCoversDraft,
   claimsNeedingReview,
+  contradictedClaims,
   evidenceCheckState,
   reviewEvidenceCheckState,
   unreviewedClaimsFingerprint,
@@ -192,7 +193,7 @@ describe("U24: did an evidence check run", () => {
       openClaims: 0,
       toReview: 0,
     });
-    assert.deepEqual(state, { ran: false, toReview: 0 });
+    assert.deepEqual(state, { ran: false, toReview: 0, contradicted: 0 });
   });
 
   it("counts each of the three records on its own", () => {
@@ -213,7 +214,7 @@ describe("U24: did an evidence check run", () => {
       openClaims: 0,
       toReview: 0,
     });
-    assert.deepEqual(quiet, { ran: true, toReview: 0 });
+    assert.deepEqual(quiet, { ran: true, toReview: 0, contradicted: 0 });
   });
 
   it("says nothing about review work when the review has not been read", () => {
@@ -222,10 +223,12 @@ describe("U24: did an evidence check run", () => {
     assert.deepEqual(reviewEvidenceCheckState({ review: null, recorded: true, openClaims: 0 }), {
       ran: true,
       toReview: 0,
+      contradicted: 0,
     });
     assert.deepEqual(reviewEvidenceCheckState({ review: null, recorded: false, openClaims: 0 }), {
       ran: false,
       toReview: 0,
+      contradicted: 0,
     });
   });
 
@@ -237,8 +240,63 @@ describe("U24: did an evidence check run", () => {
     };
     assert.deepEqual(
       reviewEvidenceCheckState({ review, recorded: false, openClaims: 0 }),
-      { ran: true, toReview: 2 },
+      { ran: true, toReview: 2, contradicted: 0 },
       "two rows need a person; the unreadable one and the judged one do not",
+    );
+  });
+
+  /*
+    M5 of the batch-6 pre-merge audit. `contradicted` is not a second count of
+    a different thing: it is the part of `toReview` the record disagrees with,
+    so the editor can be told which of the claims in front of them the story is
+    wrong about.
+
+    THE MUTATION THAT MATTERS. Counting every needing-review row rather than
+    only the `contradicts` ones fails "counts only the rows the record
+    contradicts"; dropping the chip check fails "never exceeds the head count".
+  */
+  it("counts only the rows the record contradicts", () => {
+    const review = {
+      rows: [row("unreviewed", [readable]), row("contradicts", [readable])],
+      claimRows: [claimRow("contradicts", [readable])],
+      manualClaimRows: [manualRow("unreviewed", [readable])],
+    };
+    const state = reviewEvidenceCheckState({ review, recorded: true, openClaims: 0 });
+    assert.equal(state.toReview, 4, "all four rows need a person");
+    assert.equal(state.contradicted, 2, "two of them the record contradicts");
+  });
+
+  it("never exceeds the head count, whatever a caller passes", () => {
+    assert.equal(
+      evidenceCheckState({
+        recorded: true,
+        findings: 0,
+        claims: 0,
+        manualClaims: 0,
+        openClaims: 0,
+        toReview: 2,
+        contradicted: 9,
+      }).contradicted,
+      2,
+      "a contradicted count over a head count is not a number anyone can print",
+    );
+  });
+
+  it("is a subset of the head count, by the same chip", () => {
+    /*
+      `judgmentChip` chips EVERY `contradicts` row `! Needs review`, whatever
+      captures it holds -- U24b's point is that a recorded contradiction is not
+      an answer the desk may print on, so it stays review work even when the
+      record has since become unreadable. So every contradicted row is counted
+      by both predicates, and the blocker's "(M contradicted by the record)" can
+      never be larger than its own head count.
+    */
+    const rows = [row("contradicts", [readable]), row("contradicts", [unreadable])];
+    assert.equal(contradictedClaims(rows, [], []), 2);
+    assert.equal(claimsNeedingReview(rows, [], []), 2);
+    assert.ok(
+      contradictedClaims(rows, [], []) <= claimsNeedingReview(rows, [], []),
+      "the contradicted count is a subset, never a second total",
     );
   });
 });

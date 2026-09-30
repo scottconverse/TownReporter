@@ -21,7 +21,7 @@ import { useDeskMutation } from "@/components/desk-action";
 import { LeadFlags } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
-import { ListSkeleton, ScreenError } from "@/components/states";
+import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   draftLead,
   importFinishedStories,
@@ -280,6 +280,22 @@ function DeskHome() {
         : input.status === "held"
           ? "The lead is on hold, off the Queue until you release it."
           : "The lead moved to Killed, and its row keeps an Undo.",
+    /*
+      L4 of the batch-6 pre-merge audit. The Kill sentence above names an Undo,
+      and a killed row is exactly the one that may not be on screen to offer it
+      -- the Queue's "Open" tab drops it the moment the invalidation lands. So
+      the way back is on the toast that says it, not only on a row the editor
+      now has to go and find.
+    */
+    undo: (_result, input) =>
+      input.status === "new"
+        ? null
+        : {
+            label: "Undo",
+            run: async (): Promise<void> => {
+              await setStatus.mutateAsync({ id: input.id, status: "new" });
+            },
+          },
     failedLead: "Could not change that lead. ",
   });
   const srcStatus = useMutation({
@@ -404,8 +420,16 @@ function DeskHome() {
     onSuccess: ({ result, duplicate }) => {
       if (!result.ok) {
         const line = result.error || "That story was not added. Nothing was changed.";
+        /*
+          L3 of the batch-6 pre-merge audit. This set the sentence on screen AND
+          handed the same sentence to `announceToDesk`, which -- since FB5 --
+          draws it as a toast. The editor got the same line twice, and a screen
+          reader read it twice. The inline notice is the one kept: it is where
+          the editor is looking, it stays after the toast's twelve seconds, and
+          it is a live region already (`Notice` is `role=alert` for `err`), so
+          the sentence is still spoken exactly once.
+        */
         setPasteNotice(line);
-        announceToDesk(line, "err");
         return;
       }
       const first = result.imported[0];
@@ -421,8 +445,8 @@ function DeskHome() {
     onError: (err) => {
       const line =
         err instanceof Error ? err.message : "That story was not added. Nothing was changed.";
+      // Same rule as the refusal above: one sentence, said once.
       setPasteNotice(line);
-      announceToDesk(line, "err");
     },
   });
   const writeStory = useMutation({
@@ -1527,11 +1551,13 @@ function DeskHome() {
                   </span>
                 </div>
               </div>
-              {pasteNotice ? (
-                <p className="composer-source-note" role="status">
-                  {pasteNotice}
-                </p>
-              ) : null}
+              {/*
+                L3: this is the ONE announcement for a failed paste (see the
+                mutation above). It is the desk's own `Notice` rather than a
+                bare `role=status` line so a failure is `role=alert`, the same
+                severity the toast it replaced carried.
+              */}
+              {pasteNotice ? <Notice kind="err">{pasteNotice}</Notice> : null}
               {pasted ? (
                 /*
                   Unit CA, note 6. This panel is reached by its own hash

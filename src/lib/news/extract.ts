@@ -224,7 +224,28 @@ export function preferPrimaryUrls(urls: string[], subjects: string[]): string[] 
  * The reasons are named rather than lumped into one boolean so the run file can
  * say which rule dropped what, and so a test can hold each rule to its own
  * string. The caller caps and de-duplicates what survives; this only judges.
+ *
+ * M1 of the batch-6 pre-merge audit: the first cut of these rules refused real
+ * civic searches along with the junk. `"2023-0456" Longmont contract`,
+ * `"PO 12345"`, `"O-2024-15"`, `"RFP"` and `"SAMHSA"` -- the contract, bid and
+ * agency identifiers the desk derives from the record and quotes itself in
+ * `queriesForRef` -- all came back "a quoted fragment shorter than a word",
+ * because not one of them carries a four-letter run. The two rules that decide
+ * what a quoted phrase is are now named for what they *recognise* rather than
+ * for what they exclude, and the junk the audit measured is still refused:
+ * `"SITION"`, `"ints"`, `"after"`, the scraped titles and the URLs.
  */
+
+/**
+ * Capitalised tokens that are the back half of a longer word rather than a
+ * name. `"SITION"` reached a provider out of a page that said "POSITION"; no
+ * search for a record is a suffix. Deliberately short and additive -- a lone
+ * capitalised token is how the desk writes an agency (`SAMHSA`), a document
+ * type (`RFP`) or a code (`CDPHE`), so the list names the fragments measured
+ * rather than guessing at a shape.
+ */
+const FRAGMENT_IN_CAPITALS = new Set(["sition", "position"]);
+
 export function junkQueryReason(query: string): string | null {
   const q = query.replace(/\s+/g, " ").trim();
   if (!q) return "empty query";
@@ -242,12 +263,44 @@ export function junkQueryReason(query: string): string | null {
     if (!phrase) return "the query quotes nothing";
     const words = phrase.split(/\s+/);
     /*
-      A quoted phrase of a sentence's length is a sentence the extractor picked
-      up, not a thing anybody names. The longest phrases the desk writes itself
-      are two words -- `"registered agent"`, `"normal process"`, `"according
-      to"` -- and the longest real names it derives are five.
+      A document identifier. `"2023-0456"`, `"PO 12345"`, `"O-2024-15"` -- a
+      contract, a purchase order, an ordinance -- are the things a civic search
+      is FOR, and `queriesForRef` quotes a contract reference verbatim. A digit
+      is what makes one: no ordinary English word carries one. It needs a
+      letter or an internal separator as well, which is what keeps a bare
+      amount out: `"$1900"` is a number somebody said, not a record.
     */
-    if (words.length > 5) return "a quoted sentence, not a search term";
+    if (/\d/.test(phrase) && phrase.length >= 4 && (/[a-z]/i.test(phrase) || /[-/.]/.test(phrase)))
+      continue;
+    /*
+      A lone capitalised token is an agency, a programme, a document type or a
+      code -- `"RFP"`, `"SAMHSA"`, `"CDPHE"` -- and both the desk and the record
+      write them that way. The measured exception is the page fragment: the
+      back half of a longer word, which is what `"SITION"` was.
+    */
+    const only = words[0]!;
+    if (
+      words.length === 1 &&
+      /^[A-Z0-9][A-Z0-9.\-/&']*$/.test(only) &&
+      !FRAGMENT_IN_CAPITALS.has(only.toLowerCase())
+    )
+      continue;
+    /*
+      A quoted phrase of a sentence's length is a sentence the extractor picked
+      up, not a thing anybody names. The longest real names the desk derives
+      are five words, so the ceiling is a full headline rather than a phrase --
+      the same ceiling the "quoted sentence" test below uses, raised because a
+      quoted 6-to-12-word phrase is still a thing somebody named.
+    */
+    if (words.length > 12) return "a quoted sentence, not a search term";
+    /*
+      `"under that name in our state"` -- four or more ordinary lowercase words
+      in quotes is a clause the extractor lifted out of prose. Every phrase the
+      desk writes itself is one to three words (`"registered agent"`, `"normal
+      process"`), and a real quoted name carries a capital somewhere.
+    */
+    if (words.length >= 4 && !/[A-Z]/.test(phrase))
+      return "a quoted sentence, not a search term";
     if (!/[a-z]/i.test(phrase)) return "a number or punctuation, not a name";
     if (!words.some((word) => /[a-z]{4,}/i.test(word.replace(/[^a-z0-9]/gi, ""))))
       return "a quoted fragment shorter than a word";
@@ -267,7 +320,6 @@ export function junkQueryReason(query: string): string | null {
       all-caps word of six characters or more out of a page of prose is the
       back half of a longer one. This is where "POSITION" went.
     */
-    const only = words[0]!;
     if (words.length === 1 && !/[a-z]/.test(only.slice(1)) && !/[\d.\-/&']/.test(only) && only.length > 5)
       return "a fragment in capitals, not a name or a code";
   }

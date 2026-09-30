@@ -149,6 +149,62 @@ describe("junk queries and the words they came out of", () => {
     }
   });
 
+  /*
+    M1 of the batch-6 pre-merge audit. The first cut of the quoted-phrase rules
+    asked for a four-letter run inside every quoted token, which refused the
+    identifiers a civic search is FOR: the contract, bid and agency references
+    the desk derives from the record and quotes itself in `queriesForRef`. The
+    audit's list is below, and the junk list above is the other half of the
+    table -- a rule that accepts these must still refuse those.
+
+    THE MUTATION THAT MATTERS. Removing the `/\d/` identifier rule (the first
+    `continue` in the loop) fails "keeps the identifiers a civic search is
+    for": `"2023-0456"`, `"PO 12345"` and `"O-2024-15"` go back to "a quoted
+    fragment shorter than a word".
+  */
+  it("keeps the identifiers a civic search is for", () => {
+    // The desk's own contract search, quoted the way `queriesForRef` writes it.
+    assert.equal(
+      junkQueryReason(queriesForRef({ kind: "contract", value: "2023-0456" }, SHIPPED)[0]),
+      null,
+      "the desk's own contract query was refused",
+    );
+    for (const query of [
+      '"2023-0456" Longmont contract',
+      '"PO 12345"',
+      '"O-2024-15"',
+      '"RFP"',
+      '"SAMHSA"',
+      '"CDPHE"',
+      '"RFP-2024-09" Longmont',
+      '"the 2023-0456 contract for the Terry Street parcel"',
+    ]) {
+      assert.equal(junkQueryReason(query), null, `a real civic query was refused: ${query}`);
+    }
+  });
+
+  it("still refuses the junk of the same shape", () => {
+    /*
+      The other side of the M1 table. Each of these is a quoted token in the
+      same shape as an accepted one, and each is a slice of a page rather than
+      the name of a thing.
+    */
+    for (const query of [
+      '"SITION" RFP Longmont',
+      '"ints" RFP Longmont',
+      '"after" Longmont contract',
+      '"$1900" Longmont',
+      '"under that name in our state" Longmont',
+      '"the rest of the document is under review here"',
+    ]) {
+      const reason = junkQueryReason(query);
+      assert.ok(reason, `this query would still have been sent to a provider: ${query}`);
+    }
+    // `"$1900"` is a number, not the identifier its digits make it look like.
+    assert.match(junkQueryReason('"$1900" Longmont')!, /number or punctuation/);
+    assert.match(junkQueryReason('"SITION" RFP Longmont')!, /fragment in capitals/);
+  });
+
   it("never derives a fallback query from a captured page", () => {
     /*
       The fallback reads the lead's own words; this is the pack it must NOT be

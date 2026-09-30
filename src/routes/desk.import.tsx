@@ -252,8 +252,13 @@ function ImportPage() {
             ? plural(inIdeas, "story idea", "story ideas")
             : `${plural(inStories, "story", "stories")} and ${plural(inIdeas, "story idea", "story ideas")}`;
       const line = `${what} in the Queue, marked Imported.${held ? ` ${held} held.` : ""} Nothing is published.`;
+      /*
+        L3 of the batch-6 pre-merge audit: the same sentence went to the screen
+        and to `announceToDesk`, which since FB5 draws it as a toast -- one
+        sentence, said twice. The on-screen notice is the one kept; it is
+        already a live region and it is still there when the toast is gone.
+      */
       setNotice({ text: line, kind: "info" });
-      announceToDesk(line);
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["published-desk"] });
     },

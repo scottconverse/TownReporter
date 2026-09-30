@@ -43,11 +43,18 @@ import {
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import type { QueueFilter, QueueSort } from "@/lib/news/queue-rows";
+import {
+  BULK_STATUS_TOAST_ID,
+  BULK_STATUS_UNDO_LABEL,
+  bulkStatusReport,
+  bulkStatusSummary,
+} from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
+import { deskErrorReason, deskToast } from "@/components/desk-toast";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
@@ -138,6 +145,12 @@ function QueuePage() {
       killReasonUrl?: string;
     }) => setLeadStatus({ data: input }),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    /*
+      M7: while a bulk press is fanning out over the selection, each lead's own
+      toast is suppressed -- the bulk path owns the outcome and says it once.
+      A row's own Hold/Kill, which is the same mutation, is never muted.
+    */
+    muted: () => bulkMuted.current,
     pending: "Saving…",
     done: (_result, input) =>
       input.status === "new"
@@ -145,6 +158,21 @@ function QueuePage() {
         : input.status === "held"
           ? "The lead is on hold, off the Queue until you release it."
           : "The lead moved to Killed, and its row keeps an Undo.",
+    /*
+      L4 of the batch-6 pre-merge audit: the Kill sentence names an Undo, and
+      this toast now carries it. A killed lead leaves the "Open" tab on the
+      invalidation, so the row that "keeps an Undo" is a row the editor has to
+      go and find; the way back belongs on the sentence that says so.
+    */
+    undo: (_result, input) =>
+      input.status === "new"
+        ? null
+        : {
+            label: "Undo",
+            run: async (): Promise<void> => {
+              await setStatus.mutateAsync({ id: input.id, status: "new" });
+            },
+          },
     failedLead: "Could not change that lead. ",
   });
   /*
@@ -178,6 +206,11 @@ function QueuePage() {
   const [selectedDeleteLeadIds, setSelectedDeleteLeadIds] = useState<number[]>([]);
   const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
   const [undo, setUndo] = useState<number | null>(null);
+  /**
+   * True only while the bulk strip is fanning a status change out over the
+   * selection, so `setStatus`'s own per-lead toasts stay quiet (M7).
+   */
+  const bulkMuted = useRef(false);
   const bulkRemove = useMutation({
     mutationFn: async (leadIds: number[]) => {
       const deletedIds: number[] = [];
@@ -624,10 +657,78 @@ function QueuePage() {
   const bulkDraftable = selectedLeads.filter(
     (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
   );
-  const bulkBusy = setStatus.isPending || startBatch.isPending || bulkRemove.isPending;
+  /*
+    M7 of the batch-6 pre-merge audit. This loop used to be
+    `for (const lead of selectedLeads) setStatus.mutate({id, status})`, so a
+    twelve-lead Hold raised twelve toasts into a three-toast stack and the
+    editor could not tell how many had landed; a partial failure scrolled away
+    behind the successes. One press is one outcome now: every lead goes through
+    `setStatus.mutateAsync` (which is what runs the mutation, its retry and its
+    invalidation), `Promise.allSettled` collects the results, and the batch is
+    reported in one sentence under one id.
+  */
+  const bulkStatus = useMutation({
+    mutationFn: async (input: { ids: number[]; status: "held" | "killed" }) => {
+      /*
+        The per-item toasts are suppressed for exactly as long as the batch is
+        in flight: `setStatus` would otherwise speak once per lead, and this
+        press reports the whole batch itself, one line below.
+      */
+      bulkMuted.current = true;
+      try {
+        const settled = await Promise.allSettled(
+          input.ids.map((id) => setStatus.mutateAsync({ id, status: input.status })),
+        );
+        return bulkStatusReport({
+          status: input.status,
+          ids: input.ids,
+          settled,
+          reason: (error) => deskErrorReason(error, input.status === "held" ? "hold that lead" : "kill that lead"),
+        });
+      } finally {
+        bulkMuted.current = false;
+      }
+    },
+    onSuccess: (report) => {
+      const summary = bulkStatusSummary(report);
+      deskToast(summary, {
+        tone: report.failures.length ? "err" : "ok",
+        // One line that updates, not a stack that disagrees with itself.
+        id: BULK_STATUS_TOAST_ID,
+        undo:
+          report.undoIds.length > 0
+            ? {
+                label: BULK_STATUS_UNDO_LABEL,
+                run: async () => {
+                  const back = await Promise.allSettled(
+                    report.undoIds.map((id) => setStatus.mutateAsync({ id, status: "new" })),
+                  );
+                  const failed = back.filter((r) => r.status === "rejected").length;
+                  if (failed > 0)
+                    throw new Error(
+                      failed === 1
+                        ? "one lead could not be put back"
+                        : `${failed} leads could not be put back`,
+                    );
+                },
+              }
+            : null,
+      });
+    },
+    onError: (error: Error) => {
+      deskToast(`Could not change those leads. ${deskErrorReason(error, "change those leads")}`, {
+        tone: "err",
+        id: BULK_STATUS_TOAST_ID,
+      });
+    },
+  });
   const bulkSetStatus = (status: "held" | "killed") => {
-    for (const lead of selectedLeads) setStatus.mutate({ id: lead.id, status });
+    const ids = selectedLeads.map((lead) => lead.id);
+    if (ids.length === 0) return;
+    bulkStatus.mutate({ ids, status });
   };
+  const bulkBusy =
+    setStatus.isPending || bulkStatus.isPending || startBatch.isPending || bulkRemove.isPending;
   /*
     Open the dialog a hash names.
 

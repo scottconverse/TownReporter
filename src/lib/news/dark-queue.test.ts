@@ -1,17 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { queueInvestigationFor } from "./dark.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
+/*
+  U18a-1: this file needs the migrated schema, because `queueInvestigationFor`
+  reads `sources` when it proposes the captures it read as candidate sources --
+  a table no hand-written fixture here would have, and the one the M3 case below
+  is about. `scripts/run-tests-safe.mjs` applies `migrations/*.sql` before the
+  file loads; the postgres-integration runner runs the same file WITHOUT that
+  preload, so the fixture asks for it itself.
+*/
+await applyMigrationsToTestPglite();
+
 /**
  * `getSql()` auto-applies `migrations/*.sql` via `import.meta.glob`, which is
  * a Vite-only macro -- under plain `node --test` it silently resolves to no
- * migrations (see src/lib/db.ts), so every table this test needs has to be
- * declared here, the same way newsroom-scoped-write.proof.test.ts and
- * write-story-commit.test.ts do for their own `leads` fixtures.
+ * migrations (see src/lib/db.ts), so every table this test needs outside the
+ * migrated set has to be declared here, the same way
+ * newsroom-scoped-write.proof.test.ts and write-story-commit.test.ts do for
+ * their own `leads` fixtures.
  */
 async function ensureLeadsTable() {
   const sql = await getSql();
@@ -128,6 +140,73 @@ describe("queueInvestigationFor", { timeout: 60000 }, () => {
     const res = await queueInvestigationFor(user, DEFAULT_NEWSROOM_ID, opened.investigationId);
 
     assert.equal(res.ok, false, "an investigation filed under a different newsroom must not queue");
+  });
+
+  /*
+    M3 of the batch-6 pre-merge audit, on the whole-file handoff. This writer
+    reads `artifacts` with snake_cased columns and handed the rows straight to
+    `usableLeadSources`, which reads `CapturedPage`'s camelCase -- so the
+    capture check read `undefined` for every field and never ran. The failure
+    that hides it in the sibling U25 case is the "about the lead" rule: every
+    row there is dropped by its title, so that test passes with the check
+    disabled. This one's captures are ABOUT the lead and failed anyway.
+
+    THE MUTATION THAT MATTERS. `usableLeadSources(arts, leadWords)` again, in
+    place of `arts.map(capturedPageOf)`, fails this case.
+  */
+  it("refuses a capture that failed even when its title matches the file", async () => {
+    await ensureInvestigateSchema();
+    await ensureLeadsTable();
+    const user = `dark-queue-capture-${Date.now()}`;
+    const opened = await openInvestigationForEditor(
+      user,
+      {
+        paste: "https://assets.bouldercounty.gov/example.pdf\nA council rezoning vote.",
+        title: "Kid City USA Longmont closure with one week's notice",
+      },
+      DEFAULT_NEWSROOM_ID,
+    );
+    const sql = await getSql();
+    await sql`
+      update investigations set summary = ${"Residents say the Kid City USA daycare on Terry Street closes on Oct. 2."}
+      where id = ${opened.investigationId}
+    `;
+    const seed = (url: string, title: string, fetchStatus: number, fetchOutcome: string, fullText: string) =>
+      sql`
+        insert into artifacts (
+          user_id, investigation_id, url, title, content_hash, full_text,
+          fetch_status, fetch_outcome, newsroom_id
+        ) values (
+          ${user}, ${opened.investigationId}, ${url}, ${title}, ${`hash-${title}`}, ${fullText},
+          ${fetchStatus}, ${fetchOutcome}, ${DEFAULT_NEWSROOM_ID}
+        )
+      `;
+
+    await seed(
+      "https://www.longmontcolorado.gov/council/kid-city-usa-closure",
+      "Kid City USA closure notice, Longmont City Council",
+      200,
+      "fetched",
+      "The council packet records the closure.",
+    );
+    await seed(
+      "https://www.timescall.com/kid-city-usa-closure-notice",
+      "Kid City USA closure notice",
+      404,
+      "not-found",
+      "",
+    );
+
+    const res = await queueInvestigationFor(user, DEFAULT_NEWSROOM_ID, opened.investigationId);
+    assert.equal(res.ok, true);
+    const [lead] = await sql<{ source_urls: string }>`
+      select source_urls from leads where id = ${res.ok ? res.leadId : 0}
+    `;
+    assert.deepEqual(
+      JSON.parse(lead!.source_urls) as string[],
+      ["https://www.longmontcolorado.gov/council/kid-city-usa-closure"],
+      "a capture that failed became a source on the lead",
+    );
   });
 });
 

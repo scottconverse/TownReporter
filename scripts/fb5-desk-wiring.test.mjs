@@ -76,7 +76,14 @@ test("the shared failure sentence is built where the reason can never be dropped
     false,
     "no shape here may let a caller substitute its own sentence for the real reason",
   );
-  assert.match(source, /return `\$\{copy\.failedLead \?\? ""\}\$\{deskErrorReason\(error\)\}`/);
+  /*
+    The shape, unchanged by M8/M9: the lead, then `deskErrorReason`'s sentence,
+    and nothing else between them. What `deskErrorReason` itself does with that
+    sentence gained a second argument (`what`, the verb phrase `editorActionError`
+    needs to name the press) -- see `scripts/fb5-desk-action.test.mjs` for the
+    composed result, and `src/components/desk-toast.test.ts` for the mapping.
+  */
+  assert.match(source, /return `\$\{copy\.failedLead \?\? ""\}\$\{deskErrorReason\(error, copy\.what\)\}`/);
 });
 
 test("both workbenches bind the ⌘S badge instead of drawing a dead one", () => {

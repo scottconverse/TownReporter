@@ -26,6 +26,7 @@
 */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { parseHTML } from "linkedom";
 
@@ -98,11 +99,66 @@ export function stubUrl(body) {
   return `data:text/javascript;base64,${Buffer.from(body).toString("base64")}`;
 }
 
-/** Transpile a `.ts`/`.tsx` file in this repository into an importable module. */
+/**
+ * Transpile a `.ts`/`.tsx` file in this repository into an importable module.
+ *
+ * RELATIVE IMPORTS ARE FOLLOWED (batch-6 pre-merge audit). A bare specifier is
+ * mapped by the caller or resolved from this repository's `node_modules`; a
+ * relative one used to be left verbatim inside the `data:` module below, where
+ * Node cannot resolve it -- so a module that imports a sibling
+ * (`desk-toast.ts` importing `../lib/news/desk-copy.ts`) was simply unloadable
+ * here, and a test that needed it could only stub the sibling rather than run
+ * it. Each relative specifier is now transpiled by this same rule and mapped
+ * for the module that names it, so the real chain runs.
+ *
+ * Memoized by absolute path, so a diamond is transpiled once and two modules
+ * that share a dependency share the INSTANCE of it -- which matters for a
+ * module with a store in it, like the toast layer. A cycle fails by name
+ * instead of spinning.
+ */
+const moduleCache = new Map();
+
 export async function moduleUrl(path, imports = {}) {
-  const file = new URL(`../${path}`, import.meta.url);
+  return loadModule(new URL(`../${path}`, import.meta.url), path, imports, []);
+}
+
+async function loadModule(file, label, imports, chain) {
+  const absolute = fileURLToPath(file);
+  const cached = moduleCache.get(absolute);
+  if (cached) return cached;
+  if (chain.includes(absolute))
+    throw new Error(
+      `circular import while transpiling ${label}: ${[...chain, absolute].join(" -> ")}`,
+    );
   const code = await readFile(file, "utf8");
-  return transpileToUrl(code, path, imports);
+  const resolved = { ...imports };
+  for (const specifier of relativeSpecifiers(code)) {
+    if (resolved[specifier]) continue;
+    resolved[specifier] = await loadModule(
+      new URL(specifier, file),
+      specifier,
+      {},
+      [...chain, absolute],
+    );
+  }
+  const url = transpileToUrl(code, label, resolved);
+  moduleCache.set(absolute, url);
+  return url;
+}
+
+/**
+ * Every relative specifier `source` imports, once each, in source order.
+ *
+ * The specifier has to be one word with no whitespace: a bare `[^"]+` also
+ * matches prose in a comment that happens to read `from "..."` and a
+ * `join(", ")` argument, and those are not imports.
+ */
+function relativeSpecifiers(source) {
+  return [
+    ...new Set(
+      [...source.matchAll(/(?:from|import)\s*"(\.[^"\s]*)"/g)].map((match) => match[1]),
+    ),
+  ];
 }
 
 export function transpileToUrl(code, fileName, imports = {}) {
@@ -114,18 +170,23 @@ export function transpileToUrl(code, fileName, imports = {}) {
 }
 
 /**
- * Point every bare specifier at a URL Node can import.
+ * Point every specifier at a URL Node can import.
  *
  * An explicit mapping wins. Anything else is resolved from this repository's own
  * `node_modules`, so a test that wants the REAL package -- `sonner`, in FB5's
- * case -- gets it, and a test that wants a stand-in passes one. A specifier that
- * resolves to neither (`@/...` is not a package) fails here, naming itself.
+ * case -- gets it, and a test that wants a stand-in passes one. A relative
+ * specifier has no meaning inside a `data:` module: it must have been mapped by
+ * `loadModule` (or by the caller), and one that was not is named here. A
+ * specifier that resolves to none of those (`@/...` is not a package) fails
+ * here too, naming itself.
  */
 function rewriteSpecifiers(output, fileName, imports) {
   let rewritten = output;
   const specifiers = [
     ...new Set(
-      [...output.matchAll(/(?:from|import\()\s*"([^".][^"]*)"/g)]
+      // One word, no whitespace: `from "..."` in a comment and `join(", ")`
+      // are not imports, and a `[^"]+` group collects both.
+      [...output.matchAll(/(?:from|import\()\s*"([^"\s]+)"/g)]
         .map((match) => match[1])
         .filter((specifier) => !/^(data|file|node):/.test(specifier)),
     ),
@@ -135,6 +196,10 @@ function rewriteSpecifiers(output, fileName, imports) {
     const mapped = imports[specifier];
     let url = mapped;
     if (!url) {
+      if (specifier.startsWith(".")) {
+        unresolved.push(specifier);
+        continue;
+      }
       try {
         url = import.meta.resolve(specifier);
       } catch {

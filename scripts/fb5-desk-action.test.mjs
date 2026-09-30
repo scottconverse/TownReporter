@@ -373,3 +373,83 @@ test("isSaveShortcut is ⌘S and Ctrl+S, and nothing else", () => {
   assert.equal(deskAction.isSaveShortcut({ ...key({ metaKey: true }), key: "k" }), false);
   assert.equal(deskAction.isSaveShortcut({ ...key({ metaKey: true }), key: "S" }), true, "caps lock is not a decision");
 });
+
+/*
+  M9 of the batch-6 pre-merge audit. A bound global key has to be fussier than
+  the badge that promised it: a held key fires the event dozens of times a
+  second, an IME mid-composition is building a character rather than pressing a
+  shortcut, a keystroke something nearer the editor already handled is not this
+  press, and a dialog owns the keyboard while it is open.
+
+  THE MUTATIONS THAT MATTER. Dropping any of the three event guards fails
+  "ignores the presses that are not the editor asking to save"; passing
+  `dialogOpen: false` unconditionally in `deskShouldSave` fails "leaves the key
+  to an open dialog".
+*/
+test("ignores the presses that are not the editor asking to save", () => {
+  const key = (over) => ({ key: "s", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...over });
+  assert.equal(
+    deskAction.isSaveShortcut(key({ metaKey: true, repeat: true })),
+    false,
+    "a held key fires this event dozens of times a second",
+  );
+  assert.equal(
+    deskAction.isSaveShortcut(key({ metaKey: true, isComposing: true })),
+    false,
+    "mid-IME that s is part of a character",
+  );
+  assert.equal(
+    deskAction.isSaveShortcut(key({ metaKey: true, defaultPrevented: true })),
+    false,
+    "something closer to the keystroke already claimed it",
+  );
+  // Absent means "not a repeat": a caller synthesising a press need not spell it out.
+  assert.equal(deskAction.isSaveShortcut(key({ metaKey: true })), true);
+});
+
+test("leaves the key to an open dialog, and asks about both ways one is drawn", () => {
+  const key = { key: "s", metaKey: true, ctrlKey: false, altKey: false, shiftKey: false };
+  assert.equal(deskAction.deskShouldSave(key, true), false);
+  assert.equal(deskAction.deskShouldSave(key, false), true);
+  assert.match(deskAction.DESK_DIALOG_OPEN_SELECTOR, /dialog\[open\]/);
+  assert.match(deskAction.DESK_DIALOG_OPEN_SELECTOR, /\[role=dialog\]\[data-state=open\]/);
+});
+
+test("reads the open dialog off the document, through that one selector", () => {
+  const seen = [];
+  const stub = (hit) => ({
+    querySelector(selector) {
+      seen.push(selector);
+      return hit ? {} : null;
+    },
+  });
+  assert.equal(deskAction.deskDialogOpen(stub(true)), true);
+  assert.equal(deskAction.deskDialogOpen(stub(false)), false);
+  assert.ok(seen.length > 0 && seen.every((s) => s === deskAction.DESK_DIALOG_OPEN_SELECTOR));
+  // No document at all (a server render, or a test) is not an open dialog.
+  assert.equal(deskAction.deskDialogOpen(null), false);
+});
+
+test("keeps the caller's lead in front of the mapped sentence", () => {
+  /*
+    M8's composition, and the reason `failedLead` may only be words placed
+    BEFORE the reason: the mapping still runs, so a press that failed on the
+    transport gets the desk's sentence after the caller's lead rather than the
+    browser's. The sentences themselves are pinned in
+    `src/components/desk-toast.test.ts`.
+  */
+  assert.equal(
+    deskAction.deskActionFailure(new Error("Failed to fetch"), {
+      failedLead: "Could not hold that lead. ",
+    }),
+    "Could not hold that lead. The desk could not be reached. Check that it is running and your connection. Nothing was changed.",
+  );
+  assert.equal(
+    deskAction.deskActionFailure(new Error("Internal Server Error: status code 500"), {
+      failedLead: "",
+      what: "publish",
+    }).startsWith("The desk could not publish just now."),
+    true,
+    "a bare 500 is not a sentence; `editorActionError` is where it becomes one",
+  );
+});

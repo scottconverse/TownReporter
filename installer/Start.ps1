@@ -16,6 +16,18 @@ if (!(Get-OwnedApp)) {
     Invoke-PgControl @('-D', ('"'+(Join-Path $DataRoot 'pgdata')+'"'), '-l', ('"'+(Join-Path $DataRoot 'postgres.log')+'"'), '-w', 'start')
   }
   Set-AppEnvironment
+  # TownReporter removed Grok (xAI), and this start path runs
+  # `node .output\server\index.mjs` directly rather than through
+  # `scripts/with-app-env.mjs` -- which is where the app's own removal warning
+  # is printed, and whose output would go to app.out.log here rather than to the
+  # screen. So the operator who has XAI_API_KEY set on this machine is told here,
+  # where they are looking. `Set-AppEnvironment` leaves those two variables alone
+  # on purpose; nothing downstream reads them.
+  foreach ($removedKey in @('XAI_API_KEY', 'GROK_API_KEY')) {
+    if ([Environment]::GetEnvironmentVariable($removedKey, 'Process')) {
+      Write-Warning "$removedKey is set on this machine. TownReporter no longer uses Grok (xAI) and ignores it -- choose a writing model on the Models screen."
+    }
+  }
   Set-Location -LiteralPath $AppRoot
   & $config.NodeExe (Join-Path $AppRoot 'scripts\migrate.mjs') *> (Join-Path $DataRoot 'migrate.log')
   if ($LASTEXITCODE -ne 0) { throw "Migration failed. No app was started. Read $DataRoot\migrate.log." }

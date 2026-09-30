@@ -10,10 +10,21 @@
  *
  * Choices that are not sonner's defaults, and why:
  *
- *  - `position="top-right"`. The story workbench's publish bar is `position:
- *    sticky; bottom: 0` (`desk-astra.css`), so a bottom-anchored toast would
- *    cover the gates that stand between a draft and the paper -- the one press
- *    on this desk that must never be hidden. Top-right is clear at every width.
+ *  - `position="bottom-left"`, raised clear of the two bars that live at the
+ *    bottom of a desk screen. M6 of the batch-6 pre-merge audit: the stack was
+ *    `top-right`, and a toast there covers the row menus and the workbench's
+ *    stage controls instead. Bottom-left is where the desk has nothing, but it
+ *    is also where the story workbench's publish bar (`position: sticky;
+ *    bottom: 0`, `desk-astra.css`) and the unsaved-changes bar (`fixed
+ *    bottom-0`, `unsaved-changes-guard.tsx`) sit -- and the publish bar holds
+ *    the gates that stand between a draft and the paper, the one press on this
+ *    desk that must never be hidden. `offset.bottom` is therefore
+ *    `DESK_TOAST_LIFT`, the clear height (see `desk-toast.ts`), and the phone
+ *    block at the foot of the toast section in `desk-astra.css` puts the stack
+ *    back on top there -- below the sticky phone topbar -- because a phone's
+ *    keyboard and browser chrome own the bottom of a small screen.
+ *  - `offset.left` clears the nav: `--desk-nav-w` plus a gutter, since the
+ *    sidebar is 230px, 206px under 1200px and 0px on a phone.
  *  - `zIndex: 55`. Above the sticky publish bar (3), the sticky row menus and
  *    the phone topbar (30), the nav scrim (35) and the sidebar (40); below the
  *    Radix modal layer (60, `styles.css` `.desk-ltr.astra-modal-layer`) so a
@@ -38,16 +49,49 @@
  */
 import { Toaster } from "sonner";
 
-import { DESK_TOAST_HOST_ATTR, DESK_TOAST_OK_MS } from "@/components/desk-toast";
+import { useEffect, useState } from "react";
+
+import {
+  DESK_TOASTER_MOBILE_OFFSET,
+  DESK_TOASTER_OFFSET,
+  DESK_TOASTER_PHONE_QUERY,
+  deskStackPosition,
+  DESK_TOAST_HOST_ATTR,
+  DESK_TOAST_OK_MS,
+} from "@/components/desk-toast";
+
+/**
+ * Is this frame a phone, as `desk-astra.css` draws one?
+ *
+ * Read at mount and on every change, so a window dragged narrow moves the stack
+ * without a reload. Client-only on purpose: the positioned `<ol>` sonner builds
+ * does not exist until a toast does, which is after mount, so there is nothing
+ * for the server render to disagree with.
+ */
+function usePhoneFrame(): boolean {
+  const [phone, setPhone] = useState(
+    () => typeof window !== "undefined" && Boolean(window.matchMedia?.(DESK_TOASTER_PHONE_QUERY).matches),
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.(DESK_TOASTER_PHONE_QUERY);
+    if (!query) return;
+    const onChange = () => setPhone(query.matches);
+    onChange();
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return phone;
+}
 
 export function DeskToaster() {
+  const position = deskStackPosition(usePhoneFrame());
   return (
     <div className="desk-toaster-host" {...{ [DESK_TOAST_HOST_ATTR]: "" }}>
       <Toaster
         className="desk-toaster"
-        position="top-right"
-        offset={16}
-        mobileOffset={{ top: 72, right: 16, left: 16, bottom: 16 }}
+        position={position}
+        offset={DESK_TOASTER_OFFSET}
+        mobileOffset={DESK_TOASTER_MOBILE_OFFSET}
         gap={10}
         visibleToasts={3}
         duration={DESK_TOAST_OK_MS}

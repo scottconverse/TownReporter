@@ -4,22 +4,18 @@ import { getSql } from "../db.ts";
 import {
   ensureNewsroomSchema,
   ensureInviteSchema,
-  isGrokPreviewHost,
   ForbiddenError,
   deskIsClaimed,
   leaveAsEditor,
   readNewsroomAccess,
 } from "./membership.ts";
 
-describe("newsroom hosts", () => {
-  it("treats grok.me as preview and localhost as self-host", () => {
-    assert.equal(isGrokPreviewHost("townreporter-longmont.grok.me"), true);
-    assert.equal(isGrokPreviewHost("grok.me"), true);
-    assert.equal(isGrokPreviewHost("localhost"), false);
-    assert.equal(isGrokPreviewHost("127.0.0.1"), false);
-    assert.equal(isGrokPreviewHost("paper.example.org"), false);
-  });
-});
+/*
+  `isGrokPreviewHost` and its test lived here. Both are gone: TownReporter
+  removed Grok as a provider, so nothing calls it and nothing sets a grok.me
+  host any more. A test for a host no code reads is a test that pins a fact
+  about a product this is not.
+*/
 
 /*
   Two tests lived here that read NEWSROOM_SETUP_TOKEN and asserted

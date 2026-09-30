@@ -6610,6 +6610,17 @@
 --------------------------------------------------------------------------- */
 
 /*
+   The stack's clearance is NOT declared here. `DESK_TOAST_LIFT` in
+   `desk-toast.ts` is the only number, and `desk-toaster.tsx` hands it to sonner
+   as `--offset-bottom` / `--offset-top` on the stack element itself -- a
+   stylesheet copy of it would be a second, silently-drifting authority for the
+   one value that decides whether a toast covers the publish bar. The offset to
+   the right of the nav is `calc(var(--desk-nav-w, 0px) + 16px)`, and that
+   variable IS this stylesheet's: it is 230px, 206px under 1200px and 0px at
+   the phone breakpoint where the nav goes off-canvas.
+*/
+
+/*
    The host, not the stack. `position: fixed` with `inset: 0` takes it out of
    the shell's grid flow entirely, so mounting it as a child of
    `.desk-ltr.astra` beside the nav and the workspace cannot add a track or a
@@ -6622,8 +6633,16 @@
   z-index: 55;
   pointer-events: none;
 }
+/*
+   M6 of the batch-6 pre-merge audit: the stack took pointer events back for the
+   WHOLE region it occupies, which on a bottom-anchored stack means the blank
+   space around the card swallows presses meant for the page underneath -- a
+   toast sitting near a row menu or a gate made that control unpressable for as
+   long as it lived. `none` on the region again, and only the two things an
+   editor actually presses -- the Undo button and the ✕ -- take them back.
+*/
 .desk-ltr .desk-toaster {
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 /* The card. Sonner positions and animates the <li>; everything visible is here. */
@@ -6689,6 +6708,18 @@
   font-size: calc(14px * var(--ts));
   font-weight: 700;
   cursor: pointer;
+  /* The two things an editor presses take pointer events back; see above. */
+  pointer-events: auto;
+}
+/*
+   The ✕. Same rule for the same reason: it is pressable, the card around it is
+   not. `min-height`/`min-width` are the desk's 44px floor so the glyph is a
+   target a thumb can hit, not a 14px character.
+*/
+.desk-ltr .desk-toaster [data-close-button] {
+  pointer-events: auto;
+  min-width: 44px;
+  min-height: 44px;
 }
 .desk-ltr .desk-toaster [data-button]:hover {
   background: rgba(17, 17, 17, 0.08);
@@ -6732,6 +6763,19 @@
 .desk-ltr .desk-toaster [data-icon] {
   display: none;
 }
+
+/*
+   The phone half of M6 is NOT here. `desk-toaster.tsx` picks the edge at mount
+   (`deskStackPosition`, `≤700px`), because the edge is sonner's
+   `data-y-position` attribute and only the prop that writes it can move the
+   stack: a stylesheet rule setting `top: …; bottom: auto` moved the box while
+   sonner went on laying the cards out as a bottom-anchored stack, and measured
+   in a 390px frame that put the card at y=28px -- over the very header the
+   offset was there to clear. Both edges' offsets are `desk-toast.ts`'s
+   (`DESK_TOASTER_OFFSET`, `DESK_TOASTER_MOBILE_OFFSET`), which is also the only
+   place the clearance is written down -- there is deliberately no stylesheet
+   copy of it to drift.
+*/
 
 /*
    Reduced motion: `.desk-ltr.astra *` (above) already sets `animation: none`

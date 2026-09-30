@@ -105,6 +105,65 @@ test(
   },
 );
 test(
+  "a providers.json naming removed Grok keys is warned about, not fatal",
+  { skip: !windows && "Windows PowerShell required" },
+  () => {
+    /*
+      TownReporter removed Grok (xAI) as a provider. `Set-AppEnvironment` used
+      to THROW on a hand-edited providers.json that still carried XAI_API_KEY,
+      which left an upgrading operator with a start that failed and no way
+      forward but editing JSON by hand -- for a line the app ignores anyway.
+      The warning is what has to stay: admitted, dropped, and said out loud.
+      An unknown name is still a typo, and still throws.
+    */
+    const dataRoot = mkdtempSync(join(tmpdir(), "tr-provider-test-"));
+    const runSetAppEnvironment = (settings) => {
+      writeFileSync(join(dataRoot, "providers.json"), JSON.stringify(settings));
+      const command = [
+        "$ErrorActionPreference='Stop'",
+        `$common = Join-Path '${process.cwd().replaceAll("'", "''")}' 'installer\\Common.ps1'`,
+        "$ast = [Management.Automation.Language.Parser]::ParseInput((Get-Content -LiteralPath $common -Raw), [ref]$null, [ref]$null)",
+        "$fn = $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Set-AppEnvironment'}, $true).Extent.Text",
+        "Invoke-Expression $fn",
+        `$DataRoot = '${dataRoot.replaceAll("'", "''")}'`,
+        "$config = [pscustomobject]@{ DatabasePassword='p'; PgPort=1; AuthSecret='s'; Port=2; InstanceId='i'; NodeExe=(Join-Path $env:SystemRoot 'System32\\cmd.exe') }",
+        "$env:LLM_API_KEY=''; $env:XAI_API_KEY=''; $env:GROK_API_KEY=''",
+        "Set-AppEnvironment *>&1 | ForEach-Object { [Console]::Out.WriteLine($_) }",
+        "'RESULT llm=' + $env:LLM_API_KEY + ' xai=[' + $env:XAI_API_KEY + '] grok=[' + $env:GROK_API_KEY + ']'",
+      ].join("; ");
+      try {
+        return {
+          ok: true,
+          output: execFileSync("powershell.exe", ["-NoProfile", "-Command", command], {
+            encoding: "utf8",
+            stdio: "pipe",
+          }),
+        };
+      } catch (error) {
+        return { ok: false, output: `${error.stdout ?? ""}${error.stderr ?? ""}` };
+      }
+    };
+
+    try {
+      const kept = runSetAppEnvironment({
+        LLM_API_KEY: "gateway-key",
+        XAI_API_KEY: "xai-leftover",
+        GROK_API_KEY: "grok-leftover",
+      });
+      assert.equal(kept.ok, true, `a stale xAI key must not stop the install:\n${kept.output}`);
+      assert.match(kept.output, /Ignoring XAI_API_KEY in providers\.json/);
+      assert.match(kept.output, /Ignoring GROK_API_KEY in providers\.json/);
+      assert.match(kept.output, /RESULT llm=gateway-key xai=\[\] grok=\[\]/, "a removed key was carried into the app's environment");
+
+      const typo = runSetAppEnvironment({ LLM_APIKEY: "gateway-key" });
+      assert.equal(typo.ok, false, "an unknown provider setting is still refused");
+      assert.match(typo.output, /Unsupported provider setting: LLM_APIKEY/);
+    } finally {
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  },
+);
+test(
   "installer rejects a config belonging to another source tree before touching processes",
   { skip: !windows && "Windows PowerShell required" },
   () => {

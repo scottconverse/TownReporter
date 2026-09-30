@@ -212,7 +212,8 @@ function run(
 
       Spreading `process.env` handed a child that reads the open web the
       paper's `BETTER_AUTH_SECRET`, its `DATABASE_URL`, every provider key and
-      the Grok secret. See cli-child-env.server.ts for what a CLI does need.
+      every stored model connection. See cli-child-env.server.ts for what a CLI
+      does need.
     */
     const childEnv = codexChildEnv();
     let child: ReturnType<typeof spawn>;

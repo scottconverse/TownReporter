@@ -1590,7 +1590,21 @@ export function parseJsonBlockSalvage<T>(raw: string): T | null {
       return null;
     }
   };
-  if (inString) {
+  /*
+    M4 of the batch-6 pre-merge audit. Closing the open quote is only right when
+    the string being written is the VALUE OF A TOP-LEVEL FIELD -- `summary`,
+    which is prose the model writes last and which the desk can still read. The
+    moment the cut lands anywhere deeper the string is an ITEM: a `fetch_urls`
+    entry, a claim, a query. Closing it there does not recover the model's last
+    thought, it invents one -- `"https://www.longmontcolorado.gov/agen` comes
+    back as a real address the dig will fetch, and a cut claim comes back as a
+    claim. An item that was never finished is dropped, not completed with
+    whatever the cap happened to leave.
+
+    `openStack` is exactly `["{"]` when the reply is inside the root object and
+    in no nested array or object, which is that one case.
+  */
+  if (inString && openStack.length === 1 && openStack[0] === "{") {
     const closed = read(body, openStack);
     if (closed !== null) return closed;
   }

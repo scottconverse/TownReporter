@@ -387,6 +387,89 @@ describe("editor-controlled queue handoff", { timeout: 60000 }, () => {
     );
   });
 
+  /*
+    M3 of the batch-6 pre-merge audit. `sendDarkSignalToQueueFor` selects its
+    captures with snake_cased columns -- `fetch_status`, `fetch_outcome`,
+    `full_text` -- and handed the rows straight to `usableLeadSources`, which
+    reads `CapturedPage`'s camelCase. Every field the capture check reads was
+    `undefined`, and TypeScript allowed it because `CapturedPage`'s fields are
+    all optional, so a snake_cased row structurally satisfies it. The capture
+    check therefore never ran: a 404, a 403 or a soft-404 whose TITLE shared a
+    word with the lead was still listed as a source on it, which the sibling
+    case above cannot catch -- every row there is dropped by the "about the
+    lead" rule instead, so it passes with the check disabled.
+
+    THE MUTATION THAT MATTERS. Handing `arts` to `usableLeadSources` again --
+    instead of `arts.map(capturedPageOf)` -- fails this case: all three failed
+    captures land on `leads.source_urls` beside the one real source.
+  */
+  it("refuses a capture that failed even when its title matches the lead", async () => {
+    await ensureLeadsTable();
+    const user = `queue-capture-${Date.now()}`;
+    const seeded = await seedSignal(user, {
+      name: "Kid City USA Longmont closure with one week's notice",
+      observation: "Residents say the daycare at 1941 Terry Street closes on Oct. 2.",
+    });
+    const sql = await getSql();
+    const seed = (url: string, title: string, fetchStatus: number, fetchOutcome: string, fullText: string) =>
+      sql`
+        insert into artifacts (
+          user_id, investigation_id, url, title, content_hash, full_text,
+          fetch_status, fetch_outcome, newsroom_id
+        ) values (
+          ${user}, ${seeded.investigationId}, ${url}, ${title}, ${`hash-${title}`}, ${fullText},
+          ${fetchStatus}, ${fetchOutcome}, ${DEFAULT_NEWSROOM_ID}
+        )
+      `;
+
+    // The one the dig actually got, and the only one that may be a source.
+    await seed(
+      "https://reddit.com/r/Longmont/comments/1wqeq6x/local_daycare_closure",
+      "Local Daycare closure linked to flurry of other abrupt closures",
+      200,
+      "fetched",
+      "Kid City USA Longmont is closing on Oct. 2.",
+    );
+    /*
+      Every one of these is ABOUT the lead -- their titles carry the same words
+      `leadSourceRefusalReason` looks for -- and every one of them failed. Only
+      the capture check can refuse them; the token rule would keep all three.
+    */
+    await seed(
+      "https://www.longmontcolorado.gov/agendas/kid-city-usa-closure-notice",
+      "Kid City USA closure notice | Longmont",
+      404,
+      "not-found",
+      "",
+    );
+    await seed(
+      "https://www.timescall.com/kid-city-usa-closure",
+      "Kid City USA closure coverage",
+      403,
+      "blocked",
+      "",
+    );
+    // A soft 404: the server answered 200 with a placeholder and no article.
+    await seed(
+      "https://www.daycarewatch.com/kid-city-usa-closure",
+      "Kid City USA closure notice",
+      200,
+      "parse-failed",
+      "",
+    );
+
+    const queued = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId);
+    assert.equal(queued.ok, true);
+    const [lead] = await sql<{ source_urls: string }>`
+      select source_urls from leads where id = ${queued.ok ? queued.leadId : 0}
+    `;
+    assert.deepEqual(
+      JSON.parse(lead!.source_urls) as string[],
+      ["https://reddit.com/r/Longmont/comments/1wqeq6x/local_daycare_closure"],
+      "a capture that failed became a source on the lead",
+    );
+  });
+
   it("uses a no / no / no result for triage without blocking the editor", async () => {
     await ensureLeadsTable();
     const user = `queue-watch-${Date.now()}`;

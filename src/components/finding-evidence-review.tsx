@@ -954,15 +954,20 @@ export function FindingEvidenceReviewPanel({
     changed rather than the object they arrived in -- and so a re-render with
     the same state reports nothing.
   */
-  const { ran: evidenceRan, toReview: evidenceToReview } = evidenceState;
+  const {
+    ran: evidenceRan,
+    toReview: evidenceToReview,
+    contradicted: evidenceContradicted,
+  } = evidenceState;
   const evidenceTokenSeen = review?.evidenceToken ?? null;
   useEffect(() => {
     reportEvidenceState?.({
       ran: evidenceRan,
       toReview: evidenceToReview,
+      contradicted: evidenceContradicted,
       evidenceToken: evidenceTokenSeen,
     });
-  }, [reportEvidenceState, evidenceRan, evidenceToReview, evidenceTokenSeen]);
+  }, [reportEvidenceState, evidenceRan, evidenceToReview, evidenceContradicted, evidenceTokenSeen]);
 
   /*
     The drawn line under "Evidence check": the review's own record, read

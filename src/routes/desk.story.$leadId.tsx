@@ -225,10 +225,10 @@ function StoryPage() {
   const { formatShortDate } = usePaperDateFormatters();
   /*
     Unit U24: the paper as the desk has it configured, for the one rule below
-    that needs to know which city this paper publishes in (`homeCityShortForms`).
-    The resolved identity, not the build-time constant, so a desk that renamed
-    its city in Paper setup gets its own city's short forms -- the same value
-    /about renders.
+    that needs to know which city this paper publishes in (`creditsHomeCity`,
+    src/lib/news/source-credit.ts). The resolved identity, not the build-time
+    constant, so a desk that renamed its city in Paper setup gets its own city's
+    prose words -- the same value /about renders.
   */
   const paperIdentity = usePaper();
   // The same words the reader sees on the pill row: this paper's own
@@ -1466,8 +1466,8 @@ function StoryPage() {
     draftSources.length > 0 || !mayInheritLeadSources(data.draft ?? {}) ? draftSources : sources,
     /*
       Unit U24: the paper's own city, so a story that attributes to "the city
-      manager" is not told it never named City of Longmont. It turns the short
-      forms on for that one source and no other -- see `homeCityShortForms`.
+      manager" is not told it never named City of Longmont. It turns the prose
+      words on for that one source and no other -- see `creditsHomeCity`.
     */
     paperIdentity.city,
   );
@@ -1590,6 +1590,7 @@ function StoryPage() {
   const evidenceState: EvidenceCheckState = panelEvidence ?? {
     ran: Boolean(data.draft && recordedChecks(data.draft.research_json).evidenceChecked),
     toReview: 0,
+    contradicted: 0,
   };
   /*
     Unit U24b: an acceptance covers this draft when it is for THIS version AND
@@ -1633,6 +1634,9 @@ function StoryPage() {
       the line under "Evidence check" and the rows themselves are one number.
     */
     unreviewedClaims: evidenceState.toReview,
+    // M5: which part of that number the record disagrees with, so the blocker
+    // and its override can say so.
+    contradictedClaims: evidenceState.contradicted,
     unreviewedAccepted: acceptanceCovers,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,

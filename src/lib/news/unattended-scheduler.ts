@@ -23,8 +23,10 @@ import { tickFollowUps } from "./follow-up-scheduler.ts";
  *
  *  So: every import in this file is STATIC and RELATIVE, and the ONLY thing
  *  that imports this file is server/plugins/unattended-clock.ts -- the same
- *  shape as server/middleware/grok-pwa.ts, the one server-plugin pattern this
+ *  shape as server/plugins/schema-warmup.ts, the server-plugin pattern this
  *  repo has proven in the built output. Nothing client-reachable imports it.
+ *  (The file this comment used to name, the Grok app builder's
+ *  server/middleware/grok-pwa.ts, is long gone.)
  *
  * Cadence mirrors the dev Vite plugin exactly (which owns dev --
  * `apply: "serve"` -- so the two can never double-drain): monitors first tick

@@ -26,11 +26,27 @@
  * failure (see `getMigrationGuardPromise`), so a database that was briefly
  * unreachable at boot starts serving as soon as it is reachable again.
  *
+ * THE BODY NAMES NO INTERNALS (batch-6 pre-merge audit, item 12). This used to
+ * return `error.message` to whoever asked. The guard's own `console.error`
+ * already carries the detail to the log, and the messages that reach here are
+ * not all migration sentences: a connection failure reads
+ * `connect ECONNREFUSED 127.0.0.1:55432` -- the database's host, port and
+ * user, printed by an unauthenticated route to any passer-by -- and a
+ * driver error can carry a table name or a fragment of SQL. The operator gets
+ * the same detail from the log this file already writes; the caller gets a
+ * sentence that says what is wrong and that somebody has been told. `no-store`
+ * because a 503 that says "needs an update" must not be cached into a browser
+ * that will then keep showing it after the update has run.
+ *
  * The PGlite/self-hosted-without-a-database case never trips this: `getSql()`
  * applies `migrations/*.sql` before the first query, so the ledger is current
  * by the time it is read.
  */
 import { getMigrationGuardPromise } from "../../src/lib/migration-status.ts";
+
+/** The one sentence a refused request is answered with. Fixed, at all times. */
+export const SCHEMA_UNAVAILABLE_BODY =
+  "Service unavailable: the paper's database needs an update. The operator has been told what to run.";
 
 export default async function schemaCurrentGate(
   _event: unknown,
@@ -39,10 +55,20 @@ export default async function schemaCurrentGate(
   try {
     await getMigrationGuardPromise();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(message, {
+    /*
+      The detail is already in the guard's `console.error` -- this is the second
+      copy, for whoever is watching the process rather than the response.
+    */
+    console.error(
+      "[schema-current] refusing to serve:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return new Response(SCHEMA_UNAVAILABLE_BODY, {
       status: 503,
-      headers: { "content-type": "text/plain; charset=utf-8" },
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store",
+      },
     });
   }
   return next();

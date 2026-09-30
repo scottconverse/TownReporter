@@ -96,6 +96,15 @@ export type PublishBlockerState = {
    */
   unreviewedClaims: number;
   /**
+   * How many of `unreviewedClaims` the captured record CONTRADICTS (M5).
+   *
+   * A subset of the count above, from the same review
+   * (`contradictedClaims`, evidence-check-state.ts), so the blocker can say
+   * which part of the number is the part the record disagrees with. Defaults to
+   * none for a caller that has not read the review.
+   */
+  contradictedClaims?: number;
+  /**
    * The editor has already accepted those claims for THIS exact draft version.
    *
    * Read off `leads.notes_json` (`unreviewedClaimsConfirmation`), the same way
@@ -241,14 +250,38 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   */
   if (state.unreviewedClaims > 0 && !state.unreviewedAccepted) {
     const n = state.unreviewedClaims;
+    /*
+      M5 of the batch-6 pre-merge audit. A count that folds a claim the record
+      CONTRADICTS in with a claim nobody has got to yet is honest about the
+      total and silent about the part that matters: the record says the story is
+      wrong. The head count now carries the contradicted number, both presses
+      say it, and the override names what the editor is accepting -- so nobody
+      can press "Publish anyway" without having been told there are claims the
+      record contradicts among them.
+    */
+    const m = Math.max(0, Math.min(state.contradictedClaims ?? 0, n));
+    const them = n === 1 ? "it" : "them";
+    const contradicted = m > 0 ? ` (${m} contradicted by the record)` : "";
+    const tail =
+      m === 0
+        ? `The evidence check raised ${them} and no one has judged ${them} against the record.`
+        : m === n
+          ? `The evidence check raised ${them}, and the record contradicts ${
+              n === 1 ? "it" : "every one"
+            }.`
+          : `The evidence check raised ${them}, and the record contradicts ${m} of them.`;
     blockers.push({
       key: "claims-unreviewed",
-      sentence: `${n} claim${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} review. The evidence check raised ${
-        n === 1 ? "it" : "them"
-      } and no one has judged ${n === 1 ? "it" : "them"} against the record.`,
-      action: { label: "Review the claims", target: { kind: "evidence-review" } },
+      sentence: `${n} claim${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} review${contradicted}. ${tail}`,
+      action: {
+        label: n === 1 ? "Review the claim" : "Review the claims",
+        target: { kind: "evidence-review" },
+      },
       altAction: {
-        label: "Publish anyway — I accept these claims are unreviewed",
+        label:
+          m > 0
+            ? `Publish anyway — I accept these claims, including ${m} the record contradicts`
+            : "Publish anyway — I accept these claims are unreviewed",
         target: { kind: "accept-unreviewed" },
       },
     });
