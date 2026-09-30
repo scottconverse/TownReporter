@@ -106,53 +106,57 @@ const CAPTURE_SETS: readonly (readonly FindingCaptureEvidence[])[] = [
   [],
 ];
 
-describe("U24: what the pane chips and what the blocker counts are one rule", () => {
-  it("counts exactly the rows the pane chips '! Needs review' with no judgment behind them", () => {
+describe("U24/U24b: what the pane chips and what the blocker counts are one rule", () => {
+  it("counts EXACTLY the rows the pane chips '! Needs review', over the whole matrix", () => {
+    /* THE TRIPWIRE, and it is now two-way. `claimsNeedingReview` counts with
+       `judgmentChip` -- the pane's own predicate -- so every counted row chips
+       the review chip and every review chip is counted. U24 had a one-way
+       version of this with `contradicts` carved out, and the audit found what
+       that carve-out cost: a pane showing four rows chipped `! Needs review`
+       under a blocker that said three. */
     for (const judgment of JUDGMENTS) {
       for (const captures of CAPTURE_SETS) {
         const chip = judgmentChip(judgment, captures).chip;
-        const counted = claimNeedsReview(judgment, captures);
         const count = claimsNeedingReview(
           [row(judgment, captures)],
           [claimRow(judgment, captures)],
           [manualRow(judgment, captures)],
         );
-        const label = `${judgment}/${JSON.stringify(captures)}`;
-        if (counted) {
-          assert.equal(chip, NEEDS_REVIEW_CHIP, `${label}: a counted row must chip Needs review`);
-          assert.equal(count, 3, `${label}: every stack counts`);
+        const label = `${judgment}/${captures.length} capture(s)`;
+        if (chip === NEEDS_REVIEW_CHIP) {
+          assert.equal(count, 3, `${label}: every stack counts a review row`);
         } else {
           assert.equal(count, 0, `${label}: nothing counted`);
-          /*
-            NOT the converse: a row a person has already judged `contradicts`
-            also chips `! Needs review` and is NOT counted. It is not waiting
-            on anyone -- it HAS an answer, and a serious one -- so the count is
-            "rows nobody has judged", and the exception is named here rather
-            than left as a hole a later reader would find by surprise.
-          */
-          const alreadyJudged = judgment !== "unreviewed";
-          assert.equal(
-            chip === NEEDS_REVIEW_CHIP,
-            alreadyJudged && judgment === "contradicts",
-            `${label}: only a recorded contradiction may chip Needs review without being counted`,
-          );
         }
       }
     }
   });
 
+  it("counts a claim the record contradicts, which is the row the audit found uncounted", () => {
+    const contradicting = row("contradicts", [readable]);
+    assert.equal(judgmentChip("contradicts", [readable]).chip, NEEDS_REVIEW_CHIP);
+    assert.equal(
+      claimsNeedingReview([contradicting], [], []),
+      1,
+      "a story whose claim the record contradicts must not print on that answer",
+    );
+  });
+
   it("does not call a row review work when there is no record to judge it against", () => {
     /* `Could not check` is a different state with a different (absent) press:
        counting it would put "N claims need review" on the bar over rows whose
-       only control cannot review anything. */
+       only control cannot review anything. `evidenceRan` is what says that
+       state was reached at all (see `evidenceChip`). */
     assert.equal(claimNeedsReview("unreviewed", [unreadable]), false);
     assert.equal(claimNeedsReview("unreviewed", []), false);
     assert.equal(claimNeedsReview("unreviewed", [readable]), true);
+    assert.equal(claimsNeedingReview([row("unreviewed", [unreadable])], [], []), 0);
+    assert.equal(claimsNeedingReview([row("needs-reporting", [readable])], [], []), 0);
   });
 
-  it("does not count a judgment that has already been recorded", () => {
+  it("does not count a pass a person recorded", () => {
     for (const judgment of JUDGMENTS) {
-      if (judgment === "unreviewed") continue;
+      if (judgment === "unreviewed" || judgment === "contradicts") continue;
       assert.equal(
         claimNeedsReview(judgment, [readable]),
         false,

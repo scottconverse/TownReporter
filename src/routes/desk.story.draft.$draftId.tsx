@@ -223,6 +223,9 @@ function EditorialPage() {
   const checkFacts: CheckFacts = {
     hasDraft: Boolean(q.data),
     evidenceChecked: recorded.evidenceChecked,
+    /* Unit U24b: an editorial resolves no review, so "it ran" is the same pass
+       record and nothing else -- the note below says the same for the count. */
+    evidenceRan: recorded.evidenceChecked,
     /*
       Unit U24: an editorial has no findings review behind it -- the editorial
       desk resolves no review and this bar has no Checks pane to agree with --

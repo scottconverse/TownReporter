@@ -1574,6 +1574,37 @@ describe("scan coverage accounting (P0-3)", () => {
     );
   });
 
+  /*
+    UNIT U24b -- "FETCH FAILURE" NEEDS THE FETCH TO HAVE FAILED.
+
+    U24 split this arm on `model_batches_used === 0` and called the whole half
+    "Fetch failure". A scan cancelled or errored AFTER it had read its pages but
+    BEFORE the first batch was built also records zero batches, and the desk
+    told its reader the FETCH had failed -- sending them to the Sources screen
+    when the run had stopped between its two halves.
+  */
+  it("calls it stopped-before-the-writing-pass when sources WERE fetched", () => {
+    const stopped = scanCoverageLine({
+      sources_selected: 40,
+      sources_attempted: 40,
+      sources_fetched: 40,
+      sources_failed: 0,
+      sources_analyzed: 0,
+      model_batches_used: 0,
+      model_batches_failed: 0,
+      leads_created: 0,
+      error: "The run was stopped before its writing pass.",
+    });
+    assert.match(stopped!, /^Stopped before the writing pass \(40 fetched\)/);
+    assert.match(stopped!, /nothing was analyzed/);
+    assert.doesNotMatch(
+      stopped!,
+      /Fetch failure/,
+      "40 pages came back; the fetch is not what failed",
+    );
+    assert.doesNotMatch(stopped!, /provider/i);
+  });
+
   it("still names the provider when the batches ran and their answers were unusable", () => {
     const providerFailure = scanCoverageLine({
       sources_selected: 40,

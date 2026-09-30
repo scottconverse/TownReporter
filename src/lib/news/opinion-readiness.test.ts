@@ -43,13 +43,33 @@ async function withEnv<T>(changes: Record<string, string | undefined>, run: () =
   these"). The defect was the message, so the message is what changed.
 */
 describe("U24: Opinion says which models it writes with", () => {
-  it("names its own four paths and says the desk's story writer is not one of them", () => {
-    assert.match(OPINION_MODEL_UNIVERSE, /Claude/);
+  it("names Automatic's own two, and says the desk's story writer is not one of them", () => {
     assert.match(OPINION_MODEL_UNIVERSE, /Codex/);
-    assert.match(OPINION_MODEL_UNIVERSE, /local model/);
-    assert.match(OPINION_MODEL_UNIVERSE, /saved connection/);
+    assert.match(OPINION_MODEL_UNIVERSE, /Claude/);
     assert.match(OPINION_MODEL_UNIVERSE, /desk's story writer/i);
     assert.match(OPINION_MODEL_UNIVERSE, /not used for Opinion/);
+  });
+
+  /*
+    UNIT U24b -- THE OTHER TWO ARE CHOICES, NOT MISSING PIECES.
+
+    U24's first sentence listed four paths and said none of them was set up.
+    That was too broad in the other direction: a local model and a saved
+    connection are EXPLICIT PICKS (`OPINION_MODEL_CHOICES`), never walked by
+    Automatic, so "a local model is not set up" reads as a verdict on a path
+    this failure never tried. What the editor needs is Automatic's own two
+    named, and the other two offered as what they are.
+  */
+  it("offers the local model and the saved connection as picks, not as failures", () => {
+    const picks = OPINION_MODEL_UNIVERSE.slice(OPINION_MODEL_UNIVERSE.indexOf("pick by name"));
+    assert.ok(picks.length > 0, "the sentence must offer the two explicit picks");
+    assert.match(picks, /local model/);
+    assert.match(picks, /saved connection/);
+    assert.doesNotMatch(
+      picks,
+      /not set up|none of them|no model/i,
+      "a path Automatic never walks must not be reported as missing",
+    );
   });
 
   it("says it on the page when Automatic finds nothing", async () => {
@@ -64,7 +84,7 @@ describe("U24: Opinion says which models it writes with", () => {
       }),
     );
     assert.equal(result.ready, false);
-    assert.match(result.why, /Opinion writes with Claude, Codex, a local model or a saved connection/);
+    assert.match(result.why, /Opinion's Automatic writes with Codex Sol, then Claude Sonnet/);
     assert.match(result.why, /not used for Opinion/);
     /* The generic sentence that started this is gone from what the editor reads. */
     assert.doesNotMatch(result.why, /No model is set up yet/);
@@ -86,7 +106,7 @@ describe("U24: Opinion says which models it writes with", () => {
     );
     assert.equal(result.ready, false);
     assert.match(result.why, /Opinion can write with Claude/);
-    assert.doesNotMatch(result.why, /Opinion writes with Claude, Codex, a local model/);
+    assert.doesNotMatch(result.why, /Automatic writes with Codex Sol, then Claude Sonnet/);
   });
 
   it("walks exactly the two rungs it names in that order", () => {

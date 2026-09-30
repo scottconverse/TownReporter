@@ -92,6 +92,54 @@ export async function assertRate(
   }
 }
 
+/**
+ * Refuse a repeat of `action` on `key` inside `seconds`, or record it (unit
+ * U24b).
+ *
+ * WHY THIS IS NOT `assertRate`. `assertRate` bounds an HOURLY BUDGET for a
+ * thing that costs money -- a scan, a model round, a login attempt -- and its
+ * window is fixed at an hour with the cap coming from a table. What a source
+ * row's "Retry" needs is the other shape: a short, fixed pause so one press
+ * cannot be mashed into a burst of requests at somebody else's web server. A
+ * minute-long budget would be no protection at all; an hour would be useless
+ * to the editor who is trying to fix a source.
+ *
+ * The row lives in the same `desk_rate` table, because that is where "this
+ * person did this thing at this time" already lives. The key is per EDITOR and
+ * per action (`check-source:<id>`), which is both what a spam guard is for --
+ * one editor pressing Retry over and over -- and what the table's
+ * `desk_rate_lookup (user_id, action, created_at desc)` index can serve. Two
+ * editors checking the same source a second apart is not a burst, and is not
+ * refused.
+ *
+ * The attempt is recorded only when it is allowed, so a refused press does not
+ * extend its own window.
+ */
+export async function assertCooldown(
+  userId: string,
+  action: string,
+  seconds: number,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+): Promise<void> {
+  const sql = await getSql();
+  await ensureDeskRateSchema();
+  const [last] = await sql<{ at: string | Date }>`
+    select created_at as at from desk_rate
+    where user_id = ${userId} and action = ${action}
+    order by created_at desc limit 1
+  `;
+  if (last) {
+    const ageMs = Date.now() - new Date(last.at).getTime();
+    if (Number.isFinite(ageMs) && ageMs < seconds * 1000) {
+      const wait = Math.max(1, Math.ceil((seconds * 1000 - ageMs) / 1000));
+      throw new Error(`That was checked a moment ago. Try again in ${wait}s.`);
+    }
+  }
+  await sql`
+    insert into desk_rate (user_id, action, newsroom_id) values (${userId}, ${action}, ${newsroomId})
+  `;
+}
+
 /** `audit_events` as `audit()` needs it: 0005, then 0012's column, then the two subject columns. */
 const AUDIT_EVENTS_SCHEMA = [
   `

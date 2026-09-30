@@ -26,7 +26,7 @@ import {
 import type { DraftAuditFinding } from "@/lib/news/draft-audit";
 import {
   reviewEvidenceCheckState,
-  type EvidenceCheckState,
+  type EvidenceCheckReport,
 } from "@/lib/news/evidence-check-state";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { NameCheck } from "@/lib/news/name-check";
@@ -543,16 +543,18 @@ export type EvidenceListInputs = {
   evidenceRecorded: boolean;
   /**
    * The one answer this panel's list and the page's publish bar both read
-   * (unit U24).
+   * (unit U24), plus the review's own identity (unit U24b).
    *
    * The panel is the only thing holding the resolved review, so it is the only
-   * thing that can count the claims waiting on a person. It reports the state
-   * up rather than letting the page compute a second one from the memo -- the
-   * bar, the chips, the blocker and the rows below them are then readings of a
-   * single value, which is what U24 is for. Stable callers only: the page
-   * passes a `useCallback`.
+   * thing that can count the rows waiting on a person -- and the only thing
+   * that holds the review's `evidenceToken`, which the acceptance press has to
+   * carry so the server can refuse one recorded against a review that has
+   * moved. It reports both up rather than letting the page compute a second
+   * answer from the memo: the bar, the chips, the blocker and the rows below
+   * them are then readings of a single value, which is what U24 is for. Stable
+   * callers only: the page passes a `useCallback`.
    */
-  onEvidenceState?: (state: EvidenceCheckState) => void;
+  onEvidenceState?: (report: EvidenceCheckReport) => void;
 };
 
 export function FindingEvidenceReviewPanel({
@@ -906,14 +908,19 @@ export function FindingEvidenceReviewPanel({
   });
   const reportEvidenceState = list.onEvidenceState;
   /*
-    The two values, destructured, so the effect's dependencies are the numbers
-    that changed rather than the object they arrived in -- and so a re-render
-    with the same state reports nothing.
+    The values, destructured, so the effect's dependencies are the things that
+    changed rather than the object they arrived in -- and so a re-render with
+    the same state reports nothing.
   */
   const { ran: evidenceRan, toReview: evidenceToReview } = evidenceState;
+  const evidenceTokenSeen = review?.evidenceToken ?? null;
   useEffect(() => {
-    reportEvidenceState?.({ ran: evidenceRan, toReview: evidenceToReview });
-  }, [reportEvidenceState, evidenceRan, evidenceToReview]);
+    reportEvidenceState?.({
+      ran: evidenceRan,
+      toReview: evidenceToReview,
+      evidenceToken: evidenceTokenSeen,
+    });
+  }, [reportEvidenceState, evidenceRan, evidenceToReview, evidenceTokenSeen]);
 
   /*
     The drawn line under "Evidence check": the review's own record, read

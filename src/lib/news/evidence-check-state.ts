@@ -26,20 +26,21 @@
  * thing that makes a pass), and both it and this are handed to the same
  * `CheckFacts` -- one screen, one set of facts.
  *
- * WHAT COUNTS AS "NEEDING REVIEW" is deliberately the same predicate the pane
- * draws its `! Needs review` chip from (`claimNeedsReview` below, which
- * `judgmentChip` uses). The count on the blocker and the number of rows chipped
- * `! Needs review` are the same number because they are the same expression,
- * not because two rules were written to agree. A row the check could not read
- * (`Could not check`, no readable capture) is NOT counted here: there is no
- * judgment to record against it, so a "review the claims" press would be a
- * dead end. That state stays where it already is, on the pane's own chip.
+ * WHAT COUNTS AS "NEEDING REVIEW" is the pane's own `! Needs review` chip --
+ * literally, since `claimsNeedingReview` calls `judgmentChip` rather than
+ * restating its rule. The count on the blocker and the number of rows chipped
+ * `! Needs review` are the same number because they are the same expression.
+ * A row the check could not read (`Could not check`, no readable capture) is
+ * NOT counted: there is no record to judge it against, so a "review the
+ * claims" press aimed at it would be a dead end. Unit U24b is what a row the
+ * record CONTRADICTS is: counted, because the editor has a real choice to make
+ * about it and the story must not print on it.
  *
  * Pure -- no DOM, no database, no hooks -- so both the page and the publish
  * gate can ask it, and a test can pin it without a browser.
  */
 
-import { claimNeedsReview, judgmentChip, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
+import { judgmentChip, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
 import type {
   ClaimEvidenceRow,
@@ -63,8 +64,30 @@ import type { DraftRow } from "./types.ts";
 export type EvidenceCheckState = {
   /** Did an evidence check run against this draft at all? */
   ran: boolean;
-  /** Claims the check raised that a person has not judged yet. */
+  /**
+   * Rows the Checks pane chips `! Needs review` -- claims nobody has judged,
+   * and claims the record contradicts (unit U24b).
+   */
   toReview: number;
+};
+
+/**
+ * The state, plus the identity of the review it was read from (unit U24b).
+ *
+ * The panel is the only thing that holds a resolved review, so it is also the
+ * only thing that holds the review's own `evidenceToken` -- the value the
+ * judgment saves take and the one the acceptance press now carries, so a
+ * server can tell "the review this editor was looking at" from "a review that
+ * has moved since". It travels with the state rather than in a second callback
+ * because the two are always read and written together.
+ */
+export type EvidenceCheckReport = EvidenceCheckState & {
+  /**
+   * `FindingEvidenceReview.evidenceToken`, or null while the review has not
+   * been read. Null is a real answer: an acceptance cannot be recorded against
+   * a review nobody has resolved, and the server refuses it.
+   */
+  evidenceToken: string | null;
 };
 
 /** One row of any of the review's three stacks, as the two predicates need it. */
@@ -74,20 +97,30 @@ type ReviewableRow = {
 };
 
 /**
- * How many rows of a resolved review are waiting on a person.
+ * How many rows of a resolved review the Checks pane is asking a person to
+ * deal with.
  *
- * THE TRIPWIRE: every counted row must chip `! Needs review`, and every row
- * that chips `! Needs review` with no judgment behind it must be counted. A
- * test walks the whole judgment matrix and fails if this and the chip ever
- * disagree, so the blocker's number and the pane's rows cannot drift.
+ * THE TRIPWIRE: this is exactly the number of rows the pane chips
+ * `! Needs review`, because it IS that predicate -- `judgmentChip` is what is
+ * called here, not a second rule written to agree with it. A test builds the
+ * real list (`evidenceCheckRows`, the same call the pane makes) and fails if
+ * the two numbers ever differ, so the blocker, the chip and the pane's rows
+ * cannot drift apart.
  *
- * ONE ROW CHIPS THE REVIEW CHIP WITHOUT BEING COUNTED, deliberately: a
- * judgment of `contradicts` is a recorded answer -- the editor read the record
- * and it does not say what the claim says -- so nothing is waiting on anybody,
- * and the fix is to re-judge or rewrite the sentence, not to review it. The
- * count is "claims nobody has judged", which is the thing a person can be
- * asked to do; the contradiction keeps its own chip on the pane, which is
- * where the editor meets it.
+ * UNIT U24b -- A CONTRADICTION IS COUNTED. U24 counted only rows nobody had
+ * judged, on the reasoning that `contradicts` is a recorded answer and so
+ * nothing is "waiting" on anybody. The audit found what that produced: four
+ * rows chipped `! Needs review` under a blocker that said three, and -- the
+ * part that matters -- a story whose claim the captured record CONTRADICTS
+ * printing unblocked. A contradiction is not an answer the desk can print on.
+ * It is a sentence to change or a judgment to re-make, which is exactly what
+ * "review" means here, so the count is the pane's own list of rows that need a
+ * person whatever put them there.
+ *
+ * A row the check could not read (`Could not check`, no readable capture) is
+ * still NOT counted: there is no record to judge it against, so a "review the
+ * claims" press aimed at it is a dead end. That state is what the chip's
+ * "ran, not decided" wording is for (see `evidenceChip`).
  */
 export function claimsNeedingReview(
   rows: readonly FindingEvidenceRow[],
@@ -96,12 +129,7 @@ export function claimsNeedingReview(
 ): number {
   let count = 0;
   for (const row of [...rows, ...claimRows, ...manualClaimRows] as ReviewableRow[]) {
-    if (!claimNeedsReview(row.judgment.value, row.captures)) continue;
-    /* Belt and braces against a `judgmentChip` change that stops printing the
-       review chip for a row that meets the review predicate: the count is only
-       honest while these two say the same thing. */
-    if (judgmentChip(row.judgment.value, row.captures).chip !== NEEDS_REVIEW_CHIP) continue;
-    count += 1;
+    if (judgmentChip(row.judgment.value, row.captures).chip === NEEDS_REVIEW_CHIP) count += 1;
   }
   return count;
 }

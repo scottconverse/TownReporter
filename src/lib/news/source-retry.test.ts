@@ -179,6 +179,75 @@ it("is what the row's Retry actually presses -- not a scan in disguise", () => {
   assert.match(page, /runScanNow = useMutation\(\{[\s\S]{0,200}runScan\(\{/);
 });
 
+it("refuses a source that is not ACCEPTED, and fetches nothing at all", async () => {
+  /*
+    UNIT U24b -- THE SERVER'S OWN FENCE. The row's press is drawn for accepted
+    sources; the server says the same thing, because a disabled button is a
+    suggestion and a scripted call routes past it.
+
+    `paused` is refused too, deliberately: pausing means "do not fetch on a
+    schedule", but the row offers Resume and Remove there, not Retry, so
+    allowing it would be an unexercised permission rather than a real one.
+  */
+  const f = await fixture();
+  let fetched = 0;
+  setFetchImplForTests(async () => {
+    fetched += 1;
+    return new Response(READABLE, { status: 200, headers: { "content-type": "text/html" } });
+  });
+
+  for (const status of ["paused", "rejected"] as const) {
+    await f.sql.query("update sources set status=$1 where id=$2", [status, f.sourceId]);
+    const result = await performCheckOneSource(
+      { userId: f.userId, newsroomId: f.newsroomId },
+      f.sourceId,
+      0,
+    );
+    assert.equal(result.ok, false, `${status} must not be re-checked`);
+    assert.match(result.ok ? "" : result.line, /paused|not on the watch list/);
+  }
+  assert.equal(fetched, 0, "a refused press must not touch the site");
+  /* And the row is left exactly as it was. */
+  const row = await sourceRow(f.sql, f.sourceId);
+  assert.equal(row.last_error, "The site refused the request.");
+});
+
+it("will not let one press be mashed into a burst at somebody else's server", async () => {
+  /*
+    UNIT U24b -- THE COOLDOWN. The press fetches a page a publisher pays for,
+    and an editor learns nothing new between one press and the next. The pause
+    is per EDITOR and per SOURCE, which is both what a spam guard is for and
+    what `desk_rate`'s own index can serve.
+  */
+  const f = await fixture();
+  let fetched = 0;
+  setFetchImplForTests(async () => {
+    fetched += 1;
+    return new Response(READABLE, { status: 200, headers: { "content-type": "text/html" } });
+  });
+
+  const first = await performCheckOneSource({ userId: f.userId, newsroomId: f.newsroomId }, f.sourceId, 30);
+  assert.equal(first.ok, true, first.ok ? "" : first.error);
+  const second = await performCheckOneSource({ userId: f.userId, newsroomId: f.newsroomId }, f.sourceId, 30);
+  assert.equal(second.ok, false, "a second press inside the window is refused");
+  assert.match(second.ok ? "" : second.line, /Try again in \d+s\./);
+  assert.equal(fetched, 1, "and it did not reach the site");
+
+  /* The cooldown is this editor's, on this source: neither another source nor
+     another editor is refused by it. */
+  const [other] = await f.sql.query<{ id: number }>(
+    "insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values($1,$2,$3,'Second record','official','A','accepted') returning id",
+    [f.userId, f.newsroomId, "http://93.184.216.34/second-record"],
+  );
+  const secondSource = await performCheckOneSource(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    other.id,
+    30,
+  );
+  assert.equal(secondSource.ok, true, secondSource.ok ? "" : secondSource.error);
+  assert.equal(fetched, 2, "a different source is a different cooldown");
+});
+
 it("refuses a source that is not on this desk, rather than fetching a neighbour's", async () => {
   const f = await fixture();
   respondWith(READABLE);

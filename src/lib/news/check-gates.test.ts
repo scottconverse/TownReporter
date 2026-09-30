@@ -28,6 +28,7 @@ import { reconcileDraftEvidence } from "./draft-evidence.ts";
 const NEVER_RUN: CheckFacts = {
   hasDraft: true,
   evidenceChecked: false,
+  evidenceRan: false,
   evidenceToReview: 0,
   evidenceRequired: false,
   evidenceOutstanding: false,
@@ -219,6 +220,91 @@ describe("U24: a check that ran and left claims nobody judged is not 'not run'",
       "Nothing blocks Publish. 7 claims from the evidence check are unreviewed and no name check ran.",
     );
     assert.doesNotMatch(both, /No evidence check ran/);
+  });
+});
+
+describe("U24b: a check that RAN is not a check that PASSED", () => {
+  /*
+    THE AUDIT'S HIGH FINDING. U24 widened `evidenceChecked` to "a check ran at
+    all", so a draft whose findings were every one of them `Could not check` --
+    or judged `contradicts` -- carried a green `✓ Evidence checked` and the bar
+    said "All checks done." over a pane showing exactly those rows. `toReview`
+    is 0 for those rows, so nothing else stopped it.
+
+    The pass is the RECORD again (a decision, or the reconciliation stamp), and
+    "it ran" is its own fact that only chooses wording.
+  */
+  const RAN_UNDECIDED: CheckFacts = {
+    ...NEVER_RUN,
+    evidenceRan: true,
+    evidenceChecked: false,
+    evidenceToReview: 0,
+  };
+
+  it("will not go green on a run nobody answered", () => {
+    const chip = evidenceChip(RAN_UNDECIDED);
+    assert.notEqual(chip.tone, "ok", "a run is not an answer");
+    assert.equal(chip.done, false);
+    assert.doesNotMatch(chip.text, /✓/);
+    assert.equal(chip.text, "! Evidence check not decided");
+  });
+
+  it("is not 'All checks done.' either -- and not 'no check ran'", () => {
+    const bar = publishBarNote({ ...RAN_UNDECIDED, nameCheckComplete: true, nameCheckRecorded: true });
+    assert.doesNotMatch(bar, /All checks done\./);
+    assert.doesNotMatch(bar, /No evidence check ran/);
+    assert.equal(bar, "Nothing blocks Publish. The evidence check is not confirmed.");
+  });
+
+  it("keeps the stepper's Check stage open", () => {
+    assert.equal(checkStageDone(RAN_UNDECIDED), false);
+    assert.equal(checkStageDone({ ...RAN_UNDECIDED, evidenceChecked: true, nameCheckComplete: true, nameCheckRecorded: true }), true);
+  });
+
+  it("still says 'not run' for a draft with no record and no output", () => {
+    assert.deepEqual(evidenceChip(NEVER_RUN), {
+      text: "○ Evidence check not run",
+      tone: "quiet",
+      done: false,
+    });
+    assert.equal(
+      publishBarNote({ ...NEVER_RUN, nameCheckComplete: true, nameCheckRecorded: true }),
+      "Nothing blocks Publish. No evidence check ran on this draft.",
+    );
+  });
+
+  it("keeps the pass on the record, alone", () => {
+    /* The three records that make a PASS, and nothing else does. */
+    assert.deepEqual(evidenceChip({ ...PASSED, evidenceRan: true }), {
+      text: "✓ Evidence checked",
+      tone: "ok",
+      done: true,
+    });
+    assert.equal(evidenceChip({ ...NEVER_RUN, evidenceChecked: true }).done, true);
+    /* A run with rows the pane is asking about is still the count, first. */
+    assert.equal(
+      evidenceChip({ ...RAN_UNDECIDED, evidenceToReview: 3 }).text,
+      "! 3 claims need review",
+    );
+  });
+
+  it("is what the story page actually hands the chips", () => {
+    /*
+      The tripwire that makes the mutation real. Every case above is a pure
+      fixture, so none of them can see the line the audit found: the PAGE fed
+      `evidenceChecked` from "the check ran" as well as from the record, and
+      that single `||` is what turned a pane of `Could not check` rows into
+      `✓ Evidence checked` and "All checks done.". Putting it back must fail
+      here.
+    */
+    const page = readFileSync(new URL("../../routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
+    assert.match(page, /evidenceChecked: draftChecks\.evidenceChecked,/);
+    assert.doesNotMatch(
+      page,
+      /evidenceChecked: draftChecks\.evidenceChecked \|\|/,
+      "the pass must never be widened to a run",
+    );
+    assert.match(page, /evidenceRan: evidenceState\.ran,/);
   });
 });
 

@@ -16,7 +16,7 @@ import { getPaperConfig } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
-import { assertRate, audit } from "./ops";
+import { assertCooldown, assertRate, audit } from "./ops";
 import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
@@ -92,6 +92,7 @@ import {
   reportingNotesInput,
   rowId,
   runScanInput,
+  acceptUnreviewedClaimsInput,
   slugInput,
   sourceStatusInput,
   suggestedSourceReviewInput,
@@ -137,6 +138,11 @@ import {
   parseCorrectionWording,
 } from "./correction-wording.ts";
 import { provenanceFromUrls } from "./findings";
+import type {
+  ClaimEvidenceRow,
+  FindingEvidenceRow,
+  ManualClaimEvidenceRow,
+} from "./finding-evidence-review.ts";
 import {
   namedOutlet,
   namedOutletNotice,
@@ -867,18 +873,25 @@ export const getLead = createServerFn({ method: "GET" })
         ? notes.topicConfirmation.topic
         : null;
     /*
-      Whether an editor has already accepted this exact draft version going to
-      paper with claims its evidence check raised and nobody judged (unit U24).
+      HOW MANY claims an editor has already accepted for this exact draft
+      version, or 0 (unit U24b).
 
-      Read here, server-side, for the same reason `topicConfirmed` is: the
-      client never has to know how the draft's identity is computed, and a stale
-      tab cannot decide for itself that an acceptance still counts after the
-      story was edited. The publish gate reads the same field, so the button and
-      the refusal cannot disagree.
+      A COUNT rather than a boolean: the acceptance is for "these three", and a
+      judgment the desk later downgrades to unreviewed -- because the capture
+      behind it changed, or its binding moved -- raises the number the story
+      must answer for WITHOUT moving the draft's fingerprint. Three accepted
+      must not print four, so the page compares this against what is
+      outstanding now, and `performPublish` does the same on the server.
+
+      Read here for the same reason `topicConfirmed` is: the client never has to
+      know how the draft's identity is computed, and a stale tab cannot decide
+      for itself that an acceptance still counts after the story was edited.
     */
-    const unreviewedClaimsAccepted =
-      Boolean(evidenceToken) &&
-      notes.unreviewedClaimsConfirmation?.token === topicConfirmationFingerprint(evidenceToken);
+    const unreviewedClaimsAcceptedCount =
+      evidenceToken &&
+      notes.unreviewedClaimsConfirmation?.token === topicConfirmationFingerprint(evidenceToken)
+        ? notes.unreviewedClaimsConfirmation.count
+        : 0;
     /*
       The named-outlet check, run for display only -- performPublish decides.
 
@@ -898,7 +911,7 @@ export const getLead = createServerFn({ method: "GET" })
       draftMeetingEvidence,
       evidenceToken,
       topicConfirmed,
-      unreviewedClaimsAccepted,
+      unreviewedClaimsAcceptedCount,
       namedOutlets,
       outletOverrides,
       articleSlug: live[0]?.slug ?? null,
@@ -1140,17 +1153,33 @@ export const runScan = createServerFn({ method: "POST" })
  * source said at a moment, and it is what "3 new items" is counted from; this
  * is a readability check, and claiming new content from it would be inventing
  * a change nobody looked for.
+ *
+ * TWO FENCES, BOTH SERVER-SIDE (unit U24b). The row's press is drawn only for
+ * accepted sources, and the server says the same thing: a source that is not
+ * ACCEPTED is not re-checked. Accepted is the status the press exists for;
+ * `paused` means "do not fetch on a schedule" but the row offers Resume and
+ * Remove there, not Retry, so allowing a paused row would be an unexercised
+ * permission. A rejected source is off the watch list entirely.
+ *
+ * And a short cooldown (`assertCooldown`), because the press fetches somebody
+ * else's web server: without it a held-down Retry is a burst at that site, and
+ * the editor learns nothing new between one press and the next anyway.
  */
 export async function performCheckOneSource(
   context: { userId: string; newsroomId?: number },
   sourceId: number,
+  /*
+    The cooldown, in seconds, overridable for the tests that press twice on
+    purpose. Production passes nothing.
+  */
+  cooldownSeconds = 30,
 ): Promise<
   | { ok: true; title: string; url: string; characters: number; line: string }
   | { ok: false; url: string; title: string; error: string; line: string }
 > {
   const sql = await getSql();
-  const [src] = await sql.query<{ id: number; url: string; title: string }>(
-    "select id,url,title from sources where id=$1 and newsroom_id=$2",
+  const [src] = await sql.query<{ id: number; url: string; title: string; status: string }>(
+    "select id,url,title,status from sources where id=$1 and newsroom_id=$2",
     [sourceId, owned(context)],
   );
   if (!src) {
@@ -1161,6 +1190,25 @@ export async function performCheckOneSource(
       error: "That source is not on this desk.",
       line: "That source is not on this desk.",
     };
+  }
+  if (src.status !== "accepted") {
+    const line =
+      src.status === "paused"
+        ? "This source is paused. Resume it first, then check it."
+        : "This source is not on the watch list.";
+    return { ok: false as const, url: src.url, title: src.title, error: line, line };
+  }
+  /*
+    Unit U24b: the pause is checked BEFORE anything is fetched, and comes back
+    as an ordinary refusal rather than a thrown one -- every way this press can
+    do nothing lands on the row through the same `line`, so the editor reads one
+    shape of sentence whatever stopped it.
+  */
+  try {
+    await assertCooldown(context.userId, `check-source:${sourceId}`, cooldownSeconds, owned(context));
+  } catch (err) {
+    const line = err instanceof Error ? err.message : "That was checked a moment ago.";
+    return { ok: false as const, url: src.url, title: src.title, error: line, line };
   }
   /*
     `withRetry` is the scan's own: one transient timeout is retried there and
@@ -3783,40 +3831,95 @@ export const confirmDraftTopic = createServerFn({ method: "POST" })
   .handler(async ({ context, data: leadId }) => performConfirmDraftTopic(context, leadId));
 
 /**
+ * THE REVIEW THIS GATE READS, through one seam so a test can make it fail
+ * (unit U24b). Same pattern as `PerformScanWorkDeps` and `PerformDraftWorkDeps`.
+ */
+export type UnreviewedClaimDeps = {
+  loadReview?: (newsroomId: number, leadId: number) => Promise<{
+    rows: readonly FindingEvidenceRow[];
+    claimRows: readonly ClaimEvidenceRow[];
+    manualClaimRows: readonly ManualClaimEvidenceRow[];
+    evidenceToken: string;
+  }>;
+};
+
+/**
  * The count of claims a draft's own evidence check raised and nobody has
- * judged (unit U24), for the two gates that must agree: the desk's blocker and
- * `performPublish`'s refusal.
+ * answered for (unit U24), for the three gates that must agree: the desk's
+ * blocker, `performAcceptUnreviewedClaims` and `performPublish`'s refusal.
  *
  * ONE READER OF THE ONE RULE. It resolves the same review the Checks pane
  * resolves (`loadFindingEvidenceReview`, the query that pane already makes) and
  * counts with `claimsNeedingReview` -- the predicate the pane's `! Needs
- * review` chip is drawn from. A cheaper count from the memo alone would be the
- * bug this unit exists to fix, one layer down: the pane downgrades a judgment
- * to unreviewed when its binding moved or its record stopped being readable,
- * and a memo-only count cannot see that, so the desk would offer to print
- * something the server then refused with no way to find out why.
+ * review` chip is drawn from, contradictions included (U24b). A cheaper count
+ * from the memo alone would be the bug this unit exists to fix, one layer
+ * down: the pane downgrades a judgment to unreviewed when its binding moved or
+ * its record stopped being readable, and a memo-only count cannot see that, so
+ * the desk would offer to print something the server then refused with no way
+ * to find out why.
  *
- * A draft whose stored findings will not parse has no review to resolve and
- * no way for anyone to have judged them, so it counts as NOTHING outstanding
- * here rather than as an error: `loadFindingEvidenceReview` throws for exactly
- * the rows the Checks pane already shows as unreadable, and a publish that
- * hard-failed on them would be a story nobody could print or fix. The pane
- * says so on its own rows; this gate is about claims a person can see and
- * judge.
+ * ── IT FAILS CLOSED (UNIT U24b) ────────────────────────────────────────────
+ *
+ * U24 wrapped the whole thing in a bare `catch { return 0 }`, so ANY failure --
+ * including a transient database error -- read as "nothing outstanding" and
+ * opened the gate for the length of the outage. A truthfulness gate must not
+ * answer "nothing to see" when what happened is "I could not look".
+ *
+ * So exactly one error class is swallowed, by name: the unreadable-stored-
+ * findings error (`isUnreadableFindingsError`), which is the case where there
+ * is genuinely no review to count and the Checks pane already shows those rows
+ * as unreadable. Everything else -- a dead connection, a missing table, a draft
+ * that vanished mid-request -- propagates, and the caller refuses the publish
+ * in words a person can read (`PUBLISH_COULD_NOT_CHECK`).
  */
+export async function unreviewedClaimsGate(
+  newsroomId: number,
+  leadId: number,
+  deps: UnreviewedClaimDeps = {},
+): Promise<{ outstanding: number; evidenceToken: string }> {
+  const { claimsNeedingReview } = await import("./evidence-check-state.ts");
+  const load =
+    deps.loadReview ??
+    (async (room: number, lead: number) => {
+      const { loadFindingEvidenceReview } = await import("./finding-evidence-review.ts");
+      return loadFindingEvidenceReview(await getSql(), room, lead);
+    });
+  let review;
+  try {
+    review = await load(newsroomId, leadId);
+  } catch (error) {
+    const { isUnreadableFindingsError } = await import("./finding-evidence-review.ts");
+    if (isUnreadableFindingsError(error)) return { outstanding: 0, evidenceToken: "" };
+    throw error;
+  }
+  return {
+    outstanding: claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows),
+    evidenceToken: review.evidenceToken,
+  };
+}
+
+/** The count alone, for the callers that only need the number. */
 export async function unreviewedClaimCount(
   newsroomId: number,
   leadId: number,
+  deps: UnreviewedClaimDeps = {},
 ): Promise<number> {
-  try {
-    const { loadFindingEvidenceReview } = await import("./finding-evidence-review.ts");
-    const { claimsNeedingReview } = await import("./evidence-check-state.ts");
-    const review = await loadFindingEvidenceReview(await getSql(), newsroomId, leadId);
-    return claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows);
-  } catch {
-    return 0;
-  }
+  return (await unreviewedClaimsGate(newsroomId, leadId, deps)).outstanding;
 }
+
+/**
+ * What the desk says when the evidence review could not be read at all (U24b).
+ *
+ * A publish refused for this reason is refused for a reason that has nothing to
+ * do with the story, so it says so plainly and points at the retry rather than
+ * printing a driver error at the editor.
+ */
+const PUBLISH_COULD_NOT_CHECK =
+  "The desk could not read this draft's evidence review just now, so nothing was published. Try again in a moment.";
+
+/** The same sentence for the acceptance press, which the same failure refuses. */
+const ACCEPT_COULD_NOT_CHECK =
+  "The desk could not read this draft's evidence review just now, so nothing was recorded. Try again in a moment.";
 
 /**
  * "Publish anyway -- I accept these claims are unreviewed" (unit U24).
@@ -3836,12 +3939,41 @@ export async function unreviewedClaimCount(
 export async function performAcceptUnreviewedClaims(
   context: { userId: string; newsroomId?: number },
   leadId: number,
+  /*
+    The review token the editor's screen was holding (unit U24b). Compared
+    against the review resolved HERE, the same way every judgment save compares
+    its token: an acceptance is "I read these claims", so one recorded against
+    a review that has moved since is refused rather than stored. Empty means
+    the press did not carry one (a stale client), which is also a refusal.
+  */
+  evidenceToken: string,
+  deps: UnreviewedClaimDeps = {},
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
-  const count = await unreviewedClaimCount(owned(context), leadId);
+  let gate: { outstanding: number; evidenceToken: string };
+  try {
+    gate = await unreviewedClaimsGate(owned(context), leadId, deps);
+  } catch {
+    /* Unit U24b: fail closed, in words. Recording an acceptance over a review
+       nobody could read would be the widest possible version of this bug. */
+    return { ok: false as const, error: ACCEPT_COULD_NOT_CHECK };
+  }
+  const count = gate.outstanding;
   if (count === 0) {
     return {
       ok: false as const,
       error: "There is nothing to accept: every claim the evidence check raised has been reviewed.",
+    };
+  }
+  /*
+    Unit U24b: the press carried the review the editor was looking at. A review
+    that has moved since -- a judgment saved in another tab, a claim edited, the
+    draft rewritten -- is not the one they read, so nothing is recorded.
+  */
+  if (!evidenceToken || evidenceToken !== gate.evidenceToken) {
+    return {
+      ok: false as const,
+      error:
+        "The draft or its evidence review changed since this page was drawn, so nothing was accepted. Reload the story and look at the claims again.",
     };
   }
   const result = await withTransaction(async (sql) => {
@@ -3889,8 +4021,10 @@ export async function performAcceptUnreviewedClaims(
 
 export const acceptUnreviewedClaims = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((leadId: unknown) => rowId.parse(leadId))
-  .handler(async ({ context, data: leadId }) => performAcceptUnreviewedClaims(context, leadId));
+  .validator((input: unknown) => acceptUnreviewedClaimsInput.parse(input))
+  .handler(async ({ context, data }) =>
+    performAcceptUnreviewedClaims(context, data.leadId, data.evidenceToken),
+  );
 
 /**
  * The titles a reader will see on this draft's Sources list.
@@ -4109,6 +4243,13 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     a typo.
   */
   areaFromEditor?: string,
+  /*
+    Test seam only, same shape as `PerformScanWorkDeps`: `loadReview` replaces
+    the one read the claims gate makes, so a test can make it fail and prove the
+    publish refuses rather than opening on an error it could not read (unit
+    U24b). Production passes nothing.
+  */
+  deps: UnreviewedClaimDeps = {},
 ): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
   const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
   const already = await getSql().then(
@@ -4211,27 +4352,54 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     Two ways past it, and both are the editor's to choose: judge the claims in
     the workbench (the blocker's first press, and the one to prefer), or accept
     them explicitly with a press that records who and when against this exact
-    draft version (`performAcceptUnreviewedClaims`). The accepted count and
+    draft version (`performAcceptUnreviewedClaims`). The accepted COUNT and
     token are read from `notes_json` -- the same place, and the same
     fingerprint, as the section confirmation, so the acceptance is for the
     version the editor was reading and an edit takes it back.
+
+    THREE WAYS IT FAILS CLOSED (units U24, U24b):
+
+      1. The count cannot be read at all. `unreviewedClaimCount` now only
+         swallows the unreadable-findings error and lets infrastructure errors
+         out; a publish that cannot be checked is a publish that does not
+         happen, in a sentence a person can read.
+      2. No acceptance, or one recorded for a different draft version.
+      3. An acceptance given for FEWER claims than are outstanding now. The
+         fingerprint alone cannot see this: a judgment the desk downgrades to
+         unreviewed -- the capture behind it changed, its binding moved -- does
+         not touch the draft row, so the token stands still while the number to
+         answer for grows. "I accepted three" must not print four.
 
     A disabled button is a suggestion -- a stale tab, a second window or a
     scripted call all route straight past it -- so the gate is here, and the
     desk's blocker is the sentence that tells the editor this one exists.
   */
-  const outstandingClaims = await unreviewedClaimCount(owned(context), leadId);
+  let outstandingClaims: number;
+  try {
+    outstandingClaims = await unreviewedClaimCount(owned(context), leadId, deps);
+  } catch {
+    return { ok: false as const, error: PUBLISH_COULD_NOT_CHECK };
+  }
   if (outstandingClaims > 0) {
-    const acceptedToken = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation?.token;
-    const accepted = acceptedToken === topicConfirmationFingerprint(evidenceReviewToken(row));
+    const acceptance = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation;
+    const acceptedForThisDraft =
+      acceptance?.token === topicConfirmationFingerprint(evidenceReviewToken(row));
+    const accepted = acceptedForThisDraft && (acceptance?.count ?? 0) >= outstandingClaims;
     if (!accepted) {
+      const short = acceptedForThisDraft ? (acceptance?.count ?? 0) : 0;
       return {
         ok: false as const,
         error: `${outstandingClaims} claim${
           outstandingClaims === 1 ? "" : "s"
         } from the evidence check ${
           outstandingClaims === 1 ? "has" : "have"
-        } not been reviewed. Review them in the workbench, or accept them explicitly to print anyway.`,
+        } not been reviewed${
+          short > 0
+            ? ` (you accepted ${short}, and ${
+                outstandingClaims - short
+              } more ${outstandingClaims - short === 1 ? "is" : "are"} outstanding now)`
+            : ""
+        }. Review them in the workbench, or accept them explicitly to print anyway.`,
       };
     }
   }

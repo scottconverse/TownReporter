@@ -785,31 +785,35 @@ describe("uncreditedOutlets: a word that merely contains an alias is not a credi
 });
 
 /*
-  UNIT U24 -- THE PAPER'S OWN CITY IS NOT AN UNCITED OUTLET.
+  UNITS U24 AND U24b -- THE PAPER'S OWN CITY, AND HOW LOOSE THAT GOT.
 
-  Publishing warned "The body never names City of Longmont, though it's in the
-  sources" about a story whose body attributed throughout to "the city
+  U24: publishing warned "The body never names City of Longmont, though it's in
+  the sources" about a story whose body attributed throughout to "the city
   manager's budget message" and "the city". `longmontcolorado.gov` had exactly
   one alias -- the full legal phrase -- while the two newspaper hosts beside it
-  also carried their short forms, so the official source was the only one that
-  could ONLY be credited by its full name.
+  also carried theirs, so the official source was the only one that could ONLY
+  be credited by its full name.
 
-  The short forms belong to the paper's own city's own site and to nothing
-  else, which is what the negative cases below hold: this must not become
-  "any source with a convenient synonym".
+  U24b: U24's answer also accepted the bare city name and a bare "the city",
+  which credited the city's own site for a body saying "Longmont Leader" (a
+  newspaper's name, not the city's) or "the city of Boulder" (somebody else's).
+  Either one turns a truthfulness warning into a rubber stamp. What is left is
+  the three phrases prose uses for the place it publishes in -- and each is
+  refused when it is naming somewhere else.
 */
-describe("U24: the paper's own city, named the way prose names it", () => {
+describe("U24/U24b: the paper's own city, named the way prose names it", () => {
   const CITY_URL = "https://longmontcolorado.gov/departments/departments-a-d/budget/2027-budget-message";
 
   const homeCity = (body: string, sourceUrls: string[] = [CITY_URL]) =>
     uncreditedOutlets(body, sourceUrls, "Longmont");
 
-  it("accepts the four ways the paper writes its own city", () => {
+  it("accepts prose's own words for the city", () => {
     for (const body of [
       "The city manager's budget message sets the 2027 operating budget at $547.5 million.",
       "The city said the plan rests on two November ballot questions.",
+      "The city's operating budget would rise 5.32%.",
+      "City Council voted 5-2 on Tuesday night.",
       "City of Longmont staff presented the plan.",
-      "Longmont's operating budget would rise 5.32%.",
     ]) {
       assert.deepEqual(homeCity(body), [], `must credit the city: "${body}"`);
     }
@@ -821,14 +825,48 @@ describe("U24: the paper's own city, named the way prose names it", () => {
     ]);
   });
 
-  it("reads the city setting as a place, not as prose", () => {
-    /* The setting is "Longmont, Colorado"; the name prose uses is the first
-       part. A body saying "Longmont" is a credit either way. */
-    assert.deepEqual(uncreditedOutlets("Longmont's budget grew.", [CITY_URL], "Longmont, Colorado"), []);
-    assert.deepEqual(uncreditedOutlets("The city said so.", [CITY_URL], "Longmont, Colorado"), []);
+  it("does NOT accept the bare city name -- the audit's 'Longmont Leader' case", () => {
+    /* A newspaper called after the city is not the city crediting itself. U24
+       accepted the bare name and this body credited the official source. */
+    assert.deepEqual(
+      homeCity("The Longmont Leader reported the closure last week."),
+      ["City of Longmont"],
+      "naming the paper named after the city is not naming the city",
+    );
+    assert.deepEqual(
+      homeCity("Longmont's operating budget would rise 5.32%."),
+      ["City of Longmont"],
+      "the bare name is a name other names contain, so it is not a credit",
+    );
+    /* The full phrase is still the way to credit it by name. */
+    assert.deepEqual(homeCity("City of Longmont's budget would rise 5.32%."), []);
   });
 
-  it("does not hand those short forms to any other outlet", () => {
+  it("refuses 'the city' when it is naming somewhere else", () => {
+    for (const body of [
+      "The city of Boulder adopted its own budget the same night.",
+      "The city manager of Boulder spoke first.",
+      "City council of Denver refused to comment.",
+    ]) {
+      assert.deepEqual(homeCity(body), ["City of Longmont"], `must not credit: "${body}"`);
+    }
+    /* ...and credits it when the tail IS this city. */
+    assert.deepEqual(homeCity("The city of Longmont adopted the budget."), []);
+  });
+
+  it("reads the city setting as a place, not as prose", () => {
+    /* The setting is "Longmont, Colorado"; the name is the first part. */
+    assert.deepEqual(
+      uncreditedOutlets("The city said so.", [CITY_URL], "Longmont, Colorado"),
+      [],
+    );
+    assert.deepEqual(
+      uncreditedOutlets("The city of Longmont said so.", [CITY_URL], "Longmont, Colorado"),
+      [],
+    );
+  });
+
+  it("does not hand those words to any other outlet, or to another city's paper", () => {
     /* The whole risk of this change: "the city" becoming a credit for a
        newsroom, or for a city this paper does not publish in. */
     const leader = "https://www.longmontleader.com/local-news/church-commits-40k-for-san-lazaro";
@@ -847,10 +885,6 @@ describe("U24: the paper's own city, named the way prose names it", () => {
       ["City of Longmont"],
       "no city configured means no short forms at all -- the behaviour every caller had before",
     );
-  });
-
-  it("keeps the full legal name working everywhere", () => {
-    assert.deepEqual(uncreditedOutlets("City of Longmont staff said so.", [CITY_URL], "Longmont"), []);
   });
 });
 

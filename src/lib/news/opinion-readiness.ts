@@ -14,24 +14,29 @@ type CandidateProbe =
   | { ok: false; error: string };
 
 /**
- * Which models Opinion writes with (unit U24).
+ * Which models Opinion writes with, and which of them this failure is about
+ * (units U24, U24b).
  *
  * The stand-in editorial day's finding: /desk/opinion said "AI is not
  * available. No model is set up yet…" minutes after a draft ran on DeepSeek.
  * The sentence was true of Opinion and read as true of the desk, because it
- * never said which models it meant. This is that sentence, said once, by the
- * function that knows the answer.
+ * never said which models it meant.
  *
- * It is the brief's own wording, and it is exact: Claude and Codex are the
- * Automatic ladder (`OPINION_AUTOMATIC_LADDER`, in that order); a local model
- * and a saved connection are the two explicit picks Opinion's own picker
- * offers (`OPINION_MODEL_CHOICES`). The desk's story writer is not on any of
- * them, and saying so is the whole point -- it is the model the editor watched
- * write a draft, and it is the one thing this message must not leave them
- * guessing about.
+ * U24's first draft of this sentence listed four paths and said none of them
+ * was set up, which was too broad in the other direction: a local model and a
+ * saved connection are offered as EXPLICIT PICKS (`OPINION_MODEL_CHOICES`),
+ * never walked by Automatic, so "a local model is not set up" reads as a
+ * verdict on a path this failure never tried. U24b narrows it to the truth:
+ * Automatic's own ladder is the two subscription providers, in the order it
+ * walks them (`OPINION_AUTOMATIC_LADDER`), and the other two are named as
+ * what they are -- choices the editor can pick by name.
+ *
+ * The desk's story writer is not on any of them, and saying so is still the
+ * point: it is the model the editor watched write a draft, and it is the one
+ * thing this message must not leave them guessing about.
  */
 export const OPINION_MODEL_UNIVERSE =
-  "Opinion writes with Claude, Codex, a local model or a saved connection — and none of them is set up on this machine. The desk's story writer is a different list and is not used for Opinion.";
+  "Opinion's Automatic writes with Codex Sol, then Claude Sonnet, and neither is set up on this machine. Two more models are yours to pick by name in Opinion's model menu: a local model, or a saved connection. The desk's story writer is a different list and is not used for Opinion.";
 
 export type OpinionReadinessDeps = {
   findVoice?: () => Promise<VoiceProbe>;

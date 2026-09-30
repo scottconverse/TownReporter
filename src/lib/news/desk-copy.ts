@@ -1116,8 +1116,28 @@ export function scanCoverageLine(s: {
   */
   if (errorBit && analyzed === 0) {
     if (batchesUsed === 0) {
-      const read = attempted > 0 ? ` ${failed || attempted} of ${attempted} sources could not be read.` : "";
-      return `Fetch failure after ${fetched} fetched — no source text reached the desk, so no writing pass ran.${read} ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+      /*
+        UNIT U24b -- "FETCH FAILURE" NEEDS THE FETCH TO HAVE FAILED.
+
+        U24 split this arm on `model_batches_used === 0` (the run never reached
+        a model) and called the whole half "Fetch failure". That is only true
+        when nothing was fetched: a scan cancelled or errored AFTER it had read
+        40 pages but before the first batch was built also records zero
+        batches, and the desk told its reader the FETCH had failed -- pointing
+        at the sources when the run had in fact stopped between the two halves.
+        Two different failures, two different sentences:
+
+          - not one source yielded text: the fetch really is what failed, and
+            the Sources screen is where the work is;
+          - sources came back and the run ended anyway: it stopped before the
+            writing pass, which is about the run, not about the sites.
+      */
+      if (fetched === 0) {
+        const read =
+          attempted > 0 ? ` ${failed || attempted} of ${attempted} sources could not be read.` : "";
+        return `Fetch failure after 0 fetched — no source text reached the desk, so no writing pass ran.${read} ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+      }
+      return `Stopped before the writing pass (${fetched} fetched) — no source reached the model, so nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
     }
     return `Provider failure after ${fetched} fetched — nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
   }

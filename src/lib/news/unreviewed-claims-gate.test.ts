@@ -4,6 +4,15 @@ import { join } from "node:path";
 import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 
+/** The token the editor's screen would have been holding (unit U24b). */
+async function reviewToken(f: {
+  newsroomId: number;
+  leadId: number;
+}): Promise<string> {
+  const { unreviewedClaimsGate } = await vite.ssrLoadModule("/src/lib/news/desk.ts");
+  return (await unreviewedClaimsGate(f.newsroomId, f.leadId)).evidenceToken;
+}
+
 /**
  * Unit U24: a story does not print with claims its own evidence check raised
  * and nobody judged -- unless a person says so, on the record.
@@ -101,7 +110,32 @@ async function fixture() {
     "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council adopts the budget','The 5-2 vote funds the plan.',$4,'council',$5,'','[]','news',$6,'[]','{}') returning id",
     [userId, newsroomId, lead.id, body, JSON.stringify([url]), JSON.stringify(findings)],
   );
-  return { sql, newsroomId, userId, leadId: lead.id, draftId: draft.id, url };
+  return { sql, newsroomId, userId, leadId: lead.id, draftId: draft.id, url, captureId: capture.id };
+}
+
+/** Append a finding citing the fixture's readable capture, so it counts. */
+async function addFinding(
+  f: Awaited<ReturnType<typeof fixture>>,
+  text: string,
+): Promise<void> {
+  const [draft] = await f.sql.query<{ found_note: string }>(
+    "select found_note from drafts where id=$1",
+    [f.draftId],
+  );
+  const findings = JSON.parse(draft!.found_note) as unknown[];
+  await f.sql.query("update drafts set found_note=$1 where id=$2", [
+    JSON.stringify([
+      ...findings,
+      {
+        text,
+        source_urls: [f.url],
+        capture_event_ids: [],
+        artifact_version_ids: [f.captureId],
+        locators: [],
+      },
+    ]),
+    f.draftId,
+  ]);
 }
 
 const SECTION = "council";
@@ -170,6 +204,7 @@ it("records an explicit acceptance, and prints on it", async () => {
   const accepted = await performAcceptUnreviewedClaims(
     { userId: f.userId, newsroomId: f.newsroomId },
     f.leadId,
+    await reviewToken(f),
   );
   assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
   assert.equal(accepted.ok ? accepted.count : 0, 1, "the acceptance names how many claims went unreviewed");
@@ -205,7 +240,11 @@ it("records an explicit acceptance, and prints on it", async () => {
 
 it("the acceptance is for one draft version, and an edit takes it back", async () => {
   const f = await fixture();
-  await performAcceptUnreviewedClaims({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId);
+  await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+    await reviewToken(f),
+  );
 
   /* The story moves on. The claims a person accepted were the claims they
      READ, so the acceptance must not carry to words nobody has seen. */
@@ -219,22 +258,128 @@ it("the acceptance is for one draft version, and an edit takes it back", async (
   assert.match(printed.ok ? "" : printed.error, /has not been reviewed/);
 });
 
-it("is called from the page with the bare lead id, the shape the desk's own id schema takes", () => {
+it("refuses an acceptance carrying a review token that has moved", async () => {
   /*
-    The tests above call `performAcceptUnreviewedClaims` directly, so they
-    cannot see the one thing that would break in the browser: the wire shape.
-    `acceptUnreviewedClaims` validates with `rowId`, which is a NUMBER -- the
-    same schema `getLead({ data: id })` uses on this page -- and a call passing
-    `{ leadId }` would be a press that fails validation and reports a schema
-    error to the editor. TypeScript cannot catch it (a server function's
-    validator input is untyped at the call site), so the tripwire is here.
+    UNIT U24b. The acceptance is "I read THESE claims", so the press carries the
+    review the editor's screen was holding and the server compares it against
+    the review it can see now -- exactly what every judgment save does. A stale
+    tab, or a review that moved between the page being drawn and the press,
+    records nothing rather than recording a permission for claims nobody read.
   */
-  const page = readFileSync(
-    new URL("../../routes/desk.story.$leadId.tsx", import.meta.url),
-    "utf8",
+  const f = await fixture();
+  const stale = await reviewToken(f);
+  /* The review moves: a judgment saved in another tab. */
+  await f.sql.query(
+    "update drafts set research_json=$1 where id=$2",
+    [JSON.stringify({ findingEvidenceReview: { contentToken: "moved", judgments: {} } }), f.draftId],
   );
-  assert.match(page, /acceptUnreviewedClaims\(\{ data: id \}\)/);
-  assert.doesNotMatch(page, /acceptUnreviewedClaims\(\{ data: \{ leadId/);
+  const accepted = await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+    stale,
+  );
+  assert.equal(accepted.ok, false);
+  assert.match(accepted.ok ? "" : accepted.error, /changed since this page was drawn/);
+  /* And a press that carried no review at all is refused the same way. */
+  const empty = await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+    "",
+  );
+  assert.equal(empty.ok, false);
+  assert.match(empty.ok ? "" : empty.error, /changed since this page was drawn/);
+});
+
+it("will not print on an acceptance given for fewer claims than are outstanding now", async () => {
+  /*
+    UNIT U24b -- THE COUNT FLOOR. Three claims were accepted. A judgment the
+    desk then DOWNGRADES to unreviewed -- because the capture behind it changed,
+    or its binding moved -- raises the number the story must answer for without
+    touching the draft row, so the acceptance's fingerprint still matches while
+    the claims it covered no longer do. "I accepted three" must not print four.
+  */
+  const f = await fixture();
+  const token = await reviewToken(f);
+  const accepted = await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+    token,
+  );
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
+  assert.equal(accepted.ok ? accepted.count : 0, 1);
+
+  /* A second finding arrives -- a redraft, a re-check, a claim added by hand --
+     and nothing in the acceptance covered it. Note that the acceptance's own
+     fingerprint still matches, because it is a hash of the draft row and the
+     findings live beside it in `found_note`... which is in the row, so this
+     edit DOES move the token too; the count floor is what covers the other
+     road, where a judgment is downgraded without the row changing at all. Both
+     are refused, and this pins the count. */
+  await addFinding(f, "The council also set the mill levy at 2.44 mills.");
+  assert.equal(await unreviewedClaimCount(f.newsroomId, f.leadId), 2);
+
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  assert.equal(printed.ok, false, "the old acceptance does not cover a claim that arrived after it");
+  assert.match(printed.ok ? "" : printed.error, /2 claims from the evidence check/);
+});
+
+it("will not print more claims than the editor accepted, when one is downgraded behind them", async () => {
+  /*
+    THE ROAD THE FINGERPRINT CANNOT SEE, and the reason the count floor exists.
+
+    `resolveFinding` silently downgrades a recorded judgment back to
+    `unreviewed` when its evidence binding moved -- the captured record's text
+    changed under it. That happens in the RESOLVED review; the draft row is not
+    touched, so the acceptance's token still matches while the number of claims
+    to answer for grows by one. Without the floor, "I accepted one" prints two.
+  */
+  const f = await fixture();
+  await addFinding(f, "The council also set the mill levy at 2.44 mills.");
+  const { loadFindingEvidenceReview, persistFindingEvidenceJudgment } = await vite.ssrLoadModule(
+    "/src/lib/news/finding-evidence-review.ts",
+  );
+  const review = await loadFindingEvidenceReview(await getSql(), f.newsroomId, f.leadId);
+  assert.equal(review.rows.length, 2);
+  /* Judge the FIRST one, so exactly one claim is left outstanding. */
+  await persistFindingEvidenceJudgment(
+    { newsroomId: f.newsroomId },
+    {
+      leadId: f.leadId,
+      draftId: f.draftId,
+      findingKey: "finding:0",
+      judgment: "supports",
+      reason: "",
+      contraryVersionId: null,
+      evidenceToken: review.evidenceToken,
+    },
+  );
+  assert.equal(await unreviewedClaimCount(f.newsroomId, f.leadId), 1);
+
+  const token = await reviewToken(f);
+  const accepted = await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+    token,
+  );
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
+  assert.equal(accepted.ok ? accepted.count : 0, 1, "one claim was accepted");
+
+  /* The record behind the JUDGED claim changes, so `resolveFinding` drops that
+     judgment -- in the RESOLVED review. The draft row is not touched, which is
+     the whole point: the acceptance's own fingerprint is over that row, so it
+     still matches and only the count can refuse this. */
+  await f.sql.query("update artifact_versions set full_text=$1 where id=$2", [
+    "A different record entirely.",
+    f.captureId,
+  ]);
+  assert.equal(await unreviewedClaimCount(f.newsroomId, f.leadId), 2);
+
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  assert.equal(printed.ok, false, "the accepted count no longer covers what is outstanding");
+  /* `you accepted 1` appears only on the branch where the acceptance DID match
+     this draft version -- so this assertion is also the proof that the floor,
+     and not the fingerprint, is what refused it. */
+  assert.match(printed.ok ? "" : printed.error, /you accepted 1, and 1 more is outstanding now/);
 });
 
 it("refuses to record an acceptance when there is nothing to accept", async () => {
@@ -247,7 +392,77 @@ it("refuses to record an acceptance when there is nothing to accept", async () =
   const accepted = await performAcceptUnreviewedClaims(
     { userId: f.userId, newsroomId: f.newsroomId },
     f.leadId,
+    await reviewToken(f),
   );
   assert.equal(accepted.ok, false);
   assert.match(accepted.ok ? "" : accepted.error, /nothing to accept/i);
+});
+
+it("FAILS CLOSED when the review cannot be read at all", async () => {
+  /*
+    UNIT U24b. U24's counter wrapped everything in a bare `catch { return 0 }`,
+    so a transient database error read as "nothing outstanding" and OPENED the
+    gate for as long as the outage lasted. Only the unreadable-stored-findings
+    error may be swallowed; everything else has to come out.
+  */
+  const f = await fixture();
+  const brokenDb = async () => {
+    throw new Error("connection terminated unexpectedly");
+  };
+  await assert.rejects(
+    () => unreviewedClaimCount(f.newsroomId, f.leadId, { loadReview: brokenDb }),
+    /connection terminated/,
+    "an infrastructure failure must not be answered with 0",
+  );
+
+  /* And the publish refuses, in words, rather than printing the story:
+     `unreviewedClaimCount` throwing is what used to open the gate. */
+  const { performPublish: publish } = await vite.ssrLoadModule("/src/lib/news/desk.ts");
+  const printed = await publish(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+    SECTION,
+    undefined,
+    { loadReview: brokenDb },
+  );
+  assert.equal(printed.ok, false, "a publish that cannot be checked does not happen");
+  assert.match(printed.ok ? "" : printed.error, /could not read this draft's evidence review/);
+  const [article] = await f.sql.query("select id from articles where newsroom_id=$1", [f.newsroomId]);
+  assert.equal(article, undefined, "nothing printed");
+});
+
+it("still swallows the one error that really means 'no findings to count'", async () => {
+  /*
+    The other half of failing closed: a draft whose stored findings will not
+    parse has no review to resolve, and the Checks pane already shows those rows
+    as unreadable. A publish that hard-failed on them would be a story nobody
+    could print or fix, so THIS error is the one that answers 0.
+  */
+  const f = await fixture();
+  /* The real error, raised by the real reader: `assertReadableStoredFindings`
+     throws a `ReviewError("invalid-input")` for exactly this row. */
+  await f.sql.query("update drafts set found_note='[not json' where id=$1", [f.draftId]);
+  assert.equal(
+    await unreviewedClaimCount(f.newsroomId, f.leadId),
+    0,
+    "a draft with unreadable stored findings has no claims to count",
+  );
+});
+
+it("is called from the page with the shape its own schemas take", () => {
+  /*
+    The tests above call `performAcceptUnreviewedClaims` directly, so they
+    cannot see the one thing that would break in the browser: the wire shape.
+    `acceptUnreviewedClaimsInput` is `{ leadId, evidenceToken }` -- a NUMBER and
+    a STRING -- and a press passing a bare id, or omitting the token, would fail
+    validation and report a schema dump to the editor. TypeScript cannot catch
+    it (a server function's validator input is untyped at the call site), so the
+    tripwire is here.
+  */
+  const page = readFileSync(
+    new URL("../../routes/desk.story.$leadId.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /acceptUnreviewedClaims\(\{\s*data: \{ leadId: id, evidenceToken:/);
+  assert.doesNotMatch(page, /acceptUnreviewedClaims\(\{ data: id \}\)/);
 });

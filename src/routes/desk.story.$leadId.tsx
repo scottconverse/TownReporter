@@ -29,7 +29,10 @@ import {
   type EvidenceDecision,
 } from "@/lib/news/draft-evidence";
 import { auditDraft, findingsWithIds, type DraftAuditFinding } from "@/lib/news/draft-audit";
-import type { EvidenceCheckState } from "@/lib/news/evidence-check-state";
+import type {
+  EvidenceCheckReport,
+  EvidenceCheckState,
+} from "@/lib/news/evidence-check-state";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
 import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -345,8 +348,8 @@ function StoryPage() {
     state, above the loading and not-found returns below, because a hook after
     an early return is a hook that does not run on every render.
   */
-  const [panelEvidence, setPanelEvidence] = useState<EvidenceCheckState | null>(null);
-  const onEvidenceState = useCallback((state: EvidenceCheckState) => setPanelEvidence(state), []);
+  const [panelEvidence, setPanelEvidence] = useState<EvidenceCheckReport | null>(null);
+  const onEvidenceState = useCallback((state: EvidenceCheckReport) => setPanelEvidence(state), []);
   /*
     Unit BH2 decision 5 and 6, the three dialogs. Each is opened by a press and
     owns nothing else: the record, the two calls and the saved text all stay
@@ -790,9 +793,16 @@ function StoryPage() {
     without it, which is what makes it a gate instead of a suggestion.
   */
   const acceptUnreviewed = useMutation({
-    /* The bare lead id, like `confirmDraftTopic` above: `rowId` is the schema
-       this server function validates with. */
-    mutationFn: () => acceptUnreviewedClaims({ data: id }),
+    /*
+      Unit U24b: the press carries the REVIEW TOKEN the editor was looking at,
+      the same identity the judgment saves send, and the server refuses an
+      acceptance recorded against a review that has moved since. The bare lead
+      id plus a token -- `rowId` and a string, validated together.
+    */
+    mutationFn: () =>
+      acceptUnreviewedClaims({
+        data: { leadId: id, evidenceToken: panelEvidence?.evidenceToken ?? "" },
+      }),
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       announceToDesk(
@@ -1566,7 +1576,18 @@ function StoryPage() {
     ran: Boolean(data.draft && recordedChecks(data.draft.research_json).evidenceChecked),
     toReview: 0,
   };
-  const acceptanceCovers = Boolean(data.unreviewedClaimsAccepted);
+  /*
+    Unit U24b: an acceptance covers this draft when it is for THIS version AND
+    it was given for at least as many claims as are outstanding now. The count
+    matters because the fingerprint alone does not: a judgment the desk
+    downgrades to unreviewed -- because the capture behind it changed or the
+    binding moved -- does not touch the draft row, so the token stands still
+    while the number of claims to answer for grows. "I accepted three" must not
+    print four.
+  */
+  const acceptanceCovers =
+    data.unreviewedClaimsAcceptedCount > 0 &&
+    data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1765,14 +1786,14 @@ function StoryPage() {
   const checkFacts: CheckFacts = {
     hasDraft: Boolean(data.draft),
     /*
-      Unit U24: "the check ran" is now the pane's answer too, not only the
-      memo's. A draft whose evidence pass ran inside the drafting job has
-      findings and claims and neither of the memo's two records, and this used
-      to print `○ Evidence check not run` over the pane's own list of what that
-      pass found. `evidenceState.ran` is the one answer; the memo's decision
-      still decides the PASS (`evidenceChip` reads `evidenceChecked` for that).
+      Unit U24b: the PASS is the RECORD and nothing else. U24 widened this to
+      "a check ran at all", which turned a draft whose findings were all
+      `Could not check` or judged `contradicts` into `✓ Evidence checked` and
+      "All checks done." -- a green claim about an answer nobody had given.
+      "It ran" is the separate fact below, and it only chooses wording.
     */
-    evidenceChecked: draftChecks.evidenceChecked || evidenceState.ran,
+    evidenceChecked: draftChecks.evidenceChecked,
+    evidenceRan: evidenceState.ran,
     evidenceToReview: evidenceState.toReview,
     evidenceRequired: draftChecks.evidenceRequired,
     evidenceOutstanding:
