@@ -1,6 +1,6 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getPglite, getSql } from "../db.ts";
+import { getSql } from "../db.ts";
 import {
   ensureFollowUpsSchema,
   parseFinding,
@@ -15,6 +15,14 @@ import {
   tickFollowUps,
   tickFollowUpsFor,
 } from "./follow-up-scheduler.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 /**
  * When a follow-up runs -- and, more to the point, when it does not.
@@ -113,12 +121,12 @@ async function followUpJobs(newsroomId: number): Promise<{ subject_id: number; s
 }
 
 before(async () => {
-  const { readFile } = await import("node:fs/promises");
   const sql = await getSql();
-  // The real base newsroom schema; Node lacks Vite's migration glob.
-  await (
-    await getPglite()
-  ).exec(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
+  // The real base newsroom schema comes from `migrations/*.sql`, which the
+  // suite applies to this database before the file loads (U18a-1,
+  // src/lib/test-support/pglite-migrations.ts). The hand replay of 0002 that
+  // stood in for Node's missing Vite migration glob is gone: running it again
+  // would only repeat its unguarded welcome-article seed insert.
   for (const table of ["sources", "articles", "leads", "drafts", "scan_runs"])
     await sql.query("alter table " + table + " add column if not exists newsroom_id integer not null default 1");
   await ensureJobsSchema();

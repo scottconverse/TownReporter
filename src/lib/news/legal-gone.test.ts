@@ -1,7 +1,7 @@
 import { before, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { getPglite, getSql } from "../db.ts";
+import { readFile } from "node:fs/promises";
+import { getSql } from "../db.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import { previewLegalRemoval, removeLegally } from "./legal-removal-store.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -14,6 +14,14 @@ import {
   legalGoneResponse,
 } from "./legal-gone.ts";
 import type { LegalSelection } from "./legal-removal-types.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 /**
  * Unit BH4: the URL of a legally removed story answers 410 Gone.
@@ -38,14 +46,12 @@ import type { LegalSelection } from "./legal-removal-types.ts";
  */
 
 before(async () => {
-  const pg = await getPglite();
   // Migrations from disk, not a hand-built schema: this file's tables are
-  // production's tables (PROJECT-BRIEF rule 14).
-  for (const file of (await readdir(new URL("../../../migrations/", import.meta.url)))
-    .filter((x) => x.endsWith(".sql"))
-    .sort()) {
-    await pg.exec(await readFile(new URL("../../../migrations/" + file, import.meta.url), "utf8"));
-  }
+  // production's tables (PROJECT-BRIEF rule 14). They are read and applied
+  // before this file loads now (U18a-1,
+  // src/lib/test-support/pglite-migrations.ts); the hand replay that used to
+  // stand in for Node's missing Vite migration glob would be a second
+  // application, and several migrations carry unguarded seed inserts.
   await ensureLegalSchema();
 });
 

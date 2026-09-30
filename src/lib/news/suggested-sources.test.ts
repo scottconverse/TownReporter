@@ -25,9 +25,9 @@
  * production does not have (the lesson from AK3).
  */
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { before, describe, it } from "node:test";
-import { getPglite, getSql } from "../db.ts";
+import { getSql } from "../db.ts";
 import { queueInvestigationFor } from "./dark.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
@@ -36,6 +36,13 @@ import { parseScanResult } from "./schema.ts";
 import { insertProposedNewsroomSource, proposePassSources } from "./source-seeds.server.ts";
 import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { isSearchResultUrl, sourceIdentity } from "./url-guard.ts";
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs applies
+// migrations/*.sql before the file loads; the postgres-integration runner runs
+// the same file WITHOUT that preload, so the fixture asks for it itself --
+// through the one shared applier, which does nothing at all when the ledger is
+// already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 
 const USER = "ao-suggestions-owner";
 /** A newsroom of its own, so the section rows below are the ones this file made. */
@@ -71,11 +78,11 @@ type SourceRow = {
 };
 
 before(async () => {
-  const pg = await getPglite();
-  const dir = new URL("../../../migrations/", import.meta.url);
-  for (const name of (await readdir(dir)).filter((n) => n.endsWith(".sql")).sort())
-    await pg.exec(await readFile(new URL(name, dir), "utf8"));
-
+  // `migrations/*.sql` is applied to this database before the file loads
+  // (U18a-1, src/lib/test-support/pglite-migrations.ts). This hook used to
+  // replay every file by hand, which is now a second application: several
+  // migrations carry unguarded seed inserts and would collide with the rows
+  // the first pass wrote.
   const sql = await getSql();
   /*
     The sections schema, seeded the way 0045's `resolve_story_section` trigger

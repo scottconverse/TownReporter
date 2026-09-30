@@ -1,7 +1,6 @@
 import { before, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { getSql, getPglite } from "../db.ts";
+import { getPglite, getSql } from "../db.ts";
 import { LEGAL_SCHEMA, ensureLegalSchema } from "./legal-removal-schema.ts";
 import {
   previewLegalRemoval,
@@ -15,14 +14,20 @@ import { setPageWatchStateFor } from "./page-watch.ts";
 import { tickAllDueMonitors } from "./monitors-cron.ts";
 import { fileEditorial } from "./editorial.server.ts";
 import type { LegalSelection } from "./legal-removal-types.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 before(async () => {
-  const pg = await getPglite();
-  for (const file of (await readdir(new URL("../../../migrations/", import.meta.url)))
-    .filter((x) => x.endsWith(".sql"))
-    .sort()) {
-    await pg.exec(await readFile(new URL("../../../migrations/" + file, import.meta.url), "utf8"));
-  }
+  // The database is migrated before this file loads (U18a-1,
+  // src/lib/test-support/pglite-migrations.ts). This hook used to replay every
+  // migration by hand, which is now a second application: several carry
+  // unguarded seed inserts and collide with the rows the first pass wrote.
   await ensureLegalSchema();
 });
 let roomCounter = 901;

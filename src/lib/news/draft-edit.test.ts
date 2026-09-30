@@ -5,15 +5,29 @@ import { saveDraftForEditor } from "./draft-edit.server.ts";
 import { evidenceNeedsReview, evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { parseStyleRecord } from "./draft-audit-record.ts";
 import type { DraftRow } from "./types.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 it("real saves persist invalidation, reject stale review, preserve removed evidence, and isolate newsrooms", async () => {
   const sql = await getSql();
-  await sql.query(`create table drafts (id serial primary key, newsroom_id integer, user_id text, lead_id integer,
-    headline text, dek text, body text, topic text, source_urls text default '[]', provenance_json text default '[]',
-    found_note text default '', unanswered text default '[]', research_json text default '{}',
-    headline_source text default 'model', updated_at timestamptz default now())`);
-  await sql.query(`create table leads (id integer primary key, newsroom_id integer)`);
-  await sql.query(`insert into leads values (7001,91)`);
+  // U18a-1: `drafts` and `leads` are the real tables now -- `migrations/*.sql`
+  // is applied before this file loads -- so the hand-written fixtures are gone.
+  // Two things the real schema requires that they did not: `leads` needs its
+  // `not null` columns, and 0045's trigger only files a story under a section
+  // its newsroom has.
+  await sql.query(`insert into section_config(newsroom_id) values (91) on conflict do nothing`);
+  await sql.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible) values (91,'community','Community',100,true) on conflict do nothing`,
+  );
+  await sql.query(
+    `insert into leads (id,newsroom_id,user_id,headline,why,topic) values (7001,91,'editor','Vendor news','Fixture','community') on conflict (id) do nothing`,
+  );
   await sql.query(`insert into drafts (newsroom_id,user_id,lead_id,headline,dek,body,topic,source_urls,found_note)
     values (91,'editor',7001,'Vendor news','','Vendor funding announced.','community','["https://vendor.example/release"]','Vendor funding announced.')`);
   const ctx = { userId: "editor", newsroomId: 91 };
@@ -37,12 +51,15 @@ it("real saves persist invalidation, reject stale review, preserve removed evide
 
 it("measures the saved draft into research_json beside the desk's other keys, and does not move the token twice", async () => {
   const sql = await getSql();
-  await sql.query(`create table if not exists drafts (id serial primary key, newsroom_id integer, user_id text, lead_id integer,
-    headline text, dek text, body text, topic text, source_urls text default '[]', provenance_json text default '[]',
-    found_note text default '', unanswered text default '[]', research_json text default '{}',
-    headline_source text default 'model', updated_at timestamptz default now())`);
-  await sql.query(`create table if not exists leads (id integer primary key, newsroom_id integer)`);
-  await sql.query(`insert into leads values (7002,91) on conflict do nothing`);
+  // U18a-1: the real `drafts` and `leads` (see the first test), so only the
+  // row this test needs is created here.
+  await sql.query(`insert into section_config(newsroom_id) values (91) on conflict do nothing`);
+  await sql.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible) values (91,'community','Community',100,true) on conflict do nothing`,
+  );
+  await sql.query(
+    `insert into leads (id,newsroom_id,user_id,headline,why,topic) values (7002,91,'editor','Vendor news','Fixture','community') on conflict (id) do nothing`,
+  );
   /*
     A row that already carries two of the other writers' keys. The audit adds
     one and must not disturb them: the name check and the manual claims are the

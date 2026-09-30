@@ -2,15 +2,22 @@ import { before, after, it } from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { existsSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { getPglite, getSql } from "../db.ts";
+import { getSql } from "../db.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
 import { ingestUrl } from "./ingest.ts";
 import { sha256 } from "./url-guard.ts";
 import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
 import type { SectionScanSnapshot } from "./section-types.ts";
 import { scanSourceExcerpt } from "./scan-source-excerpt.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 // This test executes desk.ts itself. Resolve its Vite alias/extensionless imports
 // inside this isolated Node test process; no production loader is changed.
@@ -36,11 +43,10 @@ const body =
   "A local public report. ".repeat(60) + marker + " Important schools detail. ".repeat(30);
 let roomCounter = 8810;
 before(async () => {
-  const pg = await getPglite();
-  for (const name of (await readdir(new URL("../../../migrations/", import.meta.url)))
-    .filter((n) => n.endsWith(".sql"))
-    .sort())
-    await pg.exec(await readFile(new URL("../../../migrations/" + name, import.meta.url), "utf8"));
+  // `migrations/*.sql` is applied to this database before the file loads
+  // (U18a-1, src/lib/test-support/pglite-migrations.ts). The hand replay that
+  // used to stand in for Node's missing Vite migration glob is gone: a second
+  // application re-runs the unguarded seed inserts several migrations carry.
   scan = (await import("./desk.ts")).performScanWork;
   setFetchImplForTests(
     async () => new Response(body, { headers: { "content-type": "text/plain" } }),

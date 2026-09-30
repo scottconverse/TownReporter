@@ -513,6 +513,15 @@ does not buzz every five minutes.
 the page answering 200 while its scripts and editor controls fail. This applies
 even when no database migration is needed.
 
+**The server refuses to start when migrations are behind.** It compares
+`migrations\*.sql` with the database's `_migrations` ledger before it serves its
+first request; if any file has not been applied it logs the missing file names
+and answers 503 instead of serving a half-migrated desk. Apply them and start it
+again: `npm run db:migrate` (or
+`node scripts\with-app-env.mjs node scripts\migrate.mjs`). `ops\promote.ps1` and
+the installer already migrate before they start the app, so this only fires on a
+start that skipped that step.
+
 **Stage first:** `ops\stage.ps1` in the dev checkout runs the new build
 against a copy of real production data and serves it locally so the changed
 screens can be walked before anything is promoted. See `docs/staging.md`.

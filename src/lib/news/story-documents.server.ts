@@ -76,9 +76,16 @@ export async function ensureStoryDocuments(sql: Sql) {
 
     The caller's handle is passed straight through -- some callers hand this a
     `Sql`, some a `tx` -- so whichever one it is records the marker. Before
-    this list existed the six `alter`s ran on every upload; they take ACCESS
+    this list existed the alters ran on every upload; they take ACCESS
     EXCLUSIVE and so queue behind the nightly `pg_dump`. See
     `paper-settings-read-lock.test.ts` and `questions/BP.md`.
+
+    `reading_key` was in this list and in no migration -- the one column the
+    desk read, compared and wrote that a database migrated from empty did not
+    have until somebody uploaded a document. It moved to
+    `migrations/0111_story_documents_reading_key.sql` (ENG-5, U18a-4); what is
+    left of this list is the part U18a-7 deletes, once the test database is
+    built from migrations/.
   */
   await ensureSchemaOnce(sql, "story-documents", [
     `create table if not exists story_documents (
@@ -92,7 +99,6 @@ export async function ensureStoryDocuments(sql: Sql) {
     "alter table story_documents add column if not exists source_url text",
     "alter table story_documents add column if not exists expected_size integer",
     "alter table story_documents add column if not exists editorial_request_id integer",
-    "alter table story_documents add column if not exists reading_key text",
     "alter table story_documents add column if not exists extraction_pages text not null default '[]'",
     "alter table story_documents add column if not exists read_pages integer",
   ]);

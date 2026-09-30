@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { IMPORT_ORIGIN, performImportFinishedStories } from "./import-stories.server.ts";
 import { SECTION_REQUIRED, cardProblems, selectionFromCard } from "./import-review.ts";
 import { PASTE_ONE_ORIGIN, headlineFromPaste, pasteOneStoryCard } from "./paste-one-story.ts";
@@ -44,6 +45,13 @@ const PASTED = [
 const PASTED_BODY = PASTED.split("\n").slice(2).join("\n");
 
 async function ensureSchema() {
+  // U18a-1: the real schema, in both lanes. scripts/run-tests-safe.mjs applies
+  // migrations/*.sql before this file loads, and the postgres-integration
+  // runner runs this same file without that preload, so the fixture asks for it
+  // here through the one shared applier -- which does nothing when the ledger
+  // is already full. The `create table if not exists` lines below then no-op
+  // against the real tables instead of standing in for them.
+  await applyMigrationsToTestPglite();
   const sql = await getSql();
   await sql.query(`create table if not exists leads (id serial primary key, newsroom_id integer not null,
     user_id text not null, scan_run_id integer, headline text, why text, topic text default 'council',
@@ -237,7 +245,12 @@ describe("a pasted story, through the real import path", () => {
 
     // Nothing published, and nothing filed as an editorial: this is a news
     // story in the Queue, not an Opinion piece.
-    const [printed] = (await sql.query("select count(*)::int as n from articles")) as { n: number }[];
+    // U18a-1: `articles` is the real table now and already holds the welcome
+    // article migrations/0002 seeds, so this asks about published stories the
+    // way the assertion means it -- none at all.
+    const [printed] = (await sql.query(
+      "select count(*)::int as n from articles where not (slug = 'welcome-to-townreporter' and user_id = 'masthead')",
+    )) as { n: number }[];
     const [editorials] = (await sql.query("select count(*)::int as n from editorial_requests")) as {
       n: number;
     }[];

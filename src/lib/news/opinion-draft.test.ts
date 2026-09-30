@@ -5,13 +5,25 @@ import { getSql } from "../db.ts";
 import { withEditorialDraft, saveOpinionDraft, assertOpinionEvidenceReady } from "./opinion-draft.server.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
 import type { DraftRow } from "./types.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 before(async () => {
  const sql=await getSql();
- await sql.query(`create table drafts(id serial primary key, newsroom_id integer, lead_id integer, form text, headline text, dek text, body text, topic text, source_urls text, provenance_json text, found_note text, unanswered text, research_json text,updated_at timestamptz default now())`);
- await sql.query(`create table articles(id serial primary key,body text,source_urls text,headline text,status text,newsroom_id integer,slug text,area text)`);
- await sql.query(`create table editorial_extras(draft_id integer,fact_sheet text,image_prompt text)`);
+ // U18a-1: `drafts`, `articles` and `editorial_extras` are the real tables now
+ // (migrations/*.sql is applied before this file loads), so the three
+ // hand-written `create table` fixtures are gone. Two things the real schema
+ // requires that the fixtures did not: `drafts.user_id` is `not null` with no
+ // default, and `drafts.lead_id` is a foreign key, so the two lead-bound
+ // drafts this file is about need their leads to exist.
+ await sql`insert into leads(id,newsroom_id,user_id,headline,why,topic) values (11,81,'opinion-fixture','Lead eleven','Fixture','opinion'),(12,81,'opinion-fixture','Lead twelve','Fixture','opinion') on conflict (id) do nothing`;
  for(const [id,form,lead] of [[1,'report',11],[2,'editorial',12],[3,'editorial',null],[4,'editorial',null]] as const) {
- await sql`insert into drafts(id,newsroom_id,lead_id,form,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json) values(${id},81,${lead},${form},'Original','','Original body','opinion','["https://example.org/record"]','[]','','[]','{}')`;
+ await sql`insert into drafts(id,newsroom_id,user_id,lead_id,form,headline,dek,body,topic,source_urls,provenance_json,found_note,unanswered,research_json) values(${id},81,'opinion-fixture',${lead},${form},'Original','','Original body','opinion','["https://example.org/record"]','[]','','[]','{}')`;
  }
 });
 for(const id of [1,2]) for (const action of ['read','edit','publish'] as const) it(`Opinion cannot ${action} a reporting/lead-bound draft ${id}`,async()=>{
@@ -27,11 +39,14 @@ it('Opinion refuses another newsroom and requires evidence review after a materi
  await saveOpinionDraft(81,data);
  const sql=await getSql();const [edited]=await sql<DraftRow>`select * from drafts where id=3`;
  assert.equal(JSON.parse(edited.research_json!).evidenceReview.original.body,'Original body');
- await assert.rejects(withEditorialDraft(81,3,async(tx,d)=>{assertOpinionEvidenceReady(d);await tx`insert into articles(body,source_urls) values(${d.body},${d.source_urls})`;}),/Review the retained evidence/);
+ await assert.rejects(withEditorialDraft(81,3,async(tx,d)=>{assertOpinionEvidenceReady(d);await tx`insert into articles(user_id,slug,headline,body,topic,source_urls) values('opinion-fixture','opinion-publish',${d.headline},${d.body},'opinion',${d.source_urls})`;}),/Review the retained evidence/);
  await assert.rejects(saveOpinionDraft(81,{...data,evidenceDecision:'keep',evidenceToken:'stale'}),/changed/);
  await saveOpinionDraft(81,{...data,evidenceDecision:'keep',evidenceToken:evidenceReviewToken(edited)});
- await withEditorialDraft(81,3,async(tx,d)=>{assertOpinionEvidenceReady(d);await tx`insert into articles(body,source_urls) values(${d.body},${d.source_urls})`;});
- const articles=await sql<{body:string;source_urls:string}>`select * from articles`;
+ await withEditorialDraft(81,3,async(tx,d)=>{assertOpinionEvidenceReady(d);await tx`insert into articles(user_id,slug,headline,body,topic,source_urls) values('opinion-fixture','opinion-publish',${d.headline},${d.body},'opinion',${d.source_urls})`;});
+ // U18a-1: `articles` is the real table now, so it also holds the welcome
+ // article migrations/0002_newsroom.sql seeds. This file's own row is the one
+ // the publish path just wrote.
+ const articles=await sql<{body:string;source_urls:string}>`select * from articles where user_id='opinion-fixture'`;
  assert.deepEqual(articles.map(a=>a.body),['Different body\n\nCLAIMS AND SOURCES\n\nRecord: https://example.org/record']);assert.match(articles[0].source_urls,/example.org/);
 });
 it('removing outdated Opinion evidence preserves the private original',async()=>{

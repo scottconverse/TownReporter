@@ -1,8 +1,57 @@
-import { describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { writeStoryForAuthenticatedEditor } from "./model-request-commit.server.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
+
+/**
+ * The beats this file's newsrooms file under.
+ *
+ * U18a-1: 0045's `leads_resolve_section` trigger is in the test database from
+ * the start now (migrations/*.sql is applied before this file loads), so a
+ * newsroom's sections have to exist where the TRIGGER can see them, not only
+ * in the `getSections` these tests inject. Declaring them is what the desk
+ * itself would do through Sections; the injected list is what the app is told.
+ */
+const SECTION_LIST = [
+  { key: "community-life", visible: true, replacementKey: null },
+  { key: "council", visible: true, replacementKey: null },
+  { key: "hidden", visible: false, replacementKey: null },
+  { key: "retired", visible: true, replacementKey: "community-life" },
+  { key: "about", visible: true, replacementKey: null },
+  { key: "opinion", visible: true, replacementKey: null },
+] as const;
+
+/** The rooms this file writes into. 815 and 816 are excluded on purpose: their whole point is a `newsroom_sections` the reader cannot use. */
+const ROOMS = [1, 811, 812, 813, 820];
+
+before(async () => {
+  const sql = await getSql();
+  for (const newsroomId of ROOMS) {
+    await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict (id) do nothing", [
+      newsroomId,
+      `Test room ${newsroomId}`,
+    ]);
+    await sql.query("insert into section_config(newsroom_id) values($1) on conflict do nothing", [
+      newsroomId,
+    ]);
+    for (const [index, section] of SECTION_LIST.entries()) {
+      await sql.query(
+        `insert into newsroom_sections(newsroom_id,key,name,position,visible,replacement_key)
+         values($1,$2,$3,$4,$5,$6) on conflict (newsroom_id,key) do nothing`,
+        [newsroomId, section.key, section.key, index, section.visible, section.replacementKey],
+      );
+    }
+  }
+});
 
 async function ensureWriteStorySchema() {
   const sql = await getSql();
@@ -71,9 +120,14 @@ describe("writeStoryForAuthenticatedEditor", () => {
   */
   const sectionConfig = {
     revision: 1,
-    sections: ["community-life", "council", "hidden", "retired", "about", "opinion"].map(key => ({
-      key, name: key, visible: key !== "hidden", brief: "", instructions: "", sourceIds: [],
-      replacementKey: key === "retired" ? "community-life" : null,
+    sections: SECTION_LIST.map((section) => ({
+      key: section.key,
+      name: section.key,
+      visible: section.visible,
+      brief: "",
+      instructions: "",
+      sourceIds: [] as number[],
+      replacementKey: section.replacementKey,
     })),
   };
   for (const sectionKey of ["community-life", "hidden", undefined]) {
@@ -269,15 +323,14 @@ describe("writeStoryForAuthenticatedEditor", () => {
 
   it("lets this newsroom's own section name and brief decide the beat", async () => {
     const sql = await ensureWriteStorySchema();
+    // U18a-1: `newsroom_sections` is the real table now, so this row carries
+    // the `position` it declares `not null` and its newsroom has the
+    // `section_config` row its foreign key points at.
+    await sql.query("insert into newsrooms(id,name) values(817,'Test room 817') on conflict (id) do nothing");
+    await sql.query("insert into section_config(newsroom_id) values(817) on conflict do nothing");
     await sql.query(`
-      create table if not exists newsroom_sections (
-        newsroom_id integer not null, key text not null, name text not null,
-        position integer not null default 0, brief text not null default '', replacement_key text
-      )
-    `);
-    await sql.query(`
-      insert into newsroom_sections (newsroom_id, key, name, brief, replacement_key)
-      values (817, 'local-media', 'Local media', 'Nonprofit newsrooms, hires and fundraisers', null)
+      insert into newsroom_sections (newsroom_id, key, name, position, brief, replacement_key)
+      values (817, 'local-media', 'Local media', 0, 'Nonprofit newsrooms, hires and fundraisers', null)
     `);
     const res = await writeStoryForAuthenticatedEditor(
       {

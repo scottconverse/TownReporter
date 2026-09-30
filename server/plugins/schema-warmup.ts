@@ -1,3 +1,4 @@
+import { getMigrationGuardPromise } from "../../src/lib/migration-status.ts";
 import { getSchemaWarmupPromise } from "../../src/lib/schema-warmup.ts";
 
 /**
@@ -24,4 +25,10 @@ import { getSchemaWarmupPromise } from "../../src/lib/schema-warmup.ts";
  */
 export default function schemaWarmup() {
   void getSchemaWarmupPromise();
+  // The migration-ledger check (U18a-3) starts here too, for the same reason:
+  // as early as possible, so its answer is waiting for the first request
+  // rather than being discovered by it. `getMigrationGuardPromise` logs a
+  // failure itself; `server/middleware/00-schema-current.ts` is what turns
+  // that failure into a refusal to serve.
+  void getMigrationGuardPromise().catch(() => undefined);
 }
