@@ -16,7 +16,7 @@ The bookmark beside any story adds it to **Saved**. Select it again to remove th
 
 **Reading preferences** in the header and **Text size** on a story offer Normal and Large text plus Light/Dark appearance. Large text scales story text, headlines and deks. Preferences stay in this browser. On a narrow screen, **Explore the publication** opens the section menu.
 
-Story controls jump to the story, claims appendix when present, sources, corrections and related coverage. Source links open original records; **View captured version** opens the publication's retained record. Records with multiple observations offer comparisons and links to the underlying captures. The design does not manufacture claims, records or correction entries.
+Story controls jump to the story, claims appendix when present, sources, corrections and related coverage. Source links open original records; **View captured version** opens the publication's retained record, which shows a short excerpt of the capture, when it was taken, its content hash and a prominent link to the original. The publication keeps the full capture for its own records and does not republish another outlet's article. Records with multiple observations offer comparisons and links to the underlying captures. The design does not manufacture claims, records or correction entries.
 
 **Share** copies the story address. **Copy credit and link** includes attribution. If clipboard access is unavailable, a dialog provides selectable text. **Follow with RSS** copies or opens the feed for your RSS reader.
 

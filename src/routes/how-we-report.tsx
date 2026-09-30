@@ -66,8 +66,9 @@ function How() {
             <strong className="text-ink">Credit.</strong> When a story hangs on another newsroom’s
             reporting — a local paper, a regional outlet, a beat reporter working the same record —
             we name them and link the exact story, not a homepage. Linking is how a reader gets to
-            the original work. We do not copy their article, and we do not treat a section index as
-            if we opened the piece.
+            the original work. We do not copy their article. Our evidence pages keep a short excerpt
+            of what we cited and link to the original, and we do not treat a section index as if we
+            opened the piece.
           </p>
           <p>
             <strong className="text-ink">Corrections.</strong> Errors get a public note. We would

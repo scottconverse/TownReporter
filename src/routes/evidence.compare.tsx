@@ -136,28 +136,41 @@ function ComparePage() {
       {unchanged ? (
         <p className="mt-8 max-w-2xl text-ink-2">No textual change between these observations.</p>
       ) : (
-        <div className="mt-8 grid gap-6 sm:grid-cols-2">
-          <div>
-            <h2 className="font-display text-2xl">Removed</h2>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-2">
-              {changes.removed.length ? (
-                changes.removed.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
-              ) : (
-                <li>None detected.</li>
-              )}
-            </ul>
+        <>
+          <div className="mt-8 grid gap-6 sm:grid-cols-2">
+            <div>
+              <h2 className="font-display text-2xl">Removed</h2>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-2">
+                {changes.removed.length ? (
+                  changes.removed.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
+                ) : (
+                  <li>None detected.</li>
+                )}
+              </ul>
+            </div>
+            <div>
+              <h2 className="font-display text-2xl">Added</h2>
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-2">
+                {changes.added.length ? (
+                  changes.added.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
+                ) : (
+                  <li>None detected.</li>
+                )}
+              </ul>
+            </div>
           </div>
-          <div>
-            <h2 className="font-display text-2xl">Added</h2>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-2">
-              {changes.added.length ? (
-                changes.added.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
-              ) : (
-                <li>None detected.</li>
-              )}
-            </ul>
-          </div>
-        </div>
+          {/*
+            A comparison is of two captured pages, so the full difference is
+            the pages. The reader gets the count and the first few sentences.
+          */}
+          {changes.removed_total > changes.removed.length ||
+          changes.added_total > changes.added.length ? (
+            <p className="mt-4 max-w-2xl text-sm text-muted">
+              Showing the first {changes.removed.length + changes.added.length} of{" "}
+              {changes.removed_total + changes.added_total} changed passages.
+            </p>
+          ) : null}
+        </>
       )}
     </PaperShell>
   );
