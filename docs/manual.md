@@ -1382,7 +1382,7 @@ What changes for a reader: `/evidence/:versionId` prints "This excerpt was remov
 
 Judgments in the desk that bound to the captured text are no longer current and read as **unreviewed**: a judgment binds to `md5(full_text)` of the versions it cited (`finding-evidence-review.ts`, `findingReferenceBinding` and the `judgment.evidenceBinding !== currentBinding` reset in `resolveFinding`), and the purge changes that fingerprint. The judgment is not deleted and not silently kept — the editor re-reviews the capture, which now reads as removed.
 
-There is no restore. Re-capturing the page creates a new record with a new hash; it does not undo the takedown, and the audit row stands.
+There is no restore, and re-capturing the page does not undo the takedown. Identical content resolves to the same capture — the row is unique on newsroom, address and hash — and its text stays deleted; a later fetch of a page that has not changed writes no text back onto it (`rememberCapture` in `investigate.ts` checks the marker). Only a page whose content actually changed mints a new hash, and so a new record, which is a different capture that this takedown never covered. The audit row stands.
 
 ---
 

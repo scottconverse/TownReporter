@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { ArticleRow } from "./types.ts";
-import { publicArticle } from "./public.ts";
+import { publicArticle, withoutProvenance } from "./public.ts";
+import { parseFindings } from "./findings.ts";
 
 function article(overrides: Partial<ArticleRow>): ArticleRow {
   return {
@@ -23,7 +25,7 @@ function article(overrides: Partial<ArticleRow>): ArticleRow {
     ]),
     form: "reported",
     found_note: JSON.stringify([
-      {text:"Public finding",source_urls:["https://public.example/record","https://private.example/corroboration"],artifact_version_ids:[11,12],capture_event_ids:[21,22],locators:["char:1-20"]},
+      {text:"Public finding",source_urls:["https://public.example/record","https://private.example/corroboration"],artifact_version_ids:[11,12],capture_event_ids:[21,22],locators:["char:1-20"],excerpt:"SUBSCRIBER-ONLY PASSAGE WE COPIED OUT OF THE PAGE"},
       {text:"Private finding",source_urls:["https://private.example/corroboration"],artifact_version_ids:[12],capture_event_ids:[22]},
     ]),
     unanswered: "[]",
@@ -34,10 +36,42 @@ function article(overrides: Partial<ArticleRow>): ArticleRow {
 test("public article serialization excludes private provenance and findings from parsed and raw fields", () => {
   const result=publicArticle(article({}));
   assert.deepEqual(result.provenance,[{url:"https://public.example/record",version_id:11,capture_event_id:21,role:"record"}]);
-  assert.deepEqual(result.findings,[{text:"Public finding",source_urls:["https://public.example/record"],artifact_version_ids:[11],capture_event_ids:[21],locators:[],excerpt:undefined}]);
+  assert.deepEqual(result.findings,[{text:"Public finding",source_urls:["https://public.example/record"],artifact_version_ids:[11],capture_event_ids:[21],locators:[]}]);
   assert.deepEqual(JSON.parse(result.provenance_json!),result.provenance);
   assert.deepEqual(JSON.parse(result.found_note!),JSON.parse(JSON.stringify(result.findings)));
   assert.doesNotMatch(JSON.stringify(result),/private\.example|Private finding/);
+});
+
+/*
+  Unit U11b3: the recorded quote is not part of what a reader is served.
+
+  `StoryFinding.excerpt` is the passage the desk copied out of the captured
+  page -- up to 800 characters of somebody else's article. The page never
+  printed it, but every public payload carried it anyway: `findings`, and the
+  serialized `found_note` beside it, are built by `publicArticle`, which spread
+  the parsed finding (quote included) into the reader's copy. This pins the
+  fence where it now is: the key is absent from the finding, and the quote text
+  appears nowhere in the serialized article -- not in `found_note`, not in
+  `findings`, not in any field a route might grow later.
+
+  The desk keeps the quote: `parseFindings` is unchanged, and the evidence
+  review still matches it against the capture. Only the reader's copy loses it.
+*/
+test("a finding's recorded quote never reaches the public payload", () => {
+  const result=publicArticle(article({}));
+  assert.equal(result.findings.length,1);
+  assert.ok(
+    !("excerpt" in result.findings[0]!),
+    "the reader's finding still carries the recorded quote",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /SUBSCRIBER-ONLY PASSAGE/,
+    "the quote is somewhere in the public payload",
+  );
+  /* And the same row read for the DESK still has it. */
+  const forDesk = parseFindings(article({}).found_note);
+  assert.equal(forDesk[0]!.excerpt,"SUBSCRIBER-ONLY PASSAGE WE COPIED OUT OF THE PAGE");
 });
 
 test("an explicit empty citation list exposes no stored editor evidence", () => {
@@ -98,4 +132,61 @@ test("a named record rides beside the linked ones, and neither hides the other",
   }));
   assert.deepEqual(result.provenance,[linked,cited]);
   assert.doesNotMatch(JSON.stringify(result),/private\.example/);
+});
+
+/*
+  Unit U11b3: the list payloads carry no provenance.
+
+  `listPublishedArticles`, `listPublishedByTopic` and `searchPublished` each
+  serve up to 30 articles to anyone, and each carried the story's whole
+  `provenance` array and its `provenance_json` twin -- unmarked, because the
+  takedown flags are joined by `publicArticleForReaders`, which only the story
+  page calls. No list view renders provenance (checked at this commit), so the
+  fix is to stop sending it rather than to mark thirty rows nobody draws.
+
+  The first case proves the rule; the second proves the three readers still use
+  it. The readers are `createServerFn`s behind a live database, so the wiring is
+  read from the source -- the same check `search-index.test.ts` makes about the
+  search query's SQL, and for the same reason: there is no way to call one
+  here.
+*/
+test("a list payload has no provenance field at all", () => {
+  const listed = withoutProvenance(publicArticle(article({})));
+  assert.ok(!("provenance" in listed), "the list payload still carries provenance");
+  assert.ok(!("provenance_json" in listed), "the list payload still carries the provenance JSON");
+  assert.equal(listed.headline, "Public boundary", "the card's own fields are untouched");
+  assert.equal(listed.body, "Published body");
+  /*
+    The card keeps the story's own `source_urls` -- those are the story's
+    citations, and the body links them -- but no capture reference survives:
+    `version_id` and `capture_event_id` are the provenance record's fields.
+  */
+  assert.ok(
+    !JSON.stringify(listed).includes('"version_id"'),
+    "a capture reference is still in the list payload",
+  );
+  assert.ok(
+    !JSON.stringify(listed).includes('"capture_event_id"'),
+    "a capture reference is still in the list payload",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(listed),
+    /SUBSCRIBER-ONLY PASSAGE/,
+    "and the recorded quote must not be in it either",
+  );
+});
+
+test("every list reader passes its rows through withoutProvenance", () => {
+  const src = readFileSync(new URL("./public.ts", import.meta.url), "utf8");
+  for (const reader of ["listPublishedArticles", "listPublishedByTopic", "searchPublished"]) {
+    const start = src.indexOf(`export const ${reader}`);
+    assert.notEqual(start, -1, `${reader} is gone from public.ts`);
+    const next = src.indexOf("export const", start + 10);
+    const body = src.slice(start, next === -1 ? src.length : next);
+    assert.match(
+      body,
+      /withoutProvenance/,
+      `${reader} serves its rows without stripping provenance`,
+    );
+  }
 });

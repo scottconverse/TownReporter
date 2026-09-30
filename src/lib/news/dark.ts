@@ -2584,9 +2584,21 @@ export async function performArtifactOcrWork(
         desk sees a completed read with no passages added, and the takedown
         stays the last word on what this capture holds.
       */
+      /*
+        `for share`, so this read cannot race a takedown that is committing.
+
+        A plain select would read `taken_down_at` as null, let a takedown purge
+        every passage of the version, and then insert this read's pages back
+        into the table the purge had just cleared -- the evidence page saying
+        the excerpt was removed while the database held it again. The takedown
+        takes its row `for update` (`evidence-takedown.ts`) and this takes it
+        `for share`, so the two serialise: whichever arrives first finishes
+        first, and a read that arrives second sees the marker and adds nothing.
+      */
       const [takenDown] = await tx<{ taken_down_at: string | null }>`
         select taken_down_at::text as taken_down_at from artifact_versions
         where id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+        for share
       `;
       if (pages.length && !takenDown?.taken_down_at) {
         const chunks = chunksFromEvidence(pages.map((page) => page.text).join("\n\n"), pages);

@@ -15,6 +15,7 @@ import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
+import { readerProvenanceItems } from "@/lib/news/reader-provenance";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
 import { ProvenanceBlock } from "@/components/provenance";
 import { DatesPanel } from "@/components/paper/dates-panel";
@@ -353,24 +354,15 @@ function ArticlePage() {
     Records first, then the cited URLs they do not already name.
   */
   const recordedProvenance = article.provenance ?? [];
-  const recordedUrls = new Set(recordedProvenance.map((item) => item.url).filter(Boolean));
-  const provenance = [
-    ...recordedProvenance,
-    ...sources
-      .filter((url) => !recordedUrls.has(url))
-      .map((url) => ({
-        title: url,
-        organization: "",
-        document_date: "",
-        url,
-        captured_at: null,
-        version_id: null,
-        version_count: null,
-        capture_event_id: null,
-        disappeared: false,
-        role: "source",
-      })),
-  ];
+  /*
+    Unit U11b3: the merge moved into `readerProvenanceItems`, where it can be
+    tested -- and where the dedup compares URLs by the identity retrieval and
+    the evidence page use, not as raw strings. See that module for the defect
+    that was: a cited URL spelled with a trailing slash or a tracking parameter
+    was printed a second time as a bare card with a live "Current source" link,
+    undoing a removed link on the same page that said it was removed.
+  */
+  const provenance = readerProvenanceItems(recordedProvenance, sources);
   const more = related.filter((a) => a.slug !== slug).slice(0, 3);
   const sectionName = sections.find((s) => s.key === article.topic)?.name ?? article.topic;
   const isOpinion = article.topic === "opinion";

@@ -79,6 +79,19 @@ type Loaded = {
     content_hash: string;
     timeline: unknown[];
   } | null>;
+  rememberCapture: (opts: {
+    userId: string;
+    investigationId: number | null;
+    url: string;
+    title: string;
+    text: string;
+    hash: string;
+    status: number;
+    outcome: string;
+    classification?: string;
+    newsroomId?: number;
+    autoWatch?: boolean;
+  }) => Promise<{ versionId: number | null; captureEventId: number }>;
   takeDownCapture: (
     context: { userId: string; newsroomId: number; role: string },
     input: { versionId: number; reason: string; removeLink?: boolean },
@@ -137,9 +150,11 @@ if (probe.ok) {
     const evidence = await import("./evidence.ts");
     const takedown = await import("./evidence-takedown.ts");
     const publicModule = await import("./public.ts");
+    const investigate = await import("./investigate.ts");
     loaded = {
       loadPublicEvidence: evidence.loadPublicEvidence,
       takeDownCapture: takedown.takeDownCapture,
+      rememberCapture: investigate.rememberCapture as unknown as Loaded["rememberCapture"],
       publicArticle: publicModule.publicArticle as unknown as Loaded["publicArticle"],
       publicArticleForReaders:
         publicModule.publicArticleForReaders as unknown as Loaded["publicArticleForReaders"],
@@ -484,6 +499,125 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
     const both = await loaded.publicArticleForReaders(await readArticle());
     assert.equal(both.provenance[0]!.excerpt_removed, true);
     assert.equal(both.provenance[1]!.excerpt_removed, undefined, "the other capture is untouched");
+  });
+
+  it("does not put the text back when the page is fetched again", async () => {
+    const seed = await seeded();
+    const { versionId, slug } = seed;
+
+    await loaded.takeDownCapture(
+      { userId: "takedown-proof", newsroomId: 1, role: "owner" },
+      { versionId, reason: REASON, removeLink: true },
+    );
+    const purged = await storedText(versionId);
+    assert.equal(purged.version.full_text, "");
+
+    /* An investigation, so the fetch writes the Dark Desk's own artifact. */
+    const investigation = await client.query<{ id: number }>(
+      `insert into investigations (user_id, newsroom_id, title)
+       values ('takedown-proof', 1, 'Re-fetch proof') returning id`,
+    );
+    /*
+      The SAME page: same URL, same content hash, same text -- which is exactly
+      what a scheduled check or a second look at a page that has not moved
+      does. The version row is unique on (newsroom, url, hash), so this
+      resolves to the captured-then-taken-down version rather than minting a
+      new one.
+    */
+    const again = await loaded.rememberCapture({
+      userId: "takedown-proof",
+      newsroomId: 1,
+      investigationId: investigation.rows[0]!.id,
+      url: CAPTURE_URL,
+      title: "Board packet",
+      text: CAPTURED_TEXT,
+      hash: "proof-hash-1",
+      status: 200,
+      outcome: "fetched",
+      autoWatch: false,
+    });
+    assert.equal(again.versionId, versionId, "the re-fetch must resolve to the same capture");
+
+    /* Nothing anywhere holds the page again: not the version, not its
+       passages, not its bytes, not the Dark Desk's copy of the fetch. */
+    const after = await storedText(versionId);
+    assert.equal(after.version.full_text, "", "the version's text must stay purged");
+    assert.ok(after.version.taken_down_at, "and it must stay marked as taken down");
+    const textChunks = await client.query<{ count: number }>(
+      "select count(*)::int as count from artifact_chunks where version_id = $1 and excerpt <> ''",
+      [versionId],
+    );
+    assert.equal(textChunks.rows[0]!.count, 0, "no passage may come back");
+    const textBlobs = await client.query<{ count: number }>(
+      "select count(*)::int as count from artifact_blobs where version_id = $1 and body_b64 <> ''",
+      [versionId],
+    );
+    assert.equal(textBlobs.rows[0]!.count, 0, "no original bytes may come back");
+    const artifacts = await client.query<{ id: number; full_text: string }>(
+      "select id, full_text from artifacts where version_id = $1",
+      [versionId],
+    );
+    assert.ok(artifacts.rows.length >= 2, "the re-fetch records a new artifact row");
+    for (const row of artifacts.rows)
+      assert.equal(row.full_text, "", "no Dark Desk artifact may hold the page again");
+    /* The fetch itself is still recorded -- it happened. */
+    const events = await client.query<{ count: number }>(
+      "select count(*)::int as count from capture_events where version_id = $1",
+      [versionId],
+    );
+    assert.ok(events.rows[0]!.count >= 2, "the observation is still recorded");
+
+    /*
+      And the manual's other half: a page that DID change mints a new version,
+      which this takedown never covered, and that version keeps its text.
+    */
+    const changed = await loaded.rememberCapture({
+      userId: "takedown-proof",
+      newsroomId: 1,
+      investigationId: investigation.rows[0]!.id,
+      url: CAPTURE_URL,
+      title: "Board packet",
+      text: `${CAPTURED_TEXT} The vote was revised again.`,
+      hash: "proof-hash-3",
+      status: 200,
+      outcome: "changed",
+      autoWatch: false,
+    });
+    assert.notEqual(changed.versionId, versionId, "changed content is a new capture");
+    const changedRows = await storedText(changed.versionId!);
+    assert.notEqual(changedRows.version.full_text, "", "a new capture keeps its own text");
+    assert.equal(changedRows.version.taken_down_at, null);
+
+    /* The story's own payload still carries no verbatim quote (unit U11b3). */
+    await client.query("update articles set found_note = $1 where slug = $2", [
+      JSON.stringify([
+        {
+          text: "The board approved the recreation room update.",
+          source_urls: [CAPTURE_URL],
+          artifact_version_ids: [versionId],
+          capture_event_ids: [],
+          locators: ["char:0-40"],
+          excerpt: "A QUOTE FROM THE PUBLISHER'S SUBSCRIBER-ONLY PAGE",
+        },
+      ]),
+      slug,
+    ]);
+    const article = await client.query<Record<string, unknown>>(
+      `select id, slug, headline, dek, body, topic, source_urls, status, published_at,
+              provenance_json, form, found_note, unanswered
+       from articles where slug = $1`,
+      [slug],
+    );
+    const served = await loaded.publicArticleForReaders(article.rows[0]!);
+    assert.equal((served.findings as { excerpt?: string }[]).length, 1);
+    assert.ok(
+      !("excerpt" in (served.findings[0] as object)),
+      "the reader's finding must not carry the recorded quote",
+    );
+    assert.ok(
+      !JSON.stringify(served).includes("SUBSCRIBER-ONLY PAGE"),
+      "and the quote must be nowhere in the served article",
+    );
   });
 
   it("refuses, and purges nothing, when a legal-removal case already covers the page", async () => {
