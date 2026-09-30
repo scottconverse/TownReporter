@@ -291,7 +291,7 @@ export function adversarialQueries(
     `site:bouldercounty.gov` on a search meant to find the city's record. One
     rule for every path that writes this operator (./research-scope.ts).
   */
-  const officialSite = cityOfficialHost(place.city, officialDomainList);
+  const officialSite = cityOfficialHost(place.city, officialDomainList, place.state);
   const site = officialSite ? `site:${officialSite} ` : "";
   return [
     {

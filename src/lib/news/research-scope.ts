@@ -43,6 +43,162 @@ function hostOf(raw: string): string | null {
   }
 }
 
+/*
+  State names -> postal codes, keyed the way a host would spell the name
+  (`newyork`, not "New York"). The rule below reads this in both directions: a
+  city may qualify itself with its state's name (`bouldercolorado.gov`) or with
+  its two-letter code (`boulderco.gov`), and a `.us` address names its state on
+  the way in (`longmont.co.us`, registered under the state's own `co.us`).
+*/
+const STATE_CODES: Record<string, string> = {
+  alabama: "al",
+  alaska: "ak",
+  arizona: "az",
+  arkansas: "ar",
+  california: "ca",
+  colorado: "co",
+  connecticut: "ct",
+  delaware: "de",
+  districtofcolumbia: "dc",
+  florida: "fl",
+  georgia: "ga",
+  hawaii: "hi",
+  idaho: "id",
+  illinois: "il",
+  indiana: "in",
+  iowa: "ia",
+  kansas: "ks",
+  kentucky: "ky",
+  louisiana: "la",
+  maine: "me",
+  maryland: "md",
+  massachusetts: "ma",
+  michigan: "mi",
+  minnesota: "mn",
+  mississippi: "ms",
+  missouri: "mo",
+  montana: "mt",
+  nebraska: "ne",
+  nevada: "nv",
+  newhampshire: "nh",
+  newjersey: "nj",
+  newmexico: "nm",
+  newyork: "ny",
+  northcarolina: "nc",
+  northdakota: "nd",
+  ohio: "oh",
+  oklahoma: "ok",
+  oregon: "or",
+  pennsylvania: "pa",
+  rhodeisland: "ri",
+  southcarolina: "sc",
+  southdakota: "sd",
+  tennessee: "tn",
+  texas: "tx",
+  utah: "ut",
+  vermont: "vt",
+  virginia: "va",
+  washington: "wa",
+  westvirginia: "wv",
+  wisconsin: "wi",
+  wyoming: "wy",
+  americansamoa: "as",
+  guam: "gu",
+  northernmarianaislands: "mp",
+  puertorico: "pr",
+  virginislands: "vi",
+};
+
+const STATE_CODE_SET = new Set(Object.values(STATE_CODES));
+
+/** The postal code of a configured state, however it is written ("Colorado", "CO"). */
+function stateCode(state: string | null | undefined): string {
+  const key = citySlug(String(state ?? ""));
+  if (!key) return "";
+  return STATE_CODE_SET.has(key) ? key : (STATE_CODES[key] ?? "");
+}
+
+/*
+  What a jurisdiction that is NOT the city adds to the city's name: the county,
+  the school district, the library district, the water district. A label ending
+  in one of these belongs to that body however it is spelled.
+
+  `co` is on the list because a label ending in it is at least as likely to be a
+  county as it is to be a town qualified by Colorado's postal code. The one
+  reading that settles it is the newsroom's own state, and that is decided in
+  `isCityLabel`, not here.
+*/
+const BORROWED_SUFFIXES = new Set([
+  "co",
+  "county",
+  "cos",
+  "parish",
+  "school",
+  "schools",
+  "schooldistrict",
+  "district",
+  "library",
+  "parks",
+  "police",
+  "fire",
+  "sheriff",
+  "water",
+  "utility",
+  "chamber",
+]);
+
+/**
+ * The label a `.gov` or `.us` host is registered under, or "" when the host has
+ * no registrable label to read.
+ *
+ * `.gov` registers the name immediately left of it: `longmontcolorado` in
+ * `longmontcolorado.gov`. `.us` names a state on the way in -- `longmont.co.us`
+ * is registered under the state's own `co.us` suffix -- so a state code sitting
+ * immediately left of `.us` is part of the suffix, not the name.
+ *
+ * This is what refuses `longmontcolorado.gov.evil.us`: the label where the
+ * city's name would have to be is `evil`, and the city's name is only a label
+ * of the attacker's own subdomain.
+ */
+function registrableLabel(host: string): string {
+  const labels = host.split(".");
+  if (labels.length < 2) return "";
+  const stateScoped =
+    labels[labels.length - 1] === "us" &&
+    labels.length >= 3 &&
+    STATE_CODE_SET.has(labels[labels.length - 2]);
+  const index = labels.length - (stateScoped ? 3 : 2);
+  return index >= 0 ? labels[index] : "";
+}
+
+/**
+ * Whether a host's registrable label is the city's own.
+ *
+ * A substring is not an answer. `bouldercounty.gov` carries `boulder`, and it
+ * is the county standing in for the city -- the exact failure this rule was
+ * rewritten for. So the label has to BE the city: `boulder`, `bouldercolorado`,
+ * `boulderco` (Colorado only), `cityofboulder`, `bouldercity`; and it has to be
+ * the whole registrable label, so `notlongmont-news.us` is nobody.
+ */
+function isCityLabel(label: string, slug: string, state: string): boolean {
+  if (!label) return false;
+  if (label === slug) return true;
+  if (label === `cityof${slug}` || label === `${slug}city`) return true;
+  if (!label.startsWith(slug)) return false;
+  const rest = label.slice(slug.length);
+  const code = stateCode(state);
+  // "boulderco.gov" is Boulder County in one reading and Boulder, Colorado in
+  // another. Only the newsroom's own state can tell them apart.
+  if (rest === "co") return code === "co";
+  if (BORROWED_SUFFIXES.has(rest)) return false;
+  // bouldercolorado.gov, boulderoregon.gov: the state's name, spelled out. It
+  // names its own state, so it needs no help -- but when the newsroom's state
+  // is known, it is the only state that qualifies THIS city's site.
+  if (STATE_CODES[rest]) return code === "" || STATE_CODES[rest] === code;
+  // boulderor.gov: the state's postal code, which only `state` can supply.
+  return code !== "" && rest === code;
+}
+
 /**
  * The CITY's own official host among candidates, or null.
  *
@@ -64,9 +220,22 @@ function hostOf(raw: string): string | null {
  *    city, whatever it is called -- longmontleader.com carries the town's name
  *    and is emphatically not the city (see `officialDomains` in
  *    ./absence-gate.ts, where that lesson is written down).
- *  - The city's own name in the host: `longmont` in `longmontcolorado.gov`,
- *    `ci.longmont.co.us`. Multi-word cities are joined the way a host joins
- *    them, so "Palo Alto" looks for `paloalto.gov`.
+ *  - The city's own name as the host's registrable label: `longmontcolorado`
+ *    in `longmontcolorado.gov`, `longmont` in `ci.longmont.co.us`. Multi-word
+ *    cities are joined the way a host joins them, so "Palo Alto" looks for
+ *    `paloalto.gov`. Subdomains to the LEFT of that label are the city's own
+ *    (`www.`, `ci.`, `library.`); labels to the right of it are not, which is
+ *    what makes `longmontcolorado.gov.evil.us` somebody else's host.
+ *
+ * A host whose label is the plain city name beats one that qualifies the name
+ * with its state, whatever order the candidates arrive in: `boulder.gov` is a
+ * better answer than `bouldercolorado.gov`.
+ *
+ * `state` is the newsroom's own state, and it settles the one genuinely
+ * ambiguous label: `boulderco.gov` is read as the city only in Colorado, and as
+ * the county's anywhere else. It is optional -- `<slug><statename>` identifies
+ * itself without it -- and it is the only reason a two-letter `<slug><st>` is
+ * ever accepted.
  *
  * No match is a real answer, and the callers' answer is to write no `site:`
  * operator at all: a `site:` naming a neighbouring town, a county, a state or
@@ -78,22 +247,35 @@ function hostOf(raw: string): string | null {
  * whose site abbreviates its name (Fort Collins' fcgov.com) is not recognised
  * from its name alone.
  */
-export function cityOfficialHost(city: string, hosts: readonly string[]): string | null {
+export function cityOfficialHost(
+  city: string,
+  hosts: readonly string[],
+  state = "",
+): string | null {
   const slug = citySlug(city);
   if (slug.length < 4) return null;
+  let best: string | null = null;
+  let bestIsExact = false;
   for (const raw of hosts) {
     const host = String(raw ?? "").trim().replace(/^www\./i, "").toLowerCase();
     if (!host || !/\.(gov|us)$/.test(host)) continue;
-    if (!host.includes(slug)) continue;
-    return host;
+    const label = registrableLabel(host);
+    if (!isCityLabel(label, slug, state)) continue;
+    // An exact city label wins over every other candidate, wherever it sits in
+    // the list; otherwise the first acceptable candidate keeps it.
+    const exact = label === slug;
+    if (best !== null && (bestIsExact || !exact)) continue;
+    best = host;
+    bestIsExact = exact;
   }
-  return null;
+  return best;
 }
 
 /** The same rule over the paper's configured sources, official ones only. */
 export function officialSiteHost(
   city: string,
   sources: readonly { url: string; kind?: string | null }[],
+  state = "",
 ): string | null {
   const officialHosts: string[] = [];
   for (const source of sources) {
@@ -101,7 +283,7 @@ export function officialSiteHost(
     const host = hostOf(source.url);
     if (host) officialHosts.push(host);
   }
-  return cityOfficialHost(city, officialHosts);
+  return cityOfficialHost(city, officialHosts, state);
 }
 
 /** The scope a PaperConfig describes. See the type note above. */
@@ -111,10 +293,13 @@ export function researchScopeOf(paper: {
   seedSources?: readonly { url: string; kind?: string | null }[] | null;
 }): ResearchScope {
   const city = paper.city.trim();
+  const state = (paper.state ?? "").trim();
   return {
     city,
-    state: (paper.state ?? "").trim(),
-    officialHost: officialSiteHost(city, paper.seedSources ?? []),
+    state,
+    // The state goes with the city: it is what makes `boulderco.gov` the city
+    // in Colorado and a county anywhere else.
+    officialHost: officialSiteHost(city, paper.seedSources ?? [], state),
   };
 }
 
