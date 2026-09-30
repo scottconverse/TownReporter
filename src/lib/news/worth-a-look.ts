@@ -9,6 +9,7 @@ import {
   withoutUrls,
   worthTitle,
 } from "./desk-copy.ts";
+import { resurfaceRefusalReason } from "./result-quality.ts";
 
 export type WorthSeed = {
   id: string;
@@ -28,7 +29,14 @@ export type WorthSeed = {
 type AnomalyIn = { kind: string; summary: string; url: string | null; details: string | null; created_at?: string };
 type MonitorIn = { url: string; title: string; last_outcome: string | null };
 type LeadIn = { id: number; headline: string; why: string; evidence: string | null; newsworthiness: number | null; source_urls: string };
-type FrontierIn = { label: string; kind: string; why: string; status: string; closed_reason: string | null };
+type FrontierIn = {
+  label: string;
+  kind: string;
+  why: string;
+  status: string;
+  closed_reason: string | null;
+  evidence?: string | null;
+};
 type SignalIn = { id: number; name: string; observation: string; pathway: string; handoff: string; strength: number };
 type PromiseIn = { who_promised: string; what: string; when_due: string | null; source_cite: string | null; status: string };
 
@@ -176,6 +184,18 @@ export function rankWorthItems(input: {
 
   for (const f of input.frontier ?? []) {
     if (f.status !== "reopened" && f.status !== "open") continue;
+    /*
+      Unit U25, C1: a page the desk already read and parked does not come back
+      as new material -- and the front page is where that was visible, five
+      courier and dictionary pages badged "New material. Nobody has opened it
+      yet." A plain `open` item is untouched: those ARE new material, and
+      offering them is what this pile is for.
+    */
+    if (
+      f.status === "reopened" &&
+      resurfaceRefusalReason({ url: f.label, evidence: f.evidence ?? f.why }) !== null
+    )
+      continue;
     out.push({
       id: `frontier:${f.kind}:${f.label}`,
       kind: f.status === "reopened" ? "reopened" : f.kind,

@@ -570,6 +570,7 @@ export function FindingEvidenceReviewPanel({
   meetingEvidence = null,
   disabled = false,
   isOwner = false,
+  takeDownDisabled = disabled,
   list,
 }: {
   leadId: number;
@@ -578,6 +579,22 @@ export function FindingEvidenceReviewPanel({
   /** The draft's transcript citations, when it has any. See `TranscriptCitationEvidence`. */
   meetingEvidence?: DraftMeetingEvidence | null;
   disabled?: boolean;
+  /**
+   * Whether the owner's takedown press may be used. Defaults to `disabled`.
+   *
+   * Unit U25: these two must be able to disagree, and the story page is where
+   * they do. `disabled` locks the whole panel while the story is on paper --
+   * judgments bind to a draft, and a published story has none -- but the
+   * takedown is the one control that a published story still needs: the
+   * captures with public pages at `/evidence/:versionId` are the ones a
+   * publisher's complaint is about, and the page's own confirm copy promises
+   * that "published citations still resolve — to a notice instead of an
+   * excerpt". Passing `onPaper` into `disabled` alone left the press rendered,
+   * greyed, and unusable on every claim of every published story, so no editor
+   * could ever produce a public removal notice. See `docs/manual.md`'s
+   * "Taking down one captured excerpt (owner workflow)".
+   */
+  takeDownDisabled?: boolean;
   /**
    * Whether this editor is the newsroom's owner (unit U11b).
    *
@@ -1666,7 +1683,7 @@ export function FindingEvidenceReviewPanel({
                     <InkButton
                       tone="danger"
                       small
-                      disabled={disabled}
+                      disabled={takeDownDisabled}
                       onClick={() => {
                         setTakeDownFeedback(null);
                         editTakeDown((current) => ({ ...current, open: true }));

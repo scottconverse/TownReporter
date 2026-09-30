@@ -133,14 +133,52 @@ export function namedDocument(sentence: string): string | null {
 }
 
 /**
+ * A period that ends a token, not a sentence.
+ *
+ * Unit U25, B3. `splitSentences` breaks on every period, so "the specific date
+ * of Oct. 2, 2026" arrived as two sentences: "…of Oct. " and "2, 2026, …".
+ * That is harmless while sentences are only counted, and destructive when one
+ * of them is REPLACED -- which is exactly what the absence gate does. Measured
+ * on the drafted Kid City USA story (lead 66, 2026-09-30):
+
+ *   written:   "Until then, the specific date of Oct. 2, 2026, is not established
+ *               in the file, and TownReporter did not find length of the notice
+ *               among the documents it opened."
+ *   stored:    "Until then, the specific date of Oct. TownReporter did not find
+ *               length of the notice among the documents it opened: TOP Courier
+ *               Services Anaheim, CA | FAST & RELIABLE TEAM; …"
+
+ * The sentence carrying the claim was one sentence, the rewrite replaced it
+ * correctly, and the paragraph still read broken -- because the abbreviation
+ * had been cut in half on the way in.
+
+ * Titles, months, "No." and the two Latin clock abbreviations are the ones a
+ * news story actually contains.
+ */
+const ABBREVIATION_TAIL =
+  /\b(?:jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec|mr|mrs|ms|dr|prof|rev|hon|st|ave|blvd|rd|ln|vs|inc|ltd|co|corp|dept|est|approx|fig|a\.m|p\.m|u\.s|u\.s\.a)\.$/i;
+
+/**
  * Split text into sentences without losing a character.
  *
  * `splitSentences(t).join("") === t` for every input, so a caller can drop one
- * sentence and rejoin the rest with the paragraph breaks intact.
+ * sentence and rejoin the rest with the paragraph breaks intact. A split that
+ * lands on an abbreviation is undone by merging it back into the next part,
+ * which keeps that invariant.
  */
 export function splitSentences(text: string): string[] {
   if (!text) return [];
-  return text.match(/[^.!?]*[.!?]+["'’)\]]*\s*|[^.!?]+$/g) ?? [text];
+  const parts = text.match(/[^.!?]*[.!?]+["'’)\]]*\s*|[^.!?]+$/g) ?? [text];
+  const merged: string[] = [];
+  for (const part of parts) {
+    const previous = merged[merged.length - 1];
+    if (previous !== undefined && ABBREVIATION_TAIL.test(previous.trimEnd())) {
+      merged[merged.length - 1] = previous + part;
+      continue;
+    }
+    merged.push(part);
+  }
+  return merged;
 }
 
 function tidy(text: string): string {

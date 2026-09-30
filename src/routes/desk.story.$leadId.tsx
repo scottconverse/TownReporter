@@ -92,6 +92,7 @@ import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
+import { evidenceReviewDisabled, takeDownPressDisabled } from "@/lib/news/finding-evidence-locks";
 import { evidenceDetailId, STYLE_ROW_KEY } from "@/lib/news/evidence-check-list";
 import {
   modelChoiceLabel,
@@ -1511,6 +1512,19 @@ function StoryPage() {
     reconcileStatus.data?.status === "running";
   const savePending = save.isPending || reviewEvidence.isPending || publish.isPending;
   /*
+    Unit U25, B1: the two reasons the evidence panel closes, kept apart so the
+    takedown press can stay live on a published story. See
+    `src/lib/news/finding-evidence-locks.ts` for why they differ.
+  */
+  const reviewLocks = {
+    locked,
+    onPaper,
+    waiting,
+    busy: save.isPending || reviewEvidence.isPending || reconcileActive,
+  };
+  const panelLocks = evidenceReviewDisabled(reviewLocks);
+  const takeDownLocks = takeDownPressDisabled(reviewLocks);
+  /*
     Why the "Fix these with the model" button is off, in the editor's own words,
     or "" when it is on. The first reason is the ordinary one on a fresh check --
     the button used to be grey here with nothing said -- and the rest are the
@@ -2151,14 +2165,22 @@ function StoryPage() {
                 currentDraft={{ headline, dek, body, topic }}
                 meetingEvidence={data.draftMeetingEvidence}
                 isOwner={isOwner}
-                disabled={
-                  locked ||
-                  onPaper ||
-                  waiting ||
-                  save.isPending ||
-                  reviewEvidence.isPending ||
-                  reconcileActive
-                }
+                /*
+                  Unit U25, B1. Two rules, named and tested in
+                  `src/lib/news/finding-evidence-locks.ts`, because they used to
+                  be one expression and the difference between them is the whole
+                  of finding B1.
+
+                  The panel closes on a published story: a judgment binds to a
+                  saved draft and a published story has none. The takedown press
+                  must NOT inherit that -- a published story's captures are the
+                  only ones with public pages at /evidence/:versionId, so it is
+                  the only place the press matters, and it rendered disabled on
+                  all ten claims of story 16 with no tooltip and no way to reach
+                  it. The server still refuses every editor who is not the owner.
+                */
+                disabled={panelLocks}
+                takeDownDisabled={takeDownLocks}
                 list={{
                   checkedAt: evidenceCheckedAt,
                   modelLabel: reconcileStatus.data?.modelChoice
