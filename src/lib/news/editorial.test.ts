@@ -818,11 +818,40 @@ type CodexCallOptions = Parameters<typeof import("./ai-codex.server.ts").codexCh
  * a source-shape check. The fake returns a provider refusal on the writing
  * call, which stops the orchestration at the pair: no filing, no fallback
  * ladder, no database write beyond the paper settings the pack needs.
+ *
+ * Both tests are hermetic on purpose, because CI is not the machine they were
+ * written on. `.github/workflows/ci.yml` exports TOWNREPORTER_CLAUDE_CODE=0
+ * for several jobs -- the real-PostgreSQL one included -- where the pair
+ * answered "Claude is unavailable" without ever calling the recorder, and the
+ * assertion read `0 !== 2`. Two things follow, and both are asserted here
+ * rather than assumed:
+ *
+ *   - availability comes from `deps.resolveClaudeCode`, not the environment;
+ *   - every transport this pair is NOT testing is a poison pill. That second
+ *     one is not decoration: on a machine with a signed-in provider, the
+ *     ladder walks past the stopped pair and spends a real model call, which
+ *     is how this defect was found locally.
  */
 describe("SEC-3: the voice and the web tools never share one Opinion call", () => {
   const originalVoice = process.env[VOICE_ENV];
   const voicePath = join(tmpdir(), `opinion-sec3-voice-${process.pid}-${Date.now()}.txt`);
   const STOPPED = { ok: false as const, error: "EDITORIAL_REFUSAL: stopped after the pair" };
+
+  /** The answer a signed-in operator's machine gives, injected rather than read. */
+  const CLAUDE_AVAILABLE = { model: "claude-opus-5", label: "Claude Code" };
+
+  /**
+   * A transport these tests must never reach.
+   *
+   * The pair's refusal is final by design, so the ladder stops at the recorded
+   * pair. If an edit ever lets it move on, this fails on the test machine
+   * instead of spending a real model call on a signed-in provider.
+   */
+  function mustNotRun(transport: string) {
+    return async (): Promise<never> => {
+      throw new Error(`the SEC-3 pair test reached the real ${transport} transport`);
+    };
+  }
 
   before(() => {
     // Outside the repository, over the "looks truncated" floor: exactly what
@@ -848,6 +877,8 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
             ? { ok: true, text: "gathered findings, each with its URL" }
             : STOPPED;
         },
+        resolveClaudeCode: () => CLAUDE_AVAILABLE,
+        codexChat: mustNotRun("Codex"),
       },
     );
 
@@ -896,6 +927,7 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
             ? { ok: true, text: "gathered findings, each with its URL" }
             : STOPPED;
         },
+        claudeCodeChat: mustNotRun("Claude"),
       },
     );
 

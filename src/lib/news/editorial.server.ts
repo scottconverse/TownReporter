@@ -121,6 +121,18 @@ export async function ensureEditorialSchema() {
 export type EditorialWriterDeps = {
   claudeCodeChat?: typeof claudeCodeChat;
   codexChat?: typeof import("./ai-codex.server.ts").codexChat;
+  /**
+   * Test seam: the availability answer the Claude pair reads before it spends
+   * anything. Production asks the operator's own switch through
+   * `resolveClaudeCode` (./ai.ts).
+   *
+   * A test that replaces the transport has to replace this too. CI exports
+   * TOWNREPORTER_CLAUDE_CODE=0 for several jobs, including the real-PostgreSQL
+   * one (.github/workflows/ci.yml), where `resolveClaudeCode` returns null and
+   * the pair answers "Claude is unavailable" without ever reaching the
+   * transport a test recorded. The environment is not the test's to assume.
+   */
+  resolveClaudeCode?: typeof import("./ai.ts").resolveClaudeCode;
 };
 
 export async function writeEditorial(
@@ -146,7 +158,8 @@ export async function writeEditorial(
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
-      const { resolveClaudeCode } = await import("./ai.ts");
+      const resolveClaudeCode =
+        deps.resolveClaudeCode ?? (await import("./ai.ts")).resolveClaudeCode;
       if (!resolveClaudeCode()) {
         return {
           ok: false,
