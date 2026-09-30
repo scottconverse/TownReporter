@@ -275,8 +275,17 @@ const readerOwn = customProps(blockAfter(readerCss, ".reader {"));
 const panelGroundAlias = customProps(blockAfter(astraCss, '[data-desk-page="dark"] {'));
 const panelRemap = customProps(blockAfter(astraCss, '[data-desk-page="dark"] .reader {'));
 
-/** The reader's three non-color declarations: a length and two font stacks. */
-const READER_NON_COLORS = new Set(["reading", "serif"]);
+/**
+ * The reader's non-color declarations: two lengths and two font stacks.
+ *
+ * `reader-scale` joined the set with the Normal/Large pass, which turned every
+ * reader size into `calc(<n>px * var(--reader-scale))` and put the multiplier
+ * itself on `.reader` as a bare number. This test's second half reads a name's
+ * absence from `PANEL_UNMAPPED` as "the panel re-points it at a desk token",
+ * and a multiplier is not a colour to re-point -- so an unlisted
+ * `reader-scale` failed the audit for being a length, which is what it is.
+ */
+const READER_NON_COLORS = new Set(["reading", "reader-scale", "serif"]);
 
 /**
  * The reader names the panel deliberately leaves alone: they are read only by
@@ -429,7 +438,21 @@ test("the reader panel section parses the CSS it means to", () => {
   assert.equal(astraLight.get("bg").toLowerCase(), "#fffdf7", "desk-astra.css .desk-ltr.astra");
   assert.equal(astraDark.get("bg").toLowerCase(), "#1b1916", "desk-astra.css .desk-ltr.astra.night");
   assert.equal(readerOwn.get("bg").toLowerCase(), "#fffdf7", "reader-astra.css .reader");
-  assert.equal(readerOwn.get("reading"), "21px", "reader-astra.css .reader");
+  /*
+    The reader's body size has been SCALE-DRIVEN since the Normal/Large pass
+    moved it onto `--reader-scale` (src/reader-astra.css:36-37). This line used
+    to assert the literal `21px`, and it was still asserting that months later:
+    nothing ran this file, so the guard could not report its own drift. The
+    assertion is now the DERIVATION rather than one number, which is what this
+    test is actually for -- proving the reader block was found and read -- and
+    it stays true across a scale change that leaves the derivation alone.
+  */
+  assert.equal(readerOwn.get("reader-scale"), "1", "reader-astra.css .reader");
+  assert.equal(
+    readerOwn.get("reading"),
+    "calc(20px * var(--reader-scale))",
+    "reader-astra.css .reader",
+  );
   assert.equal(panelRemap.size, 10, "the re-point block in desk-astra.css");
 });
 

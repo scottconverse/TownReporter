@@ -38,6 +38,19 @@ jobs:
       # the Server page came to match nothing and report a clean result
       # unconditionally. The linter would have caught it in thirty seconds.
       - run: npm run lint
+      # A guard that ran nowhere. `contrast-audit.mjs` IS a node:test file --
+      # nine assertions over the desk's colour tokens, the /desk/dark panel's
+      # re-point block and the panel's own palette -- but `npm test` discovers
+      # only `*.test.mjs`, and its name is not one. So four CSS comments and
+      # three docs cited it as the thing that "rejects" a bad pair while
+      # nothing ran it, and it drifted: by the time this step existed, two of
+      # its nine assertions were failing against a product that had moved on
+      # (a reader size that became scale-driven, and a `--reader-scale`
+      # multiplier it read as a colour). Both are fixed in the same change.
+      #
+      # It is pure: it parses src/styles.css and src/desk-astra.css and opens
+      # no browser, no server and no database. ~0.2s, beside lint.
+      - run: node --test scripts/contrast-audit.mjs
 
   # The unit gate, on several machines at once.
   #
@@ -254,6 +267,20 @@ jobs:
         env:
           DIALOG_BASE_URL: http://127.0.0.1:8080
         run: node scripts/astra-dialog-e2e.mjs
+      # `npm run check:auth` compares what the RUNNING dev server resolved for
+      # VITE_AUTH_ENABLED with what the next build will be handed. Only a live
+      # dev server can settle that, so it runs here on the server the first
+      # step already booted (it is the same server the dialog step above uses).
+      # Exit 0 agree, 1 diverged, 2 could not observe.
+      #
+      # Nothing ran it. It is not a `*.test.mjs` file and no job invoked it, so
+      # the documented failure -- "sign-in visible in the live preview and
+      # absent from the built output, or the reverse" after starting vite
+      # outside scripts/with-app-env.mjs -- had a guard and no machine watching
+      # it. Run against a deliberately diverged build it exits 1 and names the
+      # cause, which is how this step was shown to be falsifiable. ~1s.
+      - name: The dev server and the next build agree about sign-in
+        run: npm run check:auth
 
   # The unit suite runs against PGLite, which has no pg_trgm and no admin
   # connection to create a scratch database from, so three files that need a
@@ -1273,6 +1300,23 @@ jobs:
           BETTER_AUTH_SECRET: ci-import-stories-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/import-stories-e2e.mjs
+      # Unit CO's walk: the three doors onto a meeting's tape -- "Open
+      # transcript" on the story page, the Claims & evidence panel's citations,
+      # and the published story's source list -- plus the refusals that keep
+      # another newsroom's artifact out of them. It seeds through the real
+      # writers, boots the built server in its own process on in-memory PGlite
+      # (so the pages read the same database it seeded) and calls no model.
+      #
+      # Its own process and its own port, exactly like the import walk above,
+      # so the two cannot see each other's desk. `--experimental-strip-types`
+      # because it imports the desk's own caption parser and transcript-link
+      # writer rather than re-implementing them. CO_SHOTS_DIR keeps its
+      # screenshots out of the checkout, which stays a clean diff. ~17s.
+      - name: Open a meeting's tape from the story, the panel and the paper
+        env:
+          BETTER_AUTH_SECRET: ci-co-transcript-secret-not-for-production
+          CO_SHOTS_DIR: ${{ runner.temp }}/co-transcript-evidence
+        run: node --experimental-strip-types scripts/co-transcript-walk.mjs
 
   # X2: paste one story. The Desk's second box, for a single finished story
   # rather than a report -- and the section it opens with comes from the same
@@ -1296,6 +1340,24 @@ jobs:
           BETTER_AUTH_SECRET: ci-paste-one-story-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/paste-one-story-e2e.mjs
+      # THE MEETING CAPTURE PANEL, which no CI job drove in a browser. It turns
+      # capture on, adds a channel, sets the storage root and retention, and
+      # saves; then it refuses three things -- a relative storage root, a
+      # non-YouTube channel, and a root it cannot create -- and reloads after
+      # each to prove a refused save wrote NOTHING, which is what the server's
+      # own "validate up front so a bad one never half-writes" claims.
+      #
+      # Rewritten for this step. It used to run a real `pg` client against
+      # DATABASE_URL and take its storage root from a `C:/Users/...` default --
+      # unrunnable here -- so it now reads back off the PANEL after a reload,
+      # the way its sibling walks do. The unwritable root is a path under a
+      # REGULAR FILE, so the refusal is ENOTDIR on every platform instead of
+      # depending on `Z:` not existing. Own process, own port, in-memory
+      # PGlite, own desk, no model, no network. ~10s.
+      - name: The Meeting capture panel saves, refuses, and stays put
+        env:
+          BETTER_AUTH_SECRET: ci-meeting-settings-secret-not-for-production
+        run: node scripts/meeting-settings-e2e.mjs
 
   # X3: import any format. The owner's own report as the outside tool wrote it
   # (a Claude-authored civic scanner report), plus the other shapes an editor
@@ -1340,6 +1402,28 @@ jobs:
           BETTER_AUTH_SECRET: ci-front-page-river-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/front-page-river-e2e.mjs
+      # Two more walks that need only a build, and neither needs a `npm start`:
+      # each imports `.output/server/index.mjs` into its OWN process, on its own
+      # port over in-memory PGlite, and exits with its verdict -- the same seam
+      # the river walk above uses, which is why they can share this job.
+      #
+      # The Stats page's privacy rule is a claim about what the READER'S
+      # BROWSER does (no cookie, nothing in storage, no identifier on the wire),
+      # so no unit test can settle it: reading.server.test.ts proves the handler
+      # never touches `request.headers`, and this proves nothing ever gave it
+      # something to touch. ~9s.
+      - name: The Stats page keeps no per-person trace, in a browser
+        run: node scripts/stats-privacy-e2e.mjs
+      # `npm run check:panels`. The paper's two ink panels, measured in a real
+      # browser: white-on-cream text, text past the panel's own right edge, and
+      # words broken across lines are all invisible to a font-size floor, to the
+      # token audit above and to `scrollWidth`. It is a reader of a paper and it
+      # FAILS on an unseeded one -- "This week" renders only for a published
+      # story naming a date inside the next seven days -- so it now seeds its own
+      # dated story in-process, the way this job's sibling walks seed theirs.
+      # ~10s.
+      - name: The paper's two ink panels, measured in a browser
+        run: node scripts/paper-panels.mjs
 
   # X5: import a civic-scanner v2.6 report. The report's own readiness statement
   # decides the card -- Tier 1 ticked, Tier 2 developing with its gaps marked,
@@ -1416,7 +1500,12 @@ jobs:
   desk-dark-flash:
     name: No light frame in dark mode, in a browser
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 35, not 20, since Unit U5 added the whole-desk sweep below: two self-
+    # booting walks plus a production build do not fit in twenty minutes with
+    # any room to spare, and a job whose timeout is the thing that fails is a
+    # red light nobody reads. The job's NAME is untouched -- a branch rule
+    # matches the name, and `desk-dark-flash` still means what it always did.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -1431,6 +1520,48 @@ jobs:
           BETTER_AUTH_SECRET: ci-desk-dark-flash-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node scripts/desk-dark-flash-walk.mjs
+      # Unit DB part 3: every route, every link, every button, every form, the
+      # job states, and the reader's privacy -- the broadest walk in the
+      # repository, and it ran nowhere. It visits every route collected from
+      # `src/routes` and fails on a 404, a 500 or a screen showing the wrong
+      # page; clicks every distinct internal link and checks the address it
+      # lands on; presses every button and records what each one did; drives
+      # one job stalled, one failed on quota and one cancelled through the fake
+      # provider; and reads back the readers table after a reader visit. No real
+      # model: rung 1 points at scripts/fakes/fake-deepseek-endpoint.mjs, started
+      # as a child on its own port and stopped by the PID it recorded; local
+      # discovery is off, ANTHROPIC_API_KEY is cleared and both CLI rungs point
+      # at files that do not exist.
+      #
+      # It shares this job because both are whole-desk sweeps and both boot the
+      # built server in their own process on their own ports (3593 and 3594 for
+      # this one), so neither can see the other's desk.
+      #
+      # WEC_SHOT_MATRIX=lean is the walk's own knob, and the reason is TIME.
+      # Measured on the author's machine: the full 5-width x 2-theme x 2-size
+      # evidence matrix takes ~11m47s, and lean takes ~6m04s -- the matrix is
+      # two thirds of the run and it is the EVIDENCE pass, for the eye. Lean
+      # still checks every screen for console errors, and every assertion above
+      # runs in both modes; what it drops is 20 screenshots per screen down to
+      # 1. The full matrix stays the by-hand evidence run (the walk's header
+      # documents both, and WEC_OUT_DIR names where they land).
+      #
+      # WEC_OUT_DIR must be INSIDE the checkout: the walk puts it through
+      # `checkedOutputPath` with the repository as the permitted root. It is
+      # uploaded rather than left, because that is the evidence.
+      - name: Every route, every link, every button and every wire
+        env:
+          BETTER_AUTH_SECRET: ci-walk-every-control-secret-not-for-production
+          WEC_SHOT_MATRIX: lean
+          WEC_OUT_DIR: ${{ github.workspace }}/wec-evidence
+        run: node scripts/walk-every-control-0681.mjs
+      - name: Preserve the walk-every-control evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: walk-every-control-evidence
+          path: wec-evidence/
+          if-no-files-found: ignore
 
   # AG: the Control page, walked the way the owner will use it (0.6.65). The
   # terminal menu is replaced by a local page on 127.0.0.1:3095 -- one line
@@ -1717,3 +1848,55 @@ jobs:
           BETTER_AUTH_SECRET: ci-legal-gone-nav-secret-not-for-production
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: node --experimental-strip-types scripts/legal-gone-nav-e2e.mjs
+      # Unit CT's walk. Every reason Publish is off, each with its own press, on
+      # the real desk UI: three rows at the top of the Checks tab, the bottom
+      # bar's line, each row's button doing the work it points at, the story
+      # publishing, and the red banner's "Review now" reaching the list.
+      #
+      # It was written for 0.6.81 and never ran, so it had gone stale in three
+      # places, all repaired in the same change: the login form gained a
+      # first-owner setup code (unit CJ), the desk began shipping DARK by
+      # default so its fixed "switch to dark" press found nothing -- and the
+      # measurement it labelled "light" was being taken against a dark page --
+      # and unit CW deliberately replaced the count CT put on the bottom bar
+      # with the first reason said as the press that clears it. That last
+      # assertion is now stronger than the count was: the bar's words are
+      # compared against the first row's own button, read off the page.
+      #
+      # Its own process, its own port over in-memory PGlite, its own desk, and
+      # no model: LLM_BASE_URL points at a port it proves is dead before it
+      # boots, and both CLI rungs point at files that do not exist, so the walk
+      # refuses to run if a model is reachable. ~8s.
+      - name: Every reason Publish is off, each with its own press
+        env:
+          BETTER_AUTH_SECRET: ci-publish-blockers-secret-not-for-production
+        run: node scripts/publish-blockers-walk.mjs
+      # The other 0.6.81 desk walk that nothing ran, and it is here for the same
+      # reason: the two belong to one unit and were orphaned together.
+      #
+      # Unit CP mounted two drawn dialogs -- "Add to this story" and the
+      # headline dialog -- that had been built, drawn and exported while NO
+      # screen rendered either one. The walk presses both: the first Add is
+      # shown to save nothing and to display the story's stored body in its
+      # "Now" column, the second saves exactly the text that was shown, and a
+      # later "Save edits" is pressed to prove it cannot write the older body
+      # back over it. It reaches no model: the add-to mode it picks has no AI
+      # branch, it TYPES the headline rather than pressing "Suggest 3 more", and
+      # LLM_BASE_URL points at a port it proves is dead before it boots.
+      #
+      # It needed the same two repairs as the walk above (the login form's
+      # first-owner setup code, and a desk that now ships dark, which made its
+      # `-light.png` shots dark and its fixed "switch to dark" press find
+      # nothing), so both passes now ask for the theme they name. Its own
+      # process and port, its own desk; CP_SHOTS_OUT_DIR keeps the screenshots
+      # out of the checkout. ~40s.
+      - name: The two mounted desk dialogs, in light and dark
+        env:
+          BETTER_AUTH_SECRET: ci-cp-desk-dialogs-secret-not-for-production
+          # Beside the workspace, not in it, and NOT `runner.temp`: the walk
+          # puts its screenshot directory through `checkedOutputPath`, whose
+          # permitted root is its own parent (`resolve("..")`), the same guard
+          # the other self-booting walks use. `runner.temp` is outside it and
+          # the walk would refuse to start. This keeps the checkout clean.
+          CP_SHOTS_OUT_DIR: ${{ github.workspace }}/../cp-desk-dialogs-evidence
+        run: node scripts/cp-desk-dialogs-walk.mjs

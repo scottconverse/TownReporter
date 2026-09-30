@@ -59,7 +59,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl, checkedOutputPath } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -216,6 +216,14 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  /*
+    Unit CJ (0.6.80) put a first-owner SETUP CODE on this form, and this walk
+    was never updated for it: clicking Create with the field blank leaves the
+    walk on /login, and the "Queue" link it waits for never appears. Nothing
+    ran this file, so it could not report its own staleness. The shared helper
+    reads the same file the operator is told to read and types it in.
+  */
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -427,11 +435,33 @@ async function threeRowsOnePerReason() {
   step("three rows, one per reason, each with its chip and its press");
 }
 
-/** 3. The bottom bar counts the same reasons and points at the same list. */
-async function theBottomBarCountsThem() {
+/**
+ * 3. The bottom bar names the first reason as the press that clears it, and
+ * points at the list.
+ *
+ * Unit CW replaced the count CT had put on this bar with the drawing's own
+ * sentence: the FIRST reason, said as the press that clears it ("Write a dek
+ * to publish."), then "Review". CT's count still runs at the head of the list,
+ * which is the screen where it was ever acted on -- step 2 above asserts it
+ * there. This walk was written against the CT copy and never ran, so it was
+ * still reading for the count on the bar.
+ *
+ * The assertion is made STRONGER than the count was rather than merely
+ * changed: the bar's words are compared against the first ROW's own button,
+ * read off the page, so the bar can never describe a fix in words the control
+ * that clears it does not use.
+ */
+async function theBottomBarNamesTheFirstReason() {
   const note = page.locator("#astra-publish-bar .publish-blocked");
   const text = await note.innerText();
-  assert.match(text, /3 things block Publish\./, `the bar counts them: ${text}`);
+  const firstRowsPress = (
+    await page.locator("#publish-blockers .astra-blocker-act").first().innerText()
+  ).trim();
+  assert.equal(
+    text.replace(/\s*Review\s*$/, "").trim(),
+    `${firstRowsPress} to publish.`,
+    `the bar names the first reason as its own press: ${text}`,
+  );
   assert.match(text, /Review/, "and offers the press that reaches the list");
   assert.equal(
     await publishButton().isDisabled(),
@@ -455,7 +485,7 @@ async function theBottomBarCountsThem() {
     return { top: Math.round(box.top), viewport: window.innerHeight };
   });
   assert.ok(shown.top >= 0 && shown.top < shown.viewport, `the list is in view (top ${shown.top})`);
-  step("the bottom bar counts the three reasons and Review reaches the list");
+  step("the bottom bar names the first reason and Review reaches the list");
 }
 
 /**
@@ -527,10 +557,30 @@ async function theBlockIsReadable(theme) {
   step(`nothing under 14px and every pair clears AA in ${theme} (${probes.map((p) => p.ratio).join(", ")})`);
 }
 
+/**
+ * Put the desk in `mode`, from wherever it currently is.
+ *
+ * The footer draws ONE button that names what pressing it gets you, and it is
+ * rendered only while the desk is LIGHT -- `{!night && …}` around it,
+ * `src/components/desk-chrome.tsx:391`. So the label to look for is the one
+ * that leads to the mode this walk wants, and it is only there if the desk is
+ * not already in that mode.
+ *
+ * The old version pressed a FIXED label first ("Switch to dark appearance")
+ * and assumed the desk started light. Since the 2026-09-26 redesign the desk
+ * ships DARK, so that button is not on the page, and the press timed out --
+ * which is how the first measurement below came to be taken against a dark
+ * page while the facts said "light". The switch is state-aware now, and the
+ * caller asks for the theme it is about to measure instead of assuming one.
+ */
 async function chooseAppearance(mode) {
-  const label = mode === "dark" ? "Switch to dark appearance" : "Switch to light appearance";
-  await page.getByRole("button", { name: label }).click();
   const want = mode === "dark" ? "desk-dark" : "light";
+  const current = await page.evaluate(() =>
+    document.documentElement.getAttribute("data-appearance"),
+  );
+  if (current === want) return;
+  const label = want === "desk-dark" ? "Switch to dark appearance" : "Switch to light appearance";
+  await page.getByRole("button", { name: label }).click();
   await page.waitForFunction(
     (expected) => document.documentElement.getAttribute("data-appearance") === expected,
     want,
@@ -643,10 +693,19 @@ async function theBannerHasAPress() {
   assert.match(text, /Draft saved — review required\./);
   assert.match(text, /Review now/);
   assert.equal(await blockerKeys().then((k) => k.length), 1, "this draft has one reason standing");
-  assert.match(
-    await page.locator("#astra-publish-bar .publish-blocked").innerText(),
-    /1 thing blocks Publish\./,
-    "and the bar counts it in the singular",
+  /*
+    The bar's line, in the singular, is the same Unit CW rule as step 3: the
+    one reason said as the press that clears it, not a count.
+  */
+  const soleReasonPress = (
+    await page.locator("#publish-blockers .astra-blocker-act").first().innerText()
+  ).trim();
+  assert.equal(
+    (await page.locator("#astra-publish-bar .publish-blocked").innerText())
+      .replace(/\s*Review\s*$/, "")
+      .trim(),
+    `${soleReasonPress} to publish.`,
+    "and the bar names that one reason as its own press",
   );
 
   // Stand somewhere else entirely, so the press has to do the navigating.
@@ -691,6 +750,9 @@ async function main() {
     await openTheStory(currentLeadId);
     await theListIsAtTheTopOfTheChecksTab();
     await threeRowsOnePerReason();
+    // Ask for the theme before naming it: the desk ships dark, and a
+    // measurement labelled "light" that was taken in dark is a false pass.
+    await chooseAppearance("light");
     await theBlockIsReadable("light");
     await shoot("blocked-light.png");
     await chooseAppearance("dark");
@@ -698,7 +760,7 @@ async function main() {
     await shoot("blocked-dark.png");
     await chooseAppearance("light");
 
-    await theBottomBarCountsThem();
+    await theBottomBarNamesTheFirstReason();
     await everyRowHasItsOwnPress();
     await nothingIsBlocking();
     await shoot("clear-light.png");

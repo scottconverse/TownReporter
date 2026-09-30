@@ -272,9 +272,16 @@ try {
   await page.getByLabel("Email").fill("co-editor@townreporter.test");
   await page.getByLabel("Password", { exact: true }).fill("co-walk-pass-12345");
   await page.getByLabel("Confirm password").fill("co-walk-pass-12345");
+  // See the note in publish-blockers-walk.mjs: the login form has carried a
+  // first-owner SETUP CODE since unit CJ (0.6.80), and this walk was written
+  // before it. Without the code the account is never created and the wait
+  // below times out on a page that is still the sign-up form.
+  const { completeFirstRunSetup, fillPendingSetupCodeIfPresent } = await import(
+    "./first-run-setup-step.mjs"
+  );
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: "Queue", exact: true }).waitFor({ timeout: 45_000 });
-  const { completeFirstRunSetup } = await import("./first-run-setup-step.mjs");
   await completeFirstRunSetup(page, base);
   step("owns the desk");
 

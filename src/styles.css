@@ -551,7 +551,12 @@
     a current-step mark has to be SEEABLE rather than filled (accent-color,
     the active nav row, the current filter), that is `--sel` instead.
     `scripts/contrast-audit.mjs` keeps the three apart: `adeep/bg` as text,
-    `sel/bg` as a UI color, and `#111` on `a` for the yellow fills.
+    `sel/bg` as a UI color, and `#111` on `a` for the yellow fills. That audit
+    RUNS -- `node --test scripts/contrast-audit.mjs` is a step in the `static`
+    CI job -- so a pair changed here that drops below its floor fails the build
+    rather than being discovered on a screenshot months later. (It did not run
+    anywhere until Unit U5, which is how two of its own nine assertions came to
+    be failing against a product that had moved on.)
   */
   --a: var(--color-yel);
   --adeep: var(--color-ink);
@@ -615,7 +620,13 @@
     Text-size control (Normal / Large), independent of the Light/Dark toggle.
 
     `--ts` is a scale factor read by every rem-based font-size this pass
-    touched (see bump-fontsize sweep below and scripts/contrast-audit.mjs).
+    touched (see bump-fontsize sweep below). The guard for that is
+    `scripts/desk-min-font.test.mjs`, which parses EVERY `.desk-ltr` rule --
+    multi-line or not -- and fails on any declaration below the 14px floor at
+    `--ts: 1`, and separately fails a selector in this pass that does not read
+    `--ts`. It runs under `npm test`. (This comment used to name
+    `scripts/contrast-audit.mjs`, which measures color, never type size, and
+    which nothing ran at all.)
     `.large` only changes this one number; every touched rule reads it via
     `calc(<floor>rem * var(--ts))`, so raising it re-scales the whole desk at
     once instead of requiring a second, parallel set of large-mode rules.
@@ -1506,7 +1517,9 @@
   The exact ladder the absence gate ran, for the editor who wants to see it
   rather than take "0 more ways" on faith. Collapsed by default so the
   checkbox row above stays the thing an editor actually has to act on;
-  nothing here drops below 14px in either theme (contrast-audit.mjs).
+  nothing here drops below 14px in either theme -- `scripts/desk-min-font.test.mjs`
+  parses this rule (0.875rem x `--ts`) under `npm test`, which is the guard for
+  type size; `contrast-audit.mjs` is the guard for color, not for this.
 */
 .desk-ltr .gate-claim-queries {margin:6px 0 0 27px;font-size:calc(0.875rem * var(--ts));color:var(--fg2)}
 .desk-ltr .gate-claim-queries summary {cursor:pointer;color:var(--fg2)}
