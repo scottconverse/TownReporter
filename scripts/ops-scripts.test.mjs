@@ -1538,6 +1538,132 @@ test(
 );
 
 test(
+  "redlib-relocate refuses multiply linked target executables with same or alternate basenames",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    const script = join(OPS, "redlib-relocate.ps1");
+    const base = mkdtempSync(join(tmpdir(), "redlib-relocate-hardlink-reader-"));
+    const source = join(base, "source");
+    const target = join(base, "target");
+    const externalAlias = join(base, "external-alias");
+    const noEnv = join(base, "absent.env");
+    const powershellExe = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName"],
+      { encoding: "utf8" },
+    ).trim();
+    const run = (args) => {
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
+            { encoding: "utf8", timeout: 120_000, env: { ...process.env, REDLIB_INSTALL_ROOT: "" } },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
+    const plant = (root) => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "install.json"),
+        `${JSON.stringify({
+          installRoot: root,
+          executable: join(root, "redlib.exe"),
+          baseUrl: "http://127.0.0.1:65533",
+          logPath: join(root, "redlib.log"),
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      writeFileSync(join(root, "redlib.exe"), "stub, never run\n", "utf8");
+      writeFileSync(join(root, "config.toml"), "port = 65533\n", "utf8");
+    };
+    const startLongLivedProcess = (executable) => Number(execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$child = Start-Process -FilePath $env:REDLIB_TEST_PROCESS_EXE -ArgumentList '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 90' -PassThru -WindowStyle Hidden; $child.Id",
+      ],
+      { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_EXE: executable } },
+    ).trim());
+    const processImagePath = (pid) => execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "(Get-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID)).MainModule.FileName"],
+      { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(pid) } },
+    ).trim();
+    const stopProcess = (pid) => {
+      try {
+        execFileSync(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", "Stop-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID) -Force -ErrorAction SilentlyContinue"],
+          { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(pid) } },
+        );
+      } catch {
+        // Only fixture processes are stopped here, during cleanup.
+      }
+    };
+    try {
+      plant(source);
+      plant(target);
+      copyFileSync(powershellExe, join(target, "redlib.exe"));
+      mkdirSync(externalAlias);
+      const aliasPaths = [join(externalAlias, "redlib.exe"), join(externalAlias, "alternate.exe")];
+      for (const aliasPath of aliasPaths) linkSync(join(target, "redlib.exe"), aliasPath);
+      const targetInstallBefore = readFileSync(join(target, "install.json"));
+      const targetExecutableBefore = readFileSync(join(target, "redlib.exe"));
+      const evidence = [];
+      for (const aliasPath of aliasPaths) {
+        const processPid = startLongLivedProcess(aliasPath);
+        try {
+          writeFileSync(join(target, "redlib.pid"), "2147483647", "utf8");
+          const processImage = processImagePath(processPid);
+          const result = run(["-From", source, "-To", target, "-Force", "-EnvFile", noEnv]);
+          const processStillRunning = execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-Command", "if (Get-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID) -ErrorAction SilentlyContinue) { 'running' } else { 'stopped' }"],
+            { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(processPid) } },
+          ).trim() === "running";
+          evidence.push({
+            aliasBasename: win32Path.basename(aliasPath),
+            processImageIsExternalHardlink: processImage.toLowerCase() === aliasPath.toLowerCase(),
+            processBasenameDiffersFromTarget: win32Path.basename(processImage).toLowerCase() !== "redlib.exe",
+            processStillRunning,
+            exit: result.code,
+            hardlinkRefusalReported: /image state: linked/i.test(result.out),
+            targetMetadataPreserved: existsSync(join(target, "install.json"))
+              && readFileSync(join(target, "install.json")).equals(targetInstallBefore),
+            targetExecutablePreserved: existsSync(join(target, "redlib.exe"))
+              && readFileSync(join(target, "redlib.exe")).equals(targetExecutableBefore),
+            stalePidPreserved: existsSync(join(target, "redlib.pid"))
+              && readFileSync(join(target, "redlib.pid"), "utf8") === "2147483647",
+          });
+        } finally {
+          stopProcess(processPid);
+        }
+      }
+      assert.deepEqual(evidence, aliasPaths.map((aliasPath) => ({
+        aliasBasename: win32Path.basename(aliasPath),
+        processImageIsExternalHardlink: true,
+        processBasenameDiffersFromTarget: win32Path.basename(aliasPath).toLowerCase() !== "redlib.exe",
+        processStillRunning: true,
+        exit: 1,
+        hardlinkRefusalReported: true,
+        targetMetadataPreserved: true,
+        targetExecutablePreserved: true,
+        stalePidPreserved: true,
+      })), JSON.stringify(evidence, null, 2));
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "redlib-relocate.ps1 resolves path aliases, rejects unsafe targets, and fails closed on stale metadata",
   { skip: !onWindows ? "PowerShell only" : false },
   () => {
@@ -1998,14 +2124,12 @@ test(
       mkdirSync(join(hardlinkSource, "assets", "nested"), { recursive: true });
       writeFileSync(join(hardlinkSource, "assets", "nested", "payload.txt"), "SOURCE-NESTED-CONTENT", "utf8");
       plant(hardlinkTarget);
-      unlinkSync(join(hardlinkTarget, "redlib.exe"));
       unlinkSync(join(hardlinkTarget, "config.toml"));
       mkdirSync(join(hardlinkTarget, "assets", "nested"), { recursive: true });
       writeFileSync(join(hardlinkTarget, "keep.txt"), "KEEP-TARGET-ONLY", "utf8");
       writeFileSync(join(hardlinkTarget, "assets", "nested", "keep.txt"), "KEEP-NESTED-TARGET-ONLY", "utf8");
       writeFileSync(hardlinkExternal, "EXTERNAL-KEEP-CONTENT", "utf8");
       writeFileSync(hardlinkNestedExternal, "EXTERNAL-NESTED-KEEP-CONTENT", "utf8");
-      linkSync(join(hardlinkSource, "config.toml"), join(hardlinkTarget, "redlib.exe"));
       linkSync(hardlinkExternal, join(hardlinkTarget, "config.toml"));
       linkSync(hardlinkNestedExternal, join(hardlinkTarget, "assets", "nested", "payload.txt"));
       const hardlinkSourceExeBefore = readFileSync(join(hardlinkSource, "redlib.exe"));

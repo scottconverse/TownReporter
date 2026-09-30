@@ -91,12 +91,25 @@ using System;
 using System.Text;
 using System.Runtime.InteropServices;
 public static class TownReporterPathIdentity {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct FileInformation {
+    public uint Attributes;
+    public uint CreationTimeLow, CreationTimeHigh;
+    public uint LastAccessTimeLow, LastAccessTimeHigh;
+    public uint LastWriteTimeLow, LastWriteTimeHigh;
+    public uint VolumeSerialNumber;
+    public uint FileSizeHigh, FileSizeLow;
+    public uint NumberOfLinks;
+    public uint FileIndexHigh, FileIndexLow;
+  }
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern uint GetFinalPathNameByHandle(IntPtr handle, StringBuilder path, uint length, uint flags);
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool GetFileInformationByHandle(IntPtr handle, out FileInformation information);
   public static string Resolve(string path) {
     IntPtr handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
     if (handle == new IntPtr(-1)) return null;
@@ -108,6 +121,24 @@ public static class TownReporterPathIdentity {
       if (resolved.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + resolved.Substring(8);
       if (resolved.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)) return resolved.Substring(4);
       return resolved;
+    } finally { CloseHandle(handle); }
+  }
+  public static string GetFileIdentity(string path) {
+    IntPtr handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+    if (handle == new IntPtr(-1)) return null;
+    try {
+      FileInformation information;
+      if (!GetFileInformationByHandle(handle, out information)) return null;
+      return String.Format("{0:X8}:{1:X8}{2:X8}", information.VolumeSerialNumber, information.FileIndexHigh, information.FileIndexLow);
+    } finally { CloseHandle(handle); }
+  }
+  public static long GetFileLinkCount(string path) {
+    IntPtr handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+    if (handle == new IntPtr(-1)) return -1;
+    try {
+      FileInformation information;
+      if (!GetFileInformationByHandle(handle, out information)) return -1;
+      return information.NumberOfLinks;
     } finally { CloseHandle(handle); }
   }
   public static bool CanOpenForDelete(string path) {
@@ -144,13 +175,20 @@ function Get-ExecutableImageState {
   param([string]$ExecutablePath)
   if (-not $ExecutablePath -or -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) { return 'none' }
   try {
-    $expected = Get-PathIdentity $ExecutablePath
+    # A hard link can be running through a different path and filename. Refuse
+    # replacement conservatively rather than missing that mapped image.
+    $linkCount = [TownReporterPathIdentity]::GetFileLinkCount($ExecutablePath)
+    if ($linkCount -lt 1) { return 'unverified' }
+    if ($linkCount -gt 1) { return 'linked' }
+    $expected = [TownReporterPathIdentity]::GetFileIdentity($ExecutablePath)
+    if (-not $expected) { return 'unverified' }
     $processName = [IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
     foreach ($process in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
       try {
         $imagePath = [string]$process.MainModule.FileName
         if (-not $imagePath) { return 'unverified' }
-        $actual = Get-PathIdentity $imagePath
+        $actual = [TownReporterPathIdentity]::GetFileIdentity($imagePath)
+        if (-not $actual) { return 'unverified' }
       } catch { return 'unverified' }
       if ($actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) { return 'live' }
     }
@@ -596,12 +634,13 @@ foreach ($candidate in $targetImageCandidates) {
   $candidateState = Get-ExecutableImageState -ExecutablePath ([string]$candidate)
   if ($candidateState -eq 'unverified') { $targetImageState = 'unverified'; break }
   if ($candidateState -eq 'live') { $targetImageState = 'live'; break }
+  if ($candidateState -eq 'linked') { $targetImageState = 'linked'; break }
 }
 $targetAnswering = if ($targetIsInstall) { Test-RedlibUp -InstallRoot $target } else { $false }
 if ($targetIsInstall -and (($targetPidState.State -in @('live', 'unverified', 'other')) -or
     $targetImageState -ne 'none' -or $targetAnswering)) {
-  Write-Say ("  The destination has a running reader (pid state: " + $targetPidState.State + "; image state: " + $targetImageState + ").")
-  Write-Say "  Nothing was changed. Stop or identify the destination reader before replacing its files."
+  Write-Say ("  The destination may have a running reader or a linked executable (pid state: " + $targetPidState.State + "; image state: " + $targetImageState + ").")
+  Write-Say "  Nothing was changed. Stop or identify the reader, or remove executable hard links before replacing its files."
   Write-Say "  Stop it first, then run this again:"
   Write-Say "      powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 stop"
   Write-Say ""
