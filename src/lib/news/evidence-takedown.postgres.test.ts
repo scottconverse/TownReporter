@@ -82,11 +82,30 @@ type Loaded = {
   takeDownCapture: (
     context: { userId: string; newsroomId: number; role: string },
     input: { versionId: number; reason: string; removeLink?: boolean },
-  ) => Promise<{ ok: true; purged: { chunks: number; blobs: number } }>;
+  ) => Promise<{
+    ok: true;
+    linkKept: boolean;
+    purged: {
+      chunks: number;
+      blobs: number;
+      artifacts: number;
+      claims: number;
+      relationships: number;
+    };
+  }>;
   publicArticle: (row: Record<string, unknown>) => {
     provenance: { url: string; version_id?: number }[];
     findings: unknown[];
   };
+  publicArticleForReaders: (row: Record<string, unknown>) => Promise<{
+    provenance: {
+      url: string;
+      version_id?: number;
+      excerpt_removed?: boolean;
+      excerpt_removed_link_kept?: boolean;
+    }[];
+    findings: unknown[];
+  }>;
   closePoolForTests: () => Promise<void>;
 };
 
@@ -122,6 +141,8 @@ if (probe.ok) {
       loadPublicEvidence: evidence.loadPublicEvidence,
       takeDownCapture: takedown.takeDownCapture,
       publicArticle: publicModule.publicArticle as unknown as Loaded["publicArticle"],
+      publicArticleForReaders:
+        publicModule.publicArticleForReaders as unknown as Loaded["publicArticleForReaders"],
       closePoolForTests: db.closePoolForTests,
     };
   });
@@ -146,11 +167,45 @@ if (probe.ok) {
   });
 }
 
-/** Seed one captured page, its chunks and bytes, and a published story citing it. */
-async function seed(): Promise<{ versionId: number; slug: string }> {
+/** The desk's own copies of one capture: an artifact, a claim, a relationship. */
+async function seedWorkingCopies(versionId: number, tag: string) {
+  const { rows: artifact } = await client.query<{ id: number }>(
+    `insert into artifacts (user_id, newsroom_id, url, title, content_hash, full_text, version_id)
+     values ('takedown-proof', 1, $1, 'Board packet', $2, $3, $4) returning id`,
+    [CAPTURE_URL, `artifact-${tag}`, `ARTIFACT WHOLE PAGE ${tag}`, versionId],
+  );
+  const { rows: claim } = await client.query<{ id: number }>(
+    `insert into claims (user_id, newsroom_id, body, kind, evidence, source_url, version_id, excerpt)
+     values ('takedown-proof', 1, $1, 'record', $2, $3, $4, $5) returning id`,
+    [`claim body ${tag}`, `CLAIM NOTE ${tag}`, CAPTURE_URL, versionId, `CLAIM EXCERPT ${tag}`],
+  );
+  const { rows: relationship } = await client.query<{ id: number }>(
+    `insert into relationships (user_id, newsroom_id, from_name, to_name, kind, evidence, source_url, version_id, excerpt)
+     values ('takedown-proof', 1, 'board', 'library', 'approved', $1, $2, $3, $4) returning id`,
+    [`RELATIONSHIP NOTE ${tag}`, CAPTURE_URL, versionId, `RELATIONSHIP EXCERPT ${tag}`],
+  );
+  return { artifact: artifact[0]!.id, claim: claim[0]!.id, relationship: relationship[0]!.id };
+}
+
+/**
+ * Seed one captured page, its chunks and bytes, the desk's own copies of it,
+ * a second capture of the same page that must NOT be touched, and a published
+ * story citing the first.
+ */
+async function seeded(): Promise<{
+  versionId: number;
+  otherVersionId: number;
+  slug: string;
+  copies: { artifact: number; claim: number; relationship: number };
+  otherCopies: { artifact: number; claim: number; relationship: number };
+}> {
   const slug = `takedown-proof-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-  await client.query("delete from artifact_chunks where version_id in (select id from artifact_versions where url = $1)", [CAPTURE_URL]);
-  await client.query("delete from artifact_blobs where version_id in (select id from artifact_versions where url = $1)", [CAPTURE_URL]);
+  const ids = "(select id from artifact_versions where url = $1)";
+  await client.query(`delete from claims where version_id in ${ids}`, [CAPTURE_URL]);
+  await client.query(`delete from relationships where version_id in ${ids}`, [CAPTURE_URL]);
+  await client.query(`delete from artifacts where version_id in ${ids}`, [CAPTURE_URL]);
+  await client.query(`delete from artifact_chunks where version_id in ${ids}`, [CAPTURE_URL]);
+  await client.query(`delete from artifact_blobs where version_id in ${ids}`, [CAPTURE_URL]);
   await client.query("delete from capture_events where source_url = $1", [CAPTURE_URL]);
   await client.query("delete from artifact_versions where url = $1", [CAPTURE_URL]);
   await client.query("delete from articles where source_urls like $1", [`%${CAPTURE_URL}%`]);
@@ -161,6 +216,13 @@ async function seed(): Promise<{ versionId: number; slug: string }> {
     [CAPTURE_URL, CAPTURED_TEXT],
   );
   const versionId = rows[0]!.id;
+  const { rows: otherRows } = await client.query<{ id: number }>(
+    `insert into artifact_versions (user_id, newsroom_id, url, content_hash, title, full_text, fetch_outcome, captured_at)
+     values ('takedown-proof', 1, $1, 'proof-hash-2', 'Board packet', $2, 'fetched', now())
+     returning id`,
+    [CAPTURE_URL, `${CAPTURED_TEXT} The vote was revised.`],
+  );
+  const otherVersionId = otherRows[0]!.id;
   await client.query(
     `insert into artifact_chunks (version_id, user_id, newsroom_id, chunk_index, excerpt, locator)
      values ($1, 'takedown-proof', 1, 0, $2, 'p1'), ($1, 'takedown-proof', 1, 1, $3, 'p2')`,
@@ -171,6 +233,8 @@ async function seed(): Promise<{ versionId: number; slug: string }> {
      values ($1, 'takedown-proof', 1, 'proof-sha-1', $2, 128, $3)`,
     [versionId, CAPTURE_URL, Buffer.from(CAPTURED_TEXT).toString("base64")],
   );
+  const copies = await seedWorkingCopies(versionId, "1");
+  const otherCopies = await seedWorkingCopies(otherVersionId, "2");
   await client.query(
     `insert into capture_events (user_id, newsroom_id, source_url, observed_at, fetch_outcome, version_id, content_hash)
      values ('takedown-proof', 1, $1, now() - interval '1 hour', 'fetched', $2, 'proof-hash-1')`,
@@ -183,7 +247,28 @@ async function seed(): Promise<{ versionId: number; slug: string }> {
        $2, 'published', now(), $3)`,
     [slug, JSON.stringify([CAPTURE_URL]), JSON.stringify([{ url: CAPTURE_URL, version_id: versionId }])],
   );
-  return { versionId, slug };
+  return { versionId, otherVersionId, slug, copies, otherCopies };
+}
+
+/** What the desk's own copies hold right now. */
+async function workingCopyState(copies: { artifact: number; claim: number; relationship: number }) {
+  const artifact = await client.query<{ full_text: string }>(
+    "select full_text from artifacts where id = $1",
+    [copies.artifact],
+  );
+  const claim = await client.query<{ excerpt: string; evidence: string }>(
+    "select excerpt, evidence from claims where id = $1",
+    [copies.claim],
+  );
+  const relationship = await client.query<{ excerpt: string; evidence: string }>(
+    "select excerpt, evidence from relationships where id = $1",
+    [copies.relationship],
+  );
+  return {
+    artifact: artifact.rows[0]!,
+    claim: claim.rows[0]!,
+    relationship: relationship.rows[0]!,
+  };
 }
 
 async function storedText(versionId: number) {
@@ -213,7 +298,8 @@ async function storedText(versionId: number) {
 
 describe("taking down one captured excerpt, on migration-built PostgreSQL", { skip }, () => {
   it("purges the capture's text, keeps its record, and leaves the story's citation resolving", async () => {
-    const { versionId, slug } = await seed();
+    const seed = await seeded();
+    const { versionId, slug } = seed;
 
     // 1. Public while the story cites it, and the excerpt is the captured text.
     const before = await loaded.loadPublicEvidence(versionId);
@@ -236,6 +322,9 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
     assert.equal(result.ok, true);
     assert.equal(result.purged.chunks, 2, "both stored passages of the capture must be emptied");
     assert.equal(result.purged.blobs, 1, "the original bytes must be emptied");
+    assert.equal(result.purged.artifacts, 1, "the Dark Desk's copy of the page must be emptied");
+    assert.equal(result.purged.claims, 1);
+    assert.equal(result.purged.relationships, 1);
 
     // 3. The text is gone; the record is not.
     const after = await storedText(versionId);
@@ -249,6 +338,37 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
       assert.equal(chunk.excerpt, "", "every stored passage must be emptied");
     for (const blob of after.blobs)
       assert.equal(blob.body_b64, "", "the original bytes must be emptied");
+
+    /*
+      3b. The desk's own copies of the page (unit U11b2).
+
+      The legal/security audit's HIGH finding: `artifacts.full_text` holds the
+      WHOLE page for an investigation-linked capture, and a claim or a
+      relationship records a verbatim passage of it. The first cut of this
+      action left all three in place, so the public promise ("the excerpt was
+      removed") was false while the publisher's text sat in the desk's own
+      tables. The mutation for this case drops the `artifacts` update, and the
+      first assertion below is what fails.
+    */
+    const copies = await workingCopyState(seed.copies);
+    assert.equal(copies.artifact.full_text, "", "the Dark Desk's copy of the page must be emptied");
+    assert.equal(copies.claim.excerpt, "", "a claim's recorded passage must be emptied");
+    assert.equal(copies.relationship.excerpt, "", "a relationship's passage must be emptied");
+    /* The desk's own note of what the record says is a working note, not the
+       stored capture, and is not touched -- the manual says so in the same
+       words this test pins. */
+    assert.equal(copies.claim.evidence, "CLAIM NOTE 1");
+    assert.equal(copies.relationship.evidence, "RELATIONSHIP NOTE 1");
+
+    /* And a second capture of the SAME page keeps everything it had: the purge
+       follows the version it was asked about, not the URL. */
+    const untouched = await workingCopyState(seed.otherCopies);
+    assert.equal(untouched.artifact.full_text, "ARTIFACT WHOLE PAGE 2");
+    assert.equal(untouched.claim.excerpt, "CLAIM EXCERPT 2");
+    assert.equal(untouched.relationship.excerpt, "RELATIONSHIP EXCERPT 2");
+    const otherCapture = await storedText(seed.otherVersionId);
+    assert.equal(otherCapture.version.full_text, `${CAPTURED_TEXT} The vote was revised.`);
+    assert.equal(otherCapture.version.taken_down_at, null, "the other capture is not taken down");
 
     // 4. One audit row: who, when, the reason and the capture -- and no captured text.
     const audit = await client.query<{
@@ -313,5 +433,116 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
     assert.equal(rendered.provenance[0]!.version_id, versionId);
     const cited = await loaded.loadPublicEvidence(rendered.provenance[0]!.version_id!);
     assert.equal(cited?.excerpt_removed, true, "the citation must land on the notice");
+  });
+
+  it("carries the taken-down flags onto the story's own provenance, ticked box and all", async () => {
+    const seed = await seeded();
+    const readArticle = async () => {
+      const { rows } = await client.query<Record<string, unknown>>(
+        `select id, slug, headline, dek, body, topic, source_urls, status, published_at,
+                provenance_json, form, found_note, unanswered
+         from articles where slug = $1`,
+        [seed.slug],
+      );
+      return rows[0]!;
+    };
+
+    /* Before the takedown the story's card is an ordinary one. */
+    const readable = await loaded.publicArticleForReaders(await readArticle());
+    assert.equal(readable.provenance[0]!.excerpt_removed, undefined, "nothing is marked yet");
+
+    /* The owner takes it down AND asks for the link to go with it. */
+    const result = await loaded.takeDownCapture(
+      { userId: "takedown-proof", newsroomId: 1, role: "owner" },
+      { versionId: seed.versionId, reason: REASON, removeLink: true },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.linkKept, false);
+
+    /*
+      The reader's story page reads its provenance through
+      `publicArticleForReaders` -- the same function `getPublishedArticle`
+      calls. The row it returns must carry the flags, because that is what
+      `ProvenanceBlock` renders: without them the card keeps a "Current source"
+      link to the publisher whose link the owner just removed.
+    */
+    const served = await loaded.publicArticleForReaders(await readArticle());
+    const row = served.provenance[0]!;
+    assert.equal(row.url, CAPTURE_URL);
+    assert.equal(row.version_id, seed.versionId);
+    assert.equal(row.excerpt_removed, true, "the story must know the excerpt came down");
+    assert.equal(row.excerpt_removed_link_kept, false, "and that the link went with it");
+
+    /* A capture of the same URL that was NOT taken down carries nothing. */
+    await client.query("update articles set provenance_json = $1 where slug = $2", [
+      JSON.stringify([
+        { url: CAPTURE_URL, version_id: seed.versionId },
+        { url: CAPTURE_URL, version_id: seed.otherVersionId },
+      ]),
+      seed.slug,
+    ]);
+    const both = await loaded.publicArticleForReaders(await readArticle());
+    assert.equal(both.provenance[0]!.excerpt_removed, true);
+    assert.equal(both.provenance[1]!.excerpt_removed, undefined, "the other capture is untouched");
+  });
+
+  it("refuses, and purges nothing, when a legal-removal case already covers the page", async () => {
+    const seed = await seeded();
+    const { versionId } = seed;
+
+    /*
+      A removal case that covers this exact capture row. `legal_removal_targets`
+      is what the 0047 guard consults first (`prevent_legal_resurrection`), and
+      a row there is enough for it to refuse every update to that capture --
+      including the purge.
+    */
+    await client.query(
+      `insert into legal_removals(id, newsroom_id, requested_by, case_ref, policy)
+       values ($1, 1, 'takedown-proof', 'TAKEDOWN-GUARD-PROOF', 'destroy')`,
+      ["takedown-guard-proof"],
+    );
+    await client.query(
+      `insert into legal_removal_targets(newsroom_id, table_name, row_id, case_id)
+       values (1, 'artifact_versions', $1, 'takedown-guard-proof')`,
+      [versionId],
+    );
+
+    try {
+      await assert.rejects(
+        () =>
+          loaded.takeDownCapture(
+            { userId: "takedown-proof", newsroomId: 1, role: "owner" },
+            { versionId, reason: REASON },
+          ),
+        /legal removal/i,
+        "the guard must refuse a capture a removal case already covers",
+      );
+
+      /*
+        Nothing moved: the whole transaction rolled back, so there is no
+        half-purge -- no emptied version with its artifacts still full, and no
+        audit row claiming a capture came down that is still here.
+      */
+      const after = await storedText(versionId);
+      assert.equal(after.version.full_text, CAPTURED_TEXT, "the text must be untouched");
+      assert.equal(after.version.taken_down_at, null, "the capture must not be marked");
+      assert.equal(after.chunks.length, 2, "its passages must be untouched");
+      const copies = await workingCopyState(seed.copies);
+      assert.equal(copies.artifact.full_text, "ARTIFACT WHOLE PAGE 1");
+      assert.equal(copies.claim.excerpt, "CLAIM EXCERPT 1");
+      assert.equal(copies.relationship.excerpt, "RELATIONSHIP EXCERPT 1");
+      const audit = await client.query(
+        "select 1 from audit_events where subject_kind = 'artifact_versions' and subject_id = $1",
+        [versionId],
+      );
+      assert.equal(audit.rows.length, 0, "a refused takedown writes no audit row");
+      assert.ok(
+        await loaded.loadPublicEvidence(versionId),
+        "and the capture is still the public record it was",
+      );
+    } finally {
+      await client.query("delete from legal_removal_targets where case_id = 'takedown-guard-proof'");
+      await client.query("delete from legal_removals where id = 'takedown-guard-proof'");
+    }
   });
 });

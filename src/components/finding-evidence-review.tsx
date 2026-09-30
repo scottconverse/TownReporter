@@ -1468,6 +1468,21 @@ export function FindingEvidenceReviewPanel({
                 </p>
               )}
               {/*
+                Unit U11b2: the takedown's own record, for the owner.
+
+                `takenDownReason` only arrives on an owner's read (see
+                `loadFindingEvidenceCapture`), so an editor sees the sentence
+                above and no note -- the reason is not hidden here, it was never
+                sent. The two fields are read as one line because they are one
+                fact: when the owner took it down, and what they wrote.
+              */}
+              {openedCapture.capture.takenDown && openedCapture.capture.takenDownReason ? (
+                <p className="mt-3 border-l-2 border-rule pl-3 text-sm text-muted">
+                  Taken down {openedCapture.capture.takenDownAt ?? "(time not recorded)"}. Reason
+                  recorded for the audit trail: “{openedCapture.capture.takenDownReason}”
+                </p>
+              ) : null}
+              {/*
                 Unit U11b: the owner's press, beside the captured text it acts
                 on. An editor sees the text and no press; an owner who is not
                 sure what they are looking at is looking right at it.
@@ -1477,10 +1492,13 @@ export function FindingEvidenceReviewPanel({
                   {takeDownOpen ? (
                     <>
                       <p className="max-w-3xl text-sm text-muted">
-                        This deletes TownReporter’s stored copy of this capture: the excerpt, the
-                        extracted text and the original file. The record’s address, hash and capture
-                        history stay, so published citations still resolve — to a notice instead of
-                        an excerpt. It takes effect immediately and{" "}
+                        This deletes the excerpt, the extracted text and the original file stored
+                        for this capture, and the desk’s own working copies of it — the Dark Desk
+                        artifact and the passages recorded on claims and relationships from this
+                        version. The record’s address, hash and capture history stay, so published
+                        citations still resolve — to a notice instead of an excerpt. Source
+                        snapshots, note fields and backups are separate records and are not
+                        touched. It takes effect immediately and{" "}
                         <span className="font-medium text-ink">there is no restore.</span>
                       </p>
                       <label

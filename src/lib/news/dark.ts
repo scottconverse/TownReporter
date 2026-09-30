@@ -2539,7 +2539,25 @@ export async function performArtifactOcrWork(
       `;
       if (!owns[0])
         throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
-      if (pages.length) {
+      /*
+        Unit U11b2: never write an OCR passage back onto a capture the owner has
+        taken down.
+
+        The purge (`evidence-takedown.ts`) empties every `artifact_chunks`
+        excerpt of the version. A PDF read that was already queued when the
+        takedown happened would otherwise land afterwards and put model-read
+        text from the publisher's page straight back into the table the purge
+        just cleared -- the takedown would look done on the evidence page and
+        not be done in the database. Skipped rather than refused: the job's own
+        bookkeeping (pages read, the extraction method) still finishes, so the
+        desk sees a completed read with no passages added, and the takedown
+        stays the last word on what this capture holds.
+      */
+      const [takenDown] = await tx<{ taken_down_at: string | null }>`
+        select taken_down_at::text as taken_down_at from artifact_versions
+        where id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+      `;
+      if (pages.length && !takenDown?.taken_down_at) {
         const chunks = chunksFromEvidence(pages.map((page) => page.text).join("\n\n"), pages);
         const next = await tx<{ next: number }>`
           select coalesce(max(chunk_index), -1) + 1 as next from artifact_chunks

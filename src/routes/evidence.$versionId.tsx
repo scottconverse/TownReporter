@@ -216,7 +216,7 @@ function EvidencePage() {
         )}
         <p className="mt-3 text-sm text-muted">
           {record.excerpt_removed
-            ? "TownReporter deleted its stored copy of this capture. The record’s address, hash and capture history remain, so the citations that point here still resolve."
+            ? "The excerpt and the text and file TownReporter stored for this capture are deleted. We keep the page’s address, when we captured it and a fingerprint of what we captured, so citations still resolve. Notes taken from the page, other working copies in our reporting files and backups may take longer to clear."
             : "A short excerpt. TownReporter keeps the full capture for its own records and does not republish the original page."}
         </p>
         {record.url && !record.excerpt_removed ? (

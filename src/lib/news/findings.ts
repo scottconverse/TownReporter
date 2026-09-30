@@ -1,5 +1,11 @@
 import { sanitizePublicUrls } from "./schema.ts";
 
+/*
+  This type has a twin in `report.ts` (same fields, same order), kept in step
+  by hand -- a draft's provenance is hydrated there and rendered from here. A
+  field added to one and not the other is a field that disappears between the
+  draft and the page.
+*/
 export type ProvenanceItem = {
   title: string;
   organization: string;
@@ -11,6 +17,19 @@ export type ProvenanceItem = {
   capture_event_id?: number | null;
   disappeared: boolean;
   role: string;
+  /**
+   * Unit U11b2: the excerpt of this item's captured version was taken down at
+   * a publisher's request, and whether the notice may still link to the
+   * original.
+   *
+   * Optional, and set at READ time only (`public.ts`'s `markRemovedCaptures`
+   * joins them from `artifact_versions` when a story is served): provenance is
+   * stored in `articles.provenance_json` when the story is filed, and a
+   * takedown happens later, so a stored copy of these flags would be stale by
+   * definition.
+   */
+  excerpt_removed?: boolean;
+  excerpt_removed_link_kept?: boolean;
 };
 
 export type StoryFinding = {

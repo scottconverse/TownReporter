@@ -125,6 +125,16 @@ export type FindingEvidenceCaptureResult =
          * rather than offering the takedown press again.
          */
         takenDown: boolean;
+        /**
+         * When it came down and the reason the owner recorded, for the pane to
+         * print back to them. Null -- for an editor's read of the same capture
+         * as well as for a capture that has not come down -- because
+         * `loadFindingEvidenceCapture` only selects them for the owner: the
+         * reason is a desk note that may name a publisher or a complaint, and
+         * it does not leave the server for anyone else.
+         */
+        takenDownAt: string | null;
+        takenDownReason: string | null;
       };
     }
   | { ok: false; code: "forbidden" | "not-found" | "invalid-input"; error: string };
@@ -821,6 +831,16 @@ export async function loadFindingEvidenceReview(
   };
 }
 
+/**
+ * The capture, for the desk's pane -- including, for the OWNER only, when it
+ * was taken down and why.
+ *
+ * `role` is not an access check on the capture (every editor may read a
+ * captured record for a draft they can see); it decides whether the takedown's
+ * own note travels. The reason may name a publisher, a lawyer or a complaint,
+ * so an editor's read carries `null` for both fields rather than the note --
+ * the boundary is here, on the server, and not a rendering choice in the pane.
+ */
 export const loadFindingEvidenceCapture = createServerOnlyFn(
   async function loadFindingEvidenceCapture(
     sql: Sql,
@@ -828,6 +848,7 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
     leadId: number,
     draftId: number,
     versionId: number,
+    role: string = "editor",
   ): Promise<FindingEvidenceCaptureResult> {
     const review = await loadFindingEvidenceReview(sql, newsroomId, leadId);
     if (review.draftId !== draftId)
@@ -858,12 +879,14 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
       captured_at: string | Date | null;
       full_text: string | null;
       taken_down_at: string | Date | null;
+      taken_down_reason: string | null;
     }>(
-      "select id,title,url,captured_at,full_text,taken_down_at from artifact_versions where newsroom_id=$1 and id=$2",
+      "select id,title,url,captured_at,full_text,taken_down_at,taken_down_reason from artifact_versions where newsroom_id=$1 and id=$2",
       [newsroomId, versionId],
     );
     if (!version)
       return { ok: false, code: "not-found", error: "That captured version is no longer available." };
+    const owner = role === "owner";
     return {
       ok: true,
       capture: {
@@ -873,6 +896,9 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
         capturedAt: version.captured_at ? String(version.captured_at) : null,
         fullText: version.full_text ?? "",
         takenDown: Boolean(version.taken_down_at),
+        takenDownAt:
+          owner && version.taken_down_at ? String(version.taken_down_at) : null,
+        takenDownReason: owner ? version.taken_down_reason : null,
       },
     };
   },
@@ -1176,6 +1202,7 @@ export const getFindingEvidenceCapture = createServerFn({ method: "GET" })
     try {
       return await loadFindingEvidenceCapture(
         await getSql(), context.newsroomId, data.leadId, data.draftId, data.versionId,
+        context.role,
       );
     } catch {
       return { ok: false, code: "not-found", error: "That captured version is not available for this draft." };

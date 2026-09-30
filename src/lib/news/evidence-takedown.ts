@@ -21,22 +21,48 @@ import { captureTakedownInput } from "./request-input.ts";
  *
  * WHAT "TAKE DOWN" DOES, in one transaction:
  *
- *   1. The capture's stored text is PURGED. Not hidden: emptied. `full_text`
- *      on the version, every `artifact_chunks.excerpt` of that version, and
- *      the original bytes in `artifact_blobs.body_b64`. A capture is the text
- *      and the bytes we took off their page; a takedown that left the bytes in
- *      place would keep the thing the publisher objected to, one download
- *      away from the excerpt a reader can no longer see.
+ *   1. Every stored copy of that capture's text that this database keys BY
+ *      VERSION is PURGED. Not hidden: emptied.
  *
- *      Those three are the stores the CAPTURE owns -- all keyed by the version
- *      id, all reached by `/evidence/:id`. They are not the only place a copy
- *      of a page can sit: a dark-desk `artifacts` row, a `snapshots` row or an
- *      operator's backup may hold the same page under a different identity,
- *      and this action does not go looking for them. That is deliberate and
- *      matches how the codebase already treats such copies: the legal-removal
- *      flow lists them for an operator rather than deleting them silently
- *      (`legal-removal-store.ts`'s `capturedCopies`). The manual says so in
- *      the same words a reader of it needs.
+ *        - `artifact_versions.full_text` -- the capture itself.
+ *        - `artifact_chunks.excerpt` -- its extracted passages.
+ *        - `artifact_blobs.body_b64` -- the original bytes we took off their
+ *          page; a takedown that left the bytes in place would keep the thing
+ *          the publisher objected to, one download away from the excerpt a
+ *          reader can no longer see.
+ *        - `artifacts.full_text` -- the Dark Desk's own copy of the same fetch
+ *          (`investigate.ts`'s capture path; `page-watch.ts`'s attach action).
+ *        - `claims.excerpt` and `relationships.excerpt` -- the passage a Dark
+ *          Desk claim or relationship recorded from that capture.
+ *
+ *      The first three are keyed by `version_id` alone; the last three carry a
+ *      `newsroom_id` because every write to them does, so they are matched on
+ *      both. A Sonnet legal/security audit of the first cut found the gap:
+ *      `artifacts.full_text` holds the WHOLE page for an investigation-linked
+ *      capture, and a claim or relationship excerpt is a verbatim passage of
+ *      it, so a purge that stopped at `artifact_versions` left the publisher's
+ *      text in the building while the public page said the excerpt was gone.
+ *
+ *      NOT purged, and said plainly in the manual and in `how-we-report`:
+ *      `snapshots` (keyed by source, not by capture -- a different row
+ *      identity, not this capture's copy); `claims.evidence` and
+ *      `relationships.evidence` (the desk's own note of what the record says,
+ *      which may quote it -- a working note, not the stored capture);
+ *      `artifact_versions.title` (the page title stays: it is the record's
+ *      name, and the address may still be shown); provider history, search
+ *      caches and backups.
+ *
+ *      This is the honest boundary the audit asked for: what is keyed to this
+ *      capture goes, what is a separate record with its own identity is listed
+ *      rather than silently deleted -- the same line `legal-removal-store.ts`
+ *      draws with its `capturedCopies` list.
+ *
+ *      FAIL-CLOSED, unchanged. The 0047 legal guard puts a trigger on
+ *      `artifacts` (though not on `claims` or `relationships`), so if a
+ *      legal-removal case already covers this page the `artifacts` update
+ *      raises and the WHOLE transaction rolls back -- no partial purge, no
+ *      audit row. `takeDownEvidenceCapture` catches that specific refusal and
+ *      tells the owner a case covers the page (see `legalGuardRefusal`).
  *   2. The id, URL, timestamps, `byte_length` and content hashes STAY. That is
  *      what keeps the audit trail and the citations intact: a published story
  *      that cited this capture still renders its citation, and its evidence
@@ -72,7 +98,9 @@ import { captureTakedownInput } from "./request-input.ts";
  * notice says the publisher asked and names the original, and nothing about
  * what the editor typed; a reason may name the publisher, a lawyer or a
  * complaint, and it must not leak onto a public page (see `asPublicEvidence`
- * in evidence.ts, which never reads the column).
+ * in evidence.ts, which never reads the column). The owner DOES see it, in the
+ * desk's capture pane -- `loadFindingEvidenceCapture` returns it only for the
+ * owner's call, and the pane prints it there.
  */
 
 /** How long an editor's reason may be. */
@@ -104,11 +132,23 @@ export type TakeDownCaptureResult =
       /** Whether the public notice keeps the link to the original. */
       linkKept: boolean;
       /** What the purge emptied, for the desk's own confirmation line. */
-      purged: { chunks: number; blobs: number };
+      purged: {
+        chunks: number;
+        blobs: number;
+        artifacts: number;
+        claims: number;
+        relationships: number;
+      };
     }
   | {
       ok: false;
-      code: "forbidden" | "invalid-input" | "not-found" | "already-taken-down" | "error";
+      code:
+        | "forbidden"
+        | "invalid-input"
+        | "not-found"
+        | "already-taken-down"
+        | "legal-removal"
+        | "error";
       error: string;
     };
 
@@ -119,6 +159,62 @@ class TakedownError extends Error {
     this.name = "TakedownError";
     this.code = code;
   }
+}
+
+/**
+ * Did the legal-removal guard refuse this write?
+ *
+ * `prevent_legal_resurrection()` (migrations/0047_legal_removal.sql, replayed
+ * by `legal-removal-schema.ts`) is a BEFORE trigger on `artifacts` and
+ * `artifact_versions` among others, and it raises one of two sentences, both
+ * of which contain "covered by a legal removal". A takedown of a capture a
+ * case already covers therefore fails as a Postgres error rather than as one
+ * of this module's own refusals -- and the whole transaction rolls back, so
+ * nothing is half-purged.
+ *
+ * Matched on the message text because that is all the guard leaves behind: it
+ * raises a plain `raise exception`, and the driver surfaces it as the error's
+ * message. It is our own sentence, in our own schema, and the worst a false
+ * positive can do is name the legal-removal flow in a refusal.
+ */
+export function legalGuardRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /covered by a legal removal/i.test(message);
+}
+
+/**
+ * What the desk is told when a takedown fails.
+ *
+ * Apart from this module's own refusals, there is one failure worth naming:
+ * the legal-removal guard. A page already inside a removal case is not ours to
+ * delete here, and "the takedown could not be completed" would leave the owner
+ * with nothing to do next. Everything else is deliberately vague -- a database
+ * error's own text can carry a statement or a row, and this sentence is
+ * rendered in the desk.
+ *
+ * Exported so the classification is provable without a server: the real-PG
+ * proof shows the guard actually blocks the write, and the unit test shows
+ * which sentence the owner then reads.
+ */
+export function takedownFailure(error: unknown): Extract<TakeDownCaptureResult, { ok: false }> {
+  if (error instanceof ForbiddenError)
+    return { ok: false, code: "forbidden", error: error.message };
+  if (error instanceof TakedownError)
+    return { ok: false, code: error.code, error: error.message };
+  if (legalGuardRefusal(error))
+    return {
+      ok: false,
+      code: "legal-removal",
+      error:
+        "A legal-removal case already covers this page, so its captured copy is not ours to delete here. Nothing was removed. Open Legal removals to review the case.",
+    };
+  console.error("[evidence-takedown] take down failed", error);
+  return {
+    ok: false,
+    code: "error",
+    error:
+      "The takedown could not be completed. Nothing was removed; reload the story and try again.",
+  };
 }
 
 /**
@@ -221,6 +317,27 @@ export async function takeDownCapture(
     const purgedBlobs = await tx<{ id: number }>`
       update artifact_blobs set body_b64 = '' where version_id = ${input.versionId} returning id
     `;
+    /*
+      The three stores that carry the same page under a room-scoped row.
+
+      `artifacts` is the Dark Desk's copy of the fetch itself; a claim and a
+      relationship record the passage they took from it. All three are written
+      with a real `newsroom_id`, so they are matched on it -- and the first is
+      the one the 0047 trigger guards, which is what makes a takedown of a
+      legally-removed page fail closed rather than leave a half-purge behind.
+    */
+    const purgedArtifacts = await tx<{ id: number }>`
+      update artifacts set full_text = ''
+      where version_id = ${input.versionId} and newsroom_id = ${context.newsroomId} returning id
+    `;
+    const purgedClaims = await tx<{ id: number }>`
+      update claims set excerpt = ''
+      where version_id = ${input.versionId} and newsroom_id = ${context.newsroomId} returning id
+    `;
+    const purgedRelationships = await tx<{ id: number }>`
+      update relationships set excerpt = ''
+      where version_id = ${input.versionId} and newsroom_id = ${context.newsroomId} returning id
+    `;
     await auditWithSql(tx, context.userId, TAKEDOWN_ACTION, reason, context.newsroomId, {
       kind: TAKEDOWN_SUBJECT_KIND,
       id: input.versionId,
@@ -230,7 +347,13 @@ export async function takeDownCapture(
       versionId: input.versionId,
       takenDownAt: version.taken_down_at,
       linkKept,
-      purged: { chunks: purgedChunks.length, blobs: purgedBlobs.length },
+      purged: {
+        chunks: purgedChunks.length,
+        blobs: purgedBlobs.length,
+        artifacts: purgedArtifacts.length,
+        claims: purgedClaims.length,
+        relationships: purgedRelationships.length,
+      },
     };
   });
 }
@@ -253,16 +376,6 @@ export const takeDownEvidenceCapture = createServerFn({ method: "POST" })
         data,
       );
     } catch (error) {
-      if (error instanceof ForbiddenError)
-        return { ok: false, code: "forbidden", error: error.message };
-      if (error instanceof TakedownError)
-        return { ok: false, code: error.code, error: error.message };
-      console.error("[evidence-takedown] take down failed", error);
-      return {
-        ok: false,
-        code: "error",
-        error:
-          "The takedown could not be completed. Nothing was removed; reload the story and try again.",
-      };
+      return takedownFailure(error);
     }
   });

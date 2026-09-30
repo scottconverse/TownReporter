@@ -69,7 +69,7 @@ function ComparePage() {
     );
   }
 
-  const { older, newer, changes, timeline } = compared;
+  const { older, newer, changes, timeline, excerpt_removed } = compared;
   const unchanged =
     older.content_hash === newer.content_hash ||
     (!changes.added.length && !changes.removed.length);
@@ -142,7 +142,19 @@ function ComparePage() {
           ) : null}
         </div>
       </div>
-      {unchanged ? (
+      {/*
+        Unit U11b2: one side's excerpt was taken down, so the comparison says so
+        instead of diffing. The server already returns an empty change summary
+        for this case (`compareChanges`), and the sentence is what stops an
+        empty "None detected" pair from reading as "these two captures are
+        identical".
+      */}
+      {excerpt_removed ? (
+        <p className="mt-8 max-w-2xl text-ink-2" role="status">
+          An excerpt of this capture was removed at the publisher’s request, so there is nothing
+          left to compare. The record’s address, capture time and fingerprint are above.
+        </p>
+      ) : unchanged ? (
         <p className="mt-8 max-w-2xl text-ink-2">No textual change between these observations.</p>
       ) : (
         <>

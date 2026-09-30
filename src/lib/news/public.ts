@@ -10,11 +10,39 @@ import { collapsePrintedDuplicates } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { markRemovedCaptures, removedCapturesFor } from "./evidence.ts";
 import { publicSlug, publicTopic } from "./request-input.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
   catch { return false; }
+}
+
+/**
+ * `publicArticle`, with the takedown state of every capture the story cites
+ * joined in from the database (unit U11b2).
+ *
+ * WHY THIS IS SEPARATE FROM `publicArticle`. That function is pure -- it takes
+ * a row and returns what a reader may see of it -- and it is used by the feed
+ * and the topic lists as well as by the story page. The takedown flags,
+ * though, cannot live in the row: `articles.provenance_json` is written when
+ * the story is filed, and a takedown happens months later, so a stored copy of
+ * the flags would be stale by definition. This function is the one read path
+ * that joins them, and it exists as its own exported name so the join can be
+ * proved against a database (see the real-Postgres proof) rather than trusted
+ * because a route calls it.
+ *
+ * A story served with a capture whose link was removed therefore carries
+ * `excerpt_removed_link_kept: false` on that provenance row, and
+ * `ProvenanceBlock` renders the source as text instead of a link.
+ */
+export async function publicArticleForReaders<T extends ArticleRow>(
+  row: T,
+): Promise<T & { provenance: ProvenanceItem[]; findings: StoryFinding[] }> {
+  const article = publicArticle(row);
+  const removed = await removedCapturesFor(article.provenance.map((item) => item.version_id));
+  const provenance = markRemovedCaptures(article.provenance, removed);
+  return { ...article, provenance, provenance_json: JSON.stringify(provenance) };
 }
 
 /* Generic in the row so a caller that already selected extra columns (the
@@ -116,7 +144,14 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
       limit 1
     `;
       if (!rows[0]) return null;
-      const article = publicArticle(rows[0]);
+      /*
+        Unit U11b2: `publicArticleForReaders` marks the cited captures whose
+        excerpt has been taken down, so "Current source" stops being a link
+        when the link was removed with it and the captured-version link says
+        what it opens. See that function for why the flags are joined here
+        rather than stored in `provenance_json`.
+      */
+      const article = await publicArticleForReaders(rows[0]);
       const corrs = await sql<{ body: string; created_at: string }>`
         select body, created_at from corrections
         where article_id = ${rows[0].id}

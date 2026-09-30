@@ -1330,14 +1330,26 @@ When a publisher objects to one captured page rather than to a story, the owner 
 
 1. Open the story in the desk, **Checks** tab, and find the finding or claim that cited the capture. Press **View cited captured version** — the pane shows the stored text that is about to come down.
 2. Press **Take down this capture**. Editors do not see this press, and the server refuses any role but the owner.
-3. Give a short reason. Tick **Remove the link to the original too** only if the publisher asked for that as well; left unticked, the public notice keeps the link. Press **Take down this capture** to confirm. The confirm says, in the desk, that there is no restore.
-4. The excerpt, the extracted text and the original file are deleted from the database in one transaction, with one audit row recording who, when, the reason and the capture id.
+3. Give a short reason. Tick **Remove the link to the original too** only if the publisher asked for that as well; left unticked, the public notice keeps the link. Press **Take down this capture** to confirm. The confirm says, in the desk, that there is no restore. The reason is stored in the audit trail, is shown back to the owner in the capture pane, and is never shown to a reader.
+4. Everything below is deleted in one transaction, with one audit row recording who, when, the reason and the capture id.
 
-What changes for a reader: `/evidence/:versionId` prints "This excerpt was removed at the publisher's request" instead of an excerpt and, unless the box was ticked, the link to the original. The reason is never shown to a reader. What does not change: the record keeps its address, capture time, byte length and content hash, so a published story that cited the capture still prints its citation and that citation still resolves — to the notice. Judgments in the desk that bound to the captured text are no longer current and return to unreviewed, because the text they bound to is gone.
+**Deleted, by this action**, for the capture taken down:
 
-This action purges the capture itself: the version's stored text, its extracted passages and its original file. It does not go looking for other copies of the same page under a different identity — a Dark Desk artifact, a source snapshot, a search index, an operator's backup. Those are separate records, and resolving a whole URL's copies is what the legal-removal workflow above lists for an operator; it is not part of this single-capture action.
+- the capture's stored text (`artifact_versions.full_text`), which is what the evidence page excerpts;
+- its extracted passages (`artifact_chunks`), including any the desk read out of a PDF;
+- the original file bytes we stored for it (`artifact_blobs`);
+- the Dark Desk's own copy of the same fetch (`artifacts.full_text`);
+- the passage recorded from it on a Dark Desk claim or relationship (`claims.excerpt`, `relationships.excerpt`).
 
-There is no restore. Re-capturing the page creates a new record with a new hash; it does not undo the takedown, and the audit row stands. Backups, provider caches and copies outside this database are outside the application's proof, as with legal removal.
+**Not deleted, and why**: source snapshots (keyed to a source, a separate record); `claims.evidence` and `relationships.evidence` (the desk's own note of what the record says, which may quote it — a working note, not the stored capture); search results and provider history; database backups and copies outside this database. These are outside this action's proof exactly as they are for the legal-removal workflow above; resolving a whole URL's copies is what that workflow lists for an operator.
+
+**Kept, on purpose**: the page's title, its address, when we captured it, the byte length and a fingerprint (hash) of what we captured — so a published story that cited the capture still prints its citation and that citation still resolves. The address stays visible as text on the evidence page and on the story card even when the link to the original was removed.
+
+What changes for a reader: `/evidence/:versionId` prints "This excerpt was removed at the publisher's request" instead of an excerpt and, unless the box was ticked, the link to the original. On a story page, a citation whose link was removed renders as the address in text rather than a link, and its captured-version link is labelled as removed. A comparison that involves a taken-down capture says the excerpt was removed instead of printing a one-sided diff.
+
+Judgments in the desk that bound to the captured text are no longer current and read as **unreviewed**: a judgment binds to `md5(full_text)` of the versions it cited (`finding-evidence-review.ts`, `findingReferenceBinding` and the `judgment.evidenceBinding !== currentBinding` reset in `resolveFinding`), and the purge changes that fingerprint. The judgment is not deleted and not silently kept — the editor re-reviews the capture, which now reads as removed.
+
+There is no restore. Re-capturing the page creates a new record with a new hash; it does not undo the takedown, and the audit row stands.
 
 ---
 

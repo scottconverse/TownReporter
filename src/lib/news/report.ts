@@ -53,6 +53,14 @@ export { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 export const STORY_FORMS = ["brief", "reported", "explainer", "investigation"] as const;
 export type StoryForm = (typeof STORY_FORMS)[number];
 
+/*
+  The twin of `findings.ts`'s `ProvenanceItem` -- same fields, same order, kept
+  in step by hand. This copy is what a DRAFT's provenance is hydrated into
+  (`hydrateCaptures` below); the reader-facing copy is the one in
+  `findings.ts`, which `public.ts` and `ProvenanceBlock` use. Fields must be
+  added to both or they vanish between the draft and the page; the two unit
+  U11b2 flags below are the most recent pair.
+*/
 export type ProvenanceItem = {
   title: string;
   organization: string;
@@ -64,6 +72,13 @@ export type ProvenanceItem = {
   capture_event_id?: number | null;
   disappeared: boolean;
   role: string;
+  /**
+   * Unit U11b2: the excerpt of this item's captured version was taken down at
+   * a publisher's request, and whether the notice may still link to the
+   * original. Set at READ time only -- see the twin in `findings.ts`.
+   */
+  excerpt_removed?: boolean;
+  excerpt_removed_link_kept?: boolean;
 };
 
 export type StoryFinding = {

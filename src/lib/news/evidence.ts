@@ -605,6 +605,66 @@ async function loadPublicCaptureHistoryFull(url: string): Promise<LoadedEvidence
   return out;
 }
 
+/**
+ * Unit U11b2: which of a story's cited captures have had their excerpt taken
+ * down, and whether each one's link was removed too.
+ *
+ * WHY AT READ TIME. `articles.provenance_json` is written when the story is
+ * filed, and a takedown can happen months later -- the row is a record of what
+ * we cited, not a live view of the capture. So the flags are joined from
+ * `artifact_versions` every time a reader is served the story, exactly as this
+ * module reads them for the evidence page's own notice. A takedown is visible
+ * on every published story that cites the capture, from the next request on,
+ * with no rewrite of any article row.
+ *
+ * One query for the whole story, keyed by version id. A missing row (a version
+ * since deleted, or one this newsroom does not hold) is simply not in the map,
+ * and the provenance item renders exactly as it did before this existed.
+ */
+export async function removedCapturesFor(
+  versionIds: (number | null | undefined)[],
+): Promise<Map<number, { linkKept: boolean }>> {
+  const ids = [
+    ...new Set(versionIds.filter((id): id is number => typeof id === "number" && id > 0)),
+  ];
+  const out = new Map<number, { linkKept: boolean }>();
+  if (!ids.length) return out;
+  try {
+    const sql = await getSql();
+    const rows = await sql<{ id: number; taken_down_link_kept: boolean }>`
+      select id, taken_down_link_kept from artifact_versions
+      where newsroom_id = ${DEFAULT_NEWSROOM_ID} and id = any(${ids}::int[])
+        and taken_down_at is not null
+    `;
+    for (const row of rows) out.set(row.id, { linkKept: row.taken_down_link_kept !== false });
+  } catch (err) {
+    /* A reader's story page must still render if this one join fails. */
+    console.error("[paper] reading capture takedowns failed", err);
+  }
+  return out;
+}
+
+/**
+ * `items`, with every cited capture that has been taken down marked.
+ *
+ * Pure, and separate from the query above, so the rule can be tested without a
+ * database: an item whose `version_id` is in `state` is `excerpt_removed`, and
+ * carries whether its link survived. Everything else is returned untouched --
+ * including an item with no `version_id` at all (a citation with no capture
+ * behind it) and one whose capture is not in `state`.
+ */
+export function markRemovedCaptures<T extends { version_id: number | null }>(
+  items: T[],
+  state: Map<number, { linkKept: boolean }>,
+): (T & { excerpt_removed?: boolean; excerpt_removed_link_kept?: boolean })[] {
+  if (!state.size) return items;
+  return items.map((item) => {
+    const found = item.version_id != null ? state.get(item.version_id) : undefined;
+    if (!found) return item;
+    return { ...item, excerpt_removed: true, excerpt_removed_link_kept: found.linkKept };
+  });
+}
+
 export async function listPublicCaptureHistory(url: string): Promise<PublicEvidence[]> {
   return (await loadPublicCaptureHistoryFull(url)).map((loaded) => loaded.record);
 }
@@ -688,6 +748,25 @@ export async function loadPublicEvidence(id: number): Promise<PublicEvidence | n
   return (await loadVersion(id))?.record ?? null;
 }
 
+/** Has either side of a comparison had its excerpt taken down? */
+function removedOnEitherSide(older: PublicEvidence, newer: PublicEvidence): boolean {
+  return older.excerpt_removed || newer.excerpt_removed;
+}
+
+/**
+ * The bounded change summary for a pair of captures.
+ *
+ * Empty when either side's excerpt has been taken down: the diff would
+ * otherwise be one capture's text reported as "Added" against a side that has
+ * no text at all, which reads as a change and is really an absence. See
+ * `comparePublishedEvidence`'s `excerpt_removed`.
+ */
+function compareChanges(older: LoadedEvidence, newer: LoadedEvidence): PublicVersionDiff {
+  if (removedOnEitherSide(older.record, newer.record))
+    return publicVersionDiff({ added: [], removed: [] });
+  return publicVersionDiff(describeTextChanges(older.fullText, newer.fullText));
+}
+
 export async function comparePublishedEvidence(data: {
   url?: string;
   a?: number;
@@ -697,6 +776,20 @@ export async function comparePublishedEvidence(data: {
   newer: PublicEvidence;
   changes: PublicVersionDiff;
   timeline: TimelineEntry[];
+  /**
+   * Unit U11b2: one of the two sides has had its excerpt taken down, so no
+   * diff was run and none is shown. The page says why.
+   *
+   * WHY NOT DIFF ANYWAY. A comparison's whole output is the two captures'
+   * text, cut into snippets. With one side purged the diff would be a
+   * one-sided reading of the OTHER capture dressed as a change report -- the
+   * page would still print up to 600 characters of a third-party page under
+   * the label "Added", with nothing on the other side to compare it to, and
+   * the reader would have no way to see that the missing half was removed at
+   * the publisher's request rather than never captured. A comparison that
+   * cannot show both sides is not a comparison; it says so instead.
+   */
+  excerpt_removed: boolean;
 } | null> {
   if (data.a && data.b) {
     const left = await loadVersion(data.a);
@@ -711,8 +804,9 @@ export async function comparePublishedEvidence(data: {
       newer: newer.record,
       // The diff runs on the captures themselves; only the bounded summary
       // leaves this function.
-      changes: publicVersionDiff(describeTextChanges(older.fullText, newer.fullText)),
+      changes: compareChanges(older, newer),
       timeline: newer.record.timeline.length ? newer.record.timeline : older.record.timeline,
+      excerpt_removed: removedOnEitherSide(older.record, newer.record),
     };
   }
   if (!data.url) return null;
@@ -736,8 +830,9 @@ export async function comparePublishedEvidence(data: {
     return {
       older: only.record,
       newer: only.record,
-      changes: publicVersionDiff({ added: [], removed: [] }),
+      changes: compareChanges(only, only),
       timeline: only.record.timeline,
+      excerpt_removed: removedOnEitherSide(only.record, only.record),
     };
   }
   const older =
@@ -750,8 +845,9 @@ export async function comparePublishedEvidence(data: {
   return {
     older: older.record,
     newer: newer.record,
-    changes: publicVersionDiff(describeTextChanges(older.fullText, newer.fullText)),
+    changes: compareChanges(older, newer),
     timeline: newer.record.timeline,
+    excerpt_removed: removedOnEitherSide(older.record, newer.record),
   };
 }
 
