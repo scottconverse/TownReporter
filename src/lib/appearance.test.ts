@@ -12,6 +12,8 @@ import {
   appearanceHeadScript,
   appearanceSurface,
   isDeskPath,
+  readReaderMode,
+  readStoredDesk,
   surfaceBackground,
   type AppearanceSurface,
   type DeskMode,
@@ -47,6 +49,8 @@ function runHeadScript(options: {
   readerBlob?: string | null;
   /** `localStorage.getItem` throws, as it does when storage is blocked. */
   storageThrows?: boolean;
+  /** Browser system appearance exposed to the pre-paint script. */
+  systemDark?: boolean;
 }): { attributes: Record<string, string>; themeColor: string } {
   const attributes: Record<string, string> = {};
   const readerKey = options.readerKey ?? READER_KEY;
@@ -75,14 +79,112 @@ function runHeadScript(options: {
     },
   };
   const location = { pathname: options.pathname };
+  const window = { matchMedia: () => ({ matches: options.systemDark === true }) };
 
-  new Function("document", "localStorage", "location", appearanceHeadScript(readerKey))(
+  new Function("document", "localStorage", "location", "window", appearanceHeadScript(readerKey))(
     document,
     localStorage,
     location,
+    window,
   );
   return { attributes, themeColor };
 }
+
+function withBrowserGlobals<T>(
+  stored: Record<string, string>,
+  systemDark: boolean,
+  run: () => T,
+): T {
+  const names = ["document", "localStorage", "window"] as const;
+  const previous = names.map((name) => Object.getOwnPropertyDescriptor(globalThis, name));
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {} });
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: { getItem: (key: string) => stored[key] ?? null },
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { matchMedia: () => ({ matches: systemDark }) },
+  });
+  try {
+    return run();
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index]) Object.defineProperty(globalThis, name, previous[index]!);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  }
+}
+
+test("fresh appearance defaults use a dark desk and the system reader preference", () => {
+  assert.deepEqual(readStoredDesk(), { desk: "dark", size: "normal" });
+  assert.equal(readReaderMode(READER_KEY), "light", "server fallback stays hydration-safe");
+
+  assert.equal(
+    withBrowserGlobals({}, true, () => readReaderMode(READER_KEY)),
+    "dark",
+    "an unset browser reader appearance follows a dark system preference",
+  );
+  assert.equal(
+    withBrowserGlobals({}, false, () => readReaderMode(READER_KEY)),
+    "light",
+    "an unset browser reader appearance follows a light system preference",
+  );
+  assert.deepEqual(
+    withBrowserGlobals(
+      { "townreporter.desk.mode": "light", "townreporter.desk.textsize": "large" },
+      true,
+      () => readStoredDesk(),
+    ),
+    { desk: "light", size: "large" },
+    "an explicit desk choice remains authoritative",
+  );
+  assert.equal(
+    withBrowserGlobals({ [READER_KEY]: "{broken" }, true, () => readReaderMode(READER_KEY)),
+    "dark",
+    "an unreadable reader value is treated as unset",
+  );
+});
+
+test("explicit reader appearances override either system preference", () => {
+  assert.equal(
+    withBrowserGlobals({ [READER_KEY]: JSON.stringify({ dark: false }) }, true, () =>
+      readReaderMode(READER_KEY),
+    ),
+    "light",
+  );
+  assert.equal(
+    withBrowserGlobals({ [READER_KEY]: JSON.stringify({ dark: true }) }, false, () =>
+      readReaderMode(READER_KEY),
+    ),
+    "dark",
+  );
+});
+
+test("the pre-paint script resolves fresh and explicit appearance choices", () => {
+  const freshDesk = runHeadScript({ pathname: "/desk/queue" });
+  assert.equal(freshDesk.attributes[APPEARANCE_ATTR], "desk-dark");
+
+  const systemDarkReader = runHeadScript({ pathname: "/", systemDark: true });
+  assert.equal(systemDarkReader.attributes[APPEARANCE_ATTR], "reader-dark");
+
+  const systemLightReader = runHeadScript({ pathname: "/", systemDark: false });
+  assert.equal(systemLightReader.attributes[APPEARANCE_ATTR], "light");
+
+  const explicitLight = runHeadScript({
+    pathname: "/",
+    systemDark: true,
+    readerBlob: JSON.stringify({ dark: false }),
+  });
+  assert.equal(explicitLight.attributes[APPEARANCE_ATTR], "light");
+
+  const explicitDark = runHeadScript({
+    pathname: "/",
+    systemDark: false,
+    readerBlob: JSON.stringify({ dark: true }),
+  });
+  assert.equal(explicitDark.attributes[APPEARANCE_ATTR], "reader-dark");
+});
 
 const DESKS = ["/desk", "/desk/queue", "/desk/story/12", "/desk/sources"];
 const PAPERS = ["/", "/articles/council-approves", "/how-we-report"];
@@ -142,9 +244,9 @@ test("the head script's own path rule agrees with isDeskPath on the near misses"
 
 test("the head script survives blocked storage, junk values and an unreadable reader blob", () => {
   const blocked = runHeadScript({ pathname: "/desk/queue", storageThrows: true, desk: "dark" });
-  assert.equal(blocked.attributes[APPEARANCE_ATTR], "light");
+  assert.equal(blocked.attributes[APPEARANCE_ATTR], "desk-dark");
   assert.equal(blocked.attributes[DESK_SIZE_ATTR], "normal");
-  assert.equal(blocked.themeColor, LIGHT_BG);
+  assert.equal(blocked.themeColor, DESK_NIGHT_BG);
 
   const junk = runHeadScript({
     pathname: "/desk/queue",
@@ -152,7 +254,11 @@ test("the head script survives blocked storage, junk values and an unreadable re
     size: "gigantic",
     readerBlob: "{not json",
   });
-  assert.equal(junk.attributes[APPEARANCE_ATTR], "light", "an unrecognized mode is not dark");
+  assert.equal(
+    junk.attributes[APPEARANCE_ATTR],
+    "desk-dark",
+    "an unrecognized desk mode uses its dark default",
+  );
   assert.equal(junk.attributes[DESK_SIZE_ATTR], "normal", "an unrecognized size is not large");
 
   const large = runHeadScript({ pathname: "/desk/queue", desk: "dark", size: "large" });

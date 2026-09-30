@@ -592,16 +592,50 @@ async function theArchiveCarriesTheRestOfThePaper() {
   /*
     Page through to the oldest story. `PAGE_SIZE` is 12 (`src/lib/news/reader-
     articles.ts:13`), so forty stories are four pages and the last one is where
-    the oldest four are; the loop is bounded by the paper's own count rather
-    than by a page number so it cannot spin.
+    the oldest four are. Each step waits for the expected page label and row
+    boundary before sampling; paging is bounded by the seeded paper's count.
   */
   const seen = new Set();
-  for (let guard = 0; guard < Math.ceil(SEEDED / 12) + 2; guard += 1) {
+  const pageSize = 12;
+  const totalPages = Math.ceil(SEEDED / pageSize);
+  for (let expectedPage = 1; expectedPage <= totalPages; expectedPage += 1) {
+    const firstStory = (expectedPage - 1) * pageSize + 1;
+    const lastStory = Math.min(expectedPage * pageSize, SEEDED);
+    await page.waitForFunction(
+      ({ expectedPage, totalPages, firstStory, lastStory }) => {
+        const pageLabel = document.querySelector(".pagination span")?.textContent?.trim();
+        const headings = Array.from(document.querySelectorAll(".newsrow h3"), (heading) =>
+          heading.textContent?.trim(),
+        );
+        return (
+          pageLabel === `Page ${expectedPage} of ${totalPages}` &&
+          headings.length === lastStory - firstStory + 1 &&
+          headings[0] === `River story ${String(firstStory).padStart(2, "0")}` &&
+          headings.at(-1) === `River story ${String(lastStory).padStart(2, "0")}`
+        );
+      },
+      { expectedPage, totalPages, firstStory, lastStory },
+      { timeout: 30_000 },
+    );
     for (const h of await page.locator(".newsrow h3").allInnerTexts()) seen.add(h.trim());
+
     const next = page.getByRole("button", { name: /Next/ });
-    if (!(await next.isEnabled())) break;
+    if (expectedPage === totalPages) {
+      if (await next.isEnabled()) throw new Error(`the Next button is enabled on page ${totalPages}`);
+      break;
+    }
+
+    await page.waitForFunction(
+      () => {
+        const button = Array.from(document.querySelectorAll(".pagination button")).find((item) =>
+          item.textContent?.includes("Next"),
+        );
+        return button && !button.disabled;
+      },
+      undefined,
+      { timeout: 30_000 },
+    );
     await next.click();
-    await page.waitForTimeout(400);
   }
   const missing = [];
   for (let n = RIVER_FIRST; n <= SEEDED; n += 1) {

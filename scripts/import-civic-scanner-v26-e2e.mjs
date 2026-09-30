@@ -34,6 +34,7 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -746,6 +747,7 @@ async function main() {
   });
   try {
     await ownTheDesk();
+    await chooseDeskAppearance(page, "light");
     await theReportIsRead();
     await thePartialRunIsBannered();
     await theTiersDecide();

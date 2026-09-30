@@ -45,7 +45,7 @@ const IDENTITY_WORDS = /\b(?:mayor|manager|attorney|director|council|commission|
 // two-word office ("Mayor Pro Tem", "Mayor Pro Tempore") is one alternative
 // here. Listed separately, "Mayor" would match first and leave "Pro Tem"
 // dangling in front of the masked speaker phrase.
-const IDENTITY_TITLE = String.raw`(?:former|acting|interim|deputy|assistant|city|town|county|mayor|pro\s+tem(?:pore)?|manager|attorney|director|council|councilmember|councilwoman|councilman|commission|commissioner|clerk|sheriff|chief|superintendent|officer|department|office|administrator|representative|spokesperson|school|university|board|chair|chairman|chairwoman|members?)`;
+const IDENTITY_TITLE = String.raw`(?:former|acting|interim|deputy|assistant|principal\s+planner|owner|city|town|county|mayor|pro\s+tem(?:pore)?|manager|attorney|director|council|councilmember|councilwoman|councilman|commission|commissioner|clerk|sheriff|chief|superintendent|officer|department|office|administrator|representative|spokesperson|school|university|board|chair|chairman|chairwoman|members?)`;
 const EVIDENCE_STOPWORDS = new Set(["about", "after", "before", "being", "from", "into", "that", "their", "there", "these", "this", "were", "with", "your", "person", "people", "spoke", "said", "says", "asked", "presented", "appears", "appeared", "mentioned", "representative"]);
 function hostFor(url: string): string | null {
   try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return null; }

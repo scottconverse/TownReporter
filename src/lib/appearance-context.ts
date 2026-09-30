@@ -5,7 +5,15 @@ import {
   useLayoutEffect,
   useSyncExternalStore,
 } from "react";
-import type { Appearance, AppearanceSurface, DeskMode, DeskTextSize } from "./appearance";
+import {
+  READER_COLOR_SCHEME_QUERY,
+  readSystemReaderMode,
+  type Appearance,
+  type AppearanceSurface,
+  type DeskMode,
+  type DeskTextSize,
+  type ReaderMode,
+} from "./appearance";
 
 /*
   The live half of the appearance system. `src/lib/appearance.ts` explains the
@@ -47,6 +55,7 @@ import type { Appearance, AppearanceSurface, DeskMode, DeskTextSize } from "./ap
 const noSubscribe = () => () => {};
 const onClient = () => true;
 const onServer = () => false;
+const serverReaderMode = (): ReaderMode => "light";
 
 /**
  * `useLayoutEffect` where it can run, `useEffect` on the server.
@@ -74,6 +83,22 @@ export const useIsoLayoutEffect = typeof document === "undefined" ? useEffect : 
  */
 export function useHydrated(): boolean {
   return useSyncExternalStore(noSubscribe, onClient, onServer);
+}
+
+const subscribeSystemReaderMode = (onChange: () => void) => {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const query = window.matchMedia(READER_COLOR_SCHEME_QUERY);
+  if (typeof query.addEventListener === "function") {
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }
+  query.addListener(onChange);
+  return () => query.removeListener(onChange);
+};
+
+/** Follow OS color-scheme changes without changing an explicit reader choice. */
+export function useSystemReaderMode(): ReaderMode {
+  return useSyncExternalStore(subscribeSystemReaderMode, readSystemReaderMode, serverReaderMode);
 }
 
 export type AppearanceContextValue = {

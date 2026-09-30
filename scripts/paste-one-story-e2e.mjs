@@ -57,6 +57,7 @@ import { fromCrossJSON, fromJSON, toJSONAsync } from "seroval";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { openStoryDetails } from "./confirm-section-step.mjs";
+import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
 
 /**
  * This walk's own listen port, registered with
@@ -931,8 +932,8 @@ async function closeThePanel() {
 
 async function thePictures(sectionChoice) {
   // The panel as the editor meets it, empty and beside the import box, in the
-  // light desk first: a desk starts light, and the button's label names what
-  // pressing it gets you.
+  // light desk first. Pin Light explicitly because a fresh desk now defaults
+  // dark; the fixture still uses the desk's own control and verifies the paint.
   await page.goto(`${base}/desk`, { waitUntil: "networkidle" });
   await openThePastePanel();
   facts.push(await screenshot("paste-one-story-desk-1280-light.png", 1280, 900, PANEL_ANCHOR));
@@ -990,6 +991,7 @@ async function main() {
   });
   try {
     await ownTheDesk();
+    await chooseDeskAppearance(page, "light");
     await theDeskOffersTheOneStoryPaste();
 
     // Story one: the section chosen in the dialog, so it reaches the Queue with it.

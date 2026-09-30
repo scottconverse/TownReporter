@@ -7,6 +7,7 @@ import {
   drainQueuedJobs,
   executeJob,
   ensureJobsSchema,
+  annotateScanRowsWithStallStatus,
   jobHeartbeatStale,
   runLooksStalled,
   laneForKind,
@@ -1197,6 +1198,128 @@ describe("runLooksStalled", () => {
   it("is false for a job still queued and fresh", () => {
     const job = fakeJob({ status: "queued", updated_at: new Date(freshTime).toISOString() });
     assert.equal(runLooksStalled({ runOpen: true, job, now }), false);
+  });
+
+  it("keeps an old queued job active while it waits for a lane worker", () => {
+    const job = fakeJob({ status: "queued", updated_at: new Date(pastWindow).toISOString() });
+    assert.equal(runLooksStalled({ runOpen: true, job, now }), false);
+  });
+});
+
+describe("scan history stall annotations", () => {
+  it("classifies each open history row from its own latest job", async () => {
+    const newsroomId = 940_000 + (Date.now() % 10_000);
+    const otherNewsroomId = newsroomId + 1;
+    const subject = {
+      newest: 800_001,
+      missing: 800_002,
+      terminal: 800_003,
+      freshOld: 800_004,
+      cold: 800_005,
+      finished: 800_006,
+      oldQueued: 800_007,
+    };
+    const subjectIds = Object.values(subject);
+    const now = Date.now();
+    const recent = new Date(now).toISOString();
+    const old = new Date(now - 20 * 60_000).toISOString();
+    const sql = await getSql();
+    await ensureJobsSchema();
+
+    try {
+      for (const id of [subject.newest, subject.terminal, subject.cold, subject.oldQueued]) {
+        await enqueueJob({
+          userId: `scan-history-${id}`,
+          newsroomId,
+          kind: "scan",
+          subjectId: id,
+          kick: false,
+        });
+      }
+      const previousFreshOld = await enqueueJob({
+        userId: `scan-history-old-${subject.freshOld}`,
+        newsroomId,
+        kind: "scan",
+        subjectId: subject.freshOld,
+        kick: false,
+      });
+      await sql`
+        update desk_jobs
+        set status = 'completed', finished_at = ${old}, updated_at = ${old}
+        where id = ${previousFreshOld.id}
+      `;
+      const currentFreshOld = await enqueueJob({
+        userId: `scan-history-current-${subject.freshOld}`,
+        newsroomId,
+        kind: "scan",
+        subjectId: subject.freshOld,
+        kick: false,
+      });
+      await enqueueJob({
+        userId: `scan-history-foreign-${subject.missing}`,
+        newsroomId: otherNewsroomId,
+        kind: "scan",
+        subjectId: subject.missing,
+        kick: false,
+      });
+      await sql`
+        update desk_jobs
+        set status = 'completed', finished_at = ${recent}, updated_at = ${recent}
+        where newsroom_id = ${newsroomId} and kind = 'scan' and subject_id = ${subject.terminal}
+      `;
+      await sql`
+        update desk_jobs
+        set status = 'running', started_at = ${old}, updated_at = ${recent}
+        where id = ${currentFreshOld.id}
+      `;
+      await sql`
+        update desk_jobs
+        set status = 'running', started_at = ${old},
+            updated_at = ${new Date(now - (STALE_RUNNING_SECONDS + 1) * 1000).toISOString()}
+        where newsroom_id = ${newsroomId} and kind = 'scan' and subject_id = ${subject.cold}
+      `;
+      await sql`
+        update desk_jobs
+        set created_at = ${old}, updated_at = ${old}
+        where newsroom_id = ${newsroomId} and kind = 'scan' and subject_id = ${subject.oldQueued}
+      `;
+      await sql`
+        update desk_jobs
+        set status = 'running', started_at = ${recent}, updated_at = ${recent}
+        where newsroom_id = ${otherNewsroomId} and kind = 'scan' and subject_id = ${subject.missing}
+      `;
+
+      const rows: {
+        id: number;
+        started_at: string;
+        finished_at: string | null;
+        error: string | null;
+        stalled?: boolean;
+      }[] = [
+        { id: subject.newest, started_at: recent, finished_at: null, error: null },
+        { id: subject.freshOld, started_at: old, finished_at: null, error: null },
+        { id: subject.terminal, started_at: old, finished_at: null, error: null },
+        { id: subject.cold, started_at: old, finished_at: null, error: null },
+        { id: subject.missing, started_at: old, finished_at: null, error: null },
+        { id: subject.finished, started_at: old, finished_at: recent, error: null },
+        { id: subject.oldQueued, started_at: old, finished_at: null, error: null },
+      ];
+      const annotated = await annotateScanRowsWithStallStatus(rows, newsroomId, now);
+      const byId = new Map(annotated.map((row) => [row.id, row]));
+
+      assert.equal(byId.get(subject.newest)?.stalled, false, "the newer active run stays running");
+      assert.equal(byId.get(subject.freshOld)?.stalled, false, "run age does not override a fresh heartbeat");
+      assert.equal(byId.get(subject.terminal)?.stalled, true, "a terminal job cannot finish the open run");
+      assert.equal(byId.get(subject.cold)?.stalled, true, "a cold job heartbeat marks the open run stalled");
+      assert.equal(byId.get(subject.missing)?.stalled, true, "an orphaned open run is stalled");
+      assert.equal(byId.get(subject.oldQueued)?.stalled, false, "an old queued job remains eligible for a lane worker");
+      assert.equal(Object.hasOwn(byId.get(subject.finished)!, "stalled"), false, "finished rows remain untouched");
+    } finally {
+      await sql.query(
+        "delete from desk_jobs where newsroom_id = any($1::int[]) and kind = 'scan' and subject_id = any($2::int[])",
+        [[newsroomId, otherNewsroomId], subjectIds],
+      );
+    }
   });
 });
 

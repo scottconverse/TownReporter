@@ -85,8 +85,8 @@ const LIGHT = { hex: "#fffdf7", ...rgb(255, 253, 247) };
 /**
  * The reader's own store is per paper (`readerStorageKey`): the first-run
  * setup below creates "Testerville Ledger" in "Testerville", so this is the
- * key the public paper reads. Seeded for both passes, so the paper half of the
- * walk is about the same two surfaces as the desk half.
+ * key the public paper reads. The first pass begins with no appearance keys;
+ * the later passes set explicit choices after that fresh-default check.
  */
 const READER_KEY = "townreporter:reader:Testerville%20Ledger:Testerville";
 
@@ -363,7 +363,21 @@ async function openTheFiledLead() {
 
 /** Set the desk to dark through its own control, and prove the choice stuck. */
 async function chooseDark() {
-  await page.getByRole("button", { name: "Switch to dark appearance" }).click();
+  let mode = await page.evaluate(() => document.documentElement.getAttribute("data-appearance"));
+  if (mode === "desk-dark") {
+    // A fresh desk is already dark. Visit Light then Dark through the control
+    // so this pass still proves that an explicit desk choice is saved.
+    await page.getByRole("button", { name: "Switch to light appearance" }).click();
+    await page.waitForFunction(
+      () => document.documentElement.getAttribute("data-appearance") === "light",
+      undefined,
+      { timeout: 15_000 },
+    );
+  }
+  mode = await page.evaluate(() => document.documentElement.getAttribute("data-appearance"));
+  if (mode !== "desk-dark") {
+    await page.getByRole("button", { name: "Switch to dark appearance" }).click();
+  }
   await page.waitForFunction(
     () => document.documentElement.getAttribute("data-appearance") === "desk-dark",
     undefined,
@@ -380,6 +394,116 @@ async function chooseDark() {
   step("dark is chosen through the desk's own toggle and survives");
 }
 
+async function assertReaderState(dark, label, timeout = 15_000) {
+  await page.waitForFunction(
+    (expected) => {
+      const reader = document.querySelector(".reader");
+      const action = expected ? "Light mode" : "Dark mode";
+      const button = [...document.querySelectorAll("button")].find(
+        (item) => item.getAttribute("aria-label") === action,
+      );
+      return (
+        reader?.classList.contains("mode-dark") === expected &&
+        document.documentElement.getAttribute("data-appearance") ===
+          (expected ? "reader-dark" : "light") &&
+        button?.getAttribute("aria-pressed") === String(expected)
+      );
+    },
+    dark,
+    { timeout },
+  );
+  step(`${label}: the hydrated reader class and toggle agree (${dark ? "dark" : "light"})`);
+}
+
+async function verifyFreshDefaults() {
+  await hardLoad("Fresh desk default (desktop)", "/desk", DESK_DARK, "desk-dark");
+  const empty = await page.evaluate(
+    (key) => ({
+      desk: localStorage.getItem("townreporter.desk.mode"),
+      reader: localStorage.getItem(key),
+    }),
+    READER_KEY,
+  );
+  must(
+    !empty.desk && !empty.reader,
+    `fresh-default check unexpectedly has saved appearance values: ${JSON.stringify(empty)}`,
+  );
+
+  await hardLoad("Fresh reader system dark (desktop)", "/", READER_DARK, "reader-dark");
+  await assertReaderState(true, "System-dark reader");
+
+  // An unset preference should continue following the OS while this document
+  // stays open; a reload or route change must not be needed.
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertReaderState(false, "Live system-light change", 2_000);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertReaderState(true, "Live system-dark change", 2_000);
+
+  // Change only the system setting, then make an unrelated reader preference
+  // edit. It must not persist the inferred dark value as an explicit choice.
+  await page.getByRole("button", { name: "Reading preferences" }).click();
+  await page.getByRole("button", { name: "Large", exact: true }).click();
+  const readerAfterSizeChange = await page.evaluate(
+    (key) => JSON.parse(localStorage.getItem(key) || "{}"),
+    READER_KEY,
+  );
+  must(
+    !Object.hasOwn(readerAfterSizeChange, "dark"),
+    `an inferred system theme was persisted by an unrelated size change: ${JSON.stringify(readerAfterSizeChange)}`,
+  );
+  await page.getByRole("button", { name: "Done" }).click();
+  step("changing reader text size leaves the system appearance unset in storage");
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await hardLoad("Fresh reader system light (desktop)", "/", LIGHT, "light");
+  await assertReaderState(false, "System-light reader");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await hardLoad("Fresh desk default (phone)", "/desk", DESK_DARK, "desk-dark");
+  await hardLoad("Fresh reader system light (phone)", "/", LIGHT, "light");
+  await assertReaderState(false, "Phone system-light reader");
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await hardLoad("Fresh reader system dark (phone)", "/", READER_DARK, "reader-dark");
+  await assertReaderState(true, "Phone system-dark reader");
+
+  await page.getByRole("button", { name: "Light mode" }).click();
+  await assertReaderState(false, "Reader toggle to explicit light under system dark");
+  const explicitLight = await page.evaluate(
+    (key) => JSON.parse(localStorage.getItem(key) || "{}"),
+    READER_KEY,
+  );
+  must(
+    explicitLight.dark === false,
+    `the reader's Light toggle was not saved: ${JSON.stringify(explicitLight)}`,
+  );
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertReaderState(false, "Explicit light remains pinned under system light", 2_000);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertReaderState(false, "Explicit light remains pinned under system dark", 2_000);
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.getByRole("button", { name: "Dark mode" }).click();
+  await assertReaderState(true, "Reader toggle to explicit dark under system light");
+  const explicitDark = await page.evaluate(
+    (key) => JSON.parse(localStorage.getItem(key) || "{}"),
+    READER_KEY,
+  );
+  must(
+    explicitDark.dark === true,
+    `the reader's Dark toggle was not saved: ${JSON.stringify(explicitDark)}`,
+  );
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await assertReaderState(true, "Explicit dark remains pinned under system dark", 2_000);
+  await page.emulateMedia({ colorScheme: "light" });
+  await assertReaderState(true, "Explicit dark remains pinned under system light", 2_000);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  step("reader toggles save explicit appearance opposite the current system preference");
+}
+
 /**
  * The deliberate break: strip the attribute the fix is built on and require
  * the probe to SEE the light canvas. Without this the dark half could pass on
@@ -390,7 +514,8 @@ async function proveTheProbeCanSee(label, breakIt, expected) {
   await frames(2);
   const seen = await page.evaluate(() => window.__flash.slice(-8));
   must(
-    isColour(parseColour(control.after.bg), expected) || seen.some((e) => isColour(painted(e), expected)),
+    isColour(parseColour(control.after.bg), expected) ||
+      seen.some((e) => isColour(painted(e), expected)),
     `${label}: the probe did not report ${expected.hex} after the surface was deliberately ` +
       `broken (attribute now ${JSON.stringify(control.after.at)}, html background ` +
       `${control.after.bg}); this instrument cannot see the bug it is claiming is absent.`,
@@ -427,22 +552,26 @@ async function theWalk(pass) {
   const deskAttr = dark ? "desk-dark" : "light";
   const paperAttr = dark ? "reader-dark" : "light";
 
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    colorScheme: "dark",
+  });
   await context.addInitScript({ content: SAMPLER });
-  await context.addInitScript(
-    ({ key, mode }) => {
+  if (!dark) {
+    await context.addInitScript((key) => {
       try {
-        localStorage.setItem(key, JSON.stringify({ dark: mode === "dark", size: 18, saved: [] }));
+        localStorage.setItem("townreporter.desk.mode", "light");
+        localStorage.setItem(key, JSON.stringify({ dark: false, size: 18, saved: [] }));
       } catch {
-        /* blocked storage: the pass then runs on the light default */
+        /* the explicit-preference pass fails its later assertions if storage is blocked */
       }
-    },
-    { key: READER_KEY, mode: pass },
-  );
+    }, READER_KEY);
+  }
   page = await context.newPage();
 
   console.log(`\n${pass.toUpperCase()} PASS`);
   await ownTheDesk(pass);
+  if (dark) await verifyFreshDefaults();
   // The dark pass files the lead; the light pass opens the same one off the
   // Queue, which is what an editor does on any later visit -- and keeps the
   // second pass from filing a duplicate of the first pass's headline.
@@ -472,7 +601,11 @@ async function theWalk(pass) {
     "Public paper",
     // The link to the reader's paper says "View the paper ↗" now; the design
     // rewrote its words, and the step is still the same trip out to the paper.
-    () => page.getByRole("link", { name: /^View the paper/ }).first().click(),
+    () =>
+      page
+        .getByRole("link", { name: /^View the paper/ })
+        .first()
+        .click(),
     "/",
     paperSurface,
     paperAttr,
@@ -493,12 +626,7 @@ async function theWalk(pass) {
   for (const route of [...DESK_ROUTES, { label: "Story", path: `/desk/story/${leadId}` }]) {
     await hardLoad(route.label, route.path, deskSurface, deskAttr);
   }
-  await hardLoad(
-    "Public paper",
-    "/",
-    paperSurface,
-    paperAttr,
-  );
+  await hardLoad("Public paper", "/", paperSurface, paperAttr);
 
   // 4. The sensitivity control, run last so it cannot help an earlier phase.
   await hardLoad("Desk", "/desk", deskSurface, deskAttr);
@@ -510,7 +638,10 @@ async function theWalk(pass) {
         html.removeAttribute("data-appearance");
         html.removeAttribute("data-desk-size");
         return {
-          after: { at: html.getAttribute("data-appearance"), bg: getComputedStyle(html).backgroundColor },
+          after: {
+            at: html.getAttribute("data-appearance"),
+            bg: getComputedStyle(html).backgroundColor,
+          },
         };
       },
       LIGHT,
@@ -522,7 +653,10 @@ async function theWalk(pass) {
         const html = document.documentElement;
         html.setAttribute("data-appearance", "desk-dark");
         return {
-          after: { at: html.getAttribute("data-appearance"), bg: getComputedStyle(html).backgroundColor },
+          after: {
+            at: html.getAttribute("data-appearance"),
+            bg: getComputedStyle(html).backgroundColor,
+          },
         };
       },
       DESK_DARK,
@@ -539,7 +673,10 @@ async function theWalk(pass) {
  * than the whole of it, and the click still lands on the same nav link.
  */
 async function deskLink(name) {
-  await page.getByRole("link", { name: new RegExp(`^${name}\\b`) }).first().click();
+  await page
+    .getByRole("link", { name: new RegExp(`^${name}\\b`) })
+    .first()
+    .click();
 }
 
 /**

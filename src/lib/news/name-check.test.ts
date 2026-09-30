@@ -230,6 +230,14 @@ test("every council title in front of an unresolved name is masked together with
     assert.equal(masked, "seconded by an unidentified speaker, according to the transcript.", title);
   }
 });
+test("audited Principal planner and Owner prefixes disappear with unresolved identities", () => {
+  // These role-prefix fragments mirror QA-002's observed output; PLACEHOLDER
+  // stands in for the obscured speaker, without copying a name or other claim.
+  const masked = ["Principal planner", "Owner"].map((role) =>
+    polishMaskedMeetingIdentities(maskUnverifiedMeetingIdentity(`${role} PLACEHOLDER.`, "PLACEHOLDER")),
+  );
+  assert.deepEqual(masked, ["An unidentified speaker.", "An unidentified speaker."]);
+});
 test("a bare surname another reviewed person also uses stays visible while the full name is masked", () => {
   const text = 'Daryl Han reported the cable figures. Maria Han seconded the motion. Han said the count continued. Han wrote "Han said so". [Han](https://example.test) Daryl added a chart.';
   const masked = polishMaskedMeetingIdentities(maskUnverifiedMeetingIdentity(text, "Daryl Han", { otherNames: ["Maria Han"] }));
