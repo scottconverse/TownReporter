@@ -22,7 +22,12 @@
                are uncomputable by anyone including this server.
       ip       the client address, read from the allowlisted headers
                (src/lib/news/stats-privacy.ts) and used HERE AND NOWHERE ELSE.
-               It is not stored and not logged.
+               It is not stored and not logged. It is read only when the request
+               arrived over the tunnel's loopback connection: the headers it
+               comes from are as forgeable as the location pair, and a caller
+               varying one per request would mint a fresh handle every time and
+               inflate the day's count without limit (unit U17d). Off the
+               tunnel, no address is read and no visitor is counted.
       uaClass  one of five words, never the user-agent string itself.
       day      the local calendar day, so the input changes at midnight as
                well as the salt.

@@ -16,9 +16,11 @@ address and arrive as request headers; they are believed only when the request
 came over loopback, where the tunnel daemon connects from, so a direct
 connection cannot forge them. What is kept is a per-day count per place, never
 the address, and a place is printed only once at least 25 visits have landed
-there in the selected range — on a finished day, smaller places are added
-together into an "other places" row by the hourly check rather than kept
-individually. The **requesting address and the browser's type** (a few words
+there in the selected range. **Today's counts are kept per place until the day
+ends**; on a finished day, the hourly check adds every place under 25 visits
+together into that day's "other places" row and deletes the individual rows, so
+they are not kept individually beyond the day — and a backup taken before the
+fold still holds them. The **requesting address and the browser's type** (a few words
 such as "phone", never the user-agent string) are read for one moment inside a
 one-way code that changes every day, only so the same visit is not counted
 twice; the code is never written to the database or a log, cannot be reversed,

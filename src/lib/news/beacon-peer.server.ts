@@ -38,6 +38,26 @@
   peer address means no location, never an accepted one. Failing closed is the
   only safe direction, because the alternative is trusting a header a client
   can set.
+
+  THE ONE SETTING THIS GATE RESTS ON, AND IT IS OFF (unit U17d). h3's
+  `getRequestIP()` answers `event.req.ip`, and on the srvx Node server `req.ip`
+  is the SOCKET address only while `trustProxy` is unset or false. Turn it on
+  and srvx's own plugin rewrites `req.ip` from the first `x-forwarded-for`
+  value before any handler runs --
+  `node_modules/srvx/dist/_chunks/_trust-proxy.mjs`:
+
+      const forwardedFor = firstForwardedValue(headers.get("x-forwarded-for"));
+      if (forwardedFor) Object.defineProperty(request, "ip", { value: forwardedFor, ... });
+
+  With that on, this function would be reading a header the caller controls,
+  the gate would open for anyone who sent `x-forwarded-for: 127.0.0.1`, and
+  both the location and the visitor count would become forgeable. Nitro's
+  `serve()` passes no proxy option, and nothing in this repo sets one, which is
+  why the gate holds today. IF YOU EVER ADD `trustProxy` TO THE NITRO CONFIG,
+  THIS GATE IS GONE -- and the fix is not to keep trusting it but to read the
+  socket directly. `src/lib/news/stats-privacy.test.ts` asserts the setting is
+  absent from the config this repo owns, so that change fails the suite rather
+  than silently opening the door.
 */
 
 import { getRequestIP } from "@tanstack/react-start/server";

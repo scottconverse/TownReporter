@@ -82,29 +82,36 @@ export function startUnattendedScheduler(): void {
     if (statsTicking) return;
     statsTicking = true;
     try {
-      await tickStatsReports();
       /*
-        Retention, on the same hourly clock (unit U17b). `location_daily` is the
-        one Stats table with a finite life -- twelve months, the longest range
-        the Stats screen offers -- because it is the only one that describes a
-        place readers were in rather than a page. The delete is idempotent and
-        returns a row count, so a quiet hour costs one cheap query and says
-        nothing.
-
-        Deliberately AFTER the reports: a prune that failed must not stop the
-        day's report from being written, and a report that failed must not stop
-        the prune. Hence its own try/catch, and its own log tag.
+        THREE INDEPENDENT JOBS ON ONE HOURLY CLOCK, and each gets its own
+        try/catch (unit U17d). They used to share one: `tickStatsReports()` sat
+        in the same `try` as the fold and the prune, so a report tick that threw
+        -- its own `getSql()` or its per-newsroom query is enough -- skipped the
+        other two entirely, which is the opposite of what the comment beside
+        them promised. A failed report must not cost the day's retention work,
+        and a failed fold must not cost the prune.
       */
+      try {
+        await tickStatsReports();
+      } catch (err) {
+        console.error("[townreporter] stats report tick failed:", err);
+      }
+
       /*
-        The fold runs BEFORE the prune, and both are idempotent, so the order
-        is only about not doing wasted work: a place old enough to be pruned is
+        Retention (unit U17b/U17c). `location_daily` is the one Stats table with
+        a finite life -- twelve months, the longest range the Stats screen
+        offers -- and the one that describes a place a reader was in rather than
+        a page, so it is also the one that folds its small places away.
+
+        The fold runs BEFORE the prune, and both are idempotent, so the order is
+        only about not doing wasted work: a place old enough to be pruned is
         never also folded. Fold first and the prune sees fewer rows; prune first
         and the fold would fold rows the prune was about to delete. Neither
         order is wrong, and neither loses a visit -- a folded row is carried by
         a row that lives as long as the rows it came from.
 
-        Each in its own try/catch: a fold that failed must not stop the prune,
-        and vice versa, and neither may stop the day's reports above.
+        Both are cheap and quiet: a query each on an hour when there is nothing
+        to do, and a row count to log when there is.
       */
       try {
         await foldSmallPlaces();
@@ -116,8 +123,6 @@ export function startUnattendedScheduler(): void {
       } catch (err) {
         console.error("[townreporter] stats location prune failed:", err);
       }
-    } catch (err) {
-      console.error("[townreporter] stats report tick failed:", err);
     } finally {
       statsTicking = false;
     }

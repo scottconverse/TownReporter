@@ -480,10 +480,11 @@ function StatsPage() {
                 City and country only, counted by the day. A place is printed once{" "}
                 {formatCount(LOCATION_MIN_VISITS)} visits have been counted there in this range;
                 everything under that is {LOCATION_OTHER_LABEL}, so no row can be about one reader.
-                On a day that has finished, places under the threshold are added together in the
-                stored counts too — they are not kept one by one to be read later, here or anywhere
-                else. Read from this paper&rsquo;s own network, and only when the request came
-                through it.
+                Today&rsquo;s counts are kept per place until the day ends. Once a day has finished,
+                places under the threshold are added together in the stored counts too, so they are
+                not kept one by one to be read later — but they are still there until the day
+                closes, and a backup taken before then still holds them. Read from this paper&rsquo;s
+                own network, and only when the request came through it.
               </p>
 
               {/*

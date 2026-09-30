@@ -72,7 +72,8 @@ function About() {
             only ever a city or a country, never anything finer. A place is shown to the editor
             only once enough visits have landed there that the row cannot be one reader, and small
             places on a finished day are added together into &ldquo;other places&rdquo; rather than
-            kept individually. No location database is consulted, by us or on our behalf.
+            kept individually. We run no location database of our own: the city and country come
+            from Cloudflare&rsquo;s network, worked out from your address there.
           </p>
           <p>
             <strong>Counting you once, without remembering you.</strong> We also read the address

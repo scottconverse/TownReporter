@@ -556,9 +556,12 @@ and passed to the app as headers; they are believed only when the request
 arrived over loopback, which is where the tunnel daemon connects from, so a
 direct connection cannot forge them. The app keeps only a per-day count per
 place, never the address, and prints a place only once at least 25 visits have
-landed there in the selected range — smaller places on a finished day are added
-together into an "other places" row by the hourly check, so a place with one
-visit does not sit in the database or in a backup. The **requesting address and
+landed there in the selected range. **Today's counts are kept per place until
+the day ends**; once a day has finished, the hourly check adds every place under
+25 visits together into that day's "other places" row and deletes the individual
+rows. So a place with one visit does not stay in the database — but it is there
+until the day closes, and **a backup taken before the fold still holds it**.
+The **requesting address and
 the browser's type** (a few words such as "phone", never the user-agent string)
 are read for one moment, inside a one-way code that changes every day, purely to
 avoid counting the same visit twice. Neither is ever stored or logged, and the
@@ -567,7 +570,9 @@ from one day to the next. The **visitors** figure is an estimate and can be
 wrong in both directions: a restart, or a busy day that evicts the oldest
 values, can count the same reader twice, while one address shared by a household
 or a phone carrier reads as one reader. An installation that is not behind
-Cloudflare reports no place at all, and the panel says so. Places are pruned
+Cloudflare reports no place at all **and counts no visitors at all** — the
+address is read from the tunnel's own headers, so off the tunnel there is no
+trustworthy address to count, and the panel says so. Places are pruned
 after twelve months; every other Stats count is kept indefinitely.
 
 Both beacon endpoints are bounded by one process-wide budget with no key of any

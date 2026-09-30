@@ -433,13 +433,17 @@ describe("B. the daily handle rotates and is never written down", () => {
     let lines: string[] = [];
     const files = await withTempDataRoot(async () => {
       lines = await withCapturedConsole(async () => {
-        const response = await readBeaconHandler(
-          sentinelRequest("http://test.local/api/read", {
-            kind: "load",
-            path: "/",
-            refClass: "direct",
-            device: "computer",
-          }),
+        // Over the tunnel: the client address is only read at all when the
+        // peer is loopback (unit U17d), and this case is about the handle.
+        const response = await withPeer("127.0.0.1", () =>
+          readBeaconHandler(
+            sentinelRequest("http://test.local/api/read", {
+              kind: "load",
+              path: "/",
+              refClass: "direct",
+              device: "computer",
+            }),
+          ),
         );
         assert.equal(response.status, 204);
       });
@@ -493,13 +497,22 @@ describe("B. the daily handle rotates and is never written down", () => {
     // The same rule through the endpoint: three loads from one reader are one
     // visitor in the table, a second reader makes it two, and a request with no
     // address at all counts nobody.
+    // Over the tunnel: an address is only read when the peer is loopback
+    // (unit U17d), and this case is entirely about addresses.
     const send = async (headers: Record<string, string>) => {
-      const response = await readBeaconHandler(
-        new Request("http://test.local/api/read", {
-          method: "POST",
-          headers: { "content-type": "application/json", ...headers },
-          body: JSON.stringify({ kind: "load", path: "/", refClass: "direct", device: "computer" }),
-        }),
+      const response = await withPeer("127.0.0.1", () =>
+        readBeaconHandler(
+          new Request("http://test.local/api/read", {
+            method: "POST",
+            headers: { "content-type": "application/json", ...headers },
+            body: JSON.stringify({
+              kind: "load",
+              path: "/",
+              refClass: "direct",
+              device: "computer",
+            }),
+          }),
+        ),
       );
       assert.equal(response.status, 204);
     };
@@ -964,18 +977,101 @@ describe("F. the location headers are believed only over the tunnel (U17c)", () 
       },
     }) as Headers;
 
-    const untrusted = beaconContextFromHeaders(recording, { locationTrusted: false });
+    const untrusted = beaconContextFromHeaders(recording, { fromTunnel: false });
     assert.equal(untrusted.city, null);
     assert.equal(untrusted.country, null);
+    assert.equal(untrusted.ip, null, "the address header was read for an untrusted peer");
     assert.ok(!asked.includes("cf-ipcity"), "the city header was read for an untrusted peer");
     assert.ok(!asked.includes("cf-ipcountry"), "the country header was read for an untrusted peer");
-    // What the gate does NOT close: the address and the agent class, which the
-    // visitor count needs and which are never stored.
-    assert.equal(untrusted.ip, "203.0.113.7");
+    assert.ok(
+      !asked.includes("cf-connecting-ip"),
+      "the address header was read for an untrusted peer",
+    );
+    // What the gate does NOT close: the agent class. It is not an address, it
+    // cannot be varied to inflate a count on its own (there is no address to
+    // hash with it), and it is reduced to one word.
     assert.equal(untrusted.uaClass, "computer");
 
-    const trusted = beaconContextFromHeaders(recording, { locationTrusted: true });
+    const trusted = beaconContextFromHeaders(recording, { fromTunnel: true });
     assert.equal(trusted.city, "Longmont");
     assert.equal(trusted.country, "US");
+    assert.equal(trusted.ip, "203.0.113.7");
+  });
+
+  it("F5: an untrusted peer's address counts no visitor; the tunnel's counts one", async () => {
+    /*
+      The address headers are as forgeable as the location pair, so they are
+      gated the same way (unit U17d). A direct client that varied
+      `cf-connecting-ip` per request would otherwise mint a fresh handle every
+      time and inflate the day's visitor figure without limit.
+    */
+    const sql = await getSql();
+    const send = () =>
+      new Request("http://test.local/api/read", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.7",
+          "x-forwarded-for": "203.0.113.7",
+          "user-agent": "ProbeAgent/1.0",
+        },
+        body: JSON.stringify({ kind: "load", path: "/", refClass: "direct", device: "computer" }),
+      });
+    const visitors = async () => {
+      const [row] = await sql<{ visitors: string }>`
+        select visitors from visitor_daily
+        where newsroom_id = ${DEFAULT_NEWSROOM_ID} and day = current_date
+      `;
+      return Number(row?.visitors ?? 0);
+    };
+
+    // A public peer that sets the headers itself: not counted, at all.
+    assert.equal((await withPeer("203.0.113.7", () => readBeaconHandler(send()))).status, 204);
+    assert.equal(await visitors(), 0, "a direct client's cf-connecting-ip counts no visitor");
+
+    // The same request over the tunnel: counted, once.
+    assert.equal((await withPeer("127.0.0.1", () => readBeaconHandler(send()))).status, 204);
+    assert.equal(await visitors(), 1, "the tunnel's address is counted once");
+
+    // And a forged address over the tunnel is one reader, not many: varying the
+    // header is exactly what the tunnel gate exists to make impossible.
+    assert.equal((await withPeer("127.0.0.1", () => readBeaconHandler(send()))).status, 204);
+    assert.equal(await visitors(), 1, "the same reader is not counted twice");
+  });
+
+  it("F6: the peer gate assumes srvx's trustProxy is off, and this repo never turns it on", () => {
+    /*
+      h3's `getRequestIP()` answers `event.req.ip`, and srvx REWRITES `req.ip`
+      from the first `x-forwarded-for` value when the server runs with
+      `trustProxy` (node_modules/srvx/dist/_chunks/_trust-proxy.mjs:
+      `Object.defineProperty(request, "ip", { value: forwardedFor, ... })`).
+      With it on, `beaconPeerIsLoopback()` would be reading a header the caller
+      controls and would open for anyone sending `x-forwarded-for: 127.0.0.1`.
+
+      Nitro's `serve()` passes no proxy option, which is why the gate holds. This
+      is the cheap static guard the unit asked for: the setting must not appear
+      in the config surface this repo owns, so turning it on fails here rather
+      than silently opening the gate in production.
+    */
+    const roots = ["vite.config.ts", "server"];
+    const files: string[] = [];
+    const walk = (path: string) => {
+      const stat = statSync(path);
+      if (stat.isDirectory()) {
+        for (const entry of readdirSync(path)) walk(join(path, entry));
+      } else if (/\.(ts|mjs|js|json)$/.test(path)) {
+        files.push(path);
+      }
+    };
+    for (const root of roots) walk(join(process.cwd(), root));
+    assert.ok(files.length > 0, "the scan found no config files at all -- the probe is broken");
+
+    const offenders = files.filter((file) => /trustProxy/.test(readFileSync(file, "utf8")));
+    assert.deepEqual(
+      offenders.map((file) => file.slice(process.cwd().length + 1)),
+      [],
+      "trustProxy is set somewhere in the server config, which makes req.ip header-controlled " +
+        "and opens the beacon's tunnel gate -- see src/lib/news/beacon-peer.server.ts",
+    );
   });
 });

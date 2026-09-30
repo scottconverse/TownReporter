@@ -38,7 +38,11 @@
               with an HMAC held in process memory, whose secret salt rotates at
               day rollover and dies with the process -- see
               src/lib/news/stats-visitors.server.ts. Nothing derived from an
-              address is ever written down; only the integer is.
+              address is ever written down; only the integer is. The address it
+              hashes is read from the request headers only when the request came
+              over the tunnel's loopback connection (unit U17d), so a direct
+              client cannot inflate the count by varying a header, and an
+              installation with no tunnel counts no visitors at all.
 
   Of the request, `readBeaconHandler` reads exactly the five header names in
   src/lib/news/stats-privacy.ts's allowlist and the JSON body, and the body only
@@ -533,7 +537,7 @@ export async function readBeaconHandler(request: Request): Promise<Response> {
     await recordReadBeacon(
       body,
       DEFAULT_NEWSROOM_ID,
-      beaconContextFromHeaders(request.headers, { locationTrusted: beaconPeerIsLoopback() }),
+      beaconContextFromHeaders(request.headers, { fromTunnel: beaconPeerIsLoopback() }),
     );
   } catch {
     // A malformed body is just another report the validator refuses. This
@@ -1335,12 +1339,22 @@ export async function pruneLocationDaily(): Promise<number> {
  * it did not stop it existing. This is the same rule applied where the data
  * actually rests, which is what the owner's decision is about.
  *
- * WHAT IT DOES. For every row on a FINISHED day (`day < current_date` -- the
- * same calendar the rows were written on, so the paper's own local day) whose
- * `visits` is under {@link LOCATION_MIN_VISITS}, it adds the visits to that
- * day's `(newsroom, country, city = FOLDED_CITY)` row and deletes the small
- * row. One statement, so one transaction: the sum and the delete cannot come
- * apart, and an interrupted run leaves the table exactly as it was.
+ * WHAT IT DOES. For every row on a FINISHED day whose `visits` is under
+ * {@link LOCATION_MIN_VISITS}, it adds the visits to that day's
+ * `(newsroom, country, city = FOLDED_CITY)` row and deletes the small row. One
+ * statement, so one transaction: the sum and the delete cannot come apart, and
+ * an interrupted run leaves the table exactly as it was.
+ *
+ * "FINISHED" IS `day < current_date`, AND THAT IS THE DATABASE SESSION'S
+ * CALENDAR, not a timezone this code knows anything about. It is the same
+ * `current_date` every row in this table was written with and the same one
+ * `page_views.day` and `read_hourly` are read on, so the fold's day boundary
+ * agrees with the rows it is folding by construction. On a database running in
+ * UTC -- which is what a default Postgres install and the packaged setup both
+ * are -- that day is the UTC day, and a paper that wants a local day has to set
+ * the session timezone. This is a property of the deployment, not of the code:
+ * nothing here reads the clock from JavaScript, and nothing here claims the
+ * boundary is the editor's midnight.
  *
  * TODAY IS LEFT ALONE. A day still in progress has not finished arriving, so
  * folding it would move visits that are about to be joined by more; its small

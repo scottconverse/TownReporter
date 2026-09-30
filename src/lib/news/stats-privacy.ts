@@ -229,8 +229,19 @@ function plausibleIp(raw: unknown): string | null {
  * proxy). Returns null when neither is present or plausible -- and a null
  * address means the visitor is simply not counted, never counted some other
  * way.
+ *
+ * BOTH HEADERS ARE FORGEABLE, so `fromTunnel` gates them exactly as it gates
+ * the location pair (unit U17d). `cf-connecting-ip` and `x-forwarded-for` are
+ * ordinary request headers: a client that connects straight to this server can
+ * put any value it likes in either one, and a caller that varied it per request
+ * would mint a fresh visitor handle every time and inflate the day's count
+ * without limit. Cloudflare and the tunnel daemon set these on requests that
+ * arrive over loopback, and nothing else does -- the same fact the location
+ * gate rests on, so it is the same flag. Off the tunnel: no address is read,
+ * `noteVisitor` is never called, and no visitor is counted.
  */
-export function visitorClientIp(headers: Headers): string | null {
+export function visitorClientIp(headers: Headers, fromTunnel: boolean): string | null {
+  if (!fromTunnel) return null;
   for (const name of IP_HEADERS) {
     const raw = allowedHeader(headers, name);
     if (raw === null) continue;
@@ -312,23 +323,31 @@ export const EMPTY_BEACON_CONTEXT: BeaconContext = {
  * {@link allowedHeader}, and the allowlist test fails if any name outside the
  * list is asked for.
  *
- * `locationTrusted` IS REQUIRED, and deliberately so. A caller has to state
- * whether the request came from the Cloudflare tunnel (see
- * `beaconPeerIsLoopback`, src/lib/news/beacon-peer.server.ts) before it can
- * get a country or a city back; there is no default to forget, and the safe
- * answer is the one a caller has to type. When it is false the two location
- * headers are not read at all -- not read and discarded, NOT READ -- so a
- * direct client's forged `cf-ipcity` never enters this process's memory.
+ * `fromTunnel` IS REQUIRED, and deliberately so. A caller has to state whether
+ * the request came from the Cloudflare tunnel (see `beaconPeerIsLoopback`,
+ * src/lib/news/beacon-peer.server.ts) before it can get a country, a city or a
+ * client address back; there is no default to forget, and the safe answer is
+ * the one a caller has to type. When it is false, three headers are not read at
+ * all -- not read and discarded, NOT READ -- so a direct client's forged
+ * `cf-ipcity` never enters this process's memory, and its forged
+ * `cf-connecting-ip` cannot mint visitor handles. The user-agent is the one
+ * header read either way: it is not an address, it cannot be varied to inflate
+ * a count on its own (there is no address to hash with it), and it is only ever
+ * reduced to a class word.
+ *
+ * The name says `fromTunnel` rather than `locationTrusted` because it now
+ * decides more than the location: the visitor count depends on it too, and a
+ * caller reading "location" in the name would not expect that.
  */
 export function beaconContextFromHeaders(
   headers: Headers,
-  options: { locationTrusted: boolean },
+  options: { fromTunnel: boolean },
 ): BeaconContext {
   return {
-    ip: visitorClientIp(headers),
+    ip: visitorClientIp(headers, options.fromTunnel),
     uaClass: userAgentClass(allowedHeader(headers, USER_AGENT_HEADER)),
-    country: options.locationTrusted ? normalizeCountry(allowedHeader(headers, COUNTRY_HEADER)) : null,
-    city: options.locationTrusted ? normalizeCity(allowedHeader(headers, CITY_HEADER)) : null,
+    country: options.fromTunnel ? normalizeCountry(allowedHeader(headers, COUNTRY_HEADER)) : null,
+    city: options.fromTunnel ? normalizeCity(allowedHeader(headers, CITY_HEADER)) : null,
   };
 }
 
