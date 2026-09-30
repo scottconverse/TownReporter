@@ -32,7 +32,9 @@
  * So: `storableText` for what the desk says, `postgresText` for what a source
  * said. Both live here so that the next writer added has one place to look,
  * rather than the local helper a previous author happened to leave in the file
- * they were editing.
+ * they were editing. `sanitizeJsonLeaves` is not a third policy: it is
+ * `storableText` applied to a whole JSON structure, for the columns that are
+ * stringified on the way in and re-parsed as jsonb on the way out.
  *
  * Neither function is a substitute for a parameterised query, and neither
  * touches the C1 controls, lone surrogates or invalid UTF-8 -- those are
@@ -68,6 +70,50 @@ const CONTROL = new RegExp(
 export function storableText(raw: string | null | undefined): string {
   if (!raw) return "";
   return raw.replace(CONTROL, "");
+}
+
+/**
+ * Model-written data on its way into a JSON column: every string leaf through
+ * `storableText`.
+ *
+ * `JSON.stringify` is NOT a guard, and that is the whole reason this function
+ * exists. A real U+0000 in a string comes back out of `JSON.stringify` as the
+ * JSON escape -- six characters, no NUL byte anywhere -- so a value written to
+ * a `text` column looks clean and the INSERT succeeds. The failure is one step
+ * later: as soon as that column is read back through `::jsonb` (a
+ * `result_json` receipt merged with `||`, a `research_json` projected for the
+ * desk screen), Postgres PARSES the escape and refuses the whole statement
+ * with "unsupported Unicode escape sequence" -- jsonb, unlike text, has
+ * nowhere to put a NUL. The write looked fine; the read is what dies, and it
+ * dies far from the model call that put the byte there.
+ *
+ * So the guard goes on the value BEFORE the stringify, at the write: walk the
+ * structure, run every string leaf through `storableText`, and leave
+ * everything that is not a string -- numbers, booleans, null, and the keys
+ * themselves -- exactly as it is. Plain objects and arrays are copied; anything
+ * else (a Date, a class instance) is passed through untouched rather than
+ * flattened into `{}` by an `Object.entries` walk it was never meant for.
+ *
+ * `storableText`, not `postgresText`: this is what the desk or a model WROTE,
+ * never a captured page, so the byte is dropped rather than replaced. See the
+ * module docstring.
+ */
+export function sanitizeJsonLeaves<T>(value: T): T {
+  if (typeof value === "string") return storableText(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((item) => sanitizeJsonLeaves(item)) as unknown as T;
+  if (value !== null && typeof value === "object") {
+    const proto: unknown = Object.getPrototypeOf(value);
+    /*
+      Plain objects only. `Object.entries(new Date())` is empty, so recursing
+      into anything that is not a plain record would silently turn a Date into
+      `{}` -- a corruption this function would then be the cause of.
+    */
+    if (proto !== Object.prototype && proto !== null) return value;
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) out[key] = sanitizeJsonLeaves(item);
+    return out as unknown as T;
+  }
+  return value;
 }
 
 /**

@@ -2,6 +2,7 @@ import { ensureSchemaOnce, getSql } from "../db.ts";
 import { siteUrl } from "../paper.ts";
 import { probeProvider } from "./ai.ts";
 import { assertHttpUrl } from "./url-guard.ts";
+import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { assertRate, audit } from "./ops.ts";
 import { enqueueJob, findOpenJob, kickJobs, setJobFailoverNote, setJobStage } from "./jobs.ts";
 import { scanPreflight } from "./preflight.ts";
@@ -673,7 +674,18 @@ export async function writeStoryForAuthenticatedEditor(
     sections,
   );
   if (!parsed.ok) return { ok: false as const, error: parsed.error };
-  const { headline, why, urls, scratch, editorialAssignment } = parsed.value;
+  const { headline: rawHeadline, why: rawWhy, urls, scratch, editorialAssignment } = parsed.value;
+  /*
+    The write-story prompt's own words. `headline` and `why` are parsed out of
+    the editor's brief (or pasted text) and go into the lead AND the draft it
+    seeds, both `text` columns, so a U+0000 in the brief fails both statements.
+    `scratch` and `editorialAssignment` reach `notes_json` two lines below, and
+    that column is read back through `::jsonb` by `meeting-activity.ts` -- so
+    the notes object is walked with `sanitizeJsonLeaves` rather than trusted to
+    `packNotes`, whose `JSON.stringify` would keep the byte as an escape.
+  */
+  const headline = storableText(rawHeadline);
+  const why = storableText(rawWhy);
   let topic = parsed.value.topic;
   let topicUnchosen = parsed.value.topicUnchosen;
   if (input.sectionKey !== undefined) {
@@ -696,12 +708,12 @@ export async function writeStoryForAuthenticatedEditor(
     const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and editorial_request_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);
     if(available.length!==input.documentIds.length)return {ok:false as const,error:"One of these uploads is incomplete or already attached. Select it again before writing."};
   }
-  const notesJson = packNotes({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" });
+  const notesJson = packNotes(sanitizeJsonLeaves({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" }));
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json, topic_unchosen)
     values (
-      ${input.context.userId}, ${input.context.newsroomId}, ${headline}, ${why}, ${topic},
+      ${input.context.userId}, ${input.context.newsroomId}, ${headline}, ${why}, ${storableText(topic)},
       ${urlsJson}, ${why.slice(0, 400)}, 0, 'new', ${notesJson}, ${topicUnchosen}
     )
     returning id
@@ -716,7 +728,7 @@ export async function writeStoryForAuthenticatedEditor(
   await sql`
     insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls)
     values (
-      ${input.context.userId}, ${input.context.newsroomId}, ${leadId}, ${headline}, ${why.slice(0, 220)}, '', ${topic}, ${urlsJson}
+      ${input.context.userId}, ${input.context.newsroomId}, ${leadId}, ${headline}, ${why.slice(0, 220)}, '', ${storableText(topic)}, ${urlsJson}
     )
   `;
   await (deps.audit ?? audit)(

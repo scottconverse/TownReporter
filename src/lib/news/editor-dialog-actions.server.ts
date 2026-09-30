@@ -27,6 +27,7 @@
  */
 import { getSql, type Sql } from "../db.ts";
 import { grokChat, type EffectiveProviderChoice } from "./ai.ts";
+import { storableText } from "./storable-text.ts";
 import type { StoryModelChoice } from "./model-choice.ts";
 import {
   cleanJobEffort,
@@ -256,8 +257,19 @@ export async function performAddLead(
       };
     }
     const sql = await deps.getSql();
+    /*
+      The score model's explanation, written to `leads.evidence`. `scored.reason`
+      is free prose the model wrote about the story it just read, so it gets the
+      same guard a lead's own `why` and `evidence` get in `fileScanLeads`: a NUL
+      in it fails this UPDATE, and the UPDATE is how the editor's filed lead
+      gets its score -- the failure would read as "the desk could not reach a
+      model", which is not what happened.
+
+      `|| null` is kept on the outside of the guard so a model that wrote no
+      reason at all still stores NULL rather than an empty string.
+    */
     await sql`
-      update leads set newsworthiness = ${scored.score}, evidence = ${scored.reason || null}
+      update leads set newsworthiness = ${scored.score}, evidence = ${storableText(scored.reason) || null}
       where id = ${leadId} and newsroom_id = ${context.newsroomId}
     `;
     return { ok: true as const, leadId, then: "score" as const, score: scored.score, reason: scored.reason, notice };

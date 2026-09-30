@@ -1,3 +1,5 @@
+import { sanitizeJsonLeaves } from "./storable-text.ts";
+
 export type CaptureDisposition = "provisional" | "final";
 export type RevisionSignal = "hash" | "revision-timestamp" | "duration" | null;
 
@@ -210,9 +212,18 @@ export async function applyDraftRevision(
       The parsed citations are written back, so the snapshot and the draft
       agree and the review token still changes when a citation moves.
     */
+    /*
+      `research_json` is a `text` column the desk screen reads back through
+      `::jsonb`, so the citations are written back through the same walk the
+      draft writers use (see storable-text.ts). The citation records here are
+      segment indexes and caption hashes rather than model prose, so this is a
+      guard on the shape rather than the fix for a live failure -- what would
+      actually break the `::jsonb` read is a NUL already sitting in the column
+      from before the writers were guarded.
+    */
     await sql.query(
       "update drafts set research_json = coalesce(research_json,'{}') || $1, updated_at=now() where id=$2 and newsroom_id=$3",
-      [JSON.stringify({ transcriptRevisionNotice: notice, transcriptCitations: citations }), link.draft_id, input.newsroomId],
+      [JSON.stringify(sanitizeJsonLeaves({ transcriptRevisionNotice: notice, transcriptCitations: citations })), link.draft_id, input.newsroomId],
     );
     draftsUpdated += 1;
   }

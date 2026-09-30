@@ -1,5 +1,6 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import { parseNotes, packNotes } from "./notes.ts";
+import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
   AGENT_METHOD_LABELS,
@@ -496,7 +497,24 @@ export async function performRecordFollowUpRun(
   },
 ): Promise<{ ok: true; noteWritten: boolean } | { ok: false; error: string }> {
   await ensureFollowUpsSchema();
-  const finding = { ...EMPTY_FINDING, ...(input.finding ?? {}), checkedAt: input.finding?.checkedAt ?? new Date().toISOString() };
+  /*
+    The agent's finding, as the card and the story will both read it.
+
+    `finding_json` is a `text` column, so a NUL in the model's title, summary
+    or reason does NOT fail the write -- `JSON.stringify` inside `packFinding`
+    turns it into an escape and the INSERT succeeds. It fails later, and
+    somewhere else: `findingNoteLine` copies the same words into the story's
+    `notes_json`, and `meeting-activity.ts` reads that column back through
+    `::jsonb`, which is where the escape finally refuses to parse. The guard has
+    to be on the values, before they are packed, which is what
+    `sanitizeJsonLeaves` does -- the same walk `storableText` would do field by
+    field, and it leaves `changed` (a boolean) alone.
+  */
+  const finding = sanitizeJsonLeaves({
+    ...EMPTY_FINDING,
+    ...(input.finding ?? {}),
+    checkedAt: input.finding?.checkedAt ?? new Date().toISOString(),
+  });
   const sql = await getSql();
   const rows = await sql<{ id: number; lead_id: number | null; article_id: number | null }>`
     update follow_ups
@@ -520,7 +538,14 @@ export async function performRecordFollowUpRun(
   }
   if (!leadId) return { ok: true as const, noteWritten: false };
 
-  const written = await appendFindingNote(context, leadId, input.note ?? findingNoteLine(finding));
+  // The extra line is the caller's, and the caller is the model-reading part of
+  // the run -- so it gets the same guard as the finding's own fields before it
+  // reaches `notes_json`.
+  const written = await appendFindingNote(
+    context,
+    leadId,
+    storableText(input.note ?? findingNoteLine(finding)),
+  );
   return { ok: true as const, noteWritten: written };
 }
 
@@ -653,7 +678,17 @@ export async function performReleaseFollowUpRun(
   `;
   const row = rows[0];
   if (!row) return;
-  const finding = { ...parseFinding(row.finding_json), reason: reason.slice(0, 300) };
+  /*
+    Same door as the run's own write above, reached from the other side: the
+    finding is read back off the row, given the failure reason, and packed
+    again -- so a NUL already stored in the row (written before this guard
+    existed) would be carried straight back into `finding_json`. Both halves
+    go through the walk.
+  */
+  const finding = sanitizeJsonLeaves({
+    ...parseFinding(row.finding_json),
+    reason: reason.slice(0, 300),
+  });
   const next = nextRunAt(row.schedule ?? "");
   await sql`
     update follow_ups

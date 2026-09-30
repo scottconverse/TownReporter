@@ -5,6 +5,7 @@ import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.
 import { withClaimedLeadDraftLock } from "./draft-order.server.ts";
 import { enqueueJob, progressReporterFor, setJobFailoverNote, setJobModelRuntime, waitForModel, type DeskJob } from "./jobs.ts";
 import { parseClaims, parseFindings, serializeFindings, REPORT_EDIT_SYSTEM, STORY_FORMS, type ReportChat } from "./report.ts";
+import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
 import { storyModelChoice } from "./model-choice.ts";
 import { probeProvider } from "./ai.ts";
@@ -213,8 +214,26 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       : (Array.isArray(json(draft.unanswered)) ? (json(draft.unanswered) as unknown[]).map(String).slice(0,12) : []);
     const form = typeof parsed.form === "string" && (STORY_FORMS as readonly string[]).includes(parsed.form.trim()) ? parsed.form.trim() : draft.form;
     const { writerCheckpoint: _completedWriterCheckpoint, ...currentResearch } = research;
+    /*
+      The reconciler's row: the rewritten headline, dek and body are the model's
+      words in `text` columns, `integrityNotes` is its note plus the editor's,
+      and the `research_json` blob is read back by the desk screen through
+      `::jsonb` -- so a NUL in the claim rows or the name-check rows would not
+      fail here but at every later read of the column. `sanitizeJsonLeaves`
+      before the stringify is what stops that.
+
+      `sourceUrls` and `provenanceJson` are the captured-page side of the row
+      and are left as they are.
+    */
+    const reconcileResearchJson = JSON.stringify(sanitizeJsonLeaves({
+      ...currentResearch,
+      ...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),
+      nameCheck:names.check,
+      reportedClaims:{version:1,rows:claims},
+      evidenceReconciledAt:new Date().toISOString(),
+    }));
     const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${edited.headline},${edited.dek},${edited.body},${draft.topic},${sourceUrls},${integrityNotes},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(unanswered)},${JSON.stringify({...currentResearch,...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),nameCheck:names.check,reportedClaims:{version:1,rows:claims},evidenceReconciledAt:new Date().toISOString()})}) returning id`;
+      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${storableText(edited.headline)},${storableText(edited.dek)},${storableText(edited.body)},${draft.topic},${sourceUrls},${storableText(integrityNotes)},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(sanitizeJsonLeaves(unanswered))},${reconcileResearchJson}) returning id`;
     // The Done card's Open button, written in the same statement as the receipt
     // (0099) so a completed reconcile row is never briefly linkless. It points
     // at the draft this run SAVED, not the one it read.

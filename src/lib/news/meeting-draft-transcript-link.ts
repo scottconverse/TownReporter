@@ -1,5 +1,6 @@
 import type { Sql } from "../db.ts";
 import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { sanitizeJsonLeaves } from "./storable-text.ts";
 
 /**
  * The writer that connects a meeting transcript to a draft.
@@ -299,19 +300,33 @@ export async function linkDraftToTranscript(
      do update set citation_snapshot=excluded.citation_snapshot,is_current=true,revision_notice=null,updated_at=now()`,
     [input.newsroomId, input.draftId, input.artifactId, snapshot],
   );
+  /*
+    This statement RE-PARSES the column it is merging into: the left side is
+    `coalesce(...)::jsonb`, so any NUL already stored in this draft's
+    `research_json` -- an escape that `JSON.stringify` left behind before the
+    draft writers were guarded -- fails the merge right here. The write-side
+    guards in desk.ts are what keep that side clean from now on.
+
+    The payload on the right is counters and an id, so `sanitizeJsonLeaves` has
+    nothing to remove from it today. It wraps it anyway so that every value
+    handed to a `::jsonb` cast in this codebase has been through the same door,
+    and a field added here later cannot be the one that was not.
+  */
   await sql.query(
     `update drafts set research_json =
        (coalesce(nullif(research_json,''),'{}')::jsonb || $1::jsonb)::text,
        updated_at=now()
      where id=$2 and newsroom_id=$3`,
     [
-      JSON.stringify({
-        meetingEvidence: {
-          used: true,
-          artifactId: input.artifactId,
-          citationCount: JSON.parse(snapshot).length,
-        },
-      }),
+      JSON.stringify(
+        sanitizeJsonLeaves({
+          meetingEvidence: {
+            used: true,
+            artifactId: input.artifactId,
+            citationCount: JSON.parse(snapshot).length,
+          },
+        }),
+      ),
       input.draftId,
       input.newsroomId,
     ],

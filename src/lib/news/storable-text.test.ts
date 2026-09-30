@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { postgresText, storableText } from "./storable-text.ts";
+import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 
 const NUL = String.fromCharCode(0);
 const BEL = String.fromCharCode(7);
@@ -76,5 +76,64 @@ describe("postgresText", () => {
     const out = postgresText(raw);
     assert.equal(out.includes(NUL), false);
     assert.ok(out.length > 10_000, "the document itself must survive");
+  });
+});
+
+describe("sanitizeJsonLeaves", () => {
+  /*
+    The JSON writer's door.
+
+    `JSON.stringify` hides a NUL: the byte comes back as the six-character
+    escape, so an INSERT into a `text` column succeeds and the row looks clean.
+    Postgres only refuses it when the column is re-parsed -- `::jsonb`, which is
+    how `desk_jobs.result_json` and `drafts.research_json` are read. These cases
+    pin the walk that stops the byte getting that far.
+  */
+  it("strips a NUL from a nested string, however deep", () => {
+    const out = sanitizeJsonLeaves({
+      quality: { styleAudit: { notes: [`clean${NUL}er`, "fine"] } },
+      citationStatus: "complete",
+    });
+    assert.equal(out.quality.styleAudit.notes[0], "cleaner");
+    // The mutation this test exists to catch: JSON.stringify alone leaves the
+    // escape in place, and the escape is what jsonb refuses.
+    assert.equal(JSON.stringify(out).includes("u0000"), false);
+  });
+
+  it("keeps the structure, the order and the non-string leaves", () => {
+    const input = {
+      finalDraftId: 42,
+      reviewRequired: true,
+      styleAudit: { fixCount: 0, score: 1.5 },
+      reviewReasons: ["citations-missing", "evidence-reconciliation-incomplete"],
+      checkpointDraftId: null,
+    };
+    const out = sanitizeJsonLeaves(input);
+    assert.deepEqual(out, input);
+    assert.equal(out.finalDraftId, 42);
+    assert.equal(out.reviewRequired, true);
+    assert.equal(out.styleAudit.score, 1.5);
+    assert.equal(out.checkpointDraftId, null);
+  });
+
+  it("walks arrays of objects inside arrays", () => {
+    const out = sanitizeJsonLeaves({ rows: [[{ excerpt: `a${NUL}b` }]] });
+    assert.deepEqual(out, { rows: [[{ excerpt: "ab" }]] });
+  });
+
+  it("leaves a Date alone rather than flattening it to an empty object", () => {
+    // `Object.entries(new Date())` is [], so a naive walk would destroy this.
+    const when = new Date("2026-09-30T12:00:00.000Z");
+    const out = sanitizeJsonLeaves({ at: when });
+    assert.ok(out.at instanceof Date);
+    assert.equal(out.at.toISOString(), "2026-09-30T12:00:00.000Z");
+  });
+
+  it("handles the empty and absent cases without throwing", () => {
+    assert.deepEqual(sanitizeJsonLeaves({}), {});
+    assert.deepEqual(sanitizeJsonLeaves([]), []);
+    assert.equal(sanitizeJsonLeaves(null), null);
+    assert.equal(sanitizeJsonLeaves(undefined), undefined);
+    assert.equal(sanitizeJsonLeaves(7), 7);
   });
 });
