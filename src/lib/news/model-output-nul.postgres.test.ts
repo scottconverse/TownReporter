@@ -15,6 +15,17 @@ import {
 /*
   U19: the writers U15's own report listed as still unguarded.
 
+  U22 (batch 5) added the last of them: `persistPlan`, the planner MODEL's own
+  output. An entity, an anomaly and a dead end each write their own `text`
+  columns, and the dead end repeats the hypothesis' text in a `where body = ...`
+  lookup against a row that was stored SANITIZED -- so the case at the bottom of
+  this file checks both that the bytes cannot fail the round and that the
+  lookup still finds its hypothesis. The queries the app derives from that
+  hypothesis are the model's text too, and `query_fingerprint` is written from
+  the same string as `query`: a guard on the column but not on the fingerprint
+  fails the same INSERT one line later, which is why the plan case checks the
+  search receipt's row as well.
+
   SCAN-001 fixed the Scan path. Everything else a MODEL writes was still going
   straight into an INSERT, and a single U+0000 from a model does not spoil one
   field -- Postgres refuses the whole statement with "invalid byte sequence for
@@ -54,8 +65,12 @@ let ensureDarkSchema: typeof import("./dark.ts").ensureDarkSchema;
 let readDarkDials: typeof import("./dark.ts").readDarkDials;
 let insertProposedNewsroomSource: typeof import("./source-seeds.server.ts").insertProposedNewsroomSource;
 let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
+let researchLoop: typeof import("./investigate.ts").researchLoop;
+let emptyPlan: typeof import("./investigate.ts").emptyPlan;
 
 const NUL = String.fromCharCode(0);
+/* The other control character: stripped by `storableText`, accepted by Postgres. */
+const CTRL = String.fromCharCode(1);
 
 // desk.ts has Vite aliases and extensionless imports. Resolve those only in
 // this Node test process, as scan-model-nul.postgres.test.ts does.
@@ -94,6 +109,7 @@ if (probe.ok) {
     ({ synthesizeSignals, ensureDarkSchema, readDarkDials } = await import("./dark.ts"));
     ({ insertProposedNewsroomSource } = await import("./source-seeds.server.ts"));
     ({ ensureJobsSchema } = await import("./jobs.ts"));
+    ({ researchLoop, emptyPlan } = await import("./investigate.ts"));
 
     const sql = await db.getSql();
     const migrationDir = resolve(process.cwd(), "migrations");
@@ -519,6 +535,181 @@ it(
     assert.equal(row!.status, "proposed");
     for (const [column, value] of Object.entries(row!)) {
       assert.equal(carriesNul(value), false, `sources.${column} must hold no NUL`);
+    }
+  },
+);
+
+it(
+  "a model-written NUL in a research plan cannot fail the real PostgreSQL round it is written in",
+  { skip, timeout: 120000 },
+  async () => {
+    assert.equal(db.getDbSource(), "neon", "fixture must use the real pg adapter, not PGLite");
+    const sql = await db.getSql();
+    const suffix = ++fixtureCounter;
+    const room = 97400 + suffix;
+    const user = `model-nul-plan-${process.pid}-${suffix}`;
+    await sql.query("insert into newsrooms(id,name) values($1,'NUL plan room')", [room]);
+    await sql.query(
+      `insert into paper_settings
+        (newsroom_id,name,city,state,timezone,onboarded,youtube_channels,meeting_keywords,seed_sources)
+       values ($1,'Test Paper','Longmont','CO','America/Denver',true,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb)`,
+      [room],
+    );
+    const [investigation] = await sql.query<{ id: number }>(
+      "insert into investigations(user_id,newsroom_id,title) values($1,$2,'NUL plan investigation') returning id",
+      [user, room],
+    );
+
+    /*
+      U22: `persistPlan` was the last writer of model-written prose without a
+      guard. An entity, an anomaly and a dead end each reach their own `text`
+      columns, and each of them is the model's own sentence -- so one U+0000
+      anywhere in the plan fails the statement it lands in and, because a plan
+      write happens inside the pass's transaction, takes every write after it
+      with it.
+
+      The dead end repeats the hypothesis' text on purpose. The hypothesis loop
+      stores a SANITIZED body, so the dead end's `where body = ...` lookup has
+      to compare the sanitized value too; if it compared the model's raw text it
+      would match no row at all, and the assertion at the end -- that the
+      hypothesis row was found and updated -- is what would fail. Nothing here
+      throws in that case: the dead end would simply be filed against no
+      hypothesis, silently.
+    */
+    const hypothesisText = `The clerk${NUL} amended the minutes after the vote`;
+    const plan = emptyPlan();
+    plan.summary = `Planned${NUL} a records sweep.`;
+    plan.entities = [
+      { name: `Clerk${NUL} office`, kind: `agency${NUL}`, why: `Named${NUL} in the minutes` },
+    ];
+    plan.hypotheses = [
+      { text: hypothesisText, supporting: `Minutes${NUL} p.4`, contradicting: "" },
+      /*
+        A second pair whose byte is a control character rather than a NUL. A
+        NUL in the lookup's comparison always rejects at the driver, so it can
+        only ever prove the guard is present; this one is accepted by Postgres
+        and would be stored, which is the case a lookup comparing the model's
+        RAW text gets silently wrong -- the dead end is filed and the
+        hypothesis it names stays open, with no error anywhere.
+      */
+      { text: `The packet${CTRL} was withheld`, supporting: "", contradicting: "" },
+    ];
+    plan.anomalies = [{ kind: `records${NUL}`, summary: `The minutes${NUL} were amended` }];
+    plan.dead_ends = [
+      { hypothesis: hypothesisText, reason: `No${NUL} record of the amendment` },
+      { hypothesis: `The packet${CTRL} was withheld`, reason: `No index${CTRL} entry for it` },
+    ];
+
+    // Before the guard each of these three writes rejected with the Postgres
+    // encoding error, so the rejection IS the failure this reproduces: it is
+    // deliberately not caught here.
+    await researchLoop({
+      userId: user,
+      investigationId: investigation.id,
+      newsroomId: room,
+      hops: 1,
+      planner: async () => plan,
+      // The hypothesis is real, so the app's own search minimums derive queries
+      // from its text -- NUL and all. The stub keeps that inside the process;
+      // what it searches is not what this case is testing.
+      search: async () => [],
+      archives: async () => [],
+    });
+
+    const [entity] = await sql.query<{ name: string; kind: string; why: string }>(
+      "select name, kind, why from entities where newsroom_id=$1",
+      [room],
+    );
+    assert.ok(entity, "the entity must have been filed instead of lost to the encoding error");
+    assert.equal(entity!.name, "Clerk office");
+    assert.equal(entity!.kind, "agency");
+    assert.equal(entity!.why, "Named in the minutes");
+    for (const [column, value] of Object.entries(entity!)) {
+      assert.equal(carriesNul(value), false, `entities.${column} must hold no NUL`);
+    }
+
+    const [anomaly] = await sql.query<{ kind: string; summary: string }>(
+      "select kind, summary from anomalies where investigation_id=$1",
+      [investigation.id],
+    );
+    assert.ok(anomaly, "the anomaly must have been filed");
+    assert.equal(anomaly!.kind, "records");
+    assert.equal(anomaly!.summary, "The minutes were amended");
+    for (const [column, value] of Object.entries(anomaly!)) {
+      assert.equal(carriesNul(value), false, `anomalies.${column} must hold no NUL`);
+    }
+
+    const deadEnds = await sql.query<{
+      hypothesis: string;
+      dismissed_because: string;
+      entities: string;
+    }>(
+      "select hypothesis, dismissed_because, entities from dead_ends where investigation_id=$1 order by id",
+      [investigation.id],
+    );
+    assert.equal(deadEnds.length, 2, "both dead ends must have been filed");
+    for (const [index, row] of deadEnds.entries()) {
+      for (const [column, value] of Object.entries(row)) {
+        assert.equal(carriesNul(value), false, `dead_ends.${column} of row ${index} must hold no NUL`);
+      }
+    }
+    const deadEnd = deadEnds.find(
+      (row) => row.hypothesis === "The clerk amended the minutes after the vote",
+    );
+    assert.ok(deadEnd, "the hypothesis whose text carried a NUL must be stored stripped");
+    assert.equal(deadEnd!.dismissed_because, "No record of the amendment");
+    assert.match(deadEnd!.entities, /Clerk office/, "the stored entity names join the blob");
+    assert.ok(
+      deadEnds.some((row) => row.hypothesis === "The packet was withheld"),
+      "the control character is stripped from the dead end's own copy too",
+    );
+
+    const hypotheses = await sql.query<{
+      body: string;
+      status: string;
+      transition_note: string;
+    }>("select body, status, transition_note from hypotheses where investigation_id=$1 order by id", [
+      investigation.id,
+    ]);
+    assert.equal(hypotheses.length, 2, "both hypotheses must have been filed");
+    for (const [index, row] of hypotheses.entries()) {
+      for (const [column, value] of Object.entries(row)) {
+        assert.equal(carriesNul(value), false, `hypotheses.${column} of row ${index} must hold no NUL`);
+      }
+    }
+    const hypothesis = hypotheses.find(
+      (row) => row.body === "The clerk amended the minutes after the vote",
+    );
+    assert.ok(hypothesis, "the hypothesis whose text carried a NUL must be stored stripped, not dropped");
+    assert.equal(
+      hypothesis!.status,
+      "open",
+      "the dead end's sanitized `body = ...` lookup must match the sanitized hypothesis row",
+    );
+    assert.match(hypothesis!.transition_note, /Possible dead end 1\/3/);
+    const controlHypothesis = hypotheses.find((row) => row.body === "The packet was withheld");
+    assert.ok(controlHypothesis, "the control character must be stripped out of the body too");
+    assert.equal(
+      controlHypothesis!.status,
+      "open",
+      "a lookup comparing the model's raw text would match no row here, silently",
+    );
+    assert.match(controlHypothesis!.transition_note, /No index entry for it/);
+
+    /*
+      The queries the app derived from that hypothesis are the model's words
+      too, and `query_fingerprint` is written from the same string as `query`.
+      A guard applied to the column but not to the fingerprint leaves the same
+      failed INSERT one line later, which is what this row is here to catch.
+    */
+    const [log] = await sql.query<Record<string, string>>(
+      "select query, query_fingerprint, research_question, caused_by from search_log where investigation_id=$1",
+      [investigation.id],
+    );
+    assert.ok(log, "the hop's search receipt must have been filed");
+    assert.match(log!.query, /amended the minutes/);
+    for (const [column, value] of Object.entries(log!)) {
+      assert.equal(carriesNul(value), false, `search_log.${column} must hold no NUL`);
     }
   },
 );
