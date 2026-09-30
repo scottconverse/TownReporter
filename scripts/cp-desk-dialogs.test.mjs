@@ -288,6 +288,9 @@ const paperUrl = await load("src/lib/paper.ts");
 const preflightUrl = await load("src/lib/news/preflight.ts", {
   "./provider-registry.ts": providerRegistryUrl,
 });
+/* U26b (2026-09-30): lead-match.ts imports nothing at all now -- the place
+   words its stoplist is built from arrive as a caller's parameter
+   (NewsroomPlace), not from the shipped paper constants it used to import. */
 const leadMatchUrl = await load("src/lib/news/lead-match.ts", {
   "./preflight.ts": preflightUrl,
 });

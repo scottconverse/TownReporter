@@ -17,6 +17,7 @@
  * then the sort. Anything else changes which rows a page contains.
  */
 import { nearDuplicate, openLeads } from "./desk-copy.ts";
+import type { NewsroomPlace } from "./lead-match.ts";
 import { cleanListWindow, type ListFilterWindow } from "./list-window.ts";
 
 /**
@@ -102,13 +103,18 @@ export function queueMatchesSearch(lead: QueueLead, needle: string): boolean {
 }
 
 /** The leads the desk already matches to a piece that ran -- the "≈ Printed"
- *  tab. The same `nearDuplicate` the row's chip and "Kill as duplicate" use. */
+ *  tab. The same `nearDuplicate` the row's chip and "Kill as duplicate" use,
+ *  and the same `place` this newsroom's matcher runs with: the tab's count and
+ *  the chip on the row have to agree about what counts as one of the paper's
+ *  own place names. */
 export function queuePrintedMatches<T extends QueueLead>(
   leads: readonly T[],
   printed: readonly QueuePrinted[],
+  place?: NewsroomPlace | null,
 ): T[] {
   return leads.filter(
-    (lead) => nearDuplicate({ headline: lead.headline, topic: lead.topic ?? undefined }, printed) !== null,
+    (lead) =>
+      nearDuplicate({ headline: lead.headline, topic: lead.topic ?? undefined }, printed, place) !== null,
   );
 }
 
@@ -136,13 +142,14 @@ export type QueueCounts = {
 export function queueCounts(
   leads: readonly QueueLead[],
   printed: readonly QueuePrinted[],
+  place?: NewsroomPlace | null,
 ): QueueCounts {
   const byStatus = (status: string) => leads.filter((lead) => lead.status === status).length;
   return {
     open: openLeads(leads).length,
     held: byStatus("held"),
     killed: byStatus("killed"),
-    printed: queuePrintedMatches(leads, printed).length,
+    printed: queuePrintedMatches(leads, printed, place).length,
     all: leads.length,
     publishedLeads: byStatus("published"),
   };
@@ -160,6 +167,7 @@ export function queueSelect<T extends QueueLead>(
   leads: readonly T[],
   printed: readonly QueuePrinted[],
   window: Pick<QueueWindow, "filter" | "section" | "sort"> & { needle: string },
+  place?: NewsroomPlace | null,
 ): T[] {
   const { filter, section, sort, needle } = window;
   const byFilter =
@@ -168,7 +176,7 @@ export function queueSelect<T extends QueueLead>(
       : filter === "held"
         ? leads.filter((lead) => lead.status === "held")
         : filter === "printed"
-          ? queuePrintedMatches(leads, printed)
+          ? queuePrintedMatches(leads, printed, place)
           : filter === "open"
             ? openLeads(leads)
             : leads;

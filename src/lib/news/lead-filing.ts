@@ -7,6 +7,7 @@ import {
   normalizeSourceUrl,
   sameStoryForMerge,
   type MatchCandidateLead,
+  type NewsroomPlace,
 } from "./lead-match.ts";
 
 /**
@@ -112,6 +113,11 @@ export type ScanAiLead = {
  *
  * The merge only ever looks at leads this call inserted -- never at a row an
  * editor has already seen, killed or held.
+ *
+ * Unit U26b (2026-09-30): `place` is the newsroom's own city/state/county, and
+ * it is threaded to every matcher call below so this desk's region words are
+ * its own (`getPaperPlace`, ./paper-settings.ts) and never the shipped
+ * paper's. Omitted, the matcher uses the generic civic vocabulary only.
  */
 export async function fileScanLeads(
   sql: SqlTag,
@@ -120,6 +126,7 @@ export async function fileScanLeads(
   runId: number,
   aiLeads: ScanAiLead[],
   existing: MatchCandidateLead[],
+  place?: NewsroomPlace | null,
 ): Promise<{
   leadsCreated: number;
   resurfacedKilled: number;
@@ -208,7 +215,7 @@ export async function fileScanLeads(
     if (!headline.trim()) continue;
 
     const sibling = insertedThisRun.find((prior) =>
-      sameStoryForMerge({ headline, source_urls: candidateUrls }, prior),
+      sameStoryForMerge({ headline, source_urls: candidateUrls }, prior, place),
     );
     if (sibling) {
       const merged = mergeSourceUrls(sibling.source_urls, candidateUrls);
@@ -223,7 +230,7 @@ export async function fileScanLeads(
       continue;
     }
 
-    const matchId = findMatchingLead({ headline, source_urls: candidateUrls }, existing);
+    const matchId = findMatchingLead({ headline, source_urls: candidateUrls }, existing, place);
 
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
@@ -233,6 +240,7 @@ export async function fileScanLeads(
       const strength = matchStrength(
         { headline, source_urls: candidateUrls },
         { headline: matched.headline, source_urls: matched.source_urls },
+        place,
       );
       if (strength === "strong") {
         // Unit AK item 2: a strong match against a KILLED lead is normally
@@ -242,7 +250,7 @@ export async function fileScanLeads(
         // the killed row's "came back" count stays true).
         const killedWithNewFacts =
           matched.status === "killed" &&
-          newFactsIn({ why, evidence }, matched);
+          newFactsIn({ why, evidence }, matched, place);
         await sql`
             update leads
             set resurfaced_count = resurfaced_count + 1,

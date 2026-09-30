@@ -12,7 +12,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
-import { getPaperConfig } from "./paper-settings";
+import { getPaperConfig, getPaperPlace } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
@@ -564,14 +564,22 @@ export const listQueuePage = createServerFn({ method: "GET" })
   .handler(async ({ context, data }) => {
     const all = await queryLeadRows(context);
     const printed = await queryPublishedRows(context);
-    const matched = queueSelect(all, printed, {
-      filter: data.filter,
-      section: data.section,
-      sort: data.sort,
-      needle: queueNeedle(data.search),
-    });
+    // U26b: the "≈ Printed" tab and each row's chip are decided with this
+    // newsroom's own place words, the same ones the matcher files leads with.
+    const place = await getPaperPlace(owned(context));
+    const matched = queueSelect(
+      all,
+      printed,
+      {
+        filter: data.filter,
+        section: data.section,
+        sort: data.sort,
+        needle: queueNeedle(data.search),
+      },
+      place,
+    );
     const { rows, total } = takeWindow(matched, data.offset, data.limit);
-    return { rows, total, counts: queueCounts(all, printed) };
+    return { rows, total, counts: queueCounts(all, printed, place) };
   });
 
 /**
@@ -1320,6 +1328,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const fetchUrl = deps.ingestUrl ?? ingestUrl;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
+  /*
+    U26b: this newsroom's own place, read HERE and not at the point of use.
+
+    `fileScanLeads` runs inside `commitResults`, which runs inside
+    `withTransaction` (or the scheduler's equivalent), and `getPaperPlace`
+    reads through the connection pool: on the dev desk's single PGlite
+    connection a pool read inside an open transaction is a second query on a
+    connection that is already busy with this one. Reading it out here, beside
+    the paper config read, keeps it a plain read on an idle connection. A
+    scan is one job; the paper's place does not change under it.
+  */
+  const scanPlace = await getPaperPlace(owned(context));
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   const meetingChannels = paperConfig.youtubeChannels ?? [];
@@ -1872,7 +1892,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
-    } = await fileScanLeads(writeSql, context, owned(context), runId, data.leads, existingLeads);
+    } = await fileScanLeads(
+      writeSql,
+      context,
+      owned(context),
+      runId,
+      data.leads,
+      existingLeads,
+      scanPlace,
+    );
 
     let proposed = 0;
     for (const p of data.proposed_sources) {
