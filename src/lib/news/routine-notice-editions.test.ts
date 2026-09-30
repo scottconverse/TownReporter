@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eligibleRoutineNotices, planRoutineEditions } from "./routine-notice-editions.ts";
+import { eligibleRoutineNotices, plainField, planRoutineEditions } from "./routine-notice-editions.ts";
 import { validateRoutineNotice, type StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 const n = (
   formatKey: StructurallyValidRoutineNotice["formatKey"],
@@ -338,4 +338,108 @@ test("publishes plain text only for every routine format's line", () => {
   const plans = planRoutineEditions(result.eligible, "2026-09-08");
   assert.equal(plans.length, 2);
   for (const plan of plans) assertNoReaderMarkup(plan.body);
+});
+
+/*
+  Source text that reads as an ordinary field until `plainField` decodes its
+  entities and drops its markup characters — at which point it is a live URL in
+  the published line. Detection that only inspects the raw value sees none of
+  these; detection on the cleaned value sees all of them.
+*/
+const SOURCE_FIELD_EXPLOITS = [
+  "&#104;ttps://evil.example/login",
+  "h&#116;tps://evil.example",
+  "https&colon;//evil.example",
+  "ht*tps://evil.example",
+  "ht_tps://evil.example/x",
+  "htt[]ps://evil.example",
+];
+// Every source-field value these tests feed through `plainField`, including the
+// punctuation the edition must keep.
+const PLAIN_FIELD_VALUES = [
+  ...SOURCE_FIELD_EXPLOITS,
+  "**Storytime** _today_",
+  "All Ages Stay &amp; Play Friday",
+  "9 AM–5 PM (closed 12–1); call 303-555-0100.",
+  "Bags `out` by 7 AM; #3 cans, please.",
+  "Bags before 7 AM Monday; leave them out all week.",
+  "City Council [regular session]",
+  "Rogers Grove (south lot)",
+  "North of 9th Avenue",
+  "Main Library",
+  "Civic Center",
+  "L".repeat(160),
+  "L".repeat(161),
+];
+test("sends source text that only reads as a web address after cleaning to review", () => {
+  for (const [index, exploit] of SOURCE_FIELD_EXPLOITS.entries()) {
+    // The raw value evades a raw-text check, and the cleaned value is a URL.
+    assert.doesNotMatch(exploit, /https?:\/\/|www\.|\]\(/i, `raw text already looked like a URL: ${exploit}`);
+    assert.match(plainField(exploit), /:\/\//, `not a URL once cleaned: ${exploit}`);
+    const inProgram = n(
+      "parks-recreation-notice",
+      { issuer: "Parks", program: exploit, start: "2026-09-30T10:00:00-06:00", location: "Trail" },
+      `evade-program-${index}`,
+    );
+    const program = eligibleRoutineNotices([inProgram], "2026-09-30", "America/Denver");
+    assert.equal(program.eligible.length, 0, `program published: ${exploit}`);
+    assert.deepEqual(
+      program.review.map((x) => x.provenance.externalId),
+      [`evade-program-${index}`],
+      `program not reviewed: ${exploit}`,
+    );
+    const inTitle = n(
+      "community-arts-event-logistics",
+      { issuer: "Arts", title: exploit, start: "2026-09-30T18:00:00-06:00", venue: "Park" },
+      `evade-title-${index}`,
+    );
+    const title = eligibleRoutineNotices([inTitle], "2026-09-30", "America/Denver");
+    assert.equal(title.eligible.length, 0, `title published: ${exploit}`);
+    assert.equal(title.review.length, 1, `title not reviewed: ${exploit}`);
+    const inVenue = n(
+      "community-arts-event-logistics",
+      { issuer: "Arts", title: "Storytime", start: "2026-09-30T18:00:00-06:00", venue: exploit },
+      `evade-venue-${index}`,
+    );
+    const venue = eligibleRoutineNotices([inVenue], "2026-09-30", "America/Denver");
+    assert.equal(venue.eligible.length, 0, `venue published: ${exploit}`);
+    assert.equal(venue.review.length, 1, `venue not reviewed: ${exploit}`);
+  }
+});
+test("publishes no edition body from evasive source text", () => {
+  const notices = SOURCE_FIELD_EXPLOITS.flatMap((exploit, index) => [
+    n(
+      "parks-recreation-notice",
+      { issuer: "Parks", program: exploit, start: "2026-09-30T10:00:00-06:00", location: "Trail" },
+      `body-program-${index}`,
+    ),
+    n(
+      "community-arts-event-logistics",
+      { issuer: "Arts", title: exploit, start: "2026-09-30T18:00:00-06:00", venue: "Park" },
+      `body-title-${index}`,
+    ),
+    n(
+      "community-arts-event-logistics",
+      { issuer: "Arts", title: "Storytime", start: "2026-09-30T18:00:00-06:00", venue: exploit },
+      `body-venue-${index}`,
+    ),
+  ]);
+  const result = eligibleRoutineNotices(notices, "2026-09-30", "America/Denver");
+  assert.equal(result.eligible.length, 0);
+  assert.equal(result.review.length, notices.length);
+  const plans = planRoutineEditions(result.eligible, "2026-09-30");
+  assert.equal(plans.length, 0);
+  for (const plan of plans) {
+    assert.doesNotMatch(plan.body, /evil/);
+    assertNoReaderMarkup(plan.body);
+  }
+});
+test("cleaning a source field is idempotent, so detection sees the published text", () => {
+  for (const value of PLAIN_FIELD_VALUES) {
+    assert.equal(
+      plainField(plainField(value)),
+      plainField(value),
+      `plainField is not idempotent for: ${value}`,
+    );
+  }
 });

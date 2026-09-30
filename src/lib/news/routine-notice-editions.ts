@@ -48,7 +48,7 @@ function decodeText(value: string | undefined) {
   punctuation — `,` `.` `:` `-` `'` `&` `(` `)` — survives untouched.
 */
 const MARKUP_CHARACTERS = /[*_`#[\]<>]/g;
-function plainField(value: string | undefined) {
+export function plainField(value: string | undefined) {
   return decodeText(value).replace(MARKUP_CHARACTERS, "").replace(/\s+/g, " ").trim();
 }
 // Every free-text field `logisticsLine` interpolates. Values here come from the
@@ -66,15 +66,30 @@ const SOURCE_TEXT_FIELDS = [
   "scheduleChange",
   "collectionInstructions",
 ] as const;
-// A web address or markdown link in source text is the one thing an editor must
-// look at before it could ever be published; a very long field is the other.
-const SOURCE_WEB_ADDRESS = /https?:\/\/|www\./i;
+/*
+  A web address or markdown link in source text is the one thing an editor must
+  look at before it could ever be published; a very long field is the other.
+
+  Detection runs on the raw value *and* on `plainField(raw)`, because cleaning
+  is what the reader sees: `&#104;ttps://…`, `https&colon;//…`, `ht*tps://…`
+  and `htt[]ps://…` all read as an ordinary field until entity decoding and
+  markup removal turn them into a live `https://…` in the published line. `://`
+  catches the same trick behind any other scheme.
+*/
+const SOURCE_WEB_ADDRESS = /https?:\/\/|www\.|\]\(/i;
+const ANY_URL_SCHEME = /:\/\//;
 const MAXIMUM_PLAIN_FIELD = 160;
 function needsEditorForSourceText(fields: Record<string, string>) {
   return SOURCE_TEXT_FIELDS.some((field) => {
     const raw = fields[field];
     if (!raw) return false;
-    return SOURCE_WEB_ADDRESS.test(raw) || raw.includes("](") || plainField(raw).length > MAXIMUM_PLAIN_FIELD;
+    const cleaned = plainField(raw);
+    return (
+      SOURCE_WEB_ADDRESS.test(raw) ||
+      SOURCE_WEB_ADDRESS.test(cleaned) ||
+      ANY_URL_SCHEME.test(cleaned) ||
+      cleaned.length > MAXIMUM_PLAIN_FIELD
+    );
   });
 }
 function displayDateOnly(value: string) {
