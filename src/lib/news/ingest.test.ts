@@ -29,6 +29,67 @@ describe("PrimeGov API capture", () => {
       setFetchImplForTests(null);
     }
   });
+
+  /*
+    The portal's catalog, on its public page. Both halves of the read used to
+    swallow their own failure (`.catch(() => [])`), so a 5xx, a timeout or a
+    block produced "0 meetings on file" and `outcome: "fetched"` -- an outage
+    recorded as a reading, and an empty catalog the rest of the desk could take
+    as evidence that a meeting or a document does not exist.
+  */
+  const portal = "https://longmont.primegov.com/public/portal";
+  const meetingRow = [
+    { id: 3781, title: "City Council Regular Session", date: "2026-09-11", dateTime: "2026-09-11T18:00:00", location: "Chambers", documentList: [{ id: 1, templateId: 2, templateName: "Agenda" }] },
+  ];
+
+  it("records an unreachable portal as a failed read, never as an empty catalog", async () => {
+    setFetchImplForTests(async () => new Response("gateway down", { status: 503 }));
+    try {
+      const result = await ingestDocument(portal);
+      assert.equal(result.ok, false);
+      assert.notEqual(result.outcome, "fetched");
+      assert.equal(result.outcome, "fetch-failed");
+      assert.equal(result.status, 503);
+      assert.match(result.text, /503/, "the reason the read failed is recorded");
+      assert.doesNotMatch(result.text, /0 meetings on file/);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("records a portal timeout as a failure, not as an empty catalog", async () => {
+    setFetchImplForTests(async () => {
+      throw new Error("The operation was aborted due to timeout");
+    });
+    try {
+      const result = await ingestDocument(portal);
+      assert.equal(result.ok, false);
+      assert.equal(result.outcome, "fetch-failed");
+      assert.match(result.text, /timed out/, "the timeout is the recorded reason");
+      assert.doesNotMatch(result.text, /0 meetings on file/);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("keeps the list that answered, and says the catalog is partial", async () => {
+    setFetchImplForTests(async (url) =>
+      url.toString().includes("ListUpcomingMeetings")
+        ? new Response(JSON.stringify(meetingRow), { headers: { "content-type": "application/json" } })
+        : new Response("gateway down", { status: 503 }),
+    );
+    try {
+      const result = await ingestDocument(portal);
+      assert.equal(result.outcome, "fetched");
+      assert.equal(result.ok, true);
+      assert.match(result.text, /City Council Regular Session/, "the list that answered is kept");
+      assert.match(result.text, /PARTIAL/);
+      assert.match(result.text, /503/);
+      assert.match(result.title, /^longmont\.primegov\.com /);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
 });
 
 describe("ingestUrl HTML scanner path", () => {

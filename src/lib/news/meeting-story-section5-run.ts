@@ -1,5 +1,6 @@
 import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
+import { primeGovOriginForNewsroom } from "./primegov-source.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
 import { fetchStructuredVotesForDate } from "./meeting-vote-sources.ts";
 import {
@@ -17,6 +18,8 @@ import { meetingClock } from "./meeting-draft-input.ts";
 export type Section5Deps = {
   packetForTitle?: typeof primeGovDocumentsForTitle;
   packetItemsForMeeting?: typeof packetItemsForMeeting;
+  /** Test seam: which portal this newsroom watches. See ./primegov-source.ts. */
+  primeGovOrigin?: typeof primeGovOriginForNewsroom;
 };
 
 export type Section5Result = {
@@ -74,11 +77,20 @@ export async function runSection5ForArtifact(
   const packetLookup = deps.packetForTitle ?? primeGovDocumentsForTitle;
   let packetItems: PacketItem[] = [];
   try {
-    const packet = await packetLookup(input.title);
-    if (packet?.meeting) {
-      // Real item list comes from the compiled agenda document via the parser,
-      // not from documentList template names ("Agenda"/"Packet").
-      packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting);
+    /*
+      The portal to ask comes out of this newsroom's own watch list. It used to
+      be a constant (Longmont's) inside the lookup, so every other city's tape
+      was matched against Longmont's meetings; with no portal configured there
+      is no lookup at all, which is the honest answer and not a fallback.
+    */
+    const origin = await (deps.primeGovOrigin ?? primeGovOriginForNewsroom)(sql, input.newsroomId);
+    if (origin) {
+      const packet = await packetLookup(input.title, origin);
+      if (packet?.meeting) {
+        // Real item list comes from the compiled agenda document via the parser,
+        // not from documentList template names ("Agenda"/"Packet").
+        packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting, origin);
+      }
     }
   } catch {
     packetItems = [];

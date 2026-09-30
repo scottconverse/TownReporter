@@ -768,15 +768,38 @@ export function describeLiveStatus(player: {
 type YoutubeSettings = {
   channels: string[];
   meetingKeywords: string[];
+  /** The PrimeGov portal this newsroom watches, or null when it watches none.
+   *  Never a default: another city's portal is not a fallback, it is a wrong
+   *  answer (see ./primegov-source.ts). */
+  primeGovOrigin: string | null;
 };
 
+/*
+  A `.server` read (it opens the database), so it is handed to
+  createServerOnlyFn the way the two channel readers above are: this file is in
+  the /desk bundle because ingest.ts imports it, and the client build must prune
+  the import rather than resolve it.
+*/
+const currentPrimeGovOrigin = createServerOnlyFn(
+  async () => (await import("./primegov-source.server.ts")).currentPrimeGovOrigin(),
+);
+
 async function currentYoutubeSettings(): Promise<YoutubeSettings> {
+  let primeGovOrigin: string | null = null;
+  try {
+    primeGovOrigin = await currentPrimeGovOrigin();
+  } catch {
+    // A watch-list read that fails is "no portal configured" for this pass: the
+    // tape still ingests, and no other city's portal is asked in its place.
+    primeGovOrigin = null;
+  }
   try {
     const { getPaperConfig } = await import("./paper-settings.ts");
     const config = await getPaperConfig();
     return {
       channels: config.youtubeChannels,
       meetingKeywords: config.meetingKeywords,
+      primeGovOrigin,
     };
   } catch {
     return {
@@ -785,6 +808,7 @@ async function currentYoutubeSettings(): Promise<YoutubeSettings> {
       // the editor explicitly opened, but sister-channel discovery fails shut.
       channels: [],
       meetingKeywords: MEETING_KEYWORDS,
+      primeGovOrigin,
     };
   }
 }
@@ -865,8 +889,12 @@ export async function ingestYoutube(url: URL): Promise<YoutubeIngest | null> {
     const title = text.match(/^Title: (.+)$/m)?.[1] ?? `YouTube ${videoId}`;
     let extras: string[] = [];
     try {
+      // Only the newsroom's own portal: with none configured there is no
+      // lookup, rather than a lookup against the shipped example's city.
       const { primeGovDocumentsForTitle } = await import("./primegov.ts");
-      const hit = await primeGovDocumentsForTitle(title);
+      const hit = settings.primeGovOrigin
+        ? await primeGovDocumentsForTitle(title, settings.primeGovOrigin)
+        : null;
       if (hit?.urls.length) {
         extras = hit.urls;
         return {

@@ -43,7 +43,7 @@ function agendaDocument(meeting: PrimeGovMeeting): PrimeGovDocument | null {
  */
 export async function packetItemsForMeeting(
   meeting: PrimeGovMeeting,
-  origin = "https://longmont.primegov.com",
+  origin: string,
 ): Promise<PacketItem[]> {
   const doc = agendaDocument(meeting);
   if (!doc) return [];

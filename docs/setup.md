@@ -755,7 +755,27 @@ If the city uses PrimeGov, add the public portal:
 https://{tenant}.primegov.com/public/portal
 ```
 
+**Accept** the row once it is on the watch list. The first accepted source whose
+host ends in `.primegov.com` is the portal this newsroom reads — that is the
+only place the portal is configured, and there is no built-in city to fall back
+on. With no PrimeGov source accepted, meeting videos are ingested without a
+packet lookup rather than against some other city’s portal; if you have more
+than one portal accepted, only the first is read.
+
 Ingest uses `ListUpcomingMeetings` / `ListArchivedMeetings?year=` and `CompiledDocument?meetingTemplateId=…` (template id, not row id). Home `/` on PrimeGov redirects to login; the public catalog is `/public/portal`. You do not need Crawl4AI.
+
+A meeting video joins a portal meeting only when the tape's date and the
+meeting's date agree **and** the two titles share a body name (`city council`,
+`planning`, `zoning`, `school board`, …). A shared date alone is not enough —
+several bodies meet on the same night — so a tape whose title carries no date
+and no body name is written without a packet rather than joined to the nearest
+meeting.
+
+If the portal answers with a failure on both of its meeting lists (a 5xx, a
+timeout or a block), the source is recorded as "Could not check" with the reason
+and no catalog is stored. If only one list fails, the catalog is stored with a
+`PARTIAL` line naming the list that could not be read. An outage is never
+recorded as a portal with no meetings.
 
 If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead, add those URLs as official sources. The Playwright render path already knows those hosts.
 

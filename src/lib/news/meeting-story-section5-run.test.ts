@@ -7,12 +7,19 @@ import type { Sql } from "../db.ts";
  * models the stored artifact + segments, and counts the section-5 calls. This
  * fails if the pipeline stops calling chunking, alignment, vote extraction,
  * persistence, or the unaligned path.
+ *
+ * `sourceUrls` is the newsroom's watch list, which is where the PrimeGov portal
+ * now comes from (./primegov-source.ts). Boulder by default: a meeting's packet
+ * must be looked up at the portal THIS newsroom watches.
  */
-function harness() {
+function harness(sourceUrls: string[] = ["https://boulder.primegov.com/public/portal"]) {
   const writes: { text: string; params: unknown[] }[] = [];
   const sql = (async () => [] as never[]) as unknown as Sql;
   sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
     writes.push({ text, params });
+    if (/from sources/i.test(text)) {
+      return sourceUrls.map((url) => ({ url })) as T[];
+    }
     if (/from meeting_transcript_artifacts/i.test(text)) {
       return [{ id: 5, storage_path: "C:\\data\\meet.srv3", sha256: "abc123" }] as T[];
     }
@@ -34,26 +41,40 @@ describe("meeting section 5 real pipeline integration", () => {
   it("runs chunking, alignment, vote extraction, persistence, and citation resolution from the stored artifact", async () => {
     const { runSection5ForArtifact } = await import("./meeting-story-section5-run.ts");
     const { sql, writes } = harness();
+    const lookedUpIn: string[] = [];
+    const packetItemsIn: string[] = [];
     const result = await runSection5ForArtifact(
       sql,
       { newsroomId: 1, videoId: "L1AnMLsLwtk", title: "City Council Regular Session", artifactId: 5 },
       {
-        packetForTitle: async () => ({
-          meeting: {
-            id: 1, title: "City Council Regular Session", date: "2026-07-28", dateTime: "2026-07-28T18:00:00",
-            time: "18:00", location: "Council Chambers",
-            documentList: [
-              { id: 1, templateId: 1, compileOutputType: 1, templateName: "Agenda", link: null },
-            ],
-          },
-          urls: [],
-        }),
-        packetItemsForMeeting: async () => [
-          { itemNumber: "1", title: "Approval of the Minutes" },
-          { itemNumber: "2", title: "Airport Rates and Charges Study" },
-        ],
+        // Both seams record the origin they were handed: the portal is this
+        // newsroom's, read out of its watch list, and reaches the packet
+        // download as well as the lookup.
+        packetForTitle: async (_title, origin) => {
+          lookedUpIn.push(origin);
+          return {
+            meeting: {
+              id: 1, title: "City Council Regular Session", date: "2026-07-28", dateTime: "2026-07-28T18:00:00",
+              time: "18:00", location: "Council Chambers",
+              documentList: [
+                { id: 1, templateId: 1, compileOutputType: 1, templateName: "Agenda", link: null },
+              ],
+            },
+            urls: [],
+          };
+        },
+        packetItemsForMeeting: async (_meeting, origin) => {
+          packetItemsIn.push(origin);
+          return [
+            { itemNumber: "1", title: "Approval of the Minutes" },
+            { itemNumber: "2", title: "Airport Rates and Charges Study" },
+          ];
+        },
       },
     );
+    assert.deepEqual(lookedUpIn, ["https://boulder.primegov.com"]);
+    assert.deepEqual(packetItemsIn, ["https://boulder.primegov.com"]);
+    assert.ok(writes.some((w) => /from sources/i.test(w.text) && w.params[0] === 1), "the portal comes from this newsroom's watch list");
     assert.equal(result.aligned, true);
     assert.ok(result.chunkCount >= 1, "chunks were produced");
     assert.ok(writes.some((w) => /meeting_agenda_chunks/.test(w.text)), "chunks persisted");
@@ -81,5 +102,32 @@ describe("meeting section 5 real pipeline integration", () => {
     assert.equal(result.unalignedLead!.untimed, true);
     assert.match(result.unalignedLead!.leadWhy, /align/i);
     assert.ok(writes.some((w) => /meeting_alignments/.test(w.text)), "failed alignment still persisted");
+  });
+
+  it("skips the packet lookup entirely when the newsroom watches no portal", async () => {
+    const { runSection5ForArtifact } = await import("./meeting-story-section5-run.ts");
+    // A watch list with no PrimeGov source: the desk's shipped example city
+    // must not be queried in its place.
+    const { sql, writes } = harness(["https://example.test/council", "https://example.test/agendas"]);
+    const lookedUpIn: string[] = [];
+    let itemsAsked = 0;
+    const result = await runSection5ForArtifact(
+      sql,
+      { newsroomId: 1, videoId: "L1AnMLsLwtk", title: "City Council Regular Session", artifactId: 5 },
+      {
+        packetForTitle: async (_title, origin) => {
+          lookedUpIn.push(origin);
+          return null;
+        },
+        packetItemsForMeeting: async () => {
+          itemsAsked += 1;
+          return [];
+        },
+      },
+    );
+    assert.deepEqual(lookedUpIn, [], "no portal configured means no lookup");
+    assert.equal(itemsAsked, 0, "and no agenda download");
+    assert.equal(result.aligned, false);
+    assert.ok(writes.some((w) => /from sources/i.test(w.text)), "the watch list was read");
   });
 });
