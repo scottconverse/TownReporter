@@ -21,10 +21,11 @@
   It is a ONE-TIME helper and it is deliberately timid:
 
     * it copies, it does not move. The source install is left exactly as it was.
-      When -Force replaces an existing install, only matching regular files in
-      the destination are unlinked after the full copy tree passes preflight;
-      target-only files stay in place. Delete the old source yourself once the
-      paper has read Reddit through the new one for a day.
+      When -Force replaces an existing install, matching regular destination
+      files are backed up and replaced after the full tree passes preflight;
+      target-only files stay in place, and a failed replacement restores the
+      prior files where possible. Delete the old source yourself once the paper
+      has read Reddit through the new one for a day.
     * it refuses to touch an install that is RUNNING. Redlib's executable is
       the file being copied, and a live one is usually locked; more to the
       point, copying the files out from under a running reader and then
@@ -109,6 +110,11 @@ public static class TownReporterPathIdentity {
       return resolved;
     } finally { CloseHandle(handle); }
   }
+  public static bool CanOpenForDelete(string path) {
+    IntPtr handle = CreateFile(path, 0x00010000, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
+    if (handle == new IntPtr(-1)) return false;
+    return CloseHandle(handle);
+  }
 }
 "@
 }
@@ -132,6 +138,29 @@ function Get-PathIdentity {
     return (Get-CleanPath $identity)
   }
   return $clean
+}
+
+function Get-ExecutableImageState {
+  param([string]$ExecutablePath)
+  if (-not $ExecutablePath -or -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) { return 'none' }
+  try {
+    $expected = Get-PathIdentity $ExecutablePath
+    $processName = [IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
+    foreach ($process in @(Get-Process -Name $processName -ErrorAction SilentlyContinue)) {
+      try {
+        $imagePath = [string]$process.MainModule.FileName
+        if (-not $imagePath) { return 'unverified' }
+        $actual = Get-PathIdentity $imagePath
+      } catch { return 'unverified' }
+      if ($actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) { return 'live' }
+    }
+    return 'none'
+  } catch { return 'unverified' }
+}
+
+function Test-CanReplaceFile {
+  param([string]$Path)
+  return [TownReporterPathIdentity]::CanOpenForDelete($Path)
 }
 
 function Get-PathRelativeToRoot {
@@ -304,6 +333,7 @@ function Get-RelocationTree {
       [void]$items.Add([PSCustomObject]@{
         SourcePath = $item.FullName
         TargetPath = Join-Path $Destination $relative
+        RelativePath = $relative
         IsDirectory = [bool]$item.PSIsContainer
       })
       if ($item.PSIsContainer) { $pending.Enqueue($item.FullName) }
@@ -505,9 +535,9 @@ if ($targetExists) {
   }
 }
 
-# Build and validate the entire tree before unlinking any matching destination
-# leaf. Copy-Item can write through a hard link, changing the source or another
-# file that shares the same data, and can follow a destination junction.
+# Build and validate the entire tree before replacing any destination leaf.
+# Copy-Item can write through a hard link, changing the source or another file
+# that shares the same data, and can follow a destination junction.
 $relocationItems = @()
 try {
   $relocationItems = @(Get-RelocationTree -Root $source -Destination $target)
@@ -544,6 +574,47 @@ foreach ($planItem in $relocationItems) {
     [void]$replacementFiles.Add($planItem.TargetPath)
   }
 }
+$targetPidState = Get-RedlibProcess -InstallRoot $target
+$targetImageCandidates = New-Object System.Collections.ArrayList
+if ($targetIsInstall) {
+  try {
+    $targetConfig = Get-Content -Raw -LiteralPath (Join-Path $target "install.json") | ConvertFrom-Json
+    if ($targetConfig.executable) { [void]$targetImageCandidates.Add([string]$targetConfig.executable) }
+  } catch {
+    # The colliding executable paths below still provide a direct process-image check.
+  }
+}
+foreach ($planItem in $relocationItems) {
+  if (-not $planItem.IsDirectory -and [IO.Path]::GetExtension([string]$planItem.TargetPath) -ieq '.exe' -and
+      (Test-Path -LiteralPath $planItem.TargetPath -PathType Leaf) -and
+      -not $targetImageCandidates.Contains([string]$planItem.TargetPath)) {
+    [void]$targetImageCandidates.Add([string]$planItem.TargetPath)
+  }
+}
+$targetImageState = 'none'
+foreach ($candidate in $targetImageCandidates) {
+  $candidateState = Get-ExecutableImageState -ExecutablePath ([string]$candidate)
+  if ($candidateState -eq 'unverified') { $targetImageState = 'unverified'; break }
+  if ($candidateState -eq 'live') { $targetImageState = 'live'; break }
+}
+$targetAnswering = if ($targetIsInstall) { Test-RedlibUp -InstallRoot $target } else { $false }
+if ($targetIsInstall -and (($targetPidState.State -in @('live', 'unverified', 'other')) -or
+    $targetImageState -ne 'none' -or $targetAnswering)) {
+  Write-Say ("  The destination has a running reader (pid state: " + $targetPidState.State + "; image state: " + $targetImageState + ").")
+  Write-Say "  Nothing was changed. Stop or identify the destination reader before replacing its files."
+  Write-Say "  Stop it first, then run this again:"
+  Write-Say "      powershell -ExecutionPolicy Bypass -File ops\redlib.ps1 stop"
+  Write-Say ""
+  exit 1
+}
+foreach ($replacementFile in $replacementFiles) {
+  if (-not (Test-CanReplaceFile -Path ([string]$replacementFile))) {
+    Write-Say "  The destination file cannot be safely replaced right now: $replacementFile. Nothing was changed."
+    Write-Say "  Close anything using it and run this again."
+    Write-Say ""
+    exit 1
+  }
+}
 $targetPidPath = Join-Path $target "redlib.pid"
 if (Test-Path -LiteralPath $targetPidPath) {
   $targetPidItem = Get-Item -LiteralPath $targetPidPath -Force -ErrorAction Stop
@@ -565,59 +636,68 @@ if ($DryRun) {
   exit 0
 }
 
-# Unlink only the exact colliding regular destination files after all source and
-# destination shapes have passed preflight. This breaks hard links safely while
-# preserving target-only files and every source file.
-foreach ($replacementFile in $replacementFiles) {
-  Remove-Item -LiteralPath ([string]$replacementFile) -Force -ErrorAction Stop
-}
-
-Write-Say "  copying..."
-New-Item -ItemType Directory -Force -Path $target | Out-Null
-$copied = 0
-$files = @(Get-ChildItem -LiteralPath $source -Force | Where-Object { $_.Name -ne 'redlib.pid' })
-foreach ($item in $files) {
-  Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force
-  $copied++
-}
-if (-not (Test-InstallAt -Root $target)) {
-  Write-Say "  The copy did not produce an install.json at $target, so this did NOT work."
-  Write-Say "  Nothing that was working has been changed: the original install at $source is"
-  Write-Say "  untouched and .env was not edited. The likely cause is a file that could not be"
-  Write-Say "  read; copy the directory by hand and see what refuses."
-  Write-Say ""
-  exit 1
-}
-
-# The pid file in the target, if one was there from an older install, names a
-# process that is not this install's. Belt and braces beside the exclusion
-# above: a stale pid file is how the next start believes it is already up.
-Remove-Item -LiteralPath (Join-Path $target "redlib.pid") -Force -ErrorAction SilentlyContinue
-
+# Build the corrected metadata before touching the destination. It is committed
+# last so install.json never advertises the new install while its files are still
+# being replaced.
 $configPath = Join-Path $target "install.json"
+$pendingConfigPath = Join-Path $target (".install.json.pending-" + [Guid]::NewGuid().ToString('N'))
+$backupRoot = Join-Path (Split-Path -Parent $target) ((Split-Path -Leaf $target) + ".relocate-backup-" + [Guid]::NewGuid().ToString('N'))
+$backedUpFiles = New-Object System.Collections.ArrayList
+$installedFiles = New-Object System.Collections.ArrayList
+$createdDirectories = New-Object System.Collections.ArrayList
 $rewritten = 0
 $oldRoots = Get-OldRootSpellings @($source, $sourceConfigRoot)
-try {
-  $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
-  $config = Convert-PathInValue -Value $config -OldRoots $oldRoots -New $target -Changed ([ref]$rewritten)
-  $config.installRoot = $target
-  $config.executable = Join-Path $target $executableRelative
-  if ($null -ne $logRelative) { $config.logPath = Join-Path $target $logRelative }
-  $text = $config | ConvertTo-Json -Depth 10
-  # UTF-8 with no BOM: readable by both Windows PowerShell and PowerShell 7, and
-  # the file holds nothing but ASCII paths.
-  [IO.File]::WriteAllText($configPath, $text, (New-Object System.Text.UTF8Encoding($false)))
-} catch {
-  Write-Say "  The files were copied but install.json could not be rewritten: $($_.Exception.Message)"
-  Write-Say "  The copy at $target still names $source, so it is NOT usable as it stands."
-  Write-Say "  The original install and .env are unchanged. Fix the copy by hand, or delete it"
-  Write-Say "  and run this again."
-  Write-Say ""
-  exit 1
-}
+$config = Convert-PathInValue -Value $sourceConfig -OldRoots $oldRoots -New $target -Changed ([ref]$rewritten)
+$config.installRoot = $target
+$config.executable = Join-Path $target $executableRelative
+if ($null -ne $logRelative) { $config.logPath = Join-Path $target $logRelative }
+$text = $config | ConvertTo-Json -Depth 10
+$copied = @(Get-ChildItem -LiteralPath $source -Force | Where-Object { $_.Name -ne 'redlib.pid' }).Count
 
-$writtenConfig = $null
 try {
+  if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    [void]$createdDirectories.Add($target)
+  }
+  # Prepare the final metadata while the target is still intact.
+  [IO.File]::WriteAllText($pendingConfigPath, $text, (New-Object System.Text.UTF8Encoding($false)))
+
+  $targetPidPath = Join-Path $target "redlib.pid"
+  if (Test-Path -LiteralPath $targetPidPath) {
+    $pidBackup = Join-Path $backupRoot "redlib.pid"
+    New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    Move-Item -LiteralPath $targetPidPath -Destination $pidBackup -ErrorAction Stop
+    [void]$backedUpFiles.Add([PSCustomObject]@{ OriginalPath = $targetPidPath; BackupPath = $pidBackup })
+  }
+
+  foreach ($directoryItem in @($relocationItems | Where-Object { $_.IsDirectory })) {
+    if (-not (Test-Path -LiteralPath $directoryItem.TargetPath -PathType Container)) {
+      New-Item -ItemType Directory -Force -Path $directoryItem.TargetPath | Out-Null
+      [void]$createdDirectories.Add([string]$directoryItem.TargetPath)
+    }
+  }
+
+  # Replace the executable and other data before install.json. Back up each
+  # collision first so any later copy or validation failure can restore it.
+  $fileItems = @($relocationItems | Where-Object { -not $_.IsDirectory } |
+    Sort-Object @{ Expression = { if ([string]$_.RelativePath -ieq 'install.json') { 1 } else { 0 } }; Ascending = $true })
+  foreach ($fileItem in $fileItems) {
+    $destinationPath = [string]$fileItem.TargetPath
+    if (Test-Path -LiteralPath $destinationPath) {
+      $relativeBackup = Join-Path $backupRoot ([string]$fileItem.RelativePath)
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $relativeBackup) | Out-Null
+      Move-Item -LiteralPath $destinationPath -Destination $relativeBackup -ErrorAction Stop
+      [void]$backedUpFiles.Add([PSCustomObject]@{ OriginalPath = $destinationPath; BackupPath = $relativeBackup })
+    }
+    if ([string]$fileItem.RelativePath -ieq 'install.json') {
+      [void]$installedFiles.Add($destinationPath)
+      Move-Item -LiteralPath $pendingConfigPath -Destination $destinationPath -ErrorAction Stop
+    } else {
+      [void]$installedFiles.Add($destinationPath)
+      Copy-Item -LiteralPath $fileItem.SourcePath -Destination $destinationPath -Force -ErrorAction Stop
+    }
+  }
+
   $writtenConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
   $writtenRootIdentity = Get-PathIdentity ([string]$writtenConfig.installRoot)
   $expectedRootIdentity = Get-PathIdentity $target
@@ -641,10 +721,42 @@ try {
   }
   if (@($stillNames).Count -gt 0) { throw "install.json still contains a source-root path" }
 } catch {
-  Write-Say "  The files were copied, but the copied install.json did not pass path validation: $($_.Exception.Message)"
-  Write-Say "  The copy at $target is not verified and must not be used. The original install and .env are unchanged."
+  $failure = $_.Exception.Message
+  $rollbackErrors = New-Object System.Collections.ArrayList
+  foreach ($installedPath in @($installedFiles | Sort-Object { ([string]$_).Length } -Descending)) {
+    try { if (Test-Path -LiteralPath ([string]$installedPath)) { Remove-Item -LiteralPath ([string]$installedPath) -Force -ErrorAction Stop } }
+    catch { [void]$rollbackErrors.Add($_.Exception.Message) }
+  }
+  $backupsToRestore = $backedUpFiles.ToArray()
+  [array]::Reverse($backupsToRestore)
+  foreach ($backup in $backupsToRestore) {
+    try {
+      if (Test-Path -LiteralPath ([string]$backup.BackupPath)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent ([string]$backup.OriginalPath)) | Out-Null
+        Move-Item -LiteralPath ([string]$backup.BackupPath) -Destination ([string]$backup.OriginalPath) -ErrorAction Stop
+      }
+    } catch { [void]$rollbackErrors.Add($_.Exception.Message) }
+  }
+  foreach ($createdDirectory in @($createdDirectories | Sort-Object { ([string]$_).Length } -Descending)) {
+    try { if (Test-Path -LiteralPath ([string]$createdDirectory)) { Remove-Item -LiteralPath ([string]$createdDirectory) -Force -ErrorAction Stop } }
+    catch { [void]$rollbackErrors.Add($_.Exception.Message) }
+  }
+  if (Test-Path -LiteralPath $pendingConfigPath) { Remove-Item -LiteralPath $pendingConfigPath -Force -ErrorAction SilentlyContinue }
+  Write-Say "  The destination copy did not complete: $failure"
+  if ($rollbackErrors.Count -eq 0) {
+    if (Test-Path -LiteralPath $backupRoot) { Remove-Item -LiteralPath $backupRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    Write-Say "  The previous destination files were restored; the source and .env were not changed."
+  } else {
+    Write-Say "  Rollback could not restore every prior file. Preserve this recovery directory and inspect it: $backupRoot"
+    foreach ($rollbackError in $rollbackErrors) { Write-Say ("    rollback: " + $rollbackError) }
+  }
   Write-Say ""
   exit 1
+}
+
+if (Test-Path -LiteralPath $backupRoot) {
+  try { Remove-Item -LiteralPath $backupRoot -Recurse -Force -ErrorAction Stop }
+  catch { Write-Say "  The new install is valid; old destination files remain in $backupRoot for manual cleanup." }
 }
 Write-Say ""
 Write-Say ("  copied              " + $copied + " top-level item(s)")
