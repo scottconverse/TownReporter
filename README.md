@@ -484,6 +484,6 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-**0.6.82** is the current version; the summary at the top of this file and the [0.6.82 release guide](docs/releases/0.6.82.md) record what it claims and what it does not. This section previously restated 0.6.67 and 0.6.66 here; both were superseded, and their notes are in the release history below.
+**0.6.82** is the current version; the summary at the top of this file and the [0.6.82 release guide](docs/releases/0.6.82.md) record what it claims and what it does not. Earlier versions are in the release history below.
 
 Release notes for every earlier version, moved verbatim out of this README, are in the [release history](docs/releases/README.md). Line-by-line detail is in [CHANGELOG.md](CHANGELOG.md).

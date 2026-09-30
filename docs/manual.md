@@ -755,8 +755,7 @@ controls, not an operating-system security sandbox; the process still runs as th
 Windows account, and read-only mode alone does not restrict file reads.
 The Opinion writer runs from the temporary directory, as Claude does, so the
 application checkout's repository instructions are not part of its writing context.
-Its voice file supplies the native model instructions. Other Codex calls retain
-their existing working directory and prompt handling.
+Its voice file supplies the native model instructions.
 
 ## The Opinion voice
 
