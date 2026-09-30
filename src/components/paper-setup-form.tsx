@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
+import { FormError } from "@/components/form-error";
 import { inputClass } from "@/components/desk-chrome-utils";
 import { completeFirstRunSetup } from "@/lib/news/paper-settings";
 import type { PaperConfig } from "@/lib/news/paper-settings";
@@ -290,7 +291,8 @@ export function PaperSetupForm({
         </div>
       </div>
 
-      {error ? <p className="text-sm text-rust">{error}</p> : null}
+      {/* UX-3: a first-run form that fails silently leaves the operator stuck. */}
+      {error ? <FormError className="text-sm text-rust">{error}</FormError> : null}
       {savedAt && !onDone ? (
         <p className="text-sm text-ink-2">
           Saved. The front page now shows the new name, city, kicker and

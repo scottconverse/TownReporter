@@ -1272,8 +1272,26 @@ export function deskTakenLoginCopy() {
   return {
     title: "Editor sign-in",
     body: "This desk already has an editor. Sign in if that's you. Anyone can read the paper without an account.",
-    unknownEmail:
-      "No editor with that email. This desk is already claimed — read the paper without an account.",
+    /*
+      UX-2 (QA-007): the owner who typed the wrong password was told "No editor
+      with that email. This desk is already claimed — read the paper without an
+      account." Better Auth answers every failed email/password attempt with one
+      message ("Invalid email or password"), so there is no way -- and no
+      reason -- to tell a wrong password from an unknown address; but the screen
+      was picking the missing-account wording for both. The owner of the desk
+      was told their own account does not exist, and was then told to go read
+      the paper.
+
+      One sentence covers both failures, and it stays non-enumerating: it never
+      says whether the address is on this desk. What is left is the true thing
+      and the useful thing -- the pair did not match, and the way back in is the
+      recovery code the sign-in screen renders just below (see
+      `RecoveryCodeSignIn`). "Read the paper without an account" is gone from
+      this line: that belongs to a visitor deciding whether to sign in, not to
+      an owner whose sign-in just failed.
+    */
+    signInFailed:
+      "That email and password don't match an editor on this desk. Lost your password? Use a recovery code below.",
     api: "This desk already has an editor. Sign in if that's you.",
   };
 }
