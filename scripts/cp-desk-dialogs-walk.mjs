@@ -54,7 +54,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl, checkedOutputPath } from "./browser-guard.mjs";
-import { completeFirstRunSetup } from "./first-run-setup-step.mjs";
+import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -286,6 +286,11 @@ async function ownTheDesk() {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
+  // See the note in publish-blockers-walk.mjs: the login form has carried a
+  // first-owner SETUP CODE since unit CJ (0.6.80), and this walk was written
+  // before it. Without the code the account is never created and the wait
+  // below times out on a page that is still the sign-up form.
+  await fillPendingSetupCodeIfPresent(page);
   await page.getByRole("button", { name: "Create editor account" }).click();
   await page.getByRole("link", { name: /^Queue\b/ }).waitFor({ timeout: 45_000 });
   await completeFirstRunSetup(page, base);
@@ -530,6 +535,38 @@ async function theHeadlineDialogSavesTheTypedLine() {
 }
 
 /**
+ * Put the desk in `mode`, from wherever it currently is.
+ *
+ * Two things this repairs, and both were the file having never been run.
+ *
+ * The desk ships DARK (`DEFAULT_APPEARANCE.desk === "dark"`,
+ * src/lib/appearance.ts:71), so this walk's "light" screenshots were being
+ * taken in dark -- a light pass that measured the dark theme is exactly the
+ * kind of evidence this unit exists to stop. And the desk's ONE toggle is
+ * drawn only while the desk is light (`{!night && …}`,
+ * src/components/desk-chrome.tsx:391), so the fixed press this walk used to
+ * reach the dark pass found nothing at all and timed out.
+ *
+ * Each pass now asks for the theme it names, and the waiting is unchanged:
+ * `data-appearance` is stamped `desk-dark` or `light`, never an absence.
+ */
+async function chooseAppearance(mode) {
+  const want = mode === "dark" ? "desk-dark" : "light";
+  const current = await page.evaluate(() => document.documentElement.dataset.appearance ?? "");
+  if (current === want) return;
+  await page
+    .getByRole("button", {
+      name: want === "desk-dark" ? "Switch to dark appearance" : "Switch to light appearance",
+    })
+    .click();
+  await waitForTruth(`the desk to go ${mode}`, async () =>
+    (await page.evaluate(() => document.documentElement.dataset.appearance ?? "")) === want
+      ? true
+      : null,
+  );
+}
+
+/**
  * 6. The same two dialogs, in dark, on the desk's own toggle.
  *
  * This pass is for the eye, and it writes nothing: the add-to review press is
@@ -538,12 +575,7 @@ async function theHeadlineDialogSavesTheTypedLine() {
  * unchanged afterwards so "the dark pass saved nothing" is a fact too.
  */
 async function theDarkPassShowsBothDialogs() {
-  await page.getByRole("button", { name: "Switch to dark appearance" }).click();
-  await waitForTruth("the desk to go dark", async () =>
-    (await page.evaluate(() => document.documentElement.dataset.appearance ?? "")) === "desk-dark"
-      ? true
-      : null,
-  );
+  await chooseAppearance("dark");
   const bodyBefore = (await draftRow("body")).body;
   const headlineBefore = (await draftRow("headline")).headline;
 
@@ -619,6 +651,9 @@ async function main() {
     await ownTheDesk();
     const { leadId } = await seedTheDraftedLead();
     await openTheStory(leadId);
+    // The desk ships dark; the next six steps and their `-light.png` shots are
+    // the light pass, so ask for light before naming anything light.
+    await chooseAppearance("light");
     await addToStoryIsOnTheWorkbench();
     await theReviewPressWritesNothing();
     await theConfirmPressSavesWhatWasShown();

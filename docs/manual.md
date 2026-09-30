@@ -543,10 +543,47 @@ settings or invite another editor.
 `/desk/stats` — editor-only, right after Server in the nav.
 
 Anonymous page loads, not unique people or completed reads: no cookies, no
-fingerprinting, no IP or user-agent stored, just a daily count. The site total
-covers the home page and published story pages, not every public route. It shows
-all time, the last 7 calendar dates including today, and the last 30 calendar
-dates including today. Published stories are ranked by all-time story-page loads.
+fingerprinting, no IP address or user-agent stored, just a daily count. The site
+total covers the home page and published story pages, not every public route. It
+shows all time, the last 7 calendar dates including today, and the last 30
+calendar dates including today. Published stories are ranked by all-time
+story-page loads.
+
+The page also shows a **daily visitor estimate** and a **"where readers are"**
+panel. Two signals are read off a request to produce those and nothing else is.
+The **city and country** are derived by Cloudflare from the reader's IP address
+and passed to the app as headers; they are believed only when the request
+arrived over loopback, which is where the tunnel daemon connects from, so a
+direct connection cannot forge them. The app keeps only a per-day count per
+place, never the address, and that count is of **readers, not page loads** —
+each reader is counted once in a place on a day, so reloading or reading on
+cannot push a town over the line on its own. A place is printed by name only on
+days when at least 25 readers were counted in it; its quieter days, and every
+place that never reached 25, appear as "other places" for that day instead.
+**Today's counts are kept per place until the day ends**; once a day has
+finished, the hourly check adds every place under 25 readers together into that
+day's "other places" row and deletes the individual rows. So a place with one
+reader does not stay in the database — but it is there until the day closes, and
+**a backup taken before the fold still holds it**.
+The **requesting address and
+the browser's type** (a few words such as "phone", never the user-agent string)
+are read for one moment, inside a one-way code that changes every day, purely to
+avoid counting the same visit twice. Neither is ever stored or logged, and the
+code cannot be reversed or matched across days, so no reader can be followed
+from one day to the next. The **visitors** figure is an estimate and can be
+wrong in both directions: a restart, or a busy day that evicts the oldest
+values, can count the same reader twice, while one address shared by a household
+or a phone carrier reads as one reader. An installation that is not behind
+Cloudflare reports no place at all **and counts no visitors at all** — the
+address is read from the tunnel's own headers, so off the tunnel there is no
+trustworthy address to count, and the panel says so. Places are pruned
+after twelve months; every other Stats count is kept indefinitely.
+
+Both beacon endpoints are bounded by one process-wide budget with no key of any
+kind — 20 writes a second sustained, burst 400 — plus a 2 KB cap on the request
+body, so an anonymous flood cannot inflate a counter or grow the tables without
+limit. Over either bound, the request is answered exactly like a working one and
+writes nothing.
 
 Counting is decoupled from page render on purpose: a client beacon fires
 after a public page has already loaded and pings a lightweight endpoint that
@@ -1239,7 +1276,7 @@ masked name reads stiffly ("an unidentified speaker"). YouTube can rate-limit a 
 | `/articles/:slug`                            | A story                                                                                    |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
 | `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
-| `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited                                    |
+| `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited — or the notice, if the owner took that excerpt down at a publisher's request |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                 |
 | `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                        |
 | `/login`                                     | Create an editor account, or sign in                                                       |
@@ -1312,6 +1349,8 @@ Dark Desk's **Watched pages** panel records a named public URL and the editor's 
 
 Migration 0046 adds watch state, a per-check lease and action history to the existing monitor/capture system. A transaction locks and verifies the lease before capture, history, baseline and optional file attachment writes. Failed checks keep the last readable baseline. Scheduler and manual checks share this path; an expired worker cannot overwrite a newer lease's result. The editor chooses an active configured reporting section when explicitly creating a lead. Stored captures and action targets remain newsroom scoped. Capture history and complete stored-text downloads preserve evidence; they are not legal-removal or backup-management features.
 
+**Stopping a re-check follow-up leaves its page watch switched on.** A *Re-check pages* follow-up does its work by creating a watched page, so a URL it checked stays on the monitor schedule after the agent is stopped — the watch is a monitor, not part of the agent. Stop cannot switch it off on your behalf, because the same watch row is shared: it is the one watch for that URL, whether the agent made it or you did, and turning it off would also stop anything else watching that page. So the stopped follow-up card says which page is still being checked and links to **Dark Desk → Watch a page / view watches**, where you pause or stop that watch by hand. Nothing else about a stop is left behind: the run in flight is cancelled, and the agent is never picked again until you resume it.
+
 ## Legal removal: owner workflow
 
 Open **Published → Legal removal** beside a story, or **Published → Legal removal cases** to revisit a case. Editors cannot use this process. Ordinary Delete still uses 30-day trash; legal removal has no Undo.
@@ -1323,6 +1362,33 @@ Open **Published → Legal removal** beside a story, or **Published → Legal re
 5. The result opens its case. **Open owner-only retained text (audited)** is available until expiry under the retention policy. There is no restore button. Record affected backup identifiers and operator cleanup attestations here. An attestation records what an operator reports; it is not independently verified erasure.
 
 Fresh public article/feed/sitemap reads stop returning removed stories. Existing browser caches, downloads, external search caches, provider history, database logs and backups are outside the application's erasure proof. An older database restore can reintroduce removed content; the local operator must reconcile removal cases before serving restored data. Exact known URL checks include query/fragment/trailing-slash and percent-encoded slug aliases. Unlinked prose, malformed historical records, old deployment origins and unknown external copies still need owner/operator review. Do not treat this workflow as proof that no copy exists anywhere.
+
+## Taking down one captured excerpt (owner workflow)
+
+When a publisher objects to one captured page rather than to a story, the owner takes that capture down alone. This is not the legal-removal process: no story, lead, draft or watch is touched, and nothing else in the edition changes.
+
+1. Open the story in the desk, **Checks** tab, and find the finding or claim that cited the capture. Press **View cited captured version** — the pane shows the stored text that is about to come down.
+2. Press **Take down this capture**. Editors do not see this press, and the server refuses any role but the owner.
+3. Give a short reason. Tick **Remove the link to the original too** only if the publisher asked for that as well; left unticked, the public notice keeps the link. Press **Take down this capture** to confirm. The confirm says, in the desk, that there is no restore. The reason is stored in the audit trail, is shown back to the owner in the capture pane, and is never shown to a reader.
+4. Everything below is deleted in one transaction, with one audit row recording who, when, the reason and the capture id.
+
+**Deleted, by this action**, for the capture taken down:
+
+- the capture's stored text (`artifact_versions.full_text`), which is what the evidence page excerpts;
+- its extracted passages (`artifact_chunks`), including any the desk read out of a PDF;
+- the original file bytes we stored for it (`artifact_blobs`);
+- the Dark Desk's own copy of the same fetch (`artifacts.full_text`);
+- the passage recorded from it on a Dark Desk claim or relationship (`claims.excerpt`, `relationships.excerpt`).
+
+**Not deleted, and why**: source snapshots (keyed to a source, a separate record); `claims.evidence` and `relationships.evidence` (the desk's own note of what the record says, which may quote it — a working note, not the stored capture); search results and provider history; database backups and copies outside this database. These are outside this action's proof exactly as they are for the legal-removal workflow above; resolving a whole URL's copies is what that workflow lists for an operator.
+
+**Kept, on purpose**: the page's title, its address, when we captured it, the byte length and a fingerprint (hash) of what we captured — so a published story that cited the capture still prints its citation and that citation still resolves. The address stays visible as text on the evidence page and on the story card even when the link to the original was removed.
+
+What changes for a reader: `/evidence/:versionId` prints "This excerpt was removed at the publisher's request" instead of an excerpt and, unless the box was ticked, the link to the original. On a story page, a citation whose link was removed renders as the address in text rather than a link, and its captured-version link is labelled as removed. A comparison that involves a taken-down capture says the excerpt was removed instead of printing a one-sided diff.
+
+Judgments in the desk that bound to the captured text are no longer current and read as **unreviewed**: a judgment binds to `md5(full_text)` of the versions it cited (`finding-evidence-review.ts`, `findingReferenceBinding` and the `judgment.evidenceBinding !== currentBinding` reset in `resolveFinding`), and the purge changes that fingerprint. The judgment is not deleted and not silently kept — the editor re-reviews the capture, which now reads as removed.
+
+There is no restore, and re-capturing the page does not undo the takedown. Identical content resolves to the same capture — the row is unique on newsroom, address and hash — and its text stays deleted; a later fetch of a page that has not changed writes no text back onto it (`rememberCapture` in `investigate.ts` checks the marker). Only a page whose content actually changed mints a new hash, and so a new record, which is a different capture that this takedown never covered. The audit row stands.
 
 ---
 

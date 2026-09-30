@@ -639,6 +639,16 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     .filter(Boolean),
   `alter table artifact_versions add column if not exists extracted_sha256 text`,
   `alter table artifact_versions add column if not exists raw_sha256 text`,
+  // Unit U11b: one capture, taken down at a publisher's request. Mirrors
+  // migrations/0110_evidence_capture_takedown.sql statement for statement --
+  // same names, same nullability, same default -- because
+  // `src/lib/news/schema-parity.test.ts` diffs this list's `artifact_versions`
+  // against the migration-built one, and would report a difference (or worse,
+  // let a fresh PGLite desk lack the columns the purge writes) if the two
+  // drifted.
+  `alter table artifact_versions add column if not exists taken_down_at timestamptz`,
+  `alter table artifact_versions add column if not exists taken_down_reason text`,
+  `alter table artifact_versions add column if not exists taken_down_link_kept boolean not null default true`,
   `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
   `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
   `alter table entities add column if not exists newsroom_id integer not null default 1`,
@@ -1273,11 +1283,27 @@ export async function persistDiscovery(
 ) {
   const sql = await getSql();
   const newsroomId = await investigationNewsroom(investigationId);
-  const { label: canonLabel, norm } = frontierDedupKey(item.kind, item.label);
+  /*
+    THE FRONTIER DOOR, and it is a `text`-column door on every side: the label,
+    the `why`, the evidence, the queries tried and the next steps are all the
+    model's words, they are written by the INSERT below (or by the UPDATE in
+    `mergeIntoExisting`), and they are written from inside the investigation
+    pass's transaction -- so one U+0000 in one label fails the statement and the
+    whole hop with it. Guarded once here, on the inputs, so the two INSERT paths
+    and the merge path all read the same cleaned values.
+
+    `storableText`, not `postgresText`: a frontier item is the desk's own note
+    about what it is still looking for, not a captured page. See
+    storable-text.ts.
+  */
+  const whyInput = storableText(item.why);
+  const evidenceInput = storableText(item.evidence ?? "");
+  const queryInput = item.query ? storableText(item.query) : "";
+  const { label: canonLabel, norm } = frontierDedupKey(item.kind, storableText(item.label));
   const label = canonLabel.slice(0, 240);
   if (!label) return;
   const pendingQueries = (item.pendingQueries ?? [])
-    .map((query) => query.replace(/\s+/g, " ").trim())
+    .map((query) => storableText(query).replace(/\s+/g, " ").trim())
     .filter(Boolean)
     .filter((query, index, all) => all.indexOf(query) === index)
     .slice(0, 12);
@@ -1288,10 +1314,10 @@ export async function persistDiscovery(
       .slice(0, 800);
 
   async function mergeIntoExisting(row: FrontierRow): Promise<void> {
-    if (item.query) {
+    if (queryInput) {
       const tried = parseJsonArray(row.queries_tried);
-      if (!tried.includes(item.query)) {
-        tried.push(item.query);
+      if (!tried.includes(queryInput)) {
+        tried.push(queryInput);
         await sql`
           update frontier_items
           set queries_tried = ${JSON.stringify(tried).slice(0, 4000)}
@@ -1303,18 +1329,22 @@ export async function persistDiscovery(
     if (mergedNext !== row.next_steps) {
       await sql`update frontier_items set next_steps = ${mergedNext} where id = ${row.id}`;
     }
-    const incoming = (item.evidence ?? "").trim();
-    const priorEv = (row.evidence ?? "").trim();
+    const incoming = evidenceInput.trim();
+    // `row` was read back from the database, and a row written before this
+    // guard existed can still be carrying a NUL in its own evidence or reason.
+    // Both are echoed into the UPDATE below, so they are cleaned on the way in
+    // rather than trusted.
+    const priorEv = storableText(row.evidence ?? "").trim();
     const newEvidence = incoming.length >= 8 && !priorEv.includes(incoming.slice(0, 120));
     const parked = ["exhausted", "dead-end", "resolved", "deferred"].includes(row.status);
     if (parked && newEvidence) {
       const merged = `${priorEv}\n${incoming}`.trim().slice(0, 2000);
       const note =
-        `Reopened from ${row.status}: materially new evidence. Prior: ${(row.closed_reason ?? row.why).slice(0, 240)}`.slice(
+        `Reopened from ${row.status}: materially new evidence. Prior: ${storableText(row.closed_reason ?? row.why).slice(0, 240)}`.slice(
           0,
           800,
         );
-      const reopenNext = (item.query || `"${label}" ${(await getPaperConfig(newsroomId)).city}`).slice(0, 800);
+      const reopenNext = (queryInput || `"${label}" ${(await getPaperConfig(newsroomId)).city}`).slice(0, 800);
       await sql`
         update frontier_items
         set status = ${"reopened"},
@@ -1323,7 +1353,7 @@ export async function persistDiscovery(
             reopened_from = ${incoming.slice(0, 400)},
             closed_reason = ${note},
             evidence = ${merged},
-            why = ${item.why.slice(0, 800)},
+            why = ${whyInput.slice(0, 800)},
             next_steps = ${reopenNext},
             priority = greatest(priority, ${item.priority ?? 9})
         where id = ${row.id}
@@ -1348,16 +1378,16 @@ export async function persistDiscovery(
   }
 
   const budget = strategiesForFrontier(item.kind, label, await scopeForNewsroom(newsroomId));
-  const next = [...pendingQueries, ...(item.query ? [item.query] : []), ...budget.map((s) => s.query)]
+  const next = [...pendingQueries, ...(queryInput ? [queryInput] : []), ...budget.map((s) => s.query)]
     .filter((q, i, arr) => q && arr.indexOf(q) === i)
     .join(" | ")
     .slice(0, 800);
-  const queriesTriedJson = JSON.stringify(item.query ? [item.query] : []);
+  const queriesTriedJson = JSON.stringify(queryInput ? [queryInput] : []);
   const strategiesBudgetJson = JSON.stringify(budget.map((s) => s.key));
-  const evidenceVal = (item.evidence ?? "").slice(0, 400);
+  const evidenceVal = evidenceInput.slice(0, 400);
   const priorityVal = item.priority ?? 7;
-  const kindVal = item.kind.slice(0, 40);
-  const whyVal = item.why.slice(0, 800);
+  const kindVal = storableText(item.kind).slice(0, 40);
+  const whyVal = whyInput.slice(0, 800);
   /*
     Dark Desk F4: app-level dedup above still races on concurrent hops — two
     hops can both miss the `existing` select and both try to insert the same
@@ -1604,7 +1634,40 @@ export async function rememberCapture(opts: {
       /* columns may not exist yet */
     }
   }
-  if (versionId && (createdVersion || !existing[0]) && fullText) {
+
+  /*
+    Unit U11b3: a capture the owner has taken down does not come back.
+
+    Re-fetching a page that has NOT changed produces the same `versionHash`, so
+    this resolves to the version the takedown marked (the row is unique on
+    newsroom, url and hash) instead of inserting a new one. Everything below
+    that writes TEXT for that version would then put the page back where the
+    purge took it from: an investigation-linked capture writes the whole page
+    into `artifacts.full_text`, the chunk loop writes its passages, and the blob
+    insert keeps the original bytes. All three were emptied because a publisher
+    asked, and a later fetch is not a change of mind: the stored text of a
+    taken-down version stays empty.
+
+    Only a page whose content actually changed mints a new hash, and therefore a
+    new version, which this takedown never covered.
+
+    `taken_down_at` is read best-effort: on a database older than
+    migrations/0110 the column does not exist, and a database that cannot
+    record a takedown has none to honour.
+  */
+  let takenDown = false;
+  if (versionId) {
+    try {
+      const [state] = await sql<{ taken_down_at: string | null }>`
+        select taken_down_at::text as taken_down_at from artifact_versions
+        where id = ${versionId} and newsroom_id = ${newsroomId}
+      `;
+      takenDown = Boolean(state?.taken_down_at);
+    } catch {
+      /* the column arrives with 0110; no takedown can predate it */
+    }
+  }
+  if (versionId && !takenDown && (createdVersion || !existing[0]) && fullText) {
     const already = await sql<{ c: number }>`
       select count(*)::int as c from artifact_chunks where version_id = ${versionId} and newsroom_id = ${newsroomId}
     `;
@@ -1643,6 +1706,7 @@ export async function rememberCapture(opts: {
 
   if (
     versionId &&
+    !takenDown &&
     opts.rawBytes &&
     opts.rawBytes.byteLength > 0 &&
     opts.rawBytes.byteLength <= 4_000_000
@@ -1668,13 +1732,22 @@ export async function rememberCapture(opts: {
   }
 
   if (opts.investigationId != null) {
+    /*
+      Unit U11b3: when the version is taken down, the text column is emptied
+      rather than the row skipped. The artifact is the Dark Desk's record that
+      this page was fetched for that investigation -- a fact about the
+      reporting, and it is kept -- while `full_text` is the copy the purge
+      emptied. Writing the page back into it would leave the publisher's
+      article in a table the desk reads, after the evidence page had said the
+      excerpt was removed.
+    */
     await sql`
       insert into artifacts (
         user_id, newsroom_id, investigation_id, url, title, content_hash, full_text,
         classification, fetch_status, fetch_outcome, version_id, capture_event_id, extraction_method
       ) values (
         ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
-        ${versionHash}, ${fullText}, ${opts.classification ?? "discovered"},
+        ${versionHash}, ${takenDown ? "" : fullText}, ${opts.classification ?? "discovered"},
         ${opts.status}, ${opts.outcome}, ${versionId}, ${captureEventId},
         ${opts.extractionMethod ?? ""}
       )
@@ -2325,7 +2398,11 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const scope: ResearchScope = {
     city: place.city ?? "",
     state: place.state ?? "",
-    officialHost: settings ? officialSiteHost(settings.city, settings.seedSources) : null,
+    // City and state are read together, from the same settings row they
+    // describe: the state is what makes `boulderco.gov` this city's host.
+    officialHost: settings
+      ? officialSiteHost(settings.city, settings.seedSources, settings.state)
+      : null,
   };
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? ((url: string) => defaultFetch(url, {
@@ -2646,17 +2723,28 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       const tier = selected[0]
         ? tierForUrl(selected[0], officialDomainList, pressDomainList)
         : tierForQuery(q, officialDomainList);
+      /*
+        The PLANNER MODEL wrote every one of these strings -- the query being
+        run, the sentence about why, the question the hop was answering -- and
+        all three are `text` columns. One U+0000 in one of them fails the log
+        write, which runs inside the hop rather than at the end of it, so the
+        hop is lost. `results_json` and `selected_json` are the search
+        provider's own answer and are left as they are, the way the adversarial
+        trail in dark-verify.ts leaves its own.
+      */
       const logRows = await sql<{ id: number }>`
         insert into search_log (
           user_id, newsroom_id, investigation_id, hop, query, results_json, provider, state, caused_by,
           frontier_id, strategy, selected_json, query_fingerprint, research_question, tier
         )
         values (
-          ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${hop + 1}, ${q.slice(0, 300)},
+          ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${hop + 1},
+          ${storableText(q).slice(0, 300)},
           ${JSON.stringify(attempt.hits).slice(0, 8000)},
-          ${attempt.provider}, ${attempt.state}, ${plan.summary.slice(0, 200)},
+          ${attempt.provider}, ${attempt.state}, ${storableText(plan.summary).slice(0, 200)},
           ${matchedFrontier?.id ?? null}, ${strategy},
-          ${JSON.stringify(selected).slice(0, 4000)}, ${fp}, ${plan.questions[0] ?? plan.summary.slice(0, 200)},
+          ${JSON.stringify(selected).slice(0, 4000)}, ${fp},
+          ${storableText(plan.questions[0] ?? plan.summary).slice(0, 200)},
           ${tier}
         )
         returning id
@@ -3130,7 +3218,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     hopsDone += 1;
     await sql`
       update investigations
-      set hops = hops + 1, summary = ${lastSummary.slice(0, 2500)}, updated_at = now()
+      set hops = hops + 1, summary = ${storableText(lastSummary).slice(0, 2500)}, updated_at = now()
       where id = ${opts.investigationId}
     `;
 
@@ -3790,44 +3878,68 @@ async function persistPlan(
       },
       newsroomId,
     );
+    /*
+      The relationship the model drew: both names, the kind of link and the
+      evidence for it are its words in `text` columns. Sanitized once into
+      locals because the row below uses the evidence twice and the discovery
+      filed after it names both ends again.
+    */
+    const from = storableText(r.from);
+    const to = storableText(r.to);
+    const relationshipEvidence = storableText(r.evidence);
     await sql`
       insert into relationships (
         user_id, newsroom_id, investigation_id, from_name, to_name, kind, evidence, source_url,
         version_id, excerpt, capture_event_id, capture_hash, provenance_status, locator
       )
       values (
-        ${userId}, ${newsroomId}, ${investigationId}, ${r.from.slice(0, 200)}, ${r.to.slice(0, 200)},
-        ${r.kind.slice(0, 80)}, ${r.evidence.slice(0, 2000)}, ${prov.sourceUrl},
-        ${prov.versionId}, ${r.evidence.slice(0, 800)}, ${prov.captureEventId},
+        ${userId}, ${newsroomId}, ${investigationId}, ${from.slice(0, 200)}, ${to.slice(0, 200)},
+        ${storableText(r.kind).slice(0, 80)}, ${relationshipEvidence.slice(0, 2000)}, ${prov.sourceUrl},
+        ${prov.versionId}, ${relationshipEvidence.slice(0, 800)}, ${prov.captureEventId},
         ${prov.contentHash}, ${prov.status}, ${prov.locator}
       )
     `;
     if (prov.status === "unresolved") {
       await persistDiscovery(userId, investigationId, {
         kind: "unresolved-provenance",
-        label: `${r.from} ${r.kind} ${r.to}`.slice(0, 240),
+        label: `${from} ${r.kind} ${to}`.slice(0, 240),
         why: "Relationship provenance unresolved; keep investigating",
-        evidence: r.evidence.slice(0, 400),
+        evidence: relationshipEvidence.slice(0, 400),
         priority: 7,
       });
     }
   }
   for (const h of plan.hypotheses) {
-    const status = h.contradicting.trim()
+    /*
+      The model's hypothesis as a row. `body`, `supporting` and `contradicting`
+      are its prose and all three are `text` columns, so one U+0000 in any of
+      them fails whichever statement runs -- the INSERT for a hypothesis new to
+      the file, or the UPDATE for one already on it -- and both run inside the
+      pass's transaction, taking the whole round with them.
+
+      Sanitized once here rather than at each statement so the `existing`
+      lookup below compares the same string it later writes. `status` is not
+      the model's: it is one of three literals chosen from whether those two
+      fields came back empty.
+    */
+    const text = storableText(h.text);
+    const supporting = storableText(h.supporting);
+    const contradicting = storableText(h.contradicting);
+    const status = contradicting.trim()
       ? "weakened"
-      : h.supporting.trim()
+      : supporting.trim()
         ? "strengthened"
         : "active";
     const existing = await sql<{ id: number }>`
       select id from hypotheses
-      where investigation_id = ${investigationId} and body = ${h.text.slice(0, 2000)}
+      where investigation_id = ${investigationId} and body = ${text.slice(0, 2000)}
       limit 1
     `;
     if (existing[0]) {
       await sql`
         update hypotheses
-        set supporting = ${h.supporting.slice(0, 2000)},
-            contradicting = ${h.contradicting.slice(0, 2000)},
+        set supporting = ${supporting.slice(0, 2000)},
+            contradicting = ${contradicting.slice(0, 2000)},
             status = ${status},
             transition_note = ${`Evidence update (${status})`}
         where id = ${existing[0].id}
@@ -3836,8 +3948,8 @@ async function persistPlan(
       await sql`
         insert into hypotheses (user_id, newsroom_id, investigation_id, body, supporting, contradicting, status, transition_note)
         values (
-          ${userId}, ${newsroomId}, ${investigationId}, ${h.text.slice(0, 2000)},
-          ${h.supporting.slice(0, 2000)}, ${h.contradicting.slice(0, 2000)},
+          ${userId}, ${newsroomId}, ${investigationId}, ${text.slice(0, 2000)},
+          ${supporting.slice(0, 2000)}, ${contradicting.slice(0, 2000)},
           ${status}, ${"opened"}
         )
       `;
@@ -3857,15 +3969,25 @@ async function persistPlan(
       },
       newsroomId,
     );
+    /*
+      The claim the model wrote: `body`, `kind` and `evidence` are all its
+      words in `text` columns. `source_url`, the version, the capture hash and
+      the locator come from `resolveProvenance` against the captured artifacts,
+      so the evidence side of this row is untouched -- only the model's half is
+      guarded.
+    */
+    const claimText = storableText(c.text);
+    const claimEvidence = storableText(c.evidence);
     await sql`
       insert into claims (
         user_id, newsroom_id, investigation_id, body, kind, evidence, source_url, confidence,
         version_id, excerpt, capture_hash, capture_event_id, provenance_status, locator, captured_at
       )
       values (
-        ${userId}, ${newsroomId}, ${investigationId}, ${c.text.slice(0, 2000)}, ${c.kind},
-        ${c.evidence.slice(0, 2000)}, ${prov.sourceUrl ?? c.source_url ?? null}, ${conf ?? null},
-        ${prov.versionId}, ${c.evidence.slice(0, 800)}, ${prov.contentHash},
+        ${userId}, ${newsroomId}, ${investigationId}, ${claimText.slice(0, 2000)},
+        ${storableText(c.kind)}, ${claimEvidence.slice(0, 2000)},
+        ${prov.sourceUrl ?? c.source_url ?? null}, ${conf ?? null},
+        ${prov.versionId}, ${claimEvidence.slice(0, 800)}, ${prov.contentHash},
         ${prov.captureEventId}, ${prov.status}, ${prov.locator},
         ${prov.capturedAt}
       )

@@ -51,14 +51,161 @@
  *
  * `PAPER_PANELS_ARTICLE_PATH` pins the article path (default: resolved from the
  * app's own /sitemap.xml, like public-a11y-floor.mjs).
+ *
+ * UNSEEDED, THIS WALK FAILS, AND THAT IS THE DESIGN. The front page's panel
+ * renders only for a published story that names a date inside the next seven
+ * days, so pointing this at an empty paper is a missing panel, not a pass. It
+ * spent its life being pointed by hand at the operator's own paper for exactly
+ * that reason, and no CI job ran it.
+ *
+ * So with no `PAPER_PANELS_BASE_URL` it boots the built server in THIS process,
+ * on its own port and in-memory PGlite, and seeds a paper that has what the
+ * two panels read -- the same seam `scripts/front-page-river-e2e.mjs` and
+ * `scripts/stats-privacy-e2e.mjs` use. Set `PAPER_PANELS_BASE_URL` and it goes
+ * back to being a reader of someone else's server, seeding nothing.
  */
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { checkedUrl } from "./browser-guard.mjs";
 
-const base = checkedUrl(process.env.PAPER_PANELS_BASE_URL || "http://127.0.0.1:8080").replace(
-  /\/$/,
-  "",
-);
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** This walk's own listen port, when it boots the paper itself. */
+const PORT_PAPER_PANELS = 3584;
+
+const bootsItsOwnPaper = !process.env.PAPER_PANELS_BASE_URL;
+const base = checkedUrl(
+  process.env.PAPER_PANELS_BASE_URL || `http://127.0.0.1:${PORT_PAPER_PANELS}`,
+).replace(/\/$/, "");
+
+/** `YYYY-MM-DD` for an instant, read the way the walk's own seed writes it. */
+function isoDay(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** Boot the built server here, in this process, on its own port and database. */
+async function bootTheServer() {
+  process.env.PORT = String(PORT_PAPER_PANELS);
+  process.env.HOST = "127.0.0.1";
+  process.env.DATABASE_URL = ""; // PGlite in memory; never the shared Postgres
+  process.env.TOWNREPORTER_CLAUDE_CODE = "0";
+  process.env.BETTER_AUTH_SECRET ||= "paper-panels-secret";
+  await import(pathToFileURL(join(REPO, ".output/server/index.mjs")).href);
+  for (let i = 0; i < 120; i += 1) {
+    try {
+      const res = await fetch(`${base}/`);
+      if (res.ok) return;
+    } catch {
+      /* not listening yet */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`the built server never answered on ${base}`);
+}
+
+/**
+ * A paper with what the two panels read.
+ *
+ * The date is computed from TODAY rather than written down: "This week" is a
+ * seven-day window over the reader's own calendar, so a fixture pinned to a
+ * literal day would pass on the day it was written and fail the next week.
+ * Three days out sits in the middle of that window in both the runner's day
+ * and the paper's.
+ */
+async function seedThePaper() {
+  const pg = await globalThis.__pgliteInstance__;
+  if (!pg) throw new Error("the server booted without a PGlite instance to seed");
+  /*
+    Wait for the migration pass to go QUIET (`_migrations` stops growing) --
+    `bootTheServer` returns as soon as `/` answers, which an unmigrated server
+    can do out of an empty state. See the long note in
+    scripts/front-page-river-e2e.mjs, where this race was measured.
+  */
+  let applied = -1;
+  let quiet = 0;
+  for (let i = 0; i < 240 && quiet < 3; i += 1) {
+    let count = -1;
+    try {
+      count = Number((await pg.query("select count(*)::int as n from _migrations")).rows[0]?.n);
+    } catch {
+      /* the migrations table itself is not there yet */
+    }
+    if (count === applied && count >= 0) quiet += 1;
+    else {
+      quiet = 0;
+      applied = count;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  await pg.query(
+    `insert into paper_settings (newsroom_id, name, city, state, onboarded)
+     values (1, 'Testerville Ledger', 'Testerville', 'Wyoming', true)
+     on conflict (newsroom_id) do update set
+       name = excluded.name, city = excluded.city, state = excluded.state, onboarded = true`,
+  );
+  // A paper this walk controls: the migration seeds its own welcome story.
+  await pg.query("delete from articles");
+
+  const near = new Date(Date.now() + 3 * 86_400_000);
+  const nearIso = isoDay(near);
+  /* "October 3, 2026" -- a form src/lib/story-dates.ts reads by name. */
+  const nearWords = near.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const pastIso = isoDay(new Date(Date.now() - 30 * 86_400_000));
+
+  const record = (documentDate) => [
+    {
+      title: "Council packet",
+      organization: "Longmont City Council",
+      document_date: documentDate,
+      url: "https://www.longmontcolorado.gov/agenda-1.pdf",
+      captured_at: null,
+      version_id: null,
+      version_count: null,
+      disappeared: false,
+      role: "source",
+    },
+  ];
+
+  /*
+    The NEWEST story carries the date inside the window. It is therefore the
+    lead on the front page (where `.ledgerow .datespanel` lives) and the first
+    /articles/ URL in the sitemap, which is the article this walk resolves.
+  */
+  await pg.query(
+    `insert into articles (user_id, slug, headline, dek, body, topic, source_urls,
+                           provenance_json, status, published_at)
+     values ('paper-panels-e2e', 'paper-panels-dated',
+             $1, $2, $3, 'council', '[]', $4, 'published', now() - interval '1 minute')`,
+    [
+      `Council takes up the water rate on ${nearWords}`,
+      `The hearing on ${nearWords} is the last chance to comment.`,
+      "The council takes up the water rate at its next regular session.",
+      JSON.stringify(record(nearIso)),
+    ],
+  );
+  await pg.query(
+    `insert into articles (user_id, slug, headline, dek, body, topic, source_urls,
+                           provenance_json, status, published_at)
+     values ('paper-panels-e2e', 'paper-panels-older',
+             'Library board posts its budget', 'The board approved its budget.',
+             'The library board posted its budget for the coming year.',
+             'council', '[]', $1, 'published', now() - interval '2 minutes')`,
+    [JSON.stringify(record(pastIso))],
+  );
+  console.log(`  seeded a paper whose newest story names ${nearWords} (${nearIso})`);
+}
+
+if (bootsItsOwnPaper) {
+  await bootTheServer();
+  await seedThePaper();
+}
 
 /** WCAG 2.x AA for body text. The panels are body text, not large print. */
 const MIN_CONTRAST = 4.5;
@@ -566,4 +713,9 @@ report.summary = report.panels.map((p) => ({
 }));
 
 console.log(JSON.stringify(report, null, 2));
-if (!report.ok) process.exit(1);
+/*
+  Exit BY CODE. When this walk booted the paper, the server is listening in
+  THIS process, so an `exitCode`-only ending leaves node alive with an open
+  port and the CI step never finishes.
+*/
+process.exit(report.ok ? 0 : 1);

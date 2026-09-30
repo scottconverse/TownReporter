@@ -75,6 +75,20 @@ export async function realModule(relativePath, imports = pageImports) {
 const aiDisclosureUrl = await realModule("../src/components/ai-disclosure.tsx");
 const storyBodyUrl = await realModule("../src/components/story-body.tsx");
 
+/*
+  Unit U11b3: the reader's source list -- records first, then the cited URLs no
+  record already names, deduplicated by URL identity. Real, not stubbed: the
+  band it builds is one of the things the renders above assert on, and its
+  identity rule (`canonicalPublicUrl`) is the thing the defect was in. Its own
+  one relative import is redirected to the real module, the same way
+  `correction-origin-mark` is pointed at `correction-origin`.
+*/
+const fetchOutcomeUrl = await realModule("../src/lib/news/fetch-outcome.ts");
+const readerProvenanceUrl = await realModule("../src/lib/news/reader-provenance.ts", {
+  ...pageImports,
+  "./fetch-outcome.ts": fetchOutcomeUrl,
+});
+
 /* 0.6.80 (CK): the article page prints its dek through `dekOrFallback`. The
    helper is pure and imports nothing, so the real module loads here. */
 const dekFallbackUrl = await realModule("../src/lib/news/dek-fallback.ts");
@@ -235,6 +249,7 @@ const routeImports = {
   "@/lib/news/correction-origin": correctionOriginUrl,
   "@/lib/news/story-dates-public": storyDatesPublicStub,
   "@/lib/news/section-types": sectionTypesStub,
+  "@/lib/news/reader-provenance": readerProvenanceUrl,
   "@/lib/story-dates": storyDatesStub,
   "@/lib/paper": paperStub,
   "@/lib/paper-context-state": paperContextStub,

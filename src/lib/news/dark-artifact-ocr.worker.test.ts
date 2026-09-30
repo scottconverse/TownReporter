@@ -206,3 +206,56 @@ test("a replaced OCR worker cannot mutate retained evidence at checkpoint", asyn
   const [saved] = await sql<{ extraction_method: string }>`select extraction_method from artifact_versions where id=${version!.id}`;
   assert.equal(saved!.extraction_method, "ocr-pages-partial:Codex:0/2");
 });
+
+/*
+  Unit U11b2: a PDF read must not write passages back onto a capture the owner
+  has taken down.
+
+  The purge empties every `artifact_chunks` excerpt of a taken-down version. An
+  OCR job that was already queued when the takedown happened would otherwise
+  land afterwards with model-read text from the publisher's page and refill the
+  table the purge had just cleared -- the evidence page would say the excerpt
+  was removed while the database held it again. The read still finishes (its
+  bookkeeping is not this capture's text), and it adds nothing.
+*/
+test("an OCR read adds no passages to a capture that has been taken down", async () => {
+  const sql = await getSql();
+  const room = 97004;
+  const user = `artifact-ocr-takedown-${Date.now()}`;
+  await sql.query("insert into newsrooms(id,name) values($1,'Takedown OCR room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
+  const [inv] = await sql<{ id: number }>`insert into investigations(user_id,newsroom_id,title) values(${user},${room},'Removed packet') returning id`;
+  /* The capture as it stands after a takedown: no text, no passages, marked. */
+  const [version] = await sql<{ id: number }>`
+    insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome,content_type,extraction_method,taken_down_at,taken_down_reason)
+    values(${user},${room},'https://example.org/removed.pdf','removed-hash','Removed packet','',200,'fetched','application/pdf','ocr-pages-partial:Claude:0/2',now(),'Publisher asked.') returning id
+  `;
+  const [artifact] = await sql<{ id: number }>`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,classification,fetch_status,fetch_outcome,version_id,extraction_method)
+    values(${user},${room},${inv!.id},'https://example.org/removed.pdf','Removed packet','removed-hash','','discovered',200,'fetched',${version!.id},'ocr-pages-partial:Claude:0/2') returning id
+  `;
+  const raw = Buffer.from("%PDF-removed-packet");
+  await sql`insert into artifact_blobs(version_id,user_id,newsroom_id,sha256,mime,original_url,byte_length,body_b64) values(${version!.id},${user},${room},'removed-raw-hash','application/pdf','https://example.org/removed.pdf',${raw.byteLength},${raw.toString("base64")})`;
+  const request = JSON.stringify({ artifactId: artifact!.id, start: 1, end: 2, modelChoice: "claude-frontier", mode: "range" });
+  const claimToken = "takedown-claim";
+  const [job] = await sql<{ id: number }>`insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,status,claim_token,result_json) values(${user},${room},'artifact-ocr',${artifact!.id},'claude-frontier','running',${claimToken},${request}) returning id`;
+
+  await performArtifactOcrWork({ id: job!.id, user_id: user, newsroom_id: room, kind: "artifact-ocr", subject_id: artifact!.id, model_choice: "claude-frontier", claim_token: claimToken } as never, {
+    ocr: async () => ({
+      text: "Model-read text from the publisher's page.",
+      pages: [
+        { page: 1, text: "Model-read text from the publisher's page." },
+        { page: 2, text: "More model-read text." },
+      ],
+      provider: "Claude",
+      pagesRead: 2,
+      pagesTotal: 2,
+      modelCalls: 1,
+    }),
+  });
+
+  const chunks = await sql<{ count: number }>`select count(*)::int as count from artifact_chunks where version_id=${version!.id}`;
+  assert.equal(chunks[0]?.count, 0, "a taken-down capture must gain no OCR passages");
+  const [saved] = await sql<{ full_text: string }>`select full_text from artifact_versions where id=${version!.id}`;
+  assert.equal(saved!.full_text, "", "and its purged text must stay purged");
+});

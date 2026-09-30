@@ -29,6 +29,7 @@ import {
 import { grokChat, parseJsonBlock, plannerModel, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
+import { storableText } from "./storable-text.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
 import type { DarkRunBudget, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
 import {
@@ -208,20 +209,35 @@ export async function verifyRunSignals(opts: {
       records.push(record);
       allSearches.push(record);
 
-      // Logged where every other search this desk runs is logged, so the
-      // research trail on the open file shows the verification too.
+      /*
+        Logged where every other search this desk runs is logged, so the
+        research trail on the open file shows the verification too.
+
+        `q.query` and the research question are MODEL-WRITTEN -- the query came
+        out of the model's adversarial plan, the question quotes the signal's
+        own name -- and both are `text` columns, so a U+0000 in either fails
+        the insert. This one is worse than a failed insert would suggest: the
+        `.catch` below turns it into `trailSaved = false`, which downgrades the
+        signal to unverified without a word about why. `results_json` and
+        `selected_json` are the search provider's own answer, and the
+        JSON.stringify there turns any NUL into an escape rather than a byte,
+        so the captured-evidence side of this row is left as it is.
+
+        `storableText`, not `postgresText`: the query and the question are what
+        the desk generated, not what a page said.
+      */
       await sql`
         insert into search_log (
           user_id, newsroom_id, investigation_id, hop, query, results_json,
           provider, state, strategy, tier, research_question, selected_json
         ) values (
           ${opts.userId}, ${opts.newsroomId}, ${opts.investigationId}, ${0},
-          ${q.query.slice(0, 300)},
+          ${storableText(q.query).slice(0, 300)},
           ${JSON.stringify(hits)},
           ${"adversarial"},
           ${state},
           ${`adversarial:${q.kind}`}, ${record.tier},
-          ${`Gate 2 — ${q.kind}: disprove "${sig.name}"`.slice(0, 300)},
+          ${storableText(`Gate 2 — ${q.kind}: disprove "${sig.name}"`).slice(0, 300)},
           ${JSON.stringify(url ? [url] : [])}
         )
       `.catch(() => {
@@ -324,6 +340,18 @@ export async function verifyRunSignals(opts: {
     const news = readNewsworthiness(parsed.newsworthiness);
     const decision = newsworthyDecision(news);
 
+    /*
+      `counter_narrative` is the verification model's own sentence about the
+      opposing account, falling back to the stage-1 text when the model wrote
+      none. Model prose into a `text` column, so a U+0000 in it fails this
+      UPDATE -- which the `.catch` below turns into `saved = false` and an
+      `unsaved` count, losing a verification that did happen.
+      `adversarial_json` and `newsworthiness_json` beside it are
+      JSON.stringify'd text columns, where the same byte survives as an escape
+      and nothing in this repository casts them back to jsonb.
+
+      `storableText`: the model wrote it. See storable-text.ts.
+    */
     const saved = await sql`
       update dark_signals set
         stage = ${"dark-signal-desk"},
@@ -336,10 +364,9 @@ export async function verifyRunSignals(opts: {
         adversarial_json = ${JSON.stringify(records)},
         newsworthiness_json = ${news ? JSON.stringify(news) : null},
         newsworthiness_decision = ${decision},
-        counter_narrative = ${String(parsed.counter_narrative ?? sig.counter_narrative ?? "").slice(
-          0,
-          4000,
-        )},
+        counter_narrative = ${storableText(
+          String(parsed.counter_narrative ?? sig.counter_narrative ?? ""),
+        ).slice(0, 4000)},
         verified_at = ${verdict.status === "verified" ? new Date().toISOString() : null}
       where id = ${sig.id} and newsroom_id = ${opts.newsroomId}
       returning id

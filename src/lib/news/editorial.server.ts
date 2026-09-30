@@ -10,6 +10,7 @@ import {
   type WriteEditorialResult,
 } from "./editorial-orchestration.ts";
 import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
+import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { modelChoiceLabel, opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
 import { setJobFailoverNote, setJobModelRuntime, setJobStage, waitForModel } from "./jobs.ts";
@@ -535,12 +536,24 @@ export async function fileEditorial(
       }
     }
 
+    /*
+      The opinion writer's own row, in the same columns the Story drafter
+      writes: `headline`, `body` and `integrityNotes` are model prose in `text`
+      columns, and `research_json` is the JSON blob the desk screen reads back
+      through `::jsonb` (see the drafts projection in desk.ts). One U+0000 in
+      any of them fails the INSERT -- or, for `research_json`, poisons the row
+      against every later read.
+
+      `editorial_extras` beside it holds the two other things the model wrote:
+      the fact sheet and the image prompt. Same guard, same reason.
+    */
     const rows = await sql<{ id: number }>`
       insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json)
       values (
         ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
-        ${headline}, ${""}, ${body}, ${"opinion"}, ${"[]"}, ${"editorial"},
-        ${integrityNotes}, ${JSON.stringify(nameCheck ? { nameCheck } : {})}
+        ${storableText(headline)}, ${""}, ${storableText(body)}, ${"opinion"}, ${"[]"}, ${"editorial"},
+        ${storableText(integrityNotes)},
+        ${JSON.stringify(sanitizeJsonLeaves(nameCheck ? { nameCheck } : {}))}
       )
       returning id
     `;
@@ -548,8 +561,8 @@ export async function fileEditorial(
 
     await sql`
       insert into editorial_extras (draft_id, newsroom_id, fact_sheet, image_prompt, source_kind, source_ref)
-      values (${draftId}, ${input.newsroomId}, ${ed.factSheet.slice(0, 8000)},
-              ${ed.imagePrompt.slice(0, 4000)}, ${input.sourceKind}, ${input.sourceRef})
+      values (${draftId}, ${input.newsroomId}, ${storableText(ed.factSheet).slice(0, 8000)},
+              ${storableText(ed.imagePrompt).slice(0, 4000)}, ${input.sourceKind}, ${input.sourceRef})
       on conflict (draft_id) do update
         set fact_sheet = excluded.fact_sheet, image_prompt = excluded.image_prompt,
             generated_at = now()

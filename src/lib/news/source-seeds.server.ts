@@ -3,6 +3,7 @@ import { kindFromSourceUrl } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
 import { parseHttpUrl } from "./source-lines.ts";
+import { storableText } from "./storable-text.ts";
 import { assertHttpUrl, isSearchResultUrl, sourceIdentity } from "./url-guard.ts";
 
 /** Seed only the configured, onboarded newsroom that owns this editor action. */
@@ -160,15 +161,32 @@ export async function insertProposedNewsroomSource(sql: Sql, input: {
     if (sourceIdentity(row.url) === identity) return false;
   }
 
-  const reason = input.reason?.trim().slice(0, REASON_MAX) || null;
+  /*
+    THE DOOR FOR PROPOSED SOURCES.
+
+    `title`, `reason` and `section` are the model's words about a page it read
+    -- the scan's `proposed_sources`, the research pass's suggested pages, the
+    Dark Desk's artifacts -- and this is the one function all three callers
+    write through. A NUL in any one of them fails the statement the proposal is
+    part of: for the scan that is the run's commit transaction, so one stray
+    byte in one proposed page's title would take down every lead the run found.
+    The guard lives here rather than beside each caller for the same reason
+    `sourceIdentity` and the results-page refusal do: the rule is the same for
+    all of them, and a fourth caller cannot forget it.
+
+    `storableText`, not `postgresText`: this is the desk's suggestion, not the
+    captured page. See storable-text.ts.
+  */
+  const title = storableText(input.title);
+  const reason = storableText(input.reason ?? "").trim().slice(0, REASON_MAX) || null;
   const by = input.proposedBy ?? null;
   const scanRunId = input.scanRunId ?? null;
   const leadId = input.leadId ?? null;
-  const section = input.section?.trim().slice(0, SECTION_MAX) || null;
+  const section = storableText(input.section ?? "").trim().slice(0, SECTION_MAX) || null;
 
   const rows = await sql<{ id: number }>`
     insert into sources(user_id,newsroom_id,url,title,kind,tier,status,proposed_reason,proposed_by,proposed_scan_run_id,proposed_lead_id,proposed_section)
-    select ${input.userId},${input.newsroomId},${input.url},${input.title},'discovered','unclassified','proposed',${reason},${by},${scanRunId},${leadId},${section}
+    select ${input.userId},${input.newsroomId},${input.url},${title},'discovered','unclassified','proposed',${reason},${by},${scanRunId},${leadId},${section}
     where not exists (select 1 from sources where newsroom_id=${input.newsroomId} and url=${input.url})
     on conflict(user_id,newsroom_id,url) do nothing
     returning id

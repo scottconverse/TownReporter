@@ -150,7 +150,7 @@ import {
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
-import { postgresText, storableText } from "./storable-text";
+import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text";
 import {
   annotateScanRowsWithStallStatus,
   enqueueJob,
@@ -2162,11 +2162,39 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         checkpoint draft into the section-override count.
       */
       const checkpointHeadline = headlineForRedraft(current, checkpoint.headline);
+      /*
+        A CHECKPOINT IS A WRITE. It INSERTs a draft row exactly as the final
+        write does, into the same columns -- including `research_json`, which
+        the drafts projection reads back through `::jsonb` (see the note on
+        `listDeskDrafts`). So it takes the same guard as the final write: model
+        prose through `storableText`, and every JSON blob built from model
+        output through `sanitizeJsonLeaves` before it is stringified, because
+        `JSON.stringify` alone would leave a NUL in the row as an escape for
+        jsonb to refuse later.
+
+        `checkpoint.source_urls` and `provenance` are the captured-page side of
+        this row and are left as they are.
+      */
+      const checkpointResearchJson = JSON.stringify(
+        sanitizeJsonLeaves({
+          citationPolicy: "explicit",
+          researchScope: draftInput.researchScope,
+          reportedClaims: { version: 1, rows: Array.isArray(checkpoint.claims) ? checkpoint.claims : [] },
+          writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true },
+        }),
+      );
       const [saved] = await transactionSql<DraftRow>`
         insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_headline,headline_source)
-        values(${context.userId},${owned(context)},${leadId},${checkpointHeadline.headline},${checkpoint.dek},${checkpoint.body},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${integrityNotes},${JSON.stringify(provenance)},${String(checkpoint.form ?? "")},${JSON.stringify(checkpoint.found ?? null)},${JSON.stringify(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : [])},${JSON.stringify({ citationPolicy: "explicit", researchScope: draftInput.researchScope, reportedClaims: { version: 1, rows: Array.isArray(checkpoint.claims) ? checkpoint.claims : [] }, writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true } })},${checkpointHeadline.modelHeadline},${checkpointHeadline.source})
+        values(${context.userId},${owned(context)},${leadId},${storableText(checkpointHeadline.headline)},${storableText(checkpoint.dek)},${storableText(checkpoint.body)},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${storableText(integrityNotes)},${JSON.stringify(provenance)},${storableText(String(checkpoint.form ?? ""))},${JSON.stringify(sanitizeJsonLeaves(checkpoint.found ?? null))},${JSON.stringify(sanitizeJsonLeaves(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : []))},${checkpointResearchJson},${storableText(checkpointHeadline.modelHeadline)},${checkpointHeadline.source})
         returning *
       `;
+      /*
+        `checkpointDraftId` is a number, so this receipt's own JSON cannot carry
+        a NUL -- but the `coalesce(...)::jsonb` on the left re-parses whatever
+        the row already holds. That was written by the completion receipt below
+        (guarded now) or by `setFailoverNote`/`jobs.ts`, none of which put model
+        prose in it, so it is left alone here.
+      */
       await transactionSql`
         update desk_jobs set result_json=(coalesce(nullif(result_json,''),'{}')::jsonb || ${JSON.stringify({ checkpointDraftId: Number(saved.id) })}::jsonb)::text,updated_at=now()
         where id=${job.id} and newsroom_id=${job.newsroom_id} and status='running' and claim_token=${job.claim_token ?? ""}
@@ -2435,7 +2463,28 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         (async () => ({ ok: false, error: "The writing provider is not available." })),
     }),
   });
-  const draftBody = style.body;
+  /*
+    THE FINAL DRAFT'S WRITE DOOR, and the checkpoint's is the same one further
+    up (`reportDeps.onWriterDraft`).
+
+    Everything the writer model produced for this story passes through here:
+    the body, the integrity notes, the memo and the claims in `research_json`,
+    the unanswered questions. One U+0000 in any of them and the INSERT fails --
+    inside the pass's transaction, so the draft the editor was waiting for is
+    gone.
+
+    `research_json` gets `sanitizeJsonLeaves` rather than a bare
+    `JSON.stringify`, and that difference matters: `JSON.stringify` turns a NUL
+    into an escape rather than removing it, so the INSERT would succeed and
+    leave the byte in the row for the drafts projection to trip over when it
+    reads the column back through `::jsonb` (see `listDeskDrafts` below). A
+    JSON blob built from model output is sanitized wherever it is stored,
+    because whether some later reader casts it to jsonb is not knowable here.
+
+    `draftBody` is cleaned before the meeting-citation derivation rather than
+    after, so the citations describe the body actually being stored.
+  */
+  const draftBody = storableText(style.body);
   const styleRecord = styleRecordFromRepair(style, { checkedAt: new Date().toISOString() });
 
   // Discovery exclusions are not citation rules: a watched page or a root
@@ -2451,27 +2500,31 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const sourceUrls = JSON.stringify(
     meetingDraftSourceUrls(reported.source_urls, meetingMaterial?.videoUrl),
   );
-  const notes = reported.integrity_notes;
+  const notes = storableText(reported.integrity_notes);
+  // `provenance` is the captured-page side of this row -- urls, version ids,
+  // capture event ids -- and is left as it is, the way the evidence paths are.
   const provenanceJson = JSON.stringify(reported.provenance);
-  const unansweredJson = JSON.stringify(reported.unanswered);
-  const researchJson = JSON.stringify({
-    ...reported.research_memo,
-    citationPolicy: "explicit",
-    researchScope: draftInput.researchScope,
-    // Publication must fail closed if a tape-derived draft somehow loses its
-    // persisted used-citation link. The lead's candidate list is not proof of
-    // what the final story actually used.
-    meetingEvidence: { used: meetingMaterial != null },
-    reportedClaims: { version: 1, rows: reported.claims },
-    reportedDocumentClaims: {
-      version: 1,
-      checkedText: [reported.headline, reported.dek, draftBody].join("\n\n"),
-      rows: reported.documentClaims ?? [],
-    },
-    // The findings and the before/after measurements, stored with the draft they
-    // describe rather than recomputed into the page on every render.
-    styleAudit: styleRecord,
-  });
+  const unansweredJson = JSON.stringify(sanitizeJsonLeaves(reported.unanswered));
+  const researchJson = JSON.stringify(
+    sanitizeJsonLeaves({
+      ...reported.research_memo,
+      citationPolicy: "explicit",
+      researchScope: draftInput.researchScope,
+      // Publication must fail closed if a tape-derived draft somehow loses its
+      // persisted used-citation link. The lead's candidate list is not proof of
+      // what the final story actually used.
+      meetingEvidence: { used: meetingMaterial != null },
+      reportedClaims: { version: 1, rows: reported.claims },
+      reportedDocumentClaims: {
+        version: 1,
+        checkedText: [reported.headline, reported.dek, draftBody].join("\n\n"),
+        rows: reported.documentClaims ?? [],
+      },
+      // The findings and the before/after measurements, stored with the draft they
+      // describe rather than recomputed into the page on every render.
+      styleAudit: styleRecord,
+    }),
+  );
   const yours = keepHumanTodos(prevNotes);
   /*
     Claims of absence, as checkboxes the editor must tick before Publish.
@@ -2536,7 +2589,15 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     researchScope: draftInput.researchScope,
     suppliedUrls: prevNotes.suppliedUrls,
   };
-  const notesJson = packNotes(nextNotes);
+  /*
+    `leads.notes_json` is the third column in this pass that is read back
+    through `::jsonb` -- `meeting-activity.ts` casts it to find the meeting's
+    video and its citation count -- so the same rule as `research_json` above
+    applies: the walk happens on the value, before `packNotes` stringifies it,
+    because `JSON.stringify` inside `packNotes` would keep a NUL as an escape
+    for that cast to refuse later.
+  */
+  const notesJson = packNotes(sanitizeJsonLeaves(nextNotes));
 
   await withClaimedLeadDraftLock(job, leadId, async (sql) => {
     const current =
@@ -2569,11 +2630,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       model_headline, model_topic, headline_source
     )
     values (
-      ${context.userId}, ${owned(context)}, ${leadId}, ${headline.headline}, ${reported.dek}, ${draftBody},
-      ${reported.topic}, ${sourceUrls}, ${notes},
-      ${provenanceJson}, ${reported.form}, ${reported.found_note}, ${unansweredJson},
+      ${context.userId}, ${owned(context)}, ${leadId}, ${storableText(headline.headline)},
+      ${storableText(reported.dek)}, ${draftBody},
+      ${storableText(reported.topic)}, ${sourceUrls}, ${notes},
+      ${provenanceJson}, ${storableText(reported.form)}, ${storableText(reported.found_note)},
+      ${unansweredJson},
       ${researchJson},
-      ${headline.modelHeadline}, ${reported.topic}, ${headline.source}
+      ${storableText(headline.modelHeadline)}, ${storableText(reported.topic)}, ${headline.source}
     )
     returning id
   `;
@@ -2636,21 +2699,36 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           transcriptLinkCreated = true;
         }
       }
+      /*
+        THE RECEIPT THE DESK READS BACK, and the reason `sanitizeJsonLeaves`
+        exists.
+
+        `JSON.stringify` is not a guard here. The name-check rows and the style
+        audit's notes are model-written strings; a U+0000 in one of them comes
+        out of the stringify as a JSON escape rather than as a byte, so the
+        string itself looks clean -- and then `${completion}::jsonb` hands it to
+        Postgres, which parses the escape and refuses the statement with
+        "unsupported Unicode escape sequence". The update fails, the job never
+        gets its receipt, and the Done card has no Open button. The byte has to
+        go before the stringify, which is what `sanitizeJsonLeaves` does.
+      */
       const completion = JSON.stringify(
-        buildDraftCompletionReceipt({
-          checkpointDraftId,
-          finalDraftId: Number(savedDraft.id),
-          citationStatus:
-            transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
-            (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
-              ? "complete"
-              : "review-required"),
-          evidenceCheckIncomplete: notes.includes(
-            "Evidence reconciliation not completed within the available edit pass.",
-          ),
-          nameCheck: reported.research_memo.nameCheck,
-          styleAudit: styleAuditSummary(styleRecord),
-        }),
+        sanitizeJsonLeaves(
+          buildDraftCompletionReceipt({
+            checkpointDraftId,
+            finalDraftId: Number(savedDraft.id),
+            citationStatus:
+              transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
+              (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
+                ? "complete"
+                : "review-required"),
+            evidenceCheckIncomplete: notes.includes(
+              "Evidence reconciliation not completed within the available edit pass.",
+            ),
+            nameCheck: reported.research_memo.nameCheck,
+            styleAudit: styleAuditSummary(styleRecord),
+          }),
+        ),
       );
       await sql`
       update desk_jobs
@@ -4078,19 +4156,32 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         if (!clash[0]) break;
         slug = n === 0 ? `${baseSlug}-${leadId}` : `${baseSlug}-${leadId}-${n + 1}`;
       }
+      /*
+        PRINTING IS A WRITE, and it is the last door the model's words pass
+        through before a reader sees them. The draft row this reads was cleaned
+        when it was saved, but a row saved before that guard existed can still
+        carry a NUL, and a NUL in any of the `text` columns below fails the
+        INSERT -- inside the transaction that prints the story, so the publish
+        is lost rather than half-done.
+
+        `provenance_json` and `source_urls` are the captured-page side of the
+        row and are left as they are.
+      */
       const [printed] = await sql<{ id: number }>`
       insert into articles (
         user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status, published_at,
         provenance_json, form, found_note, unanswered, origin_draft_id, disclosure_text, area
       )
       values (
-        ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${draft.headline}, ${draft.dek},
-        ${draft.body}, ${draft.topic}, ${draft.source_urls}, 'published', now(),
-        ${provenanceJson}, ${row.form || "reported"}, ${row.found_note || ""}, ${row.unanswered || "[]"}, ${row.id},
+        ${context.userId}, ${owned(context)}, ${leadId}, ${slug}, ${storableText(draft.headline)},
+        ${storableText(draft.dek)},
+        ${storableText(draft.body)}, ${storableText(draft.topic)}, ${draft.source_urls}, 'published', now(),
+        ${provenanceJson}, ${storableText(row.form || "reported")}, ${storableText(row.found_note || "")},
+        ${row.unanswered || "[]"}, ${row.id},
         /* The line the editor chose on the import screen, carried on the draft.
            Empty for every story the desk wrote, which prints the standard AI
            line exactly as before. */
-        ${row.disclosure_text || ""},
+        ${storableText(row.disclosure_text || "")},
         /* The geography pill this story answers to. NULL is the home town on the
            paper, which is the rule for the whole pre-0098 archive too -- see
            story-area.ts, which owns the four keys. */
@@ -4105,11 +4196,17 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
+      /*
+        Both halves of a beat-memory row are model-written -- the entity is cut
+        out of the draft's headline, the angle is its dek -- and both are `text`
+        columns. Guarded after the split and the trim, so the entity written is
+        the entity that was counted.
+      */
       const entities = [draft.topic, ...draft.headline.split(/[:,—-]/).slice(0, 2)];
-      for (const entity of entities.map((e) => e.trim()).filter((e) => e.length > 2)) {
+      for (const entity of entities.map((e) => storableText(e).trim()).filter((e) => e.length > 2)) {
         await sql`
         insert into beat_memory (user_id, newsroom_id, entity, last_angle, article_id)
-        values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${draft.dek.slice(0, 200)}, ${printed.id})
+        values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${storableText(draft.dek).slice(0, 200)}, ${printed.id})
       `;
       }
       return { blocked: false as const, slug, id: printed.id };

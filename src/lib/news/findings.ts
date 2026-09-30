@@ -1,5 +1,11 @@
 import { sanitizePublicUrls } from "./schema.ts";
 
+/*
+  This type has a twin in `report.ts` (same fields, same order), kept in step
+  by hand -- a draft's provenance is hydrated there and rendered from here. A
+  field added to one and not the other is a field that disappears between the
+  draft and the page.
+*/
 export type ProvenanceItem = {
   title: string;
   organization: string;
@@ -11,6 +17,19 @@ export type ProvenanceItem = {
   capture_event_id?: number | null;
   disappeared: boolean;
   role: string;
+  /**
+   * Unit U11b2: the excerpt of this item's captured version was taken down at
+   * a publisher's request, and whether the notice may still link to the
+   * original.
+   *
+   * Optional, and set at READ time only (`public.ts`'s `markRemovedCaptures`
+   * joins them from `artifact_versions` when a story is served): provenance is
+   * stored in `articles.provenance_json` when the story is filed, and a
+   * takedown happens later, so a stored copy of these flags would be stale by
+   * definition.
+   */
+  excerpt_removed?: boolean;
+  excerpt_removed_link_kept?: boolean;
 };
 
 export type StoryFinding = {
@@ -294,5 +313,27 @@ export function resolvePublicFindings(
       browser at all. The reader gets the "Captured record" link, which is the
       real way into the same passage.
     */
-    .map((f) => ({ ...f, locators: [] }));
+    .map((f) => {
+      /*
+        Unit U11b3: the recorded quote does not leave the server either.
+
+        A finding's `excerpt` is the passage the desk copied out of the
+        captured page -- up to 800 characters of somebody else's article
+        (`parseFindings` above). It is the desk's receipt: it is what the
+        evidence review matches against the capture, and what the editor read
+        when they judged the finding. The public page never printed it, and
+        this function is the only place a reader's copy of a finding is built
+        -- but the `...f` spread carried the quote into every public payload
+        anyway: `findings` and the serialized `found_note` on the article, one
+        `view-source` away, which is the same leak U11a closed on the evidence
+        page and U11b2 closed on the story's link.
+
+        Dropped here for the same reason as the locators below: at the boundary
+        where the reader's copy is made, so no route, list payload or future
+        component can hand it out by accident. `parseFindings` still returns it
+        to the desk, which is where it belongs.
+      */
+      const { excerpt: _quote, ...publicFinding } = f;
+      return { ...publicFinding, locators: [] };
+    });
 }

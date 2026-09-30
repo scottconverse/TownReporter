@@ -40,6 +40,8 @@ function capture(patch: Partial<FindingCaptureEvidence> = {}): FindingCaptureEvi
     capturedAt: "2026-10-01T14:14:00.000Z",
     available: true,
     readable: true,
+    /* Unit U11b: an ordinary capture; a taken-down one is not readable. */
+    takenDown: false,
     excerptState: "found",
     newerCapture: null,
     viewHref: "/evidence/1",

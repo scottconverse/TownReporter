@@ -43,11 +43,18 @@ function* testFiles(dir) {
  * scripts/desk-dark-flash-walk.mjs (0.6.64, Unit AE) outside this check, and
  * it boots the built server on a port of its own. Leaving it unscanned would
  * make this file's guarantee a property of filenames rather than of ports.
+ *
+ * `-panels.mjs` for the same reason, since 2026-09-30: Unit U5 gave
+ * scripts/paper-panels.mjs a boot seam of its own so the CI step could seed
+ * the dated paper it needs, and a file that binds a port is exactly what this
+ * check is about -- whatever it is called. `scripts/meeting-settings-e2e.mjs`
+ * and `scripts/stats-privacy-e2e.mjs` gained the same seam and are matched
+ * already.
  */
 function* walkFiles(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) continue;
-    if (/-e2e\.mjs$|-walk\.mjs$/.test(e.name)) yield join(dir, e.name);
+    if (/-e2e\.mjs$|-walk\.mjs$|-panels\.mjs$/.test(e.name)) yield join(dir, e.name);
   }
 }
 

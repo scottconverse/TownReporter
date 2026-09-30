@@ -1542,7 +1542,14 @@ export async function buildDarkSynthesisPack(
   return `${contextText}\n\nARTIFACTS:\n${artifactEvidence.text}`;
 }
 
-async function synthesizeSignals(
+/*
+  Exported, and given a `chat` seam, for the same reason `queueInvestigationFor`
+  is exported and `performScanWork` takes its deps: the Dark Desk's signal write
+  is the one place the model's prose becomes a `dark_signals` row, and the guard
+  on it has to be provable against a real PostgreSQL rather than argued for.
+  The seam defaults to the real `grokChat`; every production caller omits it.
+*/
+export async function synthesizeSignals(
   userId: string,
   runId: number,
   investigationId: number,
@@ -1561,6 +1568,8 @@ async function synthesizeSignals(
   runBudget?: DarkRunBudget,
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>,
   reasoningEffort?: ModelEffort | null,
+  /** Test seam for the single model call this pass makes. Production omits it. */
+  deps: { chat?: typeof grokChat } = {},
 ) {
   const sql = await getSql();
   const researchWindow = preferences ? `${describeResearchWindow(preferences)}\n\n` : "";
@@ -1596,9 +1605,10 @@ async function synthesizeSignals(
   }
   if (call) await onUsage?.(runBudget!.snapshot());
   const callMs = providerBudget(choice, overrides).callMs;
+  const chat = deps.chat ?? grokChat;
   let ai: Awaited<ReturnType<typeof grokChat>>;
   try {
-    ai = await grokChat(darkSystemFor(dials, place), pack, 3200, {
+    ai = await chat(darkSystemFor(dials, place), pack, 3200, {
       timeoutMs: Math.max(1, Math.min(callMs, runBudget?.remainingMs() ?? callMs)),
       choice,
       newsroomId,
@@ -1650,7 +1660,21 @@ async function synthesizeSignals(
 
   let stored = 0;
   for (const sig of parsed.signals ?? []) {
-    const name = String(sig.name ?? "").trim();
+    /*
+      EVERY FIELD OF THIS ROW IS MODEL PROSE, so every one of them is guarded
+      here rather than at a caller: `title`, `observation`, `pattern`,
+      `linkage_map`, `alternatives`, `counter_narrative`, `what_would_kill`,
+      `pathway` and `privacy_review` all come straight out of the model's JSON
+      and all land in `text` columns. One U+0000 in one of them fails the whole
+      insert, and the insert is inside the pass's transaction, so the whole
+      Dark desk round -- every signal already stored in it -- goes with it.
+
+      `normalizePosture` and the `HANDOFFS` set pick from fixed vocabularies
+      and `strength`/`confidence` are numbers, so those four cannot carry a
+      byte that is not printable. `storableText`, not `postgresText`: this is
+      what the model wrote, not what a source said (see storable-text.ts).
+    */
+    const name = storableText(String(sig.name ?? "")).trim();
     if (!name) continue;
     if (isPoisonedSignal(sig)) continue;
     const strength = Math.min(15, Math.max(3, Number(sig.strength) || 3));
@@ -1679,16 +1703,16 @@ async function synthesizeSignals(
       ) values (
         ${userId}, ${newsroomId}, ${runId}, ${investigationId}, ${name.slice(0, 200)},
         ${normalizePosture(sig.posture)},
-        ${String(sig.type ?? "").slice(0, 80)},
+        ${storableText(String(sig.type ?? "")).slice(0, 80)},
         ${strength}, ${confidence},
-        ${preserveBoundedAbsenceLanguage(sig.observation, pack).slice(0, 4000)},
-        ${String(sig.pattern ?? "").slice(0, 4000)},
-        ${String(sig.linkage_map ?? "").slice(0, 4000)},
-        ${String(sig.alternatives ?? "").slice(0, 4000)},
-        ${String(sig.counter_narrative ?? "").slice(0, 4000)},
-        ${String(sig.what_would_kill ?? "").slice(0, 2000)},
-        ${String(sig.pathway ?? "").slice(0, 2000)},
-        ${String(sig.privacy_review ?? "").slice(0, 500)},
+        ${storableText(preserveBoundedAbsenceLanguage(sig.observation, pack)).slice(0, 4000)},
+        ${storableText(String(sig.pattern ?? "")).slice(0, 4000)},
+        ${storableText(String(sig.linkage_map ?? "")).slice(0, 4000)},
+        ${storableText(String(sig.alternatives ?? "")).slice(0, 4000)},
+        ${storableText(String(sig.counter_narrative ?? "")).slice(0, 4000)},
+        ${storableText(String(sig.what_would_kill ?? "")).slice(0, 2000)},
+        ${storableText(String(sig.pathway ?? "")).slice(0, 2000)},
+        ${storableText(String(sig.privacy_review ?? "")).slice(0, 500)},
         ${handoff},
         ${"black-desk"},
         ${"unverified"},
@@ -1699,16 +1723,23 @@ async function synthesizeSignals(
   }
 
   for (const p of parsed.promises ?? []) {
-    const who = String(p.who ?? "").trim();
-    const what = String(p.what ?? "").trim();
+    /*
+      The same write door as the signals above, one statement later, and the
+      same model: `who`, `what`, `when_due`, `source_cite` and `status` are all
+      the model's words about a promise it read. `isGroundedDarkPromise` is a
+      check on what was written, not a guard against a byte that cannot be
+      stored, so the fields still go through `storableText`.
+    */
+    const who = storableText(String(p.who ?? "")).trim();
+    const what = storableText(String(p.what ?? "")).trim();
     if (!who || !what || !isGroundedDarkPromise(p, pack)) continue;
     await sql`
       insert into dark_promises (user_id, newsroom_id, who_promised, what, when_due, source_cite, status)
       values (
         ${userId}, ${newsroomId}, ${who.slice(0, 200)}, ${what.slice(0, 800)},
-        ${String(p.when_due ?? "").slice(0, 120) || null},
-        ${String(p.source_cite ?? "").slice(0, 400) || null},
-        ${String(p.status ?? "open").slice(0, 40)}
+        ${storableText(String(p.when_due ?? "")).slice(0, 120) || null},
+        ${storableText(String(p.source_cite ?? "")).slice(0, 400) || null},
+        ${storableText(String(p.status ?? "open")).slice(0, 40)}
       )
     `;
   }
@@ -2539,7 +2570,37 @@ export async function performArtifactOcrWork(
       `;
       if (!owns[0])
         throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
-      if (pages.length) {
+      /*
+        Unit U11b2: never write an OCR passage back onto a capture the owner has
+        taken down.
+
+        The purge (`evidence-takedown.ts`) empties every `artifact_chunks`
+        excerpt of the version. A PDF read that was already queued when the
+        takedown happened would otherwise land afterwards and put model-read
+        text from the publisher's page straight back into the table the purge
+        just cleared -- the takedown would look done on the evidence page and
+        not be done in the database. Skipped rather than refused: the job's own
+        bookkeeping (pages read, the extraction method) still finishes, so the
+        desk sees a completed read with no passages added, and the takedown
+        stays the last word on what this capture holds.
+      */
+      /*
+        `for share`, so this read cannot race a takedown that is committing.
+
+        A plain select would read `taken_down_at` as null, let a takedown purge
+        every passage of the version, and then insert this read's pages back
+        into the table the purge had just cleared -- the evidence page saying
+        the excerpt was removed while the database held it again. The takedown
+        takes its row `for update` (`evidence-takedown.ts`) and this takes it
+        `for share`, so the two serialise: whichever arrives first finishes
+        first, and a read that arrives second sees the marker and adds nothing.
+      */
+      const [takenDown] = await tx<{ taken_down_at: string | null }>`
+        select taken_down_at::text as taken_down_at from artifact_versions
+        where id = ${retained.version_id} and newsroom_id = ${job.newsroom_id}
+        for share
+      `;
+      if (pages.length && !takenDown?.taken_down_at) {
         const chunks = chunksFromEvidence(pages.map((page) => page.text).join("\n\n"), pages);
         const next = await tx<{ next: number }>`
           select coalesce(max(chunk_index), -1) + 1 as next from artifact_chunks
@@ -2932,33 +2993,41 @@ export async function sendDarkSignalToQueueFor(
         order by id desc limit 12
       `;
   const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
-  const why = [
-    `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
-    `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
-    `Stage: ${words.chip}. ${words.sentence}`,
-    `Editor triage: ${newsworthinessWords(news)}`,
-    verified ? "" : "Research protocol incomplete. This is an editor lead, not a factual finding.",
-    `Opposing account: ${(sig.counter_narrative || "Not established.").slice(0, 800)}`,
-    `Missing context: ${(sig.gate_missing_context || "Not assessed.").slice(0, 800)}`,
-    sig.observation,
-    `Linkage: ${sig.linkage_map}`,
-    `Alternatives: ${sig.alternatives}`,
-    `Pathway: ${sig.pathway}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n")
-    .slice(0, 4000);
+  /*
+    `why` is ASSEMBLED from the signal, and every part of it is the model's --
+    the observation, the linkage map, the alternatives, the pathway, the
+    opposing account. The guard goes on the joined sentence, not on each clause
+    on the way in, so a field added to this list by a later author is covered
+    without their having to know this comment exists.
+  */
+  const why = storableText(
+    [
+      `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
+      `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
+      `Stage: ${words.chip}. ${words.sentence}`,
+      `Editor triage: ${newsworthinessWords(news)}`,
+      verified ? "" : "Research protocol incomplete. This is an editor lead, not a factual finding.",
+      `Opposing account: ${(sig.counter_narrative || "Not established.").slice(0, 800)}`,
+      `Missing context: ${(sig.gate_missing_context || "Not assessed.").slice(0, 800)}`,
+      sig.observation,
+      `Linkage: ${sig.linkage_map}`,
+      `Alternatives: ${sig.alternatives}`,
+      `Pathway: ${sig.pathway}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  ).slice(0, 4000);
   const created = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
     values (
       ${userId},
       ${newsroomId},
-      ${sig.name.slice(0, 240)},
+      ${storableText(sig.name).slice(0, 240)},
       ${why},
       'council',
       'new',
       ${urls},
-      ${sig.observation.slice(0, 4000)},
+      ${storableText(sig.observation).slice(0, 4000)},
       ${Math.min(20, sig.strength)},
       ${sig.investigation_id}
     )
@@ -3095,13 +3164,24 @@ export async function queueInvestigationFor(
   ]
     .filter(Boolean)
     .join("\n\n");
-  const evidence = `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`;
+  /*
+    The handoff's `evidence` is the same shape of assembled model prose as
+    `why` above: signal names, opposing accounts, what-would-kill lines and the
+    investigation's own summary, stitched into one string. Guarded whole, after
+    the join, so the stitches are covered too, and so is a clause a later author
+    adds to the `handoff` list above. `topic` is the one field here that is not
+    the model's: `topicFromText` answers with a key from the newsroom's own
+    section list.
+  */
+  const evidence = storableText(
+    `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`,
+  );
   const created = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen)
     values (
       ${userId},
       ${newsroomId},
-      ${inv[0].title.slice(0, 240)},
+      ${storableText(inv[0].title).slice(0, 240)},
       ${evidence},
       ${topic},
       'new',

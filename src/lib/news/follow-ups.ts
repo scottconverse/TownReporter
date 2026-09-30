@@ -1,5 +1,6 @@
-import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
+import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { parseNotes, packNotes } from "./notes.ts";
+import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
   AGENT_METHOD_LABELS,
@@ -441,30 +442,55 @@ export async function performUpdateAiFollowUp(
  * the desk rather than typed by the editor. Two callers use this: a run that
  * ends `found`, and an edit that attaches a story to a follow-up that had
  * already found something.
+ *
+ * `tx` IS THE CALLER'S TRANSACTION, and for the run path it must be: the note
+ * is the second half of a run's result, and the fence that refuses a stopped
+ * run's result (see `performRecordFollowUpRun`) lives in the same transaction
+ * as this write. Split them and there is a window where the fence has already
+ * passed and the note has not been written yet -- a Stop landing there would
+ * leave a stopped follow-up's finding in the editor's notes, which is the one
+ * thing this whole path exists to prevent.
  */
-async function appendFindingNote(
+async function appendFindingNoteIn(
+  tx: Sql,
   context: { userId: string; newsroomId?: number },
   leadId: number,
   text: string,
 ): Promise<boolean> {
   const noteText = text.trim().slice(0, 600);
   if (!noteText) return false;
-  return withTransaction(async (tx) => {
-    const leadRows = await tx<{ notes_json: string | null }>`
-      select notes_json from leads
-      where id = ${leadId} and newsroom_id = ${owned(context)}
-      for update
-    `;
-    if (!leadRows[0]) return false;
-    const notes = parseNotes(leadRows[0].notes_json);
-    notes.found.push({ t: noteText, src: "machine" });
-    await tx`
-      update leads set notes_json = ${packNotes(notes)}
-      where id = ${leadId} and newsroom_id = ${owned(context)}
-    `;
-    return true;
-  });
+  const leadRows = await tx<{ notes_json: string | null }>`
+    select notes_json from leads
+    where id = ${leadId} and newsroom_id = ${owned(context)}
+    for update
+  `;
+  if (!leadRows[0]) return false;
+  const notes = parseNotes(leadRows[0].notes_json);
+  notes.found.push({ t: noteText, src: "machine" });
+  await tx`
+    update leads set notes_json = ${packNotes(notes)}
+    where id = ${leadId} and newsroom_id = ${owned(context)}
+  `;
+  return true;
 }
+
+/** `appendFindingNoteIn` for a caller that is not already in a transaction. */
+async function appendFindingNote(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+  text: string,
+): Promise<boolean> {
+  return withTransaction((tx) => appendFindingNoteIn(tx, context, leadId, text));
+}
+
+/**
+ * What a run's result write did. `stopped` on the refusal says WHICH refusal
+ * this was: the editor's Stop (the run may not record, and the worker ends the
+ * job as cancelled) rather than a row that is no longer there.
+ */
+export type FollowUpRecordResult =
+  | { ok: true; noteWritten: boolean }
+  | { ok: false; error: string; stopped: boolean };
 
 /**
  * The agent's own write, at the end of a run: what it found, what it could not
@@ -482,6 +508,27 @@ async function appendFindingNote(
  * null) the state still moves and no note is written; the finding is on the
  * card, and the editor links it to a story from there. That is why
  * `noteWritten` is reported back rather than assumed.
+ *
+ * THE FENCE. `status <> 'stopped'` is in the WHERE of the one statement that
+ * moves the row, and the notes write is inside the SAME transaction, which
+ * makes "a stopped follow-up never writes a finding or a note" a property of
+ * the database rather than of the worker's timing:
+ *
+ *  - Stop commits first: this UPDATE matches no row, nothing is written, and
+ *    the caller is told `stopped: true` so the job ends as cancelled. There is
+ *    no checkpoint to lose a race with, because there is no checkpoint here --
+ *    this is the write itself refusing.
+ *  - This transaction gets there first: Stop's own `update follow_ups` blocks
+ *    on the row lock until this commits, so the note is written and the finding
+ *    exists BEFORE the row is stopped. That is not a lost write, it is a run
+ *    that finished first, and its finding is exactly what Stop must preserve.
+ *
+ * Either order, the note and the finding are on the same side of the Stop as
+ * the `follow_ups` row. The separate `appendFindingNote` a run used to call
+ * could not give that: it was a second transaction, so a Stop landing between
+ * the two writes left a stopped follow-up's finding in the editor's notes.
+ * `follow-up-stop.postgres.test.ts` is the cross-process proof, and it fails
+ * if the WHERE clause below loses its `status <> 'stopped'`.
  */
 export async function performRecordFollowUpRun(
   context: { userId: string; newsroomId?: number },
@@ -494,41 +541,89 @@ export async function performRecordFollowUpRun(
     /** Extra line for the story's notes; defaults to the finding's own line. */
     note?: string | null;
   },
-): Promise<{ ok: true; noteWritten: boolean } | { ok: false; error: string }> {
+): Promise<FollowUpRecordResult> {
   await ensureFollowUpsSchema();
-  const finding = { ...EMPTY_FINDING, ...(input.finding ?? {}), checkedAt: input.finding?.checkedAt ?? new Date().toISOString() };
-  const sql = await getSql();
-  const rows = await sql<{ id: number; lead_id: number | null; article_id: number | null }>`
-    update follow_ups
-    set last_state = ${input.state}, last_run_at = now(), finding_json = ${packFinding(finding)},
-        next_run_at = ${input.nextRunAt ?? null}, updated_at = now()
-    where id = ${input.id} and newsroom_id = ${owned(context)}
-    returning id, lead_id, article_id
-  `;
-  const row = rows[0];
-  if (!row) return { ok: false as const, error: "That follow-up is gone." };
-  if (input.state !== "found") return { ok: true as const, noteWritten: false };
+  /*
+    The agent's finding, as the card and the story will both read it.
 
-  // An article row knows its lead; a follow-up started from the story page has
-  // only the article. Resolve to the lead, then write through the notes column.
-  let leadId = row.lead_id;
-  if (!leadId && row.article_id) {
-    const articleRows = await sql<{ lead_id: number | null }>`
-      select lead_id from articles where id = ${row.article_id} and newsroom_id = ${owned(context)}
+    `finding_json` is a `text` column, so a NUL in the model's title, summary
+    or reason does NOT fail the write -- `JSON.stringify` inside `packFinding`
+    turns it into an escape and the INSERT succeeds. It fails later, and
+    somewhere else: `findingNoteLine` copies the same words into the story's
+    `notes_json`, and `meeting-activity.ts` reads that column back through
+    `::jsonb`, which is where the escape finally refuses to parse. The guard has
+    to be on the values, before they are packed, which is what
+    `sanitizeJsonLeaves` does -- the same walk `storableText` would do field by
+    field, and it leaves `changed` (a boolean) alone.
+  */
+  const finding = sanitizeJsonLeaves({
+    ...EMPTY_FINDING,
+    ...(input.finding ?? {}),
+    checkedAt: input.finding?.checkedAt ?? new Date().toISOString(),
+  });
+  const newsroomId = owned(context);
+  return withTransaction(async (tx) => {
+    const rows = await tx<{ id: number; lead_id: number | null; article_id: number | null }>`
+      update follow_ups
+      set last_state = ${input.state}, last_run_at = now(), finding_json = ${packFinding(finding)},
+          next_run_at = ${input.nextRunAt ?? null}, updated_at = now()
+      where id = ${input.id} and newsroom_id = ${newsroomId}
+        and status <> 'stopped'
+      returning id, lead_id, article_id
     `;
-    leadId = articleRows[0]?.lead_id ?? null;
-  }
-  if (!leadId) return { ok: true as const, noteWritten: false };
+    const row = rows[0];
+    if (!row) {
+      /*
+        Nothing was written. Read the row back to say WHY: a `stopped` row is
+        the editor's Stop landing after the run's last checkpoint, which the
+        worker turns into the job's own cancelled terminal state; an absent row
+        is a follow-up that is gone, which is not a cancel. Read in the same
+        transaction, so it is the state that refused the write.
+      */
+      const [present] = await tx<{ status: FollowUpStatus }>`
+        select status from follow_ups where id = ${input.id} and newsroom_id = ${newsroomId}
+      `;
+      if (!present) return { ok: false as const, error: "That follow-up is gone.", stopped: false };
+      return {
+        ok: false as const,
+        error: "The editor stopped this follow-up before the run could record its result.",
+        stopped: present.status === "stopped",
+      };
+    }
+    if (input.state !== "found") return { ok: true as const, noteWritten: false };
 
-  const written = await appendFindingNote(context, leadId, input.note ?? findingNoteLine(finding));
-  return { ok: true as const, noteWritten: written };
+    // An article row knows its lead; a follow-up started from the story page has
+    // only the article. Resolve to the lead, then write through the notes column.
+    let leadId = row.lead_id;
+    if (!leadId && row.article_id) {
+      const articleRows = await tx<{ lead_id: number | null }>`
+        select lead_id from articles where id = ${row.article_id} and newsroom_id = ${newsroomId}
+      `;
+      leadId = articleRows[0]?.lead_id ?? null;
+    }
+    if (!leadId) return { ok: true as const, noteWritten: false };
+
+    // The extra line is the caller's, and the caller is the model-reading part of
+    // the run -- so it gets the same guard as the finding's own fields before it
+    // reaches `notes_json`.
+    const written = await appendFindingNoteIn(
+      tx,
+      context,
+      leadId,
+      storableText(input.note ?? findingNoteLine(finding)),
+    );
+    return { ok: true as const, noteWritten: written };
+  });
 }
 
-/** The status transitions the screen's action buttons perform. */
-const ACTION_STATUS: Record<Exclude<FollowUpAction, "run-now">, FollowUpStatus> = {
+/**
+ * The status transitions the screen's action buttons perform, less the three
+ * that are not a plain status write: "run-now" (the scheduler's path) and
+ * "stop" / "resume" (both of which have to read `desk_jobs` as well, and are
+ * delegated to ./follow-up-stop.server.ts below).
+ */
+const ACTION_STATUS: Record<"pause" | "done", FollowUpStatus> = {
   pause: "paused",
-  resume: "active",
-  stop: "stopped",
   done: "done",
 };
 
@@ -540,23 +635,63 @@ export async function performFollowUpAction(
   await ensureFollowUpsSchema();
   const sql = await getSql();
   if (action === "run-now") {
-    // Due now, and active: "Run now" on a paused card also resumes it, which
-    // is what the drawn Waiting card's three buttons (Run now, Edit, Stop)
-    // imply -- there is no fourth way back from paused.
+    /*
+      Due now, and active: "Run now" on a paused card also resumes it, which is
+      what the drawn Waiting card's three buttons (Run now, Edit, Stop) imply --
+      there is no fourth way back from paused.
+
+      NOT from `stopped` or `done`, and that is what makes Stop mean stop. The
+      predicate is the screen's own vocabulary turned round: `cardActions` offers
+      Run now only on a card whose status is active or paused (a stopped card
+      offers Resume), and `startFollowUpRun` reads the row before it gets here.
+      Without it, a Stop committing between that read and this write would be
+      overwritten by `status = 'active'` -- a stopped agent resurrected by a
+      press that had already been refused. Resume is the one way back, and it is
+      a status the editor asks for by name.
+    */
     const rows = await sql`
       update follow_ups
       set status = 'active', next_run_at = now(), updated_at = now()
+      where id = ${id} and newsroom_id = ${owned(context)} and agent_kind is not null
+        and status in ('active', 'paused')
+      returning id
+    `;
+    if (rows.length) return { ok: true as const };
+    const [present] = await sql<{ status: FollowUpStatus }>`
+      select status from follow_ups
+      where id = ${id} and newsroom_id = ${owned(context)} and agent_kind is not null
+    `;
+    return present
+      ? {
+          ok: false as const,
+          error: "That follow-up has been stopped or finished. Resume it first if you want it to run again.",
+        }
+      : { ok: false as const, error: "That follow-up is gone." };
+  }
+  if (action === "pause" || action === "done") {
+    const rows = await sql`
+      update follow_ups set status = ${ACTION_STATUS[action]}, updated_at = now()
       where id = ${id} and newsroom_id = ${owned(context)} and agent_kind is not null
       returning id
     `;
     return rows.length ? { ok: true as const } : { ok: false as const, error: "That follow-up is gone." };
   }
-  const rows = await sql`
-    update follow_ups set status = ${ACTION_STATUS[action]}, updated_at = now()
-    where id = ${id} and newsroom_id = ${owned(context)} and agent_kind is not null
-    returning id
-  `;
-  return rows.length ? { ok: true as const } : { ok: false as const, error: "That follow-up is gone." };
+
+  /*
+    STOP AND RESUME ARE DELEGATED, and they are still Stop and Resume. Both have
+    to read or write `desk_jobs` as well as `follow_ups`: Stop cancels the runs
+    the editor ended (in the same transaction, or the two halves land apart) and
+    Resume is refused while a run for the follow-up is still going. That work
+    lives in ./follow-up-stop.server.ts, which this file cannot import
+    statically: `desk.ts` re-exports this module to the desk screens, and
+    `desk_jobs`' own module dynamically imports every `*.server.ts` worker in
+    the app, so a static edge to it fails the production build's
+    import-protection pass. A `.server`-named dynamic import is dropped from the
+    browser build, which is the same reason `follow-up-run.server.ts` is named
+    that way.
+  */
+  const { performFollowUpResume, performFollowUpStop } = await import("./follow-up-stop.server.ts");
+  return action === "stop" ? performFollowUpStop(context, id) : performFollowUpResume(context, id);
 }
 
 /**
@@ -653,7 +788,17 @@ export async function performReleaseFollowUpRun(
   `;
   const row = rows[0];
   if (!row) return;
-  const finding = { ...parseFinding(row.finding_json), reason: reason.slice(0, 300) };
+  /*
+    Same door as the run's own write above, reached from the other side: the
+    finding is read back off the row, given the failure reason, and packed
+    again -- so a NUL already stored in the row (written before this guard
+    existed) would be carried straight back into `finding_json`. Both halves
+    go through the walk.
+  */
+  const finding = sanitizeJsonLeaves({
+    ...parseFinding(row.finding_json),
+    reason: reason.slice(0, 300),
+  });
   const next = nextRunAt(row.schedule ?? "");
   await sql`
     update follow_ups

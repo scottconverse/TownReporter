@@ -10,11 +10,39 @@ import { collapsePrintedDuplicates } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { markRemovedCaptures, removedCapturesFor } from "./evidence.ts";
 import { publicSlug, publicTopic } from "./request-input.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
   catch { return false; }
+}
+
+/**
+ * `publicArticle`, with the takedown state of every capture the story cites
+ * joined in from the database (unit U11b2).
+ *
+ * WHY THIS IS SEPARATE FROM `publicArticle`. That function is pure -- it takes
+ * a row and returns what a reader may see of it -- and it is used by the feed
+ * and the topic lists as well as by the story page. The takedown flags,
+ * though, cannot live in the row: `articles.provenance_json` is written when
+ * the story is filed, and a takedown happens months later, so a stored copy of
+ * the flags would be stale by definition. This function is the one read path
+ * that joins them, and it exists as its own exported name so the join can be
+ * proved against a database (see the real-Postgres proof) rather than trusted
+ * because a route calls it.
+ *
+ * A story served with a capture whose link was removed therefore carries
+ * `excerpt_removed_link_kept: false` on that provenance row, and
+ * `ProvenanceBlock` renders the source as text instead of a link.
+ */
+export async function publicArticleForReaders<T extends ArticleRow>(
+  row: T,
+): Promise<T & { provenance: ProvenanceItem[]; findings: StoryFinding[] }> {
+  const article = publicArticle(row);
+  const removed = await removedCapturesFor(article.provenance.map((item) => item.version_id));
+  const provenance = markRemovedCaptures(article.provenance, removed);
+  return { ...article, provenance, provenance_json: JSON.stringify(provenance) };
 }
 
 /* Generic in the row so a caller that already selected extra columns (the
@@ -70,13 +98,46 @@ export function publicArticle<T extends ArticleRow>(
   };
 }
 
+/**
+ * A story as the LIST views get it: the card's fields, without the story's
+ * provenance (unit U11b3).
+ *
+ * `listPublishedArticles`, `listPublishedByTopic` and `searchPublished` each
+ * serve up to 30 articles to anyone, and each one carried the story's whole
+ * `provenance` array plus its `provenance_json` twin. Those are the reader's
+ * record of what a story cited -- and they were UNMARKED: the takedown flags
+ * are joined at read time by `publicArticleForReaders`, which only the story
+ * page calls, so a list payload could hand out a card whose source link the
+ * owner had removed, with nothing on it saying so.
+ *
+ * No list view draws provenance. Checked at this commit: the "Read next" cards,
+ * the topic and section lists and the search results print a headline, a dek, a
+ * section and a date, and `ProvenanceBlock` is mounted only by
+ * `articles.$slug.tsx`. So the fix is not to mark thirty rows nobody renders --
+ * it is to stop sending them. `collapsePrintedDuplicates` reads a headline and
+ * a body and nothing else, so the dedup in front of this call is unaffected.
+ *
+ * The story page is untouched: `getPublishedArticle` keeps its provenance, and
+ * keeps it marked.
+ */
+export type PublicListArticle = Omit<ArticleRow, "provenance_json" | "provenance"> & {
+  findings: StoryFinding[];
+};
+
+export function withoutProvenance(
+  article: ArticleRow & { provenance: ProvenanceItem[]; findings: StoryFinding[] },
+): PublicListArticle {
+  const { provenance_json: _json, provenance: _items, ...rest } = article;
+  return rest;
+}
+
 export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
   async () => {
     // CITY-SETUP release-walkthrough Blocker fix: before first-run setup
     // completes, nothing published is public -- including the
     // migration-seeded Longmont welcome article (migrations/0002_newsroom.sql),
     // which used to render on a fresh install's front page.
-    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as PublicListArticle[];
     try {
       const sql = await getSql();
       return sql<ArticleRow>`
@@ -86,10 +147,12 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
       order by published_at desc
       limit 30
-    `.then((rows) => collapsePrintedDuplicates(rows.map(publicArticle)));
+    `.then((rows) =>
+      collapsePrintedDuplicates(rows.map(publicArticle)).map(withoutProvenance),
+    );
     } catch (err) {
       console.error("[paper] listPublishedArticles failed", err);
-      return [] as ArticleRow[];
+      return [] as PublicListArticle[];
     }
   },
 );
@@ -116,7 +179,14 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
       limit 1
     `;
       if (!rows[0]) return null;
-      const article = publicArticle(rows[0]);
+      /*
+        Unit U11b2: `publicArticleForReaders` marks the cited captures whose
+        excerpt has been taken down, so "Current source" stops being a link
+        when the link was removed with it and the captured-version link says
+        what it opens. See that function for why the flags are joined here
+        rather than stored in `provenance_json`.
+      */
+      const article = await publicArticleForReaders(rows[0]);
       const corrs = await sql<{ body: string; created_at: string }>`
         select body, created_at from corrections
         where article_id = ${rows[0].id}
@@ -135,7 +205,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
 export const listPublishedByTopic = createServerFn({ method: "GET" })
   .validator((topic: string) => publicTopic.parse(topic))
   .handler(async ({ data: topic }) => {
-    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as PublicListArticle[];
     try {
       topic = await resolveSectionKey(DEFAULT_NEWSROOM_ID, topic);
       const sql = await getSql();
@@ -146,10 +216,12 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID} and topic = ${topic}
       order by published_at desc
       limit 30
-    `.then((rows) => collapsePrintedDuplicates(rows.map(publicArticle)));
+    `.then((rows) =>
+      collapsePrintedDuplicates(rows.map(publicArticle)).map(withoutProvenance),
+    );
     } catch (err) {
       console.error("[paper] listPublishedByTopic failed", err);
-      return [] as ArticleRow[];
+      return [] as PublicListArticle[];
     }
   });
 
@@ -166,8 +238,8 @@ export const SEARCH_MIN_INDEXED = 3;
 export const searchPublished = createServerFn({ method: "GET" })
   .validator((q: string) => q.trim().slice(0, 80))
   .handler(async ({ data: q }) => {
-    if (!q) return [] as ArticleRow[];
-    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as ArticleRow[];
+    if (!q) return [] as PublicListArticle[];
+    if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return [] as PublicListArticle[];
     try {
       const sql = await getSql();
       const like = `%${q}%`;
@@ -195,10 +267,10 @@ export const searchPublished = createServerFn({ method: "GET" })
              or (${wide} and body ilike ${like}))
       order by published_at desc
       limit 30
-    `.then((rows) => rows.map(publicArticle));
+    `.then((rows) => rows.map(publicArticle).map(withoutProvenance));
     } catch (err) {
       console.error("[paper] searchPublished failed", err);
-      return [] as ArticleRow[];
+      return [] as PublicListArticle[];
     }
   });
 

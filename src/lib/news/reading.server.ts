@@ -6,12 +6,12 @@
   endpoint the reader's browser posts to, the hour-bucketed aggregates it
   writes, and the editor-only queries the Stats page reads back.
 
-  THE PRIVACY RULE IT KEEPS (README.md:370-411, DECISIONS.md:90). Every row in
-  `read_hourly` (migrations/0103_read_hourly.sql) is a SUM over one hour, one
-  path, one referrer class and one device class. There is no column for an IP,
-  a user agent, a cookie, a session, or any other per-reader value -- and there
-  can be no such column, because the beacon never sends one. What arrives is
-  the vocabulary in src/lib/news/reading.ts and nothing else:
+  THE PRIVACY RULE IT KEEPS (README.md:370-411, and the owner's decision of
+  2026-09-30). Every row in `read_hourly` (migrations/0103_read_hourly.sql) is a
+  SUM over one hour, one path, one referrer class and one device class. There is
+  no column for an IP, a user agent, a cookie, a session, or any other
+  per-reader value -- and there can be no such column, because what the beacon
+  sends is the vocabulary in src/lib/news/reading.ts and nothing else:
 
     load   path, referrer class, device class, whether the referrer was one of
            our own article pages
@@ -21,16 +21,47 @@
            feeds the in-memory window in src/lib/news/reading-live.ts
     trust  one of four fixed event names
 
-  `readBeaconHandler` never reads `request.headers`. Not the IP, not the user
-  agent, not `referer`, not `cookie`. The only thing it touches is the JSON
-  body. `reading.server.test.ts` proves it by handing the handler a request whose
-  `headers` property throws on any access.
+  WHAT THE OWNER'S 2026-09-30 DECISION ADDED, AND HOW IT IS KEPT. Two signals
+  are now permitted beside the above, both counted on a `load` and neither one
+  storing or logging anything that identifies a person:
 
-  WHAT IT DOES NOT MEASURE, AND SAYS SO. "Returning readers" cannot be counted
-  without an identifier, so it is not counted (README.md:370-411). "Where
-  readers are" would need an IP lookup, which this paper does not do
-  (DECISIONS.md:90, Q5). The Stats page prints both facts rather than
-  estimating them.
+    location  a city and a country, read from Cloudflare's own `cf-ipcity` /
+              `cf-ipcountry` headers, validated by rejection, and written as a
+              per-DAY counter (migrations/0109_stats_location.sql). No IP is
+              stored, no latitude, longitude, region, postal code or timezone is
+              read at all, and a request that carries no such header writes no
+              row. A place is counted once per READER per day -- not once per
+              load (unit U23) -- and is printed on the Stats page only on days
+              when LOCATION_MIN_READERS readers were counted there, so a row can
+              never be a statement about one reader.
+
+    visitors  a daily integer. The server tells two readers apart for one day
+              with an HMAC held in process memory, whose secret salt rotates at
+              day rollover and dies with the process -- see
+              src/lib/news/stats-visitors.server.ts. Nothing derived from an
+              address is ever written down; only the integer is. The address it
+              hashes is read from the request headers only when the request came
+              over the tunnel's loopback connection (unit U17d), so a direct
+              client cannot inflate the count by varying a header, and an
+              installation with no tunnel counts no visitors at all.
+
+  Of the request, `readBeaconHandler` reads exactly the five header names in
+  src/lib/news/stats-privacy.ts's allowlist and the JSON body, and the body only
+  through a 2 KB cap. `referer` and `cookie` are still never touched, and the
+  referrer is still classified in the browser so the server never sees a URL.
+  `reading.server.test.ts` pins the allowlist with a `Headers` that records
+  every `get()`.
+
+  WHAT IT STILL DOES NOT MEASURE, AND SAYS SO. "Returning readers" cannot be
+  counted without a cross-day identifier, so it is still not counted
+  (README.md:370-411): a reader who comes back tomorrow is a new handle. The
+  visitor figure is an estimate that can be wrong in EITHER direction -- the
+  handle set is one process wide, so a restart, or a busy day's eviction of its
+  oldest handles, can count a reader who was already counted a second time
+  (over), while one address shared by a household, an office or a carrier's NAT
+  is one handle (under) -- and the page prints that beside the number rather
+  than calling it a headcount. It said "under-counts" until unit U17c, which
+  was one of the two directions and not the honest one on its own.
 
   A NOTE ON THE DENOMINATOR. `loads` counts every page load the beacon
   reported, `visits` only the ones that arrived from outside the site
@@ -65,16 +96,36 @@ import {
 } from "./reading.ts";
 import { liveSnapshot, noteLiveArrival, noteLiveBeat } from "./reading-live.ts";
 import { SITE_TARGET, ensureViewsSchema } from "./views.ts";
+import { readBeaconJson, takeBeaconToken } from "./beacon-guard.server.ts";
+import { beaconPeerIsLoopback } from "./beacon-peer.server.ts";
+import { noteVisitor } from "./stats-visitors.server.ts";
+import {
+  BEACON_HEADER_ALLOWLIST,
+  EMPTY_BEACON_CONTEXT,
+  FOLDED_CITY,
+  LOCATION_MIN_READERS,
+  beaconContextFromHeaders,
+  locationRowFor,
+} from "./stats-privacy.ts";
+import type { BeaconContext } from "./stats-privacy.ts";
 import type { LiveSnapshot } from "./reading-live.ts";
 import type { ReadRefClass, TrustEvent } from "./reading.ts";
 import type { ReadingRange } from "./reading.ts";
 
+export { BEACON_HEADER_ALLOWLIST };
+
 /**
- * Mirrors migrations/0103_read_hourly.sql. The two must stay
- * column-for-column identical -- src/lib/news/schema-parity.test.ts diffs
- * them, and every table this file touches is created here as well so a plain
- * `node --test` run (no Vite migration glob, see db.ts's `createPgliteSql`)
- * and a freshly rebuilt PGLite preview both have it before it is queried.
+ * Mirrors migrations/0103_read_hourly.sql and migrations/0109_stats_location.sql.
+ * They must stay column-for-column identical -- src/lib/news/schema-parity.test.ts
+ * diffs them (type, nullability, default and index, table by table), and every
+ * table this file touches is created here as well so a plain `node --test` run
+ * (no Vite migration glob, see db.ts's `createPgliteSql`) and a freshly rebuilt
+ * PGLite preview both have it before it is queried.
+ *
+ * One marker guards all four tables. `ensureSchemaOnce` keys on a fingerprint
+ * of the whole statement list, so adding 0109's two tables here re-runs the
+ * 0103 statements once on an installed database -- harmless, since every one of
+ * them is `create ... if not exists`.
  */
 const READING_SCHEMA_STATEMENTS = [
   `create table if not exists read_hourly (
@@ -105,6 +156,28 @@ const READING_SCHEMA_STATEMENTS = [
    )`,
   `create index if not exists trust_signals_hourly_newsroom_hour_idx
      on trust_signals_hourly (newsroom_id, hour_start desc)`,
+  // migrations/0109_stats_location.sql. A place counted by the day -- never by
+  // the hour, which for a small town would be one reader's evening (see that
+  // file's header and migrations/0103_read_hourly.sql:15). No extra index: the
+  // primary key is already prefixed by (newsroom_id, day), which is every read
+  // this table gets.
+  `create table if not exists location_daily (
+     newsroom_id integer not null default 1,
+     day date not null,
+     country text not null,
+     city text not null,
+     visits bigint not null default 0,
+     primary key (newsroom_id, day, country, city)
+   )`,
+  // The one integer the in-memory visitor handles produce
+  // (src/lib/news/stats-visitors.server.ts). There is no table of handles, and
+  // there must never be one: nothing derived from an address is written down.
+  `create table if not exists visitor_daily (
+     newsroom_id integer not null default 1,
+     day date not null,
+     visitors bigint not null default 0,
+     primary key (newsroom_id, day)
+   )`,
 ] as const;
 
 export async function ensureReadingSchema(): Promise<void> {
@@ -236,6 +309,7 @@ export async function recordTrustCount(
 export async function recordReadBeacon(
   payload: unknown,
   newsroomId: number = DEFAULT_NEWSROOM_ID,
+  context: BeaconContext = EMPTY_BEACON_CONTEXT,
 ): Promise<ReadBeaconOutcome> {
   const body =
     payload && typeof payload === "object" && !Array.isArray(payload)
@@ -245,7 +319,7 @@ export async function recordReadBeacon(
   try {
     switch (kind) {
       case "load":
-        return await recordLoad(body, newsroomId);
+        return await recordLoad(body, newsroomId, context);
       case "read":
         return await recordReadTime(body, newsroomId);
       case "trust":
@@ -271,6 +345,7 @@ export async function recordReadBeacon(
 async function recordLoad(
   body: Record<string, unknown>,
   newsroomId: number,
+  context: BeaconContext,
 ): Promise<ReadBeaconOutcome> {
   const valid = await validateRow(body, newsroomId);
   if (typeof valid === "string") return { accepted: false, kind: "load", reason: valid };
@@ -295,7 +370,85 @@ async function recordLoad(
     counted heads.
   */
   noteLiveBeat({ path: valid.path, seconds: 0, device: valid.device });
+  /*
+    The load is also where the two signals the owner's 2026-09-30 decision
+    permits are counted -- a place, and a person only as a daily integer.
+
+    Its own try/catch, deliberately: a location or visitor write that fails
+    must not turn a load that already landed into a refusal, and must not stop
+    the live panel above. This is the same rule every other refusal on this
+    path keeps -- one counter's bad day is never another's.
+  */
+  try {
+    await noteLoadExtras(newsroomId, context);
+  } catch (err) {
+    console.error("[reading] load extras failed", err);
+  }
   return { accepted: true, kind: "load" };
+}
+
+/**
+ * The place counter and the visitor count for one load -- and both are counted
+ * for a READER, not for a load (unit U23). One call each per reader per day.
+ * Keyed by the database's `current_date`, so they land on the same calendar
+ * `page_views.day` is written on.
+ *
+ * WHY THE PLACE COUNTER HAD TO MOVE BEHIND `noteVisitor`. It used to be
+ * incremented on every `load`, before anything had asked whether this was
+ * someone new. So one reader -- reloading a page, or reading twenty-five of
+ * them -- pushed a town they were the only reader of to the threshold on their
+ * own, and the Stats page then printed it by name: a row about one person,
+ * which is the exact thing the threshold exists to prevent, and which the
+ * at-rest fold could not catch because the number was already over it. The
+ * threshold's promise is "at least this many READERS were here"; a counter fed
+ * by page loads never made that promise, however many visits it reached.
+ *
+ * So both writes hang off the one answer that is about a person, and there is
+ * no path to either that does not ask for it. The column is still called
+ * `visits` -- the schema is what it is, and migrations/0109 documents the name
+ * -- but the number in it is readers counted once each, the same estimate
+ * `visitor_daily` holds, broken out by place.
+ *
+ * AN ADDRESS IS NOW THE PRICE OF A PLACE. A load carrying a country and a city
+ * but no usable address counts neither the place nor the reader. Every request
+ * the tunnel passes on carries `cf-connecting-ip`, so that is not a shape real
+ * traffic has; and of the two possible errors, not counting a place is the one
+ * that can never print a town one reader was in.
+ *
+ * THIS IS THE ONLY FUNCTION THAT SEES `context.ip`, and it does not keep it:
+ * the address goes into `noteVisitor` as HMAC input and the only thing that
+ * comes back is a yes/no, which becomes the one increment in `location_daily`
+ * and the integer in `visitor_daily`. It is never a query parameter, never a
+ * log line, never returned to a caller.
+ */
+async function noteLoadExtras(newsroomId: number, context: BeaconContext): Promise<void> {
+  // No address, no reader, and nothing that follows from a reader. A reader
+  // whose request carried neither header is simply not counted -- never
+  // counted some other way.
+  if (!context.ip) return;
+  /*
+    Checked and marked before the write, so two loads racing in the same
+    process cannot both count the same reader. The cost is that a write which
+    then fails leaves the reader marked as seen: the day under-counts by one,
+    which is the direction an estimate under this rule should err.
+  */
+  if (!noteVisitor({ ip: context.ip, uaClass: context.uaClass })) return;
+
+  const sql = await getSql();
+  const location = locationRowFor(context);
+  if (location) {
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits)
+      values (${newsroomId}, current_date, ${location.country}, ${location.city}, 1)
+      on conflict (newsroom_id, day, country, city) do update set
+        visits = location_daily.visits + 1
+    `;
+  }
+  await sql`
+    insert into visitor_daily (newsroom_id, day, visitors)
+    values (${newsroomId}, current_date, 1)
+    on conflict (newsroom_id, day) do update set visitors = visitor_daily.visitors + 1
+  `;
 }
 
 /**
@@ -371,18 +524,46 @@ async function recordTrust(
  * test can call it directly with a plain `Request` -- the same shape as
  * `viewBeaconHandler` in views.ts.
  *
- * IT DOES NOT READ `request.headers`. There is no line in this function that
- * touches them, and there must never be one: the IP address, the user agent
- * and the incoming `referer` are all available there and all three are
- * forbidden. The beacon classifies the referrer in the browser and sends the
- * class (src/lib/news/reading.ts), precisely so the server never sees the URL.
+ * WHAT IT READS, AND WHAT IT STILL DOES NOT. It reads exactly five request
+ * header names -- the allowlist in src/lib/news/stats-privacy.ts, which is what
+ * `beaconContextFromHeaders` will ask for and nothing more -- and it reads the
+ * body only through the 2 KB cap in src/lib/news/beacon-guard.server.ts, after
+ * taking a token from the process's unkeyed bucket.
  *
- * Always answers 204, whatever the body held and whatever the write did.
+ * The incoming `referer` and `cookie` are still never touched, and the referrer
+ * is still classified in the browser (src/lib/news/reading.ts) so the server
+ * never sees a URL. Of the five names, the user-agent is reduced to one of five
+ * words and the address is HMAC input that is dropped immediately: neither is
+ * stored, logged or exported (src/lib/news/stats-visitors.server.ts). Before
+ * this unit the handler read no header at all; the owner's 2026-09-30 decision
+ * permits the visitor and location signals those five names carry, and nothing
+ * else about the request is read to get them.
+ *
+ * Always answers 204, whatever the body held, whatever the write did, and
+ * whether or not the request got past the cap.
  */
 export async function readBeaconHandler(request: Request): Promise<Response> {
   try {
-    const body: unknown = await request.json();
-    await recordReadBeacon(body);
+    // The rate cap first: a request that never gets a token is never parsed and
+    // never touches the database.
+    if (!takeBeaconToken()) return new Response(null, { status: 204 });
+    const body = await readBeaconJson(request);
+    // Over the cap, unreadable, or not JSON: a refusal the validator would
+    // reach anyway, answered the same way.
+    if (body === undefined) return new Response(null, { status: 204 });
+    /*
+      `beaconPeerIsLoopback()` is the U17c gate on the two location headers: the
+      request's transport peer must be loopback (where the Cloudflare tunnel
+      daemon's requests come from) or `beaconContextFromHeaders` will not read
+      `cf-ipcity` / `cf-ipcountry` at all. It is computed here and not inside
+      the pure module because it needs the request event, which only exists in
+      the server runtime.
+    */
+    await recordReadBeacon(
+      body,
+      DEFAULT_NEWSROOM_ID,
+      beaconContextFromHeaders(request.headers, { fromTunnel: beaconPeerIsLoopback() }),
+    );
   } catch {
     // A malformed body is just another report the validator refuses. This
     // endpoint never fails outward, for the same reason /api/view never does.
@@ -469,6 +650,33 @@ export type ReadingSourceRow = {
 
 export type ReadingSectionRow = { topic: string; label: string; seconds: number; share: number };
 
+/**
+ * One place the Stats page is allowed to print. `city` is a name, or the
+ * UNKNOWN_CITY fold for a country that arrived with no usable city beside it;
+ * `country` is beside it so the panel can say which one.
+ */
+export type ReadingLocationRow = {
+  city: string;
+  country: string;
+  /**
+   * The readers counted in this place on the days it is named for (unit U23):
+   * each day of it that reached LOCATION_MIN_READERS, not the whole range's
+   * total. Its quieter days are in `otherVisits`.
+   */
+  visits: number;
+  /** Share of the located readers in the range -- the bar's width. */
+  share: number;
+};
+
+/**
+ * The daily visitor estimate. NOT a range sum: adding days together would
+ * count one reader once per day and print the total as "visitors", which is
+ * the one thing this number must never be read as. So the page shows single
+ * days, and says beside them that they are estimates from memory that empty on
+ * restart (src/lib/news/stats-visitors.server.ts).
+ */
+export type ReadingVisitors = { today: number; yesterday: number };
+
 export type ReadingHeatCell = { dow: number; hour: number; visits: number };
 export type ReadingHeatCellNamed = ReadingHeatCell & { when: string };
 
@@ -497,6 +705,18 @@ export type ReadingStats = {
   stories: ReadingStoryRow[];
   sources: ReadingSourceRow[];
   sections: ReadingSectionRow[];
+  /**
+   * Places named on at least one day in the range, busiest first, each with the
+   * readers counted on the days it is named for (`visits`). A place is named
+   * only for the days that reached LOCATION_MIN_READERS, so this is not a sum
+   * over the whole range; everything else -- its smaller days, every place that
+   * never reached the threshold, and the fold -- is summed into `otherVisits`
+   * instead of being printed row by row. A place with one reader is a statement
+   * about one person, which is what the threshold exists to prevent.
+   */
+  locations: ReadingLocationRow[];
+  otherVisits: number;
+  visitors: ReadingVisitors;
   heatmap: {
     cells: ReadingHeatCell[];
     max: number;
@@ -734,6 +954,64 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
   );
 
   /*
+    Where readers are, and how many were counted today.
+
+    Both read the tables migrations/0109_stats_location.sql adds, and both are
+    DAY-bucketed: `day >= current_date - <days-1>` is the same calendar
+    page_views uses, so the range filter means here what it means everywhere
+    else on this page. `location_daily` is empty on an installation that is not
+    behind Cloudflare, or whose zone does not emit the visitor-location
+    headers, and that is not a failure -- the panel says so instead of drawing
+    an empty chart it cannot fill.
+
+    THE THRESHOLD IS PER DAY AND IS APPLIED IN THE SQL, ON THE ROW (unit U23).
+    A row of `location_daily` is one day at one place, so `visits >=
+    LOCATION_MIN_READERS` selects NAMED DAYS, not named cities: a place that had
+    30 readers on Monday and 5 on Tuesday is drawn with 30 and the Tuesday 5
+    joins "Other places" with every other small day. Summing a city's range
+    total first and testing that instead would print a name for a week of ten
+    readers a day -- the same number, and not the fact the threshold promises,
+    which is that the row being named is about at least 25 people on a day that
+    was counted.
+
+    Two statements rather than one, because the two halves are two different
+    shapes: the named days grouped per place, and everything else as one figure.
+    The named query also never selects a row under the threshold, so a small
+    place cannot reach the browser at all -- the property is kept where the rows
+    are read, not fixed up afterwards in JavaScript.
+
+    A FOLDED ROW (`city = FOLDED_CITY`) is never a place whatever its size: it
+    can be over the threshold -- a hundred towns with two readers each -- and
+    drawing it would print a bar with no name on it, or worse, invite someone to
+    supply one.
+  */
+  const locationRows = await sql.query<{ country: string; city: string; visits: number | null }>(
+    `select country, city, coalesce(sum(visits), 0) as visits from location_daily
+     where newsroom_id = $1 and day >= current_date - $2::int
+       and city <> $3
+       and visits >= $4::bigint
+     group by country, city
+     order by visits desc, city asc`,
+    [newsroomId, days - 1, FOLDED_CITY, LOCATION_MIN_READERS],
+  );
+
+  const [otherLocations] = await sql.query<{ visits: number | null }>(
+    `select coalesce(sum(visits), 0) as visits from location_daily
+     where newsroom_id = $1 and day >= current_date - $2::int
+       and (city = $3 or visits < $4::bigint)`,
+    [newsroomId, days - 1, FOLDED_CITY, LOCATION_MIN_READERS],
+  );
+
+  const [visitorRow] = await sql.query<{ today: number | null; yesterday: number | null }>(
+    `select
+       coalesce(sum(visitors) filter (where day = current_date), 0) as today,
+       coalesce(sum(visitors) filter (where day = current_date - 1), 0) as yesterday
+     from visitor_daily
+     where newsroom_id = $1`,
+    [newsroomId],
+  );
+
+  /*
     `corrections` (migrations/0002_newsroom.sql) has no newsroom_id of its own,
     so a reader-filed correction is attributed through the story it belongs to.
     That means a correction whose story has since been deleted is not counted
@@ -782,6 +1060,29 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
       share: share(sourceVisits.get(refClass) ?? 0, sourceTotal),
     }))
     .sort((a, b) => b.visits - a.visits || a.refClass.localeCompare(b.refClass));
+
+  /*
+    The two halves above are read together: every named day-row is a place, and
+    everything the named query left behind -- small days, and the folded rows --
+    is "Other places". The panel then accounts for every located reader without
+    naming a place that fewer than the threshold were in, and the share beside a
+    place is over the same total it always was.
+  */
+  const otherVisits = Number(otherLocations?.visits ?? 0);
+  const locatedTotal = locationRows.reduce(
+    (sum, row) => sum + Number(row.visits ?? 0),
+    otherVisits,
+  );
+  const locations: ReadingLocationRow[] = locationRows.map((row) => ({
+    city: row.city,
+    country: row.country,
+    visits: Number(row.visits ?? 0),
+    share: share(Number(row.visits ?? 0), locatedTotal),
+  }));
+  const visitors: ReadingVisitors = {
+    today: Number(visitorRow?.today ?? 0),
+    yesterday: Number(visitorRow?.yesterday ?? 0),
+  };
 
   const sectionSeconds = sectionRows.map((row) => ({
     topic: row.topic,
@@ -908,6 +1209,9 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
     }),
     sources,
     sections,
+    locations,
+    otherVisits,
+    visitors,
     heatmap: {
       cells: heatCells,
       max: heatMax,
@@ -1029,4 +1333,124 @@ export async function exportReadingCsv(userId: string, range: ReadingRange): Pro
     fileName: `stats-${range}-${todayRow?.today ?? "today"}.csv`,
     csv: `${lines.join("\n")}\n`,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Retention
+ * ------------------------------------------------------------------ */
+
+/**
+ * How long a place is remembered. Twelve months, because twelve months is the
+ * longest range the Stats screen offers (READING_RANGES in
+ * src/lib/news/reading.ts) -- the table has to answer the question the page
+ * draws, and no longer.
+ *
+ * This is the ONE retention period Stats has. `page_views`, `read_hourly`,
+ * `trust_signals_hourly` and `visitor_daily` are counters with no personal
+ * content and are kept indefinitely, exactly as they were before this unit;
+ * nothing here deletes them, and the owner's decision of 2026-09-30 forbids
+ * inventing a new period for them by inference.
+ */
+export const LOCATION_RETENTION_MONTHS = 12;
+
+/**
+ * Delete the places older than {@link LOCATION_RETENTION_MONTHS}. Idempotent,
+ * and returns how many rows went, so the scheduler's log line and the test can
+ * both see that it did something.
+ *
+ * `make_interval` rather than a literal `interval '12 months'` so the period is
+ * the constant above and cannot drift from it. The comparison is against
+ * `current_date`, the same calendar the rows were written on.
+ */
+export async function pruneLocationDaily(): Promise<number> {
+  await ensureReadingSchema();
+  const sql = await getSql();
+  const rows = await sql<{ n: number }>`
+    with removed as (
+      delete from location_daily
+      where day < current_date - make_interval(months => ${LOCATION_RETENTION_MONTHS}::int)
+      returning 1
+    )
+    select count(*)::int as n from removed
+  `;
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Fold a finished day's small places into that day's per-country "other" row
+ * (unit U17c).
+ *
+ * WHY THIS EXISTS AT ALL. The 25-reader threshold used to live only on the
+ * screen. A row like `(today - 3, 'SmallTown', visits = 1)` therefore sat in
+ * `location_daily` for twelve months, went out in every `pg_dump`, and -- read
+ * beside `read_hourly` for the same day -- is one reader's visit, recorded as a
+ * named place. The display threshold stopped that reaching an editor's screen;
+ * it did not stop it existing. This is the same rule applied where the data
+ * actually rests, which is what the owner's decision is about.
+ *
+ * IT IS ALSO WHAT MAKES THE THRESHOLD A DAY'S THRESHOLD. Every finished day is
+ * settled on its own: a place is named only on a day it reached
+ * {@link LOCATION_MIN_READERS}, and a run of smaller days never accumulates
+ * into a name, because each small day leaves the named rows as it closes rather
+ * than waiting to see what the week adds up to.
+ *
+ * WHAT IT DOES. For every row on a FINISHED day whose `visits` is under
+ * {@link LOCATION_MIN_READERS}, it adds the visits to that day's
+ * `(newsroom, country, city = FOLDED_CITY)` row and deletes the small row. One
+ * statement, so one transaction: the sum and the delete cannot come apart, and
+ * an interrupted run leaves the table exactly as it was.
+ *
+ * "FINISHED" IS `day < current_date`, AND THAT IS THE DATABASE SESSION'S
+ * CALENDAR, not a timezone this code knows anything about. It is the same
+ * `current_date` every row in this table was written with and the same one
+ * `page_views.day` and `read_hourly` are read on, so the fold's day boundary
+ * agrees with the rows it is folding by construction. On a database running in
+ * UTC -- which is what a default Postgres install and the packaged setup both
+ * are -- that day is the UTC day, and a paper that wants a local day has to set
+ * the session timezone. This is a property of the deployment, not of the code:
+ * nothing here reads the clock from JavaScript, and nothing here claims the
+ * boundary is the editor's midnight.
+ *
+ * TODAY IS LEFT ALONE. A day still in progress has not finished arriving, so
+ * folding it would move visits that are about to be joined by more; its small
+ * places stay as places until the day closes, and the screen folds them for
+ * display exactly as it always did. So the threshold is enforced at rest with
+ * one day's lag, and on screen immediately.
+ *
+ * IDEMPOTENT BY CONSTRUCTION. The folded row itself has `city = FOLDED_CITY`
+ * and is excluded by `city <> FOLDED_CITY`, so it can never fold into itself
+ * and a second run in the same hour finds nothing to do. Returns how many rows
+ * were folded, for the tick's log line and the test.
+ *
+ * A COUNTRIES' WORTH OF SMALL PLACES CAN EXCEED THE THRESHOLD, which is fine
+ * and deliberate: the fold is never drawn as a place (the `city <> FOLDED_CITY`
+ * in `getReadingStats`'s named-days query), so its size does not matter. What
+ * matters is that no single-reader place survives.
+ */
+export async function foldSmallPlaces(): Promise<number> {
+  await ensureReadingSchema();
+  const sql = await getSql();
+  const rows = await sql<{ folded: number }>`
+    with folded_rows as (
+      delete from location_daily
+      where day < current_date
+        and visits < ${LOCATION_MIN_READERS}::bigint
+        and city <> ${FOLDED_CITY}
+      returning newsroom_id, day, country, visits
+    ),
+    per_country as (
+      select newsroom_id, day, country, sum(visits)::bigint as visits
+      from folded_rows
+      group by newsroom_id, day, country
+    ),
+    written as (
+      insert into location_daily (newsroom_id, day, country, city, visits)
+      select newsroom_id, day, country, ${FOLDED_CITY}, visits from per_country
+      on conflict (newsroom_id, day, country, city) do update set
+        visits = location_daily.visits + excluded.visits
+      returning 1
+    )
+    select (select count(*)::int from folded_rows) as folded
+  `;
+  return Number(rows[0]?.folded ?? 0);
 }
