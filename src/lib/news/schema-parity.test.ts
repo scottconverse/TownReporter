@@ -18,9 +18,13 @@ import {
  * a second from the hand-mirrored runtime `ensure*` functions alone (the
  * path a plain `node --test` run and a rebuilt PGLite instance actually take
  * -- see `src/lib/db.ts`'s `createPgliteSql`, whose migration glob throws
- * under Node and falls back to nothing but these functions), then diffs the
- * column set of every table the ensure side creates against the same table
- * in the migrations side.
+ * under Node and falls back to nothing but these functions), then diffs
+ * every table the ensure side creates against the same table in the
+ * migrations side: the column set, and then -- because a names-only check
+ * passes while `text` becomes `varchar(10)`, a `not null` disappears, a
+ * default changes or a unique index is dropped -- each column's
+ * `format_type`, nullability and default, and every `pg_index` index and
+ * `pg_constraint` constraint definition.
  *
  * A table that ONLY migrations define (never mirrored by any `ensure*`
  * function -- `leads`, `drafts`, `snapshots`, `sources`, `scan_runs`,
@@ -145,6 +149,11 @@ if (dbProbe.ok) {
     const modelAssignments = await import("./model-assignments-store.ts");
     const editorialServer = await import("./editorial.server.ts");
     const followUps = await import("./follow-ups.ts");
+    // Unit BS: draft_batches + desk_jobs' draft_batch_id. Its own index and
+    // FK are mirrored in draft-batch.server.ts, so without this call the
+    // parity check reported two differences that were really just this
+    // fixture not asking for the table.
+    const draftBatch = await import("./draft-batch.server.ts");
     const ops = await import("./ops.ts");
     const views = await import("./views.ts");
     const reading = await import("./reading.server.ts");
@@ -176,6 +185,7 @@ if (dbProbe.ok) {
     // at nothing.
     await reading.ensureReadingSchema();
     await followUps.ensureFollowUpsSchema();
+    await draftBatch.ensureDraftBatchSchema();
     // Sections depend on the actual migrations-owned newsroom tables, not a
     // sources(id) stand-in: verify the snapshot column and all filing triggers.
     const sectionSql = await db.getSql();
@@ -272,22 +282,120 @@ if (dbProbe.ok) {
   }, { timeout: 30_000 });
 }
 
-/** table -> sorted column names, for every base table in the public schema. */
-async function tableColumns(url: string): Promise<Map<string, string[]>> {
+/** One column's comparable attributes, as Postgres itself renders them. */
+type ColumnShape = {
+  /** `format_type(atttypid, atttypmod)`, so `text` and `character varying(10)` differ. */
+  type: string;
+  notNull: boolean;
+  /** `pg_get_expr(adbin, adrelid)`, or null when the column has no default. */
+  default: string | null;
+};
+
+/**
+ * One base table's comparable shape: every column's type/nullability/default,
+ * plus every index and constraint definition, each keyed by name.
+ *
+ * Both sides are built by `create table if not exists` DDL written column for
+ * column, so identical DDL yields identical auto-generated names
+ * (`follow_ups_pkey`, `follow_ups_newsroom_status_due`) and identical
+ * `pg_get_indexdef`/`pg_get_constraintdef` text -- the definitions carry the
+ * `public` schema name but never the database name, so the two scratch
+ * databases are directly comparable. Keying by name rather than by definition
+ * is deliberate: a renamed-but-equivalent index is still a difference an
+ * operator would see between an installed and a runtime-created database.
+ */
+type TableShape = {
+  columns: Map<string, ColumnShape>;
+  features: Map<string, string>;
+};
+
+/**
+ * Every base table in the public schema -> its {@link TableShape}.
+ *
+ * `pg_attribute`/`pg_attrdef`/`pg_index`/`pg_constraint` rather than
+ * `information_schema`: the catalogs are privileged-complete (nothing is
+ * hidden by a grant) and they are the only place `attnotnull` and
+ * `pg_get_indexdef` are exposed.
+ */
+async function tableShapes(url: string): Promise<Map<string, TableShape>> {
   const c = new Client({ connectionString: url });
   await c.connect();
   try {
-    const rows = await c.query<{ table_name: string; column_name: string }>(`
-      select table_name, column_name
-      from information_schema.columns
-      where table_schema = 'public'
-      order by table_name, column_name
+    const columns = await c.query<{
+      table_name: string;
+      column_name: string;
+      data_type: string;
+      not_null: boolean;
+      column_default: string | null;
+    }>(`
+      select c.relname as table_name,
+             a.attname as column_name,
+             format_type(a.atttypid, a.atttypmod) as data_type,
+             a.attnotnull as not_null,
+             pg_get_expr(d.adbin, d.adrelid) as column_default
+      from pg_attribute a
+      join pg_class c on c.oid = a.attrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+      where n.nspname = 'public'
+        and c.relkind in ('r', 'p')
+        and a.attnum > 0
+        and not a.attisdropped
+      order by c.relname, a.attname
     `);
-    const map = new Map<string, string[]>();
-    for (const row of rows.rows) {
-      const cols = map.get(row.table_name) ?? [];
-      cols.push(row.column_name);
-      map.set(row.table_name, cols);
+    // Standalone indexes unioned with constraint definitions. The
+    // `conindid` exclusion matters: a primary/unique constraint owns an
+    // index of the same name, so without it the same name would come back
+    // twice -- once as `CREATE UNIQUE INDEX ...` and once as
+    // `PRIMARY KEY (...)` -- and the map would keep whichever row happened
+    // to sort last, which is not a stable property. Each name therefore
+    // yields exactly one row, and `create unique index` (which is not a
+    // constraint) is still covered because it has no `pg_constraint` row.
+    // `contype = 'n'` is skipped: not-null is already compared per column.
+    const features = await c.query<{
+      table_name: string;
+      feature_name: string;
+      definition: string;
+    }>(`
+      select c.relname as table_name,
+             i.relname as feature_name,
+             pg_get_indexdef(x.indexrelid) as definition
+      from pg_index x
+      join pg_class c on c.oid = x.indrelid
+      join pg_class i on i.oid = x.indexrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind in ('r', 'p')
+        and not exists (select 1 from pg_constraint con where con.conindid = x.indexrelid)
+      union all
+      select c.relname as table_name,
+             con.conname as feature_name,
+             pg_get_constraintdef(con.oid) as definition
+      from pg_constraint con
+      join pg_class c on c.oid = con.conrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind in ('r', 'p')
+        and con.contype in ('p', 'u', 'f', 'c')
+      order by table_name, feature_name
+    `);
+
+    const map = new Map<string, TableShape>();
+    const shape = (table: string): TableShape => {
+      let found = map.get(table);
+      if (!found) {
+        found = { columns: new Map(), features: new Map() };
+        map.set(table, found);
+      }
+      return found;
+    };
+    for (const row of columns.rows) {
+      shape(row.table_name).columns.set(row.column_name, {
+        type: row.data_type,
+        notNull: row.not_null,
+        default: row.column_default,
+      });
+    }
+    for (const row of features.rows) {
+      shape(row.table_name).features.set(row.feature_name, row.definition);
     }
     return map;
   } finally {
@@ -295,30 +403,88 @@ async function tableColumns(url: string): Promise<Map<string, string[]>> {
   }
 }
 
+/** `null` reads as an absence, not as the string "null", in a failure message. */
+function describeDefault(value: string | null): string {
+  return value ?? "(no default)";
+}
+
+/**
+ * Column-level and index/constraint-level differences for one table that
+ * exists on both sides. Column-name differences are reported by the caller
+ * (which owns the "missing from migrations" wording); this handles the
+ * attributes a names-only comparison cannot see.
+ */
+function diffTableShape(
+  table: string,
+  migrations: TableShape,
+  ensure: TableShape,
+  mismatches: string[],
+): void {
+  for (const [column, left] of migrations.columns) {
+    const right = ensure.columns.get(column);
+    if (!right) continue; // a column-set mismatch, reported by the caller
+    if (left.type !== right.type) {
+      mismatches.push(
+        `${table}.${column}: type differs -- migrations ${left.type}, ensure ${right.type}`,
+      );
+    }
+    if (left.notNull !== right.notNull) {
+      mismatches.push(
+        `${table}.${column}: nullability differs -- migrations ` +
+          `${left.notNull ? "not null" : "nullable"}, ensure ` +
+          `${right.notNull ? "not null" : "nullable"}`,
+      );
+    }
+    if (left.default !== right.default) {
+      mismatches.push(
+        `${table}.${column}: default differs -- migrations ${describeDefault(left.default)}, ` +
+          `ensure ${describeDefault(right.default)}`,
+      );
+    }
+  }
+
+  for (const name of new Set([...migrations.features.keys(), ...ensure.features.keys()])) {
+    const left = migrations.features.get(name);
+    const right = ensure.features.get(name);
+    if (left === right) continue;
+    if (left === undefined) {
+      mismatches.push(`${table}: index/constraint "${name}" exists only in ensure -- ${right}`);
+    } else if (right === undefined) {
+      mismatches.push(`${table}: index/constraint "${name}" exists only in migrations -- ${left}`);
+    } else {
+      mismatches.push(
+        `${table}: index/constraint "${name}" definition differs -- migrations ${left}, ` +
+          `ensure ${right}`,
+      );
+    }
+  }
+}
+
 const INTERNAL_TABLES = new Set(["_migrations", "_schema_ensure_state"]);
 
 describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 capstone)", () => {
   it(
-    "the ensure-only column set and the migrations-only column set match, table by table",
+    "the column sets, column types/nullability/defaults and index/constraint definitions match, table by table",
     { skip },
     async () => {
-      const migrationsCols = await tableColumns(withDatabase(PSQL_ADMIN_URL, migrationsDbName));
-      const ensureCols = await tableColumns(withDatabase(PSQL_ADMIN_URL, ensureDbName));
+      const migrationsShapes = await tableShapes(withDatabase(PSQL_ADMIN_URL, migrationsDbName));
+      const ensureShapes = await tableShapes(withDatabase(PSQL_ADMIN_URL, ensureDbName));
 
-      const allTables = new Set([...migrationsCols.keys(), ...ensureCols.keys()]);
+      const allTables = new Set([...migrationsShapes.keys(), ...ensureShapes.keys()]);
       const mismatches: string[] = [];
 
       for (const table of allTables) {
         if (INTERNAL_TABLES.has(table)) continue;
         if (ALLOWLIST[table]) continue;
 
-        const inMigrations = migrationsCols.get(table);
-        const inEnsure = ensureCols.get(table);
+        const inMigrations = migrationsShapes.get(table);
+        const inEnsure = ensureShapes.get(table);
 
         if (!inMigrations) {
           mismatches.push(
             `${table}: created by an ensure* function but has no migration at all ` +
-              `(columns: ${inEnsure?.join(", ")}) -- add a migration, or add it to ALLOWLIST with a reason`,
+              `(columns: ${[...(inEnsure?.columns.keys() ?? [])].join(", ")}) -- add a migration, ` +
+              `or add it to ALLOWLIST with a reason`,
           );
           continue;
         }
@@ -328,11 +494,23 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
           // it (which would have thrown above, during setup) -- it did not
           // throw, so this table is simply untouched by the ensure side, the
           // same as the allowlisted migrations-only tables. Not a mismatch.
+          //
+          // Note the blind spot this leaves, found while mirroring the
+          // migrations: several whole subsystems (meeting_*, article_body_
+          // history) are migrations-only and deliberately unallowlisted, so
+          // "not in the ensure database" cannot be read as "not mirrored" --
+          // which also means a `create table` that silently stops parsing on
+          // the ensure side (ensureSchemaOnce swallows the throw) looks
+          // exactly like a table that was never meant to be mirrored there.
           continue;
         }
 
-        const onlyInMigrations = inMigrations.filter((c) => !inEnsure.includes(c));
-        const onlyInEnsure = inEnsure.filter((c) => !inMigrations.includes(c));
+        const onlyInMigrations = [...inMigrations.columns.keys()].filter(
+          (c) => !inEnsure.columns.has(c),
+        );
+        const onlyInEnsure = [...inEnsure.columns.keys()].filter(
+          (c) => !inMigrations.columns.has(c),
+        );
         if (onlyInMigrations.length || onlyInEnsure.length) {
           mismatches.push(
             `${table}: ` +
@@ -344,6 +522,12 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
                 : ""),
           );
         }
+
+        // Types, nullability, defaults, and every index/constraint definition.
+        // A column-set match alone is not parity: `text` vs `varchar(10)`,
+        // `not null` vs nullable, a lost default and a dropped unique index
+        // all leave the names identical.
+        diffTableShape(table, inMigrations, inEnsure, mismatches);
       }
 
       assert.deepEqual(

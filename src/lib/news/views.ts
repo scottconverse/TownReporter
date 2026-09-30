@@ -37,6 +37,9 @@ const PAGE_VIEWS_SCHEMA = [
       primary key (newsroom_id, target, day)
     )
   `,
+  // migrations/0037_page_views.sql creates this index too; without it here a
+  // database built by the PGLite/unit-test path had only the primary key.
+  `create index if not exists page_views_newsroom_target_idx on page_views (newsroom_id, target)`,
 ];
 
 /**

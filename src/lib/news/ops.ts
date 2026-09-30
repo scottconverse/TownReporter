@@ -42,10 +42,14 @@ const DESK_RATE_SCHEMA = [
       created_at timestamptz not null default now()
     )
   `,
-  `
-    create index if not exists desk_rate_window_idx
-      on desk_rate (user_id, action, created_at desc)
-  `,
+  // migrations/0005_ops.sql names this index `desk_rate_lookup`; this list
+  // used to create the identical index under the name `desk_rate_window_idx`,
+  // so a runtime-created database carried an index the migrated one did not
+  // (and lacked the migrated name). Same columns, same order, same `desc` --
+  // only the name differed. Create the migrations' name first, then drop the
+  // old one, so a database never goes without a covering index in between.
+  `create index if not exists desk_rate_lookup on desk_rate (user_id, action, created_at desc)`,
+  `drop index if exists desk_rate_window_idx`,
   // Mirrors migrations/0012_newsroom_appliance.sql -- was missing from this
   // ensure list (GauntletGate ENG-03).
   `alter table desk_rate add column if not exists newsroom_id integer not null default 1`,
