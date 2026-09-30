@@ -263,7 +263,8 @@ export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter):
 
 /**
  * The state the card is DRAWN in -- one of the seven the design gives a color,
- * a chip and a set of buttons to.
+ * a chip and a set of buttons to, plus `stopping`, which the design has no card
+ * for and this build needs (see below).
  *
  * Terminal status wins over `last_state`, because a stopped agent whose last
  * run found something is a stopped card: the editor ended it, and offering
@@ -287,16 +288,39 @@ export type FollowUpCardState =
   | "waiting"
   | "no-change"
   | "could-not-check"
+  | "stopping"
   | "stopped"
   | "done";
 
-export function followUpCardState(row: {
-  agent_kind: FollowUpAgentKind | null;
-  status: string;
-  last_state: FollowUpState | null;
-}): FollowUpCardState {
+/** Is this run still going (or still waiting to)? The job's own two states. */
+function runOpen(run: { status: string } | null | undefined): boolean {
+  return Boolean(run && (run.status === "queued" || run.status === "running"));
+}
+
+/**
+ * `stopping` is the one state the row cannot answer by itself: Stop has
+ * committed -- the follow-up IS stopped, and no further run will ever be picked
+ * -- but the run it had in flight has not reached its terminal state yet. It is
+ * a property of the pair (row, live run), which is why the job is an argument
+ * even though every other state reads off the row alone.
+ *
+ * Without it the card lies for as long as the worker takes to notice: the chip
+ * would say "Stopped" while a progress bar underneath was still moving. With
+ * it the card says "Stopping…" until the job is finished, and the next poll
+ * (2 s while a job is open -- see `useFollowUpJobs`) turns it into "Stopped"
+ * with no extra state anywhere. A card with no run in flight goes straight to
+ * "Stopped", which is the honest answer when there was nothing to stop.
+ */
+export function followUpCardState(
+  row: {
+    agent_kind: FollowUpAgentKind | null;
+    status: string;
+    last_state: FollowUpState | null;
+  },
+  run?: { status: string } | null,
+): FollowUpCardState {
   if (!row.agent_kind) return "manual";
-  if (row.status === "stopped") return "stopped";
+  if (row.status === "stopped") return runOpen(run) ? "stopping" : "stopped";
   if (row.status === "done") return "done";
   switch (row.last_state) {
     case "running":
@@ -324,6 +348,7 @@ export const CARD_STATE_CHIP: Record<
   waiting: "Waiting",
   "no-change": "Checked · no change",
   "could-not-check": "Could not check",
+  stopping: "Stopping…",
 };
 
 /* ==========================================================================
@@ -441,6 +466,14 @@ export function cardResultLine(
     }
     case "waiting":
       return finding.summary || "Nothing yet. The agent checks on its schedule and reports here.";
+    case "stopping":
+      /*
+        True rather than reassuring: Stop has committed, and the result write
+        that a run makes at its end is fenced on exactly that status, so this
+        run cannot put a finding or a note anywhere. See
+        `performRecordFollowUpRun` in ./follow-ups.ts.
+      */
+      return "Stopping — this run will not record anything more.";
     case "stopped":
       return finding.summary || finding.reason || "This agent was stopped. Nothing further will run.";
     case "done":
@@ -466,10 +499,13 @@ export function cardChip(state: FollowUpCardState): { text: string; tone: CardCh
   if (state === "manual") return null;
   if (state === "stopped") return { text: "Stopped", tone: "wait" };
   if (state === "done") return { text: "Finished", tone: "wait" };
+  // "Stopping…" wears the running tone, not the neutral one: the run really is
+  // still going, and the chip would be claiming otherwise in the same breath as
+  // the progress bar under it.
   const tone: CardChipTone =
     state === "found"
       ? "found"
-      : state === "running"
+      : state === "running" || state === "stopping"
         ? "run"
         : state === "could-not-check"
           ? "fail"
@@ -531,6 +567,16 @@ export function cardActions(state: FollowUpCardState, hasStory: boolean): CardAc
     case "waiting":
     case "no-change":
       return [{ key: "run-now", label: "Run now", emphasis: "outline" }, EDIT_ACTION, STOP_ACTION];
+    case "stopping":
+      /*
+        The run is already dying, so there is nothing left to press and nothing
+        that would not make the card contradict itself: Stop again would change
+        nothing, Run now is refused (the follow-up is stopped), and Resume while
+        the cancelled run is still unwinding would put the agent back on the
+        clock with a job on its way to `failed`. Edit stays, because it is the
+        one action that does not move the status.
+      */
+      return [EDIT_ACTION];
     case "stopped":
       return [{ key: "resume", label: "Resume", emphasis: "outline" }, EDIT_ACTION];
     case "done":

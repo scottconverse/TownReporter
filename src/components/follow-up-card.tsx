@@ -34,9 +34,19 @@ import type { FollowUpRow } from "@/lib/news/types";
  * jobs only. The caller passes `onCancelJob`, which is the same
  * `cancelStoryJob` server function.
  *
+ * THE TWO STOP BUTTONS ON A RUNNING CARD ARE NOT TWO ANSWERS TO ONE QUESTION,
+ * and Stop (the card's own) writes the SAME flag this inner Cancel writes
+ * (`cancel_requested` -- see `cancelFollowUpRunsIn` in ./follow-ups.ts), so
+ * they cannot fight: Cancel ends the run and leaves the agent on its schedule,
+ * Stop ends the run and the agent, and a press of Stop hides the inner Cancel
+ * because `job.cancelRequested` is then true. An editor who only wanted the bad
+ * run gone has not been made to kill the agent to get it.
+ *
  * Nothing here decides anything: the state, the chip, the result sentence, the
  * time sentence and the button set are all in ./follow-up-copy.ts, so a change
- * to how a stopped row reads is one edit in a module a test can call.
+ * to how a stopped row reads is one edit in a module a test can call. The one
+ * fact that comes from outside is the live run, which is what makes the
+ * `stopping` card possible at all -- `followUpCardState(row, job)`.
  */
 export function FollowUpCard({
   row,
@@ -66,7 +76,12 @@ export function FollowUpCard({
   busyKey?: CardActionKey | null;
 }) {
   const [findingOpen, setFindingOpen] = useState(false);
-  const state = followUpCardState(row);
+  /*
+    The live run is passed in because `stopping` is a fact about the pair: Stop
+    has committed on the row, and the run it had in flight has not reached its
+    terminal state yet. See `followUpCardState`.
+  */
+  const state = followUpCardState(row, job);
   const chip = cardChip(state);
   const finding = parseFinding(row.finding_json);
   const times = {
@@ -90,7 +105,9 @@ export function FollowUpCard({
   /*
     A run in flight says what it is DOING -- the job's own step -- and the
     worker's step is the only honest source for that. Every other state reads
-    its sentence off the last recorded finding.
+    its sentence off the last recorded finding, `stopping` included: the point
+    of that card is that the run will not record anything more, which is not
+    something the job's own step line says.
   */
   const resultText = state === "running" ? job?.step || "Working…" : cardResultLine(state, finding, times);
   const timeText = cardTimeLine(state, times);

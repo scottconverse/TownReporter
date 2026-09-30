@@ -199,7 +199,14 @@ export async function startFollowUpRun(
     return { started: false, skipped: "follow-up-running" };
   }
   const moved = await performFollowUpAction(context, id, "run-now");
-  if (!moved.ok) return { started: false, skipped: "not-found" };
+  /*
+    `run-now` refuses a row that is no longer active or paused, so a Stop that
+    committed between the read above and this write is reported as what it is
+    rather than resurrected by a press the editor had already been refused. The
+    read above already answered "not-found" for a missing row, so the only way
+    to get here is a status that moved under us.
+  */
+  if (!moved.ok) return { started: false, skipped: "not-active" };
   await enqueueJob({
     userId: row.user_id,
     newsroomId: context.newsroomId,

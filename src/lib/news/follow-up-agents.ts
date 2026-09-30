@@ -675,12 +675,38 @@ export function agentFor(agentKind: string): FollowUpAgentRun | null {
  * keeps `last_state: 'running'` after its worker is gone; a job-level failure
  * that is not a cancel is re-thrown and recorded by `executeJob` as well.
  *
+ * CANCELLATION IS TWO THINGS HERE, and they are not the same thing twice. The
+ * boundary checks (`deps.throwIfCancelled` inside each agent, and the one
+ * below between the agent and the record) are how a run stops EARLY, at a
+ * place where nothing is half-written. The fence inside
+ * `performRecordFollowUpRun` is what makes the RESULT write safe: a Stop that
+ * lands after the last boundary still cannot put a finding or a note on the
+ * row, because the write itself refuses it. Every refusal below ends the job
+ * the way the job system already ends a cancelled job -- `executeJob` records
+ * `JOB_CANCELLED_REASON`, "Cancelled by the editor" -- so the card says the
+ * editor stopped it rather than "Done".
+ *
  * `deps` exists so the test can drive the whole worker -- queue coalescing,
  * cancel, budget, the notes write -- with fakes and no network.
  */
 export async function performFollowUpRun(
   job: DeskJob,
-  deps: { agents?: FollowUpAgentDeps; now?: () => number } = {},
+  deps: {
+    agents?: FollowUpAgentDeps;
+    now?: () => number;
+    /**
+     * Where a test puts the run down so an editor's Stop can land in the one
+     * window the boundary check below cannot cover: after it and before the
+     * fenced result write. Nothing in production calls it.
+     *
+     * It exists because the fence is otherwise unprovable -- a Stop placed
+     * anywhere earlier is caught by the boundary check, and the test would be
+     * proving the checkpoint while claiming to prove the fence.
+     * `follow-up-stop.postgres.test.ts` commits a Stop from a second PostgreSQL
+     * process from inside this hook, and fails if the fence is removed.
+     */
+    beforeRecord?: () => Promise<void>;
+  } = {},
 ): Promise<void> {
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const row = await performReadFollowUp(context, job.subject_id);
@@ -691,9 +717,15 @@ export async function performFollowUpRun(
     return;
   }
   if (row.status !== "active") {
-    // Stopped or paused between the scheduler's pick and this run.
+    /*
+      Stopped or paused between the scheduler's pick and this run -- or a queued
+      job that slipped in behind a Stop and was never cancelled. Either way the
+      editor ended this run before it did anything, so it ends the way a cancel
+      ends rather than as a job that quietly completed with no work in it.
+      Release first (the row must not be left saying `running`), then throw.
+    */
     await performReleaseFollowUpRun(context, row.id, "The follow-up was not active when its run started.");
-    return;
+    throw new JobCancelledError();
   }
   if (!(await performClaimFollowUpRun(job.newsroom_id, row.id))) return;
 
@@ -728,12 +760,27 @@ export async function performFollowUpRun(
       : outcome;
 
     await step(FOLLOW_UP_STAGE_RECORD);
-    await performRecordFollowUpRun(context, {
+    /*
+      The last boundary before the result write: the editor's Stop, and the
+      job's own Cancel, are both heard here, so a run that is already cancelled
+      never even attempts the write.
+    */
+    await throwIfCancelled();
+    await deps.beforeRecord?.();
+
+    const recorded = await performRecordFollowUpRun(context, {
       id: row.id,
       state: final.state,
       finding: final.finding,
       nextRunAt: nextRunAt(row.schedule)?.toISOString() ?? null,
     });
+    /*
+      The fence refused the write: a Stop committed after the boundary above,
+      so there is a finding that must NOT be recorded. This is the same
+      terminal state as every other cancel -- there is no second vocabulary for
+      "the editor stopped this".
+    */
+    if (!recorded.ok && recorded.stopped) throw new JobCancelledError();
   } catch (e) {
     await performReleaseFollowUpRun(
       context,

@@ -5074,6 +5074,9 @@
 }
 .desk-ltr.astra .fu-card.state-found { --fu-col: var(--a); }
 .desk-ltr.astra .fu-card.state-running { --fu-col: var(--fg); }
+/* Stopping is a run still going, so its edge is the running card's ink rather
+   than the neutral one the stopped card wears. */
+.desk-ltr.astra .fu-card.state-stopping { --fu-col: var(--fg); }
 .desk-ltr.astra .fu-card.state-waiting { --fu-col: var(--line); }
 .desk-ltr.astra .fu-card.state-no-change { --fu-col: var(--ok); }
 .desk-ltr.astra .fu-card.state-could-not-check { --fu-col: var(--danger); }

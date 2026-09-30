@@ -206,6 +206,25 @@ describe("which card a row is drawn as", () => {
     assert.equal(followUpCardState(row({ status: "done", last_state: "found" })), "done");
   });
 
+  it("says Stopping… while the stopped row's run is still finishing, then Stopped", () => {
+    const stopped = row({ status: "stopped", last_state: "found" });
+    // The one state the row cannot answer alone: Stop has committed, so no
+    // further run will ever be picked -- but the run it had in flight has not
+    // reached its terminal state, and the card must not claim otherwise while a
+    // progress bar underneath it is still moving.
+    assert.equal(followUpCardState(stopped, { status: "running" }), "stopping");
+    assert.equal(followUpCardState(stopped, { status: "queued" }), "stopping");
+    // The moment the job is terminal, the card is the stopped one -- and a
+    // stopped follow-up with no run at all was never stopping in the first
+    // place, which is every card that was stopped while idle.
+    assert.equal(followUpCardState(stopped, { status: "failed" }), "stopped");
+    assert.equal(followUpCardState(stopped, { status: "completed" }), "stopped");
+    assert.equal(followUpCardState(stopped, null), "stopped");
+    assert.equal(followUpCardState(stopped), "stopped");
+    // Nothing else is affected by a live run.
+    assert.equal(followUpCardState(row({ last_state: "running" }), { status: "running" }), "running");
+  });
+
   it("reads a row that has never run as the waiting card", () => {
     assert.equal(followUpCardState(row({ last_state: null })), "waiting");
     assert.equal(followUpCardState(row({ last_state: "waiting" })), "waiting");
@@ -233,6 +252,20 @@ describe("the chip, the sentences and the buttons", () => {
     assert.deepEqual(cardChip("could-not-check"), { text: "Could not check", tone: "fail" });
     assert.deepEqual(cardChip("stopped"), { text: "Stopped", tone: "wait" });
     assert.deepEqual(cardChip("done"), { text: "Finished", tone: "wait" });
+    // The run really is still going, so the chip wears the running tone rather
+    // than the neutral one it changes into.
+    assert.deepEqual(cardChip("stopping"), { text: "Stopping…", tone: "run" });
+  });
+
+  it("draws the same card as Stopping… and then as Stopped", () => {
+    // The whole of the UI requirement, as one press and one poll: the editor
+    // stops a card whose run is in flight, and the card changes when -- and
+    // only when -- the job reaches its terminal state.
+    const stoppedRow = row({ status: "stopped", last_state: "waiting" });
+    const during = followUpCardState(stoppedRow, { status: "running" });
+    const afterPoll = followUpCardState(stoppedRow, { status: "failed" });
+    assert.deepEqual(cardChip(during)?.text, "Stopping…");
+    assert.deepEqual(cardChip(afterPoll)?.text, "Stopped");
   });
 
   it("writes a time of day the way the cards do, and nothing at all for a bad stamp", () => {
@@ -302,6 +335,12 @@ describe("the chip, the sentences and the buttons", () => {
       "This agent was stopped. Nothing further will run.",
     );
     assert.equal(cardResultLine("done", parseFinding("{}"), {}), "This agent was marked done.");
+    // A promise the database keeps: the result write is fenced on the stopped
+    // status, so a run that is still unwinding cannot record anything.
+    assert.equal(
+      cardResultLine("stopping", parseFinding("{}"), {}),
+      "Stopping — this run will not record anything more.",
+    );
   });
 
   it("offers the drawn buttons, and takes 'Add to story' away once there is a story", () => {
@@ -319,6 +358,10 @@ describe("the chip, the sentences and the buttons", () => {
     assert.deepEqual(keys("stopped"), ["resume", "edit"]);
     assert.deepEqual(keys("done"), ["edit"]);
     assert.deepEqual(keys("manual"), []);
+    // Nothing left to press while the cancelled run unwinds: Stop again would
+    // change nothing, Run now is refused, and Resume would put the agent back
+    // on the clock with a job on its way to `failed`.
+    assert.deepEqual(keys("stopping"), ["edit"]);
   });
 
   it("labels the retry differently from the ordinary run", () => {

@@ -98,7 +98,19 @@ function FollowUpsPage() {
     }) => followUpAction({ data: input }),
     onSuccess: (_result, input) => {
       invalidate();
-      announceToDesk(input.action === "run-now" ? "Run started." : "Follow-up updated.");
+      /*
+        Stop says BOTH halves out loud, because they happen at different
+        moments: the follow-up is stopped now, and a run that was in flight
+        stops at its next step. The card's chip does the same thing in two
+        stages ("Stopping…", then "Stopped") -- see `followUpCardState`.
+      */
+      announceToDesk(
+        input.action === "run-now"
+          ? "Run started."
+          : input.action === "stop"
+            ? "Stopped. Any run in flight stops at its next step."
+            : "Follow-up updated.",
+      );
     },
     // The refusals ("A draft is being written right now…") are thrown by the
     // server on purpose, so the press that could not do anything says why.
