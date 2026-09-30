@@ -130,10 +130,14 @@ const DEVICE_INK = ["var(--bg)", "#111111", "var(--fg)"];
  * WHAT THE OWNER'S 2026-09-30 DECISION ADDED (unit U17b): a place, and a daily
  * visitor count, and nothing else. Both are drawn in the "Where readers are"
  * panel -- the panel answers both questions about the same readers -- and both
- * are honest about what they are: a place is printed only above a threshold and
- * is a city, never a finer grain, and the visitor figure is labelled an estimate
- * that under-counts, because the value that tells two readers apart lives in
- * memory and dies at midnight (src/lib/news/stats-visitors.server.ts).
+ * are honest about what they are: a place is printed only above a threshold, is
+ * a city and never a finer grain, and is never believed at all unless the
+ * request came over the tunnel's loopback connection; and the visitor figure is
+ * labelled an estimate that can be wrong in BOTH directions -- the value that
+ * tells two readers apart lives in memory, so it dies at midnight and can be
+ * lost earlier on a day busy enough to evict it (counting a reader twice), while
+ * one shared address is one handle (counting a household once). See
+ * src/lib/news/stats-visitors.server.ts.
  *
  * Every number on this page that the paper cannot honestly measure still says
  * so rather than guessing.
@@ -476,6 +480,10 @@ function StatsPage() {
                 City and country only, counted by the day. A place is printed once{" "}
                 {formatCount(LOCATION_MIN_VISITS)} visits have been counted there in this range;
                 everything under that is {LOCATION_OTHER_LABEL}, so no row can be about one reader.
+                On a day that has finished, places under the threshold are added together in the
+                stored counts too — they are not kept one by one to be read later, here or anywhere
+                else. Read from this paper&rsquo;s own network, and only when the request came
+                through it.
               </p>
 
               {/*
@@ -483,16 +491,27 @@ function StatsPage() {
                 question about the same readers. Deliberately NOT a range sum:
                 adding days together would count one reader once per day and
                 print the total as "visitors". Two single days instead.
+
+                The direction is stated as BOTH ways round, because both are
+                true and only one used to be written down. Emptying the set --
+                at a restart, or when the oldest handles are evicted on a very
+                busy day -- lets a reader who was already counted be counted
+                again, which is an OVER-count; and one address shared between
+                several devices (a household, an office, a mobile carrier's
+                NAT) is one handle, which is an UNDER-count. Calling it a floor
+                was wrong in one direction.
               */}
               <p className="st-kpi-l">Visitors</p>
               <p className="st-big">
                 {formatCount(data.visitors.today)} <span>today</span>
               </p>
               <p className="st-note">
-                An estimate, and a floor rather than a headcount. The server tells two readers apart
-                for one day with a value held only in memory, which is thrown away at midnight and
-                again when the server restarts — so it keeps no identifier, cannot follow anyone
-                from one day to the next, and under-counts on a busy or restarted day. Yesterday:{" "}
+                An estimate, not a headcount, and it can be wrong in both directions. The server
+                tells two readers apart for one day with a value held only in memory, thrown away at
+                midnight and again when the server restarts — so it keeps no identifier and cannot
+                follow anyone from one day to the next. A restart, or a day busy enough to evict the
+                oldest values, can count the same reader twice; and one address shared by a
+                household, an office or a phone carrier reads as one reader. Yesterday:{" "}
                 {formatCount(data.visitors.yesterday)}.
               </p>
             </div>

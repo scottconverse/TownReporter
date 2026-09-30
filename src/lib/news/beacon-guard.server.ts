@@ -24,8 +24,16 @@
   by every caller bounds the harm above without knowing anything about who is
   calling. The cost is that one noisy client can exhaust the budget for
   everyone -- for a small paper's traffic that is a far smaller problem than
-  the one it replaces, and the budget is set an order of magnitude above real
-  use.
+  the one it replaces.
+
+  THE ACTUAL NUMBERS, so the comment and the constants cannot drift apart:
+  `BEACON_RATE_PER_SECOND` is 20 and `BEACON_RATE_BURST` is 400, both in
+  src/lib/news/stats-privacy.ts. That is a sustained 20 beacon writes a second
+  with a burst of 400, shared by `/api/view` and `/api/read` together -- far
+  above a small paper's real traffic (a busy minute is a few dozen writes), and
+  a hard ceiling on what an anonymous flood can add to the tables. The body cap
+  is `BEACON_BODY_LIMIT_BYTES`, 2 KB, against the few hundred bytes the largest
+  legitimate report carries.
 
   WHY THE BODY CAP DOES NOT READ `content-length`. Consulting the header would
   be an optimisation (refuse without reading), but it would also put a sixth

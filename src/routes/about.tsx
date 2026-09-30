@@ -63,15 +63,26 @@ function About() {
             <strong>What we count, and what we keep.</strong> We count page loads, reading time,
             and which of our own pages and buttons readers use — in aggregate, never per person.
             No cookies, no accounts, no fingerprinting, and no identifier that outlives the day.
-            Two things are read off a request, each for one purpose only. One is the city and
-            country your network reports, so we can say roughly which places our readers are in;
-            it is counted by the day, and a place is only ever shown once enough visits have
-            landed there that the row cannot be one reader. The other is the address your request
-            arrives from and your browser&rsquo;s user-agent, reduced to a few words and used only
-            to avoid counting you twice in the same day. Neither is stored, logged or exported,
-            and the value that tells two readers apart exists only in the server&rsquo;s memory and
-            is thrown away at midnight. So we cannot tell that you came back yesterday, and we do
-            not try. No location database is consulted, and no analytics service is involved.
+            Two signals are read on a visit, each for one purpose only.
+          </p>
+          <p>
+            <strong>Where you are, roughly.</strong> This site is served through Cloudflare, which
+            works out a city and a country from your IP address and passes those two facts to us
+            with the request. We keep only a daily count for each place — never the address, and
+            only ever a city or a country, never anything finer. A place is shown to the editor
+            only once enough visits have landed there that the row cannot be one reader, and small
+            places on a finished day are added together into &ldquo;other places&rdquo; rather than
+            kept individually. No location database is consulted, by us or on our behalf.
+          </p>
+          <p>
+            <strong>Counting you once, without remembering you.</strong> We also read the address
+            your request arrives from, and your browser&rsquo;s type — a handful of words such as
+            &ldquo;phone&rdquo;, not the browser&rsquo;s own string. Both are used for one moment,
+            to build a one-way code that changes every day and whose only job is to stop the same
+            visit being counted twice. Neither the address nor the browser string is ever stored,
+            logged or exported; the code cannot be turned back into an address, and today&rsquo;s
+            code cannot be matched against yesterday&rsquo;s. That is why we cannot tell that you
+            came back yesterday, and we do not try. No analytics service is involved.
           </p>
           {EDITOR_EMAIL ? (
             <p>

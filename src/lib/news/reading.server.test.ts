@@ -41,12 +41,14 @@ import {
   BEACON_HEADER_ALLOWLIST,
   ensureReadingSchema,
   exportReadingCsv,
+  foldSmallPlaces,
   getReadingStats,
   pruneLocationDaily,
   readBeaconHandler,
   recordReadBeacon,
   recordTrustCount,
 } from "./reading.server.ts";
+import { FOLDED_CITY, LOCATION_MIN_VISITS } from "./stats-privacy.ts";
 import { liveSnapshot, noteLiveBeat, resetLiveWindow } from "./reading-live.ts";
 
 /** Same bootstrap as views.test.ts -- `articles` is migrations-only. */
@@ -94,6 +96,27 @@ async function bucket(newsroomId: number, path: string, refClass: string, device
 
 function num(value: string | number | null | undefined): number {
   return Number(value ?? 0);
+}
+
+/**
+ * Run `fn` with a request context whose transport peer is `ip` -- the real
+ * framework AsyncLocalStorage, entered the way
+ * src/lib/auth/isolation.server.test.ts enters it.
+ *
+ * The location headers are believed only over loopback (unit U17c,
+ * `beaconPeerIsLoopback`), so a case that expects a place to be counted has to
+ * say the request came from the tunnel, and a case that expects none can say it
+ * came from anywhere else -- or, with `undefined`, that the adapter reported
+ * nothing at all.
+ */
+const EVENT_STORAGE_KEY = Symbol.for("tanstack-start:event-storage");
+
+type EventStorage = { run: <R>(store: unknown, fn: () => R) => R };
+
+async function withPeer<T>(ip: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const storage = (globalThis as Record<symbol, EventStorage | undefined>)[EVENT_STORAGE_KEY];
+  assert.ok(storage, "tanstack-start's event AsyncLocalStorage was not found on globalThis");
+  return storage.run({ h3Event: { req: { ip } } }, fn);
 }
 
 /**
@@ -272,7 +295,9 @@ describe("readBeaconHandler", () => {
         "cf-timezone": "America/Denver",
       },
     );
-    const response = await readBeaconHandler(request);
+    // Over the tunnel's loopback connection: the two location headers are only
+    // read at all when the peer is loopback (unit U17c).
+    const response = await withPeer("127.0.0.1", () => readBeaconHandler(request));
     assert.equal(response.status, 204);
 
     const names = [...new Set(read)];
@@ -1009,6 +1034,134 @@ describe("where readers are, and how many", () => {
     } finally {
       await sql`delete from location_daily where newsroom_id = ${onlySmall}`;
       await sql`delete from newsroom_members where newsroom_id = ${onlySmall}`;
+    }
+  });
+});
+
+/*
+  Unit U17c: a finished day's small places are folded at rest, not only on the
+  screen. Its own newsroom, and assertions scoped to it -- `foldSmallPlaces()`
+  is deliberately global (it is a table-wide cleanup on a clock, not a per-paper
+  action), so the rows another describe in this file seeded are folded by the
+  same call.
+*/
+describe("a finished day's small places are folded, not kept", () => {
+  const newsroomId = 9603;
+
+  /** `daysAgo` is a number, not a date string: the tag parameterises values. */
+  async function seedPlace(daysAgo: number, city: string, visits: number) {
+    const sql = await getSql();
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits)
+      values (${newsroomId}, current_date - ${daysAgo}::int, ${"US"}, ${city}, ${visits})
+      on conflict (newsroom_id, day, country, city) do update set
+        visits = location_daily.visits + excluded.visits
+    `;
+  }
+
+  async function mine() {
+    const sql = await getSql();
+    const rows = await sql<{ city: string; visits: string }>`
+      select city, visits from location_daily
+      where newsroom_id = ${newsroomId} and country = ${"US"}
+      order by city asc
+    `;
+    return rows.map((row) => [row.city, Number(row.visits)] as const);
+  }
+
+  it("moves a finished day's one-visit place into its country's other row and leaves the busy one alone", async () => {
+    const sql = await getSql();
+    await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
+    await seedPlace(3, "SmallTown", 1);
+    await seedPlace(3, "Longmont", 30);
+
+    const folded = await foldSmallPlaces();
+    assert.ok(folded >= 1, "the small place was folded");
+
+    assert.deepEqual(
+      await mine(),
+      [
+        [FOLDED_CITY, 1],
+        ["Longmont", 30],
+      ],
+      "the one-visit place is gone, the 30-visit place is untouched, and the country's other row holds the 1",
+    );
+  });
+
+  it("is idempotent: a second run in the same hour changes nothing", async () => {
+    const before = await mine();
+    assert.equal(await foldSmallPlaces(), 0, "nothing left to fold");
+    assert.deepEqual(await mine(), before, "and the table is exactly as it was");
+  });
+
+  it("leaves today's small rows alone until the day closes", async () => {
+    const sql = await getSql();
+    await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
+    await seedPlace(0, "TodayTown", 1);
+    await seedPlace(0, "Longmont", 30);
+
+    assert.equal(await foldSmallPlaces(), 0, "a day still in progress is not folded");
+    assert.deepEqual(
+      await mine(),
+      [
+        ["Longmont", 30],
+        ["TodayTown", 1],
+      ],
+      "the small row is still there today, and the screen folds it for display instead",
+    );
+
+    // And when the day is over, the same rows fold: the lag is one day, not
+    // forever.
+    await sql`
+      update location_daily set day = current_date - 1 where newsroom_id = ${newsroomId}
+    `;
+    assert.equal(await foldSmallPlaces(), 1, "the day closed, so it folds now");
+    assert.deepEqual(await mine(), [
+      [FOLDED_CITY, 1],
+      ["Longmont", 30],
+    ]);
+  });
+
+  it("a folded row is never drawn as a place, whatever its size", async () => {
+    /*
+      The case that would otherwise print a bar with no name on it: a country
+      whose small places add up past the threshold. 60 visits, over
+      LOCATION_MIN_VISITS, and still not a place.
+    */
+    const sql = await getSql();
+    const newsroom = 9604;
+    const userId = `reading-fold-owner-${Date.now()}`;
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${userId}, 'owner', ${newsroom})
+    `;
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits) values
+        (${newsroom}, current_date, 'US', ${FOLDED_CITY}, ${LOCATION_MIN_VISITS + 35}),
+        (${newsroom}, current_date, 'US', 'Longmont', ${LOCATION_MIN_VISITS + 100})
+    `;
+    try {
+      const stats = await getReadingStats(userId, "7d");
+      assert.deepEqual(
+        stats.locations.map((row) => row.city),
+        ["Longmont"],
+        "the folded row is not a place",
+      );
+      assert.equal(
+        stats.otherVisits,
+        LOCATION_MIN_VISITS + 35,
+        "its visits are still accounted for, under Other places",
+      );
+      // NOT `!JSON.stringify(...).includes(FOLDED_CITY)`: FOLDED_CITY is the
+      // empty string, and every string contains the empty string, so that
+      // assertion could never fail. Check the rows themselves.
+      assert.ok(
+        stats.locations.every((row) => row.city.length > 0),
+        "and no row with a blank city reaches the browser",
+      );
+    } finally {
+      await sql`delete from location_daily where newsroom_id = ${newsroom}`;
+      await sql`delete from newsroom_members where newsroom_id = ${newsroom}`;
     }
   });
 });

@@ -618,3 +618,46 @@ it('the stats place prune keeps twelve months on a real Postgres and takes nothi
     await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
   }
 });
+
+/*
+  Unit U17c: a finished day's small places are folded at rest. Real Postgres,
+  for the same reason the prune above is: the fold is one statement -- a
+  data-modifying CTE whose delete and insert cannot come apart -- and PGlite is
+  not the database a deployed paper runs.
+*/
+it("folds a finished day's small places on a real Postgres, idempotently, and leaves today alone", {skip,timeout:30000}, async()=>{
+  const {getSql}=await import('../db.ts');
+  const reading=await import('./reading.server.ts');
+  await reading.ensureReadingSchema();
+  const sql=await getSql();
+  const newsroomId=8898;
+  const rows=async()=>(await sql<{city:string;visits:string}>`
+    select city, visits from location_daily where newsroom_id = ${newsroomId}
+    order by day asc, city asc
+  `).map((row)=>[row.city,Number(row.visits)] as const);
+  await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
+  try {
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits) values
+        (${newsroomId}, current_date - 3, 'US', 'SmallTown', 1),
+        (${newsroomId}, current_date - 3, 'US', 'Longmont', 30),
+        (${newsroomId}, current_date, 'US', 'TodayTown', 1)
+    `;
+    const folded=await reading.foldSmallPlaces();
+    assert.equal(folded,1,'exactly the finished day\'s one-visit place');
+    assert.deepEqual(await rows(),[
+      ['',1],
+      ['Longmont',30],
+      ['TodayTown',1],
+    ],'the small place is folded into its country\'s blank-city row; the busy place and today\'s row are untouched');
+
+    assert.equal(await reading.foldSmallPlaces(),0,'a second run in the same hour changes nothing');
+    assert.deepEqual(await rows(),[
+      ['',1],
+      ['Longmont',30],
+      ['TodayTown',1],
+    ],'and the table is exactly as it was');
+  } finally {
+    await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
+  }
+});

@@ -1035,12 +1035,16 @@ Read-only, editor-only. Right after Server in the nav.
 Shows anonymous page loads, not unique people or completed reads — no cookies,
 no fingerprinting, just a count of how many times an instrumented page loaded.
 Alongside that it shows a **daily visitor estimate** and a **where readers are**
-panel: a city and a country read from the network serving the paper, counted by
-the day and printed only once at least 25 visits have landed there in the range,
-and a visitors figure built from a value the server keeps in memory only, which
-is discarded at midnight and on restart. No address, user-agent or place is ever
-stored as a value, and no reader can be followed from one day to the next — so
-the visitor figure is an estimate that under-counts. Three things:
+panel: a city and a country derived by Cloudflare from the reader's IP address,
+counted by the day and printed only once at least 25 visits have landed there in
+the range — smaller places on a finished day are added together into "other
+places" by the hourly check rather than kept individually. The visitors figure
+is built from a value the server keeps in memory only, discarded at midnight and
+on restart. No address, user-agent string or place is ever stored as a value,
+and no reader can be followed from one day to the next — but the figure is an
+estimate and can be wrong in **both** directions: a restart or a busy day can
+count the same reader twice, and one shared address reads as one reader. Three
+things:
 
 - **Site** — all-time total, last 7 calendar dates including today, and last
   30 calendar dates including today, added across the home page and published

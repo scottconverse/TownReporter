@@ -50,9 +50,13 @@
   WHAT IT STILL DOES NOT MEASURE, AND SAYS SO. "Returning readers" cannot be
   counted without a cross-day identifier, so it is still not counted
   (README.md:370-411): a reader who comes back tomorrow is a new handle. The
-  visitor figure is an estimate that under-counts -- the handle set is one
-  process wide and empties on restart -- and the page prints that beside the
-  number rather than calling it a headcount.
+  visitor figure is an estimate that can be wrong in EITHER direction -- the
+  handle set is one process wide, so a restart, or a busy day's eviction of its
+  oldest handles, can count a reader who was already counted a second time
+  (over), while one address shared by a household, an office or a carrier's NAT
+  is one handle (under) -- and the page prints that beside the number rather
+  than calling it a headcount. It said "under-counts" until unit U17c, which
+  was one of the two directions and not the honest one on its own.
 
   A NOTE ON THE DENOMINATOR. `loads` counts every page load the beacon
   reported, `visits` only the ones that arrived from outside the site
@@ -88,10 +92,12 @@ import {
 import { liveSnapshot, noteLiveArrival, noteLiveBeat } from "./reading-live.ts";
 import { SITE_TARGET, ensureViewsSchema } from "./views.ts";
 import { readBeaconJson, takeBeaconToken } from "./beacon-guard.server.ts";
+import { beaconPeerIsLoopback } from "./beacon-peer.server.ts";
 import { noteVisitor } from "./stats-visitors.server.ts";
 import {
   BEACON_HEADER_ALLOWLIST,
   EMPTY_BEACON_CONTEXT,
+  FOLDED_CITY,
   LOCATION_MIN_VISITS,
   beaconContextFromHeaders,
   locationRowFor,
@@ -516,7 +522,19 @@ export async function readBeaconHandler(request: Request): Promise<Response> {
     // Over the cap, unreadable, or not JSON: a refusal the validator would
     // reach anyway, answered the same way.
     if (body === undefined) return new Response(null, { status: 204 });
-    await recordReadBeacon(body, DEFAULT_NEWSROOM_ID, beaconContextFromHeaders(request.headers));
+    /*
+      `beaconPeerIsLoopback()` is the U17c gate on the two location headers: the
+      request's transport peer must be loopback (where the Cloudflare tunnel
+      daemon's requests come from) or `beaconContextFromHeaders` will not read
+      `cf-ipcity` / `cf-ipcountry` at all. It is computed here and not inside
+      the pure module because it needs the request event, which only exists in
+      the server runtime.
+    */
+    await recordReadBeacon(
+      body,
+      DEFAULT_NEWSROOM_ID,
+      beaconContextFromHeaders(request.headers, { locationTrusted: beaconPeerIsLoopback() }),
+    );
   } catch {
     // A malformed body is just another report the validator refuses. This
     // endpoint never fails outward, for the same reason /api/view never does.
@@ -981,6 +999,18 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
     under it must not reach the browser at all. Everything below it is summed
     into one "Other places" figure, so the panel still accounts for every
     located visit without naming a place that only one reader was in.
+
+    TWO KINDS OF ROW ARE NOT A PLACE, and both go to "Other places" whatever
+    their size:
+
+      - a row under LOCATION_MIN_VISITS, which is what the threshold has always
+        meant, and which is all that is left of a day still in progress (the
+        hourly fold only touches days that have finished);
+      - a row whose city is FOLDED_CITY, the sum of a finished day's small
+        places. It can easily be OVER the threshold -- a hundred towns with two
+        readers each -- and drawing it would print a bar with no name on it, or
+        worse, invite someone to name it. It is a fold, not a place, so it is
+        never drawn as one.
   */
   const located = locationRows.map((row) => ({
     city: row.city,
@@ -988,11 +1018,13 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
     visits: Number(row.visits ?? 0),
   }));
   const locatedTotal = located.reduce((sum, row) => sum + row.visits, 0);
+  const drawsAsAPlace = (row: { city: string; visits: number }) =>
+    row.city !== FOLDED_CITY && row.visits >= LOCATION_MIN_VISITS;
   const locations: ReadingLocationRow[] = located
-    .filter((row) => row.visits >= LOCATION_MIN_VISITS)
+    .filter(drawsAsAPlace)
     .map((row) => ({ ...row, share: share(row.visits, locatedTotal) }));
   const otherVisits = located
-    .filter((row) => row.visits < LOCATION_MIN_VISITS)
+    .filter((row) => !drawsAsAPlace(row))
     .reduce((sum, row) => sum + row.visits, 0);
   const visitors: ReadingVisitors = {
     today: Number(visitorRow?.today ?? 0),
@@ -1289,4 +1321,67 @@ export async function pruneLocationDaily(): Promise<number> {
     select count(*)::int as n from removed
   `;
   return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Fold a finished day's small places into that day's per-country "other" row
+ * (unit U17c).
+ *
+ * WHY THIS EXISTS AT ALL. The 25-visit threshold used to live only on the
+ * screen. A row like `(today - 3, 'SmallTown', visits = 1)` therefore sat in
+ * `location_daily` for twelve months, went out in every `pg_dump`, and -- read
+ * beside `read_hourly` for the same day -- is one reader's visit, recorded as a
+ * named place. The display threshold stopped that reaching an editor's screen;
+ * it did not stop it existing. This is the same rule applied where the data
+ * actually rests, which is what the owner's decision is about.
+ *
+ * WHAT IT DOES. For every row on a FINISHED day (`day < current_date` -- the
+ * same calendar the rows were written on, so the paper's own local day) whose
+ * `visits` is under {@link LOCATION_MIN_VISITS}, it adds the visits to that
+ * day's `(newsroom, country, city = FOLDED_CITY)` row and deletes the small
+ * row. One statement, so one transaction: the sum and the delete cannot come
+ * apart, and an interrupted run leaves the table exactly as it was.
+ *
+ * TODAY IS LEFT ALONE. A day still in progress has not finished arriving, so
+ * folding it would move visits that are about to be joined by more; its small
+ * places stay as places until the day closes, and the screen folds them for
+ * display exactly as it always did. So the threshold is enforced at rest with
+ * one day's lag, and on screen immediately.
+ *
+ * IDEMPOTENT BY CONSTRUCTION. The folded row itself has `city = FOLDED_CITY`
+ * and is excluded by `city <> FOLDED_CITY`, so it can never fold into itself
+ * and a second run in the same hour finds nothing to do. Returns how many rows
+ * were folded, for the tick's log line and the test.
+ *
+ * A COUNTRIES' WORTH OF SMALL PLACES CAN EXCEED THE THRESHOLD, which is fine
+ * and deliberate: the folded row is never drawn as a place
+ * (src/lib/news/reading.server.ts's `drawsAsAPlace`), so its size does not
+ * matter. What matters is that no single-reader place survives.
+ */
+export async function foldSmallPlaces(): Promise<number> {
+  await ensureReadingSchema();
+  const sql = await getSql();
+  const rows = await sql<{ folded: number }>`
+    with folded_rows as (
+      delete from location_daily
+      where day < current_date
+        and visits < ${LOCATION_MIN_VISITS}::bigint
+        and city <> ${FOLDED_CITY}
+      returning newsroom_id, day, country, visits
+    ),
+    per_country as (
+      select newsroom_id, day, country, sum(visits)::bigint as visits
+      from folded_rows
+      group by newsroom_id, day, country
+    ),
+    written as (
+      insert into location_daily (newsroom_id, day, country, city, visits)
+      select newsroom_id, day, country, ${FOLDED_CITY}, visits from per_country
+      on conflict (newsroom_id, day, country, city) do update set
+        visits = location_daily.visits + excluded.visits
+      returning 1
+    )
+    select (select count(*)::int from folded_rows) as folded
+  `;
+  return Number(rows[0]?.folded ?? 0);
 }

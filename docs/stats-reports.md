@@ -10,17 +10,31 @@ published-story page load contributes to the site total and that story's
 counter. A refresh is another page load and can count again. Opening Stats or
 reading a saved report does not create a public-page view.
 
-Two signals are read while a public page is open and are not stored as values:
-the **city and country** the serving network reports, kept only as a per-day
-count per place and printed only once at least 25 visits have landed there in
-the selected range; and the **requesting address and user-agent**, reduced to a
-few words and used only so the same reader is not counted twice in one day. The
-value that tells two readers apart is held in the server's memory, is never
-written to the database or a log, and is discarded at midnight and on restart —
-so the day's **visitors** figure is an estimate that under-counts, and
+Two signals are read while a public page is open and neither is stored as a
+value. The **city and country** are derived by Cloudflare from the reader's IP
+address and arrive as request headers; they are believed only when the request
+came over loopback, where the tunnel daemon connects from, so a direct
+connection cannot forge them. What is kept is a per-day count per place, never
+the address, and a place is printed only once at least 25 visits have landed
+there in the selected range — on a finished day, smaller places are added
+together into an "other places" row by the hourly check rather than kept
+individually. The **requesting address and the browser's type** (a few words
+such as "phone", never the user-agent string) are read for one moment inside a
+one-way code that changes every day, only so the same visit is not counted
+twice; the code is never written to the database or a log, cannot be reversed,
+and cannot be matched across days. The day's **visitors** figure is therefore an
+estimate that can be wrong in both directions — a restart or a busy day can
+count the same reader twice, and one shared address reads as one reader — and
 "returning readers" is still not measurable. Places older than twelve months are
 pruned; every other Stats count, including the saved reports below, is kept
 indefinitely.
+
+Both public beacon endpoints (`/api/view` and `/api/read`) are bounded together
+by one process-wide budget with no key of any kind: 20 writes a second sustained
+with a burst of 400 (`BEACON_RATE_PER_SECOND` / `BEACON_RATE_BURST` in
+`src/lib/news/stats-privacy.ts`), and a 2 KB cap on the request body, enforced by
+counting bytes as they arrive rather than trusting a header. A request over
+either bound is answered exactly like a working one and writes nothing.
 
 The live page shows site and published-story totals for:
 

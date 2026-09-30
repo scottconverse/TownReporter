@@ -77,6 +77,65 @@ export const LOCATION_MIN_VISITS = 25;
 export const LOCATION_OTHER_LABEL = "Other places";
 
 /**
+ * The `city` value of a folded row: the sum of a finished day's places that
+ * were under {@link LOCATION_MIN_VISITS}, one row per country (unit U17c).
+ *
+ * It is the empty string and not a word like "other", on purpose. A word could
+ * be sent in `cf-ipcity` and counted as a place; the empty string cannot --
+ * {@link normalizeCity} refuses it -- so the only way a `''` row can exist is
+ * the fold itself, and no request can ever mint one or add to one directly.
+ */
+export const FOLDED_CITY = "";
+
+/**
+ * True when a value is the loopback interface: `127.0.0.0/8` in any of its
+ * spellings, or `::1`. Everything else, including an IPv6-mapped
+ * `::ffff:127.0.0.1`, is decided on its IPv4 part.
+ *
+ * This is the gate on the location headers (unit U17c). `cf-ipcity` and
+ * `cf-ipcountry` are Cloudflare's own headers, and Cloudflare sets them at its
+ * edge; nothing stops a client from putting the same names on a request that
+ * went straight to this server, so the headers are believed only when the
+ * request came from the tunnel daemon, which connects over loopback
+ * (SELF-HOSTING.md: the tunnel dials out from this box and reaches the server
+ * on 127.0.0.1). An absent or unparseable address is NOT loopback: the gate
+ * fails closed, so a stack path that cannot report the peer simply has no
+ * location rather than a forgeable one.
+ */
+export function isLoopbackAddress(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  let address = value.trim().toLowerCase();
+  if (!address) return false;
+  // A zone index (`fe80::1%eth0`) is never loopback, and an IPv6-mapped
+  // address (`::ffff:127.0.0.1`) is the IPv4 one wearing a hat.
+  if (address.includes("%")) return false;
+  if (address.startsWith("::ffff:")) address = address.slice("::ffff:".length);
+  if (address === "::1") return true;
+  const parts = address.split(".");
+  // Only the dotted-quad form is decided here. Any other IPv6 literal -- `::1`
+  // aside -- is not loopback for this purpose.
+  if (parts.length !== 4) return false;
+  if (parts.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return false;
+  return parts[0] === "127";
+}
+
+/**
+ * One request header, or null -- and the ONLY way any code on this path may
+ * read one.
+ *
+ * The allowlist is enforced here at runtime rather than trusted to reviewers:
+ * a name that is not in {@link BEACON_HEADER_ALLOWLIST} is refused before the
+ * `Headers` object is touched at all, so a future caller cannot leak a
+ * latitude by asking one question through the wrong door. The test and the
+ * code share the same list, which is the point -- there is no second copy of
+ * the five names to drift.
+ */
+export function allowedHeader(headers: Headers, name: string): string | null {
+  if (!(BEACON_HEADER_ALLOWLIST as readonly string[]).includes(name)) return null;
+  return headers.get(name);
+}
+
+/**
  * A city name is capped well below any real one (the longest in the United
  * States is 38 characters) so a hostile or broken header cannot write a novel
  * into a column an editor reads.
@@ -173,7 +232,7 @@ function plausibleIp(raw: unknown): string | null {
  */
 export function visitorClientIp(headers: Headers): string | null {
   for (const name of IP_HEADERS) {
-    const raw = headers.get(name);
+    const raw = allowedHeader(headers, name);
     if (raw === null) continue;
     if (name === "x-forwarded-for") {
       for (const part of raw.split(",")) {
@@ -249,15 +308,27 @@ export const EMPTY_BEACON_CONTEXT: BeaconContext = {
 
 /**
  * Read the allowlisted headers and build the context. THIS IS THE ONLY PLACE
- * THAT TOUCHES A `Headers` OBJECT, and the allowlist test fails if any other
- * name is asked for.
+ * THAT TOUCHES A `Headers` OBJECT, every read goes through
+ * {@link allowedHeader}, and the allowlist test fails if any name outside the
+ * list is asked for.
+ *
+ * `locationTrusted` IS REQUIRED, and deliberately so. A caller has to state
+ * whether the request came from the Cloudflare tunnel (see
+ * `beaconPeerIsLoopback`, src/lib/news/beacon-peer.server.ts) before it can
+ * get a country or a city back; there is no default to forget, and the safe
+ * answer is the one a caller has to type. When it is false the two location
+ * headers are not read at all -- not read and discarded, NOT READ -- so a
+ * direct client's forged `cf-ipcity` never enters this process's memory.
  */
-export function beaconContextFromHeaders(headers: Headers): BeaconContext {
+export function beaconContextFromHeaders(
+  headers: Headers,
+  options: { locationTrusted: boolean },
+): BeaconContext {
   return {
     ip: visitorClientIp(headers),
-    uaClass: userAgentClass(headers.get(USER_AGENT_HEADER)),
-    country: normalizeCountry(headers.get(COUNTRY_HEADER)),
-    city: normalizeCity(headers.get(CITY_HEADER)),
+    uaClass: userAgentClass(allowedHeader(headers, USER_AGENT_HEADER)),
+    country: options.locationTrusted ? normalizeCountry(allowedHeader(headers, COUNTRY_HEADER)) : null,
+    city: options.locationTrusted ? normalizeCity(allowedHeader(headers, CITY_HEADER)) : null,
   };
 }
 

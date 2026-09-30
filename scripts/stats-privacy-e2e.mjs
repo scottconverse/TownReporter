@@ -66,6 +66,9 @@ const SEARCH_REFERRER = `https://www.google.com/search?q=${PRIVATE_QUERY}&utm=se
 const FRONT_REFERRER = "https://duckduckgo.com/?q=water+rate+longmont";
 /** The eight words in src/lib/news/reading.ts READ_REF_CLASSES. */
 const REF_CLASSES = ["search", "share", "facebook", "reddit", "direct", "local", "rss", "internal"];
+/** The place the desktop window's requests carry, and expects counted (U17c). */
+const SENTINEL_CITY = "Longmont";
+const SENTINEL_COUNTRY = "US";
 /** Keys the beacon is allowed to send, per kind. Copied from read-beacon.tsx. */
 const BEACON_KEYS = {
   load: ["kind", "path", "device", "refClass", "fromArticle"],
@@ -688,6 +691,32 @@ async function theDatabaseHoldsClassesNotPeople() {
     fail("a stats place or visitor table has a finer grain than a day");
   measured("statsLocationTypes", locationTypes);
 
+  /*
+    The loopback gate, proved on a real socket (unit U17c). This walk connects
+    to 127.0.0.1, so the desktop window's `cf-ipcity`/`cf-ipcountry` -- set by
+    the browser context above, not by Cloudflare -- must be believed and counted
+    as one place, and a phone window that sends none must add none.
+  */
+  const places = (await pg.query("select country, city, visits from location_daily order by city")).rows;
+  if (places.length !== 1)
+    fail(`expected exactly one place from the loopback window; the table holds ${JSON.stringify(places)}`);
+  if (places[0].country !== SENTINEL_COUNTRY || places[0].city !== SENTINEL_CITY)
+    fail(`the place counted was not the one the browser sent: ${JSON.stringify(places[0])}`);
+  if (Number(places[0].visits) < 1) fail("the place was counted zero times");
+  step(`the loopback window's cf headers were believed: ${JSON.stringify(places[0])}`);
+  measured("locationRows", places);
+
+  const locationColumns = (
+    await pg.query(
+      `select column_name from information_schema.columns where table_name = 'location_daily' order by column_name`,
+    )
+  ).rows.map((row) => row.column_name);
+  for (const forbidden of ["latitude", "longitude", "region", "postal_code", "timezone", "ip"]) {
+    if (locationColumns.includes(forbidden))
+      fail(`location_daily has a ${forbidden} column, which is finer than the rule permits`);
+  }
+  step(`location_daily holds a country, a city, a day and a count, and nothing finer`);
+
   const rows = (
     await pg.query(
       `select ref_class, path, sum(loads)::int as loads, sum(visits)::int as visits,
@@ -759,6 +788,16 @@ async function main() {
     viewport: { width: 1280, height: 900 },
     deviceScaleFactor: 1,
     reducedMotion: "reduce",
+    /*
+      The two headers Cloudflare sets at its edge, put on this window's requests
+      by hand (unit U17c). This walk talks to 127.0.0.1, which is where the
+      tunnel daemon connects from, so the server should BELIEVE them and count
+      the place -- that is the positive half of the loopback gate, and a real
+      socket against a real built server is the only place it can be proved.
+      The phone window below deliberately does NOT set them, so one window
+      exercises "headers present" and the other "headers absent".
+    */
+    extraHTTPHeaders: { "cf-ipcity": SENTINEL_CITY, "cf-ipcountry": SENTINEL_COUNTRY },
   });
   await watch(context);
   page = await context.newPage();

@@ -3,7 +3,7 @@ import { drainQueuedJobs, reattachDurableJobsOnStartup } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
-import { pruneLocationDaily } from "./reading.server.ts";
+import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 
 /**
@@ -95,6 +95,22 @@ export function startUnattendedScheduler(): void {
         day's report from being written, and a report that failed must not stop
         the prune. Hence its own try/catch, and its own log tag.
       */
+      /*
+        The fold runs BEFORE the prune, and both are idempotent, so the order
+        is only about not doing wasted work: a place old enough to be pruned is
+        never also folded. Fold first and the prune sees fewer rows; prune first
+        and the fold would fold rows the prune was about to delete. Neither
+        order is wrong, and neither loses a visit -- a folded row is carried by
+        a row that lives as long as the rows it came from.
+
+        Each in its own try/catch: a fold that failed must not stop the prune,
+        and vice versa, and neither may stop the day's reports above.
+      */
+      try {
+        await foldSmallPlaces();
+      } catch (err) {
+        console.error("[townreporter] stats location fold failed:", err);
+      }
       try {
         await pruneLocationDaily();
       } catch (err) {

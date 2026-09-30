@@ -41,11 +41,14 @@
   "no cross-day identifier" rather than a persistent one wearing a new name.
 
   WHAT IT IS NOT. It is not a headcount, and the page says so beside the
-  number. The Set is one process wide and empties on restart, so this
-  UNDER-COUNTS. Carrier-grade NAT puts many households behind one address and
-  rotating IPv6 privacy addresses give one household many, so it is imprecise
-  in the other direction too. And a reader who sends no address at all is not
-  counted -- never counted some other way.
+  number. It can be wrong in BOTH directions, and an earlier version of this
+  comment named only one of them. The Set is one process wide and empties on
+  restart, and it evicts its oldest handles on a day busier than MAX_HANDLES --
+  so a reader who was already counted can be counted AGAIN, which is an
+  OVER-count. Carrier-grade NAT puts many households behind one address, which
+  is an under-count of people; rotating IPv6 privacy addresses give one
+  household many addresses, which is the other way. And a reader who sends no
+  address at all is not counted -- never counted some other way.
 
   ON `globalThis`, like src/lib/news/reading-live.ts and src/lib/pglite.ts: a
   Vite dev-server HMR pass re-evaluates a module, and module scope would hand

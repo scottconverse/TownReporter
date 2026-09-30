@@ -39,7 +39,11 @@ import { SITE_TARGET, ensureViewsSchema, viewBeaconHandler } from "./views.ts";
 import { ensureReadingSchema, readBeaconHandler } from "./reading.server.ts";
 import {
   BEACON_BODY_LIMIT_BYTES,
+  BEACON_HEADER_ALLOWLIST,
   BEACON_RATE_BURST,
+  allowedHeader,
+  beaconContextFromHeaders,
+  isLoopbackAddress,
   normalizeCity,
   normalizeCountry,
   userAgentClass,
@@ -105,6 +109,28 @@ beforeEach(async () => {
     await sql.query(`delete from ${table} where newsroom_id = $1`, [DEFAULT_NEWSROOM_ID]);
   }
 });
+
+/**
+ * Run `fn` with a request context whose TRANSPORT PEER is `ip` -- the same
+ * AsyncLocalStorage the framework populates for a real request, entered the way
+ * src/lib/auth/isolation.server.test.ts enters it. Without it,
+ * `beaconPeerIsLoopback()` (src/lib/news/beacon-peer.server.ts) finds no event,
+ * returns false, and every location header is correctly ignored -- so a test
+ * that expects a place to be counted has to say where the request came from.
+ *
+ * `undefined` means the adapter reported no peer address at all, which is the
+ * case the gate must fail closed on.
+ */
+const EVENT_STORAGE_KEY = Symbol.for("tanstack-start:event-storage");
+
+/** `AsyncLocalStorage.run`, generically, so a promise-returning case types. */
+type EventStorage = { run: <R>(store: unknown, fn: () => R) => R };
+
+async function withPeer<T>(ip: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const storage = (globalThis as Record<symbol, EventStorage | undefined>)[EVENT_STORAGE_KEY];
+  assert.ok(storage, "tanstack-start's event AsyncLocalStorage was not found on globalThis");
+  return storage.run({ h3Event: { req: { ip } } }, fn);
+}
 
 /** Everything a reader's request carried that must never be written down. */
 const SENTINEL = {
@@ -277,12 +303,16 @@ describe("A. nothing that identifies a reader is stored or logged", () => {
           sentinelRequest("http://test.local/api/view", { target: "story:privacy-story" }),
           sentinelRequest("http://test.local/api/view", "not json at all {{{"),
         ];
-        for (const request of requests) {
-          const response = request.url.includes("/api/view")
-            ? await viewBeaconHandler(request)
-            : await readBeaconHandler(request);
-          assert.equal(response.status, 204, `${request.url} must answer 204`);
-        }
+        // Over the tunnel's loopback connection, which is the only peer whose
+        // location headers are believed (unit U17c).
+        await withPeer("127.0.0.1", async () => {
+          for (const request of requests) {
+            const response = request.url.includes("/api/view")
+              ? await viewBeaconHandler(request)
+              : await readBeaconHandler(request);
+            assert.equal(response.status, 204, `${request.url} must answer 204`);
+          }
+        });
       });
     });
 
@@ -493,13 +523,15 @@ describe("B. the daily handle rotates and is never written down", () => {
 describe("C. a place is read coarsely, or not at all", () => {
   it("C9: the two Cloudflare headers become one day's counter for that place", async () => {
     const sql = await getSql();
-    const response = await readBeaconHandler(
-      sentinelRequest("http://test.local/api/read", {
-        kind: "load",
-        path: "/",
-        refClass: "direct",
-        device: "computer",
-      }),
+    const response = await withPeer("127.0.0.1", () =>
+      readBeaconHandler(
+        sentinelRequest("http://test.local/api/read", {
+          kind: "load",
+          path: "/",
+          refClass: "direct",
+          device: "computer",
+        }),
+      ),
     );
     assert.equal(response.status, 204);
     const rows = await sql<{ country: string; city: string; visits: string }>`
@@ -517,7 +549,7 @@ describe("C. a place is read coarsely, or not at all", () => {
       headers: { "content-type": "application/json", "cf-ipcountry": "de" },
       body: JSON.stringify({ kind: "load", path: "/", refClass: "direct", device: "computer" }),
     });
-    assert.equal((await readBeaconHandler(countryOnly)).status, 204);
+    assert.equal((await withPeer("127.0.0.1", () => readBeaconHandler(countryOnly))).status, 204);
     const folded = await sql<{ city: string }>`
       select city from location_daily
       where newsroom_id = ${DEFAULT_NEWSROOM_ID} and country = ${"DE"}
@@ -765,13 +797,17 @@ describe("E. the two bounds on a public beacon", () => {
     let lines: string[] = [];
     try {
       lines = await withCapturedConsole(async () => {
-        const response = await readBeaconHandler(
-          sentinelRequest("http://test.local/api/read", {
-            kind: "load",
-            path: "/",
-            refClass: "direct",
-            device: "computer",
-          }),
+        // Over loopback, so the location write is attempted at all and the
+        // dropped table is what fails.
+        const response = await withPeer("127.0.0.1", () =>
+          readBeaconHandler(
+            sentinelRequest("http://test.local/api/read", {
+              kind: "load",
+              path: "/",
+              refClass: "direct",
+              device: "computer",
+            }),
+          ),
         );
         assert.equal(response.status, 204, "a database error is still 204");
       });
@@ -795,5 +831,151 @@ describe("E. the two bounds on a public beacon", () => {
     for (const sentinel of SENTINELS) {
       assert.ok(!log.includes(sentinel), `"${sentinel}" reached the error log`);
     }
+  });
+});
+
+describe("F. the location headers are believed only over the tunnel (U17c)", () => {
+  it("F1: only a loopback peer, in any of its spellings, opens the gate", () => {
+    for (const loopback of [
+      "127.0.0.1",
+      "127.0.0.53",
+      "127.255.255.254",
+      "::1",
+      "::ffff:127.0.0.1",
+      " 127.0.0.1 ",
+    ]) {
+      assert.equal(isLoopbackAddress(loopback), true, `"${loopback}" is loopback`);
+    }
+    for (const other of [
+      "10.0.0.1",
+      "192.168.1.10",
+      "203.0.113.7",
+      "172.16.0.1",
+      "128.0.0.1",
+      "0.0.0.0",
+      "::",
+      "2001:db8::1",
+      "fe80::1%eth0",
+      "::ffff:10.0.0.1",
+      "localhost",
+      "",
+      "   ",
+      "not-an-address",
+      "127.0.0.256",
+      "127.0.0",
+      undefined,
+      null,
+      42,
+    ]) {
+      assert.equal(isLoopbackAddress(other), false, `"${String(other)}" is not loopback`);
+    }
+  });
+
+  it("F2: only a loopback peer gets a place; every other peer counts everything else unchanged", async () => {
+    const sql = await getSql();
+    const send = () =>
+      sentinelRequest("http://test.local/api/read", {
+        kind: "load",
+        path: "/",
+        refClass: "search",
+        device: "phone",
+      });
+    const places = async () => {
+      const [row] = await sql<{ n: number }>`select count(*)::int as n from location_daily`;
+      return Number(row?.n ?? 0);
+    };
+    // A SUM, not a row count: read_hourly is one row per (hour, path, class,
+    // device) with a running `loads`, so counting rows would read the same
+    // number after every load.
+    const loads = async () => {
+      const [row] = await sql<{ n: number }>`
+        select coalesce(sum(loads), 0)::int as n from read_hourly
+        where path = ${"/"} and ref_class = ${"search"} and device = ${"phone"}
+      `;
+      return Number(row?.n ?? 0);
+    };
+
+    const cases = [
+      ["a public address", "203.0.113.7", 0],
+      ["a private LAN address", "192.168.1.10", 0],
+      ["an address the adapter did not report", undefined, 0],
+      ["the tunnel's loopback connection", "127.0.0.1", 1],
+    ] as const;
+
+    for (const [label, peer, expectedPlaces] of cases) {
+      await sql`delete from location_daily where newsroom_id = ${DEFAULT_NEWSROOM_ID}`;
+      const before = await loads();
+      const response = await withPeer(peer, () => readBeaconHandler(send()));
+      assert.equal(response.status, 204, `${label}: still answers 204`);
+      assert.equal(await places(), expectedPlaces, `${label}: places written`);
+      assert.equal(await loads(), before + 1, `${label}: the load itself is counted either way`);
+    }
+  });
+
+  it("F3: the header helper refuses a name outside the allowlist without touching the Headers object", () => {
+    const asked: string[] = [];
+    const real = new Headers({ "cf-ipcity": "Longmont", "cf-iplatitude": "40.1672" });
+    const recording = new Proxy(real, {
+      get(target, property, receiver) {
+        if (property === "get") {
+          return (name: string) => {
+            asked.push(String(name).toLowerCase());
+            return target.get(name);
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    }) as Headers;
+
+    assert.equal(allowedHeader(recording, "cf-ipcity"), "Longmont");
+    assert.deepEqual(asked, ["cf-ipcity"], "an allowlisted name is read normally");
+
+    assert.equal(allowedHeader(recording, "cf-iplatitude"), null, "a name off the list is refused");
+    assert.equal(asked.length, 1, "and it never reached the Headers object at all");
+
+    // The list the code enforces and the list the tests check are one object.
+    for (const name of BEACON_HEADER_ALLOWLIST) {
+      allowedHeader(recording, name);
+    }
+    assert.deepEqual(
+      [...new Set(asked)].sort(),
+      [...BEACON_HEADER_ALLOWLIST].sort(),
+      "the five allowlisted names are exactly what the helper will read",
+    );
+  });
+
+  it("F4: an untrusted peer's location headers are not read at all -- not read and discarded", () => {
+    const asked: string[] = [];
+    const real = new Headers({
+      "cf-ipcity": "Longmont",
+      "cf-ipcountry": "US",
+      "cf-connecting-ip": "203.0.113.7",
+      "user-agent": "SentinelAgent/9.9",
+    });
+    const recording = new Proxy(real, {
+      get(target, property, receiver) {
+        if (property === "get") {
+          return (name: string) => {
+            asked.push(String(name).toLowerCase());
+            return target.get(name);
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    }) as Headers;
+
+    const untrusted = beaconContextFromHeaders(recording, { locationTrusted: false });
+    assert.equal(untrusted.city, null);
+    assert.equal(untrusted.country, null);
+    assert.ok(!asked.includes("cf-ipcity"), "the city header was read for an untrusted peer");
+    assert.ok(!asked.includes("cf-ipcountry"), "the country header was read for an untrusted peer");
+    // What the gate does NOT close: the address and the agent class, which the
+    // visitor count needs and which are never stored.
+    assert.equal(untrusted.ip, "203.0.113.7");
+    assert.equal(untrusted.uaClass, "computer");
+
+    const trusted = beaconContextFromHeaders(recording, { locationTrusted: true });
+    assert.equal(trusted.city, "Longmont");
+    assert.equal(trusted.country, "US");
   });
 });
