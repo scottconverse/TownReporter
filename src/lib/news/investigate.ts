@@ -1614,7 +1614,40 @@ export async function rememberCapture(opts: {
       /* columns may not exist yet */
     }
   }
-  if (versionId && (createdVersion || !existing[0]) && fullText) {
+
+  /*
+    Unit U11b3: a capture the owner has taken down does not come back.
+
+    Re-fetching a page that has NOT changed produces the same `versionHash`, so
+    this resolves to the version the takedown marked (the row is unique on
+    newsroom, url and hash) instead of inserting a new one. Everything below
+    that writes TEXT for that version would then put the page back where the
+    purge took it from: an investigation-linked capture writes the whole page
+    into `artifacts.full_text`, the chunk loop writes its passages, and the blob
+    insert keeps the original bytes. All three were emptied because a publisher
+    asked, and a later fetch is not a change of mind: the stored text of a
+    taken-down version stays empty.
+
+    Only a page whose content actually changed mints a new hash, and therefore a
+    new version, which this takedown never covered.
+
+    `taken_down_at` is read best-effort: on a database older than
+    migrations/0110 the column does not exist, and a database that cannot
+    record a takedown has none to honour.
+  */
+  let takenDown = false;
+  if (versionId) {
+    try {
+      const [state] = await sql<{ taken_down_at: string | null }>`
+        select taken_down_at::text as taken_down_at from artifact_versions
+        where id = ${versionId} and newsroom_id = ${newsroomId}
+      `;
+      takenDown = Boolean(state?.taken_down_at);
+    } catch {
+      /* the column arrives with 0110; no takedown can predate it */
+    }
+  }
+  if (versionId && !takenDown && (createdVersion || !existing[0]) && fullText) {
     const already = await sql<{ c: number }>`
       select count(*)::int as c from artifact_chunks where version_id = ${versionId} and newsroom_id = ${newsroomId}
     `;
@@ -1653,6 +1686,7 @@ export async function rememberCapture(opts: {
 
   if (
     versionId &&
+    !takenDown &&
     opts.rawBytes &&
     opts.rawBytes.byteLength > 0 &&
     opts.rawBytes.byteLength <= 4_000_000
@@ -1678,13 +1712,22 @@ export async function rememberCapture(opts: {
   }
 
   if (opts.investigationId != null) {
+    /*
+      Unit U11b3: when the version is taken down, the text column is emptied
+      rather than the row skipped. The artifact is the Dark Desk's record that
+      this page was fetched for that investigation -- a fact about the
+      reporting, and it is kept -- while `full_text` is the copy the purge
+      emptied. Writing the page back into it would leave the publisher's
+      article in a table the desk reads, after the evidence page had said the
+      excerpt was removed.
+    */
     await sql`
       insert into artifacts (
         user_id, newsroom_id, investigation_id, url, title, content_hash, full_text,
         classification, fetch_status, fetch_outcome, version_id, capture_event_id, extraction_method
       ) values (
         ${opts.userId}, ${newsroomId}, ${opts.investigationId}, ${url}, ${opts.title.slice(0, 200)},
-        ${versionHash}, ${fullText}, ${opts.classification ?? "discovered"},
+        ${versionHash}, ${takenDown ? "" : fullText}, ${opts.classification ?? "discovered"},
         ${opts.status}, ${opts.outcome}, ${versionId}, ${captureEventId},
         ${opts.extractionMethod ?? ""}
       )
