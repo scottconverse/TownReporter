@@ -763,17 +763,65 @@ async function renewDisposableSession(page, scenario) {
   if (signOutState.signOutStatus !== 200 || signOutState.signedOutSessionStatus !== 200 || !signOutState.signedOut) {
     throw new Error("Could not establish a clean auth boundary before " + scenario.id + ": " + JSON.stringify(signOutState));
   }
-  const previewBearerState = await page.evaluate(() => {
-    const key = "grok-auth.bearer-token";
-    const presentBeforeClear = Boolean(sessionStorage.getItem(key));
-    sessionStorage.removeItem(key);
-    return {
-      previewBearerPresentBeforeClear: presentBeforeClear,
-      previewBearerCleared: !sessionStorage.getItem(key),
-    };
+  /*
+    0.6.83 renamed the session cookie. An editor who updates with the old
+    cookie still in the jar must land on the sign-in page -- not on an error,
+    and not in a redirect loop -- and then be able to sign in normally.
+
+    The old cookie is planted by the browser context, not by `document.cookie`,
+    so it goes in with the same attributes the real one had (`__Host-` requires
+    Secure + Path=/ + no Domain) and the read-back is not a JS-visible-cookies
+    fiction. Everything asserted below is what an updated editor would meet.
+  */
+  const legacyCookieName = "__Host-grok-auth.session_token";
+  /*
+    `url` and `path` are mutually exclusive in `addCookies`, and Chromium
+    rejects a `__Host-` name set from a bare `url` ("Invalid cookie fields").
+    Domain + path is the shape that lands, and it lands as a cookie the server
+    really receives -- verified against the wire, not the JS-visible jar.
+  */
+  await page.context().addCookies([
+    {
+      name: legacyCookieName,
+      value: "stale-session-planted-by-the-0.6.83-rename-walk",
+      domain: new URL(base).hostname,
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+  const legacyInJar = (await page.context().cookies()).some(
+    (c) => c.name === legacyCookieName,
+  );
+  if (!legacyInJar) {
+    throw new Error(
+      "Could not plant the pre-rename " + legacyCookieName + " cookie, so this walk " +
+        "cannot say anything about what an updated editor meets",
+    );
+  }
+  const legacyProbe = await page.goto(base + "/desk", {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
   });
-  if (!previewBearerState.previewBearerCleared) {
-    throw new Error("Could not clear the disposable preview bearer before " + scenario.id);
+  await page
+    .getByRole("heading", { name: "Editor sign-in", exact: true })
+    .waitFor({ timeout: 30_000 });
+  const legacyCookieState = {
+    legacyCookiePlanted: legacyCookieName,
+    // The two honest failure modes: a 5xx, or a bounce that never settles.
+    legacyCookieProbeStatus: legacyProbe ? legacyProbe.status() : null,
+    legacyCookieLandedOn: new URL(page.url()).pathname,
+  };
+  if (
+    legacyCookieState.legacyCookieProbeStatus === null ||
+    legacyCookieState.legacyCookieProbeStatus >= 500 ||
+    legacyCookieState.legacyCookieLandedOn !== "/login"
+  ) {
+    throw new Error(
+      "A stale pre-rename cookie did not reduce to a plain sign-in page: " +
+        JSON.stringify(legacyCookieState),
+    );
   }
   await page.goto(base + "/login", { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.getByRole("heading", { name: "Editor sign-in", exact: true }).waitFor({ timeout: 30_000 });
@@ -793,7 +841,6 @@ async function renewDisposableSession(page, scenario) {
       sessionStatus: response.status,
       authenticated: Boolean(body?.session && body?.user),
       sessionExpiresAt: body?.session?.expiresAt || null,
-      previewBearerPresentAfterSignIn: Boolean(sessionStorage.getItem("grok-auth.bearer-token")),
     };
   });
   result.signInStatus = signInResponse.status();
@@ -811,10 +858,10 @@ async function renewDisposableSession(page, scenario) {
     }));
   const boundary = {
     beforeScenario: scenario.id,
-    reason: "Clear the throwaway session and preview bearer, then re-authenticate through the rendered sign-in form during the long 220-capture matrix.",
-    method: "same-account JSON sign-out, test-owned preview bearer clear, then rendered UI sign-in",
+    reason: "Clear the throwaway session, plant a pre-rename cookie, then re-authenticate through the rendered sign-in form during the long 220-capture matrix.",
+    method: "same-account JSON sign-out, stale-cookie plant, then rendered UI sign-in",
     ...signOutState,
-    ...previewBearerState,
+    ...legacyCookieState,
     ...result,
   };
   await flushAuthTelemetry();
@@ -823,6 +870,20 @@ async function renewDisposableSession(page, scenario) {
   console.log("  session boundary before " + scenario.id + ": " + JSON.stringify(boundary));
   if (result.signInStatus !== 200 || result.sessionStatus !== 200 || !result.authenticated) {
     throw new Error("Disposable editor session renewal failed at " + scenario.id + ": " + JSON.stringify(boundary));
+  }
+  /*
+    The rename's one observable promise: the session the desk just minted is
+    carried by the new cookie name, not the stale one planted above. The stale
+    one is expected to still SIT there -- a rename cannot reach into a browser's
+    cookie jar to delete the old name, and nothing asks it to; the point is that
+    nothing reads it.
+  */
+  const sessionCookieNames = result.sessionCookies.map((c) => c.name);
+  if (!sessionCookieNames.includes("__Host-tr-auth.session_token")) {
+    throw new Error(
+      "Sign-in succeeded but the session cookie is not __Host-tr-auth.session_token: " +
+        JSON.stringify(sessionCookieNames),
+    );
   }
 }
 

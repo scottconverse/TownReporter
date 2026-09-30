@@ -1,17 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import {
-  APP_ENV_REL_PATH,
-  mergeAppEnv,
-  parseAppEnv,
-  projectRoot,
-  readAppEnv,
-} from "./with-app-env.mjs";
+import { parseDotEnv, projectRoot, readDotEnv } from "./with-app-env.mjs";
 
 /**
  * Windows refuses symlink creation to unprivileged processes unless Developer
@@ -49,70 +43,55 @@ function environmentOutsideNodeTestRunner(overrides = {}) {
   return env;
 }
 
-function makeWorkspace(appEnvJson) {
+/** A workspace with the `.env` the wrapper merges, or none when absent. */
+function makeWorkspace(dotEnvText) {
   const root = mkdtempSync(join(tmpdir(), "app-env-"));
-  if (appEnvJson !== undefined) {
-    mkdirSync(join(root, ".grok"), { recursive: true });
-    writeFileSync(join(root, APP_ENV_REL_PATH), appEnvJson);
-  }
+  if (dotEnvText !== undefined) writeFileSync(join(root, ".env"), dotEnvText);
   return root;
 }
 
-test("keeps VITE_-prefixed string entries", () => {
-  assert.deepEqual(parseAppEnv('{"VITE_AUTH_ENABLED":"false"}'), {
+test("parses KEY=value, strips quotes, skips comments and blanks", () => {
+  assert.deepEqual(parseDotEnv('A=1\n# B=2\n\nC="three"\nD=\'four\'\nE=\n'), {
+    A: "1",
+    C: "three",
+    D: "four",
+    E: "",
+  });
+});
+
+test("a missing .env is a clean no-op", () => {
+  assert.deepEqual(readDotEnv(makeWorkspace()), {});
+});
+
+test("reads the environment from a workspace .env", () => {
+  const root = makeWorkspace("VITE_AUTH_ENABLED=false\nDATABASE_URL=postgres://x\n");
+  assert.deepEqual(readDotEnv(root), {
     VITE_AUTH_ENABLED: "false",
+    DATABASE_URL: "postgres://x",
   });
 });
 
-test("drops non-VITE keys, non-string values and malformed documents", () => {
-  assert.deepEqual(parseAppEnv('{"DATABASE_URL":"postgres://x","VITE_N":1,"VITE_OK":"y"}'), {
-    VITE_OK: "y",
-  });
-  assert.deepEqual(parseAppEnv("not json"), {});
-  assert.deepEqual(parseAppEnv('["VITE_AUTH_ENABLED"]'), {});
-  assert.deepEqual(parseAppEnv("null"), {});
+test("this app's tracked env template does not switch sign-in off", () => {
+  // `VITE_AUTH_ENABLED=false` is the documented off-switch and the only one.
+  // The template ships it commented out, so a fresh install has sign-in on.
+  assert.equal(readDotEnv(projectRoot()).VITE_AUTH_ENABLED, undefined);
+  const template = parseDotEnv(readFileSync(join(projectRoot(), ".env.example"), "utf8"));
+  assert.equal(template.VITE_AUTH_ENABLED, undefined);
 });
 
-test("a missing app-env.json is a clean no-op", () => {
-  assert.deepEqual(readAppEnv(makeWorkspace()), {});
-});
-
-test("reads the app env from a workspace", () => {
-  const root = makeWorkspace('{"VITE_AUTH_ENABLED":"false"}');
-  assert.deepEqual(readAppEnv(root), { VITE_AUTH_ENABLED: "false" });
-});
-
-test("an explicit process-env override wins over the file", () => {
-  const merged = mergeAppEnv(
-    { VITE_AUTH_ENABLED: "false" },
-    { VITE_AUTH_ENABLED: "true", PATH: "/usr/bin" },
-  );
-  assert.equal(merged.VITE_AUTH_ENABLED, "true");
-  assert.equal(merged.PATH, "/usr/bin");
-});
-
-test("this app does not ship VITE_AUTH_ENABLED=false", () => {
-  assert.deepEqual(readAppEnv(projectRoot()), {});
-});
-
-test("vite loadEnv resolves the wrapped value", () => {
-  // What `import.meta.env.VITE_AUTH_ENABLED` becomes: loadEnv prefix-matches
-  // process.env, so the wrapper's merge has to land before Vite starts.
-  // Do not `import { loadEnv } from "vite"` here — Vite 8 loads rolldown
-  // native bindings that SIGSEGV the test worker under qemu-user.
-  const root = makeWorkspace('{"VITE_AUTH_ENABLED":"false"}');
-  const merged = mergeAppEnv(readAppEnv(root), { PATH: "/usr/bin" });
-  assert.equal(merged.VITE_AUTH_ENABLED, "false");
-});
-
-test("the wrapped command reports its database and runs with the app env applied", async () => {
+test("the wrapped command reports its database and inherits the workspace .env", async () => {
   const { stdout } = await execFileAsync(process.execPath, [
     WRAPPER,
     process.execPath,
     "-e",
     PRINT_FLAG,
   ]);
-  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), "undefined");
+  // The wrapper merges `.env` under `process.env`, so an explicit override in
+  // the caller's environment wins over the file. Nothing in this checkout sets
+  // the flag, so a run reaches the child without one.
+  const expected =
+    process.env.VITE_AUTH_ENABLED ?? readDotEnv(projectRoot()).VITE_AUTH_ENABLED ?? "undefined";
+  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), expected);
 });
 
 test("the wrapper reports its database and the command sees an explicit override", async () => {

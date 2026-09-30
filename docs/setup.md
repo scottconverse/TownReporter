@@ -531,10 +531,10 @@ BETTER_AUTH_URL=http://localhost:8080
 BETTER_AUTH_SECRET=generate-a-long-random-string
 ```
 
-- Self-host default: email + password on `/login` (`src/lib/auth/email-password.ts`).
+- Email + password on `/login` is the only way in (`src/lib/auth/email-password.ts`). There is no Google, X or broker sign-in to configure.
 - `BETTER_AUTH_SECRET` should be a long random string in any hosted environment. Locally, a process-stable fallback exists so `npm run dev` still signs in.
 - `BETTER_AUTH_URL` should be the public origin people actually type (scheme + host, no path). Wrong origin = cookies that never stick.
-- Grok Google / X buttons only render on `*.grok.me` / `*.grok-sandbox.com`, or if you set `VITE_GROK_OAUTH=true` **and** the `GROK_AUTH_*` broker vars. Ordinary self-hosters can ignore those.
+- The session cookie is `__Host-tr-auth.session_token`. **Updating across 0.6.83 signs every editor out once** — the cookie was renamed, so the browser stops sending the old one and the visitor simply lands on `/login`.
 - `VITE_AUTH_ENABLED=false` makes the desk unsigned-in. **Do not use on a public host.**
 
 ### A second editor
@@ -804,7 +804,7 @@ TownReporter/
 ├── src/lib/paper.ts           # city, masthead, seed sources
 ├── src/lib/news/              # ingest, PrimeGov, YouTube, Dark Desk, draft
 ├── src/lib/news/ai.ts         # provider resolution + budgets
-├── src/lib/auth/              # email/password + optional Grok OAuth
+├── src/lib/auth/              # email/password sign-in + session
 ├── src/routes/                # paper + desk pages
 ├── migrations/                # Postgres / PGLite schema
 ├── docs/                      # this manual, editor manual, landing

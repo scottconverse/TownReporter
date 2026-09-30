@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import {
-  authEnabledFromEnvValue,
-  authInvariantWarnings,
-  buildAuthEnabled,
-  compareAuthInvariant,
-  probeDevAuthEnabled,
+  judgeSignInForm,
+  probeSignIn,
+  probeSignInPage,
+  readSignInForm,
+  signInWarnings,
 } from "./check-auth-invariant.mjs";
 import { projectRoot } from "./with-app-env.mjs";
 
@@ -33,91 +33,142 @@ const SKIP_SYMLINK = symlinkSupported()
   ? undefined
   : { skip: "symlinks not permitted on this platform (Windows Developer Mode is off)" };
 
+/** The facts a page with a rendered sign-in form shows. */
+const FORM = { emailFields: 1, passwordFields: 1, submitLabel: "Create editor account", opening: false };
 
 /**
- * The JSON body `/__app-env` would serve. Do not start a real Vite server —
- * `import { createServer } from "vite"` loads rolldown native bindings that
- * SIGSEGV the test worker under qemu-user (amd64 image builds).
+ * A page object shaped like the one Playwright hands back, so the reader and
+ * the probe are testable without launching Chromium (`import { chromium } from
+ * "playwright"` is deliberately not loaded by this test file's import graph).
  */
-function appEnvFetch(env) {
-  return async () => ({
-    ok: true,
-    text: async () => JSON.stringify(env),
+function fakePage({ emailFields = 0, passwordFields = 0, submitLabel = "", body = "", status = 200 } = {}) {
+  const field = (count, text = "") => ({
+    count: async () => count,
+    first: () => ({ innerText: async () => text, waitFor: async () => {} }),
+    innerText: async () => text,
+    waitFor: async () => {},
   });
+  const page = {
+    gotoUrl: null,
+    locator(selector) {
+      if (selector === 'input[type="email"]') return field(emailFields);
+      if (selector === 'input[type="password"]') return field(passwordFields);
+      if (selector === 'button[type="submit"]') return field(submitLabel ? 1 : 0, submitLabel);
+      if (selector === "body") return field(1, body);
+      throw new Error(`unexpected selector ${selector}`);
+    },
+    async goto(href) {
+      page.gotoUrl = href;
+      return { status: () => status };
+    },
+  };
+  return page;
 }
 
-test("the flag predicate matches src/lib/auth", () => {
-  assert.equal(authEnabledFromEnvValue("false"), false);
-  assert.equal(authEnabledFromEnvValue("true"), true);
-  assert.equal(authEnabledFromEnvValue(undefined), true);
+test("a rendered form is agreement, and names what it saw", () => {
+  const result = judgeSignInForm(FORM);
+  assert.equal(result.status, "ok");
+  assert.match(result.message, /sign-in renders/);
+  assert.match(result.message, /email fields 1, password fields 1/);
+  assert.match(result.message, /Create editor account/);
 });
 
-test("reads the value a live dev server resolved", async () => {
-  assert.equal(
-    await probeDevAuthEnabled("http://127.0.0.1:8080", appEnvFetch({ VITE_AUTH_ENABLED: "false" })),
-    false,
-  );
+test("the sign-in branch's submit label is accepted too", () => {
+  assert.equal(judgeSignInForm({ ...FORM, submitLabel: "Sign in with email" }).status, "ok");
 });
 
-test("a server started without the flag reads as sign-in on", async () => {
-  assert.equal(await probeDevAuthEnabled("http://127.0.0.1:8080", appEnvFetch({})), true);
+test("a form with no password field is missing, not ok", () => {
+  const result = judgeSignInForm({ ...FORM, passwordFields: 0 });
+  assert.equal(result.status, "missing");
+  assert.match(result.message, /no usable sign-in form/);
 });
 
-test("agreement passes", () => {
-  assert.equal(
-    compareAuthInvariant({ devAuthEnabled: false, buildAuthEnabled: false }).status,
-    "ok",
-  );
+test("a submit button that is not the sign-in action is missing", () => {
+  const result = judgeSignInForm({ ...FORM, submitLabel: "Subscribe" });
+  assert.equal(result.status, "missing");
+  assert.match(result.message, /submit "Subscribe"/);
 });
 
-test("divergence fails in either direction", () => {
-  const devOn = compareAuthInvariant({ devAuthEnabled: true, buildAuthEnabled: false });
-  assert.equal(devOn.status, "diverged");
-  assert.match(devOn.message, /dev server has sign-in on but the next build has it off/);
-  assert.equal(
-    compareAuthInvariant({ devAuthEnabled: false, buildAuthEnabled: true }).status,
-    "diverged",
-  );
+test("a page stuck on Opening… names the real cause", () => {
+  const result = judgeSignInForm({
+    emailFields: 0,
+    passwordFields: 0,
+    submitLabel: "",
+    opening: true,
+  });
+  assert.equal(result.status, "missing");
+  assert.match(result.message, /stuck on "Opening…"/);
+  assert.match(result.message, /did not\s+hydrate/);
 });
 
-test("an unobservable dev server is indeterminate, not agreement", () => {
-  assert.equal(
-    compareAuthInvariant({ devAuthEnabled: null, buildAuthEnabled: false }).status,
-    "indeterminate",
-  );
+test("readSignInForm reports the fields, the submit label and the placeholder", async () => {
+  const facts = await readSignInForm(fakePage({ ...FORM, body: "Editor desk\nOpening…" }));
+  assert.deepEqual(facts, { ...FORM, opening: true });
+  assert.deepEqual(await readSignInForm(fakePage()), {
+    emailFields: 0,
+    passwordFields: 0,
+    submitLabel: "",
+    opening: false,
+  });
 });
 
-test("a dev server that cannot be reached probes as null", async () => {
-  const unreachable = () => Promise.reject(new Error("ECONNREFUSED"));
-  assert.equal(await probeDevAuthEnabled("http://127.0.0.1:1", unreachable), null);
+test("the probe loads /login on the given server and judges it", async () => {
+  const page = fakePage(FORM);
+  const result = await probeSignInPage(page, "http://127.0.0.1:8099");
+  assert.equal(result.status, "ok");
+  assert.equal(page.gotoUrl, "http://127.0.0.1:8099/login");
 });
 
-test("a server without the endpoint probes as null, not as agreement", async () => {
-  const notFound = async () => ({ ok: false, text: async () => "Not Found" });
-  assert.equal(await probeDevAuthEnabled("http://127.0.0.1:8081", notFound), null);
-  const html = async () => ({ ok: true, text: async () => "<!doctype html>" });
-  assert.equal(await probeDevAuthEnabled("http://127.0.0.1:8081", html), null);
+test("a server that does not answer 200 is indeterminate, not a verdict", async () => {
+  const result = await probeSignInPage(fakePage({ ...FORM, status: 500 }), "http://127.0.0.1:8099");
+  assert.equal(result.status, "indeterminate");
+  assert.match(result.message, /answered 500 rather than 200/);
 });
 
-test("only a divergence warns the smoke verdict", () => {
-  const diverged = compareAuthInvariant({ devAuthEnabled: true, buildAuthEnabled: false });
-  assert.deepEqual(authInvariantWarnings(diverged), [diverged.message]);
-  for (const result of [
-    compareAuthInvariant({ devAuthEnabled: false, buildAuthEnabled: false }),
-    compareAuthInvariant({ devAuthEnabled: null, buildAuthEnabled: false }),
-  ]) {
-    assert.deepEqual(authInvariantWarnings(result), []);
-  }
+test("an unreachable server is indeterminate, not a failure", async () => {
+  const page = fakePage(FORM);
+  page.goto = async () => {
+    throw new Error("ECONNREFUSED");
+  };
+  const result = await probeSignInPage(page, "http://127.0.0.1:1");
+  assert.equal(result.status, "indeterminate");
+  assert.match(result.message, /could not load http:\/\/127\.0\.0\.1:1\/login/);
 });
 
-test("the build side resolves this app's auth-on env", () => {
-  assert.equal(buildAuthEnabled(projectRoot(), {}), true);
-  assert.equal(buildAuthEnabled(projectRoot(), { VITE_AUTH_ENABLED: "false" }), false);
+test("a browser that will not launch is indeterminate, and is closed when it does", async () => {
+  const failed = await probeSignIn("http://127.0.0.1:8099", {
+    launch: async () => {
+      throw new Error("Executable doesn't exist");
+    },
+  });
+  assert.equal(failed.status, "indeterminate");
+  assert.match(failed.message, /could not launch Chromium/);
+
+  let closed = false;
+  const ok = await probeSignIn("http://127.0.0.1:8099", {
+    launch: async () => ({
+      newPage: async () => fakePage(FORM),
+      close: async () => {
+        closed = true;
+      },
+    }),
+  });
+  assert.equal(ok.status, "ok");
+  assert.ok(closed, "the browser this probe opened must be closed again");
+});
+
+test("only a missing form warns the smoke verdict", () => {
+  const missing = judgeSignInForm({ ...FORM, emailFields: 0 });
+  assert.deepEqual(signInWarnings(missing), [missing.message]);
+  assert.deepEqual(signInWarnings(judgeSignInForm(FORM)), []);
+  assert.deepEqual(signInWarnings({ status: "indeterminate", message: "no server" }), []);
 });
 
 test("the CLI reports rather than silently passing when run via a symlink", SKIP_SYMLINK, async () => {
   // A check whose exit code is the whole signal must never no-op to 0 because
-  // process.argv[1] came in through a symlinked path.
+  // process.argv[1] came in through a symlinked path. A dead port is the
+  // cheapest indeterminate: the CLI launches a browser before it fails to
+  // load the page, so this stays exit 2 whether or not Chromium is installed.
   const link = join(mkdtempSync(join(tmpdir(), "auth-invariant-link-")), "scripts");
   symlinkSync(join(projectRoot(), "scripts"), link);
   const error = await promisify(execFile)(process.execPath, [
@@ -126,5 +177,5 @@ test("the CLI reports rather than silently passing when run via a symlink", SKIP
     "http://127.0.0.1:1",
   ]).catch((err) => err);
   assert.equal(error.code, 2);
-  assert.match(error.stderr, /could not read the dev server's resolved VITE_AUTH_ENABLED/);
+  assert.match(error.stderr, /\[auth-invariant\]/);
 });

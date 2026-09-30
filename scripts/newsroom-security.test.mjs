@@ -875,30 +875,13 @@ test("at least one reader-facing doc discloses the desk's third-party search cha
   );
 });
 
-/**
- * DOC-006 (2026-08-29 documentation audit): the repo root ships a second
- * product identity -- AGENTS.md opens "You are Grok Build... App Builder
- * Workspace" and AGENTS.project.md is a personal sandbox handoff runbook,
- * both unscoped, so a GitHub visitor who opens either meets an unrelated
- * product. Both files now carry a scope note saying they are build-tooling,
- * not TownReporter documentation. This guards against that note being lost
- * on a future edit to either file.
- */
-test("AGENTS.md and AGENTS.project.md carry a scope note disclaiming product docs", () => {
-  const offenders = [];
-  for (const rel of ["AGENTS.md", "AGENTS.project.md"]) {
-    const text = readFileSync(join(ROOT, rel), "utf8");
-    if (!/not\b[^.]{0,60}TownReporter[^.]{0,40}(documentation|product)/i.test(text)) {
-      offenders.push(rel);
-    }
-  }
-  assert.deepEqual(
-    offenders,
-    [],
-    `these files are missing the scope note that keeps a GitHub reader from mistaking them for TownReporter's own docs: ${offenders.join(", ")}`,
-  );
-});
-
+/*
+  DOC-006 (2026-08-29 documentation audit) guarded the scope note that kept
+  AGENTS.md and AGENTS.project.md from reading as TownReporter's own docs. Both
+  files were scaffold material and have since been deleted outright, so the
+  guard's subject is gone: `scripts/no-grok-scaffold.test.mjs` now fails the
+  build if either one comes back.
+*/
 
 test("public sections return only reader navigation fields, never editorial guidance or sources", () => {
   const source = stripComments(readFileSync(join(ROOT, "src/lib/news/sections.ts"), "utf8"));
