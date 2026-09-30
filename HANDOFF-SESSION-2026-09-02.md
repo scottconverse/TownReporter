@@ -1,3 +1,5 @@
+> **Historical record (superseded). Current status: [TODO.md](TODO.md).**
+
 # TownReporter — full-context handoff for a new session (2026-09-02)
 
 ## STATE AS OF 21:40 2026-09-02 (read this first)

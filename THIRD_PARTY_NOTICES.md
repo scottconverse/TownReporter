@@ -34,3 +34,26 @@ contributors. TownReporter does not import or depend on dsh-xai.
 TownReporter uses `@earendil-works/pi-ai` version `0.82.1` for provider-owned
 xAI OAuth login, credential refresh, and inference. pi-ai is MIT licensed,
 copyright Mario Zechner. Source: <https://github.com/badlogic/pi-mono>.
+
+## Downloaded at install time (not in the source archive)
+
+The Windows installation package provisions three runtimes that are not part
+of this source tree and are not covered by the repository's MIT license. Each
+is distributed under its own license, and the installer ships no copy of the
+license text, so the reference here is the project's own license:
+
+- **Node.js 22.23.2** — the private runtime the installer provisions, recorded
+  in `installer/dependencies.json` against the official nodejs.org ZIP. MIT
+  License, with the bundled third-party notices in Node's own `LICENSE` file.
+- **PostgreSQL 17.11** — the EnterpriseDB Windows x64 binaries recorded in the
+  same file. The PostgreSQL License (a permissive BSD/MIT-style license); the
+  EnterpriseDB ZIP carries its own copy.
+- **Chromium** — installed by Playwright (`npx playwright install chromium`,
+  `installer/Install.ps1`). BSD 3-Clause for Chromium's own code, plus the
+  third-party licenses Chromium bundles.
+
+npm dependencies are a different case: `npm ci` installs them from the registry
+into `node_modules`, and each package carries its own license file there (for
+example `node_modules/react/LICENSE`) and its own `license` field in
+`package.json`. Those licenses travel with the installed tree and are not
+restated in this file.

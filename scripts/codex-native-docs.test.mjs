@@ -7,10 +7,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LIVE_DOCS = [
   "README.md",
+  "SELF-HOSTING.md",
   "docs/editor.md",
   "docs/manual.md",
   "docs/setup.md",
   "docs/index.html",
+  ".env.example",
+  "SECURITY.md",
+  "docs/windows-install.md",
 ];
 
 test("live documentation does not claim TownReporter Codex calls inherit full operator access", () => {
@@ -34,6 +38,26 @@ test("live documentation does not claim TownReporter Codex calls inherit full op
     offenders,
     [],
     `these live docs describe the removed Codex restriction:\n  ${offenders.join("\n  ")}`,
+  );
+});
+
+test("no live doc names the unrestricted Codex access mode", () => {
+  /*
+    Independent of the wording around it: `danger-full-access` is the Codex
+    CLI flag for the mode TownReporter deliberately does not use
+    (src/lib/news/ai-codex.server.ts passes `--sandbox read-only` instead).
+    A sentence that mentions the flag at all -- to say it is NOT passed, to
+    quote an old behaviour, or inside a longer example -- is a sentence a
+    reader can take for a description of this product. The wording checks
+    above can be satisfied by a rephrasing; this one cannot.
+  */
+  const offenders = LIVE_DOCS.filter((rel) =>
+    readFileSync(join(ROOT, rel), "utf8").includes("danger-full-access"),
+  );
+  assert.deepEqual(
+    offenders,
+    [],
+    `these live docs name the removed unrestricted Codex access mode:\n  ${offenders.join("\n  ")}`,
   );
 });
 

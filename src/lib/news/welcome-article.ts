@@ -20,7 +20,7 @@ function welcomeBody(cfg: PaperConfig): string {
   const { name, city, state, tagline } = cfg;
   return `${name} is a small non-profit newspaper for ${city}, ${state}. It is not a newsletter mill and it is not an autonomous news robot.
 
-The public site is the paper: headlines, recaps, corrections, and a permanent record of what we chose to print. Behind it sits a desk. An editor-in-chief signs in, points its writing model at official sources, reviews every draft, and hits publish. Nothing on this masthead goes live because a model felt confident.
+The public site is the paper: headlines, recaps, corrections, and a permanent record of what we chose to print. Behind it sits a desk. An editor-in-chief signs in, points its writing model at official sources, reviews every draft, and hits publish. Nothing reported goes live because a model felt confident. The one exception is the routine notices the owner may separately activate -- approved library, recreation, community-event, registration, waste-collection and public-meeting notices, printed from fixed templates and approved sources.
 
 What we cover
 The public record for ${city} -- council and public-body meetings, budgets, planning and land use, and the local institutions readers depend on. Public meetings, packets, and notices -- the documents most people never open.
@@ -42,7 +42,7 @@ This first item is the paper introducing itself. The next items will be reported
 export async function writeWelcomeArticle(newsroomId: number, cfg: PaperConfig): Promise<void> {
   const sql = await getSql();
   const headline = `A non-profit paper for ${cfg.city}, ${cfg.state}, edited by a human`;
-  const dek = `${cfg.name} watches official records, drafts under wire-service rules, and publishes only what an editor signs.`;
+  const dek = `${cfg.name} watches official records, drafts under wire-service rules, and prints a reported story only when an editor signs it; owner-activated routine notices are the one exception.`;
   const body = welcomeBody(cfg);
 
   const updated = await sql`
