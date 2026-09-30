@@ -126,7 +126,7 @@ describe("capture files the meeting lead", () => {
       runSection5: async () => ({
         aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
         items: [{ item: "9", title: "Second Reading", startSeconds: 18450 }],
-        votes: [{ item: "9", established: true, motion: "Approve", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org", provenance: [], disagreements: [] }],
+        votes: [{ item: "9", established: true, motion: "Approve", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "structured-record", provenance: [], disagreements: [] }],
         citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, endSeconds: 18454, excerpt: "the motion carries", captionSha256: caption.sha256, storagePath: caption.path }],
       }),
     };

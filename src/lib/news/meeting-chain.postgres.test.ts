@@ -63,7 +63,7 @@ function section5For(caption: ReturnType<typeof capturedCaption>) {
     };
     const vote = {
       item: "4", established: true, motion: "Approve the housing plan", mover: "A", seconder: "B",
-      tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" as const,
+      tally: "6-1", result: "Passed", source: "structured-record" as const,
       provenance: [], disagreements: [],
     };
     await persistSection5(sectionSql, {
@@ -76,6 +76,7 @@ function section5For(caption: ReturnType<typeof capturedCaption>) {
     });
     return {
       aligned: true, alignmentReason: null, chunkCount: 1, voteCount: 1, unalignedLead: null,
+      structuredVoteReason: "test fixture: the vote record is supplied, not read",
       items: [{ item: "4", title: "Housing plan", startSeconds: chunk.startSeconds, excerpt: caption.text }],
       votes: [vote],
       citations: segments.map((segment) => ({

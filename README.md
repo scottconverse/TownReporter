@@ -162,7 +162,9 @@ No code edit or rebuild is required. The owner fills out **Set up the paper** af
 
 The same form stays available under **Server → Paper identity** (**Paper setup** panel). Saving it changes the public masthead, city copy, local clock, contact links, watch list and meeting-video discovery. A blank optional field means none; it never borrows another town's value. Before setup, the public site shows a neutral “not yet set up” page and no articles.
 
-If the city uses PrimeGov, put its public portal URL in the watch list. The ingest already speaks that API.
+If the city uses PrimeGov, put its public portal URL in the watch list. The ingest already speaks that API. If it publishes a motion-by-motion vote record of its own, put that site in the **council-votes** field: section 5 reads structured votes there, and blank means it reads none rather than another city's.
+
+Two things a city swap does not carry over, because they are written for the shipped city's own pages: the notice parsers that read Longmont's waste-collection, library and sports-registration pages (they fire only on those URLs, so another city's sources produce no such roundups until there are equivalent parsers), and Colorado's business-registry search, which is offered only when the configured state is Colorado.
 
 Details and the honest limits of a city swap are in [docs/setup.md](docs/setup.md#point-it-at-another-city).
 

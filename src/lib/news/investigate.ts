@@ -27,6 +27,7 @@ import {
   type ExtractedRef,
   type StructureSnapshot,
 } from "./extract.ts";
+import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import { sha256, sha256Bytes } from "./url-guard.ts";
 import {
   classifyFetchedPage,
@@ -862,8 +863,17 @@ export function clampConfidenceToLabel(kind: string, raw: unknown): number | und
   return Math.max(0, Math.min(ceiling, raw));
 }
 
-export function heuristicPlan(text: string, tried: Set<string>): HopPlan {
-  const h = heuristicFromText(text, tried, SEARCHES_PER_HOP, FETCHES_PER_HOP);
+/**
+ * The research scope of one newsroom's paper: its configured city and state,
+ * and the host of its own official site (./research-scope.ts). No built-in
+ * town -- a paper that has answered nothing gets queries with nothing in them.
+ */
+async function scopeForNewsroom(newsroomId: number): Promise<ResearchScope> {
+  return researchScopeOf(await getPaperConfig(newsroomId));
+}
+
+export function heuristicPlan(text: string, tried: Set<string>, scope: ResearchScope): HopPlan {
+  const h = heuristicFromText(text, tried, scope, SEARCHES_PER_HOP, FETCHES_PER_HOP);
   const plan = emptyPlan();
   plan.searches = h.searches;
   plan.fetch_urls = sanitizePublicUrls(h.fetch_urls);
@@ -1071,7 +1081,16 @@ export async function grokPlanner(
   }
   if (!ai?.ok) {
     const why = ai && "error" in ai ? ai.error : "no response";
-    return { ...heuristicPlan(pack, new Set()), planner_error: why };
+    /*
+      The keyword fallback is scoped to the place this planner was handed --
+      the paper's own configured city and state. It carries no official host,
+      because this function is not given the newsroom's source list; the
+      fallback then writes no `site:` operator rather than the shipped paper's.
+    */
+    const scope: ResearchScope = place
+      ? { city: place.city ?? "", state: place.state ?? "", officialHost: null }
+      : { city: "", state: "", officialHost: null };
+    return { ...heuristicPlan(pack, new Set(), scope), planner_error: why };
   }
   const parsed = parsePlan(parseJsonBlock<unknown>(ai.text));
   if (!parsed.searches.length && !parsed.fetch_urls.length) {
@@ -1185,6 +1204,7 @@ async function addFrontierFromRefs(
   refs: ExtractedRef[],
   evidence: string,
 ) {
+  const scope = await scopeForNewsroom(await investigationNewsroom(investigationId));
   for (const ref of refs.slice(0, 30)) {
     await persistDiscovery(userId, investigationId, {
       kind: ref.kind,
@@ -1192,7 +1212,7 @@ async function addFrontierFromRefs(
       why: "Referenced in evidence",
       evidence: evidence.slice(0, 400),
       priority: ref.kind === "company" || ref.kind === "url" ? 9 : 6,
-      query: queriesForRef(ref)[0],
+      query: queriesForRef(ref, scope)[0],
     });
   }
 }
@@ -1327,7 +1347,7 @@ export async function persistDiscovery(
     return;
   }
 
-  const budget = strategiesForFrontier(item.kind, label);
+  const budget = strategiesForFrontier(item.kind, label, await scopeForNewsroom(newsroomId));
   const next = [...pendingQueries, ...(item.query ? [item.query] : []), ...budget.map((s) => s.query)]
     .filter((q, i, arr) => q && arr.indexOf(q) === i)
     .join(" | ")
@@ -1435,7 +1455,8 @@ async function recordStrategyTried(
     limit 1
   `;
   const row = rows[0];
-  if (!row) return { remaining: remainingStrategies("unknown", label, []), exhausted: false };
+  const scope = await scopeForNewsroom(await investigationNewsroom(investigationId));
+  if (!row) return { remaining: remainingStrategies("unknown", label, [], scope), exhausted: false };
   const tried = parseJsonArray(row.strategies_tried);
   if (strategyKey && !tried.includes(strategyKey) && strategyKey !== "adhoc")
     tried.push(strategyKey);
@@ -1446,6 +1467,7 @@ async function recordStrategyTried(
     row.kind,
     label,
     tried.length ? tried : budget.length ? tried : [],
+    scope,
   );
   const zeroCount = (row.search_zero_count ?? 0) + (zero ? 1 : 0);
   await sql`
@@ -2281,6 +2303,19 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   }
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
+  /*
+    Every query this loop writes is scoped to this newsroom's own configuration
+    (./research-scope.ts): the place it reads (`opts.place` from `readDarkPlace`,
+    or the paper's settings) and the host of its own official site. There is no
+    built-in town: the strategies used to default to the shipped paper's city
+    and one of them named the shipped paper's own government site, so another
+    city's desk searched for the town that paper happens to be built for.
+  */
+  const scope: ResearchScope = {
+    city: place.city ?? "",
+    state: place.state ?? "",
+    officialHost: officialDomainList[0] ?? null,
+  };
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? ((url: string) => defaultFetch(url, {
     provider: opts.choice,
@@ -2444,7 +2479,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         opts.onUsage,
         opts.reasoningEffort,
       );
-      const heur = heuristicPlan(graph, tried);
+      const heur = heuristicPlan(graph, tried, scope);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;
       if (!plan.searches.length && heur.searches.length) plan.searches = heur.searches;
@@ -2516,7 +2551,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       if (planned.length + fill.length >= SEARCHES_PER_HOP) break;
       if (f.kind === "url") continue;
       const triedStrats = parseJsonArray(f.strategies_tried);
-      for (const s of remainingStrategies(f.kind, f.label, triedStrats)) {
+      for (const s of remainingStrategies(f.kind, f.label, triedStrats, scope)) {
         if (planned.length + fill.length >= SEARCHES_PER_HOP) break;
         const q = s.query;
         if (
@@ -2586,10 +2621,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       const matchedFrontier = openFrontier.find(
         (f) =>
           q.toLowerCase().includes(f.label.toLowerCase().slice(0, 24)) ||
-          strategyKeyForQuery(f.kind, f.label, q) !== "adhoc",
+          strategyKeyForQuery(f.kind, f.label, q, scope) !== "adhoc",
       );
       const strategy = matchedFrontier
-        ? strategyKeyForQuery(matchedFrontier.kind, matchedFrontier.label, q)
+        ? strategyKeyForQuery(matchedFrontier.kind, matchedFrontier.label, q, scope)
         : "adhoc";
       /*
         Which tier answered: the paper's own official record, local press, or
@@ -2677,7 +2712,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       for (const f of openFrontier) {
         if (
           q.toLowerCase().includes(f.label.toLowerCase().slice(0, 24)) ||
-          strategyKeyForQuery(f.kind, f.label, q) !== "adhoc"
+          strategyKeyForQuery(f.kind, f.label, q, scope) !== "adhoc"
         ) {
           await sql`
             update frontier_items set status = 'investigating'
@@ -2695,7 +2730,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
               opts.userId,
               opts.investigationId,
               f.label,
-              strategyKeyForQuery(f.kind, f.label, q),
+              strategyKeyForQuery(f.kind, f.label, q, scope),
               q,
               true,
             );
@@ -2713,7 +2748,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
               opts.userId,
               opts.investigationId,
               f.label,
-              strategyKeyForQuery(f.kind, f.label, q),
+              strategyKeyForQuery(f.kind, f.label, q, scope),
               q,
               false,
             );

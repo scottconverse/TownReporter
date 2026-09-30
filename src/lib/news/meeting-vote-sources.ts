@@ -1,8 +1,6 @@
 import { fetchPublicHttp } from "./fetch-url.ts";
 import type { VoteRecord, VoteSource } from "./meeting-story-section5.ts";
 
-export const STRUCTURED_VOTE_ORIGIN = "https://longmontcitycouncil.org";
-
 export type VoteSourceAvailability = {
   structuredRecord: string;
   minutes: string;
@@ -10,20 +8,36 @@ export type VoteSourceAvailability = {
   transcript: string;
 };
 
+/** `example.org` from `https://example.org/meetings/`. The origin itself when it does not parse. */
+export function voteSourceHost(origin: string): string {
+  try {
+    return new URL(origin).hostname || origin;
+  } catch {
+    return origin;
+  }
+}
+
 /**
  * Explicit per-source availability. A source that is not available for a given
- * meeting is reported by name rather than silently omitted.
+ * meeting is reported by name rather than silently omitted -- including the
+ * case where the paper has configured no structured vote source at all, which
+ * is why the lookup never happened (`structuredSource` is the configured
+ * source's host, or null).
  */
 export function voteSourceAvailability(input: {
+  /** The structured vote source this paper configured, by host. Null when it has none. */
+  structuredSource: string | null;
   structuredRecordFound: boolean;
   minutesFound: boolean;
   packetFound: boolean;
   transcriptFound: boolean;
 }): VoteSourceAvailability {
   return {
-    structuredRecord: input.structuredRecordFound
-      ? "available: longmontcitycouncil.org structured record"
-      : "not available: no longmontcitycouncil.org record for this meeting",
+    structuredRecord: !input.structuredSource
+      ? "not available: this paper has no structured vote source configured"
+      : input.structuredRecordFound
+        ? `available: ${input.structuredSource} structured record`
+        : `not available: no ${input.structuredSource} record for this meeting`,
     minutes: input.minutesFound
       ? "available: official minutes"
       : "not available: no official minutes document for this meeting",
@@ -37,9 +51,12 @@ export function voteSourceAvailability(input: {
 }
 
 /**
- * Parse a longmontcitycouncil.org meeting page into structured vote records.
- * The page is server-rendered HTML with one block per motion carrying the item
- * number, motion text, mover, seconder, result, and tally.
+ * Parse a council-votes meeting page into structured vote records. The page is
+ * server-rendered HTML with one block per motion carrying the item number,
+ * motion text, mover, seconder, result, and tally.
+ *
+ * The parser reads the page's shape, not its host: whichever paper's structured
+ * source points here supplies the URL (./structured-vote-source.ts).
  */
 export type ParsedVoteRecord = VoteRecord & { item: string };
 
@@ -80,16 +97,17 @@ export function parseStructuredVotePage(html: string): ParsedVoteRecord[] {
       seconder,
       tally,
       result: result || "not established",
-      source: "longmontcitycouncil.org" as VoteSource,
+      source: "structured-record" as VoteSource,
     });
   }
   return out;
 }
 
-function meetingUrl(date: string): string {
+/** The meeting page for a date, at the origin the paper's own setting names. */
+export function structuredVoteMeetingUrl(origin: string, date: string): string {
   const iso = date.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
-  if (!iso) return `${STRUCTURED_VOTE_ORIGIN}/meetings/`;
-  return `${STRUCTURED_VOTE_ORIGIN}/meetings/${iso[1]}-${iso[2]}-${iso[3]}/`;
+  if (!iso) return `${origin}/meetings/`;
+  return `${origin}/meetings/${iso[1]}-${iso[2]}-${iso[3]}/`;
 }
 
 export type StructuredVoteFetchResult = {
@@ -99,24 +117,45 @@ export type StructuredVoteFetchResult = {
   url: string;
 };
 
+/** No source configured: the honest result a caller records instead of a lookup. */
+export const NO_STRUCTURED_VOTE_SOURCE: StructuredVoteFetchResult = {
+  found: false,
+  reason: "no structured vote source configured for this paper",
+  records: [],
+  url: "",
+};
+
 /**
- * Fetch structured vote records for a meeting date. Returns an explicit reason
- * when the record does not exist (the site trails by roughly three weeks), never
- * an invented vote.
+ * Fetch structured vote records for a meeting date from the origin this paper
+ * configured. Returns an explicit reason when the record does not exist (a
+ * council site typically trails by weeks), never an invented vote.
+ *
+ * There is no built-in origin. The caller passes the one its newsroom's setting
+ * names, and a newsroom with none passes nothing at all
+ * (./structured-vote-source.ts).
  */
-export async function fetchStructuredVotesForDate(date: string): Promise<StructuredVoteFetchResult> {
-  const url = meetingUrl(date);
+export async function fetchStructuredVotesForDate(
+  date: string,
+  origin: string,
+): Promise<StructuredVoteFetchResult> {
+  const host = voteSourceHost(origin);
+  const url = structuredVoteMeetingUrl(origin, date);
   try {
     const res = await fetchPublicHttp(new URL(url));
     if (!res.ok) {
-      return { found: false, reason: `longmontcitycouncil.org returned HTTP ${res.status} for ${url}`, records: [], url };
+      return { found: false, reason: `${host} returned HTTP ${res.status} for ${url}`, records: [], url };
     }
     const records = parseStructuredVotePage(await res.text());
     if (!records.length) {
-      return { found: false, reason: `longmontcitycouncil.org page had no structured motion records: ${url}`, records: [], url };
+      return { found: false, reason: `${host} page had no structured motion records: ${url}`, records: [], url };
     }
     return { found: true, reason: "structured vote records found", records, url };
   } catch (error) {
-    return { found: false, reason: `longmontcitycouncil.org fetch failed: ${error instanceof Error ? error.message : String(error)}`, records: [], url };
+    return {
+      found: false,
+      reason: `${host} fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+      records: [],
+      url,
+    };
   }
 }

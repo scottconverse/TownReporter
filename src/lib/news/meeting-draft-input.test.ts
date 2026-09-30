@@ -16,7 +16,7 @@ const base: MeetingDraftMaterial = {
   items: [{ item: "9", title: "Second Reading", startSeconds: 18450, excerpt: "Mayor: the motion carries, six to one." }],
   votes: [{
     item: "9", established: true, motion: "Approve Ordinance O-2026-46", mover: "Matthew Popkin",
-    seconder: "Jake Marsing", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org",
+    seconder: "Jake Marsing", tally: "6-1", result: "Passed", source: "structured-record",
   }],
 };
 
@@ -37,8 +37,21 @@ describe("meeting draft input", () => {
   it("states a vote only as the structured record states it", () => {
     const block = meetingEvidenceBlock(base);
     assert.match(block, /tally 6-1/, "the record tally must be carried");
-    assert.match(block, /source: longmontcitycouncil.org/, "the vote source must be named");
+    assert.match(block, /source: structured vote record/, "the vote source must be named");
     assert.match(block, /moved by Matthew Popkin/);
+  });
+
+  it("names the source a row recorded before the kind rename, rather than dropping it", () => {
+    /*
+      Rows written before the vote-source rename hold a host. A reader of the
+      evidence block is owed what the row actually says: the label is added for
+      the kinds this version writes, and anything else passes through.
+    */
+    const block = meetingEvidenceBlock({
+      ...base,
+      votes: [{ ...base.votes[0]!, source: "longmontcitycouncil.org" }],
+    });
+    assert.match(block, /source: longmontcitycouncil\.org/);
   });
 
   it("permits a clearly recorded transcript vote while requiring its source to be labelled", () => {
@@ -54,7 +67,7 @@ describe("meeting draft input", () => {
     assert.match(block, /structured or official confirmation is still pending/);
     assert.doesNotMatch(block, /Do not state a vote, a tally, or a result/);
     assert.doesNotMatch(block, /tally 6-1/, "an unestablished vote must not be carried as a tally");
-    assert.doesNotMatch(block, /source: longmontcitycouncil\.org/, "and must not carry a source it lacks");
+    assert.doesNotMatch(block, /source: structured vote record/, "and must not carry a source it lacks");
   });
 
   it("formats the clock the way the editor reads it", () => {

@@ -34,7 +34,7 @@ describe("meeting lead", () => {
       establishedVotes: 1,
       citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, excerpt: "the motion carries", captionSha256: "abc123" }],
       artifactId: 4,
-      votes: [{ item: "9", established: true, motion: "Approve Ordinance O-2026-46", mover: "Matthew Popkin", seconder: "Jake Marsing", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" }],
+      votes: [{ item: "9", established: true, motion: "Approve Ordinance O-2026-46", mover: "Matthew Popkin", seconder: "Jake Marsing", tally: "6-1", result: "Passed", source: "structured-record" }],
     });
     assert.equal(result.leadId, 88);
     const write = calls.find((c) => /insert into leads/.test(c.text));

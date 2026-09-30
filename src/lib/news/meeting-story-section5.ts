@@ -141,7 +141,37 @@ export function alignMeeting(input: {
   return { aligned: true, reason: null, chunks: input.chunks };
 }
 
-export type VoteSource = "longmontcitycouncil.org" | "minutes" | "packet" | "transcript";
+/**
+ * Which KIND of record a vote came from, not which host it was read at.
+ *
+ * The structured record used to be the literal `"longmontcitycouncil.org"`, so
+ * the type said the paper's own council site was the only structured source
+ * there could be. The host is the paper's configuration now (see
+ * ./structured-vote-source.ts); what a caller switches on is the kind of
+ * record. Precedence, not provenance, is what this union carries.
+ */
+export type VoteSource = "structured-record" | "minutes" | "packet" | "transcript";
+
+/**
+ * How a source is named where a person reads it: the drafting input's evidence
+ * block and the ops panel. The structured record's host belongs to the paper,
+ * so this names the kind rather than a town's website.
+ *
+ * A value this switch does not know is passed through unchanged: rows written
+ * before this rename hold a host, and a stored row that says where a vote came
+ * from is not something to rewrite or hide.
+ */
+export function voteSourceLabel(source: string | null | undefined): string | null {
+  if (!source) return null;
+  switch (source) {
+    case "structured-record":
+      return "structured vote record";
+    case "minutes":
+      return "official minutes";
+    default:
+      return source;
+  }
+}
 
 export type VoteRecord = {
   motion: string;
@@ -165,7 +195,7 @@ export type StructuredVote = {
   disagreements: string[];
 };
 
-const SOURCE_ORDER: VoteSource[] = ["longmontcitycouncil.org", "minutes", "packet", "transcript"];
+const SOURCE_ORDER: VoteSource[] = ["structured-record", "minutes", "packet", "transcript"];
 
 /**
  * Structured vote extraction. Source precedence is the structured vote record,
@@ -191,7 +221,9 @@ export function extractStructuredVote(input: {
       const a = authoritative[i]!;
       const b = authoritative[j]!;
       if (a.tally !== b.tally || a.result !== b.result) {
-        disagreements.push(`${a.source} says ${a.result} ${a.tally}; ${b.source} says ${b.result} ${b.tally}`);
+        disagreements.push(
+          `${voteSourceLabel(a.source)} says ${a.result} ${a.tally}; ${voteSourceLabel(b.source)} says ${b.result} ${b.tally}`,
+        );
       }
     }
   }

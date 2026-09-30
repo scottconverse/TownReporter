@@ -512,13 +512,36 @@ export async function removeYouTubeApiKey(userId: string): Promise<YouTubeKeySta
 export type YouTubeKeyTest = { ok: boolean; message: string };
 
 /**
+ * The meeting channels this paper watches, in the order Paper setup lists them.
+ *
+ * Null, not an empty list, when the settings could not be read at all: "this
+ * paper watches no channel" and "we could not find out what this paper watches"
+ * are different answers and a caller has to be able to tell them apart. Neither
+ * one is another city's channel.
+ */
+async function configuredMeetingChannels(newsroomId: number): Promise<string[] | null> {
+  try {
+    const { getPaperConfig } = await import("./paper-settings.ts");
+    const config = await getPaperConfig(newsroomId);
+    return config.youtubeChannels.map((channel) => channel.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * One `channels.list` call, to find out whether Google will take this key.
  *
  * A key given here is tested in place and never stored, so an editor can find
  * out that a key works before saving it. The channel asked about is the first
- * one the desk actually watches, falling back to the handle TownReporter ships
- * with — a real channel is the only honest test, and it doubles as proof that
- * the desk can read the channel it cares about.
+ * one THIS paper watches — a real channel is the only honest test, and it
+ * doubles as proof that the desk can read the channel it cares about.
+ *
+ * There is no built-in channel. This used to fall back to the handle
+ * TownReporter ships with, so a paper set up for another city pressed Test and
+ * was told its key worked against Longmont's council channel — a green light
+ * for a channel that paper does not watch. A paper with no meeting channel
+ * configured now gets no lookup and a sentence naming what is missing.
  */
 export async function testYouTubeApiKey(
   userId: string,
@@ -532,13 +555,20 @@ export async function testYouTubeApiKey(
   if (!key) {
     return { ok: false, message: "Save a key, or type one, before testing." };
   }
-  let target = "https://www.youtube.com/@CityofLongmont";
-  try {
-    const { getPaperConfig } = await import("./paper-settings.ts");
-    const config = await getPaperConfig(me.newsroomId);
-    if (config.youtubeChannels.length) target = config.youtubeChannels[0]!;
-  } catch {
-    /* the shipped channel is a fine stand-in */
+  const channels = await configuredMeetingChannels(me.newsroomId);
+  if (channels === null) {
+    return {
+      ok: false,
+      message: "This paper's settings could not be read, so there is no channel to test against.",
+    };
+  }
+  const target = channels[0];
+  if (!target) {
+    return {
+      ok: false,
+      message:
+        "No meeting channel is configured for this paper. Add one in Paper setup, then test the key.",
+    };
   }
   // Counted like any other call, so the desk's meter stays honest about what a
   // Test button press costs.

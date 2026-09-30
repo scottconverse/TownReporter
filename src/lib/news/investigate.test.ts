@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { heuristicPlan } from "./extract.ts";
+import { PAPER, SEED_SOURCES } from "../paper.ts";
+import { researchScopeOf } from "./research-scope.ts";
+
+/*
+  The keyword heuristic writes queries scoped to a ResearchScope
+  (./research-scope.ts) instead of a built-in town. These cases describe the
+  SHIPPED paper, read through the same configuration production reads.
+*/
+const SHIPPED = researchScopeOf({ city: PAPER.city, state: PAPER.state, seedSources: SEED_SOURCES });
 import { assertHttpUrl } from "./fetch-url.ts";
 
 const TRAIL: Record<string, { text: string; hits?: { title: string; url: string; snippet: string }[] }> = {
@@ -74,7 +83,7 @@ describe("recursive discovery", () => {
     const tried = new Set<string>();
 
     for (let hop = 0; hop < 5; hop++) {
-      const plan = heuristicPlan(text, tried);
+      const plan = heuristicPlan(text, tried, SHIPPED);
       const queries = plan.searches.filter((q) => !tried.has(q)).slice(0, 3);
       assert.ok(queries.length > 0, `hop ${hop + 1} should search`);
       for (const q of queries) {

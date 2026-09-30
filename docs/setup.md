@@ -657,7 +657,9 @@ Set the paper name, tagline, city, state and IANA timezone. The save derives the
 reader-facing kicker and deck from those choices, changes the public clock and
 meeting-cadence math, and rewrites the seeded welcome article for the city.
 Optional council-votes and editor-contact fields may be left blank; blank means
-the corresponding public link or address is not shown.
+the corresponding public link or address is not shown, and a blank council-votes
+field also means section 5 reads no structured vote record for this paper — it
+does not read another city's.
 
 ### 2. Watch list
 

@@ -2,7 +2,12 @@ import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
 import { primeGovOriginForNewsroom } from "./primegov-source.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
-import { fetchStructuredVotesForDate } from "./meeting-vote-sources.ts";
+import {
+  fetchStructuredVotesForDate,
+  NO_STRUCTURED_VOTE_SOURCE,
+  type StructuredVoteFetchResult,
+} from "./meeting-vote-sources.ts";
+import { structuredVoteOriginForNewsroom } from "./structured-vote-source.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -20,6 +25,10 @@ export type Section5Deps = {
   packetItemsForMeeting?: typeof packetItemsForMeeting;
   /** Test seam: which portal this newsroom watches. See ./primegov-source.ts. */
   primeGovOrigin?: typeof primeGovOriginForNewsroom;
+  /** Test seam: which structured vote source this paper configured. See ./structured-vote-source.ts. */
+  structuredVoteOrigin?: typeof structuredVoteOriginForNewsroom;
+  /** Test seam: the structured vote read itself, so a test never reaches a real council site. */
+  structuredVotesForDate?: typeof fetchStructuredVotesForDate;
 };
 
 export type Section5Result = {
@@ -37,6 +46,14 @@ export type Section5Result = {
   */
   items: { item: string; title: string; startSeconds: number; excerpt: string }[];
   votes: StructuredVote[];
+  /*
+    Why the structured vote read ended the way it did -- including "this paper
+    has no structured vote source configured", which is the whole of what
+    happened in that case. Carried out rather than swallowed: a run that read no
+    vote record must be able to say whether the record was missing or the paper
+    never pointed at one.
+  */
+  structuredVoteReason: string;
 };
 
 /**
@@ -99,7 +116,28 @@ export async function runSection5ForArtifact(
   const chunks = chunkByAgendaItem({ segments, packetItems });
   const alignment = alignMeeting({ segments, chunks, packetItems });
 
-  const structured = await fetchStructuredVotesForDate(input.meetingDate ?? "").catch(() => ({ found: false, reason: "structured vote lookup failed", records: [], url: "" }));
+  /*
+    The structured vote source comes out of this paper's own settings, the same
+    way the PrimeGov portal comes out of its watch list. It used to be a
+    constant inside the fetch adapter (Longmont's council site), so every
+    paper's section 5 read Longmont's motions; with no structured source
+    configured there is no lookup at all, and the result says so.
+  */
+  const voteOrigin = await (deps.structuredVoteOrigin ?? structuredVoteOriginForNewsroom)(
+    sql,
+    input.newsroomId,
+  ).catch(() => null);
+  const structured: StructuredVoteFetchResult = voteOrigin
+    ? await (deps.structuredVotesForDate ?? fetchStructuredVotesForDate)(
+        input.meetingDate ?? "",
+        voteOrigin,
+      ).catch(() => ({
+        found: false,
+        reason: `structured vote lookup failed at ${voteOrigin}`,
+        records: [],
+        url: "",
+      }))
+    : NO_STRUCTURED_VOTE_SOURCE;
   // Structured records are keyed by ordinance/resolution id (O-2026-46), while
   // chunks are keyed by agenda item number (9). Attach a record to the chunk
   // whose transcript span actually mentions that identifier or motion text.
@@ -183,5 +221,6 @@ export async function runSection5ForArtifact(
         .join("\n"),
     })),
     votes,
+    structuredVoteReason: structured.reason,
   };
 }

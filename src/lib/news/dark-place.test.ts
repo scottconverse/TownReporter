@@ -63,6 +63,54 @@ it("runtime planner and synthesis use configured place; Reddit endpoint is newsr
   assert.doesNotMatch(dark, /const sub = TIP_SUBREDDIT/);
 });
 
+it("the desk's place is configuration only: a paper that named no city is not read as the shipped one", async () => {
+  const { darkPlaceFromConfig } = await import("./dark.ts");
+  /*
+    readDarkPlace used to add a second fallback on top of getPaperConfig
+    (`cfg?.city || "Longmont"`, `cfg?.state || "Colorado"`), so an install whose
+    configuration named no place was scoped to Longmont's. Put either fallback
+    back and this test fails.
+  */
+  const bare = darkPlaceFromConfig({ city: "", state: "" });
+  assert.equal(bare.city, "");
+  assert.equal(bare.state, "");
+  assert.doesNotMatch(JSON.stringify(bare), /longmont|colorado/i);
+  assert.deepEqual(darkPlaceFromConfig({ city: "  Riverbend  ", state: " Oregon " }), {
+    city: "Riverbend",
+    state: "Oregon",
+  });
+});
+
+it("a desk set up for another city reads its own place, and never the shipped paper's", async () => {
+  const { getSql } = await import("../db.ts");
+  const { ensurePaperSettingsSchema } = await import("./paper-settings.ts");
+  const { ensureDarkSchema, readDarkPlace } = await import("./dark.ts");
+  await ensureDarkSchema();
+  await ensurePaperSettingsSchema();
+  const sql = await getSql();
+  await sql.query(
+    `create table if not exists sources(id serial primary key,user_id text,newsroom_id integer,url text,title text,status text,tier text,kind text)`,
+  );
+  const nr = (Date.now() % 100000) + 11;
+  await sql.query(
+    "insert into paper_settings(newsroom_id,city,state,onboarded) values($1,'Riverbend','Oregon',true)",
+    [nr],
+  );
+  await sql.query(
+    "insert into sources(user_id,newsroom_id,url,title,status,tier,kind) values($1,$2,$3,'Riverbend','accepted','A','official')",
+    ["other-place-test", nr, "https://www.riverbend.gov/"],
+  );
+  const { place, official } = await readDarkPlace(nr);
+  assert.equal(place.city, "Riverbend");
+  assert.equal(place.state, "Oregon");
+  assert.ok(official.some((host) => /riverbend\.gov$/.test(host)), "its own official site");
+  assert.equal(
+    JSON.stringify({ place, official }).toLowerCase().includes("longmont"),
+    false,
+    "another city's desk must not be scoped to the shipped paper's town",
+  );
+});
+
 it("actual research loop reads this newsroom setup; accepted Reddit sources stay isolated", async () => {
   const { getPglite, getSql } = await import("../db.ts");
   const { ensureDarkSchema, readDarkPlace, readTipSubreddit } = await import("./dark.ts");

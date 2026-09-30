@@ -34,7 +34,7 @@ describe("meeting lead drafts from its own record", () => {
       establishedVotes: 1,
       citations: [{ item: "9", segmentIndex: 4612, timestampSeconds: 18450, excerpt: "the motion carries six to one", captionSha256: "abc" }],
       artifactId: 4,
-      votes: [{ item: "9", established: true, motion: "Approve", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "longmontcitycouncil.org" }],
+      votes: [{ item: "9", established: true, motion: "Approve", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "structured-record" }],
     });
     return parseNotes(captured);
   }

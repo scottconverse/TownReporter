@@ -60,16 +60,41 @@ describe("meeting section 5 real vote source adapter (Finding B)", () => {
     assert.equal(votes[0]?.tally, "7-0");
     assert.equal(votes[0]?.mover, "Matthew Popkin");
     assert.equal(votes[0]?.result, "Passed");
-    assert.equal(votes[0]?.source, "longmontcitycouncil.org");
+    assert.equal(votes[0]?.source, "structured-record");
   });
 
   it("records an explicit per-source availability reason instead of a silent null", async () => {
     const { voteSourceAvailability } = await import("./meeting-vote-sources.ts");
-    const availability = voteSourceAvailability({ structuredRecordFound: false, minutesFound: false, packetFound: false, transcriptFound: true });
+    const availability = voteSourceAvailability({ structuredSource: "example.test", structuredRecordFound: false, minutesFound: false, packetFound: false, transcriptFound: true });
     assert.match(availability.structuredRecord, /not available/i);
     assert.match(availability.minutes, /not available/i);
     assert.match(availability.packet, /not available/i);
     assert.match(availability.transcript, /corroboration/i);
+  });
+
+  it("reports no structured source at all when the paper has configured none", async () => {
+    const { voteSourceAvailability } = await import("./meeting-vote-sources.ts");
+    const availability = voteSourceAvailability({
+      structuredSource: null,
+      structuredRecordFound: false,
+      minutesFound: false,
+      packetFound: false,
+      transcriptFound: false,
+    });
+    assert.match(availability.structuredRecord, /no structured vote source configured/i);
+    assert.equal(/longmont/i.test(availability.structuredRecord), false);
+  });
+
+  it("takes the structured vote origin from the paper's own setting, and nothing else", async () => {
+    const { structuredVoteOriginFromSetting } = await import("./structured-vote-source.ts");
+    assert.equal(structuredVoteOriginFromSetting("https://council.example.test/"), "https://council.example.test");
+    assert.equal(structuredVoteOriginFromSetting("  https://council.example.test/meetings/  "), "https://council.example.test");
+    // Blank is a real answer: this paper has no structured vote record.
+    assert.equal(structuredVoteOriginFromSetting(""), null);
+    assert.equal(structuredVoteOriginFromSetting("   "), null);
+    assert.equal(structuredVoteOriginFromSetting(null), null);
+    assert.equal(structuredVoteOriginFromSetting("javascript:alert(1)"), null);
+    assert.equal(structuredVoteOriginFromSetting("not a url"), null);
   });
 
   it("never infers a tally when only transcript corroboration exists", async () => {

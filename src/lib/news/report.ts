@@ -9,6 +9,7 @@ import type { MeetingStoryFocus } from "./meeting-evidence-retrieval.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import type { OcrOptions } from "./ingest.ts";
 import { coerceDraft } from "./coerce-draft.ts";
+import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import {
   extractReferences,
   queriesForRef,
@@ -246,6 +247,13 @@ export type PaperIdentityForPrompts = {
    * the same way officialDomains is: from the configured seed sources.
    */
   pressDomains?: string[];
+  /**
+   * The host of the paper's own official site, from the first configured
+   * source marked "official" (./research-scope.ts). Null when this identity
+   * was supplied without configuration -- the research helpers then write no
+   * `site:` operator rather than naming the shipped paper's town.
+   */
+  officialHost?: string | null;
 };
 
 const EVIDENCE_RECONCILIATION_RULES = `Original wording and organization do not require additional facts. Avoid unsupported contrasts, rankings and counts: evidence for X does not establish "X, not Y", "most affected", or a counted number of changes. Separate publication date, event date and capture date; do not substitute one for another. Preserve the source's temporal modality and tense: do not turn future, planned, scheduled, anticipated, or conditional statements into present/current facts. When timing or currency is uncertain, qualify the claim and retain the uncertainty in reporting notes. Preserve the scope and direction of safety advice: do not replace an instruction to avoid something with advice to assess it by sight. Link each claim only to the exact supporting document, not another page from the same organization. Put unsupported interpretations in reporting questions, not asserted prose.`;
@@ -1226,6 +1234,7 @@ async function configuredPaper(newsroomId: number): Promise<PaperIdentityForProm
       cfg.seedSources.filter((src) => src.kind === "official").map((src) => src.url),
     ),
     pressDomains: pressDomains(cfg.seedSources),
+    officialHost: researchScopeOf(cfg).officialHost,
   };
 }
 
@@ -1296,6 +1305,17 @@ export async function reportAndDraft(
   ].join("\n");
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
   const paper = await (deps.paper ?? (() => configuredPaper(newsroomId)))();
+  /*
+    Every research query below is scoped to this paper's own configuration
+    (./research-scope.ts): its city, its state, and the host of its own
+    official site. Nothing is defaulted, so a paper that named no city gets
+    queries with no city in them -- it is never handed the shipped paper's.
+  */
+  const scope: ResearchScope = {
+    city: paper.city ?? "",
+    state: paper.state ?? "",
+    officialHost: paper.officialHost ?? null,
+  };
   let effectiveModelChoice: EffectiveProviderChoice | undefined = opts.modelChoice;
   if (effectiveModelChoice === "auto") {
     const probe =
@@ -1428,7 +1448,7 @@ export async function reportAndDraft(
   );
   const subjects = [
     ...refs.filter((r) => r.kind === "company").map((r) => r.value),
-    ...namedSubjects(`${opts.lead.headline}\n${opts.lead.why}\n${blob.slice(0, 2000)}`),
+    ...namedSubjects(`${opts.lead.headline}\n${opts.lead.why}\n${blob.slice(0, 2000)}`, scope),
   ];
   const extraUrls = [
     ...docs.flatMap((d) => d.extras),
@@ -1444,7 +1464,7 @@ export async function reportAndDraft(
 
   const primaryUrls: string[] = [];
   if (!suppliedOnly) await deps.onStage?.("Looking for primary sources");
-  for (const q of (suppliedOnly ? [] : primarySourceQueries(opts.lead.headline, subjects, paper.city).slice(0, 3))) {
+  for (const q of (suppliedOnly ? [] : primarySourceQueries(opts.lead.headline, subjects, scope).slice(0, 3))) {
     if (timeLeft() < reserve) break;
     try {
       const hits = await search(q);
@@ -1609,7 +1629,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     const refQueries = refs
       .filter((r) => r.kind !== "url" && r.kind !== "amount" && r.kind !== "reference")
       .slice(0, 2)
-      .flatMap((r) => queriesForRef(r).slice(0, 1));
+      .flatMap((r) => queriesForRef(r, scope).slice(0, 1));
     if (form !== "brief") {
       for (const q of refQueries.slice(0, 2)) {
         if (!canFollow()) break;

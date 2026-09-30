@@ -16,6 +16,17 @@ import {
   queriesForRef,
   structureSnapshot,
 } from "./extract.ts";
+import { PAPER, SEED_SOURCES } from "../paper.ts";
+import { researchScopeOf } from "./research-scope.ts";
+
+/*
+  The research helpers are scoped to the paper's own configuration
+  (./research-scope.ts) instead of defaulting to a built-in town. These cases
+  describe the SHIPPED paper -- its city, its state and the host of its first
+  official source -- so what they assert is the shipped configuration, read the
+  same way production reads it, and not a constant inside the helper.
+*/
+const SHIPPED = researchScopeOf({ city: PAPER.city, state: PAPER.state, seedSources: SEED_SOURCES });
 
 describe("extractReferences", () => {
   it("pulls companies, contracts, RFPs, URLs, and 'pursuant to' phrases", () => {
@@ -39,7 +50,7 @@ describe("extractReferences", () => {
 
 describe("queriesForRef", () => {
   it("turns a company into press-release, agent and contribution searches", () => {
-    const qs = queriesForRef({ kind: "company", value: "Front Range Municipal Solutions LLC" });
+    const qs = queriesForRef({ kind: "company", value: "Front Range Municipal Solutions LLC" }, SHIPPED);
     assert.ok(qs.some((q) => /press release/i.test(q)));
     assert.ok(qs.some((q) => /registered agent/i.test(q)));
     assert.ok(qs.some((q) => /campaign contribution/i.test(q)));
@@ -48,7 +59,7 @@ describe("queriesForRef", () => {
 
 describe("namedSubjects and primary sources", () => {
   it("pulls Ursa Major from a sentence-case headline", () => {
-    const names = namedSubjects("Ursa Major opens new Longmont manufacturing facility");
+    const names = namedSubjects("Ursa Major opens new Longmont manufacturing facility", SHIPPED);
     assert.ok(names.some((n) => /ursa major/i.test(n)));
   });
 
@@ -58,7 +69,7 @@ describe("namedSubjects and primary sources", () => {
     const listing = "https://www.longmontleader.com/";
     const subjects = ["Ursa Major"];
     assert.ok(primarySourceScore(pr, subjects) > primarySourceScore(listing, subjects));
-    assert.ok(primarySourceQueries("Ursa Major opens plant", subjects).some((q) => /press release/i.test(q)));
+    assert.ok(primarySourceQueries("Ursa Major opens plant", subjects, SHIPPED).some((q) => /press release/i.test(q)));
   });
 });
 
