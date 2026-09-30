@@ -1,4 +1,5 @@
 import { getSql, withTransaction } from "../db.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
 import { ensureRoutineNoticeAutomationSchema } from "./routine-notice-automation.ts";
 import {
@@ -387,7 +388,7 @@ export async function performRoutineNoticeWorkWith(
             run.actor,
             run.newsroom_id,
             existing.article_id,
-            `Routine edition update:\n\n${plan.body}`,
+            `${ROUTINE_EDITION_UPDATE_PREFIX}\n\n${plan.body}`,
           ],
         );
         await tx.query(
