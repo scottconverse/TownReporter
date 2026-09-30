@@ -316,8 +316,9 @@ export function buildEditorialPack(input: {
 /** The tools the gathering pass needs. Its receipts posture collapses without them. */
 export const EDITORIAL_TOOLS = ["WebSearch", "WebFetch"];
 
-/** The gathering pass supplies leads without the private editorial voice.
- * The writer can independently verify these leads using web tools. */
+/** The gathering pass supplies leads, and it is the only pass that holds web
+ * tools: it never sees the private editorial voice, and the writer never gets
+ * a tool that could carry the voice back out to a page it was told to read. */
 export const RESEARCH_INSTRUCTIONS = `You are the research pass for a TownReporter editorial. A separate pass, with
 its own voice, will write the piece from what you return here.
 You never see that voice and you are not writing the editorial.

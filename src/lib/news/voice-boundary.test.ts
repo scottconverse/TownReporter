@@ -160,11 +160,13 @@ describe("the voice never becomes a command-line argument", () => {
 });
 
 /**
- * The editor-authorized writer must retain its web research capability.
+ * The two editorial passes are authorized separately, and never together.
  *
- * A previous voice-and-tools restriction produced an editorial that could
- * not verify sources and omitted its claims appendix. Prompt file transport
- * must not silently remove tools that the writing task requires.
+ * SEC-3: the gathering pass reads untrusted pages and holds no voice; the
+ * writing pass holds the private voice and must hold no outbound tool, or a
+ * page read during research could tell the writer to fetch a URL carrying the
+ * voice out of the machine. Before the fix both Claude calls were given
+ * `EDITORIAL_TOOLS`, so that pair of facts sat in one context.
  *
  * These are behavioural, not textual: they call the real exported function
  * with real option objects and check what it actually does, so they cannot
@@ -173,8 +175,12 @@ describe("the voice never becomes a command-line argument", () => {
  * any billed model call: `CLAUDE_CLI_PATH` is pointed at a path that cannot
  * exist, so a call that gets PAST the invariant check resolves to
  * `CLAUDE_CLI_MISSING` rather than spawning anything.
+ *
+ * Which option each of the pair's two calls actually receives is asserted
+ * against a recorded fake in editorial.test.ts; these cover the transport
+ * side, where each authorization must still reach the CLI.
  */
-describe("the editorial voice can use the editor-authorized research tools", () => {
+describe("the editorial voice never rides with web tools", () => {
   const originalCliPath = process.env.CLAUDE_CLI_PATH;
   const originalClaudeCode = process.env.TOWNREPORTER_CLAUDE_CODE;
 
@@ -203,12 +209,15 @@ describe("the editorial voice can use the editor-authorized research tools", () 
     resetClaudeCliCache();
   });
 
-  it("allows voice plus research to reach CLI lookup", async () => {
-    useMissingCli();
-    const result = await claudeCodeChat({system:"", systemPromptFile:join(tmpdir(),"voice.txt"), user:"Verify sources", model:"claude-opus-5", timeoutMs:1000, allowedTools:["WebSearch","WebFetch"]});
-    assert.equal(result.ok,false);
-    if(!result.ok) assert.match(result.error,/Claude Code CLI not found/);
-  });
+  /*
+    A test here used to assert that a call carrying the voice file AND web
+    tools reached CLI lookup, i.e. that the transport permits the exact
+    combination SEC-3 forbids. It is gone rather than inverted: the transport
+    still permits it by construction (the caller chooses its own options), and
+    the property that matters is that no production caller asks for it. That
+    is asserted where the pair is actually built -- see editorial.test.ts's
+    recorded-arguments tests -- rather than by a call with no caller.
+  */
 
   it("still allows a tools-only call (the gathering pass) to reach CLI lookup", async () => {
     useMissingCli();
@@ -237,6 +246,9 @@ describe("the editorial voice can use the editor-authorized research tools", () 
       user: "write the piece",
       model: "claude-opus-5",
       timeoutMs: 1_000,
+      // The production shape of the writing pass: the voice, and no tool
+      // surface at all.
+      noTools: true,
     });
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -248,18 +260,29 @@ describe("the editorial voice can use the editor-authorized research tools", () 
     }
   });
 
-  it("the editorial writer receives web research alongside its voice", () => {
+  it("the gathering pass, and only the gathering pass, asks for the web tools", () => {
     const src = readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const calls = code.match(/allowedTools:\s*EDITORIAL_TOOLS/g) ?? [];
+    assert.equal(
+      calls.length,
+      1,
+      "exactly one Claude call may hold the web tools, and it is the gathering pass",
+    );
+    // The call object closes at the next top-level `});` after the marker.
     const writeCallStart = code.indexOf("systemPromptFile: found.voice.path");
     assert.notEqual(writeCallStart, -1, "the writing-pass call must still pass the voice path");
-    // The call object closes at the next top-level `});` after the marker.
     const callEnd = code.indexOf("});", writeCallStart);
     const callSlice = code.slice(writeCallStart, callEnd === -1 ? undefined : callEnd);
+    assert.doesNotMatch(
+      callSlice,
+      /allowedTools/,
+      "the call holding the voice must not be offered a single tool",
+    );
     assert.match(
       callSlice,
-      /allowedTools: EDITORIAL_TOOLS/,
-      "the writer must be able to verify its sources",
+      /noTools:\s*true/,
+      "the call holding the voice must hide the tool surface, not merely deny it",
     );
   });
 });

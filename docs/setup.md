@@ -375,7 +375,7 @@ Rules the app enforces, not conventions:
 - The path must be absolute. A relative path is refused.
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
-- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input. Research runs as its own step before writing; a Codex writing call gets no web search.
+- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input. Research runs as its own step before writing; the writing call gets no web search and no other tools, so the pass holding the voice cannot reach the network.
 - For explicit Local model, TownReporter reads the validated file and sends
   its text as a system message to the selected model server. It does not enter
   command-line arguments. Saved custom connections similarly receive the voice through their selected API endpoint.
