@@ -1,5 +1,15 @@
 import { StoryBody } from "@/components/story-body";
+import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
+import {
+  evidenceChip,
+  namesChip,
+  pageGateChip,
+  publishBarNote,
+  recordedChecks,
+  storyStages,
+  type CheckFacts,
+} from "@/lib/news/check-gates";
 import {
   publishBlockers,
   publishGateNote,
@@ -8,7 +18,7 @@ import {
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
-import { readNameCheck } from "@/lib/news/name-check";
+import { nameCheckText, readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -1632,41 +1642,48 @@ function StoryPage() {
     stage stepper in the top bar, and the gate chips on the publish bar.
 
     Neither is a control and neither decides anything. The stage row reads the
-    record -- the lead exists, a draft exists, the evidence check is
-    satisfied, the story is on the paper -- and the gate chips say the same
-    things the page already knows about the draft in front of the editor.
-    Every chip is a `<li>`; the one thing the publish bar must not grow is a
-    second set of blockers, so what actually refuses a publish is still the
-    `disabled` list on the button below, unchanged.
+    record -- the lead exists, a draft exists, the checks ran and passed, the
+    story is on the paper -- and the gate chips say the same things the page
+    already knows about the draft in front of the editor. Every chip is a
+    `<li>`; the one thing the publish bar must not grow is a second set of
+    blockers, so what actually refuses a publish is still the `disabled` list
+    on the button below, unchanged.
+
+    Unit U9: "the checks ran and passed" is not the same question as "nothing
+    is outstanding". The old `checkClear` answered the second one, which is
+    true of a blank hand-filed draft that no check has ever touched, so the
+    stepper ticked Check and the bar printed "All checks done." for a story
+    with no recorded evidence review, no name check and no claims. Both rows
+    now read `recordedChecks` off the draft's own memo -- the evidence review's
+    decision and the name check's completion -- plus the page's outstanding
+    flags, through the one rule in `lib/news/check-gates.ts`.
   */
-  const checkClear =
-    Boolean(data.draft) &&
-    !evidenceStale &&
-    openClaims.length === 0 &&
-    !reconcileActive &&
-    !reviewEvidence.isPending;
-  const stagePlan = [
-    { label: "Lead", done: true },
-    { label: "Draft", done: Boolean(data.draft) },
-    { label: "Check", done: checkClear },
-    { label: "Publish", done: onPaper },
-  ];
-  const firstOpenStage = stagePlan.findIndex((stage) => !stage.done);
-  const stages = stagePlan.map((stage, i) => ({
-    label: `${stage.done ? "✓" : i + 1} ${stage.label}`,
-    state: stage.done ? "done" : i === firstOpenStage ? "now" : "next",
-  }));
-  const namesToReview = data.namedOutlets.length;
+  const draftChecks = recordedChecks(data.draft?.research_json);
+  const nameCheck = readNameCheck(data.draft?.research_json);
+  const checkFacts: CheckFacts = {
+    hasDraft: Boolean(data.draft),
+    evidenceChecked: draftChecks.evidenceChecked,
+    evidenceRequired: draftChecks.evidenceRequired,
+    evidenceOutstanding:
+      evidenceStale || openClaims.length > 0 || reconcileActive || reviewEvidence.isPending,
+    namesUnresolved: draftChecks.namesUnresolved,
+    namedOutlets: data.namedOutlets.length,
+    /*
+      The same staleness `DeskNameCheck` prints on the Checks tab: a name check
+      applies to the text it was run against, so a check that finished before
+      the last edit cannot be shown as a pass over this one.
+    */
+    nameCheckComplete: draftChecks.nameCheckComplete,
+    namesOutstanding: Boolean(
+      nameCheck && nameCheck.checkedText !== nameCheckText({ headline, dek, body }),
+    ),
+  };
+  const stages = storyStages(checkFacts, onPaper);
   const publishGates = [
-    { label: `${hasUnsavedDraftEdits ? "!" : "✓"} Saved`, done: !hasUnsavedDraftEdits },
-    { label: `${checkClear ? "✓" : "!"} Evidence checked`, done: checkClear },
-    {
-      label: namesToReview
-        ? `! ${namesToReview} name${namesToReview === 1 ? "" : "s"} to review`
-        : "✓ Names reviewed",
-      done: namesToReview === 0,
-    },
-    { label: `${previewSeen ? "✓" : "!"} Preview viewed`, done: previewSeen },
+    pageGateChip(`${hasUnsavedDraftEdits ? "!" : "✓"} Saved`, !hasUnsavedDraftEdits),
+    evidenceChip(checkFacts),
+    namesChip(checkFacts),
+    pageGateChip(`${previewSeen ? "✓" : "!"} Preview viewed`, previewSeen),
   ];
 
   /*
@@ -1999,7 +2016,7 @@ function StoryPage() {
                     ? modelChoiceLabel(reconcileStatus.data.modelChoice)
                     : "",
                   openClaims,
-                  nameCheck: readNameCheck(data.draft?.research_json),
+                  nameCheck,
                   styleFindings: styleCheck.findings,
                   styleDetail,
                   compareLabel: evidenceReview ? "Compare checked vs. previous version" : "",
@@ -3007,13 +3024,7 @@ function StoryPage() {
           the claims-of-absence test pins.
         */
         <div className="astra-publish-bar" id="astra-publish-bar">
-          <ul className="astra-gates" aria-label="Publish gates">
-            {publishGates.map((gate) => (
-              <li key={gate.label} className={`astra-gate${gate.done ? "" : " is-todo"}`}>
-                {gate.label}
-              </li>
-            ))}
-          </ul>
+          <CheckGates gates={publishGates} label="Publish gates" />
           <div className="astra-publish-actions">
             {canPublish ? (
               confirmingPublish ? (
@@ -3117,8 +3128,17 @@ function StoryPage() {
                       </button>
                     </span>
                   ) : (
-                    /* The drawing's other half: nothing stands in the way. */
-                    <span className="note">All checks done.</span>
+                    /*
+                      The drawing's other half: nothing stands in the way.
+
+                      Unit U9: that is not the same claim as "the checks ran".
+                      A hand-filed story may print with nothing recorded against
+                      it, and this line used to answer that case with "All
+                      checks done." -- the page saying a check passed when the
+                      panel below it said "This draft has no recorded name
+                      check." `publishBarNote` says which one did not run.
+                    */
+                    <span className="note">{publishBarNote(checkFacts)}</span>
                   )}
                 </>
               )

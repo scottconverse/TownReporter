@@ -2,6 +2,15 @@ import { evidenceNeedsReview, type EvidenceDecision } from "@/lib/news/draft-evi
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { CheckGates } from "@/components/check-gates";
+import {
+  evidenceChip,
+  namesChip,
+  pageGateChip,
+  publishBarNote,
+  recordedChecks,
+  type CheckFacts,
+} from "@/lib/news/check-gates";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { StoryBody } from "@/components/story-body";
@@ -192,20 +201,30 @@ function EditorialPage() {
   const check = readNameCheck(q.data?.research_json);
   const namesStale = Boolean(check && check.checkedText !== nameCheckText({ headline, dek, body }));
   const namesPending = check?.rows.filter((row) => row.status === "unresolved").length ?? 0;
+  /*
+    Unit U9: the same three states the reported workbench shows, from the same
+    rule (`lib/news/check-gates.ts`), because this bar had the same defect --
+    an editorial with no name check and nothing to check said `✓ Names
+    reviewed` and `✓ Evidence kept`. The two chips this screen cannot have are
+    left out rather than faked: an editorial names no outlet, so there is no
+    named-outlet gate to count (see `blockers` above), and this screen has no
+    stepper.
+  */
+  const recorded = recordedChecks(q.data?.research_json);
+  const checkFacts: CheckFacts = {
+    hasDraft: Boolean(q.data),
+    evidenceChecked: recorded.evidenceChecked,
+    evidenceRequired: recorded.evidenceRequired,
+    evidenceOutstanding: evidenceStale || review.isPending,
+    namesUnresolved: namesPending,
+    namedOutlets: 0,
+    nameCheckComplete: recorded.nameCheckComplete,
+    namesOutstanding: namesStale,
+  };
   const publishGates = [
-    { label: `${dirty ? "!" : "✓"} Saved`, done: !dirty },
-    {
-      label: namesPending
-        ? `! ${namesPending} name${namesPending === 1 ? "" : "s"} to review`
-        : namesStale
-          ? "! Name check is older than the text"
-          : "✓ Names reviewed",
-      done: namesPending === 0 && !namesStale,
-    },
-    {
-      label: evidenceStale ? "! Evidence to review" : "✓ Evidence kept",
-      done: !evidenceStale,
-    },
+    pageGateChip(`${dirty ? "!" : "✓"} Saved`, !dirty),
+    namesChip(checkFacts),
+    evidenceChip(checkFacts),
   ];
 
   if (q.isPending) {
@@ -425,13 +444,7 @@ function EditorialPage() {
       */}
       {!onPaper ? (
         <div className="astra-publish-bar" id="astra-publish-bar">
-          <ul className="astra-gates" aria-label="Publish gates">
-            {publishGates.map((gate) => (
-              <li key={gate.label} className={`astra-gate${gate.done ? "" : " is-todo"}`}>
-                {gate.label}
-              </li>
-            ))}
-          </ul>
+          <CheckGates gates={publishGates} label="Publish gates" />
           <div className="astra-publish-actions">
             {confirmingPublish ? (
               <>
@@ -463,7 +476,9 @@ function EditorialPage() {
                 {blockers.length > 0 ? (
                   <span className="note publish-blocked">{publishGateNote(blockers)}</span>
                 ) : (
-                  <span className="note">All checks done.</span>
+                  /* Unit U9: the same line the reported workbench prints --
+                     "All checks done." only when the checks actually ran. */
+                  <span className="note">{publishBarNote(checkFacts)}</span>
                 )}
               </>
             )}

@@ -7,6 +7,11 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
+import {
+  evidenceChip,
+  namesChip,
+  type CheckFacts,
+} from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { areaClass, announceToDesk, inputClass, leadOrigin } from "@/components/desk-chrome-utils";
@@ -644,26 +649,37 @@ function DeskHome() {
     never run says so ("not run") instead of borrowing the look of a pass, and
     the section chip names the section the draft is filed under rather than
     asking the editor to confirm something the desk already knows.
+
+    Unit U9 moved the two check chips' words into `lib/news/check-gates.ts` and
+    the workbench now reads the same rule, so the desk and the story page
+    cannot drift into telling an editor two different things about one draft.
+    The section chip is this row's own -- the workbench has no equivalent -- so
+    it stays here.
   */
-  const tonightChips = (row: DraftRow) => ({
-    evidence: row.evidence_required
-      ? row.evidence_decision
-        ? { text: "✓ Evidence checked", tone: "d-ok" }
-        : { text: "! Evidence to check", tone: "d-warn" }
-      : { text: "○ Evidence check not run", tone: "d-quiet" },
-    names:
-      row.names_unresolved > 0
-        ? {
-            text: `! ${row.names_unresolved} name${row.names_unresolved === 1 ? "" : "s"} to review`,
-            tone: "d-warn",
-          }
-        : row.name_check_complete
-          ? { text: "✓ Names checked", tone: "d-ok" }
-          : { text: "○ Names not checked", tone: "d-quiet" },
-    section: row.topic
-      ? { text: `✓ Section: ${sectionName(row.topic)}`, tone: "d-ok" }
-      : { text: "○ No section yet", tone: "d-quiet" },
-  });
+  const tonightChips = (row: DraftRow) => {
+    const facts: CheckFacts = {
+      hasDraft: true,
+      evidenceChecked: Boolean(row.evidence_decision),
+      evidenceRequired: row.evidence_required,
+      /* This row carries no staleness, claim or running-check state; the story
+         page is where those are read, and it says so there. */
+      evidenceOutstanding: false,
+      namesUnresolved: row.names_unresolved,
+      namedOutlets: 0,
+      nameCheckComplete: row.name_check_complete,
+      namesOutstanding: false,
+    };
+    const tone = { ok: "d-ok", warn: "d-warn", quiet: "d-quiet" } as const;
+    const evidence = evidenceChip(facts);
+    const names = namesChip(facts);
+    return {
+      evidence: { text: evidence.text, tone: tone[evidence.tone] },
+      names: { text: names.text, tone: tone[names.tone] },
+      section: row.topic
+        ? { text: `✓ Section: ${sectionName(row.topic)}`, tone: "d-ok" }
+        : { text: "○ No section yet", tone: "d-quiet" },
+    };
+  };
 
   /** The stories tonight actually turns on: through their checks, or waiting
    *  on the editor. Newest work first within each group. */
@@ -1016,15 +1032,24 @@ function DeskHome() {
             <h2 className="today-edition-title">Tonight’s edition</h2>
             <span className="sec-count">{readyToPrint + readyToCheck}</span>
           </div>
-          <p className="today-edition-sub">Each story needs every check before it can print.</p>
+          {/*
+            Unit U9: this line used to read "Each story needs every check before
+            it can print." A story is allowed to print with no check run -- a
+            lead filed and written by hand is one the desk does not require a
+            model pass over -- so the sentence described a rule the desk does
+            not have, on the same panel whose chips now say which checks ran.
+          */}
+          <p className="today-edition-sub">
+            A story prints when nothing blocks it; the chips show which checks ran.
+          </p>
           <Link to="/desk/drafts" className="np-link">
             All drafts
           </Link>
         </div>
         {tonightRows.length === 0 ? (
           <p className="wire-sum">
-            No story is through its checks yet. A draft arrives here once it is written and you have
-            checked its evidence and its names.
+            No story is through its checks yet. A draft arrives here once it is written; its chips
+            say which checks have run on it.
           </p>
         ) : (
           <div className="today-edition-rows">

@@ -1,0 +1,294 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  checkStageDone,
+  evidenceChip,
+  namesChip,
+  pageGateChip,
+  publishBarNote,
+  recordedChecks,
+  storyStages,
+  type CheckFacts,
+} from "./check-gates.ts";
+import { reconcileDraftEvidence } from "./draft-evidence.ts";
+
+/**
+ * Unit U9 (UX-1): the workbench must not say a check passed when it never ran.
+ *
+ * The editor's one-line tip had no claims, so the old `checkClear` ("nothing is
+ * outstanding") was true of it, and the story page printed `✓ Evidence
+ * checked`, `✓ Names reviewed`, a ticked Check stage and "All checks done."
+ * beside a panel that said "This draft has no recorded name check." These are
+ * the facts that fix it: a pass is claimed only from the draft's own record.
+ */
+
+/** The editor's draft: written by hand, nothing ever run against it. */
+const NEVER_RUN: CheckFacts = {
+  hasDraft: true,
+  evidenceChecked: false,
+  evidenceRequired: false,
+  evidenceOutstanding: false,
+  namesUnresolved: 0,
+  namedOutlets: 0,
+  nameCheckComplete: false,
+  namesOutstanding: false,
+};
+
+/** A draft through both checks: evidence decided, name check complete. */
+const PASSED: CheckFacts = {
+  ...NEVER_RUN,
+  evidenceChecked: true,
+  nameCheckComplete: true,
+};
+
+describe("check-gates: a check that never ran says so", () => {
+  it("(a) a written draft with no evidence decision and no name check claims no pass", () => {
+    assert.deepEqual(evidenceChip(NEVER_RUN), {
+      text: "○ Evidence check not run",
+      tone: "quiet",
+      done: false,
+    });
+    assert.deepEqual(namesChip(NEVER_RUN), {
+      text: "○ Names not checked",
+      tone: "quiet",
+      done: false,
+    });
+  });
+
+  it("(a) the Check stage of the stepper is not ticked, and the bar does not say the checks are done", () => {
+    assert.equal(checkStageDone(NEVER_RUN), false);
+    const stages = storyStages(NEVER_RUN, false);
+    assert.deepEqual(stages.map((s) => s.label), ["✓ Lead", "✓ Draft", "3 Check", "4 Publish"]);
+    assert.equal(stages[2]!.state, "now", "the Check stage is the open one, not a pass");
+    assert.ok(
+      stages.every((stage) => !/✓\s*Check/.test(stage.label)),
+      "no stage may put a checkmark on Check when no check ran",
+    );
+    assert.equal(
+      publishBarNote(NEVER_RUN),
+      "Nothing blocks Publish. No evidence or name check ran on this draft.",
+    );
+    assert.doesNotMatch(publishBarNote(NEVER_RUN), /All checks done\./);
+  });
+
+  it("(b) a decided evidence check and a completed name check are a pass", () => {
+    assert.deepEqual(evidenceChip(PASSED), {
+      text: "✓ Evidence checked",
+      tone: "ok",
+      done: true,
+    });
+    assert.deepEqual(namesChip(PASSED), { text: "✓ Names checked", tone: "ok", done: true });
+    assert.equal(checkStageDone(PASSED), true);
+    assert.deepEqual(storyStages(PASSED, false).map((s) => s.label), [
+      "✓ Lead",
+      "✓ Draft",
+      "✓ Check",
+      "4 Publish",
+    ]);
+    assert.equal(publishBarNote(PASSED), "All checks done.");
+  });
+
+  it("(c) a check that ran and has not been decided is the warning it always was", () => {
+    const open: CheckFacts = { ...NEVER_RUN, evidenceRequired: true };
+    assert.deepEqual(evidenceChip(open), { text: "! Evidence to check", tone: "warn", done: false });
+    assert.equal(checkStageDone(open), false);
+    assert.equal(
+      publishBarNote(open),
+      "Nothing blocks Publish. The evidence check is not confirmed and no name check ran.",
+    );
+    /* The reconcile that ran the evidence check also ran the name check, so
+       the common shape of this state is one open check and a name check that
+       did complete. */
+    assert.equal(
+      publishBarNote({ ...open, nameCheckComplete: true }),
+      "Nothing blocks Publish. The evidence check is not confirmed.",
+    );
+  });
+
+  it("(c) a claim of absence still puts the evidence chip back on the desk", () => {
+    const claimed: CheckFacts = { ...PASSED, evidenceOutstanding: true };
+    assert.deepEqual(evidenceChip(claimed), {
+      text: "! Evidence to check",
+      tone: "warn",
+      done: false,
+    });
+    assert.equal(checkStageDone(claimed), false);
+    assert.equal(
+      publishBarNote(claimed),
+      "Nothing blocks Publish. The evidence check is not confirmed.",
+    );
+  });
+
+  it("keeps the old chip's warning for a check that ran and was decided, once the text moves on", () => {
+    /* `evidenceOutstanding` is the page's stale-evidence flag, its running
+       reconcile, a saving decision and an unticked claim, all at once: any of
+       them means the recorded pass no longer covers what is on screen. */
+    const stale: CheckFacts = { ...PASSED, evidenceOutstanding: true };
+    assert.equal(evidenceChip(stale).tone, "warn");
+    assert.equal(evidenceChip(stale).done, false);
+    /* And a decision that was recorded before the check was re-opened is not a
+       pass either: `required` wins over the old decision, exactly as the desk
+       home's chip has it. */
+    const reopened: CheckFacts = { ...PASSED, evidenceRequired: true };
+    assert.equal(evidenceChip(reopened).tone, "warn");
+    assert.equal(evidenceChip(reopened).done, false);
+    assert.equal(checkStageDone(reopened), false);
+  });
+});
+
+describe("check-gates: the names chip", () => {
+  it("counts a name with nothing to show it, in the bar's own words", () => {
+    assert.deepEqual(namesChip({ ...NEVER_RUN, namesUnresolved: 1 }), {
+      text: "! 1 name to review",
+      tone: "warn",
+      done: false,
+    });
+    assert.deepEqual(namesChip({ ...NEVER_RUN, namesUnresolved: 3 }), {
+      text: "! 3 names to review",
+      tone: "warn",
+      done: false,
+    });
+    /* A body naming an outlet the sources do not show is the same work on this
+       bar as a person the check could not resolve: a name to review. */
+    assert.equal(namesChip({ ...NEVER_RUN, namedOutlets: 2 }).text, "! 2 names to review");
+    assert.equal(namesChip({ ...NEVER_RUN, namedOutlets: 1, namesUnresolved: 1 }).text, "! 2 names to review");
+  });
+
+  it("does not call a name check a pass over text it never saw", () => {
+    const stale: CheckFacts = { ...PASSED, namesOutstanding: true };
+    assert.deepEqual(namesChip(stale), {
+      text: "! Name check is older than the text",
+      tone: "warn",
+      done: false,
+    });
+    assert.equal(publishBarNote(stale), "Nothing blocks Publish. The name check is older than the story.");
+  });
+
+  it("a name check that did not complete is not a pass, even with no names to review", () => {
+    const facts: CheckFacts = { ...NEVER_RUN, evidenceChecked: true };
+    assert.equal(namesChip(facts).done, false);
+    assert.equal(publishBarNote(facts), "Nothing blocks Publish. No name check ran on this draft.");
+  });
+});
+
+describe("check-gates: the line beside Publish names the check that did not run", () => {
+  it("says which one is missing when one of the two ran", () => {
+    assert.equal(
+      publishBarNote({ ...NEVER_RUN, evidenceChecked: true }),
+      "Nothing blocks Publish. No name check ran on this draft.",
+    );
+    assert.equal(
+      publishBarNote({ ...NEVER_RUN, nameCheckComplete: true }),
+      "Nothing blocks Publish. No evidence check ran on this draft.",
+    );
+  });
+
+  it("says what is still outstanding when a check ran and did not pass", () => {
+    assert.equal(
+      publishBarNote({ ...PASSED, namesUnresolved: 2 }),
+      "Nothing blocks Publish. 2 names still need review.",
+    );
+    assert.equal(
+      publishBarNote({ ...PASSED, namesUnresolved: 1 }),
+      "Nothing blocks Publish. 1 name still needs review.",
+    );
+  });
+
+  it("keeps 'All checks done.' for the only state where it is true", () => {
+    assert.equal(publishBarNote(PASSED), "All checks done.");
+    for (const facts of [
+      NEVER_RUN,
+      { ...NEVER_RUN, evidenceRequired: true },
+      { ...NEVER_RUN, namesUnresolved: 1 },
+      { ...PASSED, evidenceOutstanding: true },
+      { ...PASSED, namesOutstanding: true },
+    ]) {
+      assert.doesNotMatch(publishBarNote(facts), /All checks done\./);
+    }
+  });
+});
+
+describe("check-gates: the stepper reads the same facts", () => {
+  it("never ticks Check without a draft", () => {
+    assert.equal(checkStageDone({ ...PASSED, hasDraft: false }), false);
+    assert.deepEqual(storyStages({ ...PASSED, hasDraft: false }, false).map((s) => s.label), [
+      "✓ Lead",
+      "2 Draft",
+      "3 Check",
+      "4 Publish",
+    ]);
+  });
+
+  it("ticks Publish from the paper, not from the checks", () => {
+    assert.equal(storyStages(PASSED, true).at(-1)!.label, "✓ Publish");
+    assert.equal(storyStages(NEVER_RUN, false).at(-1)!.state, "next");
+  });
+});
+
+describe("recordedChecks reads the draft's own memo", () => {
+  it("reads nothing recorded off a draft with no research at all", () => {
+    for (const raw of [null, undefined, "", "{}", "not json", '[1,2,3]']) {
+      assert.deepEqual(recordedChecks(raw), {
+        evidenceChecked: false,
+        evidenceRequired: false,
+        nameCheckComplete: false,
+        namesUnresolved: 0,
+      });
+    }
+  });
+
+  it("reads the two shapes reconcileDraftEvidence actually writes", () => {
+    const draft = {
+      id: 7,
+      headline: "Council meets",
+      dek: "A short dek.",
+      body: "The council met Tuesday.",
+      source_urls: "[]",
+      provenance_json: "[]",
+      found_note: "",
+      unanswered: "[]",
+      research_json: "{}",
+    };
+    /* An open check: required, no decision, is not a pass. */
+    const open = reconcileDraftEvidence({ ...draft, source_urls: '["https://example.test/x"]', research_json: JSON.stringify({ evidenceReview: { required: true, decision: null } }) }, "The council met Tuesday.");
+    assert.equal(recordedChecks(open.research_json).evidenceRequired, true);
+    assert.equal(recordedChecks(open.research_json).evidenceChecked, false);
+    /* The editor's own decision is. */
+    const decided = reconcileDraftEvidence({ ...draft, research_json: JSON.stringify({ evidenceReview: { required: true, decision: null } }) }, draft.body, "keep");
+    assert.equal(recordedChecks(decided.research_json).evidenceRequired, false);
+    assert.equal(recordedChecks(decided.research_json).evidenceChecked, true);
+  });
+
+  it("counts the name check's unresolved rows, the same rows the desk home counts", () => {
+    const research = JSON.stringify({
+      nameCheck: {
+        version: 1,
+        checkedAt: "2026-09-29T12:00:00.000Z",
+        checkedText: "Headline\n\nDek\n\nBody",
+        complete: true,
+        note: "1 name needs editor review.",
+        rows: [
+          { name: "Casey Alvarez", status: "matched" },
+          { name: "J. Ruiz", status: "unresolved" },
+        ],
+      },
+    });
+    assert.deepEqual(recordedChecks(research), {
+      evidenceChecked: false,
+      evidenceRequired: false,
+      nameCheckComplete: true,
+      namesUnresolved: 1,
+    });
+  });
+});
+
+describe("pageGateChip keeps the page's own two states", () => {
+  it("is green when done and a warning when not, and never claims a check", () => {
+    assert.deepEqual(pageGateChip("✓ Saved", true), { text: "✓ Saved", tone: "ok", done: true });
+    assert.deepEqual(pageGateChip("! Preview viewed", false), {
+      text: "! Preview viewed",
+      tone: "warn",
+      done: false,
+    });
+  });
+});
