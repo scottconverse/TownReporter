@@ -55,6 +55,49 @@ describe("the test database is built from migrations/*.sql", () => {
     }
   });
 
+  it("has the column and the index that used to live outside migrations/", async () => {
+    const pg = await getPglite();
+
+    // `story_documents.reading_key` -- the runtime-only column (U18a-4). The
+    // ensure list in `story-documents.server.ts` created it and no migration
+    // did, so this database did not have a column the desk selects, compares
+    // and writes. `migrations/0111_story_documents_reading_key.sql` is where it
+    // lives now; deleting that file is the mutation this assertion catches.
+    const readingKey = await pg.query<{ data_type: string }>(
+      `select format_type(a.atttypid, a.atttypmod) as data_type
+         from pg_attribute a
+         join pg_class c on c.oid = a.attrelid
+        where c.relname = 'story_documents'
+          and a.attname = 'reading_key'
+          and a.attnum > 0
+          and not a.attisdropped`,
+    );
+    assert.deepEqual(
+      readingKey.rows,
+      [{ data_type: "text" }],
+      "story_documents.reading_key is missing (or has the wrong type) after a migrations-only " +
+        "replay -- it is declared in migrations/0111_story_documents_reading_key.sql, and the " +
+        "runtime alter that used to create it has been deleted",
+    );
+
+    // `audit_events_user_idx` -- the mirror image, and the reason the parity
+    // fixture stopped replaying 0005 into its ensure-side database: this index
+    // exists in `migrations/0005_ops.sql` and in nothing the runtime creates,
+    // so a database built any other way lacks it. Replayed from migrations/,
+    // it must be here.
+    const userIndex = await pg.query<{ indexname: string }>(
+      `select indexname from pg_indexes
+        where schemaname = 'public' and tablename = 'audit_events'
+          and indexname = 'audit_events_user_idx'`,
+    );
+    assert.deepEqual(
+      userIndex.rows.map((row) => row.indexname),
+      ["audit_events_user_idx"],
+      "audit_events_user_idx is missing after a migrations-only replay -- it is created by " +
+        "migrations/0005_ops.sql and by no runtime ensure* function",
+    );
+  });
+
   it("records every migrations/*.sql file in _migrations", async () => {
     const expected = readdirSync(MIGRATIONS_DIR)
       .filter((name) => name.endsWith(".sql"))

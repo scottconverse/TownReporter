@@ -81,8 +81,11 @@ const ALLOWLIST: Record<string, { reason: string }> = {
   "src/lib/news/membership.ts": { reason: "runtime DDL, redundant with migrations; removed in U18a-7" },
   "src/lib/news/sections.server.ts": { reason: "runtime DDL, redundant with migrations; removed in U18a-7" },
   "src/lib/news/story-area.server.ts": { reason: "runtime DDL, redundant with migrations; removed in U18a-7" },
+  // U18a-4 moved the one runtime-ONLY column (`reading_key`) into
+  // migrations/0111 and deleted its line; the table and the other five alters
+  // remain, so the entry stays until U18a-7.
   "src/lib/news/story-documents.server.ts": {
-    reason: "runtime DDL; `reading_key` is also the one runtime-only column, moved into a migration by U18a-4, the rest removed in U18a-7",
+    reason: "runtime DDL, redundant with migrations (reading_key moved to 0111 by U18a-4); removed in U18a-7",
   },
   "src/lib/news/paper-settings.ts": { reason: "runtime DDL, redundant with migrations; removed in U18a-7" },
 

@@ -1,0 +1,21 @@
+-- The checkpoint key that lets a redraft resume the same reading assignment
+-- instead of starting the document again (ENG-5, U18a-4 / unit AB, 0.6.64).
+--
+-- WHY THIS IS A MIGRATION AND NOT AN ALTER IN THE CODE. The column was created
+-- by the runtime `ensureStoryDocuments` list in
+-- `src/lib/news/story-documents.server.ts` and by nothing else -- all 107
+-- migrations predating this file were replayed into an empty database and none
+-- of them had it, so the replay's `story_documents` and the schema the desk
+-- actually runs on disagreed about one column. It is live, not dead DDL: the
+-- document list selects it, the redraft path compares it and the reading pass
+-- writes it (`story-documents.server.ts`, `reading_key` in the select, the
+-- `resumesSameAssignment` compare, and the `update ... reading_key=`). A
+-- database migrated from empty therefore had to be repaired by the first
+-- document upload before it could serve the desk at all.
+--
+-- NULLABLE, AND THAT IS THE SHAPE OF THE DATA. A document that has never been
+-- read has no checkpoint to resume from; the read path treats a null key as
+-- "different assignment" and starts from the first page. Nothing to backfill
+-- and nothing to rewrite -- only the DDL moves, to where every other
+-- `story_documents` column already lives.
+alter table story_documents add column if not exists reading_key text;

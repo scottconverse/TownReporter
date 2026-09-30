@@ -62,10 +62,26 @@ const dbProbe = integrationRequested()
 const skip = dbProbe.ok ? false : dbProbe.reason;
 
 const repoRoot = new URL("../../../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
-// Sections/watch require migrations-owned core tables. Replay their ops extension
-// too: 0002 also creates subscribers, whose confirmation fields arrive in 0005.
-// Neither subscriber table nor columns have a runtime ensure counterpart.
-const CORE_DEPENDENCY_MIGRATIONS = ["0002_newsroom.sql", "0005_ops.sql"];
+// Sections/watch need the migrations-owned core tables (`sources`, `snapshots`,
+// ...), which live in 0002. 0005 used to be replayed here as well, and that was
+// a hole in this test rather than a dependency: 0005 is the ONLY place
+// `audit_events_user_idx` is created, and replaying it into the ensure-side
+// database handed that index to the side no `ensure*` function ever gives it
+// to, so the two sides agreed only because the fixture had edited one of them.
+// Dropping it (U18a-4) is what makes the index visible below.
+//
+// What 0005 was ALSO carrying is `subscribers.status` / `confirm_token`, which
+// this fixture's own assertion needs -- those are migrations-only columns with
+// no runtime counterpart, so the fixture supplies them locally instead of
+// importing a whole migration for them. The runtime `ensure*` functions never
+// touch `subscribers`, so nothing on the ensure side is masked by it.
+const CORE_DEPENDENCY_MIGRATIONS = ["0002_newsroom.sql"];
+
+/** 0005's subscribers columns, kept locally now that 0005 is not replayed here. */
+const SUBSCRIBER_CONFIRMATION_FIXTURE = [
+  "alter table subscribers add column if not exists status text not null default 'pending'",
+  "alter table subscribers add column if not exists confirm_token text",
+];
 
 it("parity dependency fixtures include subscriber confirmation fields", async () => {
   const { PGlite } = await import("@electric-sql/pglite");
@@ -74,6 +90,7 @@ it("parity dependency fixtures include subscriber confirmation fields", async ()
     for (const file of CORE_DEPENDENCY_MIGRATIONS) {
       await fixture.exec(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
     }
+    for (const statement of SUBSCRIBER_CONFIRMATION_FIXTURE) await fixture.exec(statement);
     const result = await fixture.query<{ status: string; confirm_token: string | null }>(
       "insert into subscribers(email) values ('parity@example.test') returning status, confirm_token",
     );
@@ -105,6 +122,14 @@ const ALLOWLIST: Record<string, { reason: string }> = {
   articles: { reason: "migrations-only table; no ensure* counterpart (see file docstring)" },
   beat_memory: { reason: "migrations-only table; no ensure* counterpart (see file docstring)" },
   corrections: { reason: "migrations-only table; no ensure* counterpart (see file docstring)" },
+  // Same class, arrived at differently: no `ensure*` function creates or
+  // touches `subscribers` either, but the fixture replays 0002 into the ensure
+  // database for the core tables the sections/watch modules depend on, and
+  // 0002 creates it. Everything 0005 adds (status, confirm_token) is therefore
+  // migrations-only. Replaying 0005 used to put those two columns on the
+  // ensure side too and hide it (U18a-4); the columns it needs are supplied
+  // locally by the fixture test above instead.
+  subscribers: { reason: "migrations-only table (0002_newsroom, 0005_ops); no ensure* counterpart (see file docstring)" },
   // Better Auth's own tables (migrations/0001_auth.sql, applied only when an
   // app turns sign-in on) have no ensure* mirror; out of scope for this desk
   // schema check.
@@ -112,6 +137,31 @@ const ALLOWLIST: Record<string, { reason: string }> = {
   session: { reason: "Better Auth table, not part of the desk schema this test covers" },
   account: { reason: "Better Auth table, not part of the desk schema this test covers" },
   verification: { reason: "Better Auth table, not part of the desk schema this test covers" },
+};
+
+/**
+ * Indexes and constraints expected on the **migrations** side only, keyed by
+ * feature name (Postgres index/constraint names are unique within a schema, so
+ * a name is the whole address). Every entry needs a reason, and an entry that
+ * stops describing a real difference fails this test the same way the
+ * no-runtime-ddl allowlist does -- an exception that outlives its drift reads
+ * as "checked and fine" forever.
+ *
+ * This is narrower than ALLOWLIST above on purpose: ALLOWLIST waives a whole
+ * table's presence on one side, which is the right shape for tables that
+ * genuinely have no counterpart. A shared table that is missing ONE index
+ * should not be able to hide behind the same mechanism.
+ */
+const MIGRATIONS_ONLY_FEATURES: Record<string, { reason: string }> = {
+  audit_events_user_idx: {
+    reason:
+      "migrations-only index (migrations/0005_ops.sql, the only place it is created). The runtime " +
+      "ensureAuditEventsSchema creates the table and its columns but no index at all, so an " +
+      "ensure-only database has audit_events_pkey and nothing else. No migration is missing -- the " +
+      "fix is to delete the runtime DDL (U18a-8), not to add an index to the ensure side. Recorded " +
+      "here because the 0005 replay this fixture used to do into the ensure database hid exactly " +
+      "this difference from the comparison (U18a-4 unmasked it).",
+  },
 };
 
 let closePoolForTests: () => Promise<void>;
@@ -164,6 +214,18 @@ if (dbProbe.ok) {
     const routineNoticeAutomation = await import("./routine-notice-automation.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
+
+    // desk_rate / audit_events FIRST, and through the runtime calls that
+    // create them (`ops.assertRate`, `ops.audit` -- no `ensure*Schema` name,
+    // but the same create-table-if-not-exists-on-every-call shape, ENG-09).
+    // They used to arrive as a side effect of replaying 0005 into this
+    // database; with that replay gone, the ensure side has to create them the
+    // way a bare production database does -- and it has to be before
+    // `legal-removal` (reached from `routine-notice-checks`) and `views`,
+    // both of which ALTER `audit_events`. That ordering requirement is the
+    // runtime's own (§2.4.2 of the U18a report), not this fixture's.
+    await ops.assertRate("schema-parity-smoke-user", "scan");
+    await ops.audit("schema-parity-smoke-user", "smoke", "schema-parity test");
 
     await membership.ensureNewsroomSchema();
     await membership.ensureInviteSchema();
@@ -232,11 +294,6 @@ if (dbProbe.ok) {
       (user_id,newsroom_id,headline,why,topic) values ('pg-section-proof',8802,'Example','Reason','budget') returning topic`;
     assert.equal(foreignFiled.topic, "budget", "another newsroom keeps its own active section");
     assert.deepEqual(await sections.getSections(8802), foreignSections);
-    // desk_rate / audit_events: no ensure*Schema name, but the same
-    // create-table-if-not-exists-on-every-call shape (ENG-09) -- a real call
-    // each creates the table.
-    await ops.assertRate("schema-parity-smoke-user", "scan");
-    await ops.audit("schema-parity-smoke-user", "smoke", "schema-parity test");
     const legalSchema=await import("./legal-removal-schema.ts");
     const legal=await import("./legal-removal-store.ts");
     await legalSchema.ensureLegalSchema();
@@ -413,12 +470,17 @@ function describeDefault(value: string | null): string {
  * exists on both sides. Column-name differences are reported by the caller
  * (which owns the "missing from migrations" wording); this handles the
  * attributes a names-only comparison cannot see.
+ *
+ * `usedExceptions` collects the {@link MIGRATIONS_ONLY_FEATURES} names this
+ * comparison actually met, so the caller can fail an entry that stopped
+ * describing a difference.
  */
 function diffTableShape(
   table: string,
   migrations: TableShape,
   ensure: TableShape,
   mismatches: string[],
+  usedExceptions: Set<string>,
 ): void {
   for (const [column, left] of migrations.columns) {
     const right = ensure.columns.get(column);
@@ -450,6 +512,10 @@ function diffTableShape(
     if (left === undefined) {
       mismatches.push(`${table}: index/constraint "${name}" exists only in ensure -- ${right}`);
     } else if (right === undefined) {
+      if (name in MIGRATIONS_ONLY_FEATURES) {
+        usedExceptions.add(name);
+        continue;
+      }
       mismatches.push(`${table}: index/constraint "${name}" exists only in migrations -- ${left}`);
     } else {
       mismatches.push(
@@ -472,6 +538,7 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
 
       const allTables = new Set([...migrationsShapes.keys(), ...ensureShapes.keys()]);
       const mismatches: string[] = [];
+      const usedExceptions = new Set<string>();
 
       for (const table of allTables) {
         if (INTERNAL_TABLES.has(table)) continue;
@@ -527,7 +594,7 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
         // A column-set match alone is not parity: `text` vs `varchar(10)`,
         // `not null` vs nullable, a lost default and a dropped unique index
         // all leave the names identical.
-        diffTableShape(table, inMigrations, inEnsure, mismatches);
+        diffTableShape(table, inMigrations, inEnsure, mismatches, usedExceptions);
       }
 
       assert.deepEqual(
@@ -535,6 +602,15 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
         [],
         `schema drift between migrations/*.sql and the runtime ensure* functions:\n` +
           mismatches.join("\n"),
+      );
+
+      // The exceptions only ever shrink: one that no longer describes a real
+      // difference is deleted, not left to read as "checked and fine".
+      assert.deepEqual(
+        Object.keys(MIGRATIONS_ONLY_FEATURES).filter((name) => !usedExceptions.has(name)),
+        [],
+        "these migrations-only index/constraint exceptions no longer describe a difference " +
+          "between the two databases, so they must be deleted from MIGRATIONS_ONLY_FEATURES",
       );
     },
   );
