@@ -127,7 +127,11 @@ The following is the low-level configured-provider resolution. Story, Scan and D
 | 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models; Claude Sonnet is the last rung of Opinion's Automatic only |
 | 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer (whichever one LM Studio has loaded), then Codex Terra; Opinion walks Codex Sol, then Claude Sonnet |
-| 4   | `XAI_API_KEY`                                 | Grok                                                                        |
+
+There is no fourth rung. Grok (xAI) was removed as a provider: `XAI_API_KEY`
+is ignored, the SuperGrok sign-in is gone, and an install that still sets the
+key is told so once at start-up. A saved Custom AI connection, or
+`LLM_BASE_URL` below, still reaches any OpenAI-compatible endpoint you want.
 
 #### Claude Code — configured-provider default, no key
 
@@ -145,17 +149,6 @@ can really write. Codex works the same way, with a one-time code as well as a
 link. See [the editor's manual](editor.md#signing-in-to-a-writing-model).
 
 That is the whole setup. Your Max or Pro subscription powers the desk.
-
-#### Grok through a SuperGrok subscription
-
-Open **Server → Writing models → Grok (SuperGrok)** and choose **Sign in with
-SuperGrok**. The click opens an authorization popup immediately; TownReporter
-redirects it when xAI returns the device-login URL and one-time code. If the
-browser blocks or closes the popup, use the visible authorization link. The
-xAI approval page identifies the OAuth client as **Grok Build**. After approval,
-choose a discovered Grok text model and run the small connection test. This is
-a direct TownReporter connection: it does not use DSH and does not require
-`XAI_API_KEY`. See [Grok with a SuperGrok subscription](grok-oauth.md).
 
 Being signed in to claude.ai in a browser, or in the Claude desktop app, is a
 separate login and does not count — the desk uses the command-line program's
@@ -189,16 +182,6 @@ ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 `ANTHROPIC_EFFORT` is the cost dial, and applies to the API path only. Lower is cheaper and faster; higher reads better.
-
-#### Grok
-
-```
-XAI_API_KEY=xai-...
-# XAI_MODEL=grok-4.5
-# XAI_BASE_URL=https://api.x.ai/v1
-```
-
-`GROK_API_KEY` is accepted as an alias for `XAI_API_KEY`.
 
 #### Any other model — three vars, no extra package
 
@@ -332,9 +315,10 @@ one page already running. Legacy stored `ocr:` records remain extracted-image
 records: their labels continue to say that PDF page order is not established,
 so they need re-ingest or operator review before page citation. Claude Opus
 (API or CLI) and Codex provide vision paths when their prerequisites are met;
-a reachable provider is not a guarantee that a particular scan can be read. Grok
-(SuperGrok) is text-only for OCR and fails clearly without trying another
-provider. Automatic OCR checks its established availability order — Anthropic API,
+a reachable provider is not a guarantee that a particular scan can be read. A
+text-only provider is refused for OCR with the reason stated, and the run moves
+to a vision path rather than trying a model that cannot read an image. Automatic
+OCR checks its established availability order — Anthropic API,
 Codex, Claude Code, then a discovered local vision model. A local model can only
 do it if it is a *vision* model -- pick one marked
 **`· vision`** in the picker (or in the Server page's local-model table).
@@ -831,6 +815,6 @@ Opinion and Write a story share large-document upload, OCR, long pasted text and
 
 0.6.52 keeps model effort as a run setting, not an environment-wide guess: Codex and Claude present only their supported values. Exact selection records the first runtime; technical unavailability may advance to a ready runtime with the switch retained in job history, while a content refusal is final.
 
-In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads only. A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. The SuperGrok device button opens an authorization popup during the click and provides a visible link when a popup is blocked. It still requires the editor to approve authorization at xAI.
+In **Server → Daily scan**, the owner sets the local time, named runtime, supported effort, selected accepted sources, and a source cap from 1 through 12. The scheduler files leads only. A Gemini/OpenAI-compatible connection requires its encrypted key and a model ID; the Gemini form supplies its normal default. Automatic is resolved to one named runtime before the job is queued, and the run record says which one ran.
 
 The Windows lifecycle repair prevents shutdown from terminating protected system descendants by validating process identities and killing only through a verified handle. It cannot safely clean provider/browser descendants after the root process has already crashed; use the remaining process record and warning as an investigation signal, not proof of a clean stop. A fresh Windows packaged-install result is not recorded by this release guide.

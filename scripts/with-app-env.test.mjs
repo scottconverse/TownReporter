@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { parseDotEnv, projectRoot, readDotEnv } from "./with-app-env.mjs";
+import {
+  XAI_REMOVED_WARNING,
+  parseDotEnv,
+  projectRoot,
+  readDotEnv,
+  xaiRemovedWarning,
+} from "./with-app-env.mjs";
 
 /**
  * Windows refuses symlink creation to unprivileged processes unless Developer
@@ -31,10 +37,17 @@ const execFileAsync = promisify(execFile);
 const WRAPPER = join(projectRoot(), "scripts/with-app-env.mjs");
 const PRINT_FLAG = "process.stdout.write(String(process.env.VITE_AUTH_ENABLED));";
 
+/**
+ * The diagnostic line plus whatever the child command printed.
+ *
+ * The wrapper's own WARNING lines are dropped: they depend on the AMBIENT
+ * environment (an operator's `XAI_API_KEY` must not change what these tests
+ * assert about the child's output), and the warning has its own tests below.
+ */
 function childOutputAfterDatabaseDiagnostic(stdout) {
   const [diagnostic, ...childOutput] = stdout.split("\n");
   assert.match(diagnostic, /^\[with-app-env\] DATABASE_URL (?:-> |is set but unparseable|unset )/);
-  return childOutput.join("\n");
+  return childOutput.filter((line) => !line.startsWith("[with-app-env] WARNING:")).join("\n");
 }
 
 function environmentOutsideNodeTestRunner(overrides = {}) {
@@ -212,4 +225,51 @@ test("an ordinary wrapped app command retains its explicit database environment"
     { env: { ...process.env, DATABASE_URL: sentinel } },
   );
   assert.equal(childOutputAfterDatabaseDiagnostic(stdout), sentinel);
+});
+
+/*
+  GR-C removed Grok (xAI) as a provider. An install whose only writing model was
+  `XAI_API_KEY` loses it, so the desk has to say so at start-up rather than
+  silently refusing to draft. These three tests own the sentence, the trigger,
+  and the fact that it reaches stdout (the production start script dies on the
+  first byte of native stderr -- see the comment in with-app-env.mjs).
+*/
+test("warns when XAI_API_KEY or GROK_API_KEY is set, and stays quiet otherwise", () => {
+  assert.equal(xaiRemovedWarning({}), null);
+  assert.equal(xaiRemovedWarning({ XAI_API_KEY: "" }), null, "an empty value is not set");
+  assert.equal(xaiRemovedWarning({ XAI_API_KEY: "xai-test" }), XAI_REMOVED_WARNING);
+  assert.equal(xaiRemovedWarning({ GROK_API_KEY: "grok-test" }), XAI_REMOVED_WARNING);
+  assert.match(XAI_REMOVED_WARNING, /no longer supported/);
+  assert.match(XAI_REMOVED_WARNING, /XAI_API_KEY is ignored/);
+  assert.match(XAI_REMOVED_WARNING, /Models screen/);
+});
+
+test("the wrapper prints the xAI removal warning for a command that starts the app", async () => {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [WRAPPER, process.execPath, "-e", "0"],
+    {
+      env: environmentOutsideNodeTestRunner({
+        XAI_API_KEY: "xai-test",
+        DATABASE_URL: "postgres://sentinel.invalid/xai-warning",
+      }),
+    },
+  );
+  assert.match(stdout, /^\[with-app-env\] DATABASE_URL -> sentinel\.invalid:5432/);
+  assert.ok(
+    stdout.split("\n").includes(`[with-app-env] WARNING: ${XAI_REMOVED_WARNING}`),
+    `the warning must be on stdout; got:\n${stdout}`,
+  );
+});
+
+test("the wrapper prints no warning for an install that has no xAI key", async () => {
+  const env = environmentOutsideNodeTestRunner({ DATABASE_URL: "postgres://sentinel.invalid/quiet" });
+  delete env.XAI_API_KEY;
+  delete env.GROK_API_KEY;
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [WRAPPER, process.execPath, "-e", "0"],
+    { env },
+  );
+  assert.doesNotMatch(stdout, /WARNING/);
 });

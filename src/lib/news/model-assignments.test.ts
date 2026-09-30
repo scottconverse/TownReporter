@@ -19,8 +19,9 @@
  * from memory: `claude-sonnet` takes low..max with medium as its default,
  * `codex-astra` takes low..max, DeepSeek v4.1 Flash takes none/low/high/max,
  * an unknown model id takes nothing, and `forced` (OCR, transcripts) has no
- * Automatic at all. `grok-oauth` is `NO_SURFACE` in the registry, which is why
- * it can be asserted absent from every menu without naming a menu.
+ * Automatic at all. `grok-oauth` has no registry entry at all since GR-C
+ * removed Grok (xAI), which is why it can be asserted absent from every menu
+ * without naming a menu.
  */
 
 import assert from "node:assert/strict";
@@ -451,10 +452,9 @@ describe("the lines the who-does-what selects show", () => {
     assert.equal(label("auto"), "Automatic (ladder)");
   });
 
-  it("names how every kind of provider is connected, including the retired one", () => {
+  it("names how every kind of provider is connected", () => {
     assert.equal(connectionWord("claude-code"), "sign-in");
     assert.equal(connectionWord("codex"), "sign-in");
-    assert.equal(connectionWord("xai-oauth"), "sign-in");
     assert.equal(connectionWord("openai"), "API");
     assert.equal(connectionWord("anthropic"), "API");
     assert.equal(connectionWord("local"), "on this computer");

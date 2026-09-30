@@ -483,7 +483,13 @@ describe("scheduled runtime transport", () => {
     assert.equal(result, "gemini-result");
   });
 
-  it("calls only the saved SuperGrok OAuth adapter with its newsroom and exact model", async () => {
+  /*
+    A scheduled scan row written by an older build can still hold this snapshot.
+    GR-C removed the SuperGrok transport, so no adapter can run it and the run
+    is refused with the generic "invalid snapshot" answer rather than silently
+    reaching for a different provider.
+  */
+  it("refuses a stored SuperGrok scan snapshot instead of switching transport", async () => {
     const snapshot = {
       runtime: "grok-oauth",
       modelChoice: "grok-oauth",
@@ -492,16 +498,14 @@ describe("scheduled runtime transport", () => {
       newsroomId: 501,
     } as const;
     const calls: string[] = [];
-    const result = await runForcedDailyChat(snapshot as any, "system", "user", 99, undefined, {
-      claude: async () => { throw new Error("wrong transport"); },
-      codex: async () => { throw new Error("wrong transport"); },
-      local: async () => { throw new Error("wrong transport"); },
-      xai: async (_system, _user, _maxTokens, options) => {
-        calls.push(`${options.choice}:${options.newsroomId}:${options.model}`);
-        return "grok-result";
-      },
-    });
-    assert.deepEqual(calls, ["grok-oauth:501:grok-4.6"]);
-    assert.equal(result, "grok-result");
+    await assert.rejects(
+      runForcedDailyChat(snapshot as any, "system", "user", 99, undefined, {
+        claude: async () => { calls.push("claude"); throw new Error("wrong transport"); },
+        codex: async () => { calls.push("codex"); throw new Error("wrong transport"); },
+        local: async () => { calls.push("local"); throw new Error("wrong transport"); },
+      }),
+      /forced runtime snapshot is invalid/,
+    );
+    assert.deepEqual(calls, []);
   });
 });

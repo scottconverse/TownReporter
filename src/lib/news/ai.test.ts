@@ -21,14 +21,10 @@ import {
 function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   const prev: Record<string, string | undefined> = {};
   const keys = [
-    "XAI_API_KEY",
-    "GROK_API_KEY",
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
     "OPENAI_API_KEY",
-    "XAI_MODEL",
-    "XAI_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
     "ANTHROPIC_EFFORT",
@@ -71,14 +67,10 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
 async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>) {
   const prev: Record<string, string | undefined> = {};
   const keys = [
-    "XAI_API_KEY",
-    "GROK_API_KEY",
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
     "OPENAI_API_KEY",
-    "XAI_MODEL",
-    "XAI_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
     "ANTHROPIC_EFFORT",
@@ -166,9 +158,13 @@ describe("isGrokAvailable", () => {
     withEnv(BARE, () => assert.equal(isGrokAvailable(), false));
   });
 
-  it("is true when XAI_API_KEY is set", () => {
+  /*
+    GR-C removed xAI entirely: `XAI_API_KEY` is ignored, so it cannot make a
+    provider appear. This used to assert the opposite.
+  */
+  it("ignores XAI_API_KEY, which no longer names a provider", () => {
     withEnv({ ...BARE, XAI_API_KEY: "test-key-not-used" }, () =>
-      assert.equal(isGrokAvailable(), true),
+      assert.equal(isGrokAvailable(), false),
     );
   });
 
@@ -178,16 +174,16 @@ describe("isGrokAvailable", () => {
 });
 
 describe("resolveLlm", () => {
-  it("defaults to Grok when only XAI_API_KEY is set", () => {
-    withEnv({ XAI_API_KEY: "xai-test" }, () => {
-      const llm = resolveLlm();
-      assert.equal(llm?.label, "xAI");
-      assert.equal(llm?.baseUrl, "https://api.x.ai/v1");
-      assert.equal(llm?.model, "grok-4.5");
-    });
+  /*
+    The OpenAI-compatible leg is the operator's own gateway and nothing else.
+    An `XAI_API_KEY` alone used to resolve `https://api.x.ai/v1` here; it now
+    resolves nothing, and the caller falls to the Claude ladder.
+  */
+  it("resolves nothing when only XAI_API_KEY is set", () => {
+    withEnv({ XAI_API_KEY: "xai-test" }, () => assert.equal(resolveLlm(), null));
   });
 
-  it("lets a gateway win over Grok", () => {
+  it("resolves the gateway the operator named", () => {
     withEnv(
       {
         XAI_API_KEY: "xai-test",
@@ -336,7 +332,7 @@ describe("resolveProvider", () => {
     });
   });
 
-  it("prefers Claude over Grok", () => {
+  it("prefers Claude over a stray XAI_API_KEY, which names nothing now", () => {
     withEnv({ ANTHROPIC_API_KEY: "sk-ant-test", XAI_API_KEY: "xai-test" }, () => {
       const p = resolveProvider();
       assert.equal(p?.kind, "anthropic");
@@ -344,7 +340,7 @@ describe("resolveProvider", () => {
     });
   });
 
-  it("puts the CLI ahead of Grok too", () => {
+  it("puts the CLI ahead of a stray XAI_API_KEY too", () => {
     withEnv({ XAI_API_KEY: "xai-test" }, () => {
       assert.equal(resolveProvider()?.kind, "claude-code");
     });
@@ -358,11 +354,16 @@ describe("resolveProvider", () => {
     });
   });
 
-  it("falls back to Grok when the CLI is switched off", () => {
+  /*
+    The last rung of this ladder used to be an xAI gateway built from
+    XAI_API_KEY. GR-C removed it: with the CLI switched off and nothing else
+    configured there is no provider at all, rather than a silent fall back to
+    api.x.ai. The behaviour change is the point -- the startup warning in
+    scripts/with-app-env.mjs is what tells the operator why.
+  */
+  it("resolves nothing at all when the CLI is switched off and only XAI_API_KEY is set", () => {
     withEnv({ ...BARE, XAI_API_KEY: "xai-test" }, () => {
-      const p = resolveProvider();
-      assert.equal(p?.kind, "openai");
-      assert.equal(p?.label, "xAI");
+      assert.equal(resolveProvider(), null);
     });
   });
 
@@ -443,10 +444,8 @@ describe("grokChat", () => {
   it("returns the desk-facing unavailable error when the key is missing", async () => {
     const prev: Record<string, string | undefined> = {};
     for (const k of [
-      "XAI_API_KEY",
       "LLM_API_KEY",
       "LLM_BASE_URL",
-      "GROK_API_KEY",
       "OPENAI_API_KEY",
       "ANTHROPIC_API_KEY",
       "TOWNREPORTER_CLAUDE_CODE",
@@ -763,49 +762,34 @@ describe("model-picker provider readiness", () => {
     }
   });
 
-  it("preflights the explicit SuperGrok choice only through its newsroom OAuth connection", async () => {
-    const result = await probeProvider("grok-oauth", 44, {
-      resolveXaiOauth: async (newsroomId) => {
-        assert.equal(newsroomId, 44);
-        return { modelId: "grok-4.6", label: "Grok Build" };
-      },
+  /*
+    GR-C removed Grok (xAI) as a provider, so there is no longer a SuperGrok
+    transport to preflight or to call. A job that STILL holds the retired id
+    must keep working rather than erroring: `storyModelChoice` normalises it to
+    Automatic, so a stored choice probes and runs on the ladder like any other
+    unrecognised value. These two tests used to assert the OAuth transport; they
+    now assert the fallback, which is the behaviour an existing install sees.
+  */
+  it("probes a stored grok-oauth choice as Automatic, not as a SuperGrok transport", async () => {
+    await withEnvAsync(BARE, async () => {
+      const result = await probeProvider("grok-oauth", 44);
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.equal(result.error, GROK_UNAVAILABLE);
     });
-    assert.deepEqual(result, { ok: true, label: "Grok Build", choice: "grok-oauth" });
   });
 
-  it("routes each supported Opinion effort through SuperGrok OAuth with the selected model", async () => {
-    const calls: unknown[] = [];
-    for (const reasoningEffort of ["low", "medium", "high"] as const) {
-      const result = await grokChat(
-        "system prompt",
-        "user prompt",
-        32,
-        { choice: "grok-oauth", newsroomId: 44, timeoutMs: 12_345, reasoningEffort },
-        {
-          resolveXaiOauth: async () => ({ modelId: "grok-4.6", label: "Grok Build" }),
-          xaiChat: async (input) => {
-            calls.push(input);
-            return { text: "GROK_CONNECTION_OK" };
-          },
-        },
-      );
-      assert.deepEqual(result, { ok: true, text: "GROK_CONNECTION_OK" });
-    }
-    assert.deepEqual(
-      calls.map((call) => (call as { reasoningEffort?: string }).reasoningEffort),
-      ["low", "medium", "high"],
-    );
-    for (const call of calls) {
-      assert.deepEqual(call, {
+  it("sends no call at all for a stored grok-oauth choice, and names no removed provider", async () => {
+    await withEnvAsync(BARE, async () => {
+      const result = await grokChat("system prompt", "user prompt", 32, {
+        choice: "grok-oauth",
         newsroomId: 44,
-        system: "system prompt",
-        user: "user prompt",
-        maxTokens: 32,
-        model: "grok-4.6",
         timeoutMs: 12_345,
-        reasoningEffort: (call as { reasoningEffort: string }).reasoningEffort,
       });
-    }
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.equal(result.error, GROK_UNAVAILABLE);
+    });
   });
 
   it("preflights the discovered newsroom local model without requiring environment variables", async () => {
@@ -1606,7 +1590,6 @@ describe("the planner model respects the provider", () => {
     "LLM_BASE_URL",
     "LLM_API_KEY",
     "LLM_MODEL",
-    "XAI_API_KEY",
   ];
   function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     const prev: Record<string, string | undefined> = {};
@@ -1642,13 +1625,12 @@ describe("the planner model respects the provider", () => {
   });
 
   /*
-    Grok only wins once the CLI is out of the chain. The precedence is
-    LLM_BASE_URL > ANTHROPIC_API_KEY > Claude Code CLI > XAI_API_KEY, and this
-    machine has the CLI installed — my first version of this test set
-    XAI_API_KEY alone and failed, because the CLI legitimately outranked it.
-    The test was wrong, not the code.
+    Precedence is LLM_BASE_URL > ANTHROPIC_API_KEY > Claude Code CLI. There is
+    no fourth rung any more: GR-C removed the xAI gateway, so a machine with
+    the CLI switched off and a stray XAI_API_KEY has NO provider, and naming no
+    planner model is the only honest answer.
   */
-  it("names no model on Grok either", () => {
+  it("names no model when there is no provider left at all", () => {
     withEnv({ XAI_API_KEY: "xai-test", TOWNREPORTER_CLAUDE_CODE: "0" }, () => {
       assert.equal(plannerModel(), "");
     });

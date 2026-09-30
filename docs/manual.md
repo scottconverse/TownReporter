@@ -684,7 +684,10 @@ Low-level configured-provider precedence is below. Per-run explicit choices on S
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story/Scan Automatic to it |
 | `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                             |
 | _nothing_                                       | **Claude, through your Claude Code login**                             |
-| `XAI_API_KEY`                                   | Grok                                                                   |
+
+Grok (xAI) is no longer a provider, so `XAI_API_KEY` is not a rung: it is
+ignored, and an install that still sets it is told so once at start-up. A saved
+Custom AI connection still reaches any OpenAI-compatible endpoint.
 
 ### Drafting scope and evidence review
 
@@ -1311,7 +1314,6 @@ comment on each, is [`.env.example`](../.env.example).
 | `TOWNREPORTER_CODEX_REASONING_EFFORT`                             | Optional per-launch CLI override; unset preserves native config. `high` is the only value verified here; invalid values fail clearly. |
 | `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                                         |
 | `CLAUDE_CLI_PATH`                                                 | Unusual Claude Code binary location                                                                                                   |
-| `XAI_API_KEY`                                                     | Grok                                                                                                                                  |
 | `CRON_SECRET`                                                     | Lets an external monitor ping the job runner                                                                                          |
 | `HOST`                                                            | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it.                |
 | `VITE_AUTH_ENABLED=false`                                         | No login at all. Local only. Never on a public host.                                                                                  |

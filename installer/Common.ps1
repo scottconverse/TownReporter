@@ -256,7 +256,11 @@ function Archive-StaleAppProcessState([string]$StateFile) {
 function Set-AppEnvironment {
   # Clear inherited database/provider/ops options. The explicit provider file is the only override.
   foreach ($item in @(Get-ChildItem Env:)) {
-    if ($item.Name -match '^(DATABASE_URL|TEST_POSTGRES_ADMIN_URL|BETTER_AUTH_|PUBLIC_SITE_URL|VITE_|TOWNREPORTER_|LLM_|ANTHROPIC_|OPENAI_|XAI_|CLAUDE_CLI_PATH|CODEX_CLI_PATH|WATCHDOG_|PGPASSWORD)') { [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process') }
+    # XAI_ was scrubbed here while Grok (xAI) was a provider. It no longer is:
+    # the app reads no XAI_* variable at all, so there is nothing to scrub --
+    # and an inherited XAI_API_KEY now reaches the app's start-up warning,
+    # which is where the operator should read that it is ignored.
+    if ($item.Name -match '^(DATABASE_URL|TEST_POSTGRES_ADMIN_URL|BETTER_AUTH_|PUBLIC_SITE_URL|VITE_|TOWNREPORTER_|LLM_|ANTHROPIC_|OPENAI_|CLAUDE_CLI_PATH|CODEX_CLI_PATH|WATCHDOG_|PGPASSWORD)') { [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process') }
   }
   $env:DATABASE_URL = "postgresql://townreporter:$($config.DatabasePassword)@127.0.0.1:$($config.PgPort)/townreporter"
   $env:BETTER_AUTH_SECRET = $config.AuthSecret
@@ -272,7 +276,10 @@ function Set-AppEnvironment {
   $providerFile = Join-Path $DataRoot 'providers.json'
   if (Test-Path -LiteralPath $providerFile) {
     foreach ($property in (Get-Content -LiteralPath $providerFile -Raw | ConvertFrom-Json).PSObject.Properties) {
-      if ($property.Name -notmatch '^(LLM_(BASE_URL|API_KEY|MODEL)|ANTHROPIC_(API_KEY|MODEL)|OPENAI_API_KEY|XAI_API_KEY|CLAUDE_CLI_PATH|CODEX_CLI_PATH|TOWNREPORTER_(CLAUDE_CODE|CODEX|LOCAL|VOICE_FILE))$') { throw "Unsupported provider setting: $($property.Name)" }
+      # XAI_API_KEY is deliberately NOT admitted any more: TownReporter removed
+      # Grok (xAI) as a provider, so a providers.json naming it is a mistake the
+      # installer should report rather than carry into the app's environment.
+      if ($property.Name -notmatch '^(LLM_(BASE_URL|API_KEY|MODEL)|ANTHROPIC_(API_KEY|MODEL)|OPENAI_API_KEY|CLAUDE_CLI_PATH|CODEX_CLI_PATH|TOWNREPORTER_(CLAUDE_CODE|CODEX|LOCAL|VOICE_FILE))$') { throw "Unsupported provider setting: $($property.Name)" }
       [Environment]::SetEnvironmentVariable($property.Name, [string]$property.Value, 'Process')
     }
   }

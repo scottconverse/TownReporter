@@ -47,6 +47,27 @@ export function readDotEnv(root) {
 }
 
 /**
+ * What an install needs to be told when it still carries an xAI key.
+ *
+ * GR-C removed Grok (xAI) as a provider: the SuperGrok connection, its
+ * transport and the `XAI_API_KEY` fallback are all gone. An operator who set
+ * only `XAI_API_KEY` therefore loses their writing model and falls to the next
+ * rung of the ladder -- which, on a machine with nothing else configured, is
+ * no provider at all. That is a real behavioural change and it must not be a
+ * silent one: this is the sentence the desk prints at start-up.
+ *
+ * Pure, and separate from the printing, so `with-app-env.test.mjs` can assert
+ * the wording and the trigger without spawning a server.
+ */
+export const XAI_REMOVED_WARNING =
+  "Grok (xAI) is no longer supported; XAI_API_KEY is ignored. Choose another model on the Models screen.";
+
+/** The warning this environment needs, or null when it needs none. */
+export function xaiRemovedWarning(env = process.env) {
+  return env.XAI_API_KEY || env.GROK_API_KEY ? XAI_REMOVED_WARNING : null;
+}
+
+/**
  * Translate a child's `exit` `(code, signal)` into this process's exit status.
  *
  * Do not re-raise the signal with `process.kill(process.pid, signal)`: under
@@ -154,6 +175,19 @@ function main(argv) {
   } else {
     console.log("[with-app-env] DATABASE_URL unset -- PGLite in-memory");
   }
+  /*
+    Say the xAI removal out loud, on the same start-up line this wrapper already
+    uses for the database it resolved.
+
+    stdout, NOT stderr, for the same measured reason as the line above: the
+    production start script pipes this command with 2>&1 under
+    $ErrorActionPreference = "Stop", where one byte of native stderr is a
+    terminating error -- the stderr version of the DATABASE_URL line stopped
+    the start script after migrate and took the live paper down to a 502.
+    A warning that cannot be printed is a warning that does not exist.
+  */
+  const xaiWarning = xaiRemovedWarning(env);
+  if (xaiWarning) console.log(`[with-app-env] WARNING: ${xaiWarning}`);
   // `node` is this very runtime — use its real path rather than a PATH lookup.
   // Avoids the shell entirely (and its DEP0190 warning on every run).
   const resolved = command === "node" ? process.execPath : command;

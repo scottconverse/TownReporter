@@ -366,12 +366,11 @@ test("disabled and deleted custom picks remain visible without selecting Automat
 });
 
 /*
-  0.6.63 (Unit Y item 4). The owner's standing instruction is "REMOVE Grok".
-  The registry keeps the entry only because `xai-oauth` still describes the
-  transport the Server page's sign-in card reads (see RETIRED_PROVIDER_IDS in
-  src/lib/news/provider-registry.ts), so the retirement is only real if the
-  MENUS show it: no surface's option list may offer it, and no rendered option
-  may carry the retired value.
+  0.6.63 (Unit Y item 4) took Grok out of every picker; GR-C removed the
+  provider and its transport entirely (`grok-oauth` has no registry entry at
+  all now, see RETIRED_PROVIDER_IDS in src/lib/news/provider-registry.ts), so
+  the retirement is only real if the MENUS show it: no surface's option list
+  may offer it, and no rendered option may carry the retired value.
 */
 test("no picker surface offers SuperGrok", () => {
   for (const scope of ["story", "scan", "opinion", "dark", "forced"]) {
@@ -393,7 +392,7 @@ test("no picker surface offers SuperGrok", () => {
   and its help has to say why, in the one sentence model-choice.ts owns.
 */
 const RETIRED_NOTE =
-  "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected.";
+  "Grok (SuperGrok) has been removed from TownReporter, so this falls back to Automatic. Choose another model on the Models screen.";
 
 function matchesRetiredNote(html) {
   assert.ok(

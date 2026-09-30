@@ -8,6 +8,7 @@ import {
   type AutomaticRungId,
   type PickerProviderId,
   type ProviderId,
+  type RetiredProviderId,
   modelEffort,
   type ModelEffort,
 } from "./provider-registry.ts";
@@ -16,7 +17,11 @@ import type { OcrOptions } from "./ingest.ts";
 
 type LegacyForcedRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
 export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | AutomaticRungId | CustomModelChoice;
-type CliProviderChoice = Exclude<PickerProviderId, "local-model" | "grok-oauth">;
+/* A retired id is excluded as well as `local-model`: `RetiredProviderId` is a
+   NAME with no entry and no transport behind it (GR-C removed Grok/xAI), so it
+   can never be the choice a CLI-transport snapshot names. Written against the
+   type rather than the string, so this file names no retired provider. */
+type CliProviderChoice = Exclude<PickerProviderId, "local-model" | RetiredProviderId>;
 /** One rung of Automatic's ladder, minus the internal "configured" entry. */
 type LadderChoice = Exclude<ProviderId, "configured">;
 /**
@@ -57,14 +62,6 @@ export type NamedForcedRuntimeSnapshot =
       modelChoice: CliProviderChoice;
       transport: "claude-code" | "codex";
       model: string;
-      modelEffort?: ModelEffort;
-    }
-  | {
-      runtime: "grok-oauth";
-      modelChoice: "grok-oauth";
-      transport: "xai-oauth";
-      model: string;
-      newsroomId: number;
       modelEffort?: ModelEffort;
     }
   | {
@@ -147,23 +144,6 @@ export async function validateForcedRuntime(
       model: connection.modelId,
       newsroomId,
       ...(connection.name ? { label: connection.name } : {}),
-      ...(exactEffort ? { modelEffort: exactEffort } : {}),
-    };
-  }
-  if (runtime === "grok-oauth") {
-    const connection = await (
-      await import("./xai-oauth.server.ts")
-    ).resolveXaiOauthConnection(newsroomId);
-    const { probeProvider } = await import("./ai.ts");
-    const ready = await probeProvider(runtime, newsroomId, undefined, "forced");
-    if (!ready.ok) throw new Error(ready.error);
-    const exactEffort = modelEffort(runtime, effort, connection.modelId);
-    return {
-      runtime,
-      modelChoice: runtime,
-      transport: "xai-oauth",
-      model: connection.modelId,
-      newsroomId,
       ...(exactEffort ? { modelEffort: exactEffort } : {}),
     };
   }
@@ -349,21 +329,6 @@ export function parseForcedRuntimeSnapshot(
   }
   if (typeof row.runtime === "string" && typeof row.modelChoice === "string") {
     if (
-      row.runtime === "grok-oauth" &&
-      row.modelChoice === "grok-oauth" &&
-      row.transport === "xai-oauth" &&
-      typeof row.model === "string" &&
-      row.model.trim() &&
-      Number.isSafeInteger(row.newsroomId) &&
-      Number(row.newsroomId) > 0
-    ) {
-      const parsedEffort = row.modelEffort === undefined
-        ? null
-        : modelEffort("grok-oauth", row.modelEffort, row.model);
-      if (row.modelEffort !== undefined && parsedEffort !== row.modelEffort) return null;
-      return row as ForcedRuntimeSnapshot;
-    }
-    if (
       isCustomModelChoice(row.runtime) &&
       row.modelChoice === row.runtime &&
       row.transport === "custom" &&
@@ -380,10 +345,11 @@ export function parseForcedRuntimeSnapshot(
       return row as ForcedRuntimeSnapshot;
     }
     const runtime = row.runtime as ForcedRuntime;
-    // `grok-oauth` is retired from every picker (0.6.63, Unit Y item 4) and has
-    // its own branch above, so a stored row that reaches here on the retired id
-    // is not a snapshot this build can run. `PICKER_PROVIDER_IDS` no longer
-    // contains it, so this is a plain membership answer, not a cast.
+    // A retired id (`RETIRED_PROVIDER_IDS`) has no entry and no transport
+    // behind it since GR-C removed Grok/xAI, so a stored row that reaches here
+    // on one is not a snapshot this build can run -- it falls through to the
+    // generic membership check and returns null. `PICKER_PROVIDER_IDS` does not
+    // contain it, so this is a plain membership answer, not a cast.
     const knownRuntime =
       (["local", "claude-cli", "codex-terra", "codex-sol"] as const).includes(
         runtime as LegacyForcedRuntime,
@@ -443,19 +409,6 @@ export type ForcedChatAdapters<T> = {
       reasoningEffort?: ModelEffort | null;
     },
   ) => Promise<T>;
-  xai?: (
-    system: string,
-    user: string,
-    maxTokens: number,
-    options: {
-      timeoutMs?: number;
-      choice: "grok-oauth";
-      newsroomId: number;
-      model: string;
-      noTools?: boolean;
-      reasoningEffort?: ModelEffort | null;
-    },
-  ) => Promise<T>;
 };
 
 export async function runForcedChat<T>(
@@ -474,18 +427,6 @@ export async function runForcedChat<T>(
       ...options,
       choice: "local-model",
       localModel: valid.localModel,
-      ...(valid.modelEffort ? { reasoningEffort: valid.modelEffort } : {}),
-    });
-  }
-  if (valid.transport === "xai-oauth") {
-    if (!adapters.xai) {
-      throw new Error("The saved SuperGrok OAuth adapter is unavailable for this batch.");
-    }
-    return adapters.xai(system, user, maxTokens, {
-      ...options,
-      choice: "grok-oauth",
-      newsroomId: valid.newsroomId,
-      model: valid.model,
       ...(valid.modelEffort ? { reasoningEffort: valid.modelEffort } : {}),
     });
   }
@@ -523,15 +464,12 @@ export function forcedOcrOptions(
   return {
     provider: snapshot.modelChoice,
     ...(snapshot.modelEffort ? { reasoningEffort: snapshot.modelEffort } : {}),
-    newsroomId:
-      snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
-        ? String(snapshot.newsroomId)
-        : undefined,
+    newsroomId: snapshot.transport === "custom" ? String(snapshot.newsroomId) : undefined,
     localModel: snapshot.transport === "local" ? snapshot.localModel : undefined,
     forcedPlan:
       snapshot.transport === "local"
         ? { kind: "local", baseUrl: snapshot.localModel.baseUrl, model: snapshot.localModel.id }
-        : snapshot.transport === "custom" || snapshot.transport === "xai-oauth"
+        : snapshot.transport === "custom"
           ? undefined
           : {
             kind: snapshot.transport,
@@ -558,7 +496,6 @@ export function forcedRuntimeLabel(snapshot: ForcedRuntimeSnapshot): string {
       ? `${entry.label} (${snapshot.localModel.id})`
       : (entry?.label ?? snapshot.modelChoice);
   }
-  if (snapshot.transport === "xai-oauth") return `Grok (SuperGrok): ${snapshot.model}`;
   if (snapshot.transport === "custom") {
     return `${snapshot.label ?? "Custom AI"}: ${snapshot.model}`;
   }

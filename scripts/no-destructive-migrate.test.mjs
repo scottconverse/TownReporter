@@ -52,15 +52,71 @@ test("the migration runner imports nothing that could wipe the database", () => 
  * A migration file may legitimately drop a constraint, an index, or a column.
  * It may not empty a table. `migrations/` is applied automatically on every
  * build, so anything here runs against production without a human present.
+ *
+ * ONE EXEMPTION, and only one shape of one. GR-C removed Grok (xAI) as a
+ * provider, and with it the `xai_oauth_connections` table's whole reason to
+ * exist: the SuperGrok device-code sign-in, the encrypted credential it held,
+ * and the code that read it are all deleted in the same change. The brief for
+ * that unit asks for the table itself to go, so `0112` drops it. That is a
+ * DROP TABLE, which this gate exists to stop -- so the gate has to say which
+ * drop it accepts rather than being quietly loosened or deleted.
+ *
+ * The exemption is a table NAME, not a file: a migration listed here may drop
+ * exactly the tables named beside it, and nothing else. `0112` is checked below
+ * to contain no TRUNCATE and no DELETE FROM, so it still cannot empty anything
+ * -- it can only remove the table it is listed for. A future migration that
+ * drops a table with live rows is not covered by this entry and still fails.
  */
+const TABLES_A_MIGRATION_MAY_DROP = new Map([
+  [
+    "0112_drop_xai_oauth_connections.sql",
+    {
+      tables: ["xai_oauth_connections"],
+      why: "GR-C: the table held only the removed SuperGrok credential; its reader, transport and sign-in are deleted in the same change",
+    },
+  ],
+]);
+
 test("no migration file empties a table", () => {
   const dir = join(ROOT, "migrations");
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
   assert.ok(files.length > 0, "expected migration files");
   for (const name of files) {
     const sql = readFileSync(join(dir, name), "utf8").replace(/--.*$/gm, "");
+    const exemption = TABLES_A_MIGRATION_MAY_DROP.get(name);
     for (const re of DESTRUCTIVE) {
+      const drops = re.source.includes("DROP");
+      if (drops && exemption) {
+        // The exemption covers `DROP TABLE <name>` and nothing else: every drop
+        // in the file must name a table this migration is allowed to remove.
+        const named = [...sql.matchAll(/\bDROP\s+(TABLE|DATABASE|SCHEMA)\b/gi)];
+        assert.equal(named.length, 1, `${name} may drop exactly one thing; found ${named.length}`);
+        assert.match(
+          named[0][1].toUpperCase(),
+          /^TABLE$/,
+          `${name} is exempt for DROP TABLE only (${exemption.why})`,
+        );
+        const targets = [...sql.matchAll(/\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)];
+        assert.deepEqual(
+          targets.map((match) => match[1].toLowerCase()),
+          exemption.tables,
+          `${name} may drop only ${exemption.tables.join(", ")}`,
+        );
+        continue;
+      }
       assert.doesNotMatch(sql, re, `${name} must not contain ${re}`);
     }
+  }
+});
+
+test("a migration that drops a table must be exempt by exact table name", () => {
+  // The other direction of the same gate: if a DROP TABLE appears in a file
+  // this test does not name, the loop above already fails -- and if the
+  // exemption outlives the migration it names, that is a hole, so it fails
+  // here. An exemption nobody has to re-justify is how "temporarily" becomes
+  // permanent.
+  const dir = join(ROOT, "migrations");
+  for (const name of TABLES_A_MIGRATION_MAY_DROP.keys()) {
+    assert.ok(existsSync(join(dir, name)), `${name} is exempt from the drop gate but no longer exists`);
   }
 });
