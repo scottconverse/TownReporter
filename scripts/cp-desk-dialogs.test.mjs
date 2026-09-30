@@ -288,7 +288,10 @@ const paperUrl = await load("src/lib/paper.ts");
 const preflightUrl = await load("src/lib/news/preflight.ts", {
   "./provider-registry.ts": providerRegistryUrl,
 });
+// U26 (2026-09-30): lead-match.ts builds its proper-noun stoplist from the
+// paper's own place names (PAPER.city/state and PAPER_COUNTY).
 const leadMatchUrl = await load("src/lib/news/lead-match.ts", {
+  "../paper.ts": paperUrl,
   "./preflight.ts": preflightUrl,
 });
 const logicUrl = await load("src/lib/news/editor-dialog-logic.ts", {

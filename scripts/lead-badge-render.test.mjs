@@ -184,8 +184,12 @@ const preflightStub = inlineModule(`
   export function looksLikeProviderAuthFailure() { return false; }
   export function providerAuthTarget() { return ""; }
 `);
+// U26 (2026-09-30): desk-copy.ts's nearDuplicate() asks lead-match.ts for
+// distinguishingOverlap() now (it decides the "looks already printed" chip on
+// subject words rather than raw title overlap). This row only renders a dup
+// it is handed, so the stub answers "no overlap at all".
 const leadMatchStubForCopy = inlineModule(`
-  export function nonStoplistedProperNouns() { return new Set(); }
+  export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
 `);
 const paperModuleStub = inlineModule(`
   export const TOPICS = [];

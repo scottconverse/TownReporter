@@ -734,6 +734,60 @@ describe("Worth a Look presentation", () => {
     assert.equal(dup!.slug, "svvsd-bond-vote");
   });
 
+  /**
+   * U26 (2026-09-30): the owner's Queue. A lead about the Supreme Court
+   * hearing Boulder County's climate suit was chipped "Looks already printed:
+   * Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing
+   * Longmont's Oct. 24 Day of the Dead Celebration" -- two county stories in
+   * one section, sharing a place and a month and nothing else. The pair came
+   * through here (desk-leads' chip is `nearDuplicate`), not through the lead
+   * matcher: it shared two capitalised words that PROPER_NOUN_STOPLIST did
+   * not name, which is all "two proper nouns" ever asked. Restoring the
+   * Longmont-only stoplist makes the first of these chip again.
+   */
+  describe("U26: a shared place and month is not a shared story", () => {
+    /** Same section on both sides, since the section is part of what the
+     * owner's pair had in common. */
+    function chipFor(leadHeadline: string, printedHeadline: string) {
+      return nearDuplicate({ headline: leadHeadline, topic: "council" }, [
+        { slug: "county-piece", headline: printedHeadline, topic: "council", published_at: "2026-09-29T12:00:00Z" },
+      ]);
+    }
+
+    it("does not chip the owner's pair across two Boulder County stories", () => {
+      assert.equal(
+        chipFor(
+          "U.S. Supreme Court to Hear Boulder County Climate Suit Oct. 5",
+          "Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24 Day of the Dead Celebration",
+        ),
+        null,
+      );
+    });
+
+    it("does not chip two county items whose only shared subject-shaped word is 'officials'", () => {
+      // The raw title overlap here is real -- boulder, county, officials,
+      // longmont all appear on both sides -- which is exactly why raw overlap
+      // cannot be what decides this chip.
+      assert.equal(
+        chipFor(
+          "Boulder County officials open new trailhead near Longmont Oct. 5",
+          "Boulder County officials seek volunteers for Longmont cleanup Oct. 24",
+        ),
+        null,
+      );
+    });
+
+    it("does not chip two county items whose only shared subject-shaped word is 'leaders'", () => {
+      assert.equal(
+        chipFor(
+          "Boulder County leaders debate oil and gas rules Oct. 5",
+          "Boulder County leaders celebrate Longmont artists Oct. 24",
+        ),
+        null,
+      );
+    });
+  });
+
   it("marks a YouTube watch URL as youtube kind", () => {
     assert.equal(kindFromSourceUrl("https://www.youtube.com/user/cityoflongmont"), "youtube");
     assert.equal(kindFromSourceUrl("https://www.longmontcolorado.gov/council"), "official");

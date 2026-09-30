@@ -11,6 +11,20 @@ export const PAPER = {
 } as const;
 
 /**
+ * The county this paper covers, shipped beside PAPER's city and state.
+ *
+ * Unit U26 (2026-09-30): the lead matcher has to know the newsroom's own
+ * jurisdiction words, because a region the paper covers is not a subject --
+ * every story out of Boulder County names Boulder County. Without it,
+ * "Boulder" and "County" on two otherwise unrelated headlines read as two
+ * shared facts (see PROPER_NOUN_STOPLIST in src/lib/news/lead-match.ts).
+ *
+ * Longmont sits mostly in Boulder County, the county whose own site is a seed
+ * source below. A self-hoster editing PAPER's place fields edits this one too.
+ */
+export const PAPER_COUNTY = "Boulder";
+
+/**
  * How a reader reaches the editor, if the operator has said.
  *
  * The Corrections page told readers to "write the editor from the About page".

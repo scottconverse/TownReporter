@@ -199,6 +199,104 @@ describe("findMatchingLead: anchor path (real case 2026-09-02)", () => {
   });
 });
 
+/**
+ * U26 (2026-09-30). The owner's Queue, in their words: a lead about the U.S.
+ * Supreme Court hearing Boulder County's climate suit "was chipped 'Looks
+ * already printed: Boulder County Proclaims Hispanic and Latinx Heritage
+ * Month, Listing Longmont's Oct. 24 Day of the Dead Celebration'. They share
+ * nothing but 'Boulder County', an October date, and probably the county
+ * homepage as a source."
+ *
+ * What made the region itself count as evidence was PROPER_NOUN_STOPLIST,
+ * which named only Longmont, city, council and Colorado: any other
+ * jurisdiction in the paper's coverage ("Boulder", "County", "Weld", "State")
+ * was read as a proper noun, and a capitalised place name is exactly what
+ * extractAnchors counts. "Boulder" + "County" is two anchors -- by
+ * ANCHOR_MATCH_MIN_SHARED, the same evidence as a shared meeting date plus a
+ * shared dollar figure -- so a shared region, a shared month and one civic
+ * word were enough. These pairs are all that shape: same place, same month,
+ * different story. Restoring the Longmont-only stoplist makes them match
+ * again.
+ */
+describe("U26 (2026-09-30): a place and a month are not a subject", () => {
+  /** The county's own document index -- the kind of page two sightings out of
+   * one county are both filed against. It is deliberately NOT an index page
+   * by isIndexPageUrl (that function's own tests keep it as a shared source),
+   * so these pairs get every chance the URL path can give them. */
+  const COUNTY_PAGE = ["https://bouldercounty.gov/agendas/"];
+
+  function check(candidate: string, existing: string, urls: string[] = COUNTY_PAGE) {
+    const lead: MatchCandidateLead = { id: 900, status: "new", headline: existing, source_urls: urls };
+    assert.equal(
+      findMatchingLead({ headline: candidate, source_urls: urls }, [lead]),
+      null,
+      `findMatchingLead filed ${JSON.stringify(candidate)} as a repeat of ${JSON.stringify(existing)}`,
+    );
+    assert.equal(
+      matchStrength({ headline: candidate, source_urls: urls }, { headline: existing, source_urls: urls }),
+      null,
+      `matchStrength called ${JSON.stringify(candidate)} the same story as ${JSON.stringify(existing)}`,
+    );
+  }
+
+  it("the owner's exact pair: two Boulder County stories that share a place and a month", () => {
+    check(
+      "U.S. Supreme Court to Hear Boulder County Climate Suit Oct. 5",
+      "Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24 Day of the Dead Celebration",
+    );
+  });
+
+  it("the same pair on the county homepage, which is not evidence of a shared story", () => {
+    // The source both leads most plausibly cited in production. A site home
+    // is an index page (isIndexPageUrl), so it never was shared-URL evidence
+    // -- this locks that in next to the pair it mattered for.
+    check(
+      "U.S. Supreme Court to Hear Boulder County Climate Suit Oct. 5",
+      "Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24 Day of the Dead Celebration",
+      ["https://bouldercounty.gov/"],
+    );
+  });
+
+  it("two county items that share a place, a month, and the word 'commissioners'", () => {
+    check(
+      "Boulder County commissioners approve climate suit funding Oct. 5",
+      "Boulder County commissioners proclaim Hispanic Heritage Month Oct. 24",
+    );
+  });
+
+  it("two county items that share a place, a month, and the word 'officials'", () => {
+    check(
+      "Boulder County officials open new trailhead near Longmont Oct. 5",
+      "Boulder County officials seek volunteers for Longmont cleanup Oct. 24",
+    );
+  });
+
+  it("two county items that share a place, a month, and the word 'leaders'", () => {
+    check(
+      "Boulder County leaders debate oil and gas rules Oct. 5",
+      "Boulder County leaders celebrate Longmont artists Oct. 24",
+    );
+  });
+
+  it("two county items that share a place, a month, and the word 'residents'", () => {
+    check(
+      "Boulder County asks residents about climate plan Oct. 5",
+      "Boulder County thanks residents for heritage month Oct. 24",
+    );
+  });
+
+  it("the paper's own place names are not anchors: Boulder, County, Longmont, Colorado", () => {
+    const anchors = extractAnchors(
+      "Boulder County, Listing Longmont's Colorado Day of the Dead Celebration",
+    );
+    for (const place of ["boulder", "county", "longmont", "longmont's", "colorado"]) {
+      assert.ok(!anchors.has(`noun:${place}`), `"${place}" is the paper's own region, not a fact about a story`);
+    }
+    // ...while a name that is not the newsroom's own region still is one.
+    assert.ok(extractAnchors("Boulder County hears ExxonMobil climate suit Oct. 5").has("noun:exxonmobil"));
+  });
+});
+
 describe("findMatchingLead: QA-1 round 2 adversarial set (2026-09-02)", () => {
   // All 13 pairs from
   // artifacts/gate-townreporter-2026-09-02/artifacts/reverify/qa1-matcher.mjs

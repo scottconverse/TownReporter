@@ -11,6 +11,7 @@
  * Nothing here deletes or hides anything. A killed lead that matches keeps
  * every field it had; the caller (desk.ts) only adds a resurfaced stamp.
  */
+import { PAPER, PAPER_COUNTY } from "../paper.ts";
 
 /** Candidate lead statuses eligible to be matched against. A genuinely new
  * development on an already-published story is still news -- it should
@@ -68,14 +69,68 @@ const HEADLINE_ONLY_THRESHOLD = 0.85;
  */
 export const ANCHOR_MATCH_MIN_SHARED = 2;
 
-/** Proper nouns that are the paper's own furniture, not a distinguishing
- * fact about the story -- excluded from anchor/proper-noun extraction here
- * and reused by desk-copy.ts's nearDuplicate() for the same reason. */
-export const PROPER_NOUN_STOPLIST = new Set([
-  "longmont", "city", "council", "colorado", "townreporter",
+/**
+ * The newsroom's own place names -- the words that say WHERE a story is, not
+ * WHAT it is. Derived from the paper's configured places (PAPER.city,
+ * PAPER.state, PAPER_COUNTY in src/lib/paper.ts) rather than hard-coded, so a
+ * self-hosted paper drops its own region's words instead of Longmont's.
+ *
+ * A multi-word place ("Boulder County", "Colorado Springs") contributes each
+ * of its words: either half alone still names the region.
+ */
+function regionWords(): string[] {
+  return [PAPER.city, PAPER.state, PAPER_COUNTY]
+    .flatMap((place) => place.trim().toLowerCase().split(/[^a-z]+/))
+    .filter(Boolean);
+}
+
+/**
+ * Generic civic vocabulary: the furniture of every government story in every
+ * jurisdiction. "County", "board", "court" and "department" are compatible
+ * with any city hall or county seat anywhere -- the same reason CONTENT_STOPLIST
+ * exists -- so they cannot tell one story from another.
+ *
+ * Deliberately does NOT include the words that name WHO said something rather
+ * than what happened ("commissioners", "officials"): those are the words two
+ * unrelated items on one meeting page most often share, and QA-1's negative
+ * set (NEG-4, NEG-9) depends on them still counting as content words when a
+ * pair shares a real meeting date.
+ */
+const CIVIC_FURNITURE_WORDS = [
+  "county", "state", "city", "town", "village", "board", "commission",
+  "council", "district", "department", "public", "government", "office",
+  "federal", "court", "townreporter",
+];
+
+/** Months and weekdays. Unlike a specific date, a month is compatible with
+ * every story filed that month, so it is never a fact on its own -- see
+ * extractAnchors (a `date:MM-DD` still is). */
+const CALENDAR_WORDS = [
   "january", "february", "march", "april", "may", "june", "july",
   "august", "september", "october", "november", "december",
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+];
+
+/**
+ * Proper nouns that are the paper's own place and civic furniture, not a
+ * distinguishing fact about the story -- excluded from anchor/proper-noun
+ * extraction here and reused by desk-copy.ts's nearDuplicate() for the same
+ * reason.
+ *
+ * U26 (2026-09-30), the owner's Queue: "U.S. Supreme Court to Hear Boulder
+ * County Climate Suit Oct. 5" was chipped "Looks already printed: Boulder
+ * County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's
+ * Oct. 24 Day of the Dead Celebration". The pair shares nothing but "Boulder
+ * County" and an October date -- and the old list, which named only Longmont,
+ * city, council and Colorado, let "Boulder" + "County" count as two shared
+ * anchors: as much evidence, by ANCHOR_MATCH_MIN_SHARED, as a shared meeting
+ * date plus a shared dollar figure. Nothing distinguishes two such headlines
+ * except the region they both cover.
+ */
+export const PROPER_NOUN_STOPLIST = new Set<string>([
+  ...regionWords(),
+  ...CIVIC_FURNITURE_WORDS,
+  ...CALENDAR_WORDS,
 ]);
 
 const MONTH_NUMBER: Record<string, string> = {
@@ -140,7 +195,14 @@ export function extractAnchors(headline: string): Set<string> {
   });
 
   for (const m of working.matchAll(/\b[A-Z][a-zA-Z']{2,}\b/g)) {
-    const w = m[0].toLowerCase();
+    // U26: a possessive is the same name. "Longmont's" was slipping past a
+    // stoplist that names "longmont", so the paper's own city came back as a
+    // distinguishing anchor (noun:longmont's) whenever a headline owned it --
+    // "Boulder County, Listing Longmont's Oct. 24 Day of the Dead
+    // Celebration" is exactly that shape. Folding 's also lands a possessive
+    // name on the same anchor as the plain one, which is what makes it
+    // comparable across two headlines.
+    const w = m[0].toLowerCase().replace(/'s$/, "");
     if (!PROPER_NOUN_STOPLIST.has(w)) anchors.add(`noun:${w}`);
   }
 
@@ -554,7 +616,7 @@ export function sharesStoryPageUrl(a: string[], b: string[]): boolean {
  * every surviving word -- see contentTokens and CONTENT_STOPLIST's doc
  * comment for why scoring civic-agenda furniture ("council approves ...
  * contract at ... meeting") let two different agenda items look like a
- * paraphrase of each other. sharesContentWord is also required explicitly:
+ * paraphrase of each other. sharesDistinguishingWord is also required explicitly:
  * given the thresholds below are all > 0, a nonzero Jaccard/containment
  * score already implies at least one shared content token, but the explicit
  * check keeps that invariant true even if a threshold is ever loosened.
@@ -564,14 +626,14 @@ function headlinesOverlapEnough(a: string, b: string): boolean {
   const tb = contentTokens(b);
   return (
     (jaccard(ta, tb) >= HEADLINE_JACCARD_THRESHOLD || containment(ta, tb) >= HEADLINE_CONTAINMENT_THRESHOLD) &&
-    sharesContentWord(a, b)
+    sharesDistinguishingWord(a, b)
   );
 }
 
 function headlinesAloneMatch(a: string, b: string): boolean {
   const ta = contentTokens(a);
   const tb = contentTokens(b);
-  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesContentWord(a, b);
+  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingWord(a, b);
 }
 
 /** Words at least 4 letters long, present in the headline, and NOT on
@@ -581,7 +643,7 @@ function headlinesAloneMatch(a: string, b: string): boolean {
  * path 2: a shared place name like "Twin Peaks" is already scored as an
  * anchor (noun:twin, noun:peaks), so reusing it here would let two
  * different agenda items about the same place ("Twin Peaks rezoning
- * application" vs "Twin Peaks parking variance") satisfy sharesContentWord
+ * application" vs "Twin Peaks parking variance") satisfy sharesDistinguishingWord
  * on the location alone -- the anchor path needs a *different* piece of
  * evidence that the SUBJECT, not just the place, is the same. Plural/
  * singular variants are folded together (stem) after the stoplist checks,
@@ -604,13 +666,49 @@ function contentTokens(headline: string): Set<string> {
   return new Set(words);
 }
 
+/**
+ * The words two headlines share that say WHAT a story is about, split in two:
+ *
+ *   - `subjects` -- shared content tokens (see contentTokens): furniture and
+ *     proper nouns are already stripped, so what is left is the subject
+ *     vocabulary, "climate", "Heritage", "rezoning".
+ *   - `names` -- shared proper nouns that are NOT the paper's own place or
+ *     civic furniture (nonStoplistedProperNouns): "ExxonMobil", "Bohn Farm",
+ *     "SVVSD". Real names, but names are weaker evidence than subjects: two
+ *     headlines can share a PLACE and nothing else.
+ *
+ * U26 (2026-09-30): exported for desk-copy.ts's nearDuplicate(), which shows
+ * the Queue's "Looks already printed" chip. That chip used to be decided on
+ * raw title overlap, which counts "Boulder" and "County" as evidence exactly
+ * as this matcher's own anchor path did -- see PROPER_NOUN_STOPLIST.
+ */
+export function distinguishingOverlap(a: string, b: string): { subjects: number; names: number } {
+  return {
+    subjects: sharedWordCount(contentTokens(a), contentTokens(b)),
+    names: sharedWordCount(nonStoplistedProperNouns(a), nonStoplistedProperNouns(b)),
+  };
+}
+
+function sharedWordCount(a: Set<string>, b: Set<string>): number {
+  let shared = 0;
+  for (const w of a) if (b.has(w)) shared += 1;
+  return shared;
+}
+
 /** QA-1: required alongside the overlap score for every match path (1, 2,
- * and 3) -- see findMatchingLead and CONTENT_STOPLIST's doc comment. */
-function sharesContentWord(a: string, b: string): boolean {
-  const ta = contentTokens(a);
-  const tb = contentTokens(b);
-  for (const w of ta) if (tb.has(w)) return true;
-  return false;
+ * and 3) -- see findMatchingLead and CONTENT_STOPLIST's doc comment. The
+ * "real subject overlap" requirement as one predicate: the two headlines must
+ * share at least one word that survives contentTokens, i.e. a word that is
+ * neither the paper's own place/civic furniture (PROPER_NOUN_STOPLIST) nor a
+ * proper noun at all. Two headlines can clear every lexical bar below on a
+ * shared PLACE alone ("Boulder County" as two anchors, plus the Jaccard score
+ * that shared proper nouns would otherwise contribute); a shared subject word
+ * is the evidence that they are about the same THING -- "climate",
+ * "Heritage", "ExxonMobil" -- and it is what the owner's 2026-09-30 false
+ * positive ("...Boulder County Climate Suit Oct. 5" against "Boulder County
+ * Proclaims Hispanic and Latinx Heritage Month...") never had. */
+function sharesDistinguishingWord(a: string, b: string): boolean {
+  return sharedWordCount(contentTokens(a), contentTokens(b)) >= 1;
 }
 
 export type MatchCandidateLead = {
@@ -643,7 +741,7 @@ export type MatchCandidateLead = {
  * story as. Returns the matching lead's id, or null when nothing matches.
  *
  * Match rule (three independent paths, any one is sufficient; every path
- * also requires sharesContentWord -- QA-1 round 2, see CONTENT_STOPLIST's
+ * also requires sharesDistinguishingWord -- QA-1 round 2, see CONTENT_STOPLIST's
  * doc comment):
  *   1. Shares at least one normalised source URL AND CONTENT-token overlap
  *      (contentTokens -- furniture words and shared proper nouns stripped,
@@ -692,7 +790,7 @@ function pairMatches(
   if (
     shareUrl &&
     sharedAnchorCount(extractAnchors(candidateHeadline), extractAnchors(leadHeadline)) >= ANCHOR_MATCH_MIN_SHARED &&
-    sharesContentWord(candidateHeadline, leadHeadline)
+    sharesDistinguishingWord(candidateHeadline, leadHeadline)
   ) {
     return true;
   }

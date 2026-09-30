@@ -1,7 +1,7 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
-import { nonStoplistedProperNouns } from "./lead-match.ts";
+import { distinguishingOverlap } from "./lead-match.ts";
 import { TOPICS } from "../paper.ts";
 
 export function organizationFromUrl(url: string): string {
@@ -1357,10 +1357,30 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  * mornings starting Sept. 2" for no reason but sharing the paper's own city
  * name and a weekday/month. Two fixes, both required for the proper-noun
  * path: proper nouns now exclude the same PROPER_NOUN_STOPLIST that
- * lead-match.ts's anchor matcher uses (paper/city furniture, months,
- * weekdays), and a proper-noun match alone is no longer enough -- it also
- * needs the two leads' `topic` to agree, unless titlesOverlap already says
- * yes on its own.
+ * lead-match.ts's anchor matcher uses (the newsroom's own city/state/county,
+ * civic furniture, months, weekdays), and a proper-noun match alone is no
+ * longer enough -- it also needs the two leads' `topic` to agree, unless
+ * titlesOverlap already says yes on its own.
+ *
+ * U26 (2026-09-30): the topic gate was still not enough, and the owner's
+ * Queue showed it. A lead about "U.S. Supreme Court to Hear Boulder County
+ * Climate Suit Oct. 5" was chipped as already printed as "Boulder County
+ * Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24
+ * Day of the Dead Celebration": two county stories, one topic, one region,
+ * one month, no shared subject. Two county stories will always share
+ * "Boulder County" and usually share a section, so both ways in now require
+ * DISTINGUISHING words (see distinguishingOverlap) rather than raw ones:
+ *
+ *   - the titles agree on at least two of them, at least one a subject word
+ *     ("Boulder County officials open ... Longmont" against "Boulder County
+ *     officials seek ... Longmont" shares officials alone -- one word, and a
+ *     civic one -- so it no longer qualifies, where titlesOverlap's raw count
+ *     of boulder/county/officials/longmont did);
+ *   - or the two share two real NAMES and the same section. That is the Bohn
+ *     Farm case below, kept as it was: two genuine names in one place (a
+ *     farm, a portal page, a school district) are evidence a subject word
+ *     alone is not, and the stoplist above is what keeps the region's own
+ *     names from ever counting as one.
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
@@ -1368,10 +1388,13 @@ export function nearDuplicate(
 ): PrintedDup | null {
   for (const p of published) {
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
-    if (
-      titlesOverlap(lead.headline, p.headline) ||
-      (properNounOverlap(lead.headline, p.headline) && sameTopic)
-    ) {
+    const titlesOverlapRaw = titlesOverlap(lead.headline, p.headline);
+    // Nothing else can fire, and the Queue calls this once per published
+    // story per lead: skip the tokenising work in the common case.
+    if (!titlesOverlapRaw && !sameTopic) continue;
+    const { subjects, names } = distinguishingOverlap(lead.headline, p.headline);
+    const titlesAgree = titlesOverlapRaw && subjects >= 1 && subjects + names >= 2;
+    if (titlesAgree || (names >= 2 && sameTopic)) {
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     }
   }
@@ -1524,14 +1547,6 @@ export function killRecordLine(input: {
   return input.reopened
     ? "Reopened — no record of when or why it was killed"
     : "Killed before the desk started recording why — no reason was kept";
-}
-
-function properNounOverlap(a: string, b: string): boolean {
-  const pa = nonStoplistedProperNouns(a);
-  const pb = nonStoplistedProperNouns(b);
-  let shared = 0;
-  for (const w of pa) if (pb.has(w)) shared += 1;
-  return shared >= 2;
 }
 
 export function kindFromSourceUrl(url: string): "youtube" | "official" | "news" | "social" {
