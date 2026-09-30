@@ -1034,7 +1034,13 @@ Read-only, editor-only. Right after Server in the nav.
 
 Shows anonymous page loads, not unique people or completed reads — no cookies,
 no fingerprinting, just a count of how many times an instrumented page loaded.
-Three things:
+Alongside that it shows a **daily visitor estimate** and a **where readers are**
+panel: a city and a country read from the network serving the paper, counted by
+the day and printed only once at least 25 visits have landed there in the range,
+and a visitors figure built from a value the server keeps in memory only, which
+is discarded at midnight and on restart. No address, user-agent or place is ever
+stored as a value, and no reader can be followed from one day to the next — so
+the visitor figure is an estimate that under-counts. Three things:
 
 - **Site** — all-time total, last 7 calendar dates including today, and last
   30 calendar dates including today, added across the home page and published

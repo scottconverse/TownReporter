@@ -30,6 +30,11 @@ import {
   listStatsReportsFn,
   readStatsReportFn,
 } from "@/lib/news/stats-reports";
+import {
+  LOCATION_MIN_VISITS,
+  LOCATION_OTHER_LABEL,
+  UNKNOWN_CITY,
+} from "@/lib/news/stats-privacy";
 
 export const Route = createFileRoute("/desk/stats")({
   head: () => ({ meta: [{ title: "Stats — TownReporter" }] }),
@@ -90,6 +95,15 @@ function pct(share: number): number {
 }
 
 /**
+ * A place as a person would say it. A country that arrived with no usable city
+ * beside it is counted under UNKNOWN_CITY, which is a fold and not a place
+ * name, so it is printed as one.
+ */
+function locationName(row: ReadingStats["locations"][number]): string {
+  return row.city === UNKNOWN_CITY ? `Unknown, ${row.country}` : row.city;
+}
+
+/**
  * "Where visits come from" and the trust panel both print a 0-1 range value.
  * `null` means the row is not a share of loads (an RSS fetch count, a click
  * count), and the panel then prints the count itself.
@@ -113,9 +127,16 @@ const DEVICE_INK = ["var(--bg)", "#111111", "var(--fg)"];
  * side is a person. "Reading right now" is the server's in-memory rolling
  * window, which is never written down and cannot be joined to anything.
  *
- * Where the drawing prints a number the paper cannot honestly measure -- the
- * cities readers are in -- the panel says so instead of guessing. See
- * DECISIONS.md (Q5, Q6).
+ * WHAT THE OWNER'S 2026-09-30 DECISION ADDED (unit U17b): a place, and a daily
+ * visitor count, and nothing else. Both are drawn in the "Where readers are"
+ * panel -- the panel answers both questions about the same readers -- and both
+ * are honest about what they are: a place is printed only above a threshold and
+ * is a city, never a finer grain, and the visitor figure is labelled an estimate
+ * that under-counts, because the value that tells two readers apart lives in
+ * memory and dies at midnight (src/lib/news/stats-visitors.server.ts).
+ *
+ * Every number on this page that the paper cannot honestly measure still says
+ * so rather than guessing.
  */
 function StatsPage() {
   const queryClient = useQueryClient();
@@ -166,6 +187,13 @@ function StatsPage() {
 
   const priorLabel = PRIOR_LABELS[range];
   const data = stats.data;
+  /*
+    The longest bar in "Where readers are", over the places that are drawn AND
+    the folded rest. Reading the first drawn row's count instead would be
+    `undefined` in the one case that matters -- a range where every place is
+    under the threshold, so nothing is drawn but "Other places" still is.
+  */
+  const topVisits = Math.max(data?.locations[0]?.visits ?? 0, data?.otherVisits ?? 0);
 
   return (
     <DeskShell title="Stats" hideTitle>
@@ -395,17 +423,78 @@ function StatsPage() {
             <div className="st-panel">
               <h2 className="st-h3">Where readers are</h2>
               {/*
-                Q5, DECISIONS.md: the paper keeps no location database and does
-                not read the IP for this. The drawing prints cities; printing
-                them would mean either consulting a GeoIP service or storing an
-                address, and both break the rule this page is about.
+                The owner's decision of 2026-09-30 permits a location signal, and
+                this is the whole of it: a city and a country, read from the
+                Cloudflare headers of the network this paper is already served
+                through, counted by the day. No GeoIP vendor is consulted, no
+                latitude, longitude, region, postal code or timezone is read at
+                all, and the IP address is never stored — see
+                src/lib/news/stats-privacy.ts for the allowlist and
+                migrations/0109_stats_location.sql for what is kept.
+
+                The threshold is applied on the server, so a place under it
+                never reaches this page: a city with one visit is a statement
+                about one reader.
               */}
-              <p className="st-panel-body">
-                This paper does not look up where readers are. No location database is consulted, the
-                IP address is never read, and nothing about a reader&rsquo;s city is stored — so this
-                panel has no rows to draw, on purpose.
+              {data.locations.length === 0 && data.otherVisits === 0 ? (
+                <p className="st-panel-body">
+                  No visit in this range carried a place. A place is read only as a city and a
+                  country, from the network this paper is served through — an installation that is
+                  not behind Cloudflare has none at all, and the address itself is never stored.
+                </p>
+              ) : (
+                <>
+                  {data.locations.map((row) => (
+                    <div className="st-ref" key={`${row.country}/${row.city}`}>
+                      <span>{locationName(row)}</span>
+                      <span className="st-track">
+                        <i
+                          style={{
+                            width: `${topVisits > 0 ? (row.visits / topVisits) * 100 : 0}%`,
+                          }}
+                        />
+                      </span>
+                      <b className="st-num">{formatCount(row.visits)}</b>
+                    </div>
+                  ))}
+                  {data.otherVisits > 0 ? (
+                    <div className="st-ref">
+                      <span>{LOCATION_OTHER_LABEL}</span>
+                      <span className="st-track">
+                        <i
+                          style={{
+                            width: `${topVisits > 0 ? (data.otherVisits / topVisits) * 100 : 0}%`,
+                          }}
+                        />
+                      </span>
+                      <b className="st-num">{formatCount(data.otherVisits)}</b>
+                    </div>
+                  ) : null}
+                </>
+              )}
+              <p className="st-note">
+                City and country only, counted by the day. A place is printed once{" "}
+                {formatCount(LOCATION_MIN_VISITS)} visits have been counted there in this range;
+                everything under that is {LOCATION_OTHER_LABEL}, so no row can be about one reader.
               </p>
-              <p className="st-note">The rule is the feature, not a gap in the data.</p>
+
+              {/*
+                The visitor count, in the same panel because it answers the same
+                question about the same readers. Deliberately NOT a range sum:
+                adding days together would count one reader once per day and
+                print the total as "visitors". Two single days instead.
+              */}
+              <p className="st-kpi-l">Visitors</p>
+              <p className="st-big">
+                {formatCount(data.visitors.today)} <span>today</span>
+              </p>
+              <p className="st-note">
+                An estimate, and a floor rather than a headcount. The server tells two readers apart
+                for one day with a value held only in memory, which is thrown away at midnight and
+                again when the server restarts — so it keeps no identifier, cannot follow anyone
+                from one day to the next, and under-counts on a busy or restarted day. Yesterday:{" "}
+                {formatCount(data.visitors.yesterday)}.
+              </p>
             </div>
 
             <div className="st-panel">
@@ -733,12 +822,20 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
           <p className="st-never-body">
             No cookies, no accounts, no stored IP addresses, no fingerprinting, no identifier that
             outlives the day. A reader cannot be followed from one visit to the next, which is why
-            &ldquo;returning readers&rdquo; is not a number this page can show and does not guess.
+            &ldquo;returning readers&rdquo; is not a number this page can show and does not guess
+            — the visitors figure counts a day&rsquo;s readers and forgets them at midnight.
             <strong> How it&rsquo;s counted.</strong> Page loads come from the counter that has run
             since 0.6.14 — one count per page per day with no identity attached. Everything else
             comes from the beacon: a ping every 15 seconds carrying the page, the referrer&rsquo;s
             class and the device&rsquo;s class. Each of those is one of a handful of fixed words, not
             a value read off the reader, and a visit is a page load whose referrer is not this site.
+            <strong> How visitors are counted.</strong> Two readers are told apart for one day by a
+            value the server holds in memory and throws away: it is never written down, it is
+            different for the same reader tomorrow, and it dies when the server restarts — so it
+            counts no one twice and can join no one across days. <strong>How a place is
+            read.</strong> As a city and a country, from the network this paper is served through,
+            counted by the day, and printed only once enough visits have landed there that a row
+            cannot be one person. No location database is consulted and the address is never stored.
           </p>
         </div>
       </div>

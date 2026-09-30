@@ -543,10 +543,25 @@ settings or invite another editor.
 `/desk/stats` — editor-only, right after Server in the nav.
 
 Anonymous page loads, not unique people or completed reads: no cookies, no
-fingerprinting, no IP or user-agent stored, just a daily count. The site total
-covers the home page and published story pages, not every public route. It shows
-all time, the last 7 calendar dates including today, and the last 30 calendar
-dates including today. Published stories are ranked by all-time story-page loads.
+fingerprinting, no IP address or user-agent stored, just a daily count. The site
+total covers the home page and published story pages, not every public route. It
+shows all time, the last 7 calendar dates including today, and the last 30
+calendar dates including today. Published stories are ranked by all-time
+story-page loads.
+
+The page also shows a **daily visitor estimate** and a **"where readers are"**
+panel. Two things are read off a request to produce those and nothing else is:
+the city and country the serving network reports, counted by the day and printed
+only once at least 25 visits have landed in a place within the selected range;
+and the requesting address together with the browser's user-agent, reduced to a
+few words and used only to avoid counting the same reader twice in one day.
+Neither the address nor the user-agent is ever stored or logged, and the value
+that tells two readers apart lives in the server's memory alone — it is thrown
+away at midnight and again on restart, so the visitor figure is an estimate that
+under-counts and no reader can be followed from one day to the next. An
+installation that is not behind Cloudflare reports no place at all, and the
+panel says so. Places are pruned after twelve months; every other Stats count is
+kept indefinitely.
 
 Counting is decoupled from page render on purpose: a client beacon fires
 after a public page has already loaded and pings a lightweight endpoint that

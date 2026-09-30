@@ -182,7 +182,9 @@ if (dbProbe.ok) {
     // migrations/0103_read_hourly.sql. Without this call the two tables would
     // be created on the migrations side only, and this test skips a table that
     // has no ensure* counterpart -- so the parity check would pass by looking
-    // at nothing.
+    // at nothing. Unit U17b added location_daily + visitor_daily to the same
+    // statement list (mirrored by migrations/0109_stats_location.sql), which is
+    // why this one call now covers four tables.
     await reading.ensureReadingSchema();
     await followUps.ensureFollowUpsSchema();
     await draftBatch.ensureDraftBatchSchema();
@@ -582,5 +584,37 @@ it('legal parent locks prevent a foreign FK insert racing the removal scope chec
     await removal?.catch(()=>undefined);await insert;
     await sql.query('drop trigger if exists test_pause_legal_delete on articles');
     await blocker.end();await foreign.end();
+  }
+});
+
+/*
+  Unit U17b: the one Stats table with a finite life is pruned on the same real
+  Postgres the parity check above builds, because the retention rule is SQL --
+  `current_date - make_interval(months => 12)` -- and a PGlite run would not
+  prove the interval arithmetic a deployed database actually performs.
+*/
+it('the stats place prune keeps twelve months on a real Postgres and takes nothing else', {skip,timeout:30000}, async()=>{
+  const {getSql}=await import('../db.ts');
+  const reading=await import('./reading.server.ts');
+  await reading.ensureReadingSchema();
+  const sql=await getSql();
+  const newsroomId=8899;
+  await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
+  try {
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits) values
+        (${newsroomId}, current_date, 'US', 'Longmont', 5),
+        (${newsroomId}, current_date - 400, 'US', 'Lyons', 5),
+        (${newsroomId}, current_date - 364, 'US', 'Berthoud', 5)
+    `;
+    const removed=await reading.pruneLocationDaily();
+    assert.equal(removed,1,'exactly the row past twelve months');
+    const left=await sql<{city:string}>`
+      select city from location_daily where newsroom_id = ${newsroomId} order by city
+    `;
+    assert.deepEqual(left.map((row)=>row.city),['Berthoud','Longmont'],'the boundary itself is kept');
+    assert.equal(await reading.pruneLocationDaily(),0,'and it is idempotent');
+  } finally {
+    await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
   }
 });

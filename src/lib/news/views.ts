@@ -237,12 +237,35 @@ export const getViewStatsFn = createServerFn({ method: "GET" })
 /**
  * The beacon endpoint's whole body, pulled out of src/routes/api/view.ts so
  * a test can call it directly with a plain `Request` instead of standing up
- * the router. Always answers 204, whatever the body contains or whatever
- * `recordView` did underneath -- see the module docstring above for why.
+ * the router. Always answers 204, whatever the body contains, whatever the
+ * rate cap decided, and whatever `recordView` did underneath -- see the module
+ * docstring above for why.
+ *
+ * THE TWO BOUNDS (unit U17b). This endpoint was public, unauthenticated and
+ * unbounded: no rate limit and no cap on the body (the finding is recorded in
+ * the Stats acceptance spec section 1.10; the repo's own audit wording is at
+ * artifacts/audit-townreporter-2026-08-29/01-engineering-deepdive.md:792).
+ * Both bounds now live in src/lib/news/beacon-guard.server.ts -- one process
+ * token bucket with no key of any kind, and a 2 KB body cap enforced by
+ * counting bytes as they arrive. Neither reads a request header, and neither
+ * changes this endpoint's contract: over the cap is still 204, and still
+ * writes nothing.
+ *
+ * The import is DYNAMIC and inside the handler, not at the top of this file.
+ * `beacon-guard` is a `*.server.ts` -- it holds process-wide state -- and this
+ * file is in the client graph, because `desk.stats.tsx` imports
+ * `getViewStatsFn` from it. A static import is denied by TanStack's
+ * import-protection (the `*.server.*` file pattern, in the client
+ * environment) and took the whole build down when this unit first shipped; the
+ * focused suite did not catch it because no unit test builds the client
+ * bundle. This is the same shape src/routes/api/read.ts uses, for the same
+ * reason.
  */
 export async function viewBeaconHandler(request: Request): Promise<Response> {
   try {
-    const body: unknown = await request.json();
+    const { readBeaconJson, takeBeaconToken } = await import("./beacon-guard.server.ts");
+    if (!takeBeaconToken()) return new Response(null, { status: 204 });
+    const body: unknown = await readBeaconJson(request);
     const target =
       body && typeof body === "object" && "target" in body
         ? (body as { target?: unknown }).target

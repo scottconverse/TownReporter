@@ -51,6 +51,28 @@ function About() {
             newspaper. We cover the packets most people never sit through, and we show the exact
             documents we used.
           </p>
+          {/*
+            The reader-facing half of the Stats privacy rule (owner decision,
+            2026-09-30). It says exactly what is read and what is kept, in the
+            same words the desk's own Stats page uses, so a reader can check the
+            two against each other. Written here because the redesign asked for
+            it (docs/design/handoff-2026-09-26/KICKOFF.md:154) and it had never
+            been done: /about carried no privacy statement at all.
+          */}
+          <p>
+            <strong>What we count, and what we keep.</strong> We count page loads, reading time,
+            and which of our own pages and buttons readers use — in aggregate, never per person.
+            No cookies, no accounts, no fingerprinting, and no identifier that outlives the day.
+            Two things are read off a request, each for one purpose only. One is the city and
+            country your network reports, so we can say roughly which places our readers are in;
+            it is counted by the day, and a place is only ever shown once enough visits have
+            landed there that the row cannot be one reader. The other is the address your request
+            arrives from and your browser&rsquo;s user-agent, reduced to a few words and used only
+            to avoid counting you twice in the same day. Neither is stored, logged or exported,
+            and the value that tells two readers apart exists only in the server&rsquo;s memory and
+            is thrown away at midnight. So we cannot tell that you came back yesterday, and we do
+            not try. No location database is consulted, and no analytics service is involved.
+          </p>
           {EDITOR_EMAIL ? (
             <p>
               <strong>Corrections and tips.</strong> Write the editor at{" "}

@@ -11,10 +11,14 @@
        here. The migration file is scanned for the same words outside its
        comments, because the migration is the other half of the schema
        (src/lib/news/schema-parity.test.ts diffs them against real Postgres).
-    2. That `readBeaconHandler` NEVER READS THE REQUEST HEADERS -- the IP, the
-       user agent and the incoming `referer` are all sitting in there and all
-       three are forbidden. It is handed a request whose `headers` getter
-       throws on any access, so a single read fails the case.
+    2. That `readBeaconHandler` reads EXACTLY the header names the owner's
+       2026-09-30 decision permits and no others. It used to read none at all,
+       and this file used to prove that with a `headers` getter that threw; the
+       rule is now a five-name allowlist (src/lib/news/stats-privacy.ts), so it
+       is handed a `Headers` that records every `get()` and the names it asked
+       for are asserted against that list. `cookie`, `referer`, `authorization`
+       and Cloudflare's latitude/longitude/postal/region/timezone headers are
+       all present in the fixture and must not appear among them.
     3. The arithmetic the page depends on: which referrer class a report lands
        in, the visit/internal split (DECISIONS.md:90, Q6), the
        under-ten-seconds rule, the read-through buckets, the rolling window
@@ -34,9 +38,11 @@ import { getPglite, getSql } from "../db.ts";
 import { ensureNewsroomSchema, DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { SITE_TARGET, ensureViewsSchema } from "./views.ts";
 import {
+  BEACON_HEADER_ALLOWLIST,
   ensureReadingSchema,
   exportReadingCsv,
   getReadingStats,
+  pruneLocationDaily,
   readBeaconHandler,
   recordReadBeacon,
   recordTrustCount,
@@ -90,15 +96,45 @@ function num(value: string | number | null | undefined): number {
   return Number(value ?? 0);
 }
 
-/** A `Request` that fails the case the moment anything touches its headers. */
-function headerHostileRequest(body: unknown): Request {
-  const fake = {
-    json: async () => body,
-    get headers(): never {
-      throw new Error("readBeaconHandler read request.headers -- the IP, UA or referer got in");
+/**
+ * A `Request` whose headers RECORD every name read, and a list that fills in as
+ * the handler works.
+ *
+ * This replaces the old `headers`-throws double, which failed the case the
+ * moment anything touched `request.headers`. That was the right test while the
+ * rule was "read no header at all"; the owner's decision of 2026-09-30 replaced
+ * the rule with a narrow allowlist, so the test had to become narrower too. A
+ * recording proxy is strictly stronger than the throw was: it still fails if a
+ * sixth name is read, and it fails if the five allowed ones are read for the
+ * wrong thing, because the names are asserted against the list rather than
+ * assumed to be absent. `cookie`, `referer` and `authorization` are in the
+ * fixture on purpose -- a handler that started reading them would be caught
+ * here, and a throws-double would have caught that too but told us nothing
+ * about which names were the acceptable ones.
+ */
+function recordingRequest(
+  body: unknown,
+  headers: Record<string, string> = {},
+): { request: Request; read: string[] } {
+  const read: string[] = [];
+  const real = new Headers(headers);
+  const recording = new Proxy(real, {
+    get(target, property, receiver) {
+      if (property === "get") {
+        return (name: string) => {
+          read.push(String(name).toLowerCase());
+          return target.get(name);
+        };
+      }
+      return Reflect.get(target, property, receiver);
     },
+  }) as Headers;
+  const fake = {
+    headers: recording,
+    body: undefined,
+    text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
   };
-  return fake as unknown as Request;
+  return { request: fake as unknown as Request, read };
 }
 
 describe("the tables hold aggregates, never a person", () => {
@@ -177,24 +213,99 @@ describe("the tables hold aggregates, never a person", () => {
       assert.ok(code.includes(`create table if not exists ${table}`));
     }
   });
+
+  it("states the same promise in migrations/0109 for the place and visitor tables", () => {
+    const source = readFileSync(
+      join(process.cwd(), "migrations", "0109_stats_location.sql"),
+      "utf8",
+    );
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
+    // The docstring says most of these words on purpose, so it is stripped
+    // first -- otherwise the scan would flag the promise it is written to make.
+    for (const word of [
+      "ip",
+      "user_agent",
+      "cookie",
+      "session",
+      "fingerprint",
+      "token",
+      "hash",
+      "salt",
+      "latitude",
+      "longitude",
+      "postal",
+      "timezone",
+      "region",
+    ]) {
+      assert.ok(
+        !new RegExp(`\\b${word}\\b`, "i").test(code),
+        `migrations/0109_stats_location.sql stores a "${word}"`,
+      );
+    }
+    for (const table of ["location_daily", "visitor_daily"]) {
+      assert.ok(code.includes(`create table if not exists ${table}`));
+    }
+    // The grain is a day, in both tables: no timestamp column at all.
+    assert.ok(!/timestamptz|timestamp/i.test(code), "0109 has a finer grain than a day");
+  });
 });
 
 describe("readBeaconHandler", () => {
-  it("never reads the request headers, and still records the report", async () => {
-    const request = headerHostileRequest({
-      kind: "load",
-      path: "/",
-      refClass: "search",
-      device: "phone",
-    });
+  it("reads exactly the allowlisted header names -- no cookie, no referer, no authorization, no latitude", async () => {
+    const { request, read } = recordingRequest(
+      { kind: "load", path: "/", refClass: "search", device: "phone" },
+      {
+        "content-type": "application/json",
+        "cf-ipcity": "Longmont",
+        "cf-ipcountry": "US",
+        "cf-connecting-ip": "203.0.113.7",
+        "x-forwarded-for": "203.0.113.7, 10.0.0.1",
+        "user-agent": "SentinelAgent/9.9",
+        // Present, and never to be read:
+        cookie: "sentinel=SENTINELCOOKIE",
+        referer: "https://search.example/?q=SENTINELQUERY",
+        authorization: "Bearer SENTINELTOKEN",
+        "cf-iplatitude": "40.1672",
+        "cf-iplongitude": "-105.1019",
+        "cf-postal-code": "80501",
+        "cf-region": "Colorado",
+        "cf-timezone": "America/Denver",
+      },
+    );
     const response = await readBeaconHandler(request);
     assert.equal(response.status, 204);
-    // The write happened with no newsroom of its own -- recordReadBeacon
-    // defaults to the paper's default newsroom, which is what a public
-    // endpoint must do.
+
+    const names = [...new Set(read)];
+    assert.ok(names.length > 0, "the handler read no header at all -- the probe is broken");
+    for (const name of names) {
+      assert.ok(
+        (BEACON_HEADER_ALLOWLIST as readonly string[]).includes(name),
+        `the handler read "${name}", which is not in the allowlist`,
+      );
+    }
+    for (const forbidden of [
+      "cookie",
+      "referer",
+      "authorization",
+      "cf-iplatitude",
+      "cf-iplongitude",
+      "cf-postal-code",
+      "cf-region",
+      "cf-timezone",
+    ]) {
+      assert.ok(!names.includes(forbidden), `the handler read ${forbidden}`);
+    }
+
+    // And the report still landed, with the two signals the allowlist exists
+    // for: the load row, the place, and one visitor.
     const row = await bucket(DEFAULT_NEWSROOM_ID, "/", "search", "phone");
-    assert.ok(row, "the report landed without the handler seeing a header");
+    assert.ok(row, "the report landed");
     assert.ok(num(row.loads) >= 1);
+    const sql = await getSql();
+    const places = await sql<{ city: string }>`
+      select city from location_daily where newsroom_id = ${DEFAULT_NEWSROOM_ID} and city = ${"Longmont"}
+    `;
+    assert.equal(places.length, 1, "the city the allowlist permits was counted");
   });
 
   it("always answers 204, for a good body, a garbage body and an unlisted path alike", async () => {
@@ -204,7 +315,7 @@ describe("readBeaconHandler", () => {
       { kind: "load", path: "/admin", refClass: "direct", device: "computer" },
       null,
     ]) {
-      const response = await readBeaconHandler(headerHostileRequest(body));
+      const response = await readBeaconHandler(recordingRequest(body).request);
       assert.equal(response.status, 204);
     }
     const sql = await getSql();
@@ -774,6 +885,130 @@ describe("the read-back behind /desk/stats", () => {
       await assert.rejects(() => exportReadingCsv(`stranger-${Date.now()}`, "7d"));
     } finally {
       if (guardOwnerId) await sql`delete from newsroom_members where user_id = ${guardOwnerId}`;
+    }
+  });
+});
+
+/*
+  The two signals the owner's 2026-09-30 decision permits: a place, and a daily
+  visitor count. Its own newsroom id and its own editor, so the exact sums the
+  cases above assert on are the sums they were written against.
+*/
+describe("where readers are, and how many", () => {
+  const newsroomId = 9601;
+  const userId = `reading-places-owner-${Date.now()}`;
+
+  before(async () => {
+    await ensureNewsroomSchema();
+    await ensureReadingSchema();
+    const sql = await getSql();
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${userId}, 'owner', ${newsroomId})
+    `;
+    /*
+      One place over the threshold, three under it, and one old enough that a
+      twelve-month range excludes it -- so the range filter and the threshold
+      are both exercised, and the prune below has exactly one row to take.
+    */
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits) values
+        (${newsroomId}, current_date, 'US', 'Longmont', 100),
+        (${newsroomId}, current_date, 'US', 'Lyons', 10),
+        (${newsroomId}, current_date - 1, 'US', 'Lyons', 5),
+        (${newsroomId}, current_date, 'US', 'unknown', 3),
+        (${newsroomId}, current_date - 400, 'US', 'Fort Collins', 7)
+    `;
+    await sql`
+      insert into visitor_daily (newsroom_id, day, visitors) values
+        (${newsroomId}, current_date, 42),
+        (${newsroomId}, current_date - 1, 37)
+    `;
+    // Another paper's places and readers, which must not appear anywhere.
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits)
+      values (${9999}, current_date, 'US', 'Elsewhere', 500)
+    `;
+    await sql`
+      insert into visitor_daily (newsroom_id, day, visitors) values (${9999}, current_date, 999)
+    `;
+  });
+
+  it("prints only the places at or over the threshold, and folds the rest so no row is one reader", async () => {
+    const stats = await getReadingStats(userId, "7d");
+    assert.deepEqual(
+      stats.locations.map((row) => row.city),
+      ["Longmont"],
+      "a place with 10 or 5 visits is not a row",
+    );
+    assert.equal(stats.locations[0]?.visits, 100);
+    assert.equal(stats.locations[0]?.share, 100 / 118, "the bar is over every located visit in range");
+    assert.equal(stats.otherVisits, 18, "Lyons twice and the unknown fold, summed rather than named");
+    assert.ok(
+      !JSON.stringify(stats).includes("Lyons"),
+      "a place under the threshold must not reach the browser at all",
+    );
+    assert.ok(!JSON.stringify(stats).includes("Elsewhere"), "another paper's places are not here");
+  });
+
+  it("prunes the place past twelve months, idempotently, and takes nothing else", async () => {
+    const sql = await getSql();
+    const before = await sql<{ n: number }>`
+      select count(*)::int as n from location_daily where newsroom_id = ${newsroomId}
+    `;
+    assert.equal(num(before[0]?.n), 5);
+    // Inside the longest range the page offers, so the row is still drawn.
+    const stats = await getReadingStats(userId, "12m");
+    assert.deepEqual(stats.locations.map((row) => row.city), ["Longmont"]);
+    assert.equal(stats.otherVisits, 18, "the 400-day-old row is outside the range");
+
+    const removed = await pruneLocationDaily();
+    assert.equal(removed, 1, "exactly the row past twelve months");
+    const after = await sql<{ n: number }>`
+      select count(*)::int as n from location_daily where newsroom_id = ${newsroomId}
+    `;
+    assert.equal(num(after[0]?.n), 4, "nothing else was touched");
+    assert.equal(await pruneLocationDaily(), 0, "and running it again takes nothing");
+  });
+
+  it("shows a day's visitors as single days, never as a range sum", async () => {
+    const stats = await getReadingStats(userId, "7d");
+    assert.equal(stats.visitors.today, 42);
+    assert.equal(stats.visitors.yesterday, 37);
+    // Adding the days would print 79 as "visitors", which is a different and
+    // false number -- there is deliberately no field for it.
+    assert.deepEqual(Object.keys(stats.visitors).sort(), ["today", "yesterday"]);
+  });
+
+  it("draws no place when every place is under the threshold, and still accounts for the visits", async () => {
+    /*
+      The shape that crashed the panel when it was first written: an empty
+      `locations` beside a non-zero `otherVisits`. The panel scaled its bars
+      from `locations[0]`, which is undefined in exactly this case, so the read
+      that produced it has to be pinned -- a range where everything is under the
+      threshold must come back with the visits accounted for in `otherVisits`
+      and nothing drawn.
+    */
+    const onlySmall = 9602;
+    const sql = await getSql();
+    const memberId = `reading-small-owner-${Date.now()}`;
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${memberId}, 'owner', ${onlySmall})
+    `;
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits) values
+        (${onlySmall}, current_date, 'US', 'Lyons', 3),
+        (${onlySmall}, current_date, 'US', 'Berthoud', 2)
+    `;
+    try {
+      const stats = await getReadingStats(memberId, "7d");
+      assert.deepEqual(stats.locations, [], "nothing is drawn under the threshold");
+      assert.equal(stats.otherVisits, 5, "and the visits are still accounted for");
+      assert.equal(stats.visitors.today, 0, "no reader was counted for this paper");
+    } finally {
+      await sql`delete from location_daily where newsroom_id = ${onlySmall}`;
+      await sql`delete from newsroom_members where newsroom_id = ${onlySmall}`;
     }
   });
 });

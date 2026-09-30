@@ -10,6 +10,18 @@ published-story page load contributes to the site total and that story's
 counter. A refresh is another page load and can count again. Opening Stats or
 reading a saved report does not create a public-page view.
 
+Two signals are read while a public page is open and are not stored as values:
+the **city and country** the serving network reports, kept only as a per-day
+count per place and printed only once at least 25 visits have landed there in
+the selected range; and the **requesting address and user-agent**, reduced to a
+few words and used only so the same reader is not counted twice in one day. The
+value that tells two readers apart is held in the server's memory, is never
+written to the database or a log, and is discarded at midnight and on restart —
+so the day's **visitors** figure is an estimate that under-counts, and
+"returning readers" is still not measurable. Places older than twelve months are
+pruned; every other Stats count, including the saved reports below, is kept
+indefinitely.
+
 The live page shows site and published-story totals for:
 
 - Today

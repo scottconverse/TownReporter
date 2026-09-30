@@ -3,6 +3,7 @@ import { drainQueuedJobs, reattachDurableJobsOnStartup } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
+import { pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 
 /**
@@ -82,6 +83,23 @@ export function startUnattendedScheduler(): void {
     statsTicking = true;
     try {
       await tickStatsReports();
+      /*
+        Retention, on the same hourly clock (unit U17b). `location_daily` is the
+        one Stats table with a finite life -- twelve months, the longest range
+        the Stats screen offers -- because it is the only one that describes a
+        place readers were in rather than a page. The delete is idempotent and
+        returns a row count, so a quiet hour costs one cheap query and says
+        nothing.
+
+        Deliberately AFTER the reports: a prune that failed must not stop the
+        day's report from being written, and a report that failed must not stop
+        the prune. Hence its own try/catch, and its own log tag.
+      */
+      try {
+        await pruneLocationDaily();
+      } catch (err) {
+        console.error("[townreporter] stats location prune failed:", err);
+      }
     } catch (err) {
       console.error("[townreporter] stats report tick failed:", err);
     } finally {

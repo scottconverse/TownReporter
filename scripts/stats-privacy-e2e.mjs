@@ -654,6 +654,40 @@ async function theDatabaseHoldsClassesNotPeople() {
   step(`read_hourly has ${columns.length} columns and none of them names a reader: ${columns.join(", ")}`);
   measured("readHourlyColumns", columns);
 
+  /*
+    Unit U17b's two tables, checked the same way. `location_daily` and
+    `visitor_daily` are the only Stats tables that describe a person at all --
+    a place a reader was in, and how many readers the server could tell apart
+    in a day -- so the column-name oracle matters most here. A latitude, a
+    longitude, a region, a postal code or a timezone column would each be a
+    finer fact than the rule permits and each fails this list.
+  */
+  for (const table of ["location_daily", "visitor_daily"]) {
+    const names = (
+      await pg.query(
+        `select column_name from information_schema.columns
+         where table_name = '${table}' order by column_name`,
+      )
+    ).rows.map((r) => r.column_name);
+    if (names.length === 0) fail(`${table} does not exist after this walk`);
+    for (const name of names) {
+      const words = name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+      if (FORBIDDEN_NAME.test(words) && name !== "newsroom_id")
+        fail(`${table} has a column naming a person: ${name}`);
+    }
+    step(`${table} has ${names.length} columns and none of them names a reader: ${names.join(", ")}`);
+    measured(`${table}Columns`, names);
+  }
+  const locationTypes = (
+    await pg.query(
+      `select column_name, data_type from information_schema.columns
+       where table_name in ('location_daily', 'visitor_daily')`,
+    )
+  ).rows;
+  if (locationTypes.some((row) => /timestamp/i.test(String(row.data_type))))
+    fail("a stats place or visitor table has a finer grain than a day");
+  measured("statsLocationTypes", locationTypes);
+
   const rows = (
     await pg.query(
       `select ref_class, path, sum(loads)::int as loads, sum(visits)::int as visits,
