@@ -440,12 +440,19 @@ explicit override), the desk says exactly that instead of "Empty model
 response".
 
 **Per-newsroom pick.** Choosing a model in the picker saves that choice for
-this newsroom — every draft, scan, and dig uses it until changed. A saved pick
-sticks even after a different model is loaded elsewhere: the desk does not
-quietly re-point a decision an editor made. If that model later disappears from
-the server's list, the desk falls back to the current default and the picker
-says so in one line, rather than failing. If it is still listed but not in
-memory, the run stops and says so (above) rather than loading it.
+this newsroom — every draft, scan, and dig uses it until changed. Saving it is
+the owner's, because the address it holds is where every local-model prompt and
+the operator's `LLM_API_KEY` go: an editor sees the current choice read-only and
+is refused with "Only the owner can change model connections." The address
+itself must be this computer (loopback) or one the desk's own discovery just
+found; anything else is refused, and a stored choice that is not one of those is
+not used either — the desk falls back to the discovered default and the picker
+says which address it would not send work to. A saved pick sticks even after a
+different model is loaded elsewhere: the desk does not quietly re-point a
+decision the owner made. If that model later disappears from the server's list,
+the desk falls back to the current default and the picker says so in one line,
+rather than failing. If it is still listed but not in memory, the run stops and
+says so (above) rather than loading it.
 
 **Every AI call site has the picker.** This is a standing rule, not new to
 local models: Command Center's composer, every Queue row, the Story page,

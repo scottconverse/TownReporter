@@ -70,7 +70,22 @@ let current;
 let connections = [];
 export function __setConnections(data) { connections = data; }
 export function __setAvailability(data) { current = data; }
-export const useQuery = ({ queryKey }) => ({ data: queryKey[0] === "custom-ai-connections" ? connections : current });
+
+/*
+  The desk role. \`LocalModelSelect\` asks \`myDesk()\` who is looking, because the
+  stored local-model pick is owner-only on the server -- a non-owner gets the
+  choice READ-ONLY with one line instead of a select that can only be refused.
+  The stub answers "owner", which is what most cases in this file are about;
+  \`__setRole\` covers the editor's read-only answer below.
+*/
+export let role = "owner";
+export function __setRole(next) { role = next; }
+export const myDesk = async () => ({ ok: true, role, newsroomId: 1, claimed: true });
+export const useQuery = ({ queryKey }) => {
+  if (queryKey[0] === "custom-ai-connections") return { data: connections };
+  if (queryKey[0] === "my-desk") return { data: { ok: true, role, newsroomId: 1, claimed: true } };
+  return { data: current };
+};
 export const getCustomAiConnectionsFn = async () => connections;
 export const providerAvailability = async () => current;
 export const PROVIDER_AVAILABILITY_QUERY_KEY = ["provider-availability"];
@@ -110,6 +125,7 @@ const { ModelPicker } = await import(
       "@/lib/news/provider-availability-key": availabilityStubUrl,
       "@/lib/news/provider-settings": availabilityStubUrl,
       "@/lib/news/custom-ai-settings": availabilityStubUrl,
+      "@/lib/news/claim": availabilityStubUrl,
       "@tanstack/react-query": availabilityStubUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
@@ -214,6 +230,39 @@ test("disabled picker retains accessible setup help, associated label, and techn
   assert.ok(selectId, "select must have an ID for its explicit label");
   assert.ok(html.includes(`for="${selectId}"`), "visible label must identify the select");
   assert.doesNotMatch(html, /<details[^>]*disabled|<summary[^>]*disabled/);
+});
+
+/*
+  The stored local-model pick is owner-only on the server (`saveLocalModel`,
+  src/lib/news/provider-settings.ts): the address that pick holds is where every
+  local-model prompt AND the operator's LLM_API_KEY go. So an editor sees the
+  choice -- which model would run -- and one line saying who can change it, and
+  the owner keeps the real select.
+*/
+test("a non-owner sees the local model choice read-only, with the owner-only line", () => {
+  availabilityStub.__setAvailability(undefined);
+  availabilityStub.__setRole("editor");
+  try {
+    const html = renderToStaticMarkup(createElement(ModelPicker, { value: "local-model", onChange() {} }));
+    assert.match(html, /Only the owner can change model connections\./);
+    // The label is still drawn, and the read-only branch names the choice
+    // itself (the stub's catalog is empty and no pick is stored).
+    assert.match(html, /On-device model/);
+    assert.match(html, /No local model is chosen for this desk\./);
+    // No way to change it: no model list and no Refresh button for an editor.
+    assert.doesNotMatch(html, /Choose a model…/);
+    assert.doesNotMatch(html, /Use whatever is loaded/);
+    assert.doesNotMatch(html, /model-picker-refresh/);
+  } finally {
+    availabilityStub.__setRole("owner");
+  }
+});
+
+test("the owner keeps the local model controls", () => {
+  availabilityStub.__setAvailability(undefined);
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "local-model", onChange() {} }));
+  assert.match(html, /model-picker-refresh/);
+  assert.doesNotMatch(html, /Only the owner can change model connections\./);
 });
 
 /*

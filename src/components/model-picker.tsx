@@ -34,6 +34,7 @@ import {
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { myDesk } from "@/lib/news/claim";
 import { writerIsReady } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
@@ -128,6 +129,17 @@ function notSetUpHelp(option: ModelChoiceOption): string {
 function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "dark" | "forced" }) {
   const qc = useQueryClient();
   const selectId = useId();
+  /*
+    Who is looking. The stored pick decides where every local-model prompt and
+    the operator's key go, so the SAVE is owner-only on the server
+    (`saveLocalModel`, provider-settings.ts) -- an editor pressing this select
+    would be refused, and a control that can only be refused should not be
+    drawn. Undefined (the read has not answered yet) is deliberately treated as
+    "not known yet, draw the real control": the owner's own screen must not
+    flash read-only, and the refusal is the server's either way.
+  */
+  const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const readOnly = me.data !== undefined && me.data.role !== "owner";
   const catalog = useQuery({
     queryKey: ["local-model-catalog"],
     queryFn: () => localModelCatalog(),
@@ -180,6 +192,29 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   const notice = choice.data?.notice;
 
   if (catalog.isLoading) return null;
+
+  if (readOnly) {
+    /*
+      Read-only, with the choice still named: an editor whose story will run on
+      a local model should be able to see WHICH one. The sentence is the same
+      one the server refuses with (`ONLY_OWNER_CHANGES_MODEL_CONNECTIONS`,
+      src/lib/news/membership.ts); client components cannot import that module,
+      so it is written out here.
+    */
+    return (
+      <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
+        <span className="model-picker-label">
+          {selectedModel?.cloud ? "Ollama Cloud model" : "On-device model"}
+        </span>
+        <span className="model-picker-help">
+          {selected
+            ? `${selected.id}${selectedServer ? ` · ${localServerLabel(selectedServer.kind, selectedServer.baseUrl)}` : ""}`
+            : "No local model is chosen for this desk."}
+        </span>
+        <span className="model-picker-help">Only the owner can change model connections.</span>
+      </div>
+    );
+  }
 
   return (
     <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>

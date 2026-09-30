@@ -28,7 +28,13 @@ import { createServerFn } from "@tanstack/react-start";
 */
 import { authMiddleware } from "../auth/middleware.ts";
 import { ensureSchemaOnce, getSql } from "../db.ts";
-import { requireEditor, ForbiddenError, DEFAULT_NEWSROOM_ID, ensureNewsroomSchema } from "./membership.ts";
+import {
+  requireEditor,
+  ForbiddenError,
+  ONLY_OWNER_CHANGES_MODEL_CONNECTIONS,
+  DEFAULT_NEWSROOM_ID,
+  ensureNewsroomSchema,
+} from "./membership.ts";
 import {
   PROVIDER_REGISTRY,
   clampBudgetMs,
@@ -197,43 +203,69 @@ export async function readProviderOverrides(
   }
   const explicitScoped = scope ? await rawScopedLocalModel(newsroomId, scope) : null;
   const stored = explicitScoped ?? out[LOCAL_MODEL_PROVIDER_ID]?.localModel;
+  /*
+    The live catalog, fetched at most once per call and never allowed to fail
+    the read: this is a budgets lookup every draft/scan/dig makes, and discovery
+    never throws anyway (local-models.ts).
+  */
+  let catalog: LocalCatalog | null = null;
+  const liveCatalog = async (): Promise<LocalCatalog | null> => {
+    if (catalog === null) {
+      try {
+        catalog = await refreshLocalCatalog();
+      } catch {
+        catalog = null;
+      }
+    }
+    return catalog;
+  };
   if (isUseLoadedLocalModelPick(stored)) {
     /*
       "Use whatever is loaded" must be resolved here, for every caller, or
       `grokChat` would be handed the literal sentinel as a base URL. This is
       the one pick that is resolved at call time rather than at save time, so
       it is the one pick a run can act on differently from the one before it.
+
+      Nothing loaded is the honest answer, and `probeProvider` refuses with the
+      item-2 sentence before any call.
     */
-    let loaded: { baseUrl: string; id: string } | null = null;
-    try {
-      loaded = pickLoadedLocalModelAcrossServers((await refreshLocalCatalog()).servers);
-    } catch {
-      // Discovery never throws (local-models.ts), but a budgets read must not
-      // fail a run over it: nothing loaded is the honest answer, and
-      // `probeProvider` refuses with the item-2 sentence before any call.
-    }
+    const loaded = pickLoadedLocalModelAcrossServers((await liveCatalog())?.servers ?? []);
     out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: loaded };
     return out;
   }
-  if (explicitScoped) {
+  if (explicitScoped && storedAddressIsAllowed(explicitScoped.baseUrl, await liveCatalog())) {
     // A temporary Ollama outage must never silently send the editor's chosen
-    // cloud work to an unrelated LM Studio model on another server.
+    // cloud work to an unrelated LM Studio model on another server. U7b: and an
+    // address the desk may not send work to is not kept at all -- it falls
+    // through to the catalog fallback below, exactly like a vanished model.
     out[LOCAL_MODEL_PROVIDER_ID] = { ...(out[LOCAL_MODEL_PROVIDER_ID] ?? {}), localModel: explicitScoped };
     return out;
   }
   try {
-    const catalog = await refreshLocalCatalog();
-    const resolved = stillListed(stored, catalog)
-      ? stored
+    /* A failed lookup is an empty catalog, not a thrown one: "nothing was
+       discovered" is a real answer here (`storedAddressIsAllowed` treats it as
+       "not in the list", and `preferredLocalModel` resolves to nothing). */
+    const live: LocalCatalog =
+      (await liveCatalog()) ?? { servers: [], defaultModel: null, checkedAt: 0 };
+    /*
+      U7b: the same address rule `saveLocalModel` enforces, applied to what is
+      already stored -- a row can predate the rule, or have been written by
+      hand. A stored pick the desk may not use is dropped to `null` here, which
+      is the fallback a vanished model already gets: the preferred local model,
+      else nothing.
+    */
+    const usable = stored && storedAddressIsAllowed(stored.baseUrl, live) ? stored : null;
+    const resolved = stillListed(usable, live)
+      ? usable
       : // Unit BB item 3, for a newsroom that has never picked anything:
         // prefer whatever is in memory over any named model, so the first
         // run after the owner loads something runs on it. A stored pick that
         // has vanished keeps the old fallback -- an editor chose it, and
         // silently moving them to a different local model is the failure
         // mode this comment above is about.
-        stored
-        ? preferredLocalModel(scope, catalog)
-        : (pickLoadedLocalModelAcrossServers(catalog.servers) ?? preferredLocalModel(scope, catalog));
+        usable
+        ? preferredLocalModel(scope, live)
+        : (pickLoadedLocalModelAcrossServers(live.servers) ?? preferredLocalModel(scope, live));
     // "No rows at all" must mean exactly that -- an empty object, the same
     // shipped-defaults contract every other provider id already has. A
     // newsroom with no stored row and no discovered local server (the
@@ -305,6 +337,113 @@ async function rawScopedLocalModel(newsroomId: number, scope: LocalModelScope) {
   return scoped[0] ? { baseUrl: scoped[0].base_url, id: scoped[0].model_id } : null;
 }
 
+/*
+  ---------------------------------------------------------------------------
+  The address rule for a STORED local-model pick
+  ---------------------------------------------------------------------------
+
+  `ai.ts`'s local gateway sends the full prompt AND the operator's
+  `LLM_API_KEY` / `OPENAI_API_KEY` to whatever `baseUrl` one of these two tables
+  holds, through a plain `fetch` with no SSRF guard. So a stored address is not
+  an editorial preference like a timeout -- it is an address the desk will hand
+  the operator's credentials to.
+
+  One rule, applied at both ends. `saveLocalModel` refuses a new address that is
+  not loopback and not in the live catalog; every READER below applies the same
+  rule to what is already stored, because a row can predate the save check or
+  have been written straight into the table.
+*/
+
+/**
+ * The hosts a stored local-model address is allowed to name: this computer,
+ * and nothing else.
+ */
+function isLoopbackHost(hostname: string): boolean {
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  return bare === "localhost" || bare === "127.0.0.1" || bare === "::1";
+}
+
+/**
+ * May the desk send work to this address?
+ *
+ * Yes for loopback -- a model server on the box running TownReporter, which is
+ * what "Local model" means and what `LLM_BASE_URL` points at -- and yes for an
+ * address this computer's own discovery just found (`refreshLocalCatalog`, the
+ * same catalog `resolveLocalModelChoice` resolves picks against), because a
+ * discovered address is one the desk already talks to. No for anything else: an
+ * arbitrary URL arrives from a browser, and a run to it would be the one that
+ * hands a stranger the operator's key.
+ *
+ * Trailing slashes are ignored on the comparison only: discovery stores
+ * `http://127.0.0.1:11434/v1` and a picker may send the same address with a
+ * slash on the end, which is the same server and must not be denied for it.
+ *
+ * A stored address the desk will not use is treated exactly like a pick whose
+ * model vanished: the run falls back to the catalog's preferred local model, or
+ * to none, and the picker says why. `null` catalog means "nothing was
+ * discovered" (or discovery failed), which is the same answer as "not in it".
+ */
+function storedAddressIsAllowed(baseUrl: string, catalog: LocalCatalog | null): boolean {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  if (isLoopbackAddress(trimmed)) return true;
+  // Anything that is not a URL at all matches no server here, so it is refused
+  // by the same line that refuses an address nobody discovered.
+  return Boolean(catalog?.servers.some((server) => server.baseUrl === trimmed));
+}
+
+/** Is this address this computer? Answers without touching the network. */
+function isLoopbackAddress(baseUrl: string): boolean {
+  try {
+    return isLoopbackHost(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `storedAddressIsAllowed` for a save, which has to fetch the catalog first.
+ *
+ * Loopback is answered before the lookup, exactly as it was in U7: a save to
+ * this computer must not depend on discovery, and must not start it either --
+ * `refreshLocalCatalog` is a shared, cached, network-touching call and a
+ * loopback address never needs its answer.
+ */
+async function localModelAddressIsAllowed(baseUrl: string): Promise<boolean> {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  if (isLoopbackAddress(trimmed)) return true;
+  let catalog: LocalCatalog | null = null;
+  try {
+    catalog = await refreshLocalCatalog();
+  } catch {
+    // Discovery never throws (local-models.ts), but an address must not be
+    // admitted because the check that would have refused it failed.
+    catalog = null;
+  }
+  return storedAddressIsAllowed(trimmed, catalog);
+}
+
+/** The host of a stored address, for the sentence that explains a refusal. */
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+}
+
+/**
+ * What the picker says about a stored address the desk will not use. The
+ * sentence names the address, because "somewhere else" is not something an
+ * owner can act on, and names who can fix it.
+ */
+function storedAddressRefusedNotice(choice: { baseUrl: string; id: string }): string {
+  return (
+    `${choice.id} at ${hostOf(choice.baseUrl)} is not on this computer or in the discovered list, ` +
+    `so the desk will not send work there. The owner can choose again.`
+  );
+}
+
 export async function resolveLocalModelChoice(
   newsroomId: number = DEFAULT_NEWSROOM_ID,
   scope?: LocalModelScope,
@@ -341,6 +480,24 @@ export async function resolveLocalModelChoice(
   }
 
   if (stillListed(stored, catalog)) return { override: stored, source: "stored", notice: null, catalog };
+
+  /*
+    U7b: a stored pick is only usable if the desk may send work to its address.
+    An address that is neither on this computer nor in the discovered catalog is
+    refused HERE, before the keep-your-choice branch below -- that branch exists
+    so a temporary Ollama outage does not move a decision, not so an editor's
+    old row can point the next run at a stranger's server. The fallback is the
+    same one a vanished model gets, and the notice says which address and who
+    can fix it.
+  */
+  if (!storedAddressIsAllowed(stored.baseUrl, catalog)) {
+    const replaced = preferredLocalModel(scope, catalog);
+    const notice = storedAddressRefusedNotice(stored);
+    return replaced
+      ? { override: replaced, source: "default", notice: `${notice} Using ${replaced.id} instead.`, catalog }
+      : { override: null, source: "default", notice, catalog };
+  }
+
   if (scope && await rawScopedLocalModel(newsroomId, scope)) {
     return { override: stored, source: "stored", notice: `${stored.id} is not reachable or listed right now. This job will keep your choice and report an error if it cannot connect.`, catalog };
   }
@@ -358,13 +515,40 @@ export async function resolveLocalModelChoice(
 
 export type SaveLocalModelResult = { ok: true } | { ok: false; error: string };
 
-/** Any editor may pick a local model -- it is not a timing/security decision. */
+/**
+ * Store (or clear) the newsroom's local-model pick.
+ *
+ * Owner-only, enforced here on the server and not merely hidden in the page:
+ * this column decides where every local-model prompt and the operator's key go.
+ * The address is checked too -- loopback, or an address discovery found -- so
+ * an address typed into a browser can never become the place the desk sends the
+ * operator's credentials. Read-only callers (`getLocalModelChoice`) stay open to
+ * every editor, because knowing which model is chosen is not a way to change it.
+ */
 export async function saveLocalModel(
   userId: string,
   choice: { baseUrl: string; id: string } | null,
   scope?: LocalModelScope,
 ): Promise<SaveLocalModelResult> {
   const me = await requireEditor(userId);
+  if (me.role !== "owner") {
+    throw new ForbiddenError(ONLY_OWNER_CHANGES_MODEL_CONNECTIONS);
+  }
+  /*
+    "Use whatever is loaded" is not an address at all -- it is the sentinel the
+    run resolves against the live catalog (`resolveLocalModelChoice`), so there
+    is nothing here to point anywhere and nothing to check.
+  */
+  if (choice && !isUseLoadedLocalModelPick(choice)) {
+    if (!(await localModelAddressIsAllowed(choice.baseUrl))) {
+      return {
+        ok: false,
+        error:
+          "A local model must be on this computer, or one the desk found on it. " +
+          "Use an address like http://127.0.0.1:11434/v1, or choose a model from the list.",
+      };
+    }
+  }
   await ensureProviderSettingsSchema();
   const sql = await getSql();
   if (scope) {
