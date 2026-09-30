@@ -340,7 +340,22 @@ export function buildCodexArgs(input: {
     "--disable", "plugins",
     "--disable", "multi_agent",
     "--disable", "hooks",
-    ...(input.webSearch ? ["--enable", "standalone_web_search"] : []),
+    /*
+      Web search is stated in both directions, never left to the CLI default.
+      The writing pass holds the private voice and the gathering pass's
+      untrusted page text, so an inherited-on search there would be the same
+      exfiltration channel SEC-3 closed on the Claude side.
+
+      `--disable <FEATURE>` is the CLI's own documented spelling
+      (`codex --help`: "Equivalent to `-c features.<name>=false`") and the
+      exact counterpart of the `--enable` in the other branch of this same
+      expression. Verified against codex-cli 0.145.0: the flag is accepted
+      (exit 0, no warning) and a near-miss name is rejected with "Unknown
+      feature flag", so this line does work rather than being ignored.
+    */
+    ...(input.webSearch
+      ? ["--enable", "standalone_web_search"]
+      : ["--disable", "standalone_web_search"]),
     "exec",
     "--ignore-user-config",
     // Packaged installations run from an extracted, non-Git directory. This

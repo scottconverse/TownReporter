@@ -26,6 +26,7 @@ const EXPECTED_NATIVE_ARGS = [
   "--disable", "plugins",
   "--disable", "multi_agent",
   "--disable", "hooks",
+  "--disable", "standalone_web_search",
   "exec",
   "--ignore-user-config",
   "--skip-git-repo-check",
@@ -389,6 +390,47 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.equal(researched[searchFlag + 1], "standalone_web_search");
   });
 
+  /*
+    The off direction has to be stated, not inherited. Codex's own default for
+    `standalone_web_search` happens to be off (codex-cli 0.145.0: `codex
+    features list` reports it "under development", effective `false`), but a
+    writing call holds the private voice and the gathering pass's untrusted
+    page text, and a default is a thing the installed CLI — or the operator's
+    own config.toml — is free to change. SEC-3 closed exactly this channel on
+    the Claude side by removing the tools from the call; here the equivalent
+    is naming the flag.
+
+    `--disable <FEATURE>` is the CLI's documented spelling (`codex --help`:
+    "Equivalent to `-c features.<name>=false`"), and the installed CLI both
+    accepts it (exit 0) and rejects a near-miss name with "Unknown feature
+    flag", so this is a flag that does something rather than one that is
+    silently ignored.
+  */
+  it("turns standalone web search off explicitly when the call is not authorized to search", () => {
+    for (const webSearch of [false, undefined]) {
+      const args = buildCodexArgs({ model: "gpt-5.6-sol", webSearch });
+      const last = args.lastIndexOf("--disable");
+      assert.equal(
+        args[last + 1],
+        "standalone_web_search",
+        "a call with no authorization to search must disable web search by name",
+      );
+      assert.equal(
+        args.includes("--enable"),
+        false,
+        "a call with no authorization to search must not enable any feature",
+      );
+    }
+
+    const researched = buildCodexArgs({ model: "gpt-5.6-sol", webSearch: true });
+    assert.equal(researched[researched.lastIndexOf("--enable") + 1], "standalone_web_search");
+    assert.equal(
+      researched[researched.lastIndexOf("--disable") + 1],
+      "hooks",
+      "the authorized research call must not also carry a web-search disable",
+    );
+  });
+
   it("attaches page images via the verified `codex exec -i/--image <FILE>...` flag, after `exec`", () => {
     const args = buildCodexArgs({ model: "gpt-5.6-sol", imagePaths: ["C:\\tmp\\page.jpg"] });
     const execIdx = args.indexOf("exec");
@@ -476,7 +518,7 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     assert.equal(args.includes("read-only"), true, "the host filesystem must not be writable");
     assert.equal(args.includes("--search"), false, "an ordinary draft must not gain network research from source text");
     assert.ok(args.indexOf("exec") < args.indexOf("--ignore-user-config"), "exec-scoped CLI flags must follow exec");
-    for (const feature of ["shell_tool", "computer_use", "browser_use", "apps", "plugins", "multi_agent", "hooks"]) {
+    for (const feature of ["shell_tool", "computer_use", "browser_use", "apps", "plugins", "multi_agent", "hooks", "standalone_web_search"]) {
       const index = args.indexOf(feature);
       assert.ok(index > 0 && args[index - 1] === "--disable", `${feature} must be disabled at the CLI boundary`);
     }
