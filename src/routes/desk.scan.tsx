@@ -12,7 +12,13 @@ import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { useEditorSections } from "@/lib/use-sections";
-import { pageOffset, nextWindowSize, isHistoryExhausted, accumulateScanPages } from "@/lib/news/scan-history";
+import {
+  pageOffset,
+  nextWindowSize,
+  isHistoryExhausted,
+  accumulateScanPages,
+  scanIsRunning,
+} from "@/lib/news/scan-history";
 
 export const Route = createFileRoute("/desk/scan")({ component: ScanPage });
 
@@ -83,33 +89,6 @@ function ScanPage() {
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
 
-  const scan = useMutation({
-    mutationFn: () =>
-      runScan({
-        data: {
-          modelChoice,
-          modelEffort,
-          sectionKey: scope === "section" ? sectionKey || undefined : undefined,
-          customSourceIds: scope === "custom" && !packId ? pickedIds : undefined,
-          packId: scope === "custom" && packId ? packId : undefined,
-        },
-      }),
-    onSuccess: (res) => {
-      if (res && "ok" in res && res.ok === false) {
-        setBlocked({
-          guidance: res.error,
-          detail: res.detail ?? "",
-          retryable: Boolean(res.retryable),
-        });
-        return;
-      }
-      setBlocked(null);
-      void qc.invalidateQueries({ queryKey: ["scans"] });
-      void qc.invalidateQueries({ queryKey: ["leads"] });
-      void qc.invalidateQueries({ queryKey: ["sources"] });
-    },
-  });
-
   const history = loadedRows;
   const totalScans = scans.data?.total ?? history.length;
   const exhausted = isHistoryExhausted(history.length, totalScans);
@@ -122,7 +101,60 @@ function ScanPage() {
   // `!last.finished_at && !last.error`, which left the Run button disabled
   // and the page spinning with no way to start over.
   const stalled = Boolean(last?.stalled);
-  const scanning = scan.isPending || Boolean(last && !last.finished_at && !last.error && !stalled);
+  /*
+    Unit U24: the run this page was showing when the press happened, so the
+    report on screen can be told from the one being waited for. `runScan`
+    returns as soon as the job is queued and the history query has not come
+    back yet, and in that window the page used to draw the previous run's
+    finished report under the new scan's progress (see
+    `scanReportIsCurrent` in scan-history.ts).
+  */
+  const [reportBeforePress, setReportBeforePress] = useState<number | null>(null);
+  const scan = useMutation({
+    mutationFn: async () => {
+      const showing = history[0]?.id ?? null;
+      return {
+        showing,
+        res: await runScan({
+          data: {
+            modelChoice,
+            modelEffort,
+            sectionKey: scope === "section" ? sectionKey || undefined : undefined,
+            customSourceIds: scope === "custom" && !packId ? pickedIds : undefined,
+            packId: scope === "custom" && packId ? packId : undefined,
+          },
+        }),
+      };
+    },
+    onSuccess: ({ res, showing }) => {
+      if (res && "ok" in res && res.ok === false) {
+        setBlocked({
+          guidance: res.error,
+          detail: res.detail ?? "",
+          retryable: Boolean(res.retryable),
+        });
+        return;
+      }
+      setBlocked(null);
+      setReportBeforePress(showing);
+      void qc.invalidateQueries({ queryKey: ["scans"] });
+      void qc.invalidateQueries({ queryKey: ["leads"] });
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+
+  /*
+    Unit U24: the third clause is the one that was missing. With only the first
+    two the page could say "not scanning" while it was waiting for the run it
+    had just started, and draw that run's predecessor's report as though it
+    were the answer. See `scanIsRunning` in scan-history.ts.
+  */
+  const scanning = scanIsRunning({
+    pressInFlight: scan.isPending,
+    newestOpen: Boolean(last && !last.finished_at && !last.error && !stalled),
+    newestRunId: last?.id ?? null,
+    reportBeforePress,
+  });
 
   return (
     <DeskShell title="Scan" kicker="Reporter pass">

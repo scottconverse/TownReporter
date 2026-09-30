@@ -1,0 +1,253 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { after, before, it } from "node:test";
+import { createServer, type ViteDevServer } from "vite";
+
+/**
+ * Unit U24: a story does not print with claims its own evidence check raised
+ * and nobody judged -- unless a person says so, on the record.
+ *
+ * THE FINDING. On the stand-in editorial day (2026-09-30) a draft went to
+ * paper carrying seven claims its Checks pane had chipped `! Needs review`,
+ * and nothing on the page mentioned them: not a chip, not the bar, not the
+ * list above it, not the publish confirmation. The desk had the list and did
+ * not act on it.
+ *
+ * WHAT THIS FILE PROVES, against the real `performPublish` on a real (PGlite)
+ * database:
+ *
+ *   1. The gate exists. A draft whose review resolves claims nobody has judged
+ *      is REFUSED, in a sentence that says how many and what to do.
+ *   2. The refusal is not a dead end. Judging the claim clears it, and so does
+ *      the recorded override -- which is attributable and dated.
+ *   3. The override is for ONE draft version. Editing the story takes it back,
+ *      because the claims a person accepted are the claims they read.
+ *   4. The desk's blocker and the server's refusal agree, because both count
+ *      with the same function over the same resolved review.
+ *
+ * MUTATION, and it is the whole point of the file: deleting the
+ * `if (outstandingClaims > 0) { ... }` block from `performPublish` makes the
+ * first test fail with a published slug where it expects a refusal.
+ *
+ * `draft-evidence-serialization.test.ts` is the model: the real schema, the
+ * real server functions, no faked database.
+ */
+
+let vite: ViteDevServer;
+let getSql: typeof import("../db.ts").getSql;
+let performPublish: typeof import("./desk.ts").performPublish;
+let performAcceptUnreviewedClaims: typeof import("./desk.ts").performAcceptUnreviewedClaims;
+let unreviewedClaimCount: typeof import("./desk.ts").unreviewedClaimCount;
+let parseFindings: typeof import("./findings.ts").parseFindings;
+
+before(async () => {
+  vite = await createServer({
+    configFile: false,
+    server: { middlewareMode: true },
+    resolve: { alias: { "@": join(process.cwd(), "src") } },
+  });
+  ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
+  ({ performPublish, performAcceptUnreviewedClaims, unreviewedClaimCount } =
+    await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+  ({ parseFindings } = await vite.ssrLoadModule("/src/lib/news/findings.ts"));
+});
+
+after(async () => vite.close());
+
+let sequence = 98600;
+
+/**
+ * A newsroom with one drafted story whose evidence check raised one claim
+ * against one readable captured record, and where everything ELSE publish
+ * wants is satisfied -- section on the button, dek written, sources cited.
+ * The claim nobody has judged is then the only variable in the test.
+ */
+async function fixture() {
+  const sql = await getSql();
+  const newsroomId = sequence++;
+  const userId = `u24-editor-${newsroomId}`;
+  const url = `https://records.example/u24-${newsroomId}`;
+  await sql.query("delete from articles where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from audit_events where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from drafts where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from leads where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from artifact_versions where newsroom_id=$1", [newsroomId]);
+  await sql.query("delete from newsroom_members where newsroom_id=$1", [newsroomId]);
+  await sql.query(
+    "insert into newsroom_members(user_id,role,newsroom_id) values($1,'editor',$2)",
+    [userId, newsroomId],
+  );
+  const [capture] = await sql.query<{ id: number }>(
+    "insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text) values($1,$2,$3,'u24','Council record','The adopted budget message sets the 2027 operating budget at $547.5 million.') returning id",
+    [userId, newsroomId, url],
+  );
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json) values($1,$2,'Council adopts the budget','Why','council','drafted',$3,'',1,'{}') returning id",
+    [userId, newsroomId, JSON.stringify([url])],
+  );
+  const body = "The council adopted the budget after a short debate.";
+  const findings = parseFindings([
+    {
+      text: "The 2027 operating budget is $547.5 million.",
+      source_urls: [url],
+      capture_event_ids: [],
+      artifact_version_ids: [capture.id],
+      locators: ["Budget message, page 1"],
+      excerpt: "$547.5 million operating budget",
+    },
+  ]);
+  const [draft] = await sql.query<{ id: number }>(
+    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council adopts the budget','The 5-2 vote funds the plan.',$4,'council',$5,'','[]','news',$6,'[]','{}') returning id",
+    [userId, newsroomId, lead.id, body, JSON.stringify([url]), JSON.stringify(findings)],
+  );
+  return { sql, newsroomId, userId, leadId: lead.id, draftId: draft.id, url };
+}
+
+const SECTION = "council";
+
+it("refuses to print a draft whose evidence check raised a claim nobody judged", async () => {
+  const f = await fixture();
+
+  assert.equal(
+    await unreviewedClaimCount(f.newsroomId, f.leadId),
+    1,
+    "fixture: the finding cites a readable captured record, so it is review work",
+  );
+
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  assert.equal(printed.ok, false, "a claim nobody judged must not reach the paper by itself");
+  assert.match(
+    printed.ok ? "" : printed.error,
+    /1 claim from the evidence check has not been reviewed/,
+  );
+  const [article] = await f.sql.query("select id from articles where newsroom_id=$1", [f.newsroomId]);
+  assert.equal(article, undefined, "nothing printed");
+});
+
+it("lets the story print once the claim has been judged", async () => {
+  const f = await fixture();
+  /*
+    The editor's own answer, through the real path the Checks pane's judgment
+    controls use -- not a hand-written memo. It matters that this is the real
+    one: `persistFindingEvidenceJudgment` binds the judgment to the captured
+    records it was made against (`evidenceBinding`), and `resolveFinding`
+    throws a judgment away when that binding no longer matches. A fixture that
+    wrote the memo itself would prove nothing about whether judging a claim
+    actually clears this gate -- it would only prove that a JSON blob with the
+    right shape does.
+  */
+  const { loadFindingEvidenceReview, persistFindingEvidenceJudgment } = await vite.ssrLoadModule(
+    "/src/lib/news/finding-evidence-review.ts",
+  );
+  const review = await loadFindingEvidenceReview(await getSql(), f.newsroomId, f.leadId);
+  assert.equal(review.rows.length, 1, "fixture: one finding to judge");
+  await persistFindingEvidenceJudgment(
+    { newsroomId: f.newsroomId },
+    {
+      leadId: f.leadId,
+      draftId: f.draftId,
+      findingKey: "finding:0",
+      judgment: "supports",
+      reason: "",
+      contraryVersionId: null,
+      evidenceToken: review.evidenceToken,
+    },
+  );
+  assert.equal(
+    await unreviewedClaimCount(f.newsroomId, f.leadId),
+    0,
+    "the judged claim is no longer review work",
+  );
+
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
+});
+
+it("records an explicit acceptance, and prints on it", async () => {
+  const f = await fixture();
+
+  const accepted = await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+  );
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
+  assert.equal(accepted.ok ? accepted.count : 0, 1, "the acceptance names how many claims went unreviewed");
+
+  /* The record is a real one: who accepted, when, and which draft version. */
+  const [row] = await f.sql.query<{ notes_json: string }>(
+    "select notes_json from leads where id=$1",
+    [f.leadId],
+  );
+  const stored = JSON.parse(row!.notes_json) as {
+    unreviewedClaimsConfirmation?: { count: number; token: string; at: string; by: string };
+  };
+  const confirmation = stored.unreviewedClaimsConfirmation;
+  assert.equal(confirmation?.count, 1);
+  assert.equal(confirmation?.by, f.userId);
+  assert.ok(confirmation?.at, "an acceptance without a time is not a record");
+  assert.ok(confirmation?.token, "an acceptance without a draft version would outlive the claims");
+
+  const [audited] = await f.sql.query<{ action: string }>(
+    "select action from audit_events where newsroom_id=$1 and action='accept_unreviewed_claims'",
+    [f.newsroomId],
+  );
+  assert.ok(audited, "the override is on the audit trail, like the other overrides");
+
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
+  const [printAudit] = await f.sql.query<{ action: string }>(
+    "select action from audit_events where newsroom_id=$1 and action='publish-unreviewed-claims'",
+    [f.newsroomId],
+  );
+  assert.ok(printAudit, "and the print that used it says so too");
+});
+
+it("the acceptance is for one draft version, and an edit takes it back", async () => {
+  const f = await fixture();
+  await performAcceptUnreviewedClaims({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId);
+
+  /* The story moves on. The claims a person accepted were the claims they
+     READ, so the acceptance must not carry to words nobody has seen. */
+  await f.sql.query("update drafts set body=$1, updated_at=now() where id=$2", [
+    "The council adopted the budget after a long and contested debate.",
+    f.draftId,
+  ]);
+
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  assert.equal(printed.ok, false, "an edited story is not covered by the old acceptance");
+  assert.match(printed.ok ? "" : printed.error, /has not been reviewed/);
+});
+
+it("is called from the page with the bare lead id, the shape the desk's own id schema takes", () => {
+  /*
+    The tests above call `performAcceptUnreviewedClaims` directly, so they
+    cannot see the one thing that would break in the browser: the wire shape.
+    `acceptUnreviewedClaims` validates with `rowId`, which is a NUMBER -- the
+    same schema `getLead({ data: id })` uses on this page -- and a call passing
+    `{ leadId }` would be a press that fails validation and reports a schema
+    error to the editor. TypeScript cannot catch it (a server function's
+    validator input is untyped at the call site), so the tripwire is here.
+  */
+  const page = readFileSync(
+    new URL("../../routes/desk.story.$leadId.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /acceptUnreviewedClaims\(\{ data: id \}\)/);
+  assert.doesNotMatch(page, /acceptUnreviewedClaims\(\{ data: \{ leadId/);
+});
+
+it("refuses to record an acceptance when there is nothing to accept", async () => {
+  const f = await fixture();
+  /* No findings at all: the check raised nothing, so there is no claim a
+     person could be accepting. A permission recorded here would be a
+     permission that outlives the thing it was about. */
+  await f.sql.query("update drafts set found_note='[]' where id=$1", [f.draftId]);
+  assert.equal(await unreviewedClaimCount(f.newsroomId, f.leadId), 0);
+  const accepted = await performAcceptUnreviewedClaims(
+    { userId: f.userId, newsroomId: f.newsroomId },
+    f.leadId,
+  );
+  assert.equal(accepted.ok, false);
+  assert.match(accepted.ok ? "" : accepted.error, /nothing to accept/i);
+});

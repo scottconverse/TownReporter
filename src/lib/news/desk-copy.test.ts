@@ -1538,6 +1538,58 @@ describe("scan coverage accounting (P0-3)", () => {
     assert.match(failure!, /nothing was analyzed/i);
   });
 
+  /*
+    UNIT U24 -- WHOSE FAILURE IT WAS.
+
+    The arm above used to fire on `error && analyzed === 0` whatever the cause,
+    so a run where every source failed to FETCH was reported as a provider
+    failure. On the stand-in editorial day one report carried both diagnoses in
+    one paragraph: "Provider failure after 0 fetched — nothing was analyzed"
+    beside "First source failed: Page had almost no readable text". No model was
+    called at all. `model_batches_used` is the discriminator, and it is the same
+    one the worker uses to choose that error string: zero batches means
+    `buildScanBatches` produced nothing, which happens only when no source
+    yielded text.
+  */
+  it("calls a run that never reached a model a fetch failure, never a provider one", () => {
+    const fetchFailure = scanCoverageLine({
+      sources_selected: 1,
+      sources_attempted: 1,
+      sources_fetched: 0,
+      sources_failed: 1,
+      sources_analyzed: 0,
+      model_batches_used: 0,
+      model_batches_failed: 0,
+      leads_created: 0,
+      error:
+        "Scan fetched no source text, so no writing pass ran. First source failed: Page had almost no readable text",
+    });
+    assert.match(fetchFailure!, /^Fetch failure/);
+    assert.match(fetchFailure!, /0 fetched/);
+    assert.match(fetchFailure!, /no writing pass ran/);
+    assert.doesNotMatch(
+      fetchFailure!,
+      /provider/i,
+      "a run whose sources could not be read must never be sent to the provider",
+    );
+  });
+
+  it("still names the provider when the batches ran and their answers were unusable", () => {
+    const providerFailure = scanCoverageLine({
+      sources_selected: 40,
+      sources_attempted: 40,
+      sources_fetched: 40,
+      sources_failed: 0,
+      sources_analyzed: 0,
+      model_batches_used: 2,
+      model_batches_failed: 2,
+      leads_created: 0,
+      error: "Writing pass returned no usable JSON.",
+    });
+    assert.match(providerFailure!, /^Provider failure/);
+    assert.doesNotMatch(providerFailure!, /Fetch failure/);
+  });
+
   it("states partial coverage plainly when some batches failed", () => {
     const partial = scanCoverageLine({
       sources_selected: 100,

@@ -45,6 +45,14 @@ export type PublishBlockerTarget =
   | { kind: "keep-evidence" }
   | { kind: "running-check" }
   | { kind: "evidence-review" }
+  /**
+   * Unit U24: the recorded override that says the editor has read the claims
+   * the evidence check raised and is printing anyway. It writes the same kind
+   * of confirmation `topicConfirmation` is (`leads.notes_json`, against this
+   * exact draft version) and one `audit_events` row, so an unreviewed claim
+   * that reached paper can always be traced to the person who accepted it.
+   */
+  | { kind: "accept-unreviewed" }
   | { kind: "publish-bar" };
 
 export type PublishBlockerAction = {
@@ -79,6 +87,23 @@ export type PublishBlockerState = {
   sectionReady: boolean;
   /** Claims of absence not yet ticked by a person (`uncheckedGateTodos`). */
   openClaims: number;
+  /**
+   * Claims the evidence check raised that no person has judged yet, with a
+   * readable record to judge them against (unit U24). This is
+   * `claimsNeedingReview` over the resolved review -- the same number the
+   * Checks pane counts off its `! Needs review` chips and the same one the
+   * evidence chip on the publish bar prints.
+   */
+  unreviewedClaims: number;
+  /**
+   * The editor has already accepted those claims for THIS exact draft version.
+   *
+   * Read off `leads.notes_json` (`unreviewedClaimsConfirmation`), the same way
+   * the section confirmation is: a press on the blocker records who accepted
+   * and for which version, and an edit that changes the text moves the version
+   * and brings the block back.
+   */
+  unreviewedAccepted: boolean;
   /** Outlets the body names that the draft's sources do not show. */
   namedOutlets: readonly string[];
   /** The story changed after its evidence was checked. */
@@ -93,6 +118,26 @@ export type PublishBlockerState = {
 
 function empty(text: string): boolean {
   return text.trim() === "";
+}
+
+/**
+ * Does the story page draw the "Before you can publish" list at all? (Unit U24.)
+ *
+ * A KILLED LEAD IS NOT ON ITS WAY ANYWHERE. `performPublish` refuses one
+ * outright ("Killed leads cannot print."), and the page already drops the
+ * editors, "Draft with AI" and the whole publish bar for it. What was left was
+ * this list, advertising "4 things block Publish" with four enabled buttons --
+ * "Write the headline", "Write the story", "Write a dek", "Pick a section" --
+ * three of which point at fields the page no longer draws. On the stand-in
+ * editorial day that is what a killed lead's Checks tab showed.
+ *
+ * The action on a killed lead is Reopen, and that panel is already on the page.
+ * A second list of controls that cannot be reached, counting down to a publish
+ * that cannot happen, is the desk contradicting itself in the one place an
+ * editor goes to find out what is left to do.
+ */
+export function showsPublishPrep(status: string): boolean {
+  return status !== "killed";
 }
 
 /**
@@ -175,6 +220,36 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       action: {
         label: one ? "Confirm the claim" : "Confirm the claims",
         target: { kind: "claims" },
+      },
+    });
+  }
+
+  /*
+    UNIT U24 -- THE CLAIMS THE CHECK RAISED AND NOBODY READ.
+
+    On the stand-in editorial day a draft went to the paper with seven claims
+    from its own evidence check still chipped `! Needs review`, and neither the
+    chips, the bar, the list above nor the publish confirmation mentioned them:
+    the desk had the list and did not act on it. Every other machine-made
+    decision on this page passes a person before it prints; so does this one.
+
+    Two honest answers, so the row has two presses: go and judge them (the
+    Checks tab's own list, where each row opens into its judgment controls), or
+    say in so many words that they are going out unreviewed. The second press
+    is recorded against this exact draft version and written to the audit log,
+    which is the difference between an override and a silent one.
+  */
+  if (state.unreviewedClaims > 0 && !state.unreviewedAccepted) {
+    const n = state.unreviewedClaims;
+    blockers.push({
+      key: "claims-unreviewed",
+      sentence: `${n} claim${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} review. The evidence check raised ${
+        n === 1 ? "it" : "them"
+      } and no one has judged ${n === 1 ? "it" : "them"} against the record.`,
+      action: { label: "Review the claims", target: { kind: "evidence-review" } },
+      altAction: {
+        label: "Publish anyway — I accept these claims are unreviewed",
+        target: { kind: "accept-unreviewed" },
       },
     });
   }

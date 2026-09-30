@@ -11,6 +11,8 @@ import {
   cardTimeLine,
   clockLabel,
   followUpCardState,
+  followUpFilterLabel,
+  followUpStoppedNotice,
   followUpTargets,
   findingNoteLine,
   isAgentKind,
@@ -485,5 +487,34 @@ describe("the four filters", () => {  it("names each filter the way the drawn se
     for (const filter of FOLLOW_UP_FILTERS) {
       assert.equal(matchesFollowUpFilter(manual, filter), false);
     }
+  });
+});
+
+/*
+  UNIT U24 -- EVERY FILTER CARRIES ITS COUNT, INCLUDING "STOPPED".
+
+  The stand-in editorial day: an agent was stopped, the card left Active (which
+  then read "Nothing is running or waiting right now"), and the Stopped filter
+  -- the only place the agent still existed -- was drawn without a number. The
+  design drawing writes that one pill bare, and that is exactly why the agent
+  looked deleted. An editor who has just pressed Stop needs to see something is
+  over there.
+*/
+describe("U24: the follow-up filters show what is behind them", () => {
+  it("counts every filter, Stopped included", () => {
+    for (const key of FOLLOW_UP_FILTERS) {
+      const label = followUpFilterLabel(key, 3);
+      assert.equal(label, `${FOLLOW_UP_FILTER_LABELS[key]} · 3`);
+    }
+    assert.equal(followUpFilterLabel("stopped", 1), "Stopped · 1");
+    /* A zero is a real answer here: "Stopped · 0" says the filter is empty,
+       which is different from the pill saying nothing at all. */
+    assert.equal(followUpFilterLabel("stopped", 0), "Stopped · 0");
+  });
+
+  it("says where a stopped agent went, on the press that stopped it", () => {
+    const notice = followUpStoppedNotice();
+    assert.match(notice, /^Stopped — find it under Stopped\./);
+    assert.match(notice, /run in flight stops at its next step/);
   });
 });

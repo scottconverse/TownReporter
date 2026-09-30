@@ -28,6 +28,7 @@ import { reconcileDraftEvidence } from "./draft-evidence.ts";
 const NEVER_RUN: CheckFacts = {
   hasDraft: true,
   evidenceChecked: false,
+  evidenceToReview: 0,
   evidenceRequired: false,
   evidenceOutstanding: false,
   namesUnresolved: 0,
@@ -137,6 +138,87 @@ describe("check-gates: a check that never ran says so", () => {
     assert.equal(evidenceChip(reopened).tone, "warn");
     assert.equal(evidenceChip(reopened).done, false);
     assert.equal(checkStageDone(reopened), false);
+  });
+});
+
+describe("U24: a check that ran and left claims nobody judged is not 'not run'", () => {
+  /*
+    The stand-in editorial day: `○ Evidence check not run` and "Nothing blocks
+    Publish. No evidence check ran on this draft." on the bar, over a Checks
+    pane reading "checked against 2 captures" and seven `! Needs review` rows.
+    The count is the pane's own, `claimNeedingReview` over the resolved review
+    (`evidence-check-state.ts`), so the bar and the list under it name the same
+    work.
+  */
+  const withUnreviewed = (n: number): CheckFacts => ({
+    ...NEVER_RUN,
+    evidenceChecked: true,
+    evidenceToReview: n,
+  });
+
+  it("prints the count on the chip instead of claiming no check ran", () => {
+    assert.deepEqual(evidenceChip(withUnreviewed(7)), {
+      text: "! 7 claims need review",
+      tone: "warn",
+      done: false,
+    });
+    assert.deepEqual(evidenceChip(withUnreviewed(1)), {
+      text: "! 1 claim needs review",
+      tone: "warn",
+      done: false,
+    });
+    /* And the state this replaced is still reachable -- for a draft nothing
+       was ever run against, which is the only draft it is true of. */
+    assert.deepEqual(evidenceChip(NEVER_RUN), {
+      text: "○ Evidence check not run",
+      tone: "quiet",
+      done: false,
+    });
+  });
+
+  it("is not a pass: the Check stage stays open", () => {
+    assert.equal(checkStageDone(withUnreviewed(7)), false);
+    assert.equal(evidenceChip(withUnreviewed(7)).done, false);
+    assert.equal(checkStageDone({ ...withUnreviewed(0), nameCheckComplete: true, nameCheckRecorded: true }), true);
+  });
+
+  it("keeps the older warnings ahead of it, in the order the editor meets them", () => {
+    /* A stale check is the bigger fact: the recorded answer no longer covers
+       the text, so counting the claims it left would be counting the wrong
+       thing. `required` and `outstanding` win, as they always have. */
+    assert.equal(evidenceChip({ ...withUnreviewed(7), evidenceRequired: true }).text, "! Evidence to check");
+    assert.equal(evidenceChip({ ...withUnreviewed(7), evidenceOutstanding: true }).text, "! Evidence to check");
+  });
+
+  it("says how many are unreviewed on the bar, and never that no check ran", () => {
+    assert.equal(
+      publishBarNote({ ...withUnreviewed(7), nameCheckComplete: true, nameCheckRecorded: true }),
+      "Nothing blocks Publish. 7 claims from the evidence check are unreviewed.",
+    );
+    assert.equal(
+      publishBarNote({ ...withUnreviewed(1), nameCheckComplete: true, nameCheckRecorded: true }),
+      "Nothing blocks Publish. 1 claim from the evidence check is unreviewed.",
+    );
+    /* The sentence this unit exists to stop. */
+    for (const facts of [
+      { ...withUnreviewed(7), nameCheckComplete: true },
+      { ...withUnreviewed(7), nameCheckRecorded: true },
+      withUnreviewed(1),
+    ]) {
+      assert.doesNotMatch(publishBarNote(facts), /No evidence check ran/);
+    }
+  });
+
+  it("counts claims waiting as a record that the check ran, on both sides of the sentence", () => {
+    /* No name check at all: the bar names the name check it is missing and the
+       claims it is waiting on -- and, the point of the unit, does NOT claim the
+       evidence check never happened. */
+    const both = publishBarNote(withUnreviewed(7));
+    assert.equal(
+      both,
+      "Nothing blocks Publish. 7 claims from the evidence check are unreviewed and no name check ran.",
+    );
+    assert.doesNotMatch(both, /No evidence check ran/);
   });
 });
 

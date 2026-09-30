@@ -145,6 +145,7 @@ import {
 import {
   buildScanUserMessage,
   composeZeroLeadSummary,
+  editorFetchError,
   kindFromSourceUrl,
   resurfacedSummarySentence,
 } from "./desk-copy";
@@ -866,6 +867,19 @@ export const getLead = createServerFn({ method: "GET" })
         ? notes.topicConfirmation.topic
         : null;
     /*
+      Whether an editor has already accepted this exact draft version going to
+      paper with claims its evidence check raised and nobody judged (unit U24).
+
+      Read here, server-side, for the same reason `topicConfirmed` is: the
+      client never has to know how the draft's identity is computed, and a stale
+      tab cannot decide for itself that an acceptance still counts after the
+      story was edited. The publish gate reads the same field, so the button and
+      the refusal cannot disagree.
+    */
+    const unreviewedClaimsAccepted =
+      Boolean(evidenceToken) &&
+      notes.unreviewedClaimsConfirmation?.token === topicConfirmationFingerprint(evidenceToken);
+    /*
       The named-outlet check, run for display only -- performPublish decides.
 
       Same inputs the publish gate uses, so the desk and the refusal cannot
@@ -884,6 +898,7 @@ export const getLead = createServerFn({ method: "GET" })
       draftMeetingEvidence,
       evidenceToken,
       topicConfirmed,
+      unreviewedClaimsAccepted,
       namedOutlets,
       outletOverrides,
       articleSlug: live[0]?.slug ?? null,
@@ -1099,6 +1114,96 @@ export const runScan = createServerFn({ method: "POST" })
       packId: data.packId,
     });
   });
+
+/**
+ * Re-check ONE watch-list source (unit U24).
+ *
+ * WHAT THIS REPLACED, AND WHY IT WAS WRONG. The row's "Retry" used to call
+ * `runScan` with `customSourceIds: [id]` -- a real manual scan: a `scan_runs`
+ * row, a queued job, the model writing pass, leads filed, and a refusal
+ * outright if another scan was already open. On the stand-in editorial day
+ * pressing Retry on one unreadable source produced, instead of a re-check, a
+ * failed scan whose report read "Provider failure after 0 fetched" beside
+ * "First source failed: Page had almost no readable text" -- and the row itself
+ * said nothing had been attempted. The editor asked "can we read this page
+ * now?" and the desk spent a model budget answering a different question.
+ *
+ * So this is the fetch half of the scan and only the fetch half: the same
+ * `ingestUrl` the scan loop binds (`performScanWork`'s `fetchUrl`), the same
+ * `withRetry`, the same error strings -- which is what makes the row's reason
+ * and the scan's `failed_sources` entry read identically -- and no model call,
+ * no job, no leads, and no `scan_runs` row. It writes exactly the two columns
+ * the row is drawn from (`last_error`, `last_fetched_at`), so the chip, the
+ * reason and the "Could not check · 14" count all move together.
+ *
+ * It deliberately writes NO snapshot. A snapshot is the scan's record of what a
+ * source said at a moment, and it is what "3 new items" is counted from; this
+ * is a readability check, and claiming new content from it would be inventing
+ * a change nobody looked for.
+ */
+export async function performCheckOneSource(
+  context: { userId: string; newsroomId?: number },
+  sourceId: number,
+): Promise<
+  | { ok: true; title: string; url: string; characters: number; line: string }
+  | { ok: false; url: string; title: string; error: string; line: string }
+> {
+  const sql = await getSql();
+  const [src] = await sql.query<{ id: number; url: string; title: string }>(
+    "select id,url,title from sources where id=$1 and newsroom_id=$2",
+    [sourceId, owned(context)],
+  );
+  if (!src) {
+    return {
+      ok: false as const,
+      url: "",
+      title: "",
+      error: "That source is not on this desk.",
+      line: "That source is not on this desk.",
+    };
+  }
+  /*
+    `withRetry` is the scan's own: one transient timeout is retried there and
+    not here, so a source that reads on the second try reads on this press too
+    rather than reporting a failure the scanner would not have reported.
+  */
+  try {
+    const bundle = await withRetry(() => ingestUrl(src.url));
+    const text = postgresText(bundle.text);
+    if (!text.trim()) throw new Error("Page had almost no readable text");
+    await sql.query(
+      "update sources set last_fetched_at=now(), last_error=null where id=$1 and newsroom_id=$2",
+      [sourceId, owned(context)],
+    );
+    return {
+      ok: true as const,
+      url: src.url,
+      title: bundle.titleHint?.trim() || src.title,
+      characters: text.length,
+      line: "Read OK now.",
+    };
+  } catch (err) {
+    const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
+    await sql.query(
+      "update sources set last_error=$1, last_fetched_at=now() where id=$2 and newsroom_id=$3",
+      [msg, sourceId, owned(context)],
+    );
+    return {
+      ok: false as const,
+      url: src.url,
+      title: src.title,
+      error: msg,
+      /* The row's own words for this error, so the line under the row and the
+         reason already on it cannot describe the same failure twice. */
+      line: `Still failing: ${editorFetchError(msg, src.url) ?? msg}`,
+    };
+  }
+}
+
+export const checkOneSource = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((sourceId: unknown) => rowId.parse(sourceId))
+  .handler(async ({ context, data: sourceId }) => performCheckOneSource(context, sourceId));
 
 /** Injectable seam so a scan job with a real Claude/Codex 401 mid-run, and
  * the failover it triggers, can be tested without a real provider. Same
@@ -3678,6 +3783,116 @@ export const confirmDraftTopic = createServerFn({ method: "POST" })
   .handler(async ({ context, data: leadId }) => performConfirmDraftTopic(context, leadId));
 
 /**
+ * The count of claims a draft's own evidence check raised and nobody has
+ * judged (unit U24), for the two gates that must agree: the desk's blocker and
+ * `performPublish`'s refusal.
+ *
+ * ONE READER OF THE ONE RULE. It resolves the same review the Checks pane
+ * resolves (`loadFindingEvidenceReview`, the query that pane already makes) and
+ * counts with `claimsNeedingReview` -- the predicate the pane's `! Needs
+ * review` chip is drawn from. A cheaper count from the memo alone would be the
+ * bug this unit exists to fix, one layer down: the pane downgrades a judgment
+ * to unreviewed when its binding moved or its record stopped being readable,
+ * and a memo-only count cannot see that, so the desk would offer to print
+ * something the server then refused with no way to find out why.
+ *
+ * A draft whose stored findings will not parse has no review to resolve and
+ * no way for anyone to have judged them, so it counts as NOTHING outstanding
+ * here rather than as an error: `loadFindingEvidenceReview` throws for exactly
+ * the rows the Checks pane already shows as unreadable, and a publish that
+ * hard-failed on them would be a story nobody could print or fix. The pane
+ * says so on its own rows; this gate is about claims a person can see and
+ * judge.
+ */
+export async function unreviewedClaimCount(
+  newsroomId: number,
+  leadId: number,
+): Promise<number> {
+  try {
+    const { loadFindingEvidenceReview } = await import("./finding-evidence-review.ts");
+    const { claimsNeedingReview } = await import("./evidence-check-state.ts");
+    const review = await loadFindingEvidenceReview(await getSql(), newsroomId, leadId);
+    return claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * "Publish anyway -- I accept these claims are unreviewed" (unit U24).
+ *
+ * The override for the one blocker the desk refuses to leave silent: a draft
+ * going to paper with claims its own evidence check raised and no person has
+ * judged. This writes the acceptance against `evidenceReviewToken(draft)` --
+ * the identity the section confirmation uses, so it is for the version the
+ * editor was looking at and an edit takes it back -- and one `audit_events`
+ * row naming who accepted, when, and how many claims.
+ *
+ * The count is recomputed here rather than taken from the client, and the
+ * press is refused if there is nothing left to accept: an acceptance recorded
+ * over a draft with no unreviewed claims would be a permission that outlives
+ * the thing it was about.
+ */
+export async function performAcceptUnreviewedClaims(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const count = await unreviewedClaimCount(owned(context), leadId);
+  if (count === 0) {
+    return {
+      ok: false as const,
+      error: "There is nothing to accept: every claim the evidence check raised has been reviewed.",
+    };
+  }
+  const result = await withTransaction(async (sql) => {
+    const rows = await sql<{ notes_json: string | null }>`
+      select notes_json from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)} for update
+    `;
+    if (!rows[0]) return { ok: false as const, error: "Lead not found" };
+    const drafts = await sql<DraftRow>`
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered, research_json
+      from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+      order by updated_at desc, id desc limit 1
+    `;
+    const row = drafts[0];
+    if (!row) return { ok: false as const, error: "There is no draft to accept anything for." };
+    const notes = parseNotes(rows[0].notes_json);
+    notes.unreviewedClaimsConfirmation = {
+      count,
+      token: topicConfirmationFingerprint(evidenceReviewToken(row)),
+      at: new Date().toISOString(),
+      by: context.userId,
+    };
+    await sql`
+      update leads set notes_json = ${packNotes(notes)}
+      where id = ${leadId} and newsroom_id = ${owned(context)}
+    `;
+    return { ok: true as const, count };
+  });
+  if (!result.ok) return result;
+  /*
+    Audited outside the transaction, where the rest of the publish path's
+    audits sit: `audit` writes on the pooled connection, and on PGlite there is
+    one connection, so writing from inside a transaction deadlocks it.
+  */
+  await audit(
+    context.userId,
+    "accept_unreviewed_claims",
+    `Lead ${leadId}: ${count} unreviewed claim${count === 1 ? "" : "s"} accepted for this draft`,
+    owned(context),
+    { kind: "leads", id: leadId },
+  );
+  return result;
+}
+
+export const acceptUnreviewedClaims = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((leadId: unknown) => rowId.parse(leadId))
+  .handler(async ({ context, data: leadId }) => performAcceptUnreviewedClaims(context, leadId));
+
+/**
  * The titles a reader will see on this draft's Sources list.
  *
  * Two places hold them. The draft's own provenance is what the page prints for
@@ -3986,6 +4201,41 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing.",
     };
   /*
+    ── THE CLAIMS NOBODY READ (UNIT U24) ──────────────────────────────────────
+
+    On the stand-in editorial day a story went to paper with seven claims its
+    own evidence check had raised still chipped `! Needs review`, and nothing
+    anywhere said so. Every other machine-made decision on this story passes a
+    person first; so does this one.
+
+    Two ways past it, and both are the editor's to choose: judge the claims in
+    the workbench (the blocker's first press, and the one to prefer), or accept
+    them explicitly with a press that records who and when against this exact
+    draft version (`performAcceptUnreviewedClaims`). The accepted count and
+    token are read from `notes_json` -- the same place, and the same
+    fingerprint, as the section confirmation, so the acceptance is for the
+    version the editor was reading and an edit takes it back.
+
+    A disabled button is a suggestion -- a stale tab, a second window or a
+    scripted call all route straight past it -- so the gate is here, and the
+    desk's blocker is the sentence that tells the editor this one exists.
+  */
+  const outstandingClaims = await unreviewedClaimCount(owned(context), leadId);
+  if (outstandingClaims > 0) {
+    const acceptedToken = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation?.token;
+    const accepted = acceptedToken === topicConfirmationFingerprint(evidenceReviewToken(row));
+    if (!accepted) {
+      return {
+        ok: false as const,
+        error: `${outstandingClaims} claim${
+          outstandingClaims === 1 ? "" : "s"
+        } from the evidence check ${
+          outstandingClaims === 1 ? "has" : "have"
+        } not been reviewed. Review them in the workbench, or accept them explicitly to print anyway.`,
+      };
+    }
+  }
+  /*
     THE SECTION IS A CLAIM TOO (0.6.62).
 
     Every other machine-made decision on this story passes a person before it
@@ -4232,6 +4482,25 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         modelTopic: String(row.model_topic ?? "").trim(),
         editorTopic: draftTopic,
       }),
+      owned(context),
+      { kind: "articles", id: published.id },
+    );
+  }
+  /*
+    Unit U24: a story that printed with claims its own evidence check raised
+    and nobody judged says so on the trail, beside the section override above
+    and for the same reason -- "the record raised seven claims and a person
+    chose to print them" is a fact the paper should be able to look up later.
+    The acceptance itself was audited when it was given
+    (`accept_unreviewed_claims`); this is the print that used it.
+  */
+  if (outstandingClaims > 0) {
+    await audit(
+      context.userId,
+      "publish-unreviewed-claims",
+      `Article ${published.id}: ${outstandingClaims} unreviewed claim${
+        outstandingClaims === 1 ? "" : "s"
+      } accepted before printing`,
       owned(context),
       { kind: "articles", id: published.id },
     );

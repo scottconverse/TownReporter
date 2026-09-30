@@ -13,6 +13,7 @@ import {
 import {
   publishBlockers,
   publishGateNote,
+  showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
@@ -28,6 +29,7 @@ import {
   type EvidenceDecision,
 } from "@/lib/news/draft-evidence";
 import { auditDraft, findingsWithIds, type DraftAuditFinding } from "@/lib/news/draft-audit";
+import type { EvidenceCheckState } from "@/lib/news/evidence-check-state";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
 import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -46,6 +48,7 @@ import {
   publishLead,
   pullTodo,
   resolveDraftMeetingReview,
+  acceptUnreviewedClaims,
   continuePullJob,
   overrideNamedOutlet,
   resolveLeadDuplicate,
@@ -61,7 +64,7 @@ import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
-import { useAreaLabels, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
   clipTodoText,
@@ -215,6 +218,14 @@ function StoryPage() {
      name it. Falls back to the key, which is what the desk stored. */
   const sectionName = (key: string) => sections.find((s) => s.key === key)?.name ?? key;
   const { formatShortDate } = usePaperDateFormatters();
+  /*
+    Unit U24: the paper as the desk has it configured, for the one rule below
+    that needs to know which city this paper publishes in (`homeCityShortForms`).
+    The resolved identity, not the build-time constant, so a desk that renamed
+    its city in Paper setup gets its own city's short forms -- the same value
+    /about renders.
+  */
+  const paperIdentity = usePaper();
   // The same words the reader sees on the pill row: this paper's own
   // geography, not the shipped default's (see `useAreaLabels`).
   const labels = useAreaLabels();
@@ -327,6 +338,15 @@ function StoryPage() {
   const [checkedDraftStale, setCheckedDraftStale] = useState(false);
   const [evidenceReview, setEvidenceReview] = useState<EvidenceCheckReview | null>(null);
   const [evidenceReviewOpen, setEvidenceReviewOpen] = useState(false);
+  /*
+    Unit U24: the evidence check's one state, reported up by the Checks pane
+    (the only thing holding the resolved review) and read by the chips, the
+    publish bar and the blockers. Declared here with the rest of the page's
+    state, above the loading and not-found returns below, because a hook after
+    an early return is a hook that does not run on every render.
+  */
+  const [panelEvidence, setPanelEvidence] = useState<EvidenceCheckState | null>(null);
+  const onEvidenceState = useCallback((state: EvidenceCheckState) => setPanelEvidence(state), []);
   /*
     Unit BH2 decision 5 and 6, the three dialogs. Each is opened by a press and
     owns nothing else: the record, the two calls and the saved text all stay
@@ -758,6 +778,33 @@ function StoryPage() {
       setMsg(
         editorActionError(err instanceof Error ? err.message : "", "record the override") ??
           "Could not record the override.",
+      );
+    },
+  });
+
+  /*
+    Unit U24: the recorded override for a draft going to paper with claims its
+    own evidence check raised and nobody judged. It is a press, not a checkbox
+    in the publish dialog, so the acceptance is a separate, dated, attributed
+    record rather than a side effect of printing -- and `performPublish` refuses
+    without it, which is what makes it a gate instead of a suggestion.
+  */
+  const acceptUnreviewed = useMutation({
+    /* The bare lead id, like `confirmDraftTopic` above: `rowId` is the schema
+       this server function validates with. */
+    mutationFn: () => acceptUnreviewedClaims({ data: id }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      announceToDesk(
+        res.ok
+          ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
+          : res.error,
+      );
+    },
+    onError: (err) => {
+      announceToDesk(
+        editorActionError(err instanceof Error ? err.message : "", "record that acceptance") ??
+          "Could not record that acceptance.",
       );
     },
   });
@@ -1405,6 +1452,12 @@ function StoryPage() {
   const uncredited = uncreditedOutlets(
     body,
     draftSources.length > 0 || !mayInheritLeadSources(data.draft ?? {}) ? draftSources : sources,
+    /*
+      Unit U24: the paper's own city, so a story that attributes to "the city
+      manager" is not told it never named City of Longmont. It turns the short
+      forms on for that one source and no other -- see `homeCityShortForms`.
+    */
+    paperIdentity.city,
   );
   /*
     Claims of absence block printing until a person has confirmed each one.
@@ -1494,6 +1547,27 @@ function StoryPage() {
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
   /*
+    ── ONE STATE ABOUT THE EVIDENCE CHECK (UNIT U24) ─────────────────────────
+
+    The chip, the line beside the Publish button and the blocker all read
+    `evidenceState`; the Checks pane is the only thing that can produce it,
+    because it is the only thing holding the resolved review, so it reports it
+    up (`onEvidenceState`) and this page reads it. Before, the bar asked the
+    draft's memo and the pane asked the findings, and on the stand-in editorial
+    day they said opposite things about the same run: `○ Evidence check not run`
+    above seven `! Needs review` rows.
+
+    Until the pane reports -- the review query is still in flight, or there is
+    no draft to review -- the page falls back to the record it does hold
+    (`recordedChecks`), which is exactly what it printed before this unit. That
+    fallback can only ever under-report, and only for the first paint.
+  */
+  const evidenceState: EvidenceCheckState = panelEvidence ?? {
+    ran: Boolean(data.draft && recordedChecks(data.draft.research_json).evidenceChecked),
+    toReview: 0,
+  };
+  const acceptanceCovers = Boolean(data.unreviewedClaimsAccepted);
+  /*
     Every reason the Publish button is off, in one place (unit CT).
 
     `publishBlockers` owns the list -- a sentence and a press for each reason --
@@ -1515,6 +1589,15 @@ function StoryPage() {
     sectionReady,
     openClaims: openClaims.length,
     namedOutlets: data.namedOutlets,
+    /*
+      Unit U24: the claims the draft's own evidence check raised and nobody has
+      judged, and whether this exact version has already been accepted. Both
+      come from the one state the Checks pane reports up (`evidenceState`
+      below), so the count in "Before you can publish", the count on the chip,
+      the line under "Evidence check" and the rows themselves are one number.
+    */
+    unreviewedClaims: evidenceState.toReview,
+    unreviewedAccepted: acceptanceCovers,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
@@ -1642,6 +1725,14 @@ function StoryPage() {
         /* The same mutation the evidence review's own "keep" press calls. */
         reviewEvidence.mutate("keep");
         return;
+      case "accept-unreviewed":
+        /*
+          Unit U24: the second honest answer to "claims nobody has judged".
+          `performPublish` refuses without this record, so the press is the gate
+          -- and the record names who accepted, when, and which draft version.
+        */
+        acceptUnreviewed.mutate();
+        return;
       case "publish-bar":
         document.getElementById("astra-publish-bar")?.scrollIntoView({ block: "center" });
         return;
@@ -1673,7 +1764,16 @@ function StoryPage() {
   const nameCheck = readNameCheck(data.draft?.research_json);
   const checkFacts: CheckFacts = {
     hasDraft: Boolean(data.draft),
-    evidenceChecked: draftChecks.evidenceChecked,
+    /*
+      Unit U24: "the check ran" is now the pane's answer too, not only the
+      memo's. A draft whose evidence pass ran inside the drafting job has
+      findings and claims and neither of the memo's two records, and this used
+      to print `○ Evidence check not run` over the pane's own list of what that
+      pass found. `evidenceState.ran` is the one answer; the memo's decision
+      still decides the PASS (`evidenceChip` reads `evidenceChecked` for that).
+    */
+    evidenceChecked: draftChecks.evidenceChecked || evidenceState.ran,
+    evidenceToReview: evidenceState.toReview,
     evidenceRequired: draftChecks.evidenceRequired,
     evidenceOutstanding:
       evidenceStale || openClaims.length > 0 || reconcileActive || reviewEvidence.isPending,
@@ -1998,8 +2098,22 @@ function StoryPage() {
               opens on (unit CT). The heading below was "Before you publish",
               which would now be two near-identical headings for two different
               things; the drawing calls this list "Evidence check".
+
+              UNIT U24 -- NOT ON A KILLED LEAD. This list is work toward a
+              publish, and a killed lead cannot be printed: the page already
+              drops the editors, "Draft with AI" and the whole publish bar for
+              it, because `performPublish` refuses a killed lead outright. What
+              was left was the list itself, advertising "4 things block
+              Publish" with four enabled buttons -- "Write the headline",
+              "Write the story", "Write a dek", "Pick a section" -- three of
+              which point at fields this page no longer draws. The action on a
+              killed lead is Reopen, and that panel is already on the page; a
+              second list of controls that cannot be reached is the desk
+              contradicting itself.
             */}
-            <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
+            {showsPublishPrep(data.lead.status) ? (
+              <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
+            ) : null}
             {data.draft ? (
               /*
                 The panel, not the list (unit CW2). The panel owns the review
@@ -2035,6 +2149,14 @@ function StoryPage() {
                   compareLabel: evidenceReview ? "Compare checked vs. previous version" : "",
                   onCompare: openCompareChecked,
                   onStylePress: focusStyleFix,
+                  /*
+                    The one fact the page holds and the panel cannot: whether the
+                    memo records a decision or a reconciliation stamp. The panel
+                    adds it to what it can see and reports the whole state back
+                    (unit U24).
+                  */
+                  evidenceRecorded: draftChecks.evidenceChecked,
+                  onEvidenceState,
                 }}
               />
             ) : (

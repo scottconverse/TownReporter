@@ -13,6 +13,26 @@ type CandidateProbe =
   | { ok: true; label: string; choice: CandidateChoice | "configured"; localModel?: LocalModelOverride }
   | { ok: false; error: string };
 
+/**
+ * Which models Opinion writes with (unit U24).
+ *
+ * The stand-in editorial day's finding: /desk/opinion said "AI is not
+ * available. No model is set up yet…" minutes after a draft ran on DeepSeek.
+ * The sentence was true of Opinion and read as true of the desk, because it
+ * never said which models it meant. This is that sentence, said once, by the
+ * function that knows the answer.
+ *
+ * It is the brief's own wording, and it is exact: Claude and Codex are the
+ * Automatic ladder (`OPINION_AUTOMATIC_LADDER`, in that order); a local model
+ * and a saved connection are the two explicit picks Opinion's own picker
+ * offers (`OPINION_MODEL_CHOICES`). The desk's story writer is not on any of
+ * them, and saying so is the whole point -- it is the model the editor watched
+ * write a draft, and it is the one thing this message must not leave them
+ * guessing about.
+ */
+export const OPINION_MODEL_UNIVERSE =
+  "Opinion writes with Claude, Codex, a local model or a saved connection — and none of them is set up on this machine. The desk's story writer is a different list and is not used for Opinion.";
+
 export type OpinionReadinessDeps = {
   findVoice?: () => Promise<VoiceProbe>;
   probeCandidate?: (choice: CandidateChoice, newsroomId?: number) => Promise<CandidateProbe>;
@@ -90,7 +110,15 @@ export async function checkOpinionReadiness(
     }
     providerProblems.push(opinionProviderProblem(probe.error, candidate));
   }
-  if (!selected) problems.push(...providerProblems);
+  if (!selected) {
+    /*
+      Unit U24: which models Opinion has at all, then what is missing for each
+      rung it just tried. Automatic only -- an editor who picked one model on
+      purpose is owed that model's own answer, not a list of the others.
+    */
+    if (choice === "auto") problems.push(OPINION_MODEL_UNIVERSE);
+    problems.push(...providerProblems);
+  }
   // Automatic must remain Automatic on the queued request. Readiness proves
   // that at least one rung can start; runtime owns pair-level fallthrough when
   // the first ready provider later errors or returns an invalid editorial.

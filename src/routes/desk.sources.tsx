@@ -7,6 +7,7 @@ import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
   listScans,
+  checkOneSource,
   listSourcesPage,
   reviewSuggestedSources,
   runScan,
@@ -179,6 +180,18 @@ function SourcesPage() {
   const scanPolicy =
     scanPolicyQuery.data && scanPolicyQuery.data.ok ? scanPolicyQuery.data.policy : null;
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  /*
+    Unit U24: what the last per-row check said, and which row it belongs to.
+    The editor pressed a row, so the answer is drawn on that row -- "Read OK
+    now." or "Still failing: <the reason>" -- instead of a page-level notice
+    that reads the same whichever source was pressed, or (as happened on the
+    stand-in editorial day) nothing at all.
+  */
+  const [checkResult, setCheckResult] = useState<{
+    id: number;
+    ok: boolean;
+    line: string;
+  } | null>(null);
   const runScanNow = useMutation({
     mutationFn: () => runScan({ data: { modelChoice: "auto", modelEffort: null } }),
     onSuccess: (res) => {
@@ -197,27 +210,36 @@ function SourcesPage() {
   /*
     "Check now" / "Retry" on one watch-list row.
 
-    Same runner, same defaults, one source: `runScan` has taken an explicit
-    source set since P0-1 (`customSourceIds`), and `selectCustomScanSources`
-    narrows it to the still-accepted rows, so this cannot reach a source the
-    editor has paused or dropped. It is not a second scanner -- it is the one
-    the Daily scan panel above already runs, scoped to the row you pressed.
+    UNIT U24. This used to call `runScan` scoped to one source -- a whole
+    manual scan: a scan run, a queued job, a model writing pass, leads filed,
+    and a flat refusal if another scan happened to be open. Pressing Retry on
+    one unreadable source therefore produced, on the stand-in editorial day, a
+    failed scan report blaming the model provider for a page nothing could read,
+    and said nothing at all about the row that was pressed.
+
+    Now it asks the row's own question -- can the desk read this page, and has
+    it changed since the answer? -- through `checkOneSource`, which is the
+    scan's fetch path and nothing else: no model call, no job, no leads. The
+    answer comes back to the row it belongs on (`checkResult`), because the
+    editor pressed a row, not a page.
   */
   const checkOne = useMutation({
-    mutationFn: (id: number) =>
-      runScan({ data: { modelChoice: "auto", modelEffort: null, customSourceIds: [id] } }),
-    onSuccess: (res) => {
-      if (res && "ok" in res && res.ok === false) {
-        setScanNotice(res.error);
-        return;
-      }
+    mutationFn: (id: number) => checkOneSource({ data: id }),
+    onSuccess: (res, id) => {
       setScanNotice(null);
-      void qc.invalidateQueries({ queryKey: ["scans"] });
-      void qc.invalidateQueries({ queryKey: ["leads"] });
+      setCheckResult({
+        id,
+        ok: res.ok,
+        line: res.line,
+      });
       void qc.invalidateQueries({ queryKey: ["sources"] });
     },
-    onError: (err) =>
-      setScanNotice(err instanceof Error ? err.message : "Could not check that source."),
+    onError: (err, id) =>
+      setCheckResult({
+        id,
+        ok: false,
+        line: err instanceof Error ? err.message : "Could not check that source.",
+      }),
   });
   const sectionNames = (keys: string[]) =>
     keys.map((key) => reportingSections.find((s) => s.key === key)?.name ?? key).join(", ");
@@ -571,7 +593,11 @@ function SourcesPage() {
                       justAddedSince={addedFloor}
                       killCounts={killCounts}
                   checkingId={checkOne.isPending ? (checkOne.variables ?? null) : null}
-                  onCheck={(id) => checkOne.mutate(id)}
+                  checkResult={checkResult}
+                  onCheck={(id) => {
+                    setCheckResult(null);
+                    checkOne.mutate(id);
+                  }}
                   onStatus={(id, status) => setStatus.mutate({ id, status })}
                 />
               ) : (
@@ -1138,6 +1164,7 @@ function WatchRows({
   justAddedSince,
   killCounts,
   checkingId,
+  checkResult,
   onCheck,
   onStatus,
 }: {
@@ -1151,6 +1178,11 @@ function WatchRows({
   killCounts?: Map<number, { badSource: number; killedFromSource: number }>;
   /** The row a check is in flight for, so only that row says "Checking…". */
   checkingId: number | null;
+  /**
+   * What the last per-row check answered, so the row that was pressed says it
+   * (unit U24). Null before any press, and cleared when a new one starts.
+   */
+  checkResult: { id: number; ok: boolean; line: string } | null;
   onCheck: (id: number) => void;
   onStatus: (id: number, status: "accepted" | "rejected" | "paused") => void;
 }) {
@@ -1180,6 +1212,7 @@ function WatchRows({
                 ? `Checked ${formatDateTime(s.last_fetched_at)}`
                 : "Added, not fetched yet";
         const checking = checkingId === s.id;
+        const result = checkResult?.id === s.id ? checkResult : null;
         const kills = killCounts?.get(s.id);
         return (
           <Fragment key={s.id}>
@@ -1201,6 +1234,23 @@ function WatchRows({
               <div className="astra-cell src-state">
                 <span className={"astra-chip " + chip.cls}>{chip.label}</span>
                 <span className="astra-row-meta">{note}</span>
+                {/*
+                  Unit U24: what the press on THIS row answered. The chip and
+                  the note above are the last pass's record; this is the result
+                  of the check the editor just asked for, so "Retry did
+                  something" is visible on the row instead of only as a new
+                  scan somewhere else on the page.
+                */}
+                {result ? (
+                  <span
+                    className={
+                      "astra-row-meta astra-row-result " + (result.ok ? "is-ok" : "is-fail")
+                    }
+                    role="status"
+                  >
+                    {result.line}
+                  </span>
+                ) : null}
               </div>
               <div className="astra-row-acts">
                 {paused ? (

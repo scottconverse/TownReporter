@@ -56,6 +56,27 @@ export type CorrectionDraft = {
   name: string;
   email: string;
 };
+/**
+ * The address a correction goes to: the PAPER's configured editor contact, and
+ * nothing else (unit U24).
+ *
+ * There used to be a second rule here: a paper named "townreporter" was
+ * hard-coded to `townreporter@gmail.com`, whatever its configured contact was.
+ * On the stand-in editorial day `/corrections` said "To:
+ * townreporter@gmail.com" while `/about` on the same install said "Write the
+ * editor at editor@townreporter.test" -- the same paper, the same setting, two
+ * different addresses, on two public pages whose whole job is to tell a reader
+ * where to write.
+ *
+ * One source: `paper.editorEmail`, the value the operator sets in Paper setup
+ * (`paper_settings.editor_email`, over the build-time
+ * `VITE_TOWNREPORTER_EDITOR_EMAIL`) and the same value `/about` renders. Absent
+ * means absent, and both screens say so in their own words.
+ */
+export function correctionRecipient(paper: { editorEmail: string | null }): string | null {
+  return paper.editorEmail?.trim() || null;
+}
+
 export function correctionMailto(recipient: string, paper: string, d: CorrectionDraft) {
   const body = [
     "CORRECTION REQUEST",

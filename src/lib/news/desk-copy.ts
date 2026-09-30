@@ -1093,7 +1093,32 @@ export function scanCoverageLine(s: {
   if (batchesUsed > 0) {
     parts.push(`${batchesUsed} batch${batchesUsed === 1 ? "" : "es"}${batchesFailed ? `, ${batchesFailed} failed` : ""}`);
   }
+  /*
+    ── WHOSE FAILURE (UNIT U24) ───────────────────────────────────────────────
+
+    This arm used to read `errorBit && analyzed === 0` and nothing else, and
+    the sentence it wrote named the model provider. On the stand-in editorial
+    day that produced, in one paragraph, "Provider failure after 0 fetched —
+    nothing was analyzed" and "First source failed: Page had almost no
+    readable text" -- two diagnoses pointing at two different culprits, of
+    which only the second was true. No model was called at all.
+
+    `model_batches_used` is the discriminator, and it is the same one
+    `performScanWork` uses to choose that error string in the first place: a
+    run records `model_batches_used = batches.length`, and `buildScanBatches`
+    returns nothing when no source yielded text, so ZERO batches means the run
+    never reached a model. The desk must not send its reader to the provider
+    for that -- the sources are what to look at, and the Sources screen is
+    where they are.
+
+    A run that DID send batches and got nothing usable back keeps the provider
+    sentence: that one really is about the model.
+  */
   if (errorBit && analyzed === 0) {
+    if (batchesUsed === 0) {
+      const read = attempted > 0 ? ` ${failed || attempted} of ${attempted} sources could not be read.` : "";
+      return `Fetch failure after ${fetched} fetched — no source text reached the desk, so no writing pass ran.${read} ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+    }
     return `Provider failure after ${fetched} fetched — nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
   }
   if (partial) {

@@ -7,6 +7,7 @@ import { listInvestigations } from "@/lib/news/dark";
 import { createEditorCopy, openLeads, pileForStatus } from "@/lib/news/desk-copy";
 import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
+import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
 import { useAppearance } from "@/lib/appearance-context";
 import { Dialog } from "@/components/dialog";
 /*
@@ -43,73 +44,18 @@ import { listEditorials } from "@/lib/news/opinion";
   /desk/models screen the app does not have; the hash is what tells the two
   apart for the active item, below.
 
-  CY item 6: `count` is drawn on five of the eleven items -- Queue, Drafts,
-  Opinion, Follow-ups and Dark Desk (Desk Nav.dc.html:56) -- and every one of
-  them is a number a desk screen already prints, computed by that screen's own
-  rule rather than a second one invented here (see `counts`, below). Published
-  is drawn blank, so it carries none. A count with no data yet shows nothing
+  CY item 6: `count` is drawn on five of the items -- Queue, Drafts, Opinion,
+  Follow-ups and Dark Desk (Desk Nav.dc.html:56) -- and every one of them is a
+  number a desk screen already prints, computed by that screen's own rule
+  rather than a second one invented here (see `counts`, below). Published is
+  drawn blank, so it carries none. A count with no data yet shows nothing
   rather than a zero that looks like an answer.
+
+  Unit U24: the LISTS themselves -- the drawer, the palette's pages and the
+  active-item rule -- moved to `lib/desk-nav.ts`, so "every drawn screen has a
+  drawn path to it" is a rule a test can read instead of one only a browser
+  can. This file draws them, in the drawing's order and the drawing's words.
 */
-type DeskNavItem = {
-  to: string;
-  label: string;
-  /** Active only on an exact path match — the page the item names. */
-  exact?: boolean;
-  /** A hash the link carries, when two items share one route. */
-  hash?: string;
-};
-
-const DESK_NAV: readonly DeskNavItem[] = [
-  { to: "/desk", label: "Today", exact: true },
-  { to: "/desk/queue", label: "Queue" },
-  { to: "/desk/drafts", label: "Drafts" },
-  { to: "/desk/published", label: "Published" },
-  { to: "/desk/opinion", label: "Opinion" },
-  { to: "/desk/follow-ups", label: "Follow-ups" },
-  { to: "/desk/dark", label: "Dark Desk" },
-  { to: "/desk/sources", label: "Sources & scan" },
-  { to: "/desk/ops", label: "Models", hash: "writing-models" },
-  { to: "/desk/ops", label: "Server" },
-  { to: "/desk/stats", label: "Stats" },
-] as const;
-
-/**
- * Routes the shell does not draw as nav items.
- *
- * They are still reachable: this list is what Ctrl K's palette can find and
- * navigate to, which is the design's own "find anything" mechanism. Not drawn
- * in the footer -- BF3 removed those links, and the capture has none.
- */
-const DESK_MORE = [
-  { to: "/desk/scan", label: "Scan the wire" },
-  { to: "/desk/import", label: "Import" },
-  { to: "/desk/memory", label: "Beat memory" },
-  { to: "/desk/legal-removals", label: "Legal removals" },
-] as const;
-
-/**
- * Which nav item is current. `pathname` alone cannot answer it any more,
- * because Models and Server are the same route; the hash decides between them
- * when there is one, and Server — the page — wins when there is not.
- */
-function navItemIsActive(item: DeskNavItem, pathname: string, hash: string) {
-  const path = item.to;
-  const onPath = item.exact
-    ? pathname === path
-    : pathname === path || pathname.startsWith(`${path}/`);
-  if (!onPath) return false;
-  if (path !== "/desk/ops") return true;
-  const wantHash = `#${item.hash ?? ""}`;
-  return item.hash ? hash === wantHash : hash !== "#writing-models";
-}
-
-/**
- * Search pages list. The old one read `LINKS`, so a rebuilt nav with new
- * routes and new words silently changed what "Find a story or screen" could
- * find; this is the same list the nav draws, plus the screens that are now
- * only in the footer.
- */
-const SEARCH_PAGES = [...DESK_NAV, ...DESK_MORE].map((l) => ({ to: l.to, label: l.label }));
 
 /*
   Light/Dark and Normal/Large both come from AppearanceProvider now.
@@ -855,7 +801,7 @@ function DeskNav({
             activeOptions={{ exact: true, includeHash: Boolean(l.hash) }}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
-            className={"astra-nav" + (active ? " active" : "")}
+            className={"astra-nav" + (l.sub ? " sub" : "") + (active ? " active" : "")}
           >
             <span>{l.label}</span>
             {count != null ? <span className="astra-nav-count">{count}</span> : null}
