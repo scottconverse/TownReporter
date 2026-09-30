@@ -52,6 +52,9 @@ const DARK_RGB = { r: 27, g: 25, b: 22 };
 const LIGHT_RGB = { r: 255, g: 253, b: 247 };
 const EXPECTED_CAPTURES = VIEWPORTS.length * THEMES.length * SIZES.length * (SURFACES.length + 2);
 const AUTH_RATE_LIMIT_IDLE_PAUSE_MS = 61_000;
+const RESPONSIVE_BOUNDARY_WIDTHS = [700, 701, 702, 750, 800, 900, 981, 1024, 1099, 1100, 1179, 1180, 1279, 1280, 1281, 1339, 1340];
+const EXPECTED_RESPONSIVE_BOUNDARY_CHECKS =
+  THEMES.length * RESPONSIVE_BOUNDARY_WIDTHS.length * (SIZES.length + 1);
 const INTERACTIVE_SELECTOR =
   'a[href],button,input:not([type="hidden"]),select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]';
 const ACCESSIBLE_CONTROL_ROLES = new Set([
@@ -92,12 +95,22 @@ const report = {
       "interactive workflow outcomes beyond entering the desk and opening the seeded published story",
       "conditional front-page More sections navigation is absent from the fresh fixture's section set; content-rich navigation is reserved for the final installed walkthrough",
     ],
+    responsiveBoundaryChecks: {
+      widths: RESPONSIVE_BOUNDARY_WIDTHS,
+      surfaces: ["Queue", "Scan"],
+      theme: "light and dark",
+      textSizes: { Queue: SIZES, Scan: ["large"] },
+      expectedChecks: EXPECTED_RESPONSIVE_BOUNDARY_CHECKS,
+      excludedFromCaptureCount: true,
+    },
     disclosurePolicy:
       "Collapsed details descendants and inert mobile-drawer controls are excluded from the collapsed-state control denominator. Visible details summaries and the mobile navigation toggle are checked in the collapsed state; the walk temporarily opens existing disclosures and the mobile drawer, checks revealed controls and overflow, then restores their original state.",
   },
   captures: [],
   scaleChecks: [],
   failures: [],
+  responsiveBoundaryChecks: [],
+  summaryMutationProbe: null,
   sessionBoundaries: [],
   authIdleIntervals: [],
   authTelemetry: [],
@@ -317,6 +330,13 @@ function normalizedSnapshotText(value) {
   return String(value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
 
+function summarySnapshotContainsLabel(label, liveLabel, snapshot) {
+  const expected = normalizedSnapshotText(label);
+  return Boolean(expected) &&
+    normalizedSnapshotText(liveLabel) === expected &&
+    normalizedSnapshotText(snapshot).includes(expected);
+}
+
 function missingInteractiveRoleFailure(measured) {
   if (!(measured.missingInteractiveRoleControls > 0)) return null;
   return measured.missingInteractiveRoleControls +
@@ -327,11 +347,30 @@ function missingInteractiveRoleFailure(measured) {
 }
 
 function responsiveLayoutFailures({ surface, viewportWidth, size }, metrics) {
-  if (size !== "large" || ![900, 390].includes(viewportWidth)) return [];
+  if (
+    (surface === "Queue" ? !SIZES.includes(size) : size !== "large") ||
+    ![900, 390, 1440, ...RESPONSIVE_BOUNDARY_WIDTHS].includes(viewportWidth)
+  ) return [];
   const expectedSelectors = {
-    Queue: [".queue-controls", ".queue-filters", ".queue-sel[0]", ".queue-sel[1]"],
+    Queue: [
+      ".queue-controls",
+      ".queue-tabs",
+      ".queue-filters",
+      ".queue-search",
+      ".queue-sel[0]",
+      ".queue-sel[0] select",
+      ".queue-sel[1]",
+      ".queue-sel[1] select",
+    ],
     Published: ["details.beat-memory", ".beat-memory td.td-meta[colspan=3]"],
-    Scan: [".astra-panel.hot (Run a scan)", ".astra-toolbar", ".astra-toolbar > label", ".astra-toolbar > label select"],
+    Scan: [
+      ".astra-panel.hot (Run a scan)",
+      ".astra-toolbar",
+      ".astra-toolbar > label",
+      ".astra-toolbar > label select",
+      ".scan-bar .model-picker > .model-picker",
+      ".scan-bar .model-picker > .model-picker select",
+    ],
   }[surface];
   if (!expectedSelectors) return [];
   if (!metrics) return [surface + " responsive containment metrics were not collected"];
@@ -340,11 +379,57 @@ function responsiveLayoutFailures({ surface, viewportWidth, size }, metrics) {
   }
 
   const failures = [];
+  if (surface === "Queue") {
+    const sectionSelect = metrics.targets.find((entry) => entry.selector === ".queue-sel[1] select");
+    if (!sectionSelect || sectionSelect.optionCount < 2) {
+      failures.push("Queue Section options were not loaded before measuring selected-option fit");
+    }
+    if (!Array.isArray(metrics.queueTabButtons) || metrics.queueTabButtons.length === 0) {
+      failures.push("Queue tab buttons were not measured");
+    } else {
+      for (const [index, button] of metrics.queueTabButtons.entries()) {
+        const name = "Queue tab " + (index + 1) + " " + JSON.stringify(button.text);
+        if (button.height < 44) {
+          failures.push(name + " is only " + button.height + "px tall; expected 44px");
+        }
+        if (button.fontSize <= 0 || !button.text) failures.push(name + " is not legible");
+        if (button.scrollWidth > button.clientWidth + 1 || button.scrollHeight > button.clientHeight + 1) {
+          failures.push(name + " text is clipped inside its button");
+        }
+      }
+    }
+    for (const [index, item] of (metrics.queueFilterItemGaps || []).entries()) {
+      if (item.sameRow && item.gapPx < -0.5) {
+        failures.push("Queue filter item " + (index + 1) + " overlaps its previous sibling by " +
+          Math.abs(item.gapPx).toFixed(1) + "px");
+      }
+    }
+    if (metrics.queueRowTopDelta <= 1 && metrics.queueFirstFilterGapPx < -0.5) {
+      failures.push("Queue search overlaps the tab strip by " +
+        Math.abs(metrics.queueFirstFilterGapPx).toFixed(1) + "px");
+    }
+  }
   for (const selector of expectedSelectors) {
     const target = metrics.targets.find((entry) => entry.selector === selector);
     if (!target?.found) {
       failures.push(surface + " responsive target was not found: " + selector);
       continue;
+    }
+    if (selector.endsWith(" select") && target.width <= 1) {
+      failures.push(selector + " collapsed to " + target.width + "px");
+    }
+    if (selector === ".queue-search" && target.width < 100) {
+      failures.push("Queue search is only " + target.width.toFixed(1) + "px wide; expected at least 100px");
+    }
+    if (selector.endsWith(" select") && target.selectedTextRequiredWidth > target.width + 0.5) {
+      failures.push(
+        selector + " gives selected option " + JSON.stringify(target.selectedOptionText) +
+          " " + target.width.toFixed(1) + "px, but needs " +
+          target.selectedTextRequiredWidth + "px including the arrow allowance",
+      );
+    }
+    if (selector.endsWith(" select") && target.labelGapPx < -0.5) {
+      failures.push(selector + " overlaps its visible label by " + Math.abs(target.labelGapPx).toFixed(1) + "px");
     }
     const intrinsicOverflowPx = selector.endsWith(" select") ? 0 : target.overflowPx || 0;
     const overflowPx = Math.max(intrinsicOverflowPx, target.rightEdgeOverflowPx || 0);
@@ -356,6 +441,189 @@ function responsiveLayoutFailures({ surface, viewportWidth, size }, metrics) {
     }
   }
   return failures;
+}
+
+async function collectResponsiveTargets(page, surfaceName) {
+  return page.evaluate((name) => {
+    const boxMetrics = (selector, element, boundaryRight = null) => {
+      if (!element) return { selector, found: false };
+      const rect = element.getBoundingClientRect();
+      return {
+        selector,
+        found: true,
+        width: rect.width,
+        top: rect.top,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        overflowPx: Math.max(0, element.scrollWidth - element.clientWidth),
+        rightEdgeOverflowPx: boundaryRight === null ? 0 : Math.max(0, rect.right - boundaryRight),
+        right: rect.right,
+        boundaryRight,
+      };
+    };
+    const innerRight = (element) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.right -
+        (parseFloat(style.borderRightWidth) || 0) -
+        (parseFloat(style.paddingRight) || 0);
+    };
+    let targets = [];
+    let queueRowTopDelta = null;
+    let queueTabButtons = [];
+    let queueFirstFilterGapPx = null;
+    let queueFilterItemGaps = [];
+    if (name === "Queue") {
+      const controls = document.querySelector(".queue-controls");
+      const tabs = controls?.querySelector(".queue-tabs");
+      const filters = controls?.querySelector(".queue-filters");
+      const search = filters?.querySelector(".queue-search");
+      queueTabButtons = [...(tabs?.querySelectorAll(":scope > button") || [])].map((button) => {
+        const rect = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return {
+          text: (button.innerText || "").replace(/\s+/g, " ").trim(),
+          width: rect.width,
+          height: rect.height,
+          clientWidth: button.clientWidth,
+          clientHeight: button.clientHeight,
+          scrollWidth: button.scrollWidth,
+          scrollHeight: button.scrollHeight,
+          fontSize: parseFloat(style.fontSize) || 0,
+        };
+      });
+      queueRowTopDelta = tabs && filters
+        ? Math.abs(tabs.getBoundingClientRect().top - filters.getBoundingClientRect().top)
+        : null;
+      const tabRect = tabs?.getBoundingClientRect();
+      const filterItems = [...(filters?.children || [])];
+      const firstFilterRect = filterItems[0]?.getBoundingClientRect();
+      queueFirstFilterGapPx = tabRect && firstFilterRect ? firstFilterRect.left - tabRect.right : null;
+      queueFilterItemGaps = filterItems.slice(1).map((item, index) => {
+        const previousRect = filterItems[index].getBoundingClientRect();
+        const rect = item.getBoundingClientRect();
+        return {
+          gapPx: rect.left - previousRect.right,
+          sameRow: Math.abs(rect.top - previousRect.top) <= 1,
+        };
+      });
+      const selectedOptionMetrics = (select) => {
+        if (!select) return {};
+        const selectedOptionText = select.selectedOptions[0]?.textContent?.trim() || "";
+        const optionTexts = [...select.options].map((option) => option.textContent?.trim() || "");
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        context.font = getComputedStyle(select).font;
+        const selectedTextWidth = context.measureText(selectedOptionText).width;
+        const selectRect = select.getBoundingClientRect();
+        const labelRect = select.closest(".queue-sel")?.querySelector(".queue-lab")?.getBoundingClientRect();
+        return {
+          selectedOptionText,
+          selectedTextWidth,
+          selectedTextRequiredWidth: Math.ceil(selectedTextWidth + 20),
+          optionCount: select.options.length,
+          longestOptionText: optionTexts.reduce((longest, text) => text.length > longest.length ? text : longest, ""),
+          labelGapPx: labelRect ? selectRect.left - labelRect.right : 0,
+        };
+      };
+      targets = [
+        [".queue-controls", controls, null],
+        [".queue-tabs", tabs, innerRight(controls)],
+        [".queue-filters", filters, null],
+        [".queue-search", search, innerRight(filters)],
+        ...[...document.querySelectorAll(".queue-sel")].flatMap((element, index) => {
+          const select = element.querySelector("select");
+          const selectMetrics = {
+            ...boxMetrics(".queue-sel[" + index + "] select", select, innerRight(element)),
+            ...selectedOptionMetrics(select),
+          };
+          return [
+            [".queue-sel[" + index + "]", element, null],
+            [".queue-sel[" + index + "] select", selectMetrics, null],
+          ];
+        }),
+      ].map(([selector, element, boundary]) =>
+        element?.selector === selector ? element : boxMetrics(selector, element, boundary),
+      );
+    } else if (name === "Scan") {
+      const panel = [...document.querySelectorAll(".astra-panel.hot")].find((element) =>
+        element.querySelector(".astra-panel-h")?.textContent?.trim() === "Run a scan",
+      );
+      const toolbar = panel?.querySelector(".astra-toolbar");
+      const label = toolbar?.querySelector(":scope > label");
+      const select = label?.querySelector("select");
+      const effortPicker = panel?.querySelector(".scan-bar .model-picker > .model-picker");
+      targets = [
+        [".astra-panel.hot (Run a scan)", panel, null],
+        [".astra-toolbar", toolbar, innerRight(panel)],
+        [".astra-toolbar > label", label, innerRight(panel)],
+        [".astra-toolbar > label select", select, innerRight(panel)],
+        [".scan-bar .model-picker > .model-picker", effortPicker, innerRight(panel)],
+        [
+          ".scan-bar .model-picker > .model-picker select",
+          effortPicker?.querySelector("select"),
+          innerRight(effortPicker),
+        ],
+      ].map(([selector, element, boundary]) => boxMetrics(selector, element, boundary));
+    }
+    return {
+      surface: name,
+      targets,
+      queueRowTopDelta,
+      queueTabButtons,
+      queueFirstFilterGapPx,
+      queueFilterItemGaps,
+    };
+  }, surfaceName);
+}
+
+async function checkResponsiveBoundaries(page, scenario, surface) {
+  if (
+    scenario.viewport.width !== 1024 ||
+    !["Queue", "Scan"].includes(surface.name)
+  ) return [];
+  if (surface.name === "Scan" && scenario.size !== "large") return [];
+
+  const originalWidth = scenario.viewport.width;
+  const checks = [];
+  try {
+    for (const width of RESPONSIVE_BOUNDARY_WIDTHS) {
+      await page.setViewportSize({ width, height: scenario.viewport.height });
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      const metrics = await collectResponsiveTargets(page, surface.name);
+      const failures = responsiveLayoutFailures({
+        surface: surface.name,
+        viewportWidth: width,
+        size: scenario.size,
+      }, metrics);
+      if (surface.name === "Queue") {
+        const shouldBeOneLine = width >= 1280;
+        const isOneLine = metrics.queueRowTopDelta <= 1;
+        if (isOneLine !== shouldBeOneLine) {
+          failures.push(
+            "Queue controls were " + (isOneLine ? "one line" : "wrapped") + " at " + width +
+              "px; expected " + (shouldBeOneLine ? "one line" : "filters below the tabs"),
+          );
+        }
+      }
+      const check = {
+        surface: surface.name,
+        width,
+        theme: scenario.theme,
+        size: scenario.size,
+        metrics,
+        failures,
+      };
+      checks.push(check);
+      report.responsiveBoundaryChecks.push(check);
+    }
+  } finally {
+    await page.setViewportSize({ width: originalWidth, height: scenario.viewport.height });
+  }
+  return checks;
 }
 
 function screenshotPathFor(scenario, surfaceName) {
@@ -602,6 +870,23 @@ async function captureSurface(page, scenario, surface) {
     timeout: 30_000,
   });
   await establishIdentity(page, surface, scenario);
+  if (surface.name === "Queue") {
+    await page.waitForFunction(
+      () => document.querySelector('.queue-sel select[aria-label="Section"]')?.options.length > 1,
+      undefined,
+      { timeout: 20_000 },
+    );
+  }
+  if (surface.name === "Published") {
+    await page.locator("details.row-more > summary").first().waitFor({
+      state: "visible",
+      timeout: 20_000,
+    });
+    await page.locator("details.beat-memory > summary").waitFor({
+      state: "visible",
+      timeout: 20_000,
+    });
+  }
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
@@ -693,11 +978,22 @@ async function captureSurface(page, scenario, surface) {
     const allSummaries = [...document.querySelectorAll("details > summary")];
     const summaryNodes = allSummaries
       .filter(visible)
-      .map((el) => ({
-        index: allSummaries.indexOf(el),
-        initialViewport: inViewport(el),
-        label: (el.innerText || "").replace(/\s+/g, " ").trim(),
-      }));
+      .map((el) => {
+        const details = el.parentElement;
+        const classes = [...(details?.classList || [])];
+        const identitySelector = details?.id
+          ? "details#" + CSS.escape(details.id) + " > summary"
+          : classes.length
+            ? "details" + classes.map((name) => "." + CSS.escape(name)).join("") + " > summary"
+            : "details:not([id]):not([class]) > summary";
+        return {
+          index: allSummaries.indexOf(el),
+          identitySelector,
+          identityIndex: [...document.querySelectorAll(identitySelector)].indexOf(el),
+          initialViewport: inViewport(el),
+          label: (el.innerText || "").replace(/\s+/g, " ").trim(),
+        };
+      });
     const mobileNavigationToggles = [...document.querySelectorAll(
       'button[aria-controls="desk-navigation"],button[aria-controls="reader-sections"]',
     )].filter(visible);
@@ -754,7 +1050,6 @@ async function captureSurface(page, scenario, surface) {
     };
   }, INTERACTIVE_SELECTOR);
   const controlLocator = page.locator(INTERACTIVE_SELECTOR);
-  const summaryLocator = page.locator("details > summary");
   const originalScroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
   const measuredControlNames = [];
   const measuredSummarySnapshots = [];
@@ -794,16 +1089,59 @@ async function captureSurface(page, scenario, surface) {
       });
     }
     for (const node of measured.summaryNodes) {
-      const locator = summaryLocator.nth(node.index);
+      const locator = page.locator(node.identitySelector).nth(node.identityIndex);
       await locator.scrollIntoViewIfNeeded({ timeout: 10_000 });
+      const liveLabel = (await locator.innerText()).replace(/\s+/g, " ").trim();
       const snapshot = await locator.ariaSnapshot();
       measuredSummarySnapshots.push({
         ...node,
+        liveLabel,
+        identityMatchesLabel:
+          normalizedSnapshotText(liveLabel) === normalizedSnapshotText(node.label),
         snapshot,
-        snapshotContainsLabel:
-          Boolean(normalizedSnapshotText(node.label)) &&
-          normalizedSnapshotText(snapshot).includes(normalizedSnapshotText(node.label)),
+        snapshotContainsLabel: summarySnapshotContainsLabel(node.label, liveLabel, snapshot),
       });
+    }
+    if (!report.summaryMutationProbe && surface.name === "Published") {
+      const beatMemoryNode = measured.summaryNodes.find(
+        (node) => node.identitySelector === "details.beat-memory > summary",
+      );
+      if (!beatMemoryNode) throw new Error("Published route data did not expose the Beat memory summary for the mutation check.");
+      const locator = page.locator(beatMemoryNode.identitySelector).nth(beatMemoryNode.identityIndex);
+      const originalText = await locator.textContent();
+      let mutatedSnapshot = "";
+      let mutationRejected = false;
+      let restoredSnapshot = "";
+      try {
+        await locator.evaluate((element) => { element.textContent = ""; });
+        const mutatedLiveLabel = (await locator.innerText()).replace(/\s+/g, " ").trim();
+        mutatedSnapshot = await locator.ariaSnapshot();
+        mutationRejected = !summarySnapshotContainsLabel(
+          beatMemoryNode.label,
+          mutatedLiveLabel,
+          mutatedSnapshot,
+        );
+      } finally {
+        await locator.evaluate((element, text) => { element.textContent = text; }, originalText);
+        restoredSnapshot = await locator.ariaSnapshot();
+      }
+      const restoredLiveLabel = (await locator.innerText()).replace(/\s+/g, " ").trim();
+      const restorationPassed = summarySnapshotContainsLabel(
+        beatMemoryNode.label,
+        restoredLiveLabel,
+        restoredSnapshot,
+      );
+      report.summaryMutationProbe = {
+        target: "details.beat-memory > summary",
+        expectedLabel: beatMemoryNode.label,
+        mutatedSnapshot,
+        rejectedWhenTextRemoved: mutationRejected,
+        restoredSnapshot,
+        restorationPassed,
+      };
+      if (!mutationRejected || !restorationPassed) {
+        throw new Error("Beat memory summary accessibility-name mutation check did not fail closed and restore cleanly.");
+      }
     }
 
     const mobileToggleControl = measuredControlNames.find(
@@ -959,6 +1297,8 @@ async function captureSurface(page, scenario, surface) {
         return {
           selector,
           found: true,
+          width: rect.width,
+          top: rect.top,
           clientWidth: element.clientWidth,
           scrollWidth: element.scrollWidth,
           overflowPx: Math.max(0, element.scrollWidth - element.clientWidth),
@@ -967,16 +1307,95 @@ async function captureSurface(page, scenario, surface) {
           boundaryRight,
         };
       };
+      const innerRight = (element) => {
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.right -
+          (parseFloat(style.borderRightWidth) || 0) -
+          (parseFloat(style.paddingRight) || 0);
+      };
       let responsiveTargets = [];
+      let queueRowTopDelta = null;
+      let queueTabButtons = [];
+      let queueFirstFilterGapPx = null;
+      let queueFilterItemGaps = [];
       if (surfaceName === "Queue") {
+        const controls = document.querySelector(".queue-controls");
+        const tabs = controls?.querySelector(".queue-tabs");
+        const filters = controls?.querySelector(".queue-filters");
+        const search = filters?.querySelector(".queue-search");
+        queueTabButtons = [...(tabs?.querySelectorAll(":scope > button") || [])].map((button) => {
+          const rect = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          return {
+            text: (button.innerText || "").replace(/\s+/g, " ").trim(),
+            width: rect.width,
+            height: rect.height,
+            clientWidth: button.clientWidth,
+            clientHeight: button.clientHeight,
+            scrollWidth: button.scrollWidth,
+            scrollHeight: button.scrollHeight,
+            fontSize: parseFloat(style.fontSize) || 0,
+          };
+        });
+        queueRowTopDelta = tabs && filters
+          ? Math.abs(tabs.getBoundingClientRect().top - filters.getBoundingClientRect().top)
+          : null;
+        const tabRect = tabs?.getBoundingClientRect();
+        const filterItems = [...(filters?.children || [])];
+        const firstFilterRect = filterItems[0]?.getBoundingClientRect();
+        queueFirstFilterGapPx = tabRect && firstFilterRect ? firstFilterRect.left - tabRect.right : null;
+        queueFilterItemGaps = filterItems.slice(1).map((item, index) => {
+          const previousRect = filterItems[index].getBoundingClientRect();
+          const rect = item.getBoundingClientRect();
+          return {
+            gapPx: rect.left - previousRect.right,
+            sameRow: Math.abs(rect.top - previousRect.top) <= 1,
+          };
+        });
+        const selectedOptionMetrics = (select) => {
+          if (!select) return {};
+          const selectedOptionText = select.selectedOptions[0]?.textContent?.trim() || "";
+          const optionTexts = [...select.options].map((option) => option.textContent?.trim() || "");
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          context.font = getComputedStyle(select).font;
+          const selectedTextWidth = context.measureText(selectedOptionText).width;
+          const selectRect = select.getBoundingClientRect();
+          const labelRect = select.closest(".queue-sel")?.querySelector(".queue-lab")?.getBoundingClientRect();
+          return {
+            selectedOptionText,
+            selectedTextWidth,
+            selectedTextRequiredWidth: Math.ceil(selectedTextWidth + 20),
+            optionCount: select.options.length,
+            longestOptionText: optionTexts.reduce((longest, text) => text.length > longest.length ? text : longest, ""),
+            labelGapPx: labelRect ? selectRect.left - labelRect.right : 0,
+          };
+        };
         responsiveTargets = [
-          [".queue-controls", document.querySelector(".queue-controls")],
-          [".queue-filters", document.querySelector(".queue-filters")],
-          ...[...document.querySelectorAll(".queue-sel")].map((element, index) => [
-            ".queue-sel[" + index + "]",
-            element,
+          [".queue-controls", controls, null],
+          [".queue-tabs", tabs, innerRight(controls)],
+          [".queue-filters", filters, null],
+          [".queue-search", search, innerRight(filters)],
+          ...[...document.querySelectorAll(".queue-sel")].flatMap((element, index) => [
+            [".queue-sel[" + index + "]", element, null],
+            [
+              ".queue-sel[" + index + "] select",
+              {
+                ...boxMetrics(
+                  ".queue-sel[" + index + "] select",
+                  element.querySelector("select"),
+                  innerRight(element),
+                ),
+                ...selectedOptionMetrics(element.querySelector("select")),
+              },
+              null,
+            ],
           ]),
-        ].map(([selector, element]) => boxMetrics(selector, element));
+        ].map(([selector, element, boundary]) =>
+          element?.selector === selector ? element : boxMetrics(selector, element, boundary),
+        );
       } else if (surfaceName === "Published") {
         const beatMemory = document.querySelector("details.beat-memory");
         const beatRect = beatMemory?.getBoundingClientRect();
@@ -1001,6 +1420,7 @@ async function captureSurface(page, scenario, surface) {
         const toolbar = panel?.querySelector(".astra-toolbar");
         const label = toolbar?.querySelector(":scope > label");
         const select = label?.querySelector("select");
+        const effortPicker = panel?.querySelector(".scan-bar .model-picker > .model-picker");
         const panelRect = panel?.getBoundingClientRect();
         const panelStyle = panel ? getComputedStyle(panel) : null;
         const contentRight = panelRect && panelStyle
@@ -1013,6 +1433,16 @@ async function captureSurface(page, scenario, surface) {
           boxMetrics(".astra-toolbar", toolbar, contentRight),
           boxMetrics(".astra-toolbar > label", label, contentRight),
           boxMetrics(".astra-toolbar > label select", select, contentRight),
+          boxMetrics(
+            ".scan-bar .model-picker > .model-picker",
+            effortPicker,
+            contentRight,
+          ),
+          boxMetrics(
+            ".scan-bar .model-picker > .model-picker select",
+            effortPicker?.querySelector("select"),
+            innerRight(effortPicker),
+          ),
         ];
       }
       return {
@@ -1023,6 +1453,10 @@ async function captureSurface(page, scenario, surface) {
         responsiveLayoutMetrics: {
           surface: surfaceName,
           targets: responsiveTargets,
+          queueRowTopDelta,
+          queueTabButtons,
+          queueFirstFilterGapPx,
+          queueFilterItemGaps,
         },
       };
     }, { interactiveSelector: INTERACTIVE_SELECTOR, surfaceName: surface.name });
@@ -1078,6 +1512,8 @@ async function captureSurface(page, scenario, surface) {
       originalScroll,
     );
   }
+  const responsiveBoundaryChecks = await checkResponsiveBoundaries(page, scenario, surface);
+  measured.responsiveBoundaryChecks = responsiveBoundaryChecks;
   const missingRoleControls = measuredControlNames.filter((control) => !control.role);
   const missingViewportRoleControls = missingRoleControls.filter((control) => control.initialViewport);
   const belowFoldMissingRoleControls = missingRoleControls.filter((control) => !control.initialViewport);
@@ -1123,7 +1559,11 @@ async function captureSurface(page, scenario, surface) {
   measured.summaryComputedTextFailures = summariesMissingComputedText.length;
   measured.summaryFailures = summariesMissingComputedText
     .slice(0, 8)
-    .map((summary) => "summary[" + summary.index + "] label=" + JSON.stringify(summary.label) + " snapshot=" + summary.snapshot);
+    .map((summary) =>
+      summary.identitySelector + "[" + summary.identityIndex + "] label=" +
+      JSON.stringify(summary.label) + " live=" + JSON.stringify(summary.liveLabel) +
+      " snapshot=" + summary.snapshot,
+    );
   measured.expandedDisclosureMetrics = expandedDisclosureMetrics;
   measured.responsiveLayoutMetrics = responsiveLayoutMetrics;
   measured.expandedDisclosureScreenshot = measured.expandedDisclosureScreenshot || null;
@@ -1145,6 +1585,9 @@ async function captureSurface(page, scenario, surface) {
   const violations = [];
   const missingRoleFailure = missingInteractiveRoleFailure(measured);
   if (missingRoleFailure) violations.push(missingRoleFailure);
+  for (const check of responsiveBoundaryChecks) {
+    violations.push(...check.failures.map((failure) => surface.name + " " + check.width + "px: " + failure));
+  }
   violations.push(...responsiveLayoutFailures({
     surface: surface.name,
     viewportWidth: scenario.viewport.width,
@@ -1312,6 +1755,7 @@ async function captureSurface(page, scenario, surface) {
     inertHiddenControlCandidates: measured.inertHiddenControlCandidates,
     summaryChecks: measured.summaryChecks,
     summaryComputedTextFailures: measured.summaryComputedTextFailures,
+    responsiveBoundaryChecks: measured.responsiveBoundaryChecks,
     expandedDisclosureMetrics: measured.expandedDisclosureMetrics,
     expandedDisclosureScreenshot: measured.expandedDisclosureScreenshot,
     responsiveLayoutMetrics: measured.responsiveLayoutMetrics,
@@ -1501,6 +1945,18 @@ async function run() {
   await context.close();
   await flushAuthTelemetry();
   report.failures.push(...authSessionTelemetryFailures(report.authTelemetry));
+  if (report.responsiveBoundaryChecks.length !== EXPECTED_RESPONSIVE_BOUNDARY_CHECKS) {
+    report.failures.push(
+      "responsive breakpoint checks were " + report.responsiveBoundaryChecks.length +
+        ", expected " + EXPECTED_RESPONSIVE_BOUNDARY_CHECKS,
+    );
+  }
+  if (
+    !report.summaryMutationProbe?.rejectedWhenTextRemoved ||
+    !report.summaryMutationProbe?.restorationPassed
+  ) {
+    report.failures.push("Beat memory summary accessibility-name mutation check is missing or failed");
+  }
   checkScaleRatios();
   if (report.failures.length) throw new Error(report.failures.join("\n"));
   if (report.completedCaptures !== EXPECTED_CAPTURES) {
