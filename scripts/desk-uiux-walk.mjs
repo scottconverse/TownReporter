@@ -326,6 +326,38 @@ function missingInteractiveRoleFailure(measured) {
     measured.missingRoleExamples.join("; ");
 }
 
+function responsiveLayoutFailures({ surface, viewportWidth, size }, metrics) {
+  if (size !== "large" || ![900, 390].includes(viewportWidth)) return [];
+  const expectedSelectors = {
+    Queue: [".queue-controls", ".queue-filters", ".queue-sel[0]", ".queue-sel[1]"],
+    Published: ["details.beat-memory", ".beat-memory td.td-meta[colspan=3]"],
+    Scan: [".astra-panel.hot (Run a scan)", ".astra-toolbar", ".astra-toolbar > label", ".astra-toolbar > label select"],
+  }[surface];
+  if (!expectedSelectors) return [];
+  if (!metrics) return [surface + " responsive containment metrics were not collected"];
+  if (!Array.isArray(metrics.targets)) {
+    return [surface + " responsive containment targets were not collected"];
+  }
+
+  const failures = [];
+  for (const selector of expectedSelectors) {
+    const target = metrics.targets.find((entry) => entry.selector === selector);
+    if (!target?.found) {
+      failures.push(surface + " responsive target was not found: " + selector);
+      continue;
+    }
+    const intrinsicOverflowPx = selector.endsWith(" select") ? 0 : target.overflowPx || 0;
+    const overflowPx = Math.max(intrinsicOverflowPx, target.rightEdgeOverflowPx || 0);
+    if (overflowPx > 1) {
+      failures.push(
+        selector + " escapes its containing box by " + overflowPx + "px " +
+          "(scrollWidth " + target.scrollWidth + ", clientWidth " + target.clientWidth + ")",
+      );
+    }
+  }
+  return failures;
+}
+
 function screenshotPathFor(scenario, surfaceName) {
   const name = [
     String(scenario.index).padStart(2, "0"),
@@ -747,6 +779,7 @@ async function captureSurface(page, scenario, surface) {
     expandedDisclosureUnnamedControls: 0,
     expandedOverflowPx: measured.overflowPx,
   };
+  let responsiveLayoutMetrics = null;
   try {
     for (const node of measured.visibleControlNodes) {
       const locator = controlLocator.nth(node.index);
@@ -864,7 +897,7 @@ async function captureSurface(page, scenario, surface) {
       }
     }
 
-    const disclosureState = await page.evaluate((interactiveSelector) => {
+    const disclosureState = await page.evaluate(({ interactiveSelector, surfaceName }) => {
       const allControls = [...document.querySelectorAll(interactiveSelector)];
       const collapsedVisible = new Set(
         allControls.filter((el) => {
@@ -920,13 +953,79 @@ async function captureSurface(page, scenario, surface) {
       });
       const html = document.documentElement;
       const body = document.body;
+      const boxMetrics = (selector, element, boundaryRight = null) => {
+        if (!element) return { selector, found: false };
+        const rect = element.getBoundingClientRect();
+        return {
+          selector,
+          found: true,
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          overflowPx: Math.max(0, element.scrollWidth - element.clientWidth),
+          rightEdgeOverflowPx: boundaryRight === null ? 0 : Math.max(0, rect.right - boundaryRight),
+          right: rect.right,
+          boundaryRight,
+        };
+      };
+      let responsiveTargets = [];
+      if (surfaceName === "Queue") {
+        responsiveTargets = [
+          [".queue-controls", document.querySelector(".queue-controls")],
+          [".queue-filters", document.querySelector(".queue-filters")],
+          ...[...document.querySelectorAll(".queue-sel")].map((element, index) => [
+            ".queue-sel[" + index + "]",
+            element,
+          ]),
+        ].map(([selector, element]) => boxMetrics(selector, element));
+      } else if (surfaceName === "Published") {
+        const beatMemory = document.querySelector("details.beat-memory");
+        const beatRect = beatMemory?.getBoundingClientRect();
+        const beatStyle = beatMemory ? getComputedStyle(beatMemory) : null;
+        const contentRight = beatRect && beatStyle
+          ? beatRect.right -
+            (parseFloat(beatStyle.borderRightWidth) || 0) -
+            (parseFloat(beatStyle.paddingRight) || 0)
+          : null;
+        responsiveTargets = [
+          boxMetrics("details.beat-memory", beatMemory),
+          boxMetrics(
+            ".beat-memory td.td-meta[colspan=3]",
+            beatMemory?.querySelector("td.td-meta[colspan='3']"),
+            contentRight,
+          ),
+        ];
+      } else if (surfaceName === "Scan") {
+        const panel = [...document.querySelectorAll(".astra-panel.hot")].find((element) =>
+          element.querySelector(".astra-panel-h")?.textContent?.trim() === "Run a scan",
+        );
+        const toolbar = panel?.querySelector(".astra-toolbar");
+        const label = toolbar?.querySelector(":scope > label");
+        const select = label?.querySelector("select");
+        const panelRect = panel?.getBoundingClientRect();
+        const panelStyle = panel ? getComputedStyle(panel) : null;
+        const contentRight = panelRect && panelStyle
+          ? panelRect.right -
+            (parseFloat(panelStyle.borderRightWidth) || 0) -
+            (parseFloat(panelStyle.paddingRight) || 0)
+          : null;
+        responsiveTargets = [
+          boxMetrics(".astra-panel.hot (Run a scan)", panel),
+          boxMetrics(".astra-toolbar", toolbar, contentRight),
+          boxMetrics(".astra-toolbar > label", label, contentRight),
+          boxMetrics(".astra-toolbar > label select", select, contentRight),
+        ];
+      }
       return {
         originalStates,
         expandedCount,
         expandedDisclosureControlNodes,
         expandedOverflowPx: Math.max(html.scrollWidth, body?.scrollWidth || 0) - window.innerWidth,
+        responsiveLayoutMetrics: {
+          surface: surfaceName,
+          targets: responsiveTargets,
+        },
       };
-    }, INTERACTIVE_SELECTOR);
+    }, { interactiveSelector: INTERACTIVE_SELECTOR, surfaceName: surface.name });
     expandedDisclosureMetrics = {
       detailsExpandedForAudit: disclosureState.expandedCount,
       expandedDisclosureControlCandidates: disclosureState.expandedDisclosureControlNodes.length,
@@ -935,6 +1034,7 @@ async function captureSurface(page, scenario, surface) {
       expandedDisclosureUnnamedControls: 0,
       expandedOverflowPx: disclosureState.expandedOverflowPx,
     };
+    responsiveLayoutMetrics = disclosureState.responsiveLayoutMetrics;
     try {
       for (const node of disclosureState.expandedDisclosureControlNodes) {
         const locator = controlLocator.nth(node.index);
@@ -1025,6 +1125,7 @@ async function captureSurface(page, scenario, surface) {
     .slice(0, 8)
     .map((summary) => "summary[" + summary.index + "] label=" + JSON.stringify(summary.label) + " snapshot=" + summary.snapshot);
   measured.expandedDisclosureMetrics = expandedDisclosureMetrics;
+  measured.responsiveLayoutMetrics = responsiveLayoutMetrics;
   measured.expandedDisclosureScreenshot = measured.expandedDisclosureScreenshot || null;
   measured.expandedDisclosureFailures = [...expandedMissingRoleControls, ...expandedUnnamedControls]
     .slice(0, 8)
@@ -1044,6 +1145,11 @@ async function captureSurface(page, scenario, surface) {
   const violations = [];
   const missingRoleFailure = missingInteractiveRoleFailure(measured);
   if (missingRoleFailure) violations.push(missingRoleFailure);
+  violations.push(...responsiveLayoutFailures({
+    surface: surface.name,
+    viewportWidth: scenario.viewport.width,
+    size: scenario.size,
+  }, measured.responsiveLayoutMetrics));
   const status = response?.status() ?? null;
   if (status !== 200) violations.push("HTTP status was " + status + ", expected 200");
   if (measured.pathname !== new URL(surface.path, base).pathname) {
@@ -1208,6 +1314,7 @@ async function captureSurface(page, scenario, surface) {
     summaryComputedTextFailures: measured.summaryComputedTextFailures,
     expandedDisclosureMetrics: measured.expandedDisclosureMetrics,
     expandedDisclosureScreenshot: measured.expandedDisclosureScreenshot,
+    responsiveLayoutMetrics: measured.responsiveLayoutMetrics,
     belowFoldMissingRoleControls: measured.belowFoldMissingRoleControls,
     belowFoldMissingRoleExamples: measured.belowFoldMissingRoleExamples,
     missingInteractiveRoleControls: measured.missingInteractiveRoleControls,

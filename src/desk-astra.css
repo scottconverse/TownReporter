@@ -3699,8 +3699,8 @@
 /* BF3, defect 2: ONE line at 1280, drawn order -- the tab strip at the left,
    then search, Sort and Section at the right -- with the words inside the
    controls ("Sort: Best first", "Section: All") rather than as labels above
-   them. Measured at 1280: all six share one top y. Nothing here wraps above
-   the phone width; the @media block at the foot of this file stacks them. */
+   them. Measured at 1280: all six share one top y. At 701–980px, the filters
+   wrap below the strip; the phone media block at the foot stacks them. */
 .desk-ltr.astra .queue-controls {
   display: flex;
   flex-wrap: nowrap;
@@ -3773,6 +3773,17 @@
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Large-text filters move below the tabs before their controls reach the page edge. */
+@media (min-width: 701px) and (max-width: 980px) {
+  .desk-ltr.astra .queue-controls {
+    flex-wrap: wrap;
+  }
+  .desk-ltr.astra .queue-filters {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
@@ -6037,6 +6048,18 @@
 
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */
 @media (max-width: 980px) {
+  .desk-ltr.astra .astra-panel.hot .astra-toolbar > label {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .desk-ltr.astra .astra-panel.hot .astra-toolbar > label select {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
   .desk-ltr.astra .astra-2col,
   .desk-ltr.astra .astra-split,
   .desk-ltr.astra .astra-split-deep,
