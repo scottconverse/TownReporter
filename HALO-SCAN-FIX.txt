@@ -18,3 +18,13 @@ STEPS (see SELF-HOSTING.md, "Updating this installation"):
 IF SOMETHING GOES WRONG: do not roll back a migration by hand. Stop, keep the backup, and report the exact error plus the last 50 lines of the promotion output and of logs\. The site being briefly down during the build is expected.
 
 DO NOT CHANGE: the Node version (it is 25.9.0; just report it) or cloudflared (it says it is outdated; leave it).
+
+DEPLOYMENT RESULT (2026-09-30, reported back to this branch):
+- Outcome: promotion completed successfully. Production HEAD is 32ef34ea0a1c0821ab01f7179813a9b3751dc366. The production checkout was left at that detached HEAD.
+- Database backup: C:\Users\scott\Desktop\Code\townreporter-backups\townreporter_2026-09-30_1115.sql (871.3 MB). An offsite copy was confirmed on D:\TownReporter-backups.
+- Before promotion: Server > Health showed 0 running and 0 queued desk jobs. TownReporter Watchdog was disabled for promotion, then re-enabled and Ready afterward.
+- Migration applied: 0108_welcome_article_copy.sql. Published story count remained 114 before and after.
+- Promotion verification passed for the local page, public site, named asset, and story count; both local and public endpoints returned HTTP 200. No schema-warmup line reported failed, and the application error log was empty after startup.
+- Warnings: npm reported deprecated packages and 2 high-severity audit findings. Vite warned about browser-externalized Node modules and an ineffective dynamic import. These did not fail the build or promotion.
+- Node remained v25.9.0; cloudflared was not changed. The UI still displays v0.6.82 because this commit did not bump the displayed version.
+- Runtime proof limit: no post-deployment production Scan was run in this session. The earlier 200-source scan test described above was not repeated here, so the Scan fix is deployed but not yet confirmed by a production scan.
