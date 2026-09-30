@@ -1345,6 +1345,8 @@ Dark Desk's **Watched pages** panel records a named public URL and the editor's 
 
 Migration 0046 adds watch state, a per-check lease and action history to the existing monitor/capture system. A transaction locks and verifies the lease before capture, history, baseline and optional file attachment writes. Failed checks keep the last readable baseline. Scheduler and manual checks share this path; an expired worker cannot overwrite a newer lease's result. The editor chooses an active configured reporting section when explicitly creating a lead. Stored captures and action targets remain newsroom scoped. Capture history and complete stored-text downloads preserve evidence; they are not legal-removal or backup-management features.
 
+**Stopping a re-check follow-up leaves its page watch switched on.** A *Re-check pages* follow-up does its work by creating a watched page, so a URL it checked stays on the monitor schedule after the agent is stopped — the watch is a monitor, not part of the agent. Stop cannot switch it off on your behalf, because the same watch row is shared: it is the one watch for that URL, whether the agent made it or you did, and turning it off would also stop anything else watching that page. So the stopped follow-up card says which page is still being checked and links to **Dark Desk → Watch a page / view watches**, where you pause or stop that watch by hand. Nothing else about a stop is left behind: the run in flight is cancelled, and the agent is never picked again until you resume it.
+
 ## Legal removal: owner workflow
 
 Open **Published → Legal removal** beside a story, or **Published → Legal removal cases** to revisit a case. Editors cannot use this process. Ordinary Delete still uses 30-day trash; legal removal has no Undo.

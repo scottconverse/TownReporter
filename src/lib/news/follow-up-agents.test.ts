@@ -522,7 +522,7 @@ describe("the run, end to end with the queue and the notes column", () => {
     assert.deepEqual(parseNotes(afterFailed[0]!.notes_json).found, []);
   });
 
-  it("leaves a stopped follow-up alone when its job's run reaches it", async () => {
+  it("refuses a stopped follow-up's run, and ends it as the editor's cancel", async () => {
     const sql = await getSql();
     const newsroomId = 97103;
     const userId = "agent-stopped-editor";
@@ -543,18 +543,29 @@ describe("the run, end to end with the queue and the notes column", () => {
       kick: false,
     });
     let searched = false;
-    await performFollowUpRun(job, {
-      agents: {
-        search: async () => {
-          searched = true;
-          return attempt([hit("https://pool.test/x")]);
+    /*
+      0.6.82 (unit U16): this used to return quietly, which `executeJob` read as
+      a job that completed -- a "Done" card over a run that did no work, for a
+      follow-up the editor had stopped. Stop now means the run ends the way
+      every other cancel ends, so the assertion is the same fact (nothing ran)
+      plus the honest record of why.
+    */
+    await assert.rejects(
+      performFollowUpRun(job, {
+        agents: {
+          search: async () => {
+            searched = true;
+            return attempt([hit("https://pool.test/x")]);
+          },
         },
-      },
-    });
+      }),
+      (e: unknown) => e instanceof JobCancelledError,
+    );
     assert.equal(searched, false, "a stopped follow-up does not run");
     const rows = await performListFollowUps({ userId, newsroomId }, {});
     const row = rows.find((r) => r.id === followUpId)!;
     assert.notEqual(row.last_state, "running", "the row is released rather than left running");
+    assert.equal(row.status, "stopped", "and it is not resurrected by the run that reached it");
   });
 
   it("records nothing for a follow-up that is not this newsroom's", async () => {

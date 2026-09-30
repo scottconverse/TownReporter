@@ -263,7 +263,8 @@ export function matchesFollowUpFilter(row: FollowUpRow, filter: FollowUpFilter):
 
 /**
  * The state the card is DRAWN in -- one of the seven the design gives a color,
- * a chip and a set of buttons to.
+ * a chip and a set of buttons to, plus `stopping`, which the design has no card
+ * for and this build needs (see below).
  *
  * Terminal status wins over `last_state`, because a stopped agent whose last
  * run found something is a stopped card: the editor ended it, and offering
@@ -287,16 +288,91 @@ export type FollowUpCardState =
   | "waiting"
   | "no-change"
   | "could-not-check"
+  | "stopping"
   | "stopped"
   | "done";
 
-export function followUpCardState(row: {
-  agent_kind: FollowUpAgentKind | null;
-  status: string;
-  last_state: FollowUpState | null;
-}): FollowUpCardState {
+/**
+ * How long a `running` job may go without a heartbeat before its worker is
+ * presumed gone. It MIRRORS `STALE_RUNNING_SECONDS` in ./jobs.ts -- the window
+ * the drainer itself uses before it will take a row away from a dead process --
+ * because this module cannot import that one (it is the follow-up vocabulary
+ * the browser loads, and ./jobs.ts is the queue's module). A test asserts the
+ * two agree and that this rule matches `jobHeartbeatStale` at its boundary.
+ */
+export const RUN_HEARTBEAT_STALE_MS = 120_000;
+
+/**
+ * Is the worker behind this job gone? Missing, zero and unparseable timestamps
+ * answer `false` -- "no evidence either way" -- which is what
+ * `jobHeartbeatStale` says for the same inputs.
+ */
+export function runHeartbeatStale(
+  updatedAt: number | null | undefined,
+  nowMs: number,
+): boolean {
+  if (updatedAt == null || !Number.isFinite(updatedAt)) return false;
+  return nowMs - updatedAt > RUN_HEARTBEAT_STALE_MS;
+}
+
+/**
+ * Is a run for this follow-up in flight RIGHT NOW -- the question the
+ * "Stopping…" chip asks?
+ *
+ * TWO THINGS IT IS NOT:
+ *
+ *  - A stale heartbeat is not in flight. The worker died, or the machine did;
+ *    whatever the row says, nothing is coming to finish the stop. Without this
+ *    the card sticks on "Stopping…" until something reclaims the job, which is
+ *    the dead-worker case where the editor most needs the card to be honest.
+ *  - A `queued` job is not in flight either. Nothing is running, and for a
+ *    stopped follow-up that row is already doomed: Stop cancels queued runs
+ *    outright, and a queued row that slipped in behind the Stop's transaction
+ *    is refused by the worker's own not-active guard. Counting it as in flight
+ *    is how the chip sticks for the length of a long draft ahead of it in the
+ *    queue. "Stopped" is the truthful card there -- and `performFollowUpResume`
+ *    still refuses a Resume while a queued row is pending, which is the one
+ *    place the two questions have different answers.
+ */
+function runInFlight(
+  run: { status: string; updatedAt?: number | null } | null | undefined,
+  nowMs: number,
+): boolean {
+  if (!run || run.status !== "running") return false;
+  return !runHeartbeatStale(run.updatedAt, nowMs);
+}
+
+/**
+ * `stopping` is the one state the row cannot answer by itself: Stop has
+ * committed -- the follow-up IS stopped, and no further run will ever be picked
+ * -- but the run it had in flight has not reached its terminal state yet. It is
+ * a property of the pair (row, live run), which is why the job is an argument
+ * even though every other state reads off the row alone.
+ *
+ * Without it the card lies for as long as the worker takes to notice: the chip
+ * would say "Stopped" while a progress bar underneath was still moving. With
+ * it the card says "Stopping…" until the job is finished, and the next poll
+ * (2 s while a job is open -- see `useFollowUpJobs`) turns it into "Stopped"
+ * with no extra state anywhere. A card with no run in flight goes straight to
+ * "Stopped", which is the honest answer when there was nothing to stop -- and
+ * the answer again the moment the run stops being in flight, whether because it
+ * finished or because its worker died (`runInFlight`).
+ *
+ * `now` is the reader's clock, the same one the card's own time sentences get:
+ * "is this worker still alive?" is a comparison with the clock, so a test can
+ * pin a minute and ask.
+ */
+export function followUpCardState(
+  row: {
+    agent_kind: FollowUpAgentKind | null;
+    status: string;
+    last_state: FollowUpState | null;
+  },
+  run?: { status: string; updatedAt?: number | null } | null,
+  now: Date = new Date(),
+): FollowUpCardState {
   if (!row.agent_kind) return "manual";
-  if (row.status === "stopped") return "stopped";
+  if (row.status === "stopped") return runInFlight(run, now.getTime()) ? "stopping" : "stopped";
   if (row.status === "done") return "done";
   switch (row.last_state) {
     case "running":
@@ -324,6 +400,7 @@ export const CARD_STATE_CHIP: Record<
   waiting: "Waiting",
   "no-change": "Checked · no change",
   "could-not-check": "Could not check",
+  stopping: "Stopping…",
 };
 
 /* ==========================================================================
@@ -441,6 +518,14 @@ export function cardResultLine(
     }
     case "waiting":
       return finding.summary || "Nothing yet. The agent checks on its schedule and reports here.";
+    case "stopping":
+      /*
+        True rather than reassuring: Stop has committed, and the result write
+        that a run makes at its end is fenced on exactly that status, so this
+        run cannot put a finding or a note anywhere. See
+        `performRecordFollowUpRun` in ./follow-ups.ts.
+      */
+      return "Stopping — this run will not record anything more.";
     case "stopped":
       return finding.summary || finding.reason || "This agent was stopped. Nothing further will run.";
     case "done":
@@ -466,10 +551,13 @@ export function cardChip(state: FollowUpCardState): { text: string; tone: CardCh
   if (state === "manual") return null;
   if (state === "stopped") return { text: "Stopped", tone: "wait" };
   if (state === "done") return { text: "Finished", tone: "wait" };
+  // "Stopping…" wears the running tone, not the neutral one: the run really is
+  // still going, and the chip would be claiming otherwise in the same breath as
+  // the progress bar under it.
   const tone: CardChipTone =
     state === "found"
       ? "found"
-      : state === "running"
+      : state === "running" || state === "stopping"
         ? "run"
         : state === "could-not-check"
           ? "fail"
@@ -531,11 +619,58 @@ export function cardActions(state: FollowUpCardState, hasStory: boolean): CardAc
     case "waiting":
     case "no-change":
       return [{ key: "run-now", label: "Run now", emphasis: "outline" }, EDIT_ACTION, STOP_ACTION];
+    case "stopping":
+      /*
+        The run is already dying, so there is nothing left to press and nothing
+        that would not make the card contradict itself: Stop again would change
+        nothing, Run now is refused (the follow-up is stopped), and Resume while
+        the cancelled run is still unwinding would put the agent back on the
+        clock with a job on its way to `failed`. Edit stays, because it is the
+        one action that does not move the status.
+      */
+      return [EDIT_ACTION];
     case "stopped":
       return [{ key: "resume", label: "Resume", emphasis: "outline" }, EDIT_ACTION];
     case "done":
       return [EDIT_ACTION];
     default:
       return [];
+  }
+}
+
+/* ==========================================================================
+   What a stopped re-check leaves behind
+   ========================================================================== */
+
+/**
+ * The sentence a stopped re-check card adds about the page watch its run left
+ * switched on, and the label of the link to where it can be turned off.
+ *
+ * WHY THE CARD SAYS IT AT ALL. `createPageWatchFor` writes a `source_monitors`
+ * row that the background clock keeps polling; stopping the follow-up does not
+ * turn it off, and this build will not do that on the editor's behalf (the row
+ * is shared with every other follow-up watching that URL and with the editor's
+ * own watch, and none of them record who created it -- see
+ * ./follow-up-watch-notice.ts). So the honest thing is to say it and link to the
+ * screen that owns the decision.
+ *
+ * `urls` are the WATCHES' urls, not the follow-up's targets: those are what is
+ * still being polled. The host is what a card can show without wrapping; the
+ * full URL is on the watch itself.
+ */
+export function watchNotice(urls: string[]): { text: string; linkLabel: string } | null {
+  const hosts = [...new Set(urls.map(watchHostOf).filter(Boolean))];
+  if (!hosts.length) return null;
+  return hosts.length === 1
+    ? { text: `A page watch for ${hosts[0]} is still on.`, linkLabel: "Turn it off in Dark Desk." }
+    : { text: `Page watches for ${hosts.join(", ")} are still on.`, linkLabel: "Turn them off in Dark Desk." };
+}
+
+/** The host, without `www.`, for a URL a card can name. Bad input gives "". */
+function watchHostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
   }
 }

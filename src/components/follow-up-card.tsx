@@ -11,6 +11,7 @@ import {
   followUpCardState,
   methodLine,
   parseFinding,
+  watchNotice,
   type CardActionEmphasis,
   type CardActionKey,
 } from "@/lib/news/follow-up-copy";
@@ -34,13 +35,24 @@ import type { FollowUpRow } from "@/lib/news/types";
  * jobs only. The caller passes `onCancelJob`, which is the same
  * `cancelStoryJob` server function.
  *
+ * THE TWO STOP BUTTONS ON A RUNNING CARD ARE NOT TWO ANSWERS TO ONE QUESTION,
+ * and Stop (the card's own) writes the SAME flag this inner Cancel writes
+ * (`cancel_requested` -- see `cancelFollowUpRunsIn` in ./follow-ups.ts), so
+ * they cannot fight: Cancel ends the run and leaves the agent on its schedule,
+ * Stop ends the run and the agent, and a press of Stop hides the inner Cancel
+ * because `job.cancelRequested` is then true. An editor who only wanted the bad
+ * run gone has not been made to kill the agent to get it.
+ *
  * Nothing here decides anything: the state, the chip, the result sentence, the
  * time sentence and the button set are all in ./follow-up-copy.ts, so a change
- * to how a stopped row reads is one edit in a module a test can call.
+ * to how a stopped row reads is one edit in a module a test can call. The one
+ * fact that comes from outside is the live run, which is what makes the
+ * `stopping` card possible at all -- `followUpCardState(row, job)`.
  */
 export function FollowUpCard({
   row,
   job,
+  watchUrls,
   now,
   onAction,
   onEdit,
@@ -51,6 +63,13 @@ export function FollowUpCard({
   row: FollowUpRow;
   /** The live run for this row, when one is queued or running. */
   job?: JobProgressView | null;
+  /**
+   * The URLs of page watches a stopped re-check left switched on, from
+   * `listFollowUpWatchNotices`. A re-check run creates a watch that keeps
+   * polling after the agent is stopped, and the card is where the editor is
+   * told so (see `watchNotice`).
+   */
+  watchUrls?: string[];
   /** The reader's clock, so the sentences are testable at a pinned minute. */
   now: Date;
   onAction?: (action: Extract<CardActionKey, "pause" | "resume" | "stop" | "done" | "run-now">) => void;
@@ -66,7 +85,14 @@ export function FollowUpCard({
   busyKey?: CardActionKey | null;
 }) {
   const [findingOpen, setFindingOpen] = useState(false);
-  const state = followUpCardState(row);
+  /*
+    The live run is passed in because `stopping` is a fact about the pair: Stop
+    has committed on the row, and the run it had in flight has not reached its
+    terminal state yet. See `followUpCardState` -- and note `now`, which is the
+    same clock the time sentences get: whether that run is still in flight is a
+    comparison with the clock (a worker that has gone quiet is not in flight).
+  */
+  const state = followUpCardState(row, job, now);
   const chip = cardChip(state);
   const finding = parseFinding(row.finding_json);
   const times = {
@@ -90,10 +116,19 @@ export function FollowUpCard({
   /*
     A run in flight says what it is DOING -- the job's own step -- and the
     worker's step is the only honest source for that. Every other state reads
-    its sentence off the last recorded finding.
+    its sentence off the last recorded finding, `stopping` included: the point
+    of that card is that the run will not record anything more, which is not
+    something the job's own step line says.
   */
   const resultText = state === "running" ? job?.step || "Working…" : cardResultLine(state, finding, times);
   const timeText = cardTimeLine(state, times);
+  /*
+    Only on the terminal cards. While the run is still stopping the card is
+    saying something else, and the watch notice is about what a STOPPED agent
+    left behind -- it is not news until the agent is stopped.
+  */
+  const notice =
+    state === "stopped" || state === "done" ? watchNotice(watchUrls ?? []) : null;
 
   return (
     <div className={"fu-card state-" + state}>
@@ -112,6 +147,14 @@ export function FollowUpCard({
         </div>
         <span className="fu-q">{row.what}</span>
         {resultText ? <span className="fu-result">{resultText}</span> : null}
+        {notice ? (
+          <span className="fu-watch-notice">
+            {notice.text}{" "}
+            <Link to="/desk/dark" className="fu-story-link">
+              {notice.linkLabel}
+            </Link>
+          </span>
+        ) : null}
         {(storyTo || timeText) && (
           <span className="fu-meta">
             {storyTo ? (
