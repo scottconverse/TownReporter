@@ -590,10 +590,14 @@ export async function performRecordFollowUpRun(
   });
 }
 
-/** The status transitions the screen's action buttons perform. */
-const ACTION_STATUS: Record<Exclude<FollowUpAction, "run-now" | "stop">, FollowUpStatus> = {
+/**
+ * The status transitions the screen's action buttons perform, less the three
+ * that are not a plain status write: "run-now" (the scheduler's path) and
+ * "stop" / "resume" (both of which have to read `desk_jobs` as well, and are
+ * delegated to ./follow-up-stop.server.ts below).
+ */
+const ACTION_STATUS: Record<"pause" | "done", FollowUpStatus> = {
   pause: "paused",
-  resume: "active",
   done: "done",
 };
 
@@ -638,7 +642,7 @@ export async function performFollowUpAction(
         }
       : { ok: false as const, error: "That follow-up is gone." };
   }
-  if (action !== "stop") {
+  if (action === "pause" || action === "done") {
     const rows = await sql`
       update follow_ups set status = ${ACTION_STATUS[action]}, updated_at = now()
       where id = ${id} and newsroom_id = ${owned(context)} and agent_kind is not null
@@ -648,19 +652,20 @@ export async function performFollowUpAction(
   }
 
   /*
-    STOP IS DELEGATED, and it is still Stop. The two halves of what the editor
-    asked for -- this row stopped, and the run it has in flight cancelled --
-    have to land together or not at all, and the second half is a `desk_jobs`
-    write. That is one transaction owned by ./follow-up-stop.server.ts, which
-    this file cannot import statically: `desk.ts` re-exports this module to the
-    desk screens, and `desk_jobs`' own module dynamically imports every
-    `*.server.ts` worker in the app, so a static edge to it fails the
-    production build's import-protection pass. A `.server`-named dynamic import
-    is dropped from the browser build, which is the same reason
-    `follow-up-run.server.ts` is named that way.
+    STOP AND RESUME ARE DELEGATED, and they are still Stop and Resume. Both have
+    to read or write `desk_jobs` as well as `follow_ups`: Stop cancels the runs
+    the editor ended (in the same transaction, or the two halves land apart) and
+    Resume is refused while a run for the follow-up is still going. That work
+    lives in ./follow-up-stop.server.ts, which this file cannot import
+    statically: `desk.ts` re-exports this module to the desk screens, and
+    `desk_jobs`' own module dynamically imports every `*.server.ts` worker in
+    the app, so a static edge to it fails the production build's
+    import-protection pass. A `.server`-named dynamic import is dropped from the
+    browser build, which is the same reason `follow-up-run.server.ts` is named
+    that way.
   */
-  const { performFollowUpStop } = await import("./follow-up-stop.server.ts");
-  return performFollowUpStop(context, id);
+  const { performFollowUpResume, performFollowUpStop } = await import("./follow-up-stop.server.ts");
+  return action === "stop" ? performFollowUpStop(context, id) : performFollowUpResume(context, id);
 }
 
 /**

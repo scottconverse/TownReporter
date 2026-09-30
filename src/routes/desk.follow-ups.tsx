@@ -22,6 +22,10 @@ import {
 } from "@/lib/news/desk";
 import { cancelStoryJob } from "@/lib/news/job-progress";
 import {
+  listFollowUpWatchNotices,
+  type FollowUpWatchNotice,
+} from "@/lib/news/follow-up-watch-notice";
+import {
   FOLLOW_UP_FILTERS,
   FOLLOW_UP_FILTER_LABELS,
   followUpTargets,
@@ -60,6 +64,17 @@ function FollowUpsPage() {
 
   const list = useQuery({ queryKey: ["follow-ups"], queryFn: () => listFollowUps({ data: {} }) });
   const jobs = useFollowUpJobs();
+  /*
+    The page watches the stopped re-check agents left switched on. One read for
+    the screen rather than one per card, and polled slowly: a watch is turned
+    off by the editor on another screen, and the card should stop mentioning it
+    within a screenful of time rather than instantly.
+  */
+  const watchNotices = useQuery({
+    queryKey: ["follow-up-watch-notices"],
+    queryFn: () => listFollowUpWatchNotices(),
+    refetchInterval: 60_000,
+  });
   // Fetched when a dialog opens, not when the screen renders: the picker's list
   // is only ever needed by the one dialog the editor actually opened.
   const storyOptions = useQuery({
@@ -71,6 +86,7 @@ function FollowUpsPage() {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["follow-ups"] });
     void qc.invalidateQueries({ queryKey: ["follow-up-jobs"] });
+    void qc.invalidateQueries({ queryKey: ["follow-up-watch-notices"] });
   };
 
   /*
@@ -215,6 +231,7 @@ function FollowUpsPage() {
                 key={row.id}
                 row={row}
                 job={jobForFollowUp(jobs.data, row.id)}
+                watchUrls={watchUrlsFor(watchNotices.data, row.id)}
                 now={new Date()}
                 busyKey={
                   action.isPending && action.variables?.id === row.id ? action.variables.action : null
@@ -274,6 +291,14 @@ function asWireInput(input: FollowUpDialogInput) {
 /** Running first; the query's own order otherwise. */
 function runningFirst(a: FollowUpRow, b: FollowUpRow): number {
   return Number(b.last_state === "running") - Number(a.last_state === "running");
+}
+
+/** The watches one card should mention, from the screen's single read. */
+function watchUrlsFor(
+  notices: FollowUpWatchNotice[] | undefined,
+  followUpId: number,
+): string[] {
+  return (notices ?? []).filter((notice) => notice.followUpId === followUpId).map((notice) => notice.url);
 }
 
 /** A row as the edit dialog's starting state. */

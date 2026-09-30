@@ -11,6 +11,7 @@ import {
   followUpCardState,
   methodLine,
   parseFinding,
+  watchNotice,
   type CardActionEmphasis,
   type CardActionKey,
 } from "@/lib/news/follow-up-copy";
@@ -51,6 +52,7 @@ import type { FollowUpRow } from "@/lib/news/types";
 export function FollowUpCard({
   row,
   job,
+  watchUrls,
   now,
   onAction,
   onEdit,
@@ -61,6 +63,13 @@ export function FollowUpCard({
   row: FollowUpRow;
   /** The live run for this row, when one is queued or running. */
   job?: JobProgressView | null;
+  /**
+   * The URLs of page watches a stopped re-check left switched on, from
+   * `listFollowUpWatchNotices`. A re-check run creates a watch that keeps
+   * polling after the agent is stopped, and the card is where the editor is
+   * told so (see `watchNotice`).
+   */
+  watchUrls?: string[];
   /** The reader's clock, so the sentences are testable at a pinned minute. */
   now: Date;
   onAction?: (action: Extract<CardActionKey, "pause" | "resume" | "stop" | "done" | "run-now">) => void;
@@ -79,9 +88,11 @@ export function FollowUpCard({
   /*
     The live run is passed in because `stopping` is a fact about the pair: Stop
     has committed on the row, and the run it had in flight has not reached its
-    terminal state yet. See `followUpCardState`.
+    terminal state yet. See `followUpCardState` -- and note `now`, which is the
+    same clock the time sentences get: whether that run is still in flight is a
+    comparison with the clock (a worker that has gone quiet is not in flight).
   */
-  const state = followUpCardState(row, job);
+  const state = followUpCardState(row, job, now);
   const chip = cardChip(state);
   const finding = parseFinding(row.finding_json);
   const times = {
@@ -111,6 +122,13 @@ export function FollowUpCard({
   */
   const resultText = state === "running" ? job?.step || "Working…" : cardResultLine(state, finding, times);
   const timeText = cardTimeLine(state, times);
+  /*
+    Only on the terminal cards. While the run is still stopping the card is
+    saying something else, and the watch notice is about what a STOPPED agent
+    left behind -- it is not news until the agent is stopped.
+  */
+  const notice =
+    state === "stopped" || state === "done" ? watchNotice(watchUrls ?? []) : null;
 
   return (
     <div className={"fu-card state-" + state}>
@@ -129,6 +147,14 @@ export function FollowUpCard({
         </div>
         <span className="fu-q">{row.what}</span>
         {resultText ? <span className="fu-result">{resultText}</span> : null}
+        {notice ? (
+          <span className="fu-watch-notice">
+            {notice.text}{" "}
+            <Link to="/desk/dark" className="fu-story-link">
+              {notice.linkLabel}
+            </Link>
+          </span>
+        ) : null}
         {(storyTo || timeText) && (
           <span className="fu-meta">
             {storyTo ? (

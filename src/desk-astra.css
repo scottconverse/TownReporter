@@ -5128,6 +5128,16 @@
   text-decoration-color: var(--a);
   text-decoration-thickness: 3px;
 }
+/* What a stopped re-check left switched on. Quieter than the result sentence
+   and set apart from it: it is a note about another screen, not this agent's
+   own outcome. The left rule is the card's own accent colour at low weight so
+   it reads as part of the card rather than as an error. */
+.desk-ltr.astra .fu-watch-notice {
+  font-size: calc(14px * var(--ts));
+  color: var(--fg2);
+  padding-left: 8px;
+  border-left: 2px solid var(--line);
+}
 .desk-ltr.astra .fu-actions {
   display: flex;
   flex-wrap: wrap;

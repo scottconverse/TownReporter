@@ -11,18 +11,31 @@ import {
   performReadFollowUp,
   performRecordFollowUpRun,
 } from "./follow-ups.ts";
-import { performFollowUpRun } from "./follow-up-agents.ts";
+import { performFollowUpRun, runRecheckAgent } from "./follow-up-agents.ts";
 import { startFollowUpRun, tickFollowUpsFor } from "./follow-up-scheduler.ts";
 import {
   JOB_CANCELLED_REASON,
+  JOB_PAUSED_REASON,
+  STALE_RUNNING_SECONDS,
+  JobCancelledError,
   __setJobWorkForTest,
   enqueueJob,
   ensureJobsSchema,
   executeJob,
+  jobHeartbeatStale,
   latestJob,
+  requestJobCancel,
+  throwIfJobCancelled,
   type DeskJob,
 } from "./jobs.ts";
 import { parseNotes } from "./notes.ts";
+import { listPageWatchesFor } from "./page-watch.ts";
+import {
+  performListFollowUpWatchNotices,
+  watchNoticesFor,
+} from "./follow-up-watch-notice.ts";
+import { canonicalPublicUrl } from "./fetch-outcome.ts";
+import { RUN_HEARTBEAT_STALE_MS, runHeartbeatStale } from "./follow-up-copy.ts";
 import type { IngestDocument } from "./ingest.ts";
 import type { SearchAttempt, WebHit } from "./search-web.ts";
 
@@ -455,5 +468,299 @@ describe("Stop on a follow-up whose run is in flight", () => {
     const row = await rowOf(newsroomId, id);
     assert.equal(row.status, "stopped");
     assert.notEqual(row.last_state, "running");
+  });
+});
+
+describe("the copy's liveness window and the queue's (L3)", () => {
+  it("keeps the copy's stale-heartbeat rule equal to the queue's own", async () => {
+    /*
+      `RUN_HEARTBEAT_STALE_MS` is declared in ./follow-up-copy.ts because the
+      copy vocabulary may not import ./jobs.ts (the browser loads it). Declared
+      twice is a drift risk, so the two are pinned together here: same window,
+      same rule, same answers at the boundary -- a card that called a live
+      worker dead, or a dead one live, would be a card the editor cannot act on.
+    */
+    assert.equal(RUN_HEARTBEAT_STALE_MS, STALE_RUNNING_SECONDS * 1000);
+    const now = Date.UTC(2026, 8, 30, 12, 0);
+    for (const ageSeconds of [0, 5, STALE_RUNNING_SECONDS - 1, STALE_RUNNING_SECONDS, STALE_RUNNING_SECONDS + 1, 600]) {
+      const iso = new Date(now - ageSeconds * 1000).toISOString();
+      assert.equal(
+        runHeartbeatStale(Date.parse(iso), now),
+        jobHeartbeatStale({ status: "running", updated_at: iso }, now),
+        `age ${ageSeconds}s`,
+      );
+    }
+    // Null and unparseable are "no evidence", not "stale" -- the same answer
+    // `jobHeartbeatStale` gives a row with no timestamp.
+    assert.equal(runHeartbeatStale(null, now), false);
+    assert.equal(runHeartbeatStale(undefined, now), false);
+    assert.equal(runHeartbeatStale(Number.NaN, now), false);
+  });
+});
+
+describe("the window between reading the follow-up and claiming it (M1)", () => {
+  it("ends the job as cancelled when a Stop lands in that window", async () => {
+    /*
+      The claim is the `status = 'active'` predicate on an update, so the only
+      place a Stop can land and be missed by the not-active guard is between the
+      read and the claim. The worker used to `return` here, and `executeJob`
+      then wrote "Done" over a run that did no work at all -- for a follow-up
+      the editor had just stopped.
+    */
+    const newsroomId = await room(974_900);
+    const id = await dueFollowUp(newsroomId);
+    const job = await enqueueJob({ userId: EDITOR, newsroomId, kind: "follow-up", subjectId: id, kick: false });
+
+    let searched = false;
+    const handled = await withJobWork(
+      async (running) =>
+        performFollowUpRun(running, {
+          agents: {
+            model: async (_label, run) => run(),
+            search: async () => {
+              searched = true;
+              return attempt([hit("https://clerk.test/x")]);
+            },
+          },
+          beforeClaim: async () => {
+            const stopped = await performFollowUpAction(ctx(newsroomId), id, "stop");
+            assert.equal(stopped.ok, true);
+          },
+        }),
+      () => executeJob(job),
+    );
+    assert.equal(handled, true, "the job itself was claimed");
+
+    assert.equal(searched, false, "and no work ran");
+    const after = await latestJob({ newsroomId, kind: "follow-up", subjectId: id });
+    assert.equal(after?.status, "failed", "a run that did nothing must not be recorded as Done");
+    assert.equal(after?.error, JOB_CANCELLED_REASON);
+    assert.equal((await rowOf(newsroomId, id)).status, "stopped");
+  });
+
+  it("ends the job as superseded when another execution already owns the row", async () => {
+    // The other way the claim refuses: a `last_state = 'running'` mark that
+    // outlived its worker. Returning quietly would read as "Done", and this run
+    // recorded nothing, so the card must not say it did.
+    const newsroomId = await room(974_950);
+    const id = await dueFollowUp(newsroomId);
+    const sql = await getSql();
+    await sql`update follow_ups set last_state = 'running' where id = ${id}`;
+    const job = await enqueueJob({ userId: EDITOR, newsroomId, kind: "follow-up", subjectId: id, kick: false });
+
+    let searched = false;
+    await withJobWork(
+      async (running) =>
+        performFollowUpRun(running, {
+          agents: {
+            model: async (_label, run) => run(),
+            search: async () => {
+              searched = true;
+              return attempt([hit("https://clerk.test/x")]);
+            },
+          },
+        }),
+      () => executeJob(job),
+    );
+
+    assert.equal(searched, false);
+    const after = await latestJob({ newsroomId, kind: "follow-up", subjectId: id });
+    assert.equal(after?.status, "failed");
+    assert.match(String(after?.error), /took it over/);
+    const row = await rowOf(newsroomId, id);
+    assert.notEqual(row.last_state, "running", "the stale mark is cleared, so the agent is due again");
+  });
+
+  it("names the Pause when a paused follow-up's run reaches the worker (L4)", async () => {
+    // "Cancelled by the editor" on a Pause the editor pressed reads as a bug
+    // report about a button nobody touched. Same terminal state, honest reason.
+    const newsroomId = await room(974_960);
+    const id = await dueFollowUp(newsroomId);
+    await performFollowUpAction(ctx(newsroomId), id, "pause");
+    const job = await enqueueJob({ userId: EDITOR, newsroomId, kind: "follow-up", subjectId: id, kick: false });
+
+    await withJobWork(
+      async (running) => performFollowUpRun(running, { agents: { model: async (_label, run) => run() } }),
+      () => executeJob(job),
+    );
+
+    const after = await latestJob({ newsroomId, kind: "follow-up", subjectId: id });
+    assert.equal(after?.status, "failed");
+    assert.equal(after?.error, JOB_PAUSED_REASON);
+    assert.notEqual(after?.error, JOB_CANCELLED_REASON);
+    const row = await rowOf(newsroomId, id);
+    assert.equal(row.status, "paused", "a paused follow-up stays paused");
+    assert.match(parseFinding(row.finding_json).reason, /paused before its run started/);
+  });
+});
+
+describe("Resume while a run for the follow-up is still going (L1)", () => {
+  it("refuses Resume with a plain message while a run is queued", async () => {
+    const newsroomId = await room(975_000);
+    const id = await dueFollowUp(newsroomId);
+    await performFollowUpAction(ctx(newsroomId), id, "stop");
+    // A queued row Stop's transaction did not see (it was inserted in the same
+    // instant): the card says Stopped, and Resume waits for that row.
+    await enqueueJob({ userId: EDITOR, newsroomId, kind: "follow-up", subjectId: id, kick: false });
+
+    const resumed = await performFollowUpAction(ctx(newsroomId), id, "resume");
+    assert.equal(resumed.ok, false);
+    assert.equal(
+      resumed.ok === false ? resumed.error : "",
+      "A run for this follow-up is still queued or running. Resume it once that run has stopped.",
+    );
+    assert.equal((await rowOf(newsroomId, id)).status, "stopped", "and the row was not touched");
+
+    // Once that run is terminal, the same press works.
+    const sql = await getSql();
+    await sql`update desk_jobs set status = 'failed', finished_at = now()
+      where newsroom_id = ${newsroomId} and kind = 'follow-up' and subject_id = ${id}`;
+    assert.equal((await performFollowUpAction(ctx(newsroomId), id, "resume")).ok, true);
+    assert.equal((await rowOf(newsroomId, id)).status, "active");
+  });
+
+  it("refuses Resume while a live worker is running, and allows it once it goes quiet", async () => {
+    const newsroomId = await room(975_100);
+    const id = await dueFollowUp(newsroomId);
+    await performFollowUpAction(ctx(newsroomId), id, "stop");
+    const job = await enqueueJob({ userId: EDITOR, newsroomId, kind: "follow-up", subjectId: id, kick: false });
+    const sql = await getSql();
+    await sql`update desk_jobs set status = 'running', updated_at = now() where id = ${job.id}`;
+
+    assert.equal((await performFollowUpAction(ctx(newsroomId), id, "resume")).ok, false);
+    // A worker that has gone quiet is not a run that is still going: the card
+    // says Stopped and offers Resume, so the server must honour the press.
+    const stale = new Date(Date.now() - 10 * 60_000).toISOString();
+    await sql`update desk_jobs set updated_at = ${stale} where id = ${job.id}`;
+    assert.equal((await performFollowUpAction(ctx(newsroomId), id, "resume")).ok, true);
+    assert.equal((await rowOf(newsroomId, id)).status, "active");
+  });
+});
+
+describe("what a re-check leaves behind (M2)", () => {
+  const REC_URL = "https://clerk.test/notices";
+  const passthrough = async <T,>(_label: string, run: () => Promise<T>) => run();
+
+  it("creates no page watch once the run has been cancelled", async () => {
+    const newsroomId = await room(975_200);
+    const who = { userId: EDITOR, newsroomId };
+    const id = await dueFollowUp(newsroomId, { agentKind: "recheck", targets: [REC_URL] });
+    const agentInput = {
+      id,
+      userId: EDITOR,
+      newsroomId,
+      what: "Has the notices page changed?",
+      targets: [REC_URL],
+      modelChoice: "auto",
+      lastFinding: parseFinding("{}"),
+    };
+
+    // The control first: with nothing cancelled the run does what a re-check
+    // does and the watch exists. Without it the assertion below could pass
+    // because no watch was ever created by anyone.
+    const ran = await runRecheckAgent(agentInput, {
+      fetch: async () => doc("The library opens at nine."),
+      step: async () => undefined,
+      model: passthrough,
+    });
+    assert.equal(ran.state, "no-change");
+    assert.equal((await listPageWatchesFor(who)).length, 1, "a live run creates the watch");
+
+    // Now the same run, cancelled at the boundary immediately before the
+    // upsert: the page it was about to watch must not be left on the clock.
+    const second = await performCreateAiFollowUp(ctx(newsroomId), {
+      what: "Have the minutes been posted?",
+      agentKind: "recheck",
+      schedule: "daily",
+      targets: ["https://clerk.test/minutes"],
+    });
+    const secondId = second.ok ? second.id : 0;
+    const secondJob = await enqueueJob({
+      userId: EDITOR,
+      newsroomId,
+      kind: "follow-up",
+      subjectId: secondId,
+      kick: false,
+    });
+    await assert.rejects(
+      runRecheckAgent(
+        { ...agentInput, id: secondId, targets: ["https://clerk.test/minutes"] },
+        {
+          // The real wiring, not a fake: the flag one press writes is what the
+          // boundary reads back.
+          throwIfCancelled: () => throwIfJobCancelled(secondJob.id),
+          step: async () => {
+            await requestJobCancel(secondJob.id);
+          },
+          fetch: async () => doc("The library opens at nine."),
+          model: passthrough,
+        },
+      ),
+      (e: unknown) => e instanceof JobCancelledError,
+    );
+    const watches = await listPageWatchesFor(who);
+    assert.equal(watches.length, 1, "the cancelled run created no second watch");
+    assert.match(watches[0]!.url, /clerk\.test\/notices/);
+    assert.equal(
+      watches.some((watch) => watch.url.includes("minutes")),
+      false,
+      "and the page it was about to watch is not being polled",
+    );
+  });
+
+  it("tells the card which watches a stopped re-check left switched on", async () => {
+    const newsroomId = await room(975_300);
+    const recheck = await dueFollowUp(newsroomId, { agentKind: "recheck", targets: [REC_URL] });
+    // A re-check that is NOT stopped, and a search agent: neither is a
+    // leftover, and the read must not claim otherwise.
+    const live = await dueFollowUp(newsroomId, { agentKind: "recheck", targets: ["https://pool.test/hours"] });
+    const searching = await dueFollowUp(newsroomId, { agentKind: "search" });
+
+    const ran = await runRecheckAgent(
+      {
+        id: recheck,
+        userId: EDITOR,
+        newsroomId,
+        what: "Has the notices page changed?",
+        targets: [REC_URL],
+        modelChoice: "auto",
+        lastFinding: parseFinding("{}"),
+      },
+      {
+        fetch: async () => doc("The library opens at nine."),
+        step: async () => undefined,
+        model: passthrough,
+      },
+    );
+    assert.equal(ran.state, "no-change");
+
+    assert.deepEqual(
+      await performListFollowUpWatchNotices(ctx(newsroomId)),
+      [],
+      "an active agent's watch is not a leftover",
+    );
+
+    await performFollowUpAction(ctx(newsroomId), recheck, "stop");
+    const watched = canonicalPublicUrl(REC_URL);
+    assert.deepEqual(await performListFollowUpWatchNotices(ctx(newsroomId)), [
+      { followUpId: recheck, url: watched },
+    ]);
+
+    // The pure matcher answers the same way when the query's own rows are
+    // handed to it: a target that is not watched is not a notice, a newsroom
+    // with no watches has none, and a watch belonging to another agent's page
+    // does not attach itself to this card.
+    const sql = await getSql();
+    const rows = await sql<{ id: number; targets_json: string }>`
+      select id, targets_json from follow_ups
+      where newsroom_id = ${newsroomId} and status in ('stopped', 'done') and agent_kind = 'recheck'
+    `;
+    assert.deepEqual(watchNoticesFor(rows, [watched]), [{ followUpId: recheck, url: watched }]);
+    assert.deepEqual(watchNoticesFor(rows, []), []);
+    assert.deepEqual(watchNoticesFor(rows, ["https://elsewhere.test/x"]), []);
+    assert.deepEqual(watchNoticesFor(rows, [canonicalPublicUrl("https://pool.test/hours")]), []);
+    // The rows really did exclude the live agents -- otherwise the assertions
+    // above would be about an empty list rather than about the rule.
+    assert.equal(rows.some((row) => row.id === live || row.id === searching), false);
   });
 });

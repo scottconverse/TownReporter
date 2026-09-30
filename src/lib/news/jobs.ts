@@ -835,15 +835,13 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
     /*
       A cancel is not a crash. It is recorded as a failure because the card has
       no other terminal state for "this stopped without a result", but the
-      reason written is the honest one, so the editor sees "Cancelled by the
-      editor" with Retry beside it instead of a stack trace.
+      reason written is the honest one, so the editor sees the sentence that
+      ended the run -- "Cancelled by the editor", "Paused by the editor", or the
+      worker's own account of a superseded run -- with Retry beside it instead
+      of a stack trace. `JobCancelledError`'s message IS that sentence, which is
+      why it is read rather than replaced with the constant.
     */
-    const raw =
-      err instanceof JobCancelledError
-        ? JOB_CANCELLED_REASON
-        : err instanceof Error
-          ? err.message
-          : "Job failed";
+    const raw = err instanceof Error ? err.message : "Job failed";
     await sql`
       update desk_jobs
       set status = ${"failed"}, error = ${raw.slice(0, 800)}, finished_at = now(), updated_at = now()
@@ -972,10 +970,25 @@ export async function annotateScanRowsWithStallStatus<
 
 /**
  * What the editor asked a job to stop, and what a stopped worker records as
- * the reason. Spelled once: `desk_jobs.error` and the JobCard's failed state
- * both read it, and a test asserts the exact string.
+ * the reason. Spelled once for the Cancel press: `desk_jobs.error` and the
+ * JobCard's failed state both read it, and a test asserts the exact string.
+ *
+ * IT IS WRITTEN AND RENDERED, NEVER COMPARED. Nothing branches on this string
+ * (checked: `executeJob` writes it, the JobCard prints `job.error`, and only
+ * tests compare it), which is what makes the pause variant below safe to add:
+ * a reader that keyed on the literal would have to learn the new one too.
  */
 export const JOB_CANCELLED_REASON = "Cancelled by the editor";
+
+/**
+ * The same terminal state, for the other way an editor ends a run without
+ * cancelling it: pausing the agent (or a queued run arriving for an agent that
+ * has been paused). The job still ends `failed` -- the card has no fourth
+ * state -- but the sentence says which press did it, because "Cancelled by the
+ * editor" on a paused agent reads as a bug report about a button nobody
+ * pressed. See `performFollowUpRun`'s not-active guard.
+ */
+export const JOB_PAUSED_REASON = "Paused by the editor";
 
 /**
  * How often a worker speaks up while it waits on a model. The design says
@@ -987,14 +1000,20 @@ export const JOB_TICK_MS = 12_000;
 
 /**
  * Raised by `throwIfJobCancelled` at a step boundary. `executeJob` catches it
- * and records `JOB_CANCELLED_REASON` as the failure reason: the design's card
- * has three states (running, done, failed) and no cancelled one, so a job the
+ * and records its message as the job's failure reason: the design's card has
+ * three states (running, done, failed) and no cancelled one, so a job the
  * editor stopped is a failed job whose real reason is that the editor stopped
  * it -- which is exactly what the card renders, Retry buttons and all.
+ *
+ * The reason defaults to `JOB_CANCELLED_REASON`, so every existing `throw new
+ * JobCancelledError()` still means exactly what it meant. A caller that
+ * deliberately ended a run without a Cancel press passes its own sentence
+ * (`JOB_PAUSED_REASON`, the superseded-run case in `performFollowUpRun`), and
+ * `executeJob` records it unchanged.
  */
 export class JobCancelledError extends Error {
-  constructor() {
-    super(JOB_CANCELLED_REASON);
+  constructor(reason: string = JOB_CANCELLED_REASON) {
+    super(reason);
     this.name = "JobCancelledError";
   }
 }

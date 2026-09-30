@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "pg";
 import { integrationRequested, probePostgres, resolveAdminUrl, withDatabase } from "../test-support/pg-admin.ts";
+import type { SearchAttempt } from "./search-web.ts";
 
 /**
  * Stop, across two real PostgreSQL processes.
@@ -47,6 +48,42 @@ let created = false;
 let db: typeof import("../db.ts");
 let followUps: typeof import("./follow-ups.ts");
 let jobs: typeof import("./jobs.ts");
+let agents: typeof import("./follow-up-agents.ts");
+
+/** The advisory-lock namespace `executeJob` serializes a newsroom's claims on. */
+const NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE = 1_414_670_918;
+
+/** Wait until some statement in this database is blocked on another session's
+ * lock. That is the witness that a barrier is really holding, rather than a
+ * sleep long enough to hope so. */
+async function waitForBlockedLock(observer: Client, expected = 1): Promise<void> {
+  let waiting = 0;
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    const result = await observer.query<{ waiting: string }>(
+      "select count(*)::text as waiting from pg_locks where not granted",
+    );
+    waiting = Number(result.rows[0]?.waiting ?? 0);
+    if (waiting >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`expected at least ${expected} blocked lock(s); observed ${waiting}`);
+}
+
+/** Did this promise settle within `ms`? Used to assert that something is STILL
+ * blocked -- a claim that has not been refused, a Stop that has not returned. */
+async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let settled = false;
+  void promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  return settled;
+}
 
 type WorkerMessage =
   | { type: "paused" }
@@ -281,6 +318,7 @@ if (probe.ok) {
     db = await import("../db.ts");
     followUps = await import("./follow-ups.ts");
     jobs = await import("./jobs.ts");
+    agents = await import("./follow-up-agents.ts");
     const sql = await db.getSql();
     const migrationDir = resolve(process.cwd(), "migrations");
     for (const name of readdirSync(migrationDir).filter((name) => /^\d+.*\.sql$/.test(name)).sort()) {
@@ -433,4 +471,203 @@ it("a run stopped while it is working stops at its next unit, not at the end", {
   assert.equal(after.notes.found.length, 1, "nothing was recorded");
   assert.notEqual(after.last_state, "found");
   assert.equal(after.status, "stopped");
+});
+
+it("a Stop waits for a result write already inside its transaction, and the note survives (M3a)", { skip, timeout: 60000 }, async () => {
+  /*
+    The other side of the fence, which the race test above cannot show. There,
+    Stop won. Here the result write is already inside its transaction -- its
+    fenced UPDATE has run and it is parked on the story's notes row -- and Stop
+    must WAIT for it rather than interleave. That is the linearization the fence
+    promises: the note and the finding are on the same side of the Stop as the
+    follow_up row, so a run that got there first keeps what it recorded.
+
+    The barrier is a lock the write itself takes (`select ... for update` on
+    `leads`, part of the fenced transaction), not a test seam: if the notes
+    write ever moves out of that transaction, the fence commits without waiting
+    for the story row, Stop returns immediately, and the first assertion here
+    fails.
+  */
+  const followUpId = await seedFollowUp("Whether the pool page changed", "recheck", [
+    "https://clerk.test/pool",
+  ]);
+  const after = await stateOf(followUpId);
+  const leadId = after.lead_id!;
+
+  const gate = new Client({ connectionString: process.env.DATABASE_URL });
+  const observer = new Client({ connectionString: process.env.DATABASE_URL });
+  await gate.connect();
+  await observer.connect();
+  const sql = await db.getSql();
+  let gateOpen = false;
+  try {
+    // Hold the story's notes row, so the write's own `for update` blocks there.
+    await gate.query("begin");
+    gateOpen = true;
+    await gate.query("select notes_json from leads where id = $1 for update", [leadId]);
+
+    const writing = followUps.performRecordFollowUpRun(ctx(), {
+      id: followUpId,
+      state: "found",
+      finding: {
+        title: "The pool reopened",
+        summary: "The pool page says it reopened on 30 September.",
+        url: "https://clerk.test/pool-reopened",
+      },
+      nextRunAt: null,
+    });
+    await waitForBlockedLock(observer);
+
+    const stopping = followUps.performFollowUpAction(ctx(), followUpId, "stop");
+    assert.equal(
+      await settlesWithin(stopping, 500),
+      false,
+      "Stop must be waiting on the result write's transaction, not committing alongside it",
+    );
+
+    // Let the write finish. Everything queued behind its row lock goes through
+    // in order: the note first, then the Stop.
+    await gate.query("commit");
+    gateOpen = false;
+
+    const recorded = await writing;
+    assert.deepEqual(recorded, { ok: true, noteWritten: true });
+    assert.equal((await stopping).ok, true);
+
+    const settled = await stateOf(followUpId);
+    assert.equal(settled.status, "stopped");
+    // Both notes: the earlier run's, and the one this run recorded before the
+    // Stop landed. Nothing was lost, and nothing was written after the stop.
+    assert.equal(settled.notes.found.length, 2, "the note the write committed survives the Stop");
+    assert.match(settled.notes.found[1]!.t, /pool-reopened/);
+    assert.match(String(settled.finding_json), /pool-reopened/);
+  } finally {
+    if (gateOpen) await gate.query("rollback").catch(() => undefined);
+    await gate.end().catch(() => undefined);
+    await observer.end().catch(() => undefined);
+    await sql`delete from follow_ups where id = ${followUpId}`;
+  }
+});
+
+it("a Stop interleaved into the worker's claim ends the job cancelled, never completed (M3b)", { skip, timeout: 60000 }, async () => {
+  /*
+    The window M1 is about: the worker has read the follow-up (it is active) and
+    has not claimed it yet. Stop commits there. The claim refuses, and what the
+    worker does with that refusal is the whole test -- a bare `return` lets
+    `executeJob` write "Done" over a run that did no work.
+  */
+  const followUpId = await seedFollowUp("Has the pool reopened?", "search", []);
+  const job = await enqueue(followUpId);
+  let searched = false;
+  jobs.__setJobWorkForTest(async (running) => {
+    await agents.performFollowUpRun(running, {
+      agents: {
+        model: async (_label, run) => run(),
+        search: async () => {
+          searched = true;
+          return { state: "SEARCH_OK", provider: "fake", hits: [] } as unknown as SearchAttempt;
+        },
+      },
+      beforeClaim: async () => {
+        const stopped = await followUps.performFollowUpAction(ctx(), followUpId, "stop");
+        assert.equal(stopped.ok, true, "the editor's Stop commits in the window");
+      },
+    });
+  });
+  try {
+    assert.equal(await jobs.executeJob(job), true);
+  } finally {
+    jobs.__setJobWorkForTest();
+  }
+
+  assert.equal(searched, false, "the run never did any work");
+  const after = await stateOf(followUpId);
+  assert.equal(after.job?.status, "failed", "a run that did nothing is not recorded as completed");
+  assert.equal(after.job?.error, "Cancelled by the editor");
+  assert.notEqual(after.job?.status, "completed");
+  assert.equal(after.status, "stopped");
+  assert.notEqual(after.last_state, "running", "the row is released rather than left running");
+});
+
+it("a Stop holding the queue's claim lock against a worker leaves no completed job (M3b2)", { skip, timeout: 60000 }, async () => {
+  /*
+    The same interleaving from the queue's side: the worker is inside
+    `executeJob`'s claim transaction, blocked on the newsroom's advisory lock,
+    and Stop commits while it waits. The claim then matches nothing, and the row
+    it was about to claim is already terminal -- so the job can never be
+    completed by it.
+  */
+  const followUpId = await seedFollowUp("Has the pool reopened?", "search", []);
+  const job = await enqueue(followUpId);
+  const gate = new Client({ connectionString: process.env.DATABASE_URL });
+  const observer = new Client({ connectionString: process.env.DATABASE_URL });
+  await gate.connect();
+  await observer.connect();
+  let entered = false;
+  jobs.__setJobWorkForTest(async () => {
+    entered = true;
+  });
+  let gateOpen = false;
+  try {
+    await gate.query("begin");
+    gateOpen = true;
+    await gate.query("select pg_advisory_xact_lock($1, $2)", [
+      NEWSROOM_JOB_CLAIM_LOCK_NAMESPACE,
+      newsroomId,
+    ]);
+
+    const claiming = jobs.executeJob(job);
+    await waitForBlockedLock(observer);
+    assert.equal(await settlesWithin(claiming, 500), false, "the claim is waiting on the lock");
+
+    const stopped = await followUps.performFollowUpAction(ctx(), followUpId, "stop");
+    assert.equal(stopped.ok, true, "Stop does not need the claim lock");
+
+    await gate.query("commit");
+    gateOpen = false;
+    assert.equal(await claiming, false, "the claim is refused");
+
+    assert.equal(entered, false, "so no work ever started");
+    const after = await stateOf(followUpId);
+    assert.equal(after.job?.status, "failed");
+    assert.equal(after.job?.error, "Cancelled by the editor");
+  } finally {
+    if (gateOpen) await gate.query("rollback").catch(() => undefined);
+    jobs.__setJobWorkForTest();
+    await gate.end().catch(() => undefined);
+    await observer.end().catch(() => undefined);
+  }
+});
+
+it("a Stop between Run now's read and its write leaves the agent stopped (M3c)", { skip, timeout: 60000 }, async () => {
+  /*
+    `startFollowUpRun` reads the row (active or paused), then writes. The write
+    is the run-now update, and its `status in ('active','paused')` predicate is
+    what stops a Stop that landed in between from being overwritten -- which
+    would resurrect an agent the editor had ended.
+  */
+  const followUpId = await seedFollowUp("Has the pool reopened?", "search", []);
+  const read = await followUps.performReadFollowUp(ctx(), followUpId);
+  assert.equal(read?.status, "active", "the read Run now does first");
+
+  const stopped = await followUps.performFollowUpAction(ctx(), followUpId, "stop");
+  assert.equal(stopped.ok, true);
+
+  const moved = await followUps.performFollowUpAction(ctx(), followUpId, "run-now");
+  assert.equal(moved.ok, false, "the write must not overwrite the Stop");
+  const after = await stateOf(followUpId);
+  assert.equal(after.status, "stopped");
+  assert.equal(after.job, null, "and no run was queued for it");
+
+  // The whole press, for the same reason: refused, with the sentence that says
+  // which state the row is in.
+  const started = await (await import("./follow-up-scheduler.ts")).startFollowUpRun(
+    ctx(),
+    followUpId,
+    new Date(),
+    { kick: false },
+  );
+  assert.equal(started.started, false);
+  assert.equal(started.skipped, "not-active");
+  assert.equal((await stateOf(followUpId)).job, null);
 });

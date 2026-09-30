@@ -50,6 +50,17 @@ export type JobProgressView = {
   startedAt: number | null;
   endedAt: number | null;
   beatAt: number | null;
+  /**
+   * The row's `updated_at`, epoch ms: the heartbeat `executeJob` writes every
+   * 30s for as long as its process is alive. It is here beside `beatAt` because
+   * the two answer different questions and the desk needs both: `beatAt` is the
+   * worker's own progress report (a long unwrapped call can let it go quiet
+   * while the process is fine -- see `jobProgressStalled`), and `updatedAt` is
+   * whether the PROCESS is alive (`jobHeartbeatStale`, the same rule the
+   * drainer uses to reclaim a row). A follow-up card asks the second question
+   * when it decides whether a Stop is still in flight.
+   */
+  updatedAt: number | null;
   error: string | null;
   /** Where the Done card's Open button goes. Already a route the app serves. */
   resultHref: string | null;
@@ -129,6 +140,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
     startedAt: ms(row.started_at),
     endedAt: ms(row.finished_at),
     beatAt: ms(row.beat_at),
+    updatedAt: ms(row.updated_at),
     error: row.error ?? null,
     failoverNote: row.failover_note ?? "",
     cancelRequested: (row.status === "queued" || row.status === "running") && Boolean(row.cancel_requested),

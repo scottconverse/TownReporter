@@ -21,7 +21,9 @@ import {
   nextRunAt,
   packFinding,
   parseFinding,
+  RUN_HEARTBEAT_STALE_MS,
   scheduleForAgent,
+  watchNotice,
   type FollowUpCardState,
 } from "./follow-up-copy.ts";
 import type { FollowUpRow } from "./types.ts";
@@ -213,7 +215,6 @@ describe("which card a row is drawn as", () => {
     // reached its terminal state, and the card must not claim otherwise while a
     // progress bar underneath it is still moving.
     assert.equal(followUpCardState(stopped, { status: "running" }), "stopping");
-    assert.equal(followUpCardState(stopped, { status: "queued" }), "stopping");
     // The moment the job is terminal, the card is the stopped one -- and a
     // stopped follow-up with no run at all was never stopping in the first
     // place, which is every card that was stopped while idle.
@@ -223,6 +224,48 @@ describe("which card a row is drawn as", () => {
     assert.equal(followUpCardState(stopped), "stopped");
     // Nothing else is affected by a live run.
     assert.equal(followUpCardState(row({ last_state: "running" }), { status: "running" }), "running");
+  });
+
+  it("does not call a dead worker's run 'Stopping…', and offers Resume again", () => {
+    /*
+      The two ways the chip used to stick, both of which leave the editor with a
+      card that offers nothing:
+       - the worker died (or the machine did), so the row says `running` and
+         will never move again on its own;
+       - the run is still `queued` behind a long draft, so nothing has started
+         and nothing is stopping.
+      Both are "Stopped" -- the follow-up IS stopped -- and a stopped card is
+      the one with Resume on it.
+    */
+    const stopped = row({ status: "stopped", last_state: "waiting" });
+    const now = at(2026, 9, 30, 12, 0);
+    const seconds = (n: number) => new Date(now.getTime() - n * 1000).getTime();
+
+    // A live worker: the last heartbeat is well inside the window.
+    assert.equal(followUpCardState(stopped, { status: "running", updatedAt: seconds(5) }, now), "stopping");
+    assert.equal(
+      followUpCardState(stopped, { status: "running", updatedAt: seconds(RUN_HEARTBEAT_STALE_MS / 1000) }, now),
+      "stopping",
+      "the boundary itself is still alive -- the rule is 'older than', not 'as old as'",
+    );
+    // And past it, not.
+    assert.equal(
+      followUpCardState(stopped, { status: "running", updatedAt: seconds(RUN_HEARTBEAT_STALE_MS / 1000 + 1) }, now),
+      "stopped",
+    );
+    // A run that has not started is not a run that is stopping.
+    assert.equal(followUpCardState(stopped, { status: "queued", updatedAt: seconds(600) }, now), "stopped");
+    // No heartbeat at all is no evidence either way, so the run counts as live --
+    // the same answer `jobHeartbeatStale` gives for a row with no timestamp.
+    assert.equal(followUpCardState(stopped, { status: "running", updatedAt: null }, now), "stopping");
+    // The Resume button is what a Stopped card has, so the dead-worker card is
+    // a card the editor can act on.
+    assert.deepEqual(
+      cardActions(followUpCardState(stopped, { status: "running", updatedAt: seconds(600) }, now), false).map(
+        (action) => action.key,
+      ),
+      ["resume", "edit"],
+    );
   });
 
   it("reads a row that has never run as the waiting card", () => {
@@ -371,8 +414,31 @@ describe("the chip, the sentences and the buttons", () => {
   });
 });
 
-describe("the four filters", () => {
-  it("names each filter the way the drawn segment does", () => {
+describe("what a stopped re-check left on", () => {
+  it("names the pages still being watched, and where to turn them off", () => {
+    // Nothing watched: the card says nothing at all rather than naming a watch
+    // that is not there.
+    assert.equal(watchNotice([]), null);
+    assert.equal(watchNotice(["not a url"]), null, "an unparseable URL is not a page a card can name");
+
+    assert.deepEqual(watchNotice(["https://www.clerk.test/agenda"]), {
+      text: "A page watch for clerk.test is still on.",
+      linkLabel: "Turn it off in Dark Desk.",
+    });
+    // Two targets that canonicalise to one page are one watch, and the sentence
+    // does not name it twice.
+    assert.deepEqual(
+      watchNotice(["https://clerk.test/agenda?utm_source=x", "http://www.clerk.test/agenda"]),
+      { text: "A page watch for clerk.test is still on.", linkLabel: "Turn it off in Dark Desk." },
+    );
+    assert.deepEqual(watchNotice(["https://clerk.test/agenda", "https://pool.test/hours"]), {
+      text: "Page watches for clerk.test, pool.test are still on.",
+      linkLabel: "Turn them off in Dark Desk.",
+    });
+  });
+});
+
+describe("the four filters", () => {  it("names each filter the way the drawn segment does", () => {
     assert.deepEqual(FOLLOW_UP_FILTERS, ["active", "found", "could-not-check", "stopped"]);
     assert.equal(FOLLOW_UP_FILTER_LABELS.active, "Active");
     assert.equal(FOLLOW_UP_FILTER_LABELS.found, "Found something");

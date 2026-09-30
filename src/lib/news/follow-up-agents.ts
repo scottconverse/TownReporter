@@ -35,7 +35,15 @@ import {
   preferredDocuments,
   type PrimeGovMeeting,
 } from "./primegov.ts";
-import { JobCancelledError, progressReporterFor, throwIfJobCancelled, waitForModel, type DeskJob } from "./jobs.ts";
+import {
+  JOB_CANCELLED_REASON,
+  JOB_PAUSED_REASON,
+  JobCancelledError,
+  progressReporterFor,
+  throwIfJobCancelled,
+  waitForModel,
+  type DeskJob,
+} from "./jobs.ts";
 import {
   searchWithFallback,
   type SearchAttempt,
@@ -249,8 +257,18 @@ export async function runRecheckAgent(
       failures.push("the run reached its document-read limit");
       break;
     }
-    await deps.throwIfCancelled?.();
     await deps.step?.(`Checking ${hostOf(url)}`);
+    /*
+      THE LAST BOUNDARY BEFORE THE ONE WRITE THAT OUTLIVES THE RUN. Every other
+      thing a re-check does dies with the run; `createPageWatchFor` is different
+      -- it leaves a `source_monitors` row behind, and that row is picked up by
+      the background clock (`monitors-cron.ts`, `enabled = true and next_check_at
+      <= now()`) for as long as nobody turns it off. So the check sits between
+      the step sentence and the upsert rather than at the top of the loop: a
+      Stop that has already been asked for must not leave a new watch polling
+      the page after the editor ended the agent.
+    */
+    await deps.throwIfCancelled?.();
 
     const made = await createPageWatchFor(who, {
       url,
@@ -706,6 +724,15 @@ export async function performFollowUpRun(
      * process from inside this hook, and fails if the fence is removed.
      */
     beforeRecord?: () => Promise<void>;
+    /**
+     * The other half of the same idea, one step earlier: after the follow-up
+     * row has been read and before the run claims it. The claim is the
+     * `status = 'active'` predicate on an update, so the window between the two
+     * is the only place a Stop can land and be MISSED by the guard above --
+     * which is what `follow-up-stop.postgres.test.ts` interleaves a real Stop
+     * into, and what fails if the claim's refusal is swallowed (M1).
+     */
+    beforeClaim?: () => Promise<void>;
   } = {},
 ): Promise<void> {
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
@@ -723,20 +750,61 @@ export async function performFollowUpRun(
       editor ended this run before it did anything, so it ends the way a cancel
       ends rather than as a job that quietly completed with no work in it.
       Release first (the row must not be left saying `running`), then throw.
-    */
-    await performReleaseFollowUpRun(context, row.id, "The follow-up was not active when its run started.");
-    throw new JobCancelledError();
-  }
-  if (!(await performClaimFollowUpRun(job.newsroom_id, row.id))) return;
 
+      THE SENTENCE NAMES THE PRESS. A paused agent is not a cancelled one, and a
+      card reading "Cancelled by the editor" for a Pause the editor pressed
+      reads as a bug report about a button nobody touched.
+    */
+    const paused = row.status === "paused";
+    await performReleaseFollowUpRun(
+      context,
+      row.id,
+      paused ? "The follow-up was paused before its run started." : "The follow-up was not active when its run started.",
+    );
+    throw new JobCancelledError(paused ? JOB_PAUSED_REASON : JOB_CANCELLED_REASON);
+  }
+  // The job's own cancel flag, read fresh each time: a worker's copy of the row
+  // is from claim time. Defined here rather than beside the agent deps below so
+  // the claim's refusal can reach it too.
+  const throwIfCancelled = () => throwIfJobCancelled(job.id);
   const step = progressReporterFor(job);
   const budget = createDarkRunBudget(followUpRunLimits(row.model_choice), { now: deps.now });
-  const throwIfCancelled = () => throwIfJobCancelled(job.id);
   const model =
     deps.agents?.model ??
     (<T,>(label: string, run: () => Promise<T>) => waitForModel({ jobId: job.id, label, run }));
 
+  /*
+    THE CLAIM IS INSIDE THE try, and that is load-bearing. Everything that ends
+    this run early -- the claim's refusal, a cancel, a crash -- has to go
+    through the same release, or a row is left saying `running` with no worker
+    behind it and the agent silently stops being due. The claim used to sit
+    before the `try`, so its throw skipped the release.
+  */
   try {
+    await deps.beforeClaim?.();
+    if (!(await performClaimFollowUpRun(job.newsroom_id, row.id))) {
+      /*
+        THE CLAIM REFUSED, and that is not "nothing happened". It refuses in
+        exactly two cases, and both of them end this run:
+
+        - A Stop committed between the read above and this line: the job flag is
+          already set (Stop writes it in the same transaction that stops the
+          row), so `throwIfCancelled` throws the cancel the editor asked for.
+        - Another execution owns the row (`last_state = 'running'`): this job was
+          superseded -- a stalled execution was reclaimed while it was still
+          going, or a stale `running` mark outlived its worker. Nothing here may
+          be recorded, and returning quietly would let `executeJob` write "Done"
+          over a run that did no work at all, which is the lie this guard exists
+          to prevent. The release below clears the stale mark, so the follow-up
+          becomes due again instead of waiting out
+          `performReconcileFollowUpRuns`.
+      */
+      await throwIfCancelled();
+      throw new JobCancelledError(
+        "A newer run of this follow-up took it over. Nothing was recorded here.",
+      );
+    }
+
     await step(FOLLOW_UP_STAGE_START);
     const outcome = await agent(
       {
@@ -782,11 +850,24 @@ export async function performFollowUpRun(
     */
     if (!recorded.ok && recorded.stopped) throw new JobCancelledError();
   } catch (e) {
-    await performReleaseFollowUpRun(
-      context,
-      row.id,
-      e instanceof JobCancelledError ? "The editor stopped this run." : "The run failed before it could finish.",
-    );
+    await performReleaseFollowUpRun(context, row.id, releaseReasonFor(e));
     throw e;
   }
+}
+
+/**
+ * Why the row was released, in the editor's words for the CARD (the job's own
+ * sentence is `err.message`, which `executeJob` records).
+ *
+ * The two cancel sentences are kept apart on purpose: a paused agent's run is
+ * not a cancelled one (L4), and a run superseded by another execution is
+ * neither -- it carries its own account, which is passed through unchanged
+ * rather than flattened into "the editor stopped this run" by the shared
+ * `JobCancelledError` class.
+ */
+function releaseReasonFor(e: unknown): string {
+  if (!(e instanceof JobCancelledError)) return "The run failed before it could finish.";
+  if (e.message === JOB_PAUSED_REASON) return "The editor paused this run.";
+  if (e.message === JOB_CANCELLED_REASON) return "The editor stopped this run.";
+  return e.message;
 }
