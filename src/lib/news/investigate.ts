@@ -27,7 +27,7 @@ import {
   type ExtractedRef,
   type StructureSnapshot,
 } from "./extract.ts";
-import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
+import { officialSiteHost, researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import { sha256, sha256Bytes } from "./url-guard.ts";
 import {
   classifyFetchedPage,
@@ -2292,7 +2292,17 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const sql = await getSql();
   const { describeResearchWindow, queryWithResearchWindow } = await import("./dark-preferences.ts");
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
-  const place: Place = opts.place ?? await getPaperConfig(newsroomId);
+  /*
+    The paper's settings, read once per loop: they are the place when the caller
+    read none, and they are where the city's own official site comes from. That
+    second read is here rather than off `opts.officialDomains` on purpose -- the
+    caller's list is the Dark Desk's TIER list (county, state, school district,
+    portal, press), head-first, and its head is not the city's site. A settings
+    read that fails therefore yields NO `site:` strategy, which is the honest
+    answer, instead of a neighbouring jurisdiction's site.
+  */
+  const settings = await getPaperConfig(newsroomId).catch(() => null);
+  const place: Place = opts.place ?? settings ?? { city: "", state: "" };
   await investigationNewsroom(opts.investigationId, newsroomId);
   const investigation = await sql<{ title: string }>`
     select title from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
@@ -2306,15 +2316,16 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   /*
     Every query this loop writes is scoped to this newsroom's own configuration
     (./research-scope.ts): the place it reads (`opts.place` from `readDarkPlace`,
-    or the paper's settings) and the host of its own official site. There is no
-    built-in town: the strategies used to default to the shipped paper's city
+    or the paper's settings) and the CITY's own site, identified by
+    `officialSiteHost` from the configured sources and the city's name. There is
+    no built-in town: the strategies used to default to the shipped paper's city
     and one of them named the shipped paper's own government site, so another
     city's desk searched for the town that paper happens to be built for.
   */
   const scope: ResearchScope = {
     city: place.city ?? "",
     state: place.state ?? "",
-    officialHost: officialDomainList[0] ?? null,
+    officialHost: settings ? officialSiteHost(settings.city, settings.seedSources) : null,
   };
   const hopsBudget = opts.hops ?? HOPS_PER_RUN;
   const fetchDoc = opts.fetch ?? ((url: string) => defaultFetch(url, {

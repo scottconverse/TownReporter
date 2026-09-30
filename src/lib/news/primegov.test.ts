@@ -156,6 +156,45 @@ describe("meeting match", () => {
     assert.equal(sameMeetingTitle("City Council Regular Session", council), false);
     assert.equal(sameMeetingTitle("Planning and Zoning Commission", historic), false);
   });
+
+  it("joins a study session, a work session, a workshop and a hearing on their own body word", () => {
+    /*
+      A session's own word is what identifies it. PrimeGov titles these rows
+      "Study Session" / "Work Session" while the tape carries the city's name
+      ahead of them, so nothing but the session type is shared -- and with none
+      of them in the body list, a real Sep 9 study session stopped being joined
+      to its own packet.
+    */
+    const meeting = (title: string, id: number): PrimeGovMeeting => ({
+      ...council,
+      id,
+      title,
+      date: "Sep 9, 2026",
+      dateTime: "2026-09-09T18:00:00",
+      documentList: [],
+    });
+    const study = meeting("Study Session", 3800);
+    assert.deepEqual(sharedBodyNames("Longmont Study Session 09/09/2026", study), ["study"]);
+    assert.equal(sameMeetingTitle("Longmont Study Session 09/09/2026", study), true);
+    assert.equal(bestMeetingMatch("Longmont Study Session - 09/09/2026", [study])?.id, 3800);
+    assert.equal(sameMeetingTitle("Longmont Work Session 09/09/2026", meeting("Work Session", 3801)), true);
+
+    assert.equal(sameMeetingTitle("Longmont Planning Workshop 09/09/2026", meeting("Workshop", 3802)), true);
+    assert.equal(
+      sameMeetingTitle("Longmont Public Hearing 09/09/2026", meeting("Public Hearing", 3803)),
+      true,
+    );
+
+    /*
+      And a session is not another session. "session" itself is deliberately
+      absent from the body list: a council holds a study session and an
+      executive session on the same night, and a bare "session" would join them.
+    */
+    const executive = meeting("Executive Session", 3804);
+    assert.deepEqual(sharedBodyNames("Longmont Study Session 09/09/2026", executive), []);
+    assert.equal(sameMeetingTitle("Longmont Study Session 09/09/2026", executive), false);
+    assert.equal(bestMeetingMatch("Longmont Study Session - 09/09/2026", [executive]), null);
+  });
 });
 
 describe("the catalog", () => {

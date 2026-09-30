@@ -103,6 +103,11 @@ describe("research scope", () => {
         "historical-archive",
       ],
     );
+    assert.equal(
+      officialSiteHost(SHIPPED.city, SEED_SOURCES),
+      "longmontcolorado.gov",
+      "the shipped watch list still identifies the shipped city's own site",
+    );
     assert.ok(company.some((s) => s.query === `"Acme Holdings LLC" Longmont`));
     assert.ok(company.some((s) => s.query === `"Acme Holdings LLC" site:longmontcolorado.gov`));
     assert.ok(company.some((s) => s.query === `"Acme Holdings LLC" site:sos.state.co.us`));
@@ -113,18 +118,66 @@ describe("research scope", () => {
     );
   });
 
-  it("takes the official host from the first source an editor marked official", () => {
-    assert.equal(officialSiteHost([]), null);
-    assert.equal(officialSiteHost([{ url: "https://news.example.test/", kind: "news" }]), null);
-    assert.equal(officialSiteHost([{ url: "https://www.youtube.com/@SomeCity", kind: "youtube" }]), null);
+  it("takes the official host from the CITY's own government address, not the first official row", () => {
+    assert.equal(officialSiteHost("Longmont", []), null);
+    assert.equal(officialSiteHost("Longmont", [{ url: "https://news.example.test/", kind: "news" }]), null);
+    assert.equal(officialSiteHost("Longmont", [{ url: "https://www.youtube.com/@SomeCity", kind: "youtube" }]), null);
     assert.equal(
-      officialSiteHost([
+      officialSiteHost("Longmont", [
         { url: "not a url", kind: "official" },
-        { url: "https://www.example.gov/", kind: "official" },
-        { url: "https://second.example.gov/", kind: "official" },
+        { url: "https://www.longmontcolorado.gov/", kind: "official" },
+        { url: "https://second.longmontcolorado.gov/", kind: "official" },
       ]),
-      "example.gov",
+      "longmontcolorado.gov",
+      "the first host carrying the city's name, in watch-list order",
     );
+  });
+
+  it("refuses a publisher, a county or a state standing in for the city", () => {
+    /*
+      The live watch list, in the order an editor would meet it: the local
+      paper filed official, the county, the state, the school district, the
+      vendor portal -- and the city's own site last. Only the last one is the
+      city, and the two bugs this replaces each picked one of the others.
+    */
+    const liveWatchList = [
+      { url: "https://www.timescall.com/", kind: "official" },
+      { url: "https://bouldercounty.gov/", kind: "official" },
+      { url: "https://www.colorado.gov/", kind: "official" },
+      { url: "https://www.svvsd.org/", kind: "official" },
+      { url: "https://longmont.primegov.com/public/portal", kind: "official" },
+      { url: "https://www.longmontcolorado.gov/", kind: "official" },
+    ];
+    assert.equal(officialSiteHost("Longmont", liveWatchList), "longmontcolorado.gov");
+    // The same list under another city's name is nobody's official site here.
+    assert.equal(officialSiteHost("Riverbend", liveWatchList), null);
+    assert.equal(
+      researchScopeOf({ city: "Riverbend", state: "Oregon", seedSources: liveWatchList }).officialHost,
+      null,
+    );
+    const riverbend = strategiesForFrontier("company", "Acme Holdings LLC", {
+      city: "Riverbend",
+      state: "Oregon",
+      officialHost: officialSiteHost("Riverbend", liveWatchList),
+    });
+    assert.equal(
+      riverbend.some((s) => s.query.includes("site:")),
+      false,
+      "no identifiable city site means no site: operator, never someone else's",
+    );
+  });
+
+  it("joins a multi-word city the way a host joins it, and does not guess at short or abbreviated names", () => {
+    assert.equal(officialSiteHost("Palo Alto", [{ url: "https://paloalto.gov/", kind: "official" }]), "paloalto.gov");
+    assert.equal(
+      officialSiteHost("Longmont", [{ url: "https://ci.longmont.co.us/", kind: "official" }]),
+      "ci.longmont.co.us",
+      "the older .us city address is still the city's own",
+    );
+    // A three-letter town name cannot identify a host (ada.gov is not a town),
+    // and a site that abbreviates its city's name is not recognised from it.
+    assert.equal(officialSiteHost("Ada", [{ url: "https://ada.gov/", kind: "official" }]), null);
+    assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official" }]), null);
   });
 
   it("defaults to nothing at all when the configuration answers nothing", () => {

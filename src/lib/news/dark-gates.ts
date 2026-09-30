@@ -24,6 +24,7 @@
  */
 
 import { isSelfReferential } from "./claim-hygiene.ts";
+import { cityOfficialHost } from "./research-scope.ts";
 
 /* -------------------------------------------------------------------------
    Stage 1 — the Black Desk cap
@@ -282,7 +283,16 @@ export function adversarialQueries(
   if (!subject) return [];
   const city = place.city || "";
   const county = place.county ? `${place.county} County` : city;
-  const site = officialDomainList[0] ? `site:${officialDomainList[0]} ` : "";
+  /*
+    The `site:` operator names THIS city's own site or nothing. The list handed
+    in is the Dark Desk's tier list, whose head is whichever official source was
+    filed first -- the county, the state, the school district or the paper's own
+    vendor portal as often as the city -- so reading its head put a
+    `site:bouldercounty.gov` on a search meant to find the city's record. One
+    rule for every path that writes this operator (./research-scope.ts).
+  */
+  const officialSite = cityOfficialHost(place.city, officialDomainList);
+  const site = officialSite ? `site:${officialSite} ` : "";
   return [
     {
       // The boring explanation, written first and searched first.

@@ -151,6 +151,40 @@ describe("the mandatory adversarial searches", () => {
       qs.some((q) => /routine|scheduled|normal process|explanation/i.test(q.query)),
       "no query looks for the boring explanation",
     );
+    assert.ok(
+      qs.some((q) => q.query.includes("site:longmontcolorado.gov")),
+      "the record query is scoped to the city's own site",
+    );
+  });
+
+  it("scopes the record query to THIS city's site, or to none at all", () => {
+    /*
+      The domain list handed in is the Dark Desk's tier list, head-first. Its
+      head is whichever official source was filed first -- here the county's --
+      and a `site:` naming the county is not the city's own record.
+    */
+    const countyFirst = adversarialQueries(SURVEY_SIGNAL, PLACE, [
+      "bouldercounty.gov",
+      "longmontcolorado.gov",
+    ]);
+    assert.equal(
+      countyFirst.some((q) => q.query.includes("site:bouldercounty.gov")),
+      false,
+      "a county ahead of the city in the list must not become the city's site:",
+    );
+    assert.ok(
+      countyFirst.some((q) => q.query.includes("site:longmontcolorado.gov")),
+      "the city's own site, wherever it sits in the list",
+    );
+    // A list with no city site in it writes no operator at all -- never the
+    // county's, the state's or another town's.
+    for (const list of [["bouldercounty.gov"], ["colorado.gov"], ["riverbend.gov"], []]) {
+      assert.equal(
+        adversarialQueries(SURVEY_SIGNAL, PLACE, list).some((q) => q.query.includes("site:")),
+        false,
+        `no site: operator is owed for ${JSON.stringify(list)}`,
+      );
+    }
   });
 });
 

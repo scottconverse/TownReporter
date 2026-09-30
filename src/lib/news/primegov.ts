@@ -78,6 +78,16 @@ export function preferredDocuments(meeting: PrimeGovMeeting): PrimeGovDocument[]
  * The civic bodies a meeting title can name. Two tapes that agree on the date
  * but not on the body are two different meetings -- a city holds several on the
  * same night -- so agreeing on one of these is what makes a date mean anything.
+ *
+ * SINGLE WORDS, because that is what the match below compares: `norm` splits a
+ * title into words and this set is intersected with both, so a two-word entry
+ * could never match anything. A "study session" is therefore recognised by
+ * `study`, a "work session" by `work` -- not by `session`, which on its own is
+ * true of a study session and an executive session and would join two meetings
+ * a council held the same night. `workshop` and `hearing` name their own kind
+ * of meeting. (Missing these was why "Longmont Study Session 09/09/2026" and a
+ * portal row titled "Study Session" stopped being joined: no body word agreed
+ * and the titles are not identical.)
  */
 const MEETING_BODIES = new Set([
   "council",
@@ -93,6 +103,10 @@ const MEETING_BODIES = new Set([
   "school",
   "authority",
   "district",
+  "study",
+  "work",
+  "workshop",
+  "hearing",
 ]);
 
 /** The body names both titles carry, in the body list's order. */
