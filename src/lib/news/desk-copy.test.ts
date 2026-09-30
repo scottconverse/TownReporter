@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import type { NewsroomPlace } from "./lead-match.ts";
 import {
   blockedDigBannerText,
   cameBackLabel,
@@ -741,17 +742,30 @@ describe("Worth a Look presentation", () => {
    * Longmont's Oct. 24 Day of the Dead Celebration" -- two county stories in
    * one section, sharing a place and a month and nothing else. The pair came
    * through here (desk-leads' chip is `nearDuplicate`), not through the lead
-   * matcher: it shared two capitalised words that PROPER_NOUN_STOPLIST did
-   * not name, which is all "two proper nouns" ever asked. Restoring the
-   * Longmont-only stoplist makes the first of these chip again.
+   * matcher: it shared two capitalised words the stoplist did not name, which
+   * is all "two proper nouns" ever asked. Restoring the Longmont-only
+   * stoplist makes the first of these chip again.
    */
   describe("U26: a shared place and month is not a shared story", () => {
+    /** The production paper's own place: the chip is decided with the
+     * newsroom's words (U26b), so these run as that newsroom. */
+    const LONGMONT: NewsroomPlace = { city: "Longmont", state: "Colorado", county: "Boulder" };
+
     /** Same section on both sides, since the section is part of what the
      * owner's pair had in common. */
-    function chipFor(leadHeadline: string, printedHeadline: string) {
-      return nearDuplicate({ headline: leadHeadline, topic: "council" }, [
-        { slug: "county-piece", headline: printedHeadline, topic: "council", published_at: "2026-09-29T12:00:00Z" },
-      ]);
+    function chipFor(leadHeadline: string, printedHeadline: string, place: NewsroomPlace = LONGMONT) {
+      return nearDuplicate(
+        { headline: leadHeadline, topic: "council" },
+        [
+          {
+            slug: "county-piece",
+            headline: printedHeadline,
+            topic: "council",
+            published_at: "2026-09-29T12:00:00Z",
+          },
+        ],
+        place,
+      );
     }
 
     it("does not chip the owner's pair across two Boulder County stories", () => {
@@ -784,6 +798,38 @@ describe("Worth a Look presentation", () => {
           "Boulder County leaders celebrate Longmont artists Oct. 24",
         ),
         null,
+      );
+    });
+
+    /*
+      U26b: the chip is decided with the NEWSROOM's place (nearDuplicate's
+      `place`), so the same two headlines are judged differently by two papers
+      -- which is the point. Under a paper set up for Riverbend, "Longmont"
+      and "Boulder" are somebody else's towns: names in a headline, not this
+      paper's own furniture. Under Longmont's configuration they are furniture
+      and the chip stays off (the test above).
+    */
+    it("reads the paper's own place: a Riverbend paper treats Longmont as a name, not furniture", () => {
+      const riverbend: NewsroomPlace = { city: "Riverbend", state: "Oregon" };
+      // Riverbend's own town is furniture there...
+      assert.equal(
+        chipFor(
+          "Riverbend council opens the Riverbend trailhead Oct. 5",
+          "Riverbend council seeks volunteers for the Riverbend cleanup Oct. 24",
+          riverbend,
+        ),
+        null,
+      );
+      // ...and Longmont's is not, so a shared Longmont name is evidence to
+      // THIS paper exactly as "Bohn Farm" is (the chip's two-names-and-a-
+      // section rule). Nothing is guessed either way: the words come from the
+      // configuration, not from this module.
+      assert.ok(
+        chipFor(
+          "Longmont's Twin Peaks rezoning heads to council Oct. 5",
+          "Longmont's Twin Peaks parking variance clears council Oct. 24",
+          riverbend,
+        ),
       );
     });
   });

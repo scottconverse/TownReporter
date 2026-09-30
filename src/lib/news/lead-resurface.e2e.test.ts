@@ -56,6 +56,10 @@ let getSql: typeof import("../db.ts").getSql;
 let closePoolForTests: typeof import("../db.ts").closePoolForTests;
 
 const NEWSROOM_ID = 1;
+/** U26b: the newsroom's own place, as getPaperPlace would read it for the
+ * production paper -- the matcher's region words are the paper's, not the
+ * software's, and these fixtures are Boulder County stories. */
+const LONGMONT_PLACE = { city: "Longmont", state: "Colorado", county: "Boulder" };
 const USER_ID = "resurface-test-user";
 
 if (dbProbe.ok) {
@@ -194,6 +198,11 @@ describe("fileScanLeads stamps a resurfaced lead instead of refiling it", () => 
         runId,
         aiLeads,
         existing,
+        // U26b: the place a server caller passes in (getPaperPlace). This
+        // scratch database never runs first-run setup, so the test states
+        // the production paper's own configuration instead of reading a
+        // blank one.
+        LONGMONT_PLACE,
       );
 
       assert.equal(result.leadsCreated, 1, "exactly one genuinely new lead should have been inserted");
@@ -305,6 +314,11 @@ describe("fileScanLeads files a 'possible' match as its own row, linked, and doe
         runId,
         aiLeads,
         existing,
+        // U26b: the place a server caller passes in (getPaperPlace). This
+        // scratch database never runs first-run setup, so the test states
+        // the production paper's own configuration instead of reading a
+        // blank one.
+        LONGMONT_PLACE,
       );
 
       assert.equal(result.leadsCreated, 1, "the possible match is FILED, not discarded");

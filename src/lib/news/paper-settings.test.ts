@@ -9,6 +9,7 @@ import {
   ensurePaperSettingsSchema,
   cleanSetupInput,
   getPaperConfig,
+  getPaperPlace,
   getPublicPaperConfig,
   isOnboarded,
   savePaperConfig,
@@ -272,6 +273,47 @@ describe("getPublicPaperConfig -- release-walkthrough Blocker fix", () => {
     assert.equal(cfg.name, "Boulder Bugle");
     assert.equal(cfg.city, "Boulder");
     await clearRow(newsroomId);
+  });
+
+  /*
+    U26b (2026-09-30): `getPaperPlace` is the read the lead matcher and the
+    Queue's "already printed" chip take their region words from, so it has to
+    answer with THIS newsroom's place and nothing else. The failure it exists
+    to prevent is the shipped one: a paper set up for another town treating
+    Longmont, Colorado and Boulder County as its own furniture.
+  */
+  describe("getPaperPlace -- the matcher's place, never the shipped paper's", () => {
+    it("an install that has not been set up names no place at all -- nothing is guessed", async () => {
+      const newsroomId = 900_030;
+      await clearRow(newsroomId);
+      assert.equal(await isOnboarded(newsroomId), false);
+      const place = await getPaperPlace(newsroomId);
+      assert.deepEqual(place, { city: "", state: "", county: null });
+      assert.doesNotMatch(
+        `${place.city} ${place.state} ${place.county ?? ""}`,
+        /longmont|boulder|colorado/i,
+        "an unconfigured install must never hand the matcher the shipped paper's region",
+      );
+    });
+
+    it("a paper set up for Riverbend, Oregon gets its own city and state, and no county it did not type", async () => {
+      const newsroomId = 900_031;
+      await clearRow(newsroomId);
+      const sql = await getSql();
+      await sql`
+        insert into paper_settings (newsroom_id, name, city, state, onboarded)
+        values (${newsroomId}, ${"The Riverbend Record"}, ${"Riverbend"}, ${"Oregon"}, true)
+      `;
+      const place = await getPaperPlace(newsroomId);
+      assert.equal(place.city, "Riverbend");
+      assert.equal(place.state, "Oregon");
+      // No `dark_settings` row to read a county from, and a county nobody
+      // typed is null rather than a guess.
+      assert.equal(place.county, null);
+      // And none of the shipped paper's place survives anywhere in it.
+      assert.doesNotMatch(JSON.stringify(place), /longmont|boulder|colorado/i);
+      await clearRow(newsroomId);
+    });
   });
 
   it("migrations/0023_paper_settings_onboard_existing.sql marks an already-claimed newsroom onboarded, so an install like the live production paper (a claimed desk that predates first-run setup) is never blanked by the public gate", async () => {

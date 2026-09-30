@@ -997,7 +997,9 @@ function QueuePage() {
           </div>
           <div className="lead-list roomy">
             {shown.map((l) => {
-              const dupMatch = nearDuplicate(l, printed);
+              // U26b: the same paper's place the server's counts and the scan's
+              // matcher use, so the chip and the "≈ Printed" tab agree.
+              const dupMatch = nearDuplicate(l, printed, PAPER);
               return (
                 <LeadRowView
                   key={l.id}

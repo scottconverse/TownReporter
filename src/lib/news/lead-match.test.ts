@@ -5,8 +5,10 @@ import {
   matchStrength,
   normalizeSourceUrl,
   extractAnchors,
+  properNounStoplist,
   sharedAnchorCount,
   type MatchCandidateLead,
+  type NewsroomPlace,
 } from "./lead-match.ts";
 
 describe("normalizeSourceUrl", () => {
@@ -207,8 +209,8 @@ describe("findMatchingLead: anchor path (real case 2026-09-02)", () => {
  * nothing but 'Boulder County', an October date, and probably the county
  * homepage as a source."
  *
- * What made the region itself count as evidence was PROPER_NOUN_STOPLIST,
- * which named only Longmont, city, council and Colorado: any other
+ * What made the region itself count as evidence was the old hard-coded
+ * stoplist, which named only Longmont, city, council and Colorado: any other
  * jurisdiction in the paper's coverage ("Boulder", "County", "Weld", "State")
  * was read as a proper noun, and a capitalised place name is exactly what
  * extractAnchors counts. "Boulder" + "County" is two anchors -- by
@@ -217,7 +219,13 @@ describe("findMatchingLead: anchor path (real case 2026-09-02)", () => {
  * word were enough. These pairs are all that shape: same place, same month,
  * different story. Restoring the Longmont-only stoplist makes them match
  * again.
+ *
+ * U26b: the place is now passed in, so every pair here is checked under the
+ * newsroom these headlines came from -- Longmont, Colorado, Boulder County,
+ * which is the production paper's own configuration.
  */
+const LONGMONT: NewsroomPlace = { city: "Longmont", state: "Colorado", county: "Boulder" };
+
 describe("U26 (2026-09-30): a place and a month are not a subject", () => {
   /** The county's own document index -- the kind of page two sightings out of
    * one county are both filed against. It is deliberately NOT an index page
@@ -228,12 +236,16 @@ describe("U26 (2026-09-30): a place and a month are not a subject", () => {
   function check(candidate: string, existing: string, urls: string[] = COUNTY_PAGE) {
     const lead: MatchCandidateLead = { id: 900, status: "new", headline: existing, source_urls: urls };
     assert.equal(
-      findMatchingLead({ headline: candidate, source_urls: urls }, [lead]),
+      findMatchingLead({ headline: candidate, source_urls: urls }, [lead], LONGMONT),
       null,
       `findMatchingLead filed ${JSON.stringify(candidate)} as a repeat of ${JSON.stringify(existing)}`,
     );
     assert.equal(
-      matchStrength({ headline: candidate, source_urls: urls }, { headline: existing, source_urls: urls }),
+      matchStrength(
+        { headline: candidate, source_urls: urls },
+        { headline: existing, source_urls: urls },
+        LONGMONT,
+      ),
       null,
       `matchStrength called ${JSON.stringify(candidate)} the same story as ${JSON.stringify(existing)}`,
     );
@@ -288,12 +300,108 @@ describe("U26 (2026-09-30): a place and a month are not a subject", () => {
   it("the paper's own place names are not anchors: Boulder, County, Longmont, Colorado", () => {
     const anchors = extractAnchors(
       "Boulder County, Listing Longmont's Colorado Day of the Dead Celebration",
+      LONGMONT,
     );
     for (const place of ["boulder", "county", "longmont", "longmont's", "colorado"]) {
       assert.ok(!anchors.has(`noun:${place}`), `"${place}" is the paper's own region, not a fact about a story`);
     }
     // ...while a name that is not the newsroom's own region still is one.
-    assert.ok(extractAnchors("Boulder County hears ExxonMobil climate suit Oct. 5").has("noun:exxonmobil"));
+    assert.ok(
+      extractAnchors("Boulder County hears ExxonMobil climate suit Oct. 5", LONGMONT).has(
+        "noun:exxonmobil",
+      ),
+    );
+  });
+});
+
+/**
+ * U26b (2026-09-30): the place words belong to the NEWSROOM, not to the
+ * software.
+ *
+ * The U26 fix above read the shipped constants (PAPER.city/state and a
+ * PAPER_COUNTY constant added for it), which is right for Longmont and wrong
+ * for every other paper: a desk set up for Riverbend, Oregon would have
+ * treated Longmont, Boulder and Colorado as its own furniture and Riverbend
+ * and Oregon as facts about a story -- exactly the shape of the bug U26 was
+ * fixing, just moved to a different newsroom. ENG-3 (U13/U13b/U13c) removed
+ * that class of default from the desk's searches; the matcher now takes the
+ * paper's place as a parameter (`getPaperPlace` on the server, the paper
+ * identity on the client) and reads no global at all.
+ *
+ * An unconfigured paper gets the generic civic vocabulary and nothing else --
+ * no country, no state, no town is guessed for it.
+ */
+describe("U26b: the place words are the newsroom's, never the shipped paper's", () => {
+  const RIVERBEND: NewsroomPlace = { city: "Riverbend", state: "Oregon" };
+
+  it("a paper set up for Riverbend, Oregon gets its own words and none of Longmont's", () => {
+    const furniture = properNounStoplist(RIVERBEND);
+    for (const own of ["riverbend", "oregon"]) {
+      assert.ok(furniture.has(own), `"${own}" is this paper's own place and must not be an anchor`);
+    }
+    for (const other of ["longmont", "boulder", "colorado"]) {
+      assert.ok(
+        !furniture.has(other),
+        `"${other}" belongs to a different newsroom and must not be treated as this paper's furniture`,
+      );
+    }
+    // The same thing one level down, where it actually decides a match.
+    const anchors = extractAnchors("Riverbend council meets Sept. 22 to review the Longmont contract", RIVERBEND);
+    assert.ok(!anchors.has("noun:riverbend"), "Riverbend is this paper's own town, not a fact about a story");
+    assert.ok(!anchors.has("noun:oregon"));
+    assert.ok(anchors.has("noun:longmont"), "a neighbouring newsroom's town IS a name in this paper's headlines");
+  });
+
+  it("an unconfigured paper gets the civic words only -- no state, no town, no county is guessed", () => {
+    const furniture = properNounStoplist();
+    assert.ok(furniture.has("county"), "the generic civic vocabulary is always there");
+    assert.ok(furniture.has("september"));
+    for (const guessed of ["longmont", "boulder", "colorado", "riverbend"]) {
+      assert.ok(!furniture.has(guessed), `nothing may invent "${guessed}" for a paper that named no place`);
+    }
+    // No place, no region furniture anywhere in the path...
+    assert.ok(extractAnchors("Riverbend council meets Sept. 22").has("noun:riverbend"));
+    // ...and the generic half still holds the owner's pair apart on its own:
+    // "County" is one anchor against ANCHOR_MATCH_MIN_SHARED's two.
+    const owner = "U.S. Supreme Court to Hear Boulder County Climate Suit Oct. 5";
+    const printed =
+      "Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24 Day of the Dead Celebration";
+    assert.equal(
+      matchStrength({ headline: owner, source_urls: [] }, { headline: printed, source_urls: [] }),
+      null,
+    );
+  });
+
+  it("Longmont's own configuration still gives the owner's pair no match", () => {
+    const owner = "U.S. Supreme Court to Hear Boulder County Climate Suit Oct. 5";
+    const printed =
+      "Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24 Day of the Dead Celebration";
+    assert.equal(
+      matchStrength(
+        { headline: owner, source_urls: ["https://bouldercounty.gov/agendas/"] },
+        { headline: printed, source_urls: ["https://bouldercounty.gov/agendas/"] },
+        LONGMONT,
+      ),
+      null,
+    );
+    // A newsroom place is furniture, not a gag order: the paper's OWN real
+    // duplicate still matches under that same configuration.
+    assert.notEqual(
+      matchStrength(
+        {
+          headline:
+            "Two closed executive sessions are on the books for Longmont city council in late September",
+          source_urls: ["https://www.longmontleader.com/agenda/sept-council/"],
+        },
+        {
+          headline:
+            "Longmont council has two closed-door executive sessions on the books for late September",
+          source_urls: ["https://longmontleader.com/agenda/sept-council"],
+        },
+        LONGMONT,
+      ),
+      null,
+    );
   });
 });
 

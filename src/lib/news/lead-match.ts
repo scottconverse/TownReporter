@@ -10,8 +10,15 @@
  *
  * Nothing here deletes or hides anything. A killed lead that matches keeps
  * every field it had; the caller (desk.ts) only adds a resurfaced stamp.
+ *
+ * Unit U26b (2026-09-30): the matcher's place words are the NEWSROOM's, passed
+ * in by the caller (`place`), never this module's own. It used to read the
+ * shipped Longmont constants, which meant a paper set up for another town got
+ * Longmont's region treated as furniture and its own region treated as a fact
+ * -- the same failure ENG-3 removed from the desk's searches. This module
+ * imports nothing and reads no global: a caller that passes no place gets the
+ * generic civic vocabulary only, and an unconfigured paper guesses nothing.
  */
-import { PAPER, PAPER_COUNTY } from "../paper.ts";
 
 /** Candidate lead statuses eligible to be matched against. A genuinely new
  * development on an already-published story is still news -- it should
@@ -51,8 +58,8 @@ const HEADLINE_ONLY_THRESHOLD = 0.85;
  *
  * "Anchors" are the concrete, hard-to-coincidentally-restate details in a
  * headline: specific dates, dollar amounts, other multi-digit numbers, and
- * proper nouns that are not generic paper/city furniture (see
- * PROPER_NOUN_STOPLIST). When a source URL is already shared, two headlines
+ * proper nouns that are not the newsroom's own place or civic furniture (see
+ * properNounStoplist). When a source URL is already shared, two headlines
  * that pin down >= ANCHOR_MATCH_MIN_SHARED of the same concrete details are
  * the same story even when their prose barely overlaps.
  *
@@ -70,17 +77,30 @@ const HEADLINE_ONLY_THRESHOLD = 0.85;
 export const ANCHOR_MATCH_MIN_SHARED = 2;
 
 /**
- * The newsroom's own place names -- the words that say WHERE a story is, not
- * WHAT it is. Derived from the paper's configured places (PAPER.city,
- * PAPER.state, PAPER_COUNTY in src/lib/paper.ts) rather than hard-coded, so a
- * self-hosted paper drops its own region's words instead of Longmont's.
+ * The newsroom's own place: the city it covers, its state, and the county its
+ * owner typed into Paper setup (`dark_settings.county`, read by
+ * `getPaperPlace` in ./paper-settings.ts -- the same source `readDarkPlace`
+ * and the paper identity use).
  *
- * A multi-word place ("Boulder County", "Colorado Springs") contributes each
- * of its words: either half alone still names the region.
+ * Every field is optional and nullable on purpose. A paper that has not said
+ * where it is has no region words at all, and this module never guesses one:
+ * the shipped Longmont constants are one newsroom's answer, not a default.
  */
-function regionWords(): string[] {
-  return [PAPER.city, PAPER.state, PAPER_COUNTY]
-    .flatMap((place) => place.trim().toLowerCase().split(/[^a-z]+/))
+export type NewsroomPlace = {
+  city?: string | null;
+  state?: string | null;
+  county?: string | null;
+};
+
+/**
+ * The region's own words -- the words that say WHERE a story is, not WHAT it
+ * is. Every word of every configured place: a place name made of two words
+ * ("Boulder County", "Colorado Springs") contributes both, since either half
+ * alone still names the region. Nothing configured yields nothing.
+ */
+function regionWords(place?: NewsroomPlace | null): string[] {
+  return [place?.city, place?.state, place?.county]
+    .flatMap((part) => String(part ?? "").trim().toLowerCase().split(/[^a-z]+/))
     .filter(Boolean);
 }
 
@@ -88,7 +108,10 @@ function regionWords(): string[] {
  * Generic civic vocabulary: the furniture of every government story in every
  * jurisdiction. "County", "board", "court" and "department" are compatible
  * with any city hall or county seat anywhere -- the same reason CONTENT_STOPLIST
- * exists -- so they cannot tell one story from another.
+ * exists -- so they cannot tell one story from another. These are the words a
+ * paper that has named no place still gets, and they are what keeps the
+ * owner's 2026-09-30 pair apart even without a configured county: "County"
+ * alone is one anchor against a two-anchor bar (see below).
  *
  * Deliberately does NOT include the words that name WHO said something rather
  * than what happened ("commissioners", "officials"): those are the words two
@@ -112,10 +135,10 @@ const CALENDAR_WORDS = [
 ];
 
 /**
- * Proper nouns that are the paper's own place and civic furniture, not a
+ * Proper nouns that are the newsroom's own place and civic furniture, not a
  * distinguishing fact about the story -- excluded from anchor/proper-noun
- * extraction here and reused by desk-copy.ts's nearDuplicate() for the same
- * reason.
+ * extraction in this module and reused by desk-copy.ts's nearDuplicate() for
+ * the same reason.
  *
  * U26 (2026-09-30), the owner's Queue: "U.S. Supreme Court to Hear Boulder
  * County Climate Suit Oct. 5" was chipped "Looks already printed: Boulder
@@ -126,12 +149,24 @@ const CALENDAR_WORDS = [
  * anchors: as much evidence, by ANCHOR_MATCH_MIN_SHARED, as a shared meeting
  * date plus a shared dollar figure. Nothing distinguishes two such headlines
  * except the region they both cover.
+ *
+ * U26b: the region half now comes from the caller's `place` (see
+ * NewsroomPlace). Memoised by that place, because a scan matches every
+ * candidate against every open lead and rebuilding a forty-word set inside
+ * extractAnchors, twice per pair, is work with one answer. The set handed
+ * back is the cached one -- read it, never write to it.
  */
-export const PROPER_NOUN_STOPLIST = new Set<string>([
-  ...regionWords(),
-  ...CIVIC_FURNITURE_WORDS,
-  ...CALENDAR_WORDS,
-]);
+const FURNITURE_CACHE = new Map<string, Set<string>>();
+
+export function properNounStoplist(place?: NewsroomPlace | null): Set<string> {
+  const region = regionWords(place);
+  const key = [...region].sort().join(" ");
+  const cached = FURNITURE_CACHE.get(key);
+  if (cached) return cached;
+  const set = new Set<string>([...CIVIC_FURNITURE_WORDS, ...CALENDAR_WORDS, ...region]);
+  FURNITURE_CACHE.set(key, set);
+  return set;
+}
 
 const MONTH_NUMBER: Record<string, string> = {
   jan: "01", january: "01",
@@ -151,11 +186,12 @@ const MONTH_NUMBER: Record<string, string> = {
 /** Extract "anchors" from a headline: `date:MM-DD` for a specific date,
  * `month:MM` for a bare month mention with no day, `amount:$N` for a
  * dollar figure, `num:N` for any other number with >= 2 digits, and
- * `noun:word` for a capitalised word not on PROPER_NOUN_STOPLIST. Matched
- * spans are blanked out of the working copy as they're consumed so a date's
- * day number isn't also counted as a bare `num:` anchor and a date's month
- * name isn't also counted as a `noun:` anchor. */
-export function extractAnchors(headline: string): Set<string> {
+ * `noun:word` for a capitalised word that is not the newsroom's own place or
+ * civic furniture (properNounStoplist, fed by `place`). Matched spans are
+ * blanked out of the working copy as they're consumed so a date's day number
+ * isn't also counted as a bare `num:` anchor and a date's month name isn't
+ * also counted as a `noun:` anchor. */
+export function extractAnchors(headline: string, place?: NewsroomPlace | null): Set<string> {
   const anchors = new Set<string>();
   let working = headline;
 
@@ -194,6 +230,7 @@ export function extractAnchors(headline: string): Set<string> {
     return " ".repeat(full.length);
   });
 
+  const furniture = properNounStoplist(place);
   for (const m of working.matchAll(/\b[A-Z][a-zA-Z']{2,}\b/g)) {
     // U26: a possessive is the same name. "Longmont's" was slipping past a
     // stoplist that names "longmont", so the paper's own city came back as a
@@ -203,18 +240,21 @@ export function extractAnchors(headline: string): Set<string> {
     // name on the same anchor as the plain one, which is what makes it
     // comparable across two headlines.
     const w = m[0].toLowerCase().replace(/'s$/, "");
-    if (!PROPER_NOUN_STOPLIST.has(w)) anchors.add(`noun:${w}`);
+    if (!furniture.has(w)) anchors.add(`noun:${w}`);
   }
 
   return anchors;
 }
 
-/** Proper nouns from a headline, excluding PROPER_NOUN_STOPLIST -- the
- * `noun:*` subset of extractAnchors, unprefixed. Shared by desk-copy.ts's
- * nearDuplicate() so both call sites use one stoplist. */
-export function nonStoplistedProperNouns(headline: string): Set<string> {
+/** Proper nouns from a headline, excluding the newsroom's own place and civic
+ * furniture (properNounStoplist) -- the `noun:*` subset of extractAnchors,
+ * unprefixed. */
+export function nonStoplistedProperNouns(
+  headline: string,
+  place?: NewsroomPlace | null,
+): Set<string> {
   const out = new Set<string>();
-  for (const anchor of extractAnchors(headline)) {
+  for (const anchor of extractAnchors(headline, place)) {
     if (anchor.startsWith("noun:")) out.add(anchor.slice("noun:".length));
   }
   return out;
@@ -621,35 +661,36 @@ export function sharesStoryPageUrl(a: string[], b: string[]): boolean {
  * score already implies at least one shared content token, but the explicit
  * check keeps that invariant true even if a threshold is ever loosened.
  */
-function headlinesOverlapEnough(a: string, b: string): boolean {
-  const ta = contentTokens(a);
-  const tb = contentTokens(b);
+function headlinesOverlapEnough(a: string, b: string, place?: NewsroomPlace | null): boolean {
+  const ta = contentTokens(a, place);
+  const tb = contentTokens(b, place);
   return (
     (jaccard(ta, tb) >= HEADLINE_JACCARD_THRESHOLD || containment(ta, tb) >= HEADLINE_CONTAINMENT_THRESHOLD) &&
-    sharesDistinguishingWord(a, b)
+    sharesDistinguishingWord(a, b, place)
   );
 }
 
-function headlinesAloneMatch(a: string, b: string): boolean {
-  const ta = contentTokens(a);
-  const tb = contentTokens(b);
-  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingWord(a, b);
+function headlinesAloneMatch(a: string, b: string, place?: NewsroomPlace | null): boolean {
+  const ta = contentTokens(a, place);
+  const tb = contentTokens(b, place);
+  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingWord(a, b, place);
 }
 
 /** Words at least 4 letters long, present in the headline, and NOT on
- * STOP_WORDS, PROPER_NOUN_STOPLIST, or CONTENT_STOPLIST -- see
- * CONTENT_STOPLIST's doc comment -- and not a non-stoplisted proper noun
- * (nonStoplistedProperNouns) either. That last exclusion matters for match
- * path 2: a shared place name like "Twin Peaks" is already scored as an
- * anchor (noun:twin, noun:peaks), so reusing it here would let two
- * different agenda items about the same place ("Twin Peaks rezoning
- * application" vs "Twin Peaks parking variance") satisfy sharesDistinguishingWord
- * on the location alone -- the anchor path needs a *different* piece of
- * evidence that the SUBJECT, not just the place, is the same. Plural/
- * singular variants are folded together (stem) after the stoplist checks,
- * which all key on the raw word. */
-function contentTokens(headline: string): Set<string> {
-  const properNouns = nonStoplistedProperNouns(headline);
+ * STOP_WORDS, the newsroom's own place/civic furniture (properNounStoplist),
+ * or CONTENT_STOPLIST -- see CONTENT_STOPLIST's doc comment -- and not a
+ * non-stoplisted proper noun (nonStoplistedProperNouns) either. That last
+ * exclusion matters for match path 2: a shared place name like "Twin Peaks"
+ * is already scored as an anchor (noun:twin, noun:peaks), so reusing it here
+ * would let two different agenda items about the same place ("Twin Peaks
+ * rezoning application" vs "Twin Peaks parking variance") satisfy
+ * sharesDistinguishingWord on the location alone -- the anchor path needs a
+ * *different* piece of evidence that the SUBJECT, not just the place, is the
+ * same. Plural/singular variants are folded together (stem) after the
+ * stoplist checks, which all key on the raw word. */
+function contentTokens(headline: string, place?: NewsroomPlace | null): Set<string> {
+  const properNouns = nonStoplistedProperNouns(headline, place);
+  const furniture = properNounStoplist(place);
   const words = headline
     .toLowerCase()
     .replace(/[^a-z0-9\s]+/g, " ")
@@ -658,7 +699,7 @@ function contentTokens(headline: string): Set<string> {
       (w) =>
         w.length >= 4 &&
         !STOP_WORDS.has(w) &&
-        !PROPER_NOUN_STOPLIST.has(w) &&
+        !furniture.has(w) &&
         !CONTENT_STOPLIST.has(w) &&
         !properNouns.has(w),
     )
@@ -672,7 +713,7 @@ function contentTokens(headline: string): Set<string> {
  *   - `subjects` -- shared content tokens (see contentTokens): furniture and
  *     proper nouns are already stripped, so what is left is the subject
  *     vocabulary, "climate", "Heritage", "rezoning".
- *   - `names` -- shared proper nouns that are NOT the paper's own place or
+ *   - `names` -- shared proper nouns that are NOT the newsroom's own place or
  *     civic furniture (nonStoplistedProperNouns): "ExxonMobil", "Bohn Farm",
  *     "SVVSD". Real names, but names are weaker evidence than subjects: two
  *     headlines can share a PLACE and nothing else.
@@ -680,12 +721,20 @@ function contentTokens(headline: string): Set<string> {
  * U26 (2026-09-30): exported for desk-copy.ts's nearDuplicate(), which shows
  * the Queue's "Looks already printed" chip. That chip used to be decided on
  * raw title overlap, which counts "Boulder" and "County" as evidence exactly
- * as this matcher's own anchor path did -- see PROPER_NOUN_STOPLIST.
+ * as this matcher's own anchor path did -- see properNounStoplist.
+ *
+ * `place` is the newsroom's own city/state/county, which is what decides
+ * whether a name is one of ITS places (see NewsroomPlace). A caller that
+ * passes nothing gets the generic civic words only.
  */
-export function distinguishingOverlap(a: string, b: string): { subjects: number; names: number } {
+export function distinguishingOverlap(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+): { subjects: number; names: number } {
   return {
-    subjects: sharedWordCount(contentTokens(a), contentTokens(b)),
-    names: sharedWordCount(nonStoplistedProperNouns(a), nonStoplistedProperNouns(b)),
+    subjects: sharedWordCount(contentTokens(a, place), contentTokens(b, place)),
+    names: sharedWordCount(nonStoplistedProperNouns(a, place), nonStoplistedProperNouns(b, place)),
   };
 }
 
@@ -699,7 +748,7 @@ function sharedWordCount(a: Set<string>, b: Set<string>): number {
  * and 3) -- see findMatchingLead and CONTENT_STOPLIST's doc comment. The
  * "real subject overlap" requirement as one predicate: the two headlines must
  * share at least one word that survives contentTokens, i.e. a word that is
- * neither the paper's own place/civic furniture (PROPER_NOUN_STOPLIST) nor a
+ * neither the newsroom's own place/civic furniture (properNounStoplist) nor a
  * proper noun at all. Two headlines can clear every lexical bar below on a
  * shared PLACE alone ("Boulder County" as two anchors, plus the Jaccard score
  * that shared proper nouns would otherwise contribute); a shared subject word
@@ -707,8 +756,8 @@ function sharedWordCount(a: Set<string>, b: Set<string>): number {
  * "Heritage", "ExxonMobil" -- and it is what the owner's 2026-09-30 false
  * positive ("...Boulder County Climate Suit Oct. 5" against "Boulder County
  * Proclaims Hispanic and Latinx Heritage Month...") never had. */
-function sharesDistinguishingWord(a: string, b: string): boolean {
-  return sharedWordCount(contentTokens(a), contentTokens(b)) >= 1;
+function sharesDistinguishingWord(a: string, b: string, place?: NewsroomPlace | null): boolean {
+  return sharedWordCount(contentTokens(a, place), contentTokens(b, place)) >= 1;
 }
 
 export type MatchCandidateLead = {
@@ -768,6 +817,14 @@ export type MatchCandidateLead = {
  * Only considers leads whose status is in MATCHABLE_STATUSES (never
  * 'published' -- a fresh development on a published story should file as
  * new) and, when `created_at` is present, within MATCH_LOOKBACK_DAYS days.
+ *
+ * `place` is the newsroom's own city/state/county (see NewsroomPlace), and it
+ * decides which names count as the paper's own furniture rather than as facts
+ * about a story. Every exported entry point takes it; a caller that passes
+ * nothing gets the generic civic words only. Server callers read it with
+ * `getPaperPlace` (./paper-settings.ts), the client from the paper identity it
+ * already renders -- one source, so a match cannot mean two things on two
+ * screens.
  */
 /**
  * QA-1 round 3 (2026-09-02): pulled out of findMatchingLead's loop so
@@ -782,19 +839,23 @@ function pairMatches(
   candidateUrls: string[],
   leadHeadline: string,
   leadUrls: string[],
+  place?: NewsroomPlace | null,
 ): boolean {
   const shareUrl = sharesUrl(candidateUrls, leadUrls);
-  if (shareUrl && headlinesOverlapEnough(candidateHeadline, leadHeadline)) {
+  if (shareUrl && headlinesOverlapEnough(candidateHeadline, leadHeadline, place)) {
     return true;
   }
   if (
     shareUrl &&
-    sharedAnchorCount(extractAnchors(candidateHeadline), extractAnchors(leadHeadline)) >= ANCHOR_MATCH_MIN_SHARED &&
-    sharesDistinguishingWord(candidateHeadline, leadHeadline)
+    sharedAnchorCount(
+      extractAnchors(candidateHeadline, place),
+      extractAnchors(leadHeadline, place),
+    ) >= ANCHOR_MATCH_MIN_SHARED &&
+    sharesDistinguishingWord(candidateHeadline, leadHeadline, place)
   ) {
     return true;
   }
-  if (!shareUrl && headlinesAloneMatch(candidateHeadline, leadHeadline)) {
+  if (!shareUrl && headlinesAloneMatch(candidateHeadline, leadHeadline, place)) {
     return true;
   }
   return false;
@@ -859,6 +920,7 @@ function pairMatches(
 export function sameStoryForMerge(
   candidate: { headline: string; source_urls?: string[] },
   existing: { headline: string; source_urls?: string[] },
+  place?: NewsroomPlace | null,
 ): boolean {
   const candidateHeadline = candidate.headline ?? "";
   const existingHeadline = existing.headline ?? "";
@@ -868,6 +930,7 @@ export function sameStoryForMerge(
   const strength = matchStrength(
     { headline: candidateHeadline, source_urls: candidateUrls },
     { headline: existingHeadline, source_urls: existingUrls },
+    place,
   );
   if (strength === "strong") return true;
   if (strength !== "possible") return false;
@@ -914,10 +977,14 @@ export function sameStoryForMerge(
 const NEW_FACT_ANCHOR_KINDS = ["date:", "amount:", "num:"] as const;
 
 /** The concrete anchors in a lead's own words, and nothing else. */
-function factAnchors(why?: string | null, evidence?: string | null): Set<string> {
+function factAnchors(
+  why?: string | null,
+  evidence?: string | null,
+  place?: NewsroomPlace | null,
+): Set<string> {
   const text = `${why ?? ""} ${evidence ?? ""}`;
   const anchors = new Set<string>();
-  for (const anchor of extractAnchors(text)) {
+  for (const anchor of extractAnchors(text, place)) {
     if (NEW_FACT_ANCHOR_KINDS.some((kind) => anchor.startsWith(kind))) anchors.add(anchor);
   }
   return anchors;
@@ -926,9 +993,10 @@ function factAnchors(why?: string | null, evidence?: string | null): Set<string>
 export function newFactsIn(
   candidate: { why?: string | null; evidence?: string | null },
   existing: { why?: string | null; evidence?: string | null },
+  place?: NewsroomPlace | null,
 ): boolean {
-  const old = factAnchors(existing.why, existing.evidence);
-  for (const anchor of factAnchors(candidate.why, candidate.evidence)) {
+  const old = factAnchors(existing.why, existing.evidence, place);
+  for (const anchor of factAnchors(candidate.why, candidate.evidence, place)) {
     if (!old.has(anchor)) return true;
   }
   return false;
@@ -937,6 +1005,7 @@ export function newFactsIn(
 export function findMatchingLead(
   candidate: { headline: string; source_urls: string[] },
   existing: MatchCandidateLead[],
+  place?: NewsroomPlace | null,
 ): number | null {
   const headline = candidate.headline ?? "";
   if (!headline.trim()) return null;
@@ -950,8 +1019,9 @@ export function findMatchingLead(
       const t = Date.parse(lead.created_at);
       if (Number.isFinite(t) && t < cutoff) continue;
     }
-    if (pairMatches(headline, candidate.source_urls ?? [], lead.headline, lead.source_urls ?? [])) {
-      if (matchStrength(candidate, lead) === "strong") return lead.id;
+    const leadUrls = lead.source_urls ?? [];
+    if (pairMatches(headline, candidate.source_urls ?? [], lead.headline, leadUrls, place)) {
+      if (matchStrength(candidate, lead, place) === "strong") return lead.id;
       firstPossible ??= lead.id;
       if (lead.status === "killed") firstKilledPossible ??= lead.id;
     }
@@ -999,6 +1069,7 @@ export function findMatchingLead(
 export function matchStrength(
   candidate: { headline: string; source_urls?: string[] },
   existing: { headline: string; source_urls?: string[] },
+  place?: NewsroomPlace | null,
 ): "strong" | "possible" | null {
   const candidateHeadline = candidate.headline ?? "";
   const existingHeadline = existing.headline ?? "";
@@ -1006,12 +1077,12 @@ export function matchStrength(
   const candidateUrls = candidate.source_urls ?? [];
   const existingUrls = existing.source_urls ?? [];
 
-  if (!pairMatches(candidateHeadline, candidateUrls, existingHeadline, existingUrls)) {
+  if (!pairMatches(candidateHeadline, candidateUrls, existingHeadline, existingUrls, place)) {
     return null;
   }
 
-  const ca = contentTokens(candidateHeadline);
-  const cb = contentTokens(existingHeadline);
+  const ca = contentTokens(candidateHeadline, place);
+  const cb = contentTokens(existingHeadline, place);
   const score = jaccard(ca, cb);
   const symmetricOk = symmetricDiffAllVariants(ca, cb);
 

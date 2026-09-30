@@ -33,6 +33,9 @@ import {
   LONGMONT_YOUTUBE_CHANNELS,
 } from "../paper.ts";
 import type { PaperIdentity } from "../paper-identity.ts";
+/* Type-only, and the module it comes from imports nothing at all: see
+   NewsroomPlace's note. */
+import type { NewsroomPlace } from "./lead-match.ts";
 /* Pure constants + folds, no database: the outlet list and its parser. */
 import { NAMED_OUTLETS, asNamedOutlets, type NamedOutlet } from "./outlet-credit.ts";
 /* Pure zod + constants, no database: safe to load from a plain node test. */
@@ -358,6 +361,50 @@ async function readCounty(newsroomId: number): Promise<string | null> {
   return rows[0]?.county?.trim() || null;
 }
 
+/** The three place fields of a paper's identity, read the one way. City and
+ * state are always strings here (the config read has already defaulted them);
+ * only the county can be missing, and then it is null rather than absent --
+ * `PaperIdentity.county` and the matcher's NewsroomPlace both read it that
+ * way. */
+async function paperPlaceFor(
+  cfg: PaperConfig,
+  newsroomId: number,
+): Promise<{ city: string; state: string; county: string | null }> {
+  /*
+    The county is read for an install that has finished first-run setup only.
+    An install that has not got that far names no city, no state and no
+    county -- the placeholder above -- so there is no place to look a county
+    up FOR, and a county alone would scope a paper that never said where it
+    is.
+  */
+  const county = (await isOnboarded(newsroomId)) ? await readCounty(newsroomId) : null;
+  return { city: cfg.city, state: cfg.state, county };
+}
+
+/**
+ * Where this newsroom is: the city and state it is set up for, and the county
+ * its owner typed into Paper setup.
+ *
+ * Unit U26b (2026-09-30): this is the one read for "the paper's own place",
+ * and it is deliberately the SAME source the public identity uses (the block
+ * below) rather than a second lookup that could drift from it. The lead
+ * matcher and the Queue's "Looks already printed" chip take it as a `place`
+ * parameter (see NewsroomPlace in ./lead-match.ts) so that a paper set up for
+ * another town stops treating Longmont's region as its own furniture -- the
+ * class of bug ENG-3 removed from the desk's searches, which the matcher
+ * still had because it read the shipped constants directly.
+ *
+ * A paper that has named no place gets no place words at all. Nothing here
+ * guesses a region: `getPublicPaperConfig` answers with the neutral
+ * placeholder until the owner has completed setup, and a county nobody typed
+ * is null.
+ */
+export async function getPaperPlace(
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+): Promise<NewsroomPlace> {
+  return paperPlaceFor(await getPublicPaperConfig(newsroomId), newsroomId);
+}
+
 /**
  * The paper's identity fields only, shaped for the client (`PaperIdentity`
  * in src/lib/paper-context.tsx) and fetched ONCE per page load: the root
@@ -372,13 +419,12 @@ export const getPaperIdentityFn = createServerFn({ method: "GET" }).handler(
     // setup never serves the shipped Longmont identity to the internet.
     const cfg = await getPublicPaperConfig();
     /*
-      The county is public-facing too, so it is only read for an install that
-      has finished first-run setup: the neutral placeholder above names no
-      county, and neither does an install that never got that far.
+      Same reads as `getPaperPlace` above, and the same rule: the county is
+      public-facing too, so it is only read for an install that has finished
+      first-run setup: the neutral placeholder above names no county, and
+      neither does an install that never got that far.
     */
-    const county = (await isOnboarded(DEFAULT_NEWSROOM_ID))
-      ? await readCounty(DEFAULT_NEWSROOM_ID)
-      : null;
+    const { county } = await paperPlaceFor(cfg, DEFAULT_NEWSROOM_ID);
     return {
       name: cfg.name,
       city: cfg.city,

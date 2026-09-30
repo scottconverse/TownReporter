@@ -5,7 +5,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
@@ -146,7 +146,14 @@ type PanelKey = "story-composer" | "paste-one-story" | null;
 
 function DeskHome() {
   const sectionQuery = useEditorSections();
-  const { city, timezone } = usePaper();
+  /*
+    U26b: the paper's own place, from the identity this page already renders.
+    The chip below is decided with the same three fields the server's Queue
+    counts and the scan's matcher use (`getPaperPlace`), so a lead cannot be
+    "already printed" here and not there.
+  */
+  const { city, state, county, timezone } = usePaper();
+  const paperPlace = useMemo(() => ({ city, state, county }), [city, state, county]);
   const { formatDate, formatDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -1681,7 +1688,7 @@ function DeskHome() {
                       </p>
                     ) : null}
                     {newLeads.map((l, index) => {
-                      const dup = nearDuplicate(l, printed);
+                      const dup = nearDuplicate(l, printed, paperPlace);
                       const held = l.status === "held";
                       const done = held || l.status === "killed";
                       /*

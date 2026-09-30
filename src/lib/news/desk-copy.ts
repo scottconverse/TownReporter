@@ -1,7 +1,7 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
-import { distinguishingOverlap } from "./lead-match.ts";
+import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { TOPICS } from "../paper.ts";
 
 export function organizationFromUrl(url: string): string {
@@ -1356,11 +1356,12 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  * got tagged as covering "Longmont's permit counter goes dark Wednesday
  * mornings starting Sept. 2" for no reason but sharing the paper's own city
  * name and a weekday/month. Two fixes, both required for the proper-noun
- * path: proper nouns now exclude the same PROPER_NOUN_STOPLIST that
- * lead-match.ts's anchor matcher uses (the newsroom's own city/state/county,
- * civic furniture, months, weekdays), and a proper-noun match alone is no
- * longer enough -- it also needs the two leads' `topic` to agree, unless
- * titlesOverlap already says yes on its own.
+ * path: proper nouns now exclude the same stoplist that lead-match.ts's
+ * anchor matcher uses -- the newsroom's own city/state/county, civic
+ * furniture, months, weekdays (`properNounStoplist`, fed by this function's
+ * `place`) -- and a proper-noun match alone is no longer enough -- it also
+ * needs the two leads' `topic` to agree, unless titlesOverlap already says
+ * yes on its own.
  *
  * U26 (2026-09-30): the topic gate was still not enough, and the owner's
  * Queue showed it. A lead about "U.S. Supreme Court to Hear Boulder County
@@ -1379,12 +1380,18 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  *   - or the two share two real NAMES and the same section. That is the Bohn
  *     Farm case below, kept as it was: two genuine names in one place (a
  *     farm, a portal page, a school district) are evidence a subject word
- *     alone is not, and the stoplist above is what keeps the region's own
+ *     alone is not, and the stoplist is what keeps the newsroom's own place
  *     names from ever counting as one.
+ *
+ * U26b (2026-09-30): that stoplist is the NEWSROOM's, so `place` (the paper's
+ * city/state/county) is a parameter here as it is on the matcher -- the chip
+ * and the matcher that files the lead must not disagree about what the
+ * paper's own region is. See NewsroomPlace.
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
   published: readonly { slug: string; headline: string; topic?: string; published_at: string }[],
+  place?: NewsroomPlace | null,
 ): PrintedDup | null {
   for (const p of published) {
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
@@ -1392,7 +1399,7 @@ export function nearDuplicate(
     // Nothing else can fire, and the Queue calls this once per published
     // story per lead: skip the tokenising work in the common case.
     if (!titlesOverlapRaw && !sameTopic) continue;
-    const { subjects, names } = distinguishingOverlap(lead.headline, p.headline);
+    const { subjects, names } = distinguishingOverlap(lead.headline, p.headline, place);
     const titlesAgree = titlesOverlapRaw && subjects >= 1 && subjects + names >= 2;
     if (titlesAgree || (names >= 2 && sameTopic)) {
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
