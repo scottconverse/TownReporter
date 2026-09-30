@@ -51,6 +51,40 @@ function About() {
             newspaper. We cover the packets most people never sit through, and we show the exact
             documents we used.
           </p>
+          {/*
+            The reader-facing half of the Stats privacy rule (owner decision,
+            2026-09-30). It says exactly what is read and what is kept, in the
+            same words the desk's own Stats page uses, so a reader can check the
+            two against each other. Written here because the redesign asked for
+            it (docs/design/handoff-2026-09-26/KICKOFF.md:154) and it had never
+            been done: /about carried no privacy statement at all.
+          */}
+          <p>
+            <strong>What we count, and what we keep.</strong> We count page loads, reading time,
+            and which of our own pages and buttons readers use — in aggregate, never per person.
+            No cookies, no accounts, no fingerprinting, and no identifier that outlives the day.
+            Two signals are read on a visit, each for one purpose only.
+          </p>
+          <p>
+            <strong>Where you are, roughly.</strong> This site is served through Cloudflare, which
+            works out a city and a country from your IP address and passes those two facts to us
+            with the request. We keep only a daily count for each place — never the address, and
+            only ever a city or a country, never anything finer. A place is shown to the editor
+            only once enough visits have landed there that the row cannot be one reader, and small
+            places on a finished day are added together into &ldquo;other places&rdquo; rather than
+            kept individually. We run no location database of our own: the city and country come
+            from Cloudflare&rsquo;s network, worked out from your address there.
+          </p>
+          <p>
+            <strong>Counting you once, without remembering you.</strong> We also read the address
+            your request arrives from, and your browser&rsquo;s type — a handful of words such as
+            &ldquo;phone&rdquo;, not the browser&rsquo;s own string. Both are used for one moment,
+            to build a one-way code that changes every day and whose only job is to stop the same
+            visit being counted twice. Neither the address nor the browser string is ever stored,
+            logged or exported; the code cannot be turned back into an address, and today&rsquo;s
+            code cannot be matched against yesterday&rsquo;s. That is why we cannot tell that you
+            came back yesterday, and we do not try. No analytics service is involved.
+          </p>
           {EDITOR_EMAIL ? (
             <p>
               <strong>Corrections and tips.</strong> Write the editor at{" "}

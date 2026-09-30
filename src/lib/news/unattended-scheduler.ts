@@ -3,6 +3,7 @@ import { drainQueuedJobs, reattachDurableJobsOnStartup } from "./jobs.ts";
 import { tickDailyScans } from "./daily-scan.server.ts";
 import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
+import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 
 /**
@@ -81,9 +82,47 @@ export function startUnattendedScheduler(): void {
     if (statsTicking) return;
     statsTicking = true;
     try {
-      await tickStatsReports();
-    } catch (err) {
-      console.error("[townreporter] stats report tick failed:", err);
+      /*
+        THREE INDEPENDENT JOBS ON ONE HOURLY CLOCK, and each gets its own
+        try/catch (unit U17d). They used to share one: `tickStatsReports()` sat
+        in the same `try` as the fold and the prune, so a report tick that threw
+        -- its own `getSql()` or its per-newsroom query is enough -- skipped the
+        other two entirely, which is the opposite of what the comment beside
+        them promised. A failed report must not cost the day's retention work,
+        and a failed fold must not cost the prune.
+      */
+      try {
+        await tickStatsReports();
+      } catch (err) {
+        console.error("[townreporter] stats report tick failed:", err);
+      }
+
+      /*
+        Retention (unit U17b/U17c). `location_daily` is the one Stats table with
+        a finite life -- twelve months, the longest range the Stats screen
+        offers -- and the one that describes a place a reader was in rather than
+        a page, so it is also the one that folds its small places away.
+
+        The fold runs BEFORE the prune, and both are idempotent, so the order is
+        only about not doing wasted work: a place old enough to be pruned is
+        never also folded. Fold first and the prune sees fewer rows; prune first
+        and the fold would fold rows the prune was about to delete. Neither
+        order is wrong, and neither loses a visit -- a folded row is carried by
+        a row that lives as long as the rows it came from.
+
+        Both are cheap and quiet: a query each on an hour when there is nothing
+        to do, and a row count to log when there is.
+      */
+      try {
+        await foldSmallPlaces();
+      } catch (err) {
+        console.error("[townreporter] stats location fold failed:", err);
+      }
+      try {
+        await pruneLocationDaily();
+      } catch (err) {
+        console.error("[townreporter] stats location prune failed:", err);
+      }
     } finally {
       statsTicking = false;
     }
