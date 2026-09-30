@@ -150,6 +150,7 @@ import {
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
+import { postgresText, storableText } from "./storable-text";
 import {
   annotateScanRowsWithStallStatus,
   enqueueJob,
@@ -196,12 +197,6 @@ import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
   return context.newsroomId ?? DEFAULT_NEWSROOM_ID;
-}
-
-function postgresText(value: string) {
-  // PostgreSQL text cannot contain U+0000. Preserve its position as a visible
-  // replacement character so fetched pages and source failures remain reportable.
-  return value.split("\u0000").join("\uFFFD");
 }
 
 async function lockManualScanClaim(writeSql: Sql, job: DeskJob): Promise<boolean> {
@@ -1735,25 +1730,39 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       } catch {
         continue;
       }
+      /*
+        Every string here is model output headed for a `text` column --
+        `sources.title`, `.proposed_reason`, `.proposed_section` -- so it gets
+        `storableText` for the same reason a lead does: one NUL fails the
+        statement, and that fails the scan's commit transaction.
+      */
       if (
         await insertProposedNewsroomSource(writeSql, {
           userId: context.userId,
           newsroomId: owned(context),
           url: url.toString(),
-          title: p.title || url.hostname,
+          title: storableText(p.title) || url.hostname,
           // 0.6.70: the scan already wrote a sentence about each suggested
           // page and threw it away here. The editor reading 175 rows needs
           // that sentence and the run it came from, not just a bare URL.
-          reason: p.why,
+          reason: storableText(p.why),
           proposedBy: "scan",
           scanRunId: runId,
-          section: p.section || null,
+          section: storableText(p.section) || null,
         })
       )
         proposed += 1;
     }
 
-    let summary = postgresText(String(data.editor_summary ?? "")).slice(0, 1200);
+    /*
+      `storableText`, not `postgresText`: this column holds the desk's own
+      sentence about the run -- the model's summary plus the coverage clauses
+      below -- not a captured page, so the policy for editorial text applies
+      (see storable-text.ts). It took a NUL guard early because it is the one
+      model-written field the original fix noticed; the lead fields beside it,
+      which fail the same transaction, did not get one until SCAN-001.
+    */
+    let summary = String(data.editor_summary ?? "").slice(0, 1200);
     if (leadsCreated === 0 && !summary)
       summary = composeZeroLeadSummary({
         fetched: fetchedCount,
@@ -1776,6 +1785,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     const meetingCoverageLine = meetingAwareness?.coverageLine ?? "";
     if (meetingCoverageLine)
       summary = summary ? `${summary} ${meetingCoverageLine}`.slice(0, 1200) : meetingCoverageLine;
+    // Sanitize the ASSEMBLED sentence rather than only the model's clause at
+    // the top: every part of it -- the coverage line, the resurfaced sentence
+    // naming a discarded headline, the meeting clause -- is stitched onto the
+    // value that gets written, and a guard on the first part alone would leave
+    // the joins unguarded.
+    summary = storableText(summary);
     await writeSql`
       update scan_runs
       set finished_at = now(),

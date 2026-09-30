@@ -9,6 +9,7 @@ let getPglite: typeof import("../db.ts").getPglite;
 let getSql: typeof import("../db.ts").getSql;
 let performScanWork: typeof import("./desk.ts").performScanWork;
 let runDailyScanWork: typeof import("./daily-scan.server.ts").runDailyScanWork;
+const NUL = String.fromCharCode(0);
 const SOURCE_TEXT = "Council votes Tuesday on a water contract.\u0000 Agenda item 7.";
 
 before(async () => {
@@ -124,17 +125,23 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
         },
         codex: async () => {
           codexCalls += 1;
+          /*
+            The fetched page is not the only place a NUL arrives from. A model
+            writing prose can emit one too, and it lands in a different set of
+            columns -- `leads.headline/why/topic/evidence` and
+            `scan_runs.summary` -- which the original fix did not cover. SCAN-001.
+          */
           return {
             ok: true as const,
             text: JSON.stringify({
-              editor_summary: "Council has a contract vote.",
+              editor_summary: `Council has a contract vote.${NUL} Next week.`,
               leads: [
                 {
-                  headline: "Council schedules water contract vote",
-                  why: "The vote is Tuesday.",
+                  headline: `Council schedules water${NUL} contract vote`,
+                  why: `The vote is Tuesday.${NUL}`,
                   topic: "council",
                   source_urls: ["https://example.test/agenda"],
-                  evidence: "Council votes Tuesday on a water contract.",
+                  evidence: `Council votes Tuesday on a water contract.${NUL}`,
                   newsworthiness: 10,
                 },
               ],
@@ -164,11 +171,37 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
   );
   assert.equal(savedSnapshot.excerpt, SOURCE_TEXT.replace("\u0000", "\uFFFD"));
   assert.equal((await sql.query("select 1 from leads where scan_run_id=$1", [run.id])).length, 1);
-  const [savedRun] = await sql.query<{ leads_created: number; execution_origin: string }>(
-    "select leads_created,execution_origin from scan_runs where id=$1",
-    [run.id],
-  );
-  assert.deepEqual(savedRun, { leads_created: 1, execution_origin: "scheduled" });
+  /*
+    The lead the model wrote, not only the page it read.
+
+    `storableText` strips the byte rather than replacing it: this is editorial
+    text, and the desk is the one that wrote it (see storable-text.ts). What
+    matters for the scan is that the INSERT succeeded at all -- before the
+    guard this whole run rolled back and was recorded as a failed run, so
+    reaching these rows is the fix, and the exact strings are the contract.
+  */
+  const [savedLead] = await sql.query<{
+    headline: string;
+    why: string;
+    topic: string;
+    evidence: string;
+  }>("select headline,why,topic,evidence from leads where scan_run_id=$1", [run.id]);
+  assert.deepEqual(savedLead, {
+    headline: "Council schedules water contract vote",
+    why: "The vote is Tuesday.",
+    topic: "council",
+    evidence: "Council votes Tuesday on a water contract.",
+  });
+  const [savedRun] = await sql.query<{
+    leads_created: number;
+    execution_origin: string;
+    summary: string;
+  }>("select leads_created,execution_origin,summary from scan_runs where id=$1", [run.id]);
+  assert.deepEqual(savedRun, {
+    leads_created: 1,
+    execution_origin: "scheduled",
+    summary: "Council has a contract vote. Next week.",
+  });
   const [savedReservation] = await sql.query<{ status: string }>(
     "select status from daily_scan_reservations where id=$1",
     [reservation.id],

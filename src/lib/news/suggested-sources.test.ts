@@ -312,14 +312,20 @@ describe("a suggestion records why and where it came from", () => {
     assert.equal(row.proposed_section, null);
   });
 
-  it("wires the scan's own reply through to the insert", async () => {
+  it("wires the scan's own reply through to the insert, sanitized", async () => {
     // The scan's loop is inside `desk.ts`, which plain `node --test` cannot
     // load (it reaches `@/lib/...` aliases). The executed half of this claim is
     // the insert directly above; this pins the wiring that feeds it.
+    //
+    // `storableText` is part of the pinned shape rather than an implementation
+    // detail: these three strings are model output headed for `text` columns,
+    // and the scan's commit is one transaction -- a NUL in any of them loses
+    // the whole run (SCAN-001). Matching the bare `p.title` / `p.why` /
+    // `p.section` is exactly the mutation that must fail here.
     const desk = await readFile(new URL("./desk.ts", import.meta.url), "utf8");
     assert.match(
       desk,
-      /insertProposedNewsroomSource\(writeSql, \{[^}]*reason: p\.why,[^}]*proposedBy: "scan",[^}]*scanRunId: runId,[^}]*section: p\.section \|\| null,/s,
+      /insertProposedNewsroomSource\(writeSql, \{[^}]*title: storableText\(p\.title\) \|\| url\.hostname,[^}]*reason: storableText\(p\.why\),[^}]*proposedBy: "scan",[^}]*scanRunId: runId,[^}]*section: storableText\(p\.section\) \|\| null,/s,
     );
   });
 });

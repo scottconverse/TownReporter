@@ -289,10 +289,15 @@ async function runNulScanFixture(input: NulScanFixture) {
     failed_sources: string | null;
     error: string | null;
     summary: string | null;
+    leads_created: number;
   }>`
     select finished_at,sources_selected,sources_attempted,sources_fetched,sources_failed,
-      sources_analyzed,model_batches_used,model_batches_failed,failed_sources,error,summary
+      sources_analyzed,model_batches_used,model_batches_failed,failed_sources,error,summary,
+      leads_created
     from scan_runs where id=${run.id}
+  `;
+  const [lead] = await sql<{ headline: string; why: string; evidence: string; topic: string }>`
+    select headline,why,evidence,topic from leads where scan_run_id=${run.id} order by id limit 1
   `;
   const [savedSource] = await sql<{ last_error: string | null }>`
     select last_error from sources where id=${sourceIds[0]}
@@ -303,7 +308,7 @@ async function runNulScanFixture(input: NulScanFixture) {
   const [jobAfter] = await sql<{ status: string; claim_token: string | null }>`
     select status,claim_token from desk_jobs where id=${jobRow.id}
   `;
-  return { error, modelPrompt, modelCalls, scanRun, savedSource, snapshot, jobAfter };
+  return { error, modelPrompt, modelCalls, scanRun, lead, savedSource, snapshot, jobAfter };
 }
 
 it("normalizes NUL in fetched source text before the transactional snapshot write", async () => {
@@ -403,32 +408,49 @@ it("counts successful later batches when an earlier batch fails", async () => {
   assert.ok(result.scanRun.summary?.includes("1 of 2 analysis batches failed"));
 });
 
-it("finalizes the manual run with coverage when the result transaction fails", async () => {
+it("stores a model-written lead whose headline carries a NUL instead of losing the run", async () => {
+  /*
+    This test used to assert the opposite: that a NUL in the model's headline
+    failed the result write, settled the run and left `0x00` in its error
+    column. That was an accurate description of the defect -- one byte in one
+    field rolled back every lead the run had found -- written up as though the
+    settling were the point. SCAN-001 fixes the defect, so the assertion moves
+    to the outcome the desk wants: the run completes and the stored lead is the
+    model's sentence with the byte gone.
+  */
   const result = await runNulScanFixture({
     response: {
       leads: [
         {
           headline: `Council approves the contract${NUL}`,
-          why: "The vote is Tuesday.",
+          why: `The vote is Tuesday.${NUL}`,
           topic: "council",
           source_urls: ["https://example.org/agenda"],
-          evidence: "Council approved the contract.",
+          evidence: `Council approved the contract.${NUL}`,
           newsworthiness: 10,
         },
       ],
       proposed_sources: [],
-      editor_summary: "The council approved the contract.",
+      editor_summary: `The council approved the contract.${NUL}`,
     },
   });
-  assert.ok(result.error instanceof Error, "invalid model text should be reported as a failed result write");
-  assert.ok(result.scanRun.finished_at, "the run row must settle after the transaction rolls back");
+  assert.equal(result.error, undefined, `NUL-bearing model text must not fail the run: ${String(result.error)}`);
+  assert.ok(result.scanRun.finished_at);
+  assert.equal(result.scanRun.leads_created, 1);
   assert.equal(result.scanRun.sources_selected, 1);
   assert.equal(result.scanRun.sources_attempted, 1);
   assert.equal(result.scanRun.sources_fetched, 1);
   assert.equal(result.scanRun.sources_failed, 0);
   assert.equal(result.scanRun.sources_analyzed, 1);
-  assert.ok(result.scanRun.error?.includes("0x00"));
-  assert.equal(result.snapshot, undefined, "the failed result transaction must roll back its snapshot");
+  assert.equal(result.scanRun.error, null);
+  assert.equal(result.scanRun.summary, "The council approved the contract.");
+  assert.deepEqual(result.lead, {
+    headline: "Council approves the contract",
+    why: "The vote is Tuesday.",
+    evidence: "Council approved the contract.",
+    topic: "council",
+  });
+  assert.ok(result.snapshot, "the successful run still writes its snapshot");
 });
 
 it("does not let a superseded scan claim commit results or settle its run", async () => {
