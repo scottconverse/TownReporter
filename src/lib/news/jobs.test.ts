@@ -42,6 +42,178 @@ function fakeJob(over: Partial<DeskJob>): DeskJob {
   };
 }
 
+/**
+ * Bound a wait, so a claim that never happens fails the test with a reason
+ * instead of hanging the whole file -- node's test runner has no default
+ * per-test timeout, and a blocked worker left holding its gate would outlive
+ * the test that started it.
+ */
+function withDeadline<T>(promise: Promise<T>, what: string, ms = 10_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms waiting for ${what}`)), ms);
+    timer.unref();
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+/** The terminal columns the claim-token guard decides the fate of. */
+type JobTerminalRow = {
+  status: string;
+  stage: string;
+  claim_token: string | null;
+  error: string | null;
+  finished_at: unknown;
+};
+
+type SupersededExecutionRace = {
+  job: DeskJob;
+  tokenA: string;
+  tokenB: string;
+  releaseGhost(): void;
+  releaseOwner(): void;
+  /** Let the superseded execution finish its own code path; the value is its `executeJob` result. */
+  settleGhost(): Promise<boolean>;
+  /** Let the execution that took the row over finish its own code path. */
+  settleOwner(): Promise<boolean>;
+  /** The job's terminal columns, read fresh from the database. */
+  row(): Promise<JobTerminalRow | undefined>;
+  /** Release both gates, drain both executions, restore the work seam, remove the row. */
+  finish(): Promise<void>;
+};
+
+/**
+ * Drive the superseded-execution race through production code, with no
+ * stand-in for the ghost's terminal write.
+ *
+ * Execution A claims a draft job and blocks inside its work. Its heartbeat is
+ * `HEARTBEAT_MS` (30s) away and nothing else moves `updated_at`, so the test
+ * can push the row past `STALE_RUNNING_SECONDS` and leave it there. Execution
+ * B then re-claims that same stale row through `executeJob`'s real reclaim
+ * path and blocks too, so B is the live owner while A is still inside its own
+ * `executeJob`. Releasing A makes it finish through the same try/catch the
+ * production drainer uses -- claim token, heartbeat, reclaim and both terminal
+ * writes all belong to `jobs.ts`, not to this file.
+ *
+ * The only thing swapped is what the work itself does (`__setJobWorkForTest`,
+ * jobs.ts:310): a 40-minute draft cannot run here, and the race is about the
+ * claim boundary around the work, not the work.
+ */
+async function startSupersededExecutionRace(opts: {
+  newsroomId: number;
+  subjectId: number;
+  /** What the superseded execution's work does once the test releases it. */
+  ghostWork: () => Promise<void>;
+}): Promise<SupersededExecutionRace> {
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const job = await enqueueJob({
+    userId: `job-superseded-${Date.now()}`,
+    newsroomId: opts.newsroomId,
+    kind: "draft",
+    subjectId: opts.subjectId,
+    kick: false,
+  });
+
+  // Tokens in the order executions enter their work: [A (ghost), B (owner)].
+  const tokens: string[] = [];
+  let releaseGhost!: () => void;
+  const ghostGate = new Promise<void>((resolve) => {
+    releaseGhost = resolve;
+  });
+  let releaseOwner!: () => void;
+  const ownerGate = new Promise<void>((resolve) => {
+    releaseOwner = resolve;
+  });
+  let ghostEntered!: () => void;
+  const ghostInWork = new Promise<void>((resolve) => {
+    ghostEntered = resolve;
+  });
+  let ownerEntered!: () => void;
+  const ownerInWork = new Promise<void>((resolve) => {
+    ownerEntered = resolve;
+  });
+
+  __setJobWorkForTest(async (claimed) => {
+    tokens.push(claimed.claim_token ?? "");
+    if (tokens.length === 1) {
+      ghostEntered();
+      await ghostGate;
+      await opts.ghostWork();
+      return;
+    }
+    ownerEntered();
+    await ownerGate;
+  });
+
+  let ghostRun: Promise<boolean> | undefined;
+  let ownerRun: Promise<boolean> | undefined;
+  const settle = async () => {
+    releaseGhost();
+    releaseOwner();
+    await ghostRun?.catch(() => undefined);
+    await ownerRun?.catch(() => undefined);
+  };
+
+  try {
+    ghostRun = executeJob(job);
+    await withDeadline(ghostInWork, "the first execution to enter its work");
+    const tokenA = tokens[0]!;
+    assert.ok(tokenA, "the first execution must stamp a claim token");
+
+    // A has gone quiet past the reclaim window: the shape of a process that
+    // died mid-run, from every other drainer's point of view.
+    await sql`
+      update desk_jobs
+      set updated_at = now() - make_interval(secs => ${STALE_RUNNING_SECONDS + 60})
+      where id = ${job.id} and claim_token = ${tokenA}
+    `;
+
+    ownerRun = executeJob({ ...job, status: "running" });
+    await withDeadline(ownerInWork, "the second execution to claim the reclaimed row");
+    const tokenB = tokens[1]!;
+    assert.ok(tokenB, "the reclaiming execution must stamp its own claim token");
+    assert.notEqual(tokenB, tokenA, "each execution mints its own claim token");
+
+    const row = async () =>
+      (
+        await sql<JobTerminalRow>`
+          select status, stage, claim_token, error, finished_at
+          from desk_jobs where id = ${job.id}
+        `
+      )[0];
+
+    return {
+      job,
+      tokenA,
+      tokenB,
+      releaseGhost,
+      releaseOwner,
+      async settleGhost() {
+        releaseGhost();
+        return await ghostRun!;
+      },
+      async settleOwner() {
+        releaseOwner();
+        return await ownerRun!;
+      },
+      row,
+      async finish() {
+        await settle();
+        __setJobWorkForTest();
+        await sql`delete from desk_jobs where id = ${job.id}`;
+      },
+    };
+  } catch (error) {
+    // Setup failed with workers still holding their gates: let them go and
+    // clean up, or the failure would be a hung test file rather than a message.
+    await settle();
+    __setJobWorkForTest();
+    await sql`delete from desk_jobs where id = ${job.id}`;
+    throw error;
+  }
+}
+
 describe("desk jobs", () => {
   it("refuses a scheduled scan whose reservation metadata is missing", () => {
     assert.throws(
@@ -394,50 +566,117 @@ describe("desk jobs", () => {
     assert.ok(rows[0]?.claim_token, "expected a claim token on the executed row");
   });
 
+  /*
+    The real shape of the bug, with no stand-in for the ghost's terminal write.
+
+    A slow execution passes the stale window, a second drainer re-claims the
+    row, and then the ORIGINAL finishes and writes its result over the top. The
+    claim-token guard has to make that a no-op.
+
+    This test used to hand-write the ghost's finish (`update desk_jobs ... where
+    claim_token = 'ghost-worker'`), which only proved that a WHERE clause the
+    test itself typed does what the test said -- deleting `and claim_token =
+    ${token}` from the completion UPDATE in jobs.ts left it green. Both
+    executions here are real `executeJob` calls and A finishes through its own
+    code path; see `startSupersededExecutionRace`.
+
+    THE GUARD'S OBSERVABLE MOMENT is while B still owns the row. Once B has
+    finished, the shared `status = 'running'` clause in the completion UPDATE
+    blocks a late write on its own, so the claim token is only load-bearing
+    while the rightful owner is still running -- which is exactly the window
+    this test holds open. What the guard prevents is not just a wrong row
+    afterwards: an unguarded ghost write settles a job B is still working and
+    then silently swallows B's own terminal write.
+  */
   it("a superseded execution cannot overwrite the result of the one that took over", async () => {
-    // The real shape of the bug: a slow job passes the stale window, a second
-    // drainer re-claims it, and then the ORIGINAL finishes and writes its
-    // result over the top. The claim-token guard has to make that a no-op.
-    await ensureJobsSchema();
-    const sql = await getSql();
-    const newsroomId = 91006;
-    const job = await enqueueJob({
-      userId: `job-stale-${Date.now()}`,
-      newsroomId,
-      kind: "draft",
+    const race = await startSupersededExecutionRace({
+      newsroomId: 91020,
       subjectId: 99,
-      kick: false,
+      ghostWork: async () => undefined,
     });
+    try {
+      // The reclaim itself, still covered: B took a stale running row over.
+      const owned = await race.row();
+      assert.equal(owned?.status, "running");
+      assert.equal(owned?.claim_token, race.tokenB, "the reclaim must stamp B's token");
 
-    // Pretend an earlier execution claimed it and then went quiet past the window.
-    await sql`
-      update desk_jobs
-      set status = 'running', claim_token = 'ghost-worker',
-          updated_at = now() - make_interval(secs => ${STALE_RUNNING_SECONDS + 60})
-      where id = ${job.id}
-    `;
+      // A now finishes through its normal completion path while B owns the row.
+      assert.equal(await race.settleGhost(), true);
 
-    // A fresh drainer legitimately takes it over.
-    const took = await executeJob({ ...job, status: "running" });
-    assert.equal(took, true, "a stale running job should be reclaimable");
+      const afterGhost = await race.row();
+      assert.equal(
+        afterGhost?.status,
+        "running",
+        "the ghost's completion must not settle a row it no longer owns",
+      );
+      assert.equal(afterGhost?.claim_token, race.tokenB, "B must still own the row");
+      assert.notEqual(afterGhost?.stage, "Done", "the ghost's terminal stage must not be written");
+      assert.equal(afterGhost?.finished_at, null, "the ghost must not stamp a finish time");
 
-    const after = await sql<{ status: string; claim_token: string | null }>`
-      select status, claim_token from desk_jobs where id = ${job.id}
-    `;
-    assert.notEqual(after[0]?.claim_token, "ghost-worker");
-    const settled = after[0]!.status;
+      // B finishes normally: the settled row is B's result, not A's.
+      assert.equal(await race.settleOwner(), true);
 
-    // Now the ghost finishes and tries to report success.
-    await sql`
-      update desk_jobs
-      set status = 'completed', stage = 'Done', error = null, finished_at = now(), updated_at = now()
-      where id = ${job.id} and claim_token = 'ghost-worker'
-    `;
+      const final = await race.row();
+      assert.equal(final?.status, "completed");
+      assert.equal(final?.claim_token, race.tokenB);
+      assert.notEqual(final?.claim_token, race.tokenA, "the settled row must not carry A's token");
+      assert.equal(final?.stage, "Done");
+      assert.equal(final?.error, null);
+      assert.ok(final?.finished_at, "B's finish time is the one that stands");
+    } finally {
+      await race.finish();
+    }
+  });
 
-    const final = await sql<{ status: string }>`
-      select status from desk_jobs where id = ${job.id}
-    `;
-    assert.equal(final[0]?.status, settled, "the ghost must not have changed anything");
+  /*
+    The same race on the failure path (the `catch` at jobs.ts:~834).
+
+    A's work throws after B has taken the row over, so A reaches its failure
+    UPDATE while B still owns the row. Unguarded, that write marks B's live job
+    failed and records A's error on it -- and because B's own completion then
+    fails its `status = 'running'` test, B's successful work is recorded as a
+    failure the editor is told about and cannot explain.
+
+    That window is the whole value of the guard on this path: once B has
+    finished, `status = 'running'` already blocks a late write by itself, so a
+    test that only throws AFTER B completed cannot tell the token guard's
+    presence from its absence. This one throws while B is still running.
+  */
+  it("a superseded execution's late failure cannot overwrite the work that took over", async () => {
+    const race = await startSupersededExecutionRace({
+      newsroomId: 91021,
+      subjectId: 100,
+      ghostWork: async () => {
+        throw new Error("ghost worker failed");
+      },
+    });
+    try {
+      assert.equal(await race.settleGhost(), true);
+
+      const afterGhost = await race.row();
+      assert.equal(
+        afterGhost?.status,
+        "running",
+        "the ghost's failure must not settle a row it no longer owns",
+      );
+      assert.equal(afterGhost?.error, null, "the ghost's error text must not be recorded");
+      assert.equal(afterGhost?.claim_token, race.tokenB, "B must still own the row");
+      assert.equal(afterGhost?.finished_at, null, "the ghost must not stamp a finish time");
+
+      assert.equal(await race.settleOwner(), true);
+
+      const final = await race.row();
+      assert.equal(
+        final?.status,
+        "completed",
+        "the owner's successful work must not be recorded as the ghost's failure",
+      );
+      assert.equal(final?.error, null);
+      assert.equal(final?.claim_token, race.tokenB);
+      assert.ok(final?.finished_at, "B's finish time is the one that stands");
+    } finally {
+      await race.finish();
+    }
   });
 
   it("does not turn atomically completed work into a failure when redundant completion errors", async () => {
