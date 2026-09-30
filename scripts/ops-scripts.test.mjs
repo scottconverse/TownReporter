@@ -1218,6 +1218,18 @@ test("redlib-relocate.ps1 copies rather than moves, refuses a live reader, and n
   */
   const raw = read("redlib-relocate.ps1");
   const code = stripComments(raw);
+  const pathIdentity = raw.match(/function Get-PathIdentity \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(pathIdentity, "filesystem identity resolution must exist");
+  assert.match(
+    pathIdentity,
+    /if \(-not \$identity\) \{\s*throw "Could not resolve filesystem identity for existing path:/,
+    "an existing path whose final identity cannot be resolved must fail closed before path comparisons",
+  );
+  assert.doesNotMatch(
+    pathIdentity,
+    /Get-Item -LiteralPath \$probe -Force\)\.FullName/,
+    "lexical FullName must never stand in for an unresolved filesystem identity",
+  );
   assert.match(raw, /\[switch\]\$Force/, "-Force must exist for a deliberate AppData target");
   assert.match(raw, /\[switch\]\$DryRun/, "-DryRun must exist");
   const toDefault = raw.match(/\$To\s*=\s*"([^"]+)"/);
@@ -1515,6 +1527,44 @@ test(
         return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
       }
     };
+    const runWithNullPathIdentity = (args) => {
+      const wrapper = join(base, "null-path-identity.ps1");
+      writeFileSync(
+        wrapper,
+        [
+          "Add-Type -TypeDefinition @'",
+          "using System;",
+          "public static class TownReporterPathIdentity { public static string Resolve(string path) { return null; } }",
+          "'@",
+          "& $env:REDLIB_RELOCATE_SCRIPT -From $env:REDLIB_RELOCATE_FROM -To $env:REDLIB_RELOCATE_TO -Force -EnvFile $env:REDLIB_RELOCATE_ENV",
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper],
+            {
+              encoding: "utf8",
+              timeout: 120_000,
+              env: {
+                ...process.env,
+                REDLIB_INSTALL_ROOT: "",
+                REDLIB_RELOCATE_SCRIPT: script,
+                REDLIB_RELOCATE_FROM: args[0],
+                REDLIB_RELOCATE_TO: args[1],
+                REDLIB_RELOCATE_ENV: noEnv,
+              },
+            },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
     const plant = (root, overrides = {}) => {
       mkdirSync(root, { recursive: true });
       const config = {
@@ -1625,6 +1675,17 @@ test(
         && sourceBytes(sameSource).equals(sameBytes)
         && readdirSync(sameSource).sort().join(",") === "config.toml,install.json,redlib.exe";
 
+      const unresolvedSource = join(base, "unresolved-identity-source");
+      const unresolvedTarget = join(base, "unresolved-identity-target");
+      plant(unresolvedSource);
+      const unresolvedSourceBytes = sourceBytes(unresolvedSource);
+      const unresolvedRun = runWithNullPathIdentity([unresolvedSource, unresolvedTarget]);
+      const unresolvedIdentityRejected = unresolvedRun.code === 1
+        && /Could not resolve filesystem identity for existing path/.test(unresolvedRun.out)
+        && !envLine(unresolvedRun.out)
+        && !existsSync(unresolvedTarget)
+        && sourceBytes(unresolvedSource).equals(unresolvedSourceBytes);
+
       const junctionSource = join(base, "junction-source");
       const junctionAlias = join(base, "junction-alias");
       plant(junctionSource);
@@ -1717,6 +1778,7 @@ test(
         sandboxedLogicalRoot: sandboxLogicalMappingCorrect,
         similarPathOutsideSandboxRejected: similarPathRejected,
         forceSamePlaceAliasPreservesSource: samePlaceSafe,
+        unresolvedExistingPathIdentityFailsClosed: unresolvedIdentityRejected,
         forceJunctionToSource: sameJunctionEvidence,
         junctionToSourceChild: targetJunctionChildEvidence,
         nestedTargetRejectedBeforeSourceMutation: nestedSafe,
@@ -1731,6 +1793,7 @@ test(
           sandboxedLogicalRoot: true,
           similarPathOutsideSandboxRejected: true,
           forceSamePlaceAliasPreservesSource: true,
+          unresolvedExistingPathIdentityFailsClosed: true,
           forceJunctionToSource: {
             exit: 0,
             printedEnv: true,
@@ -1757,7 +1820,7 @@ test(
           },
           invalidRequiredMetadataRejectedBeforeAdvice: { installRoot: true, executable: true, logPath: true },
         },
-        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, junctionOutput: junctionRun.out, junctionChildOutput: junctionChildRun.out, nestedOutput: nestedRun.out, ancestorOutput: ancestorRun.out, invalidMetadata }, null, 2),
+        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, unresolvedIdentityOutput: unresolvedRun.out, junctionOutput: junctionRun.out, junctionChildOutput: junctionChildRun.out, nestedOutput: nestedRun.out, ancestorOutput: ancestorRun.out, invalidMetadata }, null, 2),
       );
     } finally {
       rmSync(base, { recursive: true, force: true });

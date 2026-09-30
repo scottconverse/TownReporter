@@ -124,7 +124,7 @@ function Get-PathIdentity {
   }
   if (Test-Path -LiteralPath $probe) {
     $identity = [TownReporterPathIdentity]::Resolve($probe)
-    if (-not $identity) { $identity = (Get-Item -LiteralPath $probe -Force).FullName }
+    if (-not $identity) { throw "Could not resolve filesystem identity for existing path: $probe" }
     $identity = Get-CleanPath $identity
     foreach ($part in $tail) { $identity = Join-Path $identity ([string]$part) }
     return (Get-CleanPath $identity)
