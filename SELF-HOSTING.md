@@ -2,7 +2,7 @@
 
 Repository documentation version: **0.6.82**
 
-Repository baseline reviewed 2026-09-29: **0.6.82**, source commit `7cff3d6c`; GitHub published v0.6.82 on 2026-09-28. See the [0.6.82 release guide](docs/releases/0.6.82.md) for its recorded source and package evidence. Publication does not establish production deployment.
+Repository baseline reviewed 2026-09-30: **0.6.82**, whose release commit is `7cff3d6c`; GitHub published v0.6.82 on 2026-09-28, and `main` is now ahead of that release. See the [0.6.82 release guide](docs/releases/0.6.82.md) for its recorded source and package evidence. Publication does not establish production deployment.
 
 **New installations:** use the [Windows installation guide](docs/windows-install.md), not the machine-specific scripts described below.
 
@@ -318,11 +318,16 @@ the run.
 | Story — named       | Codex Astra, Sol, Terra, or Luna; Claude Fable, Opus, Sonnet, or Haiku; Local model; or a saved custom connection is tried first | the job records requested/actual model and effort, any technical switch, and preserved checkpoints |
 | Opinion             | Automatic starts Codex Sol → Claude Sonnet; named choices are tried first; technical retry is per unfinished call | the completed row records the provider that delivered; refusals stop |
 
-For ordinary Story calls, Codex reuses the signed-in user's native configuration and full available
-Windows access. TownReporter does not disable search, shell/files,
-browser/computer tools, apps, plugins, hooks, skills, user rules, repository
-instructions, or multi-agent capability, and it launches with
-`danger-full-access`. Assignments travel over stdin; Opinion loads the complete voice through the native instruction-file setting. Timeout cleanup targets only
+For ordinary Story calls, Codex uses the signed-in account only to authenticate
+its CLI requests; the call does not inherit the operator's full Codex setup.
+Each call ignores Codex user configuration, starts from the system temporary
+directory, runs ephemerally with a read-only sandbox, and disables shell,
+computer, browser, apps, plugins, multi-agent and hook features. Built-in web
+search is added only when the application's trusted caller requests research.
+That is an application-level tool boundary, not an operating-system security
+sandbox: the reporting process still runs as the Windows account, and the
+read-only setting does not by itself restrict which files that account can read.
+Assignments travel over stdin; Opinion loads the complete voice through the native instruction-file setting. Timeout cleanup targets only
 the spawned PID tree. If OAuth expires, open Codex and sign in again; the app
 does not read or store the token.
 

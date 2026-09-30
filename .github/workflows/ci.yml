@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# Every job here only reads the repository: checkout, `npm ci`, build, test,
+# and upload run artifacts. Nothing opens a release, comments on a pull
+# request or pushes a branch, so the workflow's token needs no more than
+# `contents: read` -- the same floor windows-install.yml sets. Without this
+# block the token gets the repository default, which may be read-write.
+permissions:
+  contents: read
+
 jobs:
   # Typecheck and lint used to stand in front of the unit suite inside one job,
   # so the suite could not begin until they had both finished -- and a lint

@@ -1,3 +1,5 @@
+> **Historical record (superseded). Current status: [TODO.md](TODO.md).**
+
 # Build-list handoff — 2026-08-31
 
 Working state at the pause. Everything below is verified, not assumed.

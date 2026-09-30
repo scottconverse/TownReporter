@@ -743,11 +743,16 @@ it reloads a fixed preamble on every call, so a draft takes minutes rather than
 seconds; the time budgets adjust on their own.
 
 Your own `CLAUDE.md`, skills and plugins are **not** loaded into news prompts.
-Claude strips settings with `--setting-sources ""`. Codex is deliberately the
-opposite: it retains the user's native configuration, rules, skills and plugins,
-keeps search and local tools available, and
-runs with `danger-full-access` rather than a TownReporter-imposed read-only
-sandbox. It has the same available access to `C:\` as the signed-in account.
+Claude strips settings with `--setting-sources ""`. Codex is scoped the same
+way, and the "read-only sandbox" described above applies to ordinary Story calls
+too: a newsroom call uses the signed-in account only to authenticate its CLI
+requests and does not inherit the operator's full Codex setup. Each call ignores
+Codex user configuration, starts from the system temporary directory, runs
+ephemerally with a read-only sandbox, and disables shell, computer, browser,
+apps, plugins, multi-agent and hook features; built-in web search is added only
+when the application authorizes a research call. These are application-level CLI
+controls, not an operating-system security sandbox; the process still runs as the
+Windows account, and read-only mode alone does not restrict file reads.
 The Opinion writer runs from the temporary directory, as Claude does, so the
 application checkout's repository instructions are not part of its writing context.
 Its voice file supplies the native model instructions. Other Codex calls retain
