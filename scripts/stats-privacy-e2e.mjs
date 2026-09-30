@@ -797,7 +797,14 @@ async function main() {
       The phone window below deliberately does NOT set them, so one window
       exercises "headers present" and the other "headers absent".
     */
-    extraHTTPHeaders: { "cf-ipcity": SENTINEL_CITY, "cf-ipcountry": SENTINEL_COUNTRY },
+    // Cloudflare always sends the reader's address with the place headers; a
+    // place is counted once per reader (U23), and a reader is only known by
+    // that address. 203.0.113.0/24 is the documentation range (RFC 5737).
+    extraHTTPHeaders: {
+      "cf-ipcity": SENTINEL_CITY,
+      "cf-ipcountry": SENTINEL_COUNTRY,
+      "cf-connecting-ip": "203.0.113.9",
+    },
   });
   await watch(context);
   page = await context.newPage();
