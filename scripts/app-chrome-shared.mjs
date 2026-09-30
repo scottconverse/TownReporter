@@ -2,6 +2,13 @@
  * Single source of truth for the app head chrome (PWA manifest, touch icon, share-card meta),
  * shared by the Vite plugin and Nitro middleware. Plain ESM so `node --test`
  * and the Nitro bundler can both consume it.
+ *
+ * Nothing here puts a third-party asset on a reader's page. The one that did
+ * was the Grok app builder's `extensions.js` banner, injected into every
+ * document whenever `VITE_PROJECT_ID` was set, together with `grok-project-id`
+ * and `grok:app_id` metas; it is gone, id or no id. The paper is self-hosted
+ * and self-contained, and `npm run smoke` fails the build if a cold load of
+ * the front page makes any request to an outside host.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -102,14 +109,6 @@ export function resolvePublicHost(hostHeader) {
   );
 }
 
-export function isInstallQuery(url) {
-  const query = String(url ?? "").split("?", 2)[1] ?? "";
-  const params = new URLSearchParams(query);
-  const install = params.get("install");
-  const platform = (params.get("platform") ?? "").toLowerCase();
-  return (install === "1" || install === "true") && platform === "ios";
-}
-
 /** Paths that can carry an app document (vs assets / API / internals). */
 export function isDocumentPath(pathname) {
   const path = String(pathname ?? "");
@@ -120,27 +119,6 @@ export function isDocumentPath(pathname) {
     !path.startsWith("/node_modules") &&
     !/\.[a-z0-9]+$/i.test(path)
   );
-}
-
-export function acceptsHtml(accept) {
-  const value = String(accept ?? "");
-  return value === "" || value.includes("text/html") || value.includes("*/*");
-}
-
-/** The same URL without the install-tutorial params (used as the app link). */
-export function stripInstallParams(url) {
-  const [path = "/", query = ""] = String(url ?? "/").split("?", 2);
-  const params = new URLSearchParams(query);
-  params.delete("install");
-  params.delete("platform");
-  const rest = params.toString();
-  return rest ? `${path}?${rest}` : path;
-}
-
-export function renderInstallPageHtml(template, { host, url } = {}) {
-  return String(template)
-    .replaceAll("{{APP_NAME}}", escapeHtml(appNameFromHost(host)))
-    .replaceAll("{{APP_URL}}", escapeHtml(stripInstallParams(url)));
 }
 
 export function renderWebManifest(hostHeader) {
@@ -186,13 +164,6 @@ export function appChromeHeadTags(appName = DEFAULT_APP_NAME) {
   ];
 }
 
-export const GROK_EXTENSIONS_SCRIPT_SRC = "https://grok.com/grok-app-builder/extensions.js";
-
-export function readBuilderProjectId() {
-  const fromProcess = typeof process !== "undefined" ? process.env?.VITE_PROJECT_ID : "";
-  return String(fromProcess ?? "").trim();
-}
-
 export function readXCreator() {
   const fromProcess = typeof process !== "undefined" ? process.env?.X_CREATOR : "";
   return String(fromProcess ?? "").trim();
@@ -211,21 +182,6 @@ export function appXCreatorHeadTags(creator = readXCreator(), creatorId = readXC
     `<meta property="x:creator" content="${escapeHtml(name)}">`,
     `<meta property="x:creator:id" content="${escapeHtml(id)}">`,
   ];
-}
-
-/** Platform "Created with Grok" banner — injected into every HTML document. */
-export function appExtensionsHeadTags(projectId = readBuilderProjectId()) {
-  const id = escapeHtml(projectId);
-  const tags = [];
-  if (projectId) {
-    tags.push(`<meta name="grok-project-id" content="${id}">`);
-  }
-  tags.push(
-    `<script src="${GROK_EXTENSIONS_SCRIPT_SRC}"${
-      projectId ? ` data-project-id="${id}"` : ""
-    } defer></script>`,
-  );
-  return tags;
 }
 
 export function readOgSite(cwd = process.cwd()) {
@@ -434,7 +390,6 @@ export function normalizeHeadContext(ctx = {}) {
   const appName = resolveOgTitle(site, ctx.appName ?? DEFAULT_APP_NAME, ctx.host ?? "");
   return {
     appName,
-    projectId: ctx.projectId ?? readBuilderProjectId(),
     creator: ctx.creator ?? readXCreator(),
     creatorId: ctx.creatorId ?? readXCreatorId(),
     host: ctx.host ?? "",
@@ -445,14 +400,9 @@ export function normalizeHeadContext(ctx = {}) {
 
 export function injectAppHead(html, ctx = {}) {
   if (typeof html !== "string") return html;
-  const { site, projectId, creator, creatorId, host, cwd } = normalizeHeadContext(ctx);
+  const { site, creator, creatorId, host, cwd } = normalizeHeadContext(ctx);
   const documentTitle = titleFromDocument(html);
-  const appName = resolveOgTitle(
-    site,
-    ctx.appName ?? DEFAULT_APP_NAME,
-    host,
-    documentTitle,
-  );
+  const appName = resolveOgTitle(site, ctx.appName ?? DEFAULT_APP_NAME, host, documentTitle);
   // Keep whatever the document set for itself and fill only the gaps.
   // See `definedShareMetaKeys`.
   const ownKeys = definedShareMetaKeys(html);
@@ -471,26 +421,6 @@ export function injectAppHead(html, ctx = {}) {
   );
   if (ogTags.length) next = insertAfterHeadOpen(next, ogTags.join(""));
 
-  /*
-    The builder's extension script belongs to pages running inside the Grok app
-    builder, which is what a project id means. A self-hosted deployment has no
-    project id and was still loading
-    `https://grok.com/grok-app-builder/extensions.js` on every page view — a
-    third-party request made by every reader of the paper, for a harness that
-    does nothing outside the builder.
-  */
-  if (projectId && !next.includes("/grok-app-builder/extensions.js")) {
-    missing.push(...appExtensionsHeadTags(projectId));
-  } else if (projectId && !next.includes('name="grok-project-id"')) {
-    missing.push(`<meta name="grok-project-id" content="${escapeHtml(projectId)}">`);
-  }
-  if (
-    projectId &&
-    !next.includes('property="grok:app_id"') &&
-    !next.includes("property='grok:app_id'")
-  ) {
-    missing.push(`<meta property="grok:app_id" content="${escapeHtml(projectId)}">`);
-  }
   const creatorTags = appXCreatorHeadTags(creator, creatorId);
   if (creatorTags.length > 0) {
     const hasCreator =
@@ -524,7 +454,6 @@ export function createHeadInjector(ctx = {}) {
   const apply = (html) =>
     injectAppHead(html, {
       appName: normalized.appName,
-      projectId: normalized.projectId,
       creator: normalized.creator,
       creatorId: normalized.creatorId,
       host: normalized.host,

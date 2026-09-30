@@ -10,14 +10,11 @@ import {
   appXCreatorHeadTags,
   injectAppHead,
   isDocumentPath,
-  isInstallQuery,
   publicAppHost,
   renderWebManifest,
   resolveOgCardAsset,
   snapshotOgIdentity,
-  stripInstallParams,
 } from "./app-chrome-shared.mjs";
-import { renderInstallPage } from "./app-chrome-plugin.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,40 +26,48 @@ test("injects before </head>", () => {
 });
 
 /**
- * A project id is what marks a page as running inside the Grok app builder.
- * Without one, the builder's extension script has nothing to do — and this was
- * loading it anyway, so a self-hosted site made a request to grok.com on every
- * page view, for every reader.
+ * The builder's `extensions.js` banner is gone for good.
+ *
+ * A project id marked a page as running inside the Grok app builder, and every
+ * such page loaded `https://grok.com/grok-app-builder/extensions.js` — a
+ * third-party script for the "Created with Grok" banner, on a paper that is
+ * self-hosted and documents that a cold load makes zero outside requests
+ * (docs/manual.md). It was removed rather than gated, so this guards against
+ * its return under the environment variable that used to switch it on.
  */
-test("does not load the builder script when there is no project id", () => {
-  const out = injectAppHead("<html><head></head></html>", {
-    appName: "Demo",
-    projectId: "",
-  });
-  assert.doesNotMatch(out, /grok-app-builder\/extensions\.js/);
-  assert.doesNotMatch(out, /grok-project-id/);
-  assert.doesNotMatch(out, /data-project-id/);
-  assert.doesNotMatch(out, /property="grok:app_id"/);
-  // The PWA chrome is unrelated and must still be applied.
-  assert.match(out, /rel="manifest"/);
+test("no page loads the builder's extension script, with or without a project id", () => {
+  const previous = process.env.VITE_PROJECT_ID;
+  process.env.VITE_PROJECT_ID = "proj-123";
+  try {
+    const withEnv = injectAppHead("<html><head></head></html>", { appName: "Demo" });
+    const withCtx = injectAppHead("<html><head></head></html>", {
+      appName: "Demo",
+      projectId: "proj-123",
+    });
+    for (const [label, out] of [
+      ["VITE_PROJECT_ID set", withEnv],
+      ["a project id in the context", withCtx],
+    ]) {
+      assert.doesNotMatch(out, /grok\.com/, `${label}: a grok.com script or URL`);
+      assert.doesNotMatch(out, /extensions\.js/, `${label}: the builder's extension script`);
+      assert.doesNotMatch(out, /grok-project-id/, `${label}: the grok-project-id meta`);
+      assert.doesNotMatch(out, /data-project-id/, `${label}: the script's data-project-id`);
+      assert.doesNotMatch(out, /grok:app_id/, `${label}: the grok:app_id meta`);
+      // The PWA chrome is unrelated and must still be applied.
+      assert.match(out, /rel="manifest"/, `${label}: the manifest link`);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.VITE_PROJECT_ID;
+    else process.env.VITE_PROJECT_ID = previous;
+  }
 });
 
-test("injects project id on the script and meta when provided", () => {
-  const out = injectAppHead("<html><head></head></html>", {
-    appName: "Demo",
-    projectId: "proj-123",
-  });
-  assert.match(out, /name="grok-project-id" content="proj-123"/);
-  assert.match(out, /data-project-id="proj-123"/);
-  assert.match(out, /property="grok:app_id" content="proj-123"/);
-});
-
-test("does not duplicate grok:app_id", () => {
+test("repeating the injection never adds a grok.com script", () => {
   const ctx = { appName: "Demo", projectId: "proj-123" };
   const once = injectAppHead("<html><head></head></html>", ctx);
   const twice = injectAppHead(once, ctx);
   assert.equal(once, twice);
-  assert.equal(twice.split('property="grok:app_id"').length - 1, 1);
+  assert.doesNotMatch(twice, /grok\.com/);
 });
 
 test("omits x:creator tags without both creator values", () => {
@@ -70,7 +75,6 @@ test("omits x:creator tags without both creator values", () => {
   assert.deepEqual(appXCreatorHeadTags("@alice", ""), []);
   const out = injectAppHead("<html><head></head></html>", {
     appName: "Demo",
-    projectId: "",
     creator: "@alice",
     creatorId: "",
   });
@@ -80,7 +84,6 @@ test("omits x:creator tags without both creator values", () => {
 test("injects x:creator tags when both creator values are set", () => {
   const out = injectAppHead("<html><head></head></html>", {
     appName: "Demo",
-    projectId: "",
     creator: "@alice",
     creatorId: "42",
   });
@@ -101,7 +104,7 @@ test("escapes x:creator values", () => {
 });
 
 test("does not duplicate x:creator tags", () => {
-  const ctx = { appName: "Demo", projectId: "", creator: "@alice", creatorId: "42" };
+  const ctx = { appName: "Demo", creator: "@alice", creatorId: "42" };
   const once = injectAppHead("<html><head></head></html>", ctx);
   const twice = injectAppHead(once, ctx);
   assert.equal(once, twice);
@@ -403,14 +406,6 @@ test("streaming injector matches </HEAD> case-insensitively", () => {
   assert.match(out, /<body>hello<\/body>/);
 });
 
-test("does not duplicate the extensions script", () => {
-  const ctx = { appName: "Demo", projectId: "proj-123" };
-  const once = injectAppHead("<html><head></head></html>", ctx);
-  const twice = injectAppHead(once, ctx);
-  assert.equal(once, twice);
-  assert.equal(twice.split("extensions.js").length - 1, 1);
-});
-
 test("is idempotent", () => {
   const once = injectAppHead("<html><head></head></html>");
   const twice = injectAppHead(once);
@@ -449,26 +444,12 @@ test("streaming injector falls back when no </head> is seen", () => {
   assert.match(out, /rel="manifest"/);
 });
 
-test("detects install query", () => {
-  assert.equal(isInstallQuery("/?install=1&platform=ios"), true);
-  assert.equal(isInstallQuery("/app?foo=1&install=true&platform=ios"), true);
-  assert.equal(isInstallQuery("/?install=1"), false);
-  assert.equal(isInstallQuery("/?install=1&platform=android"), false);
-  assert.equal(isInstallQuery("/?install=0&platform=ios"), false);
-  assert.equal(isInstallQuery("/"), false);
-});
-
 test("filters non-document paths", () => {
   assert.equal(isDocumentPath("/"), true);
   assert.equal(isDocumentPath("/app"), true);
   assert.equal(isDocumentPath("/api/thing"), false);
-  assert.equal(isDocumentPath("/__app/install/styles.css"), false);
+  assert.equal(isDocumentPath("/__app/manifest.webmanifest"), false);
   assert.equal(isDocumentPath("/logo.png"), false);
-});
-
-test("strips install params from the app link", () => {
-  assert.equal(stripInstallParams("/?install=1&platform=ios"), "/");
-  assert.equal(stripInstallParams("/app?install=1&platform=ios&tab=2"), "/app?tab=2");
 });
 
 // The display name must come from the product, never from the deployment host.
@@ -489,20 +470,6 @@ test("hostile hosts cannot influence the display name", () => {
   assert.equal(appNameFromHost('"><img src=x onerror=1>.grok.me'), "TownReporter");
 });
 
-test("renders install page markup", () => {
-  const html = renderInstallPage("wild-race.grok.me", "/?install=1&platform=ios");
-  assert.match(html, /Add TownReporter to your/);
-  assert.match(html, /\/__app\/install\/styles\.css/);
-  assert.match(html, /href="\/"/);
-  assert.equal(html.includes("{{APP_NAME}}"), false);
-  assert.equal(html.includes("{{APP_URL}}"), false);
-});
-
-test("escapes host-derived values in the install page", () => {
-  const html = renderInstallPage("<script>alert(1)</script>", "/?install=1&platform=ios");
-  assert.equal(html.includes("<script>alert(1)</script>"), false);
-});
-
 test("renders the manifest with the product name", () => {
   const manifest = JSON.parse(renderWebManifest("wild-race.grok.me"));
   assert.equal(manifest.name, "TownReporter");
@@ -512,7 +479,8 @@ test("renders the manifest with the product name", () => {
 
 // Tripwires: the deployed-app path only works if Nitro scans server/ — an
 // accidental edit that drops serverDir or the middleware file would otherwise
-// fail silently (published apps would just render the app for ?install=1).
+// fail silently (a deployed paper would serve no manifest and inject no
+// share-card metas).
 test("vite config keeps the nitro serverDir wiring", () => {
   const viteConfig = readFileSync(join(TEMPLATE_ROOT, "vite.config.ts"), "utf8");
   assert.match(viteConfig, /serverDir:\s*"\.\/server"/);
@@ -521,11 +489,9 @@ test("vite config keeps the nitro serverDir wiring", () => {
 
 test("nitro middleware and its bundled assets exist", () => {
   const middleware = readFileSync(join(TEMPLATE_ROOT, "server/middleware/app-chrome.ts"), "utf8");
-  assert.match(middleware, /install-page\.html\?raw/);
   assert.match(middleware, /virtual:app-og-identity/);
-  readFileSync(join(TEMPLATE_ROOT, "scripts/install-page.html"));
+  assert.match(middleware, /\/__app\/manifest\.webmanifest/);
   readFileSync(join(TEMPLATE_ROOT, "public/__app/icon-180.png"));
-  readFileSync(join(TEMPLATE_ROOT, "public/__app/install/styles.css"));
 });
 
 test("vite plugin bakes og identity as a virtual module", () => {

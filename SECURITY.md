@@ -81,11 +81,13 @@ not be named. There is no bug bounty.
   the repository onto that command line is a report.
 - Injection of any kind into the public paper — a published story, the feed,
   the sitemap, or the evidence routes.
-- Anything that puts a third-party asset onto a reader's page (see
-  `docs/manual.md` §"What the reader gets" for what "reader's page" covers,
-  and `docs/setup.md` §"What leaves this machine" for what the desk itself
-  is already documented to send out — that documented egress is not itself a
-  vulnerability).
+- Anything that puts a third-party asset onto a reader's page. The paper is
+  self-contained — fonts self-hosted, no third-party script — and a cold load
+  of it makes zero requests to an outside host (`docs/manual.md` §"What the
+  reader gets"; `npm run smoke` proves it in a real browser). The desk's own
+  outbound calls are a different surface, documented in `docs/setup.md`
+  §"What leaves this machine": that documented egress is not itself a
+  vulnerability.
 
 **Not in scope** — configuration choices the operator makes, which the docs
 already warn about:

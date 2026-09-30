@@ -396,7 +396,7 @@ export default defineConfig(({ command, isPreview }) => ({
     authPopupPlugin(),
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
     appEnvPlugin(),
-    // App head chrome (manifest, touch icon, ?install=1 tutorial); runs before Start/Nitro.
+    // App head chrome (manifest, touch icon, share-card metas); runs before Start/Nitro.
     appPwaPlugin(),
     stubServerOnlyOnClient(),
     tailwindcss(),
@@ -412,9 +412,9 @@ export default defineConfig(({ command, isPreview }) => ({
             // disables Chromium whenever it sees a VERCEL env var).
             // Set NITRO_PRESET=vercel to build for Vercel again.
             preset: process.env.NITRO_PRESET || "node-server",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
+            // Auto-registers server/middleware/* (the PWA manifest route and
+            // the head-tag middleware). Nitro v3 defaults serverDir to false,
+            // so removing this silently unwires both on deploys.
             serverDir: "./server",
           }),
         ]

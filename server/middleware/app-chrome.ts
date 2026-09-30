@@ -3,9 +3,6 @@
  * global h3 middleware because vite.config.ts sets `serverDir: "./server"` —
  * without that option Nitro v3 never scans this directory.
  *
- * - `?install=1&platform=ios` on a document path → the Home Screen tutorial,
- *   bundled into the server build via `?raw` (the public/ directory is CDN
- *   static output on Vercel and not readable from the function).
  * - `/__app/manifest.webmanifest` → per-app-named manifest (kept out of
  *   public/ so this dynamic response is the only one).
  * - Other HTML documents → stream-inject PWA + OG head tags at `</head>`.
@@ -14,14 +11,10 @@
  *   This must be a middleware transforming `next()`: h3 discards the `response`
  *   runtime hook's return value, and `render:html` does not exist in Nitro v3.
  */
-import installPageTemplate from "../../scripts/install-page.html?raw";
 import { appOgIdentity } from "virtual:app-og-identity";
 import {
-  acceptsHtml,
   createHeadInjector,
   isDocumentPath,
-  isInstallQuery,
-  renderInstallPageHtml,
   renderWebManifest,
 } from "../../scripts/app-chrome-shared.mjs";
 
@@ -68,29 +61,11 @@ export default async function appChromeMiddleware(
   if (method !== "GET") return next();
 
   const path = event.url.pathname;
-  const urlWithQuery = path + event.url.search;
 
   if (path === "/__app/manifest.webmanifest" || path === "/__app/manifest.json") {
     return new Response(renderWebManifest(requestHost(event)), {
       headers: {
         "content-type": "application/manifest+json; charset=utf-8",
-        "cache-control": "no-cache",
-      },
-    });
-  }
-
-  if (
-    isInstallQuery(urlWithQuery) &&
-    isDocumentPath(path) &&
-    acceptsHtml(event.req.headers.get("accept"))
-  ) {
-    const html = renderInstallPageHtml(installPageTemplate, {
-      host: requestHost(event),
-      url: urlWithQuery,
-    });
-    return new Response(html, {
-      headers: {
-        "content-type": "text/html; charset=utf-8",
         "cache-control": "no-cache",
       },
     });
