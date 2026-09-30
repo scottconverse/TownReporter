@@ -1,3 +1,5 @@
+> **Historical record (superseded). Current status: [TODO.md](TODO.md).**
+
 # TownReporter — complete handoff for a new agent
 
 Written 2026-08-31, refreshed 2026-09-02 after the v0.5.7 release. You are assumed to know

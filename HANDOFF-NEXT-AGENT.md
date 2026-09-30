@@ -1,8 +1,8 @@
 # TownReporter — current development handoff
 
-## Current review baseline — 2026-09-29
+## Current review baseline — 2026-09-30
 
-Reviewed baseline: software version [0.6.82](docs/releases/0.6.82.md) at source commit `7cff3d6c`; GitHub confirms it was published on 2026-09-28. The bundled release guide still carries candidate-era wording, so use GitHub for publication state. Resolve the current branch tip, package assets and running deployment separately before making later release claims. Publication does not establish fresh packaged-install or provider-run acceptance. [TODO.md](TODO.md) is the current in-repository queue; the 0.6.51 snapshot and dated entries below are historical receipts, not the current implementation queue.
+Reviewed baseline: `main` after PR #148 (`3c0bc37c`), 68 commits after the v0.6.82 release (`7cff3d6c`), which GitHub published on 2026-09-28; the [0.6.82 release guide](docs/releases/0.6.82.md) at `main` now says published. Resolve the current branch tip, package assets and running deployment separately before making later release claims. Publication does not establish fresh packaged-install or provider-run acceptance. [TODO.md](TODO.md) is the current in-repository queue; the 0.6.51 snapshot and dated entries below are historical receipts, not the current implementation queue.
 
 Owner decision, 2026-09-29: retain the bounded automatic routine-notice publication exception; ordinary stories still require editor Publish. This records policy, not evidence that the routine-notice path is running in production.
 
