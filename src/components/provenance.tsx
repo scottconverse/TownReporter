@@ -76,59 +76,87 @@ export function ProvenanceBlock({
         <h2>How we reported this</h2>
       </div>
       <div className="sourcegrid">
-        {items.map((item, index) => (
-          <SourceCard
-            key={item.url || `${item.title}-${index}`}
-            role={item.role && item.role !== "source" ? item.role.replace(/[-_]+/g, " ") : "Source"}
-            title={item.title}
-            host={hostOf(item)}
-            {...(item.document_date ? { documentDate: item.document_date } : {})}
-            {...(item.captured_at ? { captured: formatDateTime(item.captured_at) } : {})}
-            actions={
-              <>
-                {item.disappeared ? (
-                  <p className="sourcecardnote">
-                    Original source no longer available
-                    {item.captured_at
-                      ? ` — captured by TownReporter on ${formatShortDate(item.captured_at)}`
-                      : " — captured by TownReporter"}
-                    .
-                  </p>
-                ) : null}
-                {!item.url ? (
-                  /*
-                    A citation, not a link. The report the story came from
-                    named this document and nobody has a page for it; a
-                    "Current source" pointing at nothing would be worse than
-                    saying so.
-                  */
-                  <p className="sourcecardnote">
-                    Named in the report we worked from — there is no page to open for this one.
-                  </p>
-                ) : null}
-                {item.url && !item.disappeared ? (
-                  <a href={item.url} className="sourcelink" target="_blank" rel="noreferrer">
-                    Current source
-                  </a>
-                ) : null}
-                {item.version_id != null ? (
-                  <Link
-                    to="/evidence/$versionId"
-                    params={{ versionId: String(item.version_id) }}
-                    className="sourcelink"
-                  >
-                    View captured version
-                  </Link>
-                ) : null}
-                {item.url && (item.version_count ?? 0) > 1 ? (
-                  <Link to="/evidence/compare" search={{ url: item.url }} className="sourcelink">
-                    Compare versions
-                  </Link>
-                ) : null}
-              </>
-            }
-          />
-        ))}
+        {items.map((item, index) => {
+          /*
+            Unit U11b2: a capture whose excerpt was taken down at a publisher's
+            request, with the link removed too.
+
+            The owner's "remove the link too" is about the reader's way OUT of
+            our site to the publisher, so it has to hold on the story page and
+            not only on the evidence page it links to: a "Current source" here
+            would hand back the link the publisher asked us to drop. The
+            address still prints -- it is part of the record of what we cited,
+            and the evidence page prints it the same way when the link is
+            removed -- but it is text, not a link.
+
+            A takedown that KEEPS the link changes one thing here: the captured
+            version's own link says what it opens, so a reader who follows it
+            is not surprised to find a notice instead of an excerpt.
+          */
+          const linkRemoved =
+            item.excerpt_removed === true && item.excerpt_removed_link_kept === false;
+          return (
+            <SourceCard
+              key={item.url || `${item.title}-${index}`}
+              role={item.role && item.role !== "source" ? item.role.replace(/[-_]+/g, " ") : "Source"}
+              title={item.title}
+              host={hostOf(item)}
+              {...(item.document_date ? { documentDate: item.document_date } : {})}
+              {...(item.captured_at ? { captured: formatDateTime(item.captured_at) } : {})}
+              actions={
+                <>
+                  {item.disappeared ? (
+                    <p className="sourcecardnote">
+                      Original source no longer available
+                      {item.captured_at
+                        ? ` — captured by TownReporter on ${formatShortDate(item.captured_at)}`
+                        : " — captured by TownReporter"}
+                      .
+                    </p>
+                  ) : null}
+                  {!item.url ? (
+                    /*
+                      A citation, not a link. The report the story came from
+                      named this document and nobody has a page for it; a
+                      "Current source" pointing at nothing would be worse than
+                      saying so.
+                    */
+                    <p className="sourcecardnote">
+                      Named in the report we worked from — there is no page to open for this one.
+                    </p>
+                  ) : null}
+                  {item.url && !item.disappeared && !linkRemoved ? (
+                    <a href={item.url} className="sourcelink" target="_blank" rel="noreferrer">
+                      Current source
+                    </a>
+                  ) : null}
+                  {item.url && !item.disappeared && linkRemoved ? (
+                    <p className="sourcecardnote break-all">
+                      Excerpt removed at the publisher’s request, and the link to the original with
+                      it. The address is {item.url}.
+                    </p>
+                  ) : null}
+                  {item.version_id != null ? (
+                    <Link
+                      to="/evidence/$versionId"
+                      params={{ versionId: String(item.version_id) }}
+                      className="sourcelink"
+                    >
+                      {item.excerpt_removed
+                        ? "View captured version (excerpt removed)"
+                        : "View captured version"}
+                    </Link>
+                  ) : null}
+                  {item.url && (item.version_count ?? 0) > 1 ? (
+                    <Link to="/evidence/compare" search={{ url: item.url }} className="sourcelink">
+                      Compare versions
+                    </Link>
+                  ) : null}
+                </>
+              }
+            />
+          );
+        })}
       </div>
       <p className="trustline">
         Trust is verifiable. Check the official record before you act on a figure or a vote.

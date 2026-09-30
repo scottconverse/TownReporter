@@ -219,6 +219,15 @@ export const LIMITS = {
   backupIdentifier: 200,
   /** `legal-removal-store.ts:37` refuses a selection over 200 rows. */
   caseRefList: 200,
+  /**
+   * Unit U11b: the editor's reason for taking down one captured excerpt
+   * (`evidence-takedown.ts`'s `TAKEDOWN_REASON_MAX`, the same number). A
+   * sentence or two about why a publisher asked, read back by the owner in the
+   * desk and written into the audit row -- `auditWithSql` cuts `detail` at
+   * 500, so a reason at this ceiling is stored whole rather than silently
+   * truncated.
+   */
+  takedownReason: 400,
   /** A county name. */
   county: 80,
   /** `dark.ts:1848` cuts a pasted investigation subject at 14,000. */
@@ -1335,6 +1344,24 @@ export const legalBackupInput = z.object({
   caseId: z.string().max(LIMITS.caseRef),
   identifier: z.string().max(LIMITS.backupIdentifier).optional(),
   confirmId: rowId.optional(),
+});
+
+/* --- evidence-takedown.ts (1 row) ---------------------------------------- */
+
+/**
+ * `evidence-takedown.ts`'s takeDownEvidenceCapture -- one capture, taken down
+ * at a publisher's request.
+ *
+ * `versionId` is the capture's own row id, the same number a public
+ * `/evidence/:id` address carries, so the desk sends the id it is already
+ * looking at. `removeLink` is optional because the desk's box is unchecked by
+ * default and absent must mean "keep the link": a request that forgot the
+ * field may not silently strip the reader's way to the original.
+ */
+export const captureTakedownInput = z.object({
+  versionId: rowId,
+  reason: z.string().max(LIMITS.takedownReason),
+  removeLink: z.boolean().optional(),
 });
 
 /* --- opinion.ts (4 rows) ------------------------------------------------- */

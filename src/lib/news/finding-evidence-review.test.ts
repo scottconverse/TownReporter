@@ -7,6 +7,7 @@ import {
   persistManualClaim,
   persistFindingEvidenceJudgment,
 } from "./finding-evidence-review.ts";
+import { takeDownCapture } from "./evidence-takedown.ts";
 
 const room = 73001;
 const otherRoom = 73002;
@@ -20,15 +21,49 @@ async function reset() {
     id serial primary key,user_id text,newsroom_id integer not null,lead_id integer not null,
     headline text,dek text,body text,topic text,source_urls text,provenance_json text,
     found_note text,unanswered text,research_json text,updated_at timestamptz default now())`);
+  /*
+    Unit U11b: the real column is added by migrations/0110_evidence_capture_takedown.sql
+    and mirrored in investigate.ts's ensure list. This file's scratch table is
+    a hand-made copy of the real one, so it carries it too -- the loader reads
+    it for every cited version, and a fixture without it fails on the read
+    rather than on the property under test.
+  */
   await sql.query(`create table if not exists artifact_versions(
     id serial primary key,user_id text,newsroom_id integer not null,url text,content_hash text,
     title text,full_text text,fetch_status integer,fetch_outcome text,content_type text,
-    captured_at timestamptz default now())`);
+    captured_at timestamptz default now(),taken_down_at timestamptz,
+    taken_down_reason text,taken_down_link_kept boolean not null default true)`);
   await sql.query(`create table if not exists capture_events(
     id serial primary key,user_id text,newsroom_id integer not null,investigation_id integer,
     source_url text,observed_at timestamptz default now(),http_status integer,fetch_outcome text,
     redirect_chain text,version_id integer,disappearance boolean,soft_404 boolean,trigger_kind text,
     monitor_id integer,headers_json text,content_hash text,content_type text,extraction_method text)`);
+  /*
+    Unit U11b2: the five stores a takedown purges (the capture's own passages
+    and bytes, the Dark Desk's copy of the fetch, and the passage a claim or a
+    relationship recorded). This file runs the REAL action in one case to prove
+    that a judgment binding to the captured text comes back unreviewed, and
+    that action writes to all five -- so they exist here, empty, with the
+    columns the purge touches.
+  */
+  await sql.query(`create table if not exists artifact_chunks(
+    id serial primary key,version_id integer,user_id text,newsroom_id integer not null,
+    chunk_index integer,page_number integer,section text not null default '',
+    excerpt text not null default '',locator text not null default '')`);
+  await sql.query(`create table if not exists artifact_blobs(
+    id serial primary key,version_id integer,user_id text,newsroom_id integer not null,
+    sha256 text,original_url text,byte_length integer not null default 0,
+    body_b64 text not null default '')`);
+  await sql.query(`create table if not exists artifacts(
+    id serial primary key,user_id text,newsroom_id integer not null,investigation_id integer,
+    url text,title text,content_hash text,full_text text not null default '',version_id integer)`);
+  await sql.query(`create table if not exists claims(
+    id serial primary key,user_id text,newsroom_id integer not null,investigation_id integer,
+    body text,kind text,evidence text,source_url text,version_id integer,excerpt text)`);
+  await sql.query(`create table if not exists relationships(
+    id serial primary key,user_id text,newsroom_id integer not null,investigation_id integer,
+    from_name text,to_name text,kind text,evidence text,source_url text,version_id integer,
+    excerpt text)`);
   await sql.query("delete from capture_events where newsroom_id in ($1,$2)", [room, otherRoom]);
   await sql.query("delete from artifact_versions where newsroom_id in ($1,$2)", [room, otherRoom]);
   await sql.query("delete from drafts where newsroom_id in ($1,$2)", [room, otherRoom]);
@@ -669,6 +704,91 @@ describe("finding evidence resolution", () => {
       () => loadFindingEvidenceCapture(f.sql, otherRoom, leadId, f.draft.id, f.cited.id),
       /Draft not found/,
     );
+  });
+
+  it("hands the recorded takedown reason to the owner, and to nobody else", async () => {
+    /*
+      Unit U11b2: `taken_down_reason` was written and never shown. It is now
+      shown in the capture pane -- to the OWNER, whose decision it records, and
+      not to an editor reading the same draft (a reason may name the publisher,
+      a lawyer or a complaint). The boundary is here, in the loader: an
+      editor's read does not carry the note at all, so no page can print it.
+    */
+    const f = await fixture();
+    /* The row as a real takedown leaves it: text purged, marked, with the note. */
+    await f.sql.query(
+      "update artifact_versions set full_text='',taken_down_at=now(),taken_down_reason=$1 where id=$2",
+      ["Publisher asked: the excerpt quoted their subscriber-only story.", f.cited.id],
+    );
+
+    const asOwner = await loadFindingEvidenceCapture(
+      f.sql, room, leadId, f.draft.id, f.cited.id, "owner",
+    );
+    assert.equal(asOwner.ok, true);
+    if (asOwner.ok) {
+      assert.equal(asOwner.capture.takenDown, true);
+      assert.ok(asOwner.capture.takenDownAt, "the owner is told when it came down");
+      assert.match(asOwner.capture.takenDownReason ?? "", /subscriber-only/);
+      assert.equal(asOwner.capture.fullText, "", "a taken-down capture reads as empty");
+    }
+
+    const asEditor = await loadFindingEvidenceCapture(
+      f.sql, room, leadId, f.draft.id, f.cited.id, "editor",
+    );
+    assert.equal(asEditor.ok, true);
+    if (asEditor.ok) {
+      assert.equal(asEditor.capture.takenDown, true, "an editor still sees that it came down");
+      assert.equal(asEditor.capture.takenDownReason, null, "and never the owner's note");
+      assert.equal(asEditor.capture.takenDownAt, null);
+    }
+
+    /* And the default, for a caller that does not say who is asking. */
+    const unnamed = await loadFindingEvidenceCapture(f.sql, room, leadId, f.draft.id, f.cited.id);
+    if (unnamed.ok) assert.equal(unnamed.capture.takenDownReason, null);
+  });
+
+  it("returns a judgment to unreviewed once the capture it bound to is taken down", async () => {
+    /*
+      Unit U11b2: the manual says a takedown leaves the judgments that bound to
+      the captured text unreviewed, and this is the code that claim points at.
+
+      A judgment binds to `md5(full_text)` of the versions it cited
+      (`findingReferenceBinding`), and `resolveFinding` throws it back to
+      `unreviewed` when the binding no longer matches. The purge empties
+      `full_text`, so the binding moves -- proved here with the real action
+      rather than with a hand-edited row, because the claim is about what a
+      takedown does.
+    */
+    const f = await fixture();
+    const loaded = await loadFindingEvidenceReview(f.sql, room, leadId);
+    const finding = loaded.rows.find((row) => row.captures.some((c) => c.versionId === f.cited.id))!;
+    const saved = await persistFindingEvidenceJudgment(
+      { newsroomId: room },
+      {
+        leadId,
+        draftId: f.draft.id,
+        findingKey: finding.key,
+        judgment: "supports",
+        reason: "The cited capture names the approval.",
+        contraryVersionId: null,
+        evidenceToken: loaded.evidenceToken,
+      },
+    );
+    assert.equal(saved.rows[0]!.judgment.value, "supports", "the judgment is recorded first");
+
+    const result = await takeDownCapture(
+      { userId: "takedown-owner", newsroomId: room, role: "owner" },
+      { versionId: f.cited.id, reason: "Publisher asked; the excerpt quoted their article." },
+    );
+    assert.equal(result.ok, true);
+
+    const after = await loadFindingEvidenceReview(f.sql, room, leadId);
+    assert.equal(
+      after.rows[0]!.judgment.value,
+      "unreviewed",
+      "the judgment bound to text that is no longer there",
+    );
+    assert.equal(after.rows[0]!.captures.find((c) => c.versionId === f.cited.id)!.takenDown, true);
   });
 });
 

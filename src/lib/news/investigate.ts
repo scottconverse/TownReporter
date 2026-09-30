@@ -639,6 +639,16 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     .filter(Boolean),
   `alter table artifact_versions add column if not exists extracted_sha256 text`,
   `alter table artifact_versions add column if not exists raw_sha256 text`,
+  // Unit U11b: one capture, taken down at a publisher's request. Mirrors
+  // migrations/0110_evidence_capture_takedown.sql statement for statement --
+  // same names, same nullability, same default -- because
+  // `src/lib/news/schema-parity.test.ts` diffs this list's `artifact_versions`
+  // against the migration-built one, and would report a difference (or worse,
+  // let a fresh PGLite desk lack the columns the purge writes) if the two
+  // drifted.
+  `alter table artifact_versions add column if not exists taken_down_at timestamptz`,
+  `alter table artifact_versions add column if not exists taken_down_reason text`,
+  `alter table artifact_versions add column if not exists taken_down_link_kept boolean not null default true`,
   `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
   `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
   `alter table entities add column if not exists newsroom_id integer not null default 1`,

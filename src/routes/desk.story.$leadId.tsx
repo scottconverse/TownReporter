@@ -57,6 +57,7 @@ import {
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
+import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
@@ -364,6 +365,16 @@ function StoryPage() {
   });
 
   currentDraftFields.current = { headline, dek, body, topic };
+  /*
+    Unit U11b: whether this editor is the owner, so the evidence review knows
+    whether to draw the "Take down this capture" press. The same `my-desk`
+    query the desk shell already holds (`desk.tsx`'s DeskGate), so this is a
+    cache read in practice, not a second round trip. The server refuses a
+    non-owner regardless (see `evidence-takedown.ts`); this only decides what
+    the page offers.
+  */
+  const deskRole = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const isOwner = deskRole.data?.ok === true && deskRole.data.role === "owner";
   const reconcileStatus = useQuery({
     queryKey: ["draft-reconcile", id],
     queryFn: () => getDraftReconciliationStatusFn({ data: { leadId: id } }),
@@ -2003,6 +2014,7 @@ function StoryPage() {
                 reviewRevision={data.evidenceToken}
                 currentDraft={{ headline, dek, body, topic }}
                 meetingEvidence={data.draftMeetingEvidence}
+                isOwner={isOwner}
                 disabled={
                   locked ||
                   onPaper ||

@@ -1,0 +1,50 @@
+-- Unit U11b: take down ONE evidence capture, from the desk, without the
+-- article-level legal-removal case.
+--
+-- WHY A SEPARATE ACTION. The legal audit asked for two different things. U11a
+-- shrank what a public /evidence/:id page shows (a short excerpt, and a link to
+-- the original -- see PUBLIC_EXCERPT_MAX in src/lib/news/evidence.ts). The
+-- other half is what to do when a publisher objects to ONE captured page: the
+-- existing flow (legal-removal-store.ts) removes OUR stories, copies and
+-- references and flags captured copies for an operator, and its cases are keyed
+-- to articles. There was no way for an editor to say "take this one capture
+-- down" -- and doing it by hand in SQL is exactly the kind of write that
+-- bypasses the audit trail.
+--
+-- WHAT THESE COLUMNS HOLD. `taken_down_at` is the state: null means the capture
+-- is ordinary, non-null means its stored text has been purged and a public
+-- evidence page for it must print the notice instead of an excerpt. It is a
+-- timestamp rather than a boolean because the desk and the audit row both want
+-- to know WHEN -- and because a timestamp cannot be written as "true" by a
+-- caller who forgot what it meant.
+--
+-- `taken_down_reason` is the editor's short plain-text reason, stored beside
+-- the row so the desk can say why a capture it can no longer read is that way.
+-- It is NEVER shown to a reader: the public notice says the publisher asked,
+-- and nothing about the reason (see `asPublicEvidence` and
+-- `/evidence/$versionId`).
+--
+-- `taken_down_link_kept` is the one editor choice the public page needs. The
+-- notice keeps the link to the original unless the editor ticked "remove the
+-- link too"; defaulting to true means an install that never touched this
+-- feature, and every existing row, keeps linking out the way it always has.
+--
+-- WHY PURGING NEEDS NO COLUMN HERE. The purge itself is a write to
+-- `artifact_versions.full_text`, `artifact_chunks.excerpt` and
+-- `artifact_blobs.body_b64` (see takeDownCapture in
+-- src/lib/news/evidence-takedown.ts). Ids, URLs, timestamps and content hashes
+-- stay: a citation that pointed at this capture still resolves, and the audit
+-- row still names a row that exists.
+--
+-- Additive only, and idempotent: `add column if not exists` twice changes
+-- nothing, which is what the deploy path relies on (`scripts/migrate.mjs`
+-- records the file in `_migrations`, and a replayed file must be a no-op).
+--
+-- Mirrored in the runtime ensure list for `artifact_versions`
+-- (src/lib/news/investigate.ts, INVESTIGATE_SCHEMA_STATEMENTS) exactly as the
+-- sibling columns above it are -- a database built by the ensure path alone (a
+-- fresh PGLite dev instance) must carry the same columns, which
+-- src/lib/news/schema-parity.test.ts checks against a migration-built one.
+alter table artifact_versions add column if not exists taken_down_at timestamptz;
+alter table artifact_versions add column if not exists taken_down_reason text;
+alter table artifact_versions add column if not exists taken_down_link_kept boolean not null default true;

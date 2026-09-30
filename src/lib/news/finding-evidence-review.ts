@@ -19,6 +19,15 @@ export type FindingCaptureEvidence = {
   capturedAt: string | null;
   available: boolean;
   readable: boolean;
+  /**
+   * Unit U11b: an owner took this capture's excerpt down at a publisher's
+   * request, and `evidence-takedown.ts` purged its stored text. The row says so
+   * instead of saying "no readable captured text", and the desk does not offer
+   * the takedown press again -- there is no restore, and nothing left to
+   * remove. A taken-down capture is no longer readable, exactly as it is for a
+   * judgment that would need its text.
+   */
+  takenDown: boolean;
   excerptState: "found" | "not-found" | "no-excerpt";
   newerCapture: { versionId: number; capturedAt: string | null } | null;
   viewHref: string | null;
@@ -110,6 +119,22 @@ export type FindingEvidenceCaptureResult =
         url: string;
         capturedAt: string | null;
         fullText: string;
+        /**
+         * Unit U11b: this capture's excerpt was taken down, so its text is
+         * purged (which is why `fullText` is empty) and the pane says that
+         * rather than offering the takedown press again.
+         */
+        takenDown: boolean;
+        /**
+         * When it came down and the reason the owner recorded, for the pane to
+         * print back to them. Null -- for an editor's read of the same capture
+         * as well as for a capture that has not come down -- because
+         * `loadFindingEvidenceCapture` only selects them for the owner: the
+         * reason is a desk note that may name a publisher or a complaint, and
+         * it does not leave the server for anyone else.
+         */
+        takenDownAt: string | null;
+        takenDownReason: string | null;
       };
     }
   | { ok: false; code: "forbidden" | "not-found" | "invalid-input"; error: string };
@@ -160,6 +185,8 @@ type VersionRow = {
   full_text: string;
   content_hash: string;
   captured_at: string | Date;
+  /** Unit U11b: non-null when this capture's excerpt was taken down. */
+  taken_down_at: string | Date | null;
 };
 type CaptureRow = {
   id: number;
@@ -171,6 +198,7 @@ type CaptureRow = {
   version_captured_at: string | Date | null;
   content_hash: string | null;
   version_content_hash: string | null;
+  taken_down_at: string | Date | null;
 };
 
 const JUDGMENTS = new Set<FindingJudgment>([
@@ -505,7 +533,7 @@ async function resolveFinding(
   const captureIds = [...new Set(finding.capture_event_ids)];
   const versions = versionIds.length
     ? await sql.query<VersionRow>(
-        "select id,url,title,full_text,content_hash,captured_at from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
+        "select id,url,title,full_text,content_hash,captured_at,taken_down_at from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
         [newsroomId, versionIds],
       )
     : [];
@@ -513,7 +541,7 @@ async function resolveFinding(
     ? await sql.query<CaptureRow>(
         `select ce.id,ce.version_id,ce.source_url,ce.observed_at,ce.content_hash,
                 av.title,av.full_text,av.content_hash as version_content_hash,
-                av.captured_at as version_captured_at
+                av.captured_at as version_captured_at,av.taken_down_at
            from capture_events ce
            left join artifact_versions av on av.id=ce.version_id and av.newsroom_id=ce.newsroom_id
           where ce.newsroom_id=$1 and ce.id=any($2::int[])`,
@@ -541,6 +569,7 @@ async function resolveFinding(
             full_text: capture.full_text,
             content_hash: capture.version_content_hash ?? capture.content_hash ?? "",
             captured_at: capture.version_captured_at ?? capture.observed_at,
+            taken_down_at: capture.taken_down_at,
           }
         : undefined);
     const url = availableVersion?.url ?? capture?.source_url ?? null;
@@ -570,6 +599,7 @@ async function resolveFinding(
           : null,
       available: Boolean(availableVersion),
       readable: Boolean(availableVersion?.full_text.trim()),
+      takenDown: Boolean(availableVersion?.taken_down_at),
       excerptState: excerptState(finding.excerpt, availableVersion?.full_text ?? null),
       newerCapture: newer
         ? { versionId: newer.id, capturedAt: newer.captured_at ? String(newer.captured_at) : null }
@@ -638,6 +668,7 @@ async function resolveClaim(
           capturedAt: null,
           available: false,
           readable: false,
+          takenDown: false,
           excerptState: "no-excerpt" as const,
           newerCapture: null,
           viewHref: null,
@@ -691,6 +722,7 @@ async function resolveManualClaim(
         capturedAt: null,
         available: false,
         readable: false,
+        takenDown: false,
         excerptState: "no-excerpt" as const,
         newerCapture: null,
         viewHref: null,
@@ -799,6 +831,16 @@ export async function loadFindingEvidenceReview(
   };
 }
 
+/**
+ * The capture, for the desk's pane -- including, for the OWNER only, when it
+ * was taken down and why.
+ *
+ * `role` is not an access check on the capture (every editor may read a
+ * captured record for a draft they can see); it decides whether the takedown's
+ * own note travels. The reason may name a publisher, a lawyer or a complaint,
+ * so an editor's read carries `null` for both fields rather than the note --
+ * the boundary is here, on the server, and not a rendering choice in the pane.
+ */
 export const loadFindingEvidenceCapture = createServerOnlyFn(
   async function loadFindingEvidenceCapture(
     sql: Sql,
@@ -806,6 +848,7 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
     leadId: number,
     draftId: number,
     versionId: number,
+    role: string = "editor",
   ): Promise<FindingEvidenceCaptureResult> {
     const review = await loadFindingEvidenceReview(sql, newsroomId, leadId);
     if (review.draftId !== draftId)
@@ -835,12 +878,15 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
       url: string;
       captured_at: string | Date | null;
       full_text: string | null;
+      taken_down_at: string | Date | null;
+      taken_down_reason: string | null;
     }>(
-      "select id,title,url,captured_at,full_text from artifact_versions where newsroom_id=$1 and id=$2",
+      "select id,title,url,captured_at,full_text,taken_down_at,taken_down_reason from artifact_versions where newsroom_id=$1 and id=$2",
       [newsroomId, versionId],
     );
     if (!version)
       return { ok: false, code: "not-found", error: "That captured version is no longer available." };
+    const owner = role === "owner";
     return {
       ok: true,
       capture: {
@@ -849,6 +895,10 @@ export const loadFindingEvidenceCapture = createServerOnlyFn(
         url: version.url,
         capturedAt: version.captured_at ? String(version.captured_at) : null,
         fullText: version.full_text ?? "",
+        takenDown: Boolean(version.taken_down_at),
+        takenDownAt:
+          owner && version.taken_down_at ? String(version.taken_down_at) : null,
+        takenDownReason: owner ? version.taken_down_reason : null,
       },
     };
   },
@@ -1152,6 +1202,7 @@ export const getFindingEvidenceCapture = createServerFn({ method: "GET" })
     try {
       return await loadFindingEvidenceCapture(
         await getSql(), context.newsroomId, data.leadId, data.draftId, data.versionId,
+        context.role,
       );
     } catch {
       return { ok: false, code: "not-found", error: "That captured version is not available for this draft." };

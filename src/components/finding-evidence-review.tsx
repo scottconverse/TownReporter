@@ -13,6 +13,7 @@ import {
 } from "@/lib/news/finding-evidence-review";
 import { InkButton } from "@/components/desk-chrome";
 import { EvidenceCheckList } from "@/components/evidence-check-list";
+import { TAKEDOWN_REASON_MAX, takeDownEvidenceCapture } from "@/lib/news/evidence-takedown";
 import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 import { groupDisplayCaptures } from "@/lib/news/finding-evidence-display";
@@ -78,6 +79,13 @@ function captureState(
   recordLabel = "Cited capture",
 ) {
   if (!capture.available) return `${recordLabel} unavailable`;
+  /*
+    Taken down before "not readable", because it is the reason this record has
+    no readable text -- and "exists, but no readable captured text is
+    available" would read as a defect in the capture rather than a decision the
+    owner recorded, with a reason, in the audit trail.
+  */
+  if (capture.takenDown) return "Excerpt removed at the publisher's request";
   if (!capture.readable) return `${recordLabel} exists, but no readable captured text is available`;
   if (capture.excerptState === "found") return "Recorded excerpt found in cited version";
   if (capture.excerptState === "not-found") return "Recorded excerpt not found in cited version";
@@ -531,6 +539,7 @@ export function FindingEvidenceReviewPanel({
   currentDraft,
   meetingEvidence = null,
   disabled = false,
+  isOwner = false,
   list,
 }: {
   leadId: number;
@@ -539,6 +548,16 @@ export function FindingEvidenceReviewPanel({
   /** The draft's transcript citations, when it has any. See `TranscriptCitationEvidence`. */
   meetingEvidence?: DraftMeetingEvidence | null;
   disabled?: boolean;
+  /**
+   * Whether this editor is the newsroom's owner (unit U11b).
+   *
+   * The takedown press is drawn only for the owner, because only the owner may
+   * use it: `takeDownCapture` refuses any other role with the same guard the
+   * legal-removal routes use, and this flag only decides whether the desk
+   * offers a press that would be refused. A page that has not asked (this
+   * default) offers nothing.
+   */
+  isOwner?: boolean;
   /** The drawn list, as the page sees it: the run line, the extra rows, the presses. */
   list: EvidenceListInputs;
 }) {
@@ -549,6 +568,20 @@ export function FindingEvidenceReviewPanel({
   );
   const [reloadRequired, setReloadRequired] = useState(false);
   const [openedCapture, setOpenedCapture] = useState<FindingEvidenceCaptureResult | null>(null);
+  /*
+    Unit U11b: the takedown form, opened by a press rather than drawn beside
+    every captured record the editor opens. It is a plain press and a state
+    flag, not a `<details>`: the review page's shut disclosures are enumerated
+    by position in `scripts/delete-corrections-e2e.mjs`, and a new one inside
+    the opened-capture pane would move those indices under it.
+  */
+  const [takeDownOpen, setTakeDownOpen] = useState(false);
+  const [takeDownReason, setTakeDownReason] = useState("");
+  const [takeDownRemoveLink, setTakeDownRemoveLink] = useState(false);
+  const [takeDownFeedback, setTakeDownFeedback] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
   const [manualClaim, setManualClaim] = useState<ManualClaimForm>(blankManualClaim);
   const [recordToAdd, setRecordToAdd] = useState("");
   const [recordRelation, setRecordRelation] = useState<ManualClaimReferenceRelation>("corroborating");
@@ -637,6 +670,45 @@ export function FindingEvidenceReviewPanel({
         ok: false,
         code: "not-found",
         error: "Could not open that captured version.",
+      }),
+  });
+
+  /*
+    Unit U11b: take this capture's excerpt down, permanently.
+
+    The purge changes what the review can say about this record -- its stored
+    text is gone, so the review token moves and any judgment that bound to the
+    old text is no longer current -- so the press reloads the review rather
+    than leaving the page showing a capture that no longer reads the way it
+    did. The pane closes: what it was showing is what just came down.
+  */
+  const takeDown = useMutation({
+    mutationFn: (input: { versionId: number; reason: string; removeLink: boolean }) =>
+      takeDownEvidenceCapture({ data: input }),
+    onSuccess: async (result) => {
+      if (!result.ok) {
+        setTakeDownFeedback({ kind: "err", text: result.error });
+        return;
+      }
+      setOpenedCapture(null);
+      setTakeDownOpen(false);
+      setTakeDownReason("");
+      setTakeDownRemoveLink(false);
+      setTakeDownFeedback({
+        kind: "ok",
+        text:
+          "Excerpt taken down. The stored text and any original file for this capture are " +
+          "emptied, the audit trail records why, and the public page now says the publisher " +
+          "asked. There is no restore.",
+      });
+      captureRead.reset();
+      await reviewQuery.refetch();
+      await qc.invalidateQueries({ queryKey: ["finding-evidence-review", leadId] });
+    },
+    onError: () =>
+      setTakeDownFeedback({
+        kind: "err",
+        text: "The takedown could not be completed. Nothing was removed.",
       }),
   });
 
@@ -1358,6 +1430,15 @@ export function FindingEvidenceReviewPanel({
         </Notice>
       ) : null}
       {feedback ? <Notice kind={feedback.kind}>{feedback.text}</Notice> : null}
+      {/*
+        The takedown's own line, at panel level rather than inside the pane:
+        the pane closes when a takedown succeeds -- what it was showing is what
+        just came down -- and a confirmation drawn inside it would leave with
+        it.
+      */}
+      {takeDownFeedback ? (
+        <Notice kind={takeDownFeedback.kind}>{takeDownFeedback.text}</Notice>
+      ) : null}
 
       {captureRead.isPending ? <BusyLine label="Opening captured text…" /> : null}
       {openedCapture ? (
@@ -1381,9 +1462,123 @@ export function FindingEvidenceReviewPanel({
                 <pre className="read-full mt-3">{openedCapture.capture.fullText}</pre>
               ) : (
                 <p className="mt-3 text-sm text-muted">
-                  This captured version has no readable text.
+                  {openedCapture.capture.takenDown
+                    ? "This excerpt was removed at the publisher’s request, and it cannot be restored."
+                    : "This captured version has no readable text."}
                 </p>
               )}
+              {/*
+                Unit U11b2: the takedown's own record, for the owner.
+
+                `takenDownReason` only arrives on an owner's read (see
+                `loadFindingEvidenceCapture`), so an editor sees the sentence
+                above and no note -- the reason is not hidden here, it was never
+                sent. The two fields are read as one line because they are one
+                fact: when the owner took it down, and what they wrote.
+              */}
+              {openedCapture.capture.takenDown && openedCapture.capture.takenDownReason ? (
+                <p className="mt-3 border-l-2 border-rule pl-3 text-sm text-muted">
+                  Taken down {openedCapture.capture.takenDownAt ?? "(time not recorded)"}. Reason
+                  recorded for the audit trail: “{openedCapture.capture.takenDownReason}”
+                </p>
+              ) : null}
+              {/*
+                Unit U11b: the owner's press, beside the captured text it acts
+                on. An editor sees the text and no press; an owner who is not
+                sure what they are looking at is looking right at it.
+              */}
+              {isOwner && !openedCapture.capture.takenDown ? (
+                <div className="mt-4 border-t border-rule pt-3">
+                  {takeDownOpen ? (
+                    <>
+                      <p className="max-w-3xl text-sm text-muted">
+                        This deletes the excerpt, the extracted text and the original file stored
+                        for this capture, and the desk’s own working copies of it — the Dark Desk
+                        artifact and the passages recorded on claims and relationships from this
+                        version. The record’s address, hash and capture history stay, so published
+                        citations still resolve — to a notice instead of an excerpt. Source
+                        snapshots, note fields and backups are separate records and are not
+                        touched. It takes effect immediately and{" "}
+                        <span className="font-medium text-ink">there is no restore.</span>
+                      </p>
+                      <label
+                        className="mt-3 block text-sm font-medium text-ink"
+                        htmlFor="capture-takedown-reason"
+                      >
+                        Why is this capture coming down?
+                      </label>
+                      <textarea
+                        id="capture-takedown-reason"
+                        className="mt-1 min-h-20 w-full border border-rule bg-paper p-3 text-sm"
+                        maxLength={TAKEDOWN_REASON_MAX}
+                        value={takeDownReason}
+                        disabled={takeDown.isPending}
+                        onChange={(event) => setTakeDownReason(event.target.value)}
+                      />
+                      <label
+                        className="mt-3 flex items-start gap-2 text-sm text-ink"
+                        htmlFor="capture-takedown-remove-link"
+                      >
+                        <input
+                          id="capture-takedown-remove-link"
+                          type="checkbox"
+                          className="mt-1"
+                          checked={takeDownRemoveLink}
+                          disabled={takeDown.isPending}
+                          onChange={(event) => setTakeDownRemoveLink(event.target.checked)}
+                        />
+                        <span>
+                          Remove the link to the original too. Left unticked, the public notice
+                          keeps the link.
+                        </span>
+                      </label>
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        <InkButton
+                          tone="danger"
+                          small
+                          disabled={!takeDownReason.trim() || takeDown.isPending}
+                          onClick={() =>
+                            takeDown.mutate({
+                              versionId: openedCapture.capture.versionId,
+                              reason: takeDownReason,
+                              removeLink: takeDownRemoveLink,
+                            })
+                          }
+                        >
+                          {takeDown.isPending ? "Taking down…" : "Take down this capture"}
+                        </InkButton>
+                        <InkButton
+                          tone="quiet"
+                          small
+                          disabled={takeDown.isPending}
+                          onClick={() => {
+                            setTakeDownOpen(false);
+                            setTakeDownReason("");
+                            setTakeDownRemoveLink(false);
+                          }}
+                        >
+                          Cancel takedown
+                        </InkButton>
+                      </div>
+                      <p className="mt-2 text-sm text-muted">
+                        The reason is kept in the desk’s audit trail. It is never shown to a reader.
+                      </p>
+                    </>
+                  ) : (
+                    <InkButton
+                      tone="danger"
+                      small
+                      disabled={disabled}
+                      onClick={() => {
+                        setTakeDownFeedback(null);
+                        setTakeDownOpen(true);
+                      }}
+                    >
+                      Take down this capture
+                    </InkButton>
+                  )}
+                </div>
+              ) : null}
             </>
           ) : (
             <Notice kind="err">{openedCapture.error}</Notice>

@@ -10,6 +10,8 @@ const capture = (overrides = {}) => ({
   capturedAt: "2026-09-08T10:00:00Z",
   available: true,
   readable: true,
+  /* Unit U11b: an ordinary capture; a taken-down one is not readable. */
+  takenDown: false,
   excerptState: "found" as const,
   newerCapture: null,
   viewHref: "/evidence/41",
