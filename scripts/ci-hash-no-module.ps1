@@ -1,19 +1,20 @@
 <#
   File hashing must not need a module.
 
-  Measured on this machine, 2026-09-26: a Windows PowerShell 5.1 session whose
-  PSModulePath was inherited from PowerShell 7 cannot reach Get-FileHash at
-  all. `Get-Command Get-FileHash` still lists it; calling it throws
-  CommandNotFoundException. That is the worst shape a missing command can
-  have, because the mistake is invisible until the moment the code runs --
+  Some Windows PowerShell 5.1 sessions cannot reach Get-FileHash when their
+  PSModulePath comes from PowerShell 7. A host can still auto-import the
+  built-in Utility module from PSHOME after PSModulePath changes, so the
+  fixture disables module autoloading and imports only the Utility commands
+  it needs, deliberately excluding Get-FileHash. It confirms the command is
+  absent and that calling it throws CommandNotFoundException. That is the
+  failure shape the changed code must survive --
   and the two places that hashed a file were ops\promote.ps1 (the lockfile
   check, with the live paper already stopped by step 4) and
   installer\Install.ps1's Get-VerifiedDependency (the download checksum).
 
-  This harness runs the REAL changed code under exactly that broken
-  PSModulePath, in a temp directory, and fails if either of them calls the
-  cmdlet again. It launches nothing, opens no port, and touches no backup
-  folder.
+  This harness runs the REAL changed code in that command-missing PowerShell
+  session, in a temp directory, and fails if either of them calls the cmdlet
+  again. It launches nothing, opens no port, and touches no backup folder.
 
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI.
 
@@ -48,25 +49,39 @@ $libBackup = Join-Path $AppRoot 'ops\lib-backup.ps1'
 # --- the broken session, built on purpose ----------------------------------
 # PowerShell 7's module directory is what a Node-launched 5.1 inherits. When
 # it is not installed, an empty directory is the same condition: a PSModulePath
-# that lists no Windows PowerShell module directory.
+# that lists no Windows PowerShell module directory. PSHOME modules can still
+# be auto-imported on some hosts, so explicitly remove that nondeterminism and
+# load only the commands this fixture and the exercised code need.
 $pwshModules = Join-Path $env:ProgramFiles 'PowerShell\7\Modules'
 $world = Join-Path ([IO.Path]::GetTempPath()) ('tr-hash-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $world | Out-Null
+$null = [IO.Directory]::CreateDirectory($world)
 
 try {
   $sabotage = if (Test-Path -LiteralPath $pwshModules) { $pwshModules } else { $world }
   $env:PSModulePath = $sabotage
+  $PSModuleAutoLoadingPreference = 'None'
+  $managementModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Management\Microsoft.PowerShell.Management.psd1'
+  $utilityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'
+  Import-Module -Name $managementModule -ErrorAction Stop
+  Import-Module -Name $utilityModule -Cmdlet @('ForEach-Object', 'Invoke-Expression', 'Out-Null', 'Where-Object', 'Write-Host', 'Write-Output') -ErrorAction Stop
   Say "PSModulePath for this run: $sabotage"
 
   # The sabotage must actually be in force. If a future PowerShell 5.1 can
   # reach the cmdlet anyway, this run proves nothing and says so instead of
   # passing quietly.
   Check 'the sabotaged session really cannot reach Get-FileHash' {
-    $reachable = $true
-    try { [void](Get-FileHash -LiteralPath $install -Algorithm SHA256) }
-    catch [System.Management.Automation.CommandNotFoundException] { $reachable = $false }
-    catch { $reachable = $false }
-    if ($reachable) { 'Get-FileHash answered, so this run cannot prove anything' } else { $true }
+    $command = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+    if ($command) { "Get-FileHash is still available from $($command.Source)" }
+    else {
+      try {
+        [void](Get-FileHash -LiteralPath $install -Algorithm SHA256)
+        'Get-FileHash answered, so this run cannot prove anything'
+      } catch [System.Management.Automation.CommandNotFoundException] {
+        $true
+      } catch {
+        "Get-FileHash failed for another reason: $($_.Exception.Message)"
+      }
+    }
   }
 
   # --- ops\promote.ps1's lockfile check -----------------------------------
@@ -150,8 +165,8 @@ try {
 
 Write-Output ''
 if ($script:failures -gt 0) {
-  Write-Output "file hashing without a module: $($script:failures) check(s) failed"
+  Write-Output "file hashing without Get-FileHash: $($script:failures) check(s) failed"
   exit 1
 }
-Write-Output 'file hashing without a module: every check passed'
+Write-Output 'file hashing without Get-FileHash: every check passed'
 exit 0

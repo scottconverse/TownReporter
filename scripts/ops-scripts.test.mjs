@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, readdirSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync, realpathSync, symlinkSync, linkSync, unlinkSync, copyFileSync } from "node:fs";
+import { join, dirname, win32 as win32Path } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -10,6 +10,47 @@ import { ACTIONS, STAGE_START_WINDOW_MS } from "../ops/control/control-server.mj
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
+
+function canonicalWindowsPath(path) {
+  const tail = [];
+  let probe = win32Path.resolve(path);
+  while (!existsSync(probe)) {
+    const parent = win32Path.dirname(probe);
+    if (parent === probe) throw new Error(`could not resolve an existing parent for ${path}`);
+    tail.unshift(win32Path.basename(probe));
+    probe = parent;
+  }
+  return win32Path.normalize(win32Path.join(realpathSync.native(probe), ...tail));
+}
+
+function configFieldsResolveAtTarget(config, target, oldRoots) {
+  try {
+    const installRoot = canonicalWindowsPath(config.installRoot);
+    const targetRoot = canonicalWindowsPath(target);
+    const executable = canonicalWindowsPath(config.executable);
+    const logPath = canonicalWindowsPath(config.logPath);
+    const note = typeof config.notes?.[0] === "string" && config.notes[0].startsWith("built at ")
+      ? canonicalWindowsPath(config.notes[0].slice("built at ".length))
+      : null;
+    const oldSpellings = oldRoots.flatMap((root) => [root, canonicalWindowsPath(root)]).map((root) => root.toLowerCase());
+    const serializedFields = [config.installRoot, config.executable, config.logPath, ...(Array.isArray(config.notes) ? config.notes : [])];
+    const noOldRootText = serializedFields.every((value) => typeof value === "string"
+      && oldSpellings.every((oldRoot) => !value.toLowerCase().includes(oldRoot)));
+    const relativeExecutable = win32Path.relative(installRoot, executable).toLowerCase();
+    const relativeLog = win32Path.relative(installRoot, logPath).toLowerCase();
+
+    return win32Path.normalize(installRoot).toLowerCase() === win32Path.normalize(targetRoot).toLowerCase()
+      && existsSync(config.executable)
+      && relativeExecutable === "redlib.exe"
+      && relativeLog === "redlib.log"
+      && note !== null
+      && win32Path.normalize(note).toLowerCase() === win32Path.normalize(installRoot).toLowerCase()
+      && JSON.stringify(config.notes) === JSON.stringify([config.notes[0], "unrelated"])
+      && noOldRootText;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The Windows operations layer ran in no automated check of any kind.
@@ -1218,14 +1259,25 @@ test("redlib-relocate.ps1 copies rather than moves, refuses a live reader, and n
   */
   const raw = read("redlib-relocate.ps1");
   const code = stripComments(raw);
+  const pathIdentity = raw.match(/function Get-PathIdentity \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(pathIdentity, "filesystem identity resolution must exist");
+  assert.match(
+    pathIdentity,
+    /if \(-not \$identity\) \{\s*throw "Could not resolve filesystem identity for existing path:/,
+    "an existing path whose final identity cannot be resolved must fail closed before path comparisons",
+  );
+  assert.doesNotMatch(
+    pathIdentity,
+    /Get-Item -LiteralPath \$probe -Force\)\.FullName/,
+    "lexical FullName must never stand in for an unresolved filesystem identity",
+  );
   assert.match(raw, /\[switch\]\$Force/, "-Force must exist for a deliberate AppData target");
   assert.match(raw, /\[switch\]\$DryRun/, "-DryRun must exist");
   const toDefault = raw.match(/\$To\s*=\s*"([^"]+)"/);
   assert.ok(toDefault, "could not find the -To default");
   assert.doesNotMatch(toDefault[1], /AppData/i, "the default -To must be OUTSIDE AppData, or the redirect applies to the copy too");
 
-  assert.match(code, /Copy-Item -LiteralPath \$item\.FullName -Destination \$target -Recurse -Force/, "it must copy");
-  assert.doesNotMatch(code, /Move-Item/, "and must not move: the original stays where it was");
+  assert.doesNotMatch(code, /Move-Item[^\n]*\$(?:source|fileItem\.SourcePath)/, "the source install must never be moved");
   assert.doesNotMatch(code, /Remove-Item[^\n]*\$source/, "nothing may delete the source install");
   assert.doesNotMatch(code, /Add-Content|Out-File|Set-Content/, "it must write no file by text -- .env above all");
   assert.match(code, /REDLIB_INSTALL_ROOT=/, "it must print the .env line instead");
@@ -1235,7 +1287,6 @@ test("redlib-relocate.ps1 copies rather than moves, refuses a live reader, and n
 
   // install.json is rewritten at the OBJECT level. A text replace finds
   // nothing: the paths in the file are written with doubled backslashes.
-  assert.match(raw, /ConvertFrom-Json[\s\S]{0,300}?Convert-PathInValue/, "the rewrite must walk the parsed object");
   assert.match(code, /ConvertTo-Json -Depth 10/, "and write it back as JSON");
   assert.match(code, /\[IO\.File\]::WriteAllText\([\s\S]{0,160}?UTF8Encoding\(\$false\)/, "UTF-8 with no BOM, readable by both PowerShells");
   assert.match(code, /Get-RedlibSandboxedRoots/, "it must look in the MSIX LocalCache copies, which is where the install really was");
@@ -1423,24 +1474,26 @@ test(
       plant(src);
       const copy = run(["-From", src, "-To", dst, "-Force", "-EnvFile", noEnv]);
       assert.equal(copy.code, 0, `the copy exited ${copy.code}:\n${copy.out}`);
-      assert.ok(
-        copy.out.toLowerCase().includes(`redlib_install_root=${dst}`.toLowerCase()),
-        `the .env line must be printed:\n${copy.out}`,
+      const envLine = copy.out.split(/\r?\n/).map((line) => line.trim()).find((line) => /^REDLIB_INSTALL_ROOT=/i.test(line));
+      assert.ok(envLine, `the standalone .env assignment must be printed:\n${copy.out}`);
+      const printedRoot = envLine.slice(envLine.indexOf("=") + 1).trim();
+      const canonicalPrintedRoot = realpathSync.native(printedRoot);
+      const canonicalTarget = realpathSync.native(dst);
+      assert.equal(
+        win32Path.normalize(canonicalPrintedRoot).toLowerCase(),
+        win32Path.normalize(canonicalTarget).toLowerCase(),
+        `the printed .env assignment must name the copied target (expected ${JSON.stringify(dst)} => ${JSON.stringify(canonicalTarget)}, got ${JSON.stringify(printedRoot)} => ${JSON.stringify(canonicalPrintedRoot)}):\n${copy.out}`,
       );
       assert.match(copy.out, /inside AppData/, "a target under AppData must be called out");
       assert.match(copy.out, /was not changed or deleted/, "the run must say the original is still there");
       const moved = JSON.parse(readFileSync(join(dst, "install.json"), "utf8"));
-      assert.equal(moved.installRoot.toLowerCase(), dst.toLowerCase(), "installRoot must name the new place");
-      assert.equal(moved.executable.toLowerCase(), join(dst, "redlib.exe").toLowerCase(), "so must executable");
-      assert.equal(moved.logPath.toLowerCase(), join(dst, "redlib.log").toLowerCase(), "and any other path in it");
-      assert.deepEqual(moved.notes, [`built at ${dst}`, "unrelated"], "a path inside an ARRAY must be rewritten, and the array must stay an array");
+      assert.ok(
+        configFieldsResolveAtTarget(moved, dst, [src]),
+        `install.json paths and array notes must resolve inside the copied install, with no old-root references: ${JSON.stringify(moved, null, 2)}`,
+      );
       assert.equal(moved.commit, "b6a2a5e", "a value that is not a path must be left alone");
       assert.ok(existsSync(join(dst, "config.toml")), "the whole install must be copied");
       assert.ok(!existsSync(join(dst, "redlib.pid")), "the pid file belongs to a process, not to an install");
-      assert.ok(
-        !readFileSync(join(dst, "install.json"), "utf8").toLowerCase().includes(src.toLowerCase()),
-        "the copy must not still name the old root anywhere",
-      );
       const kept = JSON.parse(readFileSync(join(src, "install.json"), "utf8"));
       assert.equal(kept.installRoot, src, "the original install.json must be untouched");
       assert.ok(existsSync(join(src, "redlib.exe")), "and the original executable must still be there -- this copies, it does not move");
@@ -1478,6 +1531,786 @@ test(
       const missing = run(["-From", join(base, "nothere"), "-To", join(base, "x"), "-Force", "-EnvFile", noEnv]);
       assert.equal(missing.code, 1);
       assert.match(missing.out, /no Redlib install at -From/);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "redlib-relocate refuses multiply linked target executables with same or alternate basenames",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    const script = join(OPS, "redlib-relocate.ps1");
+    const base = mkdtempSync(join(tmpdir(), "redlib-relocate-hardlink-reader-"));
+    const source = join(base, "source");
+    const target = join(base, "target");
+    const externalAlias = join(base, "external-alias");
+    const noEnv = join(base, "absent.env");
+    const powershellExe = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName"],
+      { encoding: "utf8" },
+    ).trim();
+    const run = (args) => {
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
+            { encoding: "utf8", timeout: 120_000, env: { ...process.env, REDLIB_INSTALL_ROOT: "" } },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
+    const plant = (root) => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "install.json"),
+        `${JSON.stringify({
+          installRoot: root,
+          executable: join(root, "redlib.exe"),
+          baseUrl: "http://127.0.0.1:65533",
+          logPath: join(root, "redlib.log"),
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      writeFileSync(join(root, "redlib.exe"), "stub, never run\n", "utf8");
+      writeFileSync(join(root, "config.toml"), "port = 65533\n", "utf8");
+    };
+    const startLongLivedProcess = (executable) => Number(execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$child = Start-Process -FilePath $env:REDLIB_TEST_PROCESS_EXE -ArgumentList '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 90' -PassThru -WindowStyle Hidden; $child.Id",
+      ],
+      { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_EXE: executable } },
+    ).trim());
+    const processImagePath = (pid) => execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "(Get-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID)).MainModule.FileName"],
+      { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(pid) } },
+    ).trim();
+    const stopProcess = (pid) => {
+      try {
+        execFileSync(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command", "Stop-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID) -Force -ErrorAction SilentlyContinue"],
+          { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(pid) } },
+        );
+      } catch {
+        // Only fixture processes are stopped here, during cleanup.
+      }
+    };
+    try {
+      plant(source);
+      plant(target);
+      copyFileSync(powershellExe, join(target, "redlib.exe"));
+      mkdirSync(externalAlias);
+      const aliasPaths = [join(externalAlias, "redlib.exe"), join(externalAlias, "alternate.exe")];
+      for (const aliasPath of aliasPaths) linkSync(join(target, "redlib.exe"), aliasPath);
+      const targetInstallBefore = readFileSync(join(target, "install.json"));
+      const targetExecutableBefore = readFileSync(join(target, "redlib.exe"));
+      const evidence = [];
+      for (const aliasPath of aliasPaths) {
+        const processPid = startLongLivedProcess(aliasPath);
+        try {
+          writeFileSync(join(target, "redlib.pid"), "2147483647", "utf8");
+          const processImage = processImagePath(processPid);
+          const result = run(["-From", source, "-To", target, "-Force", "-EnvFile", noEnv]);
+          const processStillRunning = execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-Command", "if (Get-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID) -ErrorAction SilentlyContinue) { 'running' } else { 'stopped' }"],
+            { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(processPid) } },
+          ).trim() === "running";
+          evidence.push({
+            aliasBasename: win32Path.basename(aliasPath),
+            processImageIsExternalHardlink: processImage.toLowerCase() === aliasPath.toLowerCase(),
+            processBasenameDiffersFromTarget: win32Path.basename(processImage).toLowerCase() !== "redlib.exe",
+            processStillRunning,
+            exit: result.code,
+            hardlinkRefusalReported: /image state: linked/i.test(result.out),
+            targetMetadataPreserved: existsSync(join(target, "install.json"))
+              && readFileSync(join(target, "install.json")).equals(targetInstallBefore),
+            targetExecutablePreserved: existsSync(join(target, "redlib.exe"))
+              && readFileSync(join(target, "redlib.exe")).equals(targetExecutableBefore),
+            stalePidPreserved: existsSync(join(target, "redlib.pid"))
+              && readFileSync(join(target, "redlib.pid"), "utf8") === "2147483647",
+          });
+        } finally {
+          stopProcess(processPid);
+        }
+      }
+      assert.deepEqual(evidence, aliasPaths.map((aliasPath) => ({
+        aliasBasename: win32Path.basename(aliasPath),
+        processImageIsExternalHardlink: true,
+        processBasenameDiffersFromTarget: win32Path.basename(aliasPath).toLowerCase() !== "redlib.exe",
+        processStillRunning: true,
+        exit: 1,
+        hardlinkRefusalReported: true,
+        targetMetadataPreserved: true,
+        targetExecutablePreserved: true,
+        stalePidPreserved: true,
+      })), JSON.stringify(evidence, null, 2));
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "redlib-relocate.ps1 resolves path aliases, rejects unsafe targets, and fails closed on stale metadata",
+  { skip: !onWindows ? "PowerShell only" : false },
+  () => {
+    const script = join(OPS, "redlib-relocate.ps1");
+    const base = mkdtempSync(join(tmpdir(), "redlib-relocate-edge-"));
+    const noEnv = join(base, "absent.env");
+    const run = (args, extraEnv = {}) => {
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
+            {
+              encoding: "utf8",
+              timeout: 120_000,
+              env: { ...process.env, REDLIB_INSTALL_ROOT: "", ...extraEnv },
+            },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
+    const runWithNullPathIdentity = (args) => {
+      const wrapper = join(base, "null-path-identity.ps1");
+      writeFileSync(
+        wrapper,
+        [
+          "Add-Type -TypeDefinition @'",
+          "using System;",
+          "public static class TownReporterPathIdentity { public static string Resolve(string path) { return null; } }",
+          "'@",
+          "& $env:REDLIB_RELOCATE_SCRIPT -From $env:REDLIB_RELOCATE_FROM -To $env:REDLIB_RELOCATE_TO -Force -EnvFile $env:REDLIB_RELOCATE_ENV",
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+      try {
+        return {
+          code: 0,
+          out: execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper],
+            {
+              encoding: "utf8",
+              timeout: 120_000,
+              env: {
+                ...process.env,
+                REDLIB_INSTALL_ROOT: "",
+                REDLIB_RELOCATE_SCRIPT: script,
+                REDLIB_RELOCATE_FROM: args[0],
+                REDLIB_RELOCATE_TO: args[1],
+                REDLIB_RELOCATE_ENV: noEnv,
+              },
+            },
+          ),
+        };
+      } catch (err) {
+        return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+      }
+    };
+    const plant = (root, overrides = {}) => {
+      mkdirSync(root, { recursive: true });
+      const config = {
+        installRoot: root,
+        executable: join(root, "redlib.exe"),
+        baseUrl: "http://127.0.0.1:65533",
+        logPath: join(root, "redlib.log"),
+        notes: [`built at ${root}`, "unrelated"],
+        commit: "b6a2a5e",
+        ...overrides,
+      };
+      writeFileSync(join(root, "install.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+      writeFileSync(join(root, "redlib.exe"), "stub, never run\n", "utf8");
+      writeFileSync(join(root, "config.toml"), "port = 65533\n", "utf8");
+    };
+    const envLine = (out) => out.split(/\r?\n/).map((line) => line.trim()).find((line) => /^REDLIB_INSTALL_ROOT=/i.test(line));
+    const sourceBytes = (root) => readFileSync(join(root, "install.json"));
+    try {
+      const shortBase = execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$source = $env:REDLIB_ALIAS_SOURCE; $buffer = New-Object System.Text.StringBuilder 1024; Add-Type -TypeDefinition 'using System.Runtime.InteropServices; using System.Text; public static class AliasPathProbe { [DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode)] public static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint bufferLength); }'; [void][AliasPathProbe]::GetShortPathName($source, $buffer, [uint32]$buffer.Capacity); $buffer.ToString()",
+        ],
+        { encoding: "utf8", env: { ...process.env, REDLIB_ALIAS_SOURCE: base } },
+      ).trim();
+      assert.ok(shortBase && shortBase.toLowerCase() !== base.toLowerCase(), `the Windows fixture needs a real 8.3 alias for ${base}`);
+
+      const aliasSource = join(shortBase, "alias-from");
+      const aliasTarget = join(base, "alias-to");
+      plant(aliasSource);
+      const aliasRun = run(["-From", aliasSource, "-To", aliasTarget, "-Force", "-EnvFile", noEnv]);
+      const aliasConfig = existsSync(join(aliasTarget, "install.json"))
+        ? JSON.parse(readFileSync(join(aliasTarget, "install.json"), "utf8"))
+        : {};
+      const aliasFieldsCorrect = configFieldsResolveAtTarget(aliasConfig, aliasTarget, [aliasSource]);
+
+      const autoAliasSource = join(shortBase, "auto-from");
+      const autoLongSource = join(base, "auto-from");
+      const autoTarget = join(base, "auto-to");
+      const autoEnv = join(base, "auto.env");
+      plant(autoAliasSource);
+      writeFileSync(autoEnv, `REDLIB_INSTALL_ROOT=${autoLongSource}\n`, "utf8");
+      const autoRun = run(["-To", autoTarget, "-Force", "-EnvFile", autoEnv]);
+      const autoConfig = existsSync(join(autoTarget, "install.json"))
+        ? JSON.parse(readFileSync(join(autoTarget, "install.json"), "utf8"))
+        : {};
+      const autoFieldsCorrect = configFieldsResolveAtTarget(autoConfig, autoTarget, [autoAliasSource, autoLongSource]);
+
+      const fixtureLocalAppData = join(base, "fixture-localappdata");
+      const sandboxSource = join(fixtureLocalAppData, "Packages", "FakePackage", "LocalCache", "Local", "RedditSearch", "Redlib");
+      const logicalRoot = join(fixtureLocalAppData, "RedditSearch", "Redlib");
+      const sandboxTarget = join(base, "sandbox-to");
+      plant(sandboxSource, {
+        installRoot: logicalRoot,
+        executable: join(logicalRoot, "redlib.exe"),
+        logPath: join(logicalRoot, "redlib.log"),
+        notes: [`built at ${logicalRoot}`, "unrelated"],
+      });
+      const sandboxBytes = sourceBytes(sandboxSource);
+      const sandboxRun = run(["-To", sandboxTarget, "-Force", "-EnvFile", noEnv], { LOCALAPPDATA: fixtureLocalAppData });
+      const sandboxConfig = existsSync(join(sandboxTarget, "install.json"))
+        ? JSON.parse(readFileSync(join(sandboxTarget, "install.json"), "utf8"))
+        : {};
+      const printedSandboxRoot = envLine(sandboxRun.out)?.slice(envLine(sandboxRun.out).indexOf("=") + 1).trim();
+      const sandboxPrintedTargetCorrect = Boolean(printedSandboxRoot)
+        && win32Path.normalize(realpathSync.native(printedSandboxRoot)).toLowerCase()
+          === win32Path.normalize(realpathSync.native(sandboxTarget)).toLowerCase();
+      const sandboxLogicalMappingCorrect = sandboxRun.code === 0
+        && sandboxPrintedTargetCorrect
+        && configFieldsResolveAtTarget(sandboxConfig, sandboxTarget, [sandboxSource, logicalRoot])
+        && sourceBytes(sandboxSource).equals(sandboxBytes);
+
+      const ordinarySource = join(base, "ordinary-source");
+      const ordinaryTarget = join(base, "ordinary-target");
+      plant(ordinarySource, {
+        installRoot: logicalRoot,
+        executable: join(logicalRoot, "redlib.exe"),
+        logPath: join(logicalRoot, "redlib.log"),
+      });
+      const ordinaryBytes = sourceBytes(ordinarySource);
+      const ordinaryRun = run(
+        ["-From", ordinarySource, "-To", ordinaryTarget, "-Force", "-EnvFile", noEnv],
+        { LOCALAPPDATA: fixtureLocalAppData },
+      );
+      const similarPathRejected = ordinaryRun.code === 1
+        && !envLine(ordinaryRun.out)
+        && !existsSync(ordinaryTarget)
+        && sourceBytes(ordinarySource).equals(ordinaryBytes);
+
+      const siblingPrefixSource = join(base, "sibling-prefix-source");
+      const siblingPrefixTarget = `${fixtureLocalAppData}-sibling`;
+      plant(siblingPrefixSource);
+      const siblingPrefixRun = run(
+        ["-From", siblingPrefixSource, "-To", siblingPrefixTarget, "-EnvFile", noEnv],
+        { LOCALAPPDATA: fixtureLocalAppData },
+      );
+      const siblingPrefixStaysOutside = siblingPrefixRun.code === 0
+        && Boolean(envLine(siblingPrefixRun.out))
+        && !/inside AppData/.test(siblingPrefixRun.out)
+        && existsSync(join(siblingPrefixTarget, "install.json"));
+
+      const appDataJunctionSource = join(base, "appdata-junction-source");
+      const appDataJunctionDestination = join(fixtureLocalAppData, "junction-destination");
+      const externalLookingJunction = join(base, "external-looking-junction");
+      plant(appDataJunctionSource);
+      mkdirSync(appDataJunctionDestination);
+      symlinkSync(appDataJunctionDestination, externalLookingJunction, "junction");
+      const appDataJunctionSourceBytes = sourceBytes(appDataJunctionSource);
+      const appDataJunctionRun = run(
+        ["-From", appDataJunctionSource, "-To", externalLookingJunction, "-EnvFile", noEnv],
+        { LOCALAPPDATA: fixtureLocalAppData },
+      );
+      const appDataJunctionRejected = appDataJunctionRun.code === 1
+        && /inside AppData/.test(appDataJunctionRun.out)
+        && !envLine(appDataJunctionRun.out)
+        && !existsSync(join(appDataJunctionDestination, "install.json"))
+        && sourceBytes(appDataJunctionSource).equals(appDataJunctionSourceBytes);
+
+      const sameSource = join(base, "same-source");
+      plant(sameSource);
+      const sameBytes = sourceBytes(sameSource);
+      const sameRun = run(["-From", sameSource, "-To", join(shortBase, "same-source"), "-Force", "-EnvFile", noEnv]);
+      const samePlaceSafe = sameRun.code === 0
+        && Boolean(envLine(sameRun.out))
+        && sourceBytes(sameSource).equals(sameBytes)
+        && readdirSync(sameSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+
+      const liveTargetSource = join(base, "live-target-source");
+      const liveTarget = join(base, "live-target");
+      const powershellExe = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", "[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName"],
+        { encoding: "utf8" },
+      ).trim();
+      const startLongLivedProcess = (executable) => Number(execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$child = Start-Process -FilePath $env:REDLIB_TEST_PROCESS_EXE -ArgumentList '-NoProfile -NonInteractive -Command Start-Sleep -Seconds 90' -PassThru -WindowStyle Hidden; $child.Id",
+        ],
+        { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_EXE: executable } },
+      ).trim());
+      const isProcessRunning = (pid) => execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", "if (Get-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID) -ErrorAction SilentlyContinue) { 'running' } else { 'stopped' }"],
+        { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(pid) } },
+      ).trim() === "running";
+      const stopProcess = (pid) => {
+        try {
+          execFileSync(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-Command", "Stop-Process -Id ([int]$env:REDLIB_TEST_PROCESS_PID) -Force -ErrorAction SilentlyContinue"],
+            { encoding: "utf8", env: { ...process.env, REDLIB_TEST_PROCESS_PID: String(pid) } },
+          );
+        } catch {
+          // The relocation regression is allowed to stop a fixture process only in cleanup.
+        }
+      };
+      const startSourceFileLock = (filePath) => {
+        const readyPath = join(base, `lock-ready-${Math.random().toString(16).slice(2)}`);
+        const childScript = "$stream = [IO.File]::Open($env:REDLIB_TEST_LOCK_PATH, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None); [IO.File]::WriteAllText($env:REDLIB_TEST_LOCK_READY, 'ready'); Start-Sleep -Seconds 90; $stream.Dispose()";
+        const encodedCommand = Buffer.from(childScript, "utf16le").toString("base64");
+        const pid = Number(execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$child = Start-Process -FilePath $env:REDLIB_TEST_POWERSHELL_EXE -ArgumentList ('-NoProfile -NonInteractive -EncodedCommand ' + $env:REDLIB_TEST_LOCK_COMMAND) -PassThru -WindowStyle Hidden; $child.Id",
+          ],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              REDLIB_TEST_POWERSHELL_EXE: powershellExe,
+              REDLIB_TEST_LOCK_COMMAND: encodedCommand,
+              REDLIB_TEST_LOCK_PATH: filePath,
+              REDLIB_TEST_LOCK_READY: readyPath,
+            },
+          },
+        ).trim());
+        const waitCell = new Int32Array(new SharedArrayBuffer(4));
+        const deadline = Date.now() + 5000;
+        while (!existsSync(readyPath) && Date.now() < deadline) Atomics.wait(waitCell, 0, 0, 25);
+        if (!existsSync(readyPath)) {
+          stopProcess(pid);
+          throw new Error(`source-file lock did not become ready for ${filePath}`);
+        }
+        return pid;
+      };
+      plant(liveTargetSource);
+      plant(liveTarget);
+      copyFileSync(powershellExe, join(liveTarget, "redlib.exe"));
+      const liveTargetInstallBefore = readFileSync(join(liveTarget, "install.json"));
+      const liveTargetExecutableBefore = readFileSync(join(liveTarget, "redlib.exe"));
+      const liveTargetExe = join(liveTarget, "redlib.exe");
+      const liveTargetPid = startLongLivedProcess(liveTargetExe);
+      writeFileSync(join(liveTarget, "redlib.pid"), String(liveTargetPid), "utf8");
+      let liveTargetRun;
+      let liveTargetProcessSurvived = false;
+      try {
+        liveTargetRun = run(["-From", liveTargetSource, "-To", liveTarget, "-Force", "-EnvFile", noEnv]);
+        liveTargetProcessSurvived = isProcessRunning(liveTargetPid);
+      } finally {
+        stopProcess(liveTargetPid);
+      }
+      const liveTargetEvidence = {
+        exit: liveTargetRun.code,
+        refusedBeforeReplace: /destination.*running reader/i.test(liveTargetRun.out),
+        processStillRunning: liveTargetProcessSurvived,
+        installMetadataPreserved: existsSync(join(liveTarget, "install.json"))
+          && readFileSync(join(liveTarget, "install.json")).equals(liveTargetInstallBefore),
+        executablePreserved: readFileSync(join(liveTarget, "redlib.exe")).equals(liveTargetExecutableBefore),
+        pidFilePreserved: existsSync(join(liveTarget, "redlib.pid"))
+          && readFileSync(join(liveTarget, "redlib.pid"), "utf8") === String(liveTargetPid),
+      };
+      const stalePidTargetSource = join(base, "stale-pid-target-source");
+      const stalePidTarget = join(base, "stale-pid-target");
+      plant(stalePidTargetSource);
+      plant(stalePidTarget);
+      copyFileSync(powershellExe, join(stalePidTarget, "redlib.exe"));
+      const stalePidTargetInstallBefore = readFileSync(join(stalePidTarget, "install.json"));
+      const stalePidTargetExecutableBefore = readFileSync(join(stalePidTarget, "redlib.exe"));
+      const stalePidTargetExe = join(stalePidTarget, "redlib.exe");
+      const stalePidTargetProcess = startLongLivedProcess(stalePidTargetExe);
+      writeFileSync(join(stalePidTarget, "redlib.pid"), "2147483647", "utf8");
+      let stalePidTargetRun;
+      let stalePidProcessSurvived = false;
+      try {
+        stalePidTargetRun = run(["-From", stalePidTargetSource, "-To", stalePidTarget, "-Force", "-EnvFile", noEnv]);
+        stalePidProcessSurvived = isProcessRunning(stalePidTargetProcess);
+      } finally {
+        stopProcess(stalePidTargetProcess);
+      }
+      const stalePidTargetEvidence = {
+        exit: stalePidTargetRun.code,
+        refusedBeforeReplace: /destination.*running reader/i.test(stalePidTargetRun.out),
+        processStillRunning: stalePidProcessSurvived,
+        installMetadataPreserved: existsSync(join(stalePidTarget, "install.json"))
+          && readFileSync(join(stalePidTarget, "install.json")).equals(stalePidTargetInstallBefore),
+        executablePreserved: existsSync(stalePidTargetExe)
+          && readFileSync(stalePidTargetExe).equals(stalePidTargetExecutableBefore),
+        stalePidPreserved: readFileSync(join(stalePidTarget, "redlib.pid"), "utf8") === "2147483647",
+      };
+      const rollbackSource = join(base, "rollback-source");
+      const rollbackTarget = join(base, "rollback-target");
+      plant(rollbackSource);
+      plant(rollbackTarget);
+      writeFileSync(join(rollbackTarget, "redlib.pid"), "2147483647", "utf8");
+      const rollbackTargetInstallBefore = readFileSync(join(rollbackTarget, "install.json"));
+      const rollbackTargetExecutableBefore = readFileSync(join(rollbackTarget, "redlib.exe"));
+      const rollbackTargetConfigBefore = readFileSync(join(rollbackTarget, "config.toml"));
+      const sourceLockPid = startSourceFileLock(join(rollbackSource, "config.toml"));
+      let rollbackRun;
+      try {
+        rollbackRun = run(["-From", rollbackSource, "-To", rollbackTarget, "-Force", "-EnvFile", noEnv]);
+      } finally {
+        stopProcess(sourceLockPid);
+      }
+      const rollbackTargetRestored = rollbackRun.code === 1
+        && /previous destination files were restored/i.test(rollbackRun.out)
+        && readFileSync(join(rollbackTarget, "install.json")).equals(rollbackTargetInstallBefore)
+        && readFileSync(join(rollbackTarget, "redlib.exe")).equals(rollbackTargetExecutableBefore)
+        && readFileSync(join(rollbackTarget, "config.toml")).equals(rollbackTargetConfigBefore)
+        && readFileSync(join(rollbackTarget, "redlib.pid"), "utf8") === "2147483647";
+
+      const lockedTargetSource = join(base, "locked-target-source");
+      const lockedTarget = join(base, "locked-target");
+      plant(lockedTargetSource);
+      plant(lockedTarget);
+      const lockedTargetInstallBefore = readFileSync(join(lockedTarget, "install.json"));
+      const lockedTargetExecutableBefore = readFileSync(join(lockedTarget, "redlib.exe"));
+      const lockedTargetConfigBefore = readFileSync(join(lockedTarget, "config.toml"));
+      const targetLockPid = startSourceFileLock(join(lockedTarget, "config.toml"));
+      let lockedTargetRun;
+      try {
+        lockedTargetRun = run(["-From", lockedTargetSource, "-To", lockedTarget, "-Force", "-EnvFile", noEnv]);
+      } finally {
+        stopProcess(targetLockPid);
+      }
+      const lockedTargetRefused = lockedTargetRun.code === 1
+        && /cannot be safely replaced right now/i.test(lockedTargetRun.out)
+        && readFileSync(join(lockedTarget, "install.json")).equals(lockedTargetInstallBefore)
+        && readFileSync(join(lockedTarget, "redlib.exe")).equals(lockedTargetExecutableBefore)
+        && readFileSync(join(lockedTarget, "config.toml")).equals(lockedTargetConfigBefore);
+
+      const unresolvedSource = join(base, "unresolved-identity-source");
+      const unresolvedTarget = join(base, "unresolved-identity-target");
+      plant(unresolvedSource);
+      const unresolvedSourceBytes = sourceBytes(unresolvedSource);
+      const unresolvedRun = runWithNullPathIdentity([unresolvedSource, unresolvedTarget]);
+      const unresolvedIdentityRejected = unresolvedRun.code === 1
+        && /Could not resolve filesystem identity for existing path/.test(unresolvedRun.out)
+        && !envLine(unresolvedRun.out)
+        && !existsSync(unresolvedTarget)
+        && sourceBytes(unresolvedSource).equals(unresolvedSourceBytes);
+
+      const junctionSource = join(base, "junction-source");
+      const junctionAlias = join(base, "junction-alias");
+      plant(junctionSource);
+      symlinkSync(junctionSource, junctionAlias, "junction");
+      const junctionBytes = sourceBytes(junctionSource);
+      const junctionEntriesBefore = readdirSync(junctionSource).sort();
+      const junctionRun = run(["-From", junctionSource, "-To", junctionAlias, "-Force", "-EnvFile", noEnv]);
+      const junctionLine = envLine(junctionRun.out);
+      const junctionPrintedRoot = junctionLine?.slice(junctionLine.indexOf("=") + 1).trim();
+      const sameJunctionEvidence = {
+        exit: junctionRun.code,
+        printedEnv: Boolean(junctionPrintedRoot),
+        sourceBytesPreserved: sourceBytes(junctionSource).equals(junctionBytes),
+        sourceEntriesPreserved: readdirSync(junctionSource).sort().join(",") === junctionEntriesBefore.join(","),
+        printedRootResolvesToSource: Boolean(junctionPrintedRoot)
+          && win32Path.normalize(realpathSync.native(junctionPrintedRoot)).toLowerCase()
+            === win32Path.normalize(realpathSync.native(junctionSource)).toLowerCase(),
+      };
+
+      const junctionChildSource = join(base, "junction-child-source");
+      const junctionChild = join(junctionChildSource, "existing-child");
+      const junctionChildAlias = join(base, "junction-child-alias");
+      plant(junctionChildSource);
+      mkdirSync(junctionChild);
+      symlinkSync(junctionChild, junctionChildAlias, "junction");
+      const junctionChildBytes = sourceBytes(junctionChildSource);
+      const junctionChildEntriesBefore = readdirSync(junctionChildSource).sort();
+      const redirectedChildEntriesBefore = readdirSync(junctionChild).sort();
+      const junctionChildRun = run(["-From", junctionChildSource, "-To", junctionChildAlias, "-Force", "-EnvFile", noEnv]);
+      const targetJunctionChildEvidence = {
+        exit: junctionChildRun.code,
+        printedEnv: Boolean(envLine(junctionChildRun.out)),
+        sourceBytesPreserved: sourceBytes(junctionChildSource).equals(junctionChildBytes),
+        sourceEntriesPreserved: readdirSync(junctionChildSource).sort().join(",") === junctionChildEntriesBefore.join(","),
+        redirectedChildEntries: readdirSync(junctionChild).sort(),
+      };
+
+      const nestedSource = join(base, "nested-source");
+      const nestedTarget = join(nestedSource, "nested-target");
+      plant(nestedSource);
+      const nestedBytes = sourceBytes(nestedSource);
+      const nestedRun = run(["-From", nestedSource, "-To", nestedTarget, "-Force", "-EnvFile", noEnv]);
+      const nestedSafe = nestedRun.code === 1
+        && !existsSync(nestedTarget)
+        && !envLine(nestedRun.out)
+        && sourceBytes(nestedSource).equals(nestedBytes)
+        && readdirSync(nestedSource).sort().join(",") === "config.toml,install.json,redlib.exe";
+
+      const ancestorTarget = join(base, "ancestor-target");
+      const ancestorSource = join(ancestorTarget, "source");
+      plant(ancestorTarget);
+      plant(ancestorSource);
+      writeFileSync(join(ancestorTarget, "config.toml"), "preserve parent config\n", "utf8");
+      writeFileSync(join(ancestorTarget, "unrelated.keep"), "preserve unrelated file\n", "utf8");
+      const ancestorParentEntriesBefore = readdirSync(ancestorTarget).sort();
+      const ancestorParentConfigBefore = readFileSync(join(ancestorTarget, "config.toml"));
+      const ancestorParentInstallBefore = sourceBytes(ancestorTarget);
+      const ancestorParentExeBefore = readFileSync(join(ancestorTarget, "redlib.exe"));
+      const ancestorSourceBytes = sourceBytes(ancestorSource);
+      const ancestorRun = run(["-From", ancestorSource, "-To", ancestorTarget, "-Force", "-EnvFile", noEnv]);
+      const ancestorTargetEvidence = {
+        exit: ancestorRun.code,
+        printedEnv: Boolean(envLine(ancestorRun.out)),
+        parentEntriesPreserved: readdirSync(ancestorTarget).sort().join(",") === ancestorParentEntriesBefore.join(","),
+        parentConfigPreserved: readFileSync(join(ancestorTarget, "config.toml")).equals(ancestorParentConfigBefore),
+        parentInstallPreserved: sourceBytes(ancestorTarget).equals(ancestorParentInstallBefore),
+        parentExecutablePreserved: readFileSync(join(ancestorTarget, "redlib.exe")).equals(ancestorParentExeBefore),
+        sourceInstallPreserved: sourceBytes(ancestorSource).equals(ancestorSourceBytes),
+      };
+
+      const invalidMetadata = {};
+      for (const field of ["installRoot", "executable", "logPath"]) {
+        const root = join(base, `bad-${field}-source`);
+        const destination = join(base, `bad-${field}-target`);
+        const invalidPath = field === "installRoot"
+          ? join(base, `unrelated-${field}`)
+          : `${root}\\..\\unrelated-${field}\\redlib.${field === "executable" ? "exe" : "log"}`;
+        plant(root, { [field]: invalidPath });
+        const before = sourceBytes(root);
+        const result = run(["-From", root, "-To", destination, "-Force", "-EnvFile", noEnv]);
+        invalidMetadata[field] = result.code === 1
+          && !envLine(result.out)
+          && !existsSync(destination)
+          && sourceBytes(root).equals(before);
+      }
+
+      const hardlinkSource = join(base, "hardlink-source");
+      const hardlinkTarget = join(base, "hardlink-target");
+      const hardlinkExternal = join(base, "hardlink-external.txt");
+      const hardlinkNestedExternal = join(base, "hardlink-nested-external.txt");
+      plant(hardlinkSource);
+      writeFileSync(join(hardlinkSource, "redlib.exe"), "SOURCE-EXE-CONTENT", "utf8");
+      writeFileSync(join(hardlinkSource, "config.toml"), "SOURCE-CONFIG-CONTENT", "utf8");
+      mkdirSync(join(hardlinkSource, "assets", "nested"), { recursive: true });
+      writeFileSync(join(hardlinkSource, "assets", "nested", "payload.txt"), "SOURCE-NESTED-CONTENT", "utf8");
+      plant(hardlinkTarget);
+      unlinkSync(join(hardlinkTarget, "config.toml"));
+      mkdirSync(join(hardlinkTarget, "assets", "nested"), { recursive: true });
+      writeFileSync(join(hardlinkTarget, "keep.txt"), "KEEP-TARGET-ONLY", "utf8");
+      writeFileSync(join(hardlinkTarget, "assets", "nested", "keep.txt"), "KEEP-NESTED-TARGET-ONLY", "utf8");
+      writeFileSync(hardlinkExternal, "EXTERNAL-KEEP-CONTENT", "utf8");
+      writeFileSync(hardlinkNestedExternal, "EXTERNAL-NESTED-KEEP-CONTENT", "utf8");
+      linkSync(hardlinkExternal, join(hardlinkTarget, "config.toml"));
+      linkSync(hardlinkNestedExternal, join(hardlinkTarget, "assets", "nested", "payload.txt"));
+      const hardlinkSourceExeBefore = readFileSync(join(hardlinkSource, "redlib.exe"));
+      const hardlinkSourceConfigBefore = readFileSync(join(hardlinkSource, "config.toml"));
+      const hardlinkExternalBefore = readFileSync(hardlinkExternal);
+      const hardlinkNestedExternalBefore = readFileSync(hardlinkNestedExternal);
+      const hardlinkRun = run(["-From", hardlinkSource, "-To", hardlinkTarget, "-Force", "-EnvFile", noEnv]);
+      const hardlinkEvidence = {
+        exit: hardlinkRun.code,
+        sourceExecutablePreserved: readFileSync(join(hardlinkSource, "redlib.exe")).equals(hardlinkSourceExeBefore),
+        sourceConfigPreserved: readFileSync(join(hardlinkSource, "config.toml")).equals(hardlinkSourceConfigBefore),
+        externalHardlinkTargetPreserved: readFileSync(hardlinkExternal).equals(hardlinkExternalBefore),
+        nestedExternalHardlinkTargetPreserved: readFileSync(hardlinkNestedExternal).equals(hardlinkNestedExternalBefore),
+        copiedExecutableCorrect: existsSync(join(hardlinkTarget, "redlib.exe"))
+          && readFileSync(join(hardlinkTarget, "redlib.exe")).equals(hardlinkSourceExeBefore),
+        copiedConfigCorrect: readFileSync(join(hardlinkTarget, "config.toml")).equals(hardlinkSourceConfigBefore),
+        copiedNestedFileCorrect: readFileSync(join(hardlinkTarget, "assets", "nested", "payload.txt")).equals(Buffer.from("SOURCE-NESTED-CONTENT", "utf8")),
+        targetOnlyEntriesPreserved: readFileSync(join(hardlinkTarget, "keep.txt"), "utf8") === "KEEP-TARGET-ONLY"
+          && readFileSync(join(hardlinkTarget, "assets", "nested", "keep.txt"), "utf8") === "KEEP-NESTED-TARGET-ONLY",
+      };
+
+      const unownedSource = join(base, "unowned-source");
+      const unownedTarget = join(base, "unowned-target");
+      plant(unownedSource);
+      mkdirSync(unownedTarget);
+      writeFileSync(join(unownedTarget, "redlib.exe"), "UNOWNED-EXE-MUST-SURVIVE", "utf8");
+      writeFileSync(join(unownedTarget, "operator-data.txt"), "UNOWNED-DATA-MUST-SURVIVE", "utf8");
+      const unownedEntriesBefore = readdirSync(unownedTarget).sort();
+      const unownedExeBefore = readFileSync(join(unownedTarget, "redlib.exe"));
+      const unownedDataBefore = readFileSync(join(unownedTarget, "operator-data.txt"));
+      const unownedRun = run(["-From", unownedSource, "-To", unownedTarget, "-Force", "-EnvFile", noEnv]);
+      const unownedTargetRefused = unownedRun.code === 1
+        && /not an existing Redlib install|unowned/i.test(unownedRun.out)
+        && !envLine(unownedRun.out)
+        && !existsSync(join(unownedTarget, "install.json"))
+        && readdirSync(unownedTarget).sort().join(",") === unownedEntriesBefore.join(",")
+        && readFileSync(join(unownedTarget, "redlib.exe")).equals(unownedExeBefore)
+        && readFileSync(join(unownedTarget, "operator-data.txt")).equals(unownedDataBefore);
+
+      const shapeSource = join(base, "shape-source");
+      const shapeTarget = join(base, "shape-target");
+      plant(shapeSource);
+      writeFileSync(join(shapeSource, "zz-collision.txt"), "SOURCE-FILE", "utf8");
+      plant(shapeTarget);
+      mkdirSync(join(shapeTarget, "zz-collision.txt"));
+      writeFileSync(join(shapeTarget, "zz-collision.txt", "keep.txt"), "TARGET-DIRECTORY", "utf8");
+      const shapeTargetInstallBefore = sourceBytes(shapeTarget);
+      const shapeRun = run(["-From", shapeSource, "-To", shapeTarget, "-Force", "-EnvFile", noEnv]);
+      const shapeConflictRejectedBeforeWrite = shapeRun.code === 1
+        && !envLine(shapeRun.out)
+        && sourceBytes(shapeTarget).equals(shapeTargetInstallBefore)
+        && readFileSync(join(shapeTarget, "zz-collision.txt", "keep.txt"), "utf8") === "TARGET-DIRECTORY";
+
+      const reparseSource = join(base, "reparse-source");
+      const reparseTarget = join(base, "reparse-target");
+      const reparseExternal = join(base, "reparse-external");
+      plant(reparseSource);
+      mkdirSync(join(reparseSource, "collision"));
+      writeFileSync(join(reparseSource, "collision", "payload.txt"), "SOURCE-PAYLOAD", "utf8");
+      plant(reparseTarget);
+      mkdirSync(reparseExternal);
+      writeFileSync(join(reparseExternal, "keep.txt"), "EXTERNAL-KEEP", "utf8");
+      symlinkSync(reparseExternal, join(reparseTarget, "collision"), "junction");
+      const reparseTargetInstallBefore = sourceBytes(reparseTarget);
+      const reparseExternalBefore = readFileSync(join(reparseExternal, "keep.txt"));
+      const reparseRun = run(["-From", reparseSource, "-To", reparseTarget, "-Force", "-EnvFile", noEnv]);
+      const reparseConflictRejectedBeforeWrite = reparseRun.code === 1
+        && !envLine(reparseRun.out)
+        && sourceBytes(reparseTarget).equals(reparseTargetInstallBefore)
+        && readFileSync(join(reparseExternal, "keep.txt")).equals(reparseExternalBefore);
+
+      const evidence = {
+        explicitAlias: { exit: aliasRun.code, printedEnv: Boolean(envLine(aliasRun.out)), allPathFieldsAndArrayNoteRewritten: aliasFieldsCorrect },
+        autoDiscoveredAlias: { exit: autoRun.code, printedEnv: Boolean(envLine(autoRun.out)), allPathFieldsAndArrayNoteRewritten: autoFieldsCorrect },
+        sandboxedLogicalRoot: sandboxLogicalMappingCorrect,
+        similarPathOutsideSandboxRejected: similarPathRejected,
+        localAppDataSiblingPrefixStaysOutside: siblingPrefixStaysOutside,
+        externalLookingAppDataJunctionRejected: appDataJunctionRejected,
+        forceSamePlaceAliasPreservesSource: samePlaceSafe,
+        runningTargetInstallRefusedBeforeUnlink: liveTargetEvidence,
+        stalePidRunningImageRefusedBeforeUnlink: stalePidTargetEvidence,
+        failedCopyRestoresPreviousDestination: {
+          exit: rollbackRun.code,
+          priorMetadataAndFilesRestored: rollbackTargetRestored,
+          copyFailureReported: /destination copy did not complete/i.test(rollbackRun.out),
+        },
+        lockedDestinationFileRefusedBeforeReplacement: {
+          exit: lockedTargetRun.code,
+          destinationPreserved: lockedTargetRefused,
+          refusalReported: /cannot be safely replaced right now/i.test(lockedTargetRun.out),
+        },
+        unresolvedExistingPathIdentityFailsClosed: unresolvedIdentityRejected,
+        forceJunctionToSource: sameJunctionEvidence,
+        junctionToSourceChild: targetJunctionChildEvidence,
+        nestedTargetRejectedBeforeSourceMutation: nestedSafe,
+        ancestorTarget: ancestorTargetEvidence,
+        invalidRequiredMetadataRejectedBeforeAdvice: invalidMetadata,
+        hardlinkReplacementPreservesAllOtherLinks: hardlinkEvidence,
+        unownedNonemptyTargetRefusedEvenWithForce: unownedTargetRefused,
+        fileDirectoryConflictRejectedBeforeWrite: shapeConflictRejectedBeforeWrite,
+        targetReparseConflictRejectedBeforeWrite: reparseConflictRejectedBeforeWrite,
+      };
+      assert.deepEqual(
+        evidence,
+        {
+          explicitAlias: { exit: 0, printedEnv: true, allPathFieldsAndArrayNoteRewritten: true },
+          autoDiscoveredAlias: { exit: 0, printedEnv: true, allPathFieldsAndArrayNoteRewritten: true },
+          sandboxedLogicalRoot: true,
+          similarPathOutsideSandboxRejected: true,
+          localAppDataSiblingPrefixStaysOutside: true,
+          externalLookingAppDataJunctionRejected: true,
+          forceSamePlaceAliasPreservesSource: true,
+          runningTargetInstallRefusedBeforeUnlink: {
+            exit: 1,
+            refusedBeforeReplace: true,
+            processStillRunning: true,
+            installMetadataPreserved: true,
+            executablePreserved: true,
+            pidFilePreserved: true,
+          },
+          stalePidRunningImageRefusedBeforeUnlink: {
+            exit: 1,
+            refusedBeforeReplace: true,
+            processStillRunning: true,
+            installMetadataPreserved: true,
+            executablePreserved: true,
+            stalePidPreserved: true,
+          },
+          failedCopyRestoresPreviousDestination: {
+            exit: 1,
+            priorMetadataAndFilesRestored: true,
+            copyFailureReported: true,
+          },
+          lockedDestinationFileRefusedBeforeReplacement: {
+            exit: 1,
+            destinationPreserved: true,
+            refusalReported: true,
+          },
+          unresolvedExistingPathIdentityFailsClosed: true,
+          forceJunctionToSource: {
+            exit: 0,
+            printedEnv: true,
+            sourceBytesPreserved: true,
+            sourceEntriesPreserved: true,
+            printedRootResolvesToSource: true,
+          },
+          junctionToSourceChild: {
+            exit: 1,
+            printedEnv: false,
+            sourceBytesPreserved: true,
+            sourceEntriesPreserved: true,
+            redirectedChildEntries: redirectedChildEntriesBefore,
+          },
+          nestedTargetRejectedBeforeSourceMutation: true,
+          ancestorTarget: {
+            exit: 1,
+            printedEnv: false,
+            parentEntriesPreserved: true,
+            parentConfigPreserved: true,
+            parentInstallPreserved: true,
+            parentExecutablePreserved: true,
+            sourceInstallPreserved: true,
+          },
+          invalidRequiredMetadataRejectedBeforeAdvice: { installRoot: true, executable: true, logPath: true },
+          hardlinkReplacementPreservesAllOtherLinks: {
+            exit: 0,
+            sourceExecutablePreserved: true,
+            sourceConfigPreserved: true,
+            externalHardlinkTargetPreserved: true,
+            nestedExternalHardlinkTargetPreserved: true,
+            copiedExecutableCorrect: true,
+            copiedConfigCorrect: true,
+            copiedNestedFileCorrect: true,
+            targetOnlyEntriesPreserved: true,
+          },
+          unownedNonemptyTargetRefusedEvenWithForce: true,
+          fileDirectoryConflictRejectedBeforeWrite: true,
+          targetReparseConflictRejectedBeforeWrite: true,
+        },
+        JSON.stringify({ aliasOutput: aliasRun.out, autoOutput: autoRun.out, sandboxOutput: sandboxRun.out, ordinaryOutput: ordinaryRun.out, siblingPrefixOutput: siblingPrefixRun.out, appDataJunctionOutput: appDataJunctionRun.out, unresolvedIdentityOutput: unresolvedRun.out, junctionOutput: junctionRun.out, junctionChildOutput: junctionChildRun.out, nestedOutput: nestedRun.out, ancestorOutput: ancestorRun.out, invalidMetadata, unownedOutput: unownedRun.out, shapeOutput: shapeRun.out, reparseOutput: reparseRun.out, liveTargetOutput: liveTargetRun.out, liveTargetEvidence, stalePidTargetOutput: stalePidTargetRun.out, stalePidTargetEvidence }, null, 2),
+      );
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
@@ -1710,6 +2543,7 @@ test(
     assert.match(text, /\$script:backupDir = Join-Path \$script:world "townreporter-backups"/, "with the local folder inside that temp world, never the real sibling");
     assert.match(text, /throw 'there is no pg_dump on this machine'/, "the dumps must be written by a stub, so no database is ever dumped");
     assert.ok(text.includes("-DumpCommand $dumpGood"), "and every run must be given that stub");
+    assert.match(text, /\$conds = Get-TownReporterBackupAlertConditions[^\r\n]*-MinFreeGb 1/, "the fake temp volume must use an explicit small reserve rather than assume the CI host has 100 GB free");
     // 5433 appears twice, and both times as text written into a fake .env --
     // the port is read for the database NAME off the URL and never connected
     // to. Anything else containing the live port is the start of a real
@@ -1832,7 +2666,6 @@ test(
       "the fixture must touch nothing live -- a temp directory only",
     );
     assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
-
     let out = "";
     let code = 0;
     try {
@@ -1846,7 +2679,7 @@ test(
       code = err.status ?? -1;
     }
     assert.doesNotMatch(out, /FAIL/, `a hash check failed:\n${out}`);
-    assert.match(out, /file hashing without a module: every check passed/, `the fixture did not reach its end:\n${out}`);
+    assert.match(out, /file hashing without Get-FileHash: every check passed/, `the fixture did not reach its end:\n${out}`);
     assert.equal(code, 0, `the fixture exited ${code}:\n${out}`);
   },
 );
@@ -2116,6 +2949,7 @@ test(
     assert.match(text, /WATCHDOG_STAGE_APP/, "the harness must run the real watchdog against its disposable stage world");
     assert.match(text, /\$candidate -ne 3100/, "every port it picks must be one this machine's own copy is not on");
     assert.match(text, /GetTempPath\(\)/, "and its world must be built under the OS temp directory");
+    assert.match(text, /function Wait-ForStub\([\s\S]*?\.AddSeconds\(\$Seconds\)[\s\S]*?OwningProcess -eq \$ProcessId/, "stub readiness must be bounded and belong to this harness's child process");
     /*
       Unit BX. The machine-wide staged-copy pointer is read at call time from
       %LOCALAPPDATA%, and this machine has one (it names the 3100 copy), so the
@@ -2131,6 +2965,9 @@ test(
       "the fixture must point LOCALAPPDATA inside its own world, so the operator's real pointer is neither read nor written",
     );
     assert.match(text, /\$env:LOCALAPPDATA = \$fakeLocalAppData/, "and it must actually set it");
+    const pgReadyAt = text.indexOf("Wait-ForStub $pgPort $stubPgPid 30");
+    const firstWatchdogAt = text.indexOf("$run = Invoke-Watchdog 'reboot'");
+    assert.ok(pgReadyAt >= 0 && pgReadyAt < firstWatchdogAt, "the bounded wait for this run's PostgreSQL listener must finish before the watchdog starts");
     assert.match(
       text,
       /\$env:LOCALAPPDATA = \$previousLocalAppData|Remove-Item Env:\\LOCALAPPDATA/,

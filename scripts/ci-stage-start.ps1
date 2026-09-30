@@ -158,6 +158,20 @@ function Start-Stub([string]$Script, [int]$Port, [string]$LogName) {
   }
 }
 
+# Start-Process returns before Node has bound its socket. Wait for this exact
+# child PID's listener so a busy CI runner cannot race the watchdog's probe.
+function Wait-ForStub([int]$Port, [int]$ProcessId, [int]$Seconds) {
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $false }
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+      Where-Object { [int]$_.OwningProcess -eq $ProcessId })
+    if ($listeners.Count -gt 0) { return $true }
+    Start-Sleep -Milliseconds 200
+  }
+  return $false
+}
+
 $stubAppPid = Start-Stub (Join-Path $world 'stub-app.mjs') $appPort 'stub-app'
 $stubPgPid = Start-Stub (Join-Path $world 'stub-pg.mjs') $pgPort 'stub-pg'
 
@@ -255,7 +269,16 @@ $env:WATCHDOG_STAGE_APP = $app
 $env:PUBLIC_SITE_URL = "http://127.0.0.1:$appPort/"
 
 try {
-  Start-Sleep -Seconds 2
+  if (-not (Wait-ForStub $pgPort $stubPgPid 30)) {
+    $details = @((Get-Content -LiteralPath (Join-Path $world 'stub-pg.out') -Raw -ErrorAction SilentlyContinue),
+      (Get-Content -LiteralPath (Join-Path $world 'stub-pg.err') -Raw -ErrorAction SilentlyContinue)) -join ' '
+    throw "The disposable PostgreSQL listener did not start on $pgPort within 30 seconds (PID $stubPgPid). $details"
+  }
+  if (-not (Wait-ForStub $appPort $stubAppPid 30)) {
+    $details = @((Get-Content -LiteralPath (Join-Path $world 'stub-app.out') -Raw -ErrorAction SilentlyContinue),
+      (Get-Content -LiteralPath (Join-Path $world 'stub-app.err') -Raw -ErrorAction SilentlyContinue)) -join ' '
+    throw "The disposable app listener did not start on $appPort within 30 seconds (PID $stubAppPid). $details"
+  }
 
   # --- 1. The reboot: staged on disk, nothing answering, nothing recorded ---
   Say ''
