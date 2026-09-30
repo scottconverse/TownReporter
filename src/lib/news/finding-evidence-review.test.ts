@@ -20,10 +20,18 @@ async function reset() {
     id serial primary key,user_id text,newsroom_id integer not null,lead_id integer not null,
     headline text,dek text,body text,topic text,source_urls text,provenance_json text,
     found_note text,unanswered text,research_json text,updated_at timestamptz default now())`);
+  /*
+    Unit U11b: the real column is added by migrations/0110_evidence_capture_takedown.sql
+    and mirrored in investigate.ts's ensure list. This file's scratch table is
+    a hand-made copy of the real one, so it carries it too -- the loader reads
+    it for every cited version, and a fixture without it fails on the read
+    rather than on the property under test.
+  */
   await sql.query(`create table if not exists artifact_versions(
     id serial primary key,user_id text,newsroom_id integer not null,url text,content_hash text,
     title text,full_text text,fetch_status integer,fetch_outcome text,content_type text,
-    captured_at timestamptz default now())`);
+    captured_at timestamptz default now(),taken_down_at timestamptz,
+    taken_down_reason text,taken_down_link_kept boolean not null default true)`);
   await sql.query(`create table if not exists capture_events(
     id serial primary key,user_id text,newsroom_id integer not null,investigation_id integer,
     source_url text,observed_at timestamptz default now(),http_status integer,fetch_outcome text,

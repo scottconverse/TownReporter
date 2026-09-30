@@ -1239,7 +1239,7 @@ masked name reads stiffly ("an unidentified speaker"). YouTube can rate-limit a 
 | `/articles/:slug`                            | A story                                                                                    |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
 | `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
-| `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited                                    |
+| `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited — or the notice, if the owner took that excerpt down at a publisher's request |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                 |
 | `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                        |
 | `/login`                                     | Create an editor account, or sign in                                                       |
@@ -1323,6 +1323,21 @@ Open **Published → Legal removal** beside a story, or **Published → Legal re
 5. The result opens its case. **Open owner-only retained text (audited)** is available until expiry under the retention policy. There is no restore button. Record affected backup identifiers and operator cleanup attestations here. An attestation records what an operator reports; it is not independently verified erasure.
 
 Fresh public article/feed/sitemap reads stop returning removed stories. Existing browser caches, downloads, external search caches, provider history, database logs and backups are outside the application's erasure proof. An older database restore can reintroduce removed content; the local operator must reconcile removal cases before serving restored data. Exact known URL checks include query/fragment/trailing-slash and percent-encoded slug aliases. Unlinked prose, malformed historical records, old deployment origins and unknown external copies still need owner/operator review. Do not treat this workflow as proof that no copy exists anywhere.
+
+## Taking down one captured excerpt (owner workflow)
+
+When a publisher objects to one captured page rather than to a story, the owner takes that capture down alone. This is not the legal-removal process: no story, lead, draft or watch is touched, and nothing else in the edition changes.
+
+1. Open the story in the desk, **Checks** tab, and find the finding or claim that cited the capture. Press **View cited captured version** — the pane shows the stored text that is about to come down.
+2. Press **Take down this capture**. Editors do not see this press, and the server refuses any role but the owner.
+3. Give a short reason. Tick **Remove the link to the original too** only if the publisher asked for that as well; left unticked, the public notice keeps the link. Press **Take down this capture** to confirm. The confirm says, in the desk, that there is no restore.
+4. The excerpt, the extracted text and the original file are deleted from the database in one transaction, with one audit row recording who, when, the reason and the capture id.
+
+What changes for a reader: `/evidence/:versionId` prints "This excerpt was removed at the publisher's request" instead of an excerpt and, unless the box was ticked, the link to the original. The reason is never shown to a reader. What does not change: the record keeps its address, capture time, byte length and content hash, so a published story that cited the capture still prints its citation and that citation still resolves — to the notice. Judgments in the desk that bound to the captured text are no longer current and return to unreviewed, because the text they bound to is gone.
+
+This action purges the capture itself: the version's stored text, its extracted passages and its original file. It does not go looking for other copies of the same page under a different identity — a Dark Desk artifact, a source snapshot, a search index, an operator's backup. Those are separate records, and resolving a whole URL's copies is what the legal-removal workflow above lists for an operator; it is not part of this single-capture action.
+
+There is no restore. Re-capturing the page creates a new record with a new hash; it does not undo the takedown, and the audit row stands. Backups, provider caches and copies outside this database are outside the application's proof, as with legal removal.
 
 ---
 

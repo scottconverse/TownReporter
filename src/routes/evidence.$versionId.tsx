@@ -79,7 +79,14 @@ function EvidencePage() {
         <div>
           <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">Source URL</dt>
           <dd className="mt-1 break-all">
-            {record.disappeared ? (
+            {/*
+              A taken-down capture whose editor ticked "remove the link too"
+              prints the address and does not link it -- the same treatment a
+              vanished source already gets here. The address itself is the
+              record, and is not the part that was asked to come down.
+            */}
+            {record.disappeared ||
+            (record.excerpt_removed && !record.excerpt_removed_link_kept) ? (
               record.url
             ) : (
               <a
@@ -114,7 +121,17 @@ function EvidencePage() {
         ) : null}
         <div>
           <dt className="text-[11px] tracking-[0.14em] text-muted uppercase">
-            {record.has_original_bytes ? "SHA-256 of original file" : "SHA-256 of extracted text"}
+            {/*
+              A taken-down capture holds neither the original file nor the
+              extracted text, so neither of the two ordinary labels is true of
+              it. What is left -- and what a citation needs -- is the digest
+              recorded when the page was captured.
+            */}
+            {record.excerpt_removed
+              ? "SHA-256 recorded for this capture"
+              : record.has_original_bytes
+                ? "SHA-256 of original file"
+                : "SHA-256 of extracted text"}
           </dt>
           <dd className="mt-1 break-all font-mono text-xs">{record.content_hash || "—"}</dd>
         </div>
@@ -147,27 +164,62 @@ function EvidencePage() {
         </section>
       ) : null}
       {/*
-        An excerpt, and it says so.
+        An excerpt, and it says so -- or the notice, when the publisher asked
+        for this one capture to come down (unit U11b).
 
         This block used to print up to 80,000 characters of the page we
         captured -- somebody else's article, whole, on a public page. The
         record still shows what we cited and where it came from; the reading
         happens at the source, which is what the link below is for.
+
+        The notice is what a citation pointing here now lands on: the story
+        that cited the capture still prints its citation, this address still
+        resolves, and what it says is that the excerpt was removed -- not why,
+        and not what an editor wrote about it. `excerpt` is empty for these
+        rows because the text is gone from the database, not hidden from this
+        page, so the notice is driven by `excerpt_removed` rather than by the
+        excerpt being blank: "(no extractable text in this capture)" is a
+        different fact and would be a false one here.
       */}
       <section className="mt-8 max-w-2xl">
         <h2 className="text-[11px] tracking-[0.16em] text-muted uppercase">
           Excerpt of the captured record
         </h2>
-        <div className="mt-3 whitespace-pre-wrap border-l-2 border-rule pl-4 text-sm leading-6 text-ink-2">
-          {record.disappeared && !record.excerpt
-            ? "(source unavailable at this check)"
-            : record.excerpt || "(no extractable text in this capture)"}
-        </div>
+        {record.excerpt_removed ? (
+          <div
+            role="status"
+            className="mt-3 border-l-2 border-rule pl-4 text-sm leading-6 text-ink-2"
+          >
+            This excerpt was removed at the publisher’s request.
+            {record.excerpt_removed_link_kept && record.url ? (
+              <>
+                {" "}
+                The original is at:{" "}
+                <a
+                  href={record.url}
+                  className="break-all text-rust underline hover:text-rust-2"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {record.url}
+                </a>
+                .
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-3 whitespace-pre-wrap border-l-2 border-rule pl-4 text-sm leading-6 text-ink-2">
+            {record.disappeared && !record.excerpt
+              ? "(source unavailable at this check)"
+              : record.excerpt || "(no extractable text in this capture)"}
+          </div>
+        )}
         <p className="mt-3 text-sm text-muted">
-          A short excerpt. TownReporter keeps the full capture for its own records and does not
-          republish the original page.
+          {record.excerpt_removed
+            ? "TownReporter deleted its stored copy of this capture. The record’s address, hash and capture history remain, so the citations that point here still resolve."
+            : "A short excerpt. TownReporter keeps the full capture for its own records and does not republish the original page."}
         </p>
-        {record.url ? (
+        {record.url && !record.excerpt_removed ? (
           <p className="mt-4 text-base">
             {record.disappeared ? (
               <span className="text-muted">

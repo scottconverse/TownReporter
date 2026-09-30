@@ -232,8 +232,25 @@ export type PublicEvidence = {
   /**
    * A short excerpt of the capture, never the capture. See `PUBLIC_EXCERPT_MAX`.
    * Named for what it is so no caller can mistake it for the stored text.
+   *
+   * Empty when `excerpt_removed` is true: the text is not withheld here, it is
+   * gone from the database (see `evidence-takedown.ts`), and this record is the
+   * shape the notice is printed from.
    */
   excerpt: string;
+  /**
+   * The publisher asked for this capture's excerpt to come down, and an owner
+   * took it down: the page shows a notice where the excerpt would be. There is
+   * no restore, and no reason travels with this record -- the notice says the
+   * publisher asked and never what the desk wrote about it.
+   */
+  excerpt_removed: boolean;
+  /**
+   * Whether the notice (and the record's other links) may still point at the
+   * original. True by default -- the point of the page is the reader's way to
+   * the source -- and false only when the editor ticked "remove the link too".
+   */
+  excerpt_removed_link_kept: boolean;
   has_original_bytes: boolean;
   byte_length: number | null;
   observation: CaptureObservationKind;
@@ -445,6 +462,14 @@ type CaptureRow = {
   url: string;
   full_text: string | null;
   version_hash: string | null;
+  /**
+   * Unit U11b. `taken_down_at` non-null means the stored text is purged and a
+   * reader gets the notice; `taken_down_link_kept` decides whether that notice
+   * still links out. Both live on the version, so a capture event whose version
+   * is missing carries null and is an ordinary row.
+   */
+  taken_down_at: string | null;
+  taken_down_link_kept: boolean | null;
 };
 
 async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
@@ -454,7 +479,8 @@ async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
     select ce.id as capture_event_id, av.id as version_id, ce.observed_at::text as observed_at,
       ce.fetch_outcome, ce.disappearance, coalesce(ce.content_hash, av.content_hash) as content_hash,
       coalesce(av.title, '') as title, ce.source_url as url,
-      av.full_text as full_text, av.content_hash as version_hash
+      av.full_text as full_text, av.content_hash as version_hash,
+      av.taken_down_at::text as taken_down_at, av.taken_down_link_kept
     from capture_events ce
     left join artifact_versions av
       on av.id = ce.version_id
@@ -469,7 +495,8 @@ async function loadCapturesForUrl(url: string): Promise<CaptureRow[]> {
   const versions = await sql<CaptureRow>`
     select av.id as capture_event_id, av.id as version_id, av.captured_at::text as observed_at,
       av.fetch_outcome, false as disappearance, av.content_hash as content_hash,
-      av.title as title, av.url as url, av.full_text as full_text, av.content_hash as version_hash
+      av.title as title, av.url as url, av.full_text as full_text, av.content_hash as version_hash,
+      av.taken_down_at::text as taken_down_at, av.taken_down_link_kept
     from artifact_versions av
     where av.newsroom_id = ${DEFAULT_NEWSROOM_ID} and av.url in (${url}, ${canonical})
     order by av.captured_at asc, av.id asc
@@ -514,6 +541,22 @@ async function asPublicEvidence(
   const blob = await blobForVersion(row.version_id);
   const gone = classified?.disappeared ?? goneOutcome(row.fetch_outcome, row.disappearance);
   const fullText = row.full_text || "";
+  /*
+    A taken-down capture is a public RECORD with no public TEXT.
+
+    Nothing is excerpted here -- `fullText` is already empty, because the desk
+    purged it -- but the empty string is not the whole answer: a reader would
+    otherwise be shown "(no extractable text in this capture)", which is a
+    different and misleading fact. `excerpt_removed` is what tells the page to
+    print the notice instead, and it is read from the capture row's own
+    `taken_down_at`, never from the shape of the text.
+
+    `has_original_bytes`/`byte_length` report false/null while taken down: the
+    page used to say "TownReporter kept the original bytes", and that sentence
+    is not true of a capture whose bytes this same action emptied. The hash and
+    the URL stay, so the record, the citation and the audit all still line up.
+  */
+  const takenDown = Boolean(row.taken_down_at);
   return {
     fullText,
     record: {
@@ -525,9 +568,11 @@ async function asPublicEvidence(
       content_hash: row.version_hash || row.content_hash || "",
       fetch_outcome: row.fetch_outcome,
       disappeared: gone,
-      excerpt: publicExcerpt(fullText, receipts),
-      has_original_bytes: Boolean(blob?.byte_length),
-      byte_length: blob?.byte_length ?? null,
+      excerpt: takenDown ? "" : publicExcerpt(fullText, receipts),
+      excerpt_removed: takenDown,
+      excerpt_removed_link_kept: row.taken_down_link_kept !== false,
+      has_original_bytes: takenDown ? false : Boolean(blob?.byte_length),
+      byte_length: takenDown ? null : blob?.byte_length ?? null,
       observation: classified?.observation ?? (gone ? "unavailable" : "captured"),
       previously_observed_at: classified?.previously_observed_at ?? null,
       content_label: classified?.content_label || (row.version_id != null ? `Content version ${row.version_id}` : ""),
@@ -574,8 +619,11 @@ async function loadVersion(id: number): Promise<LoadedEvidence | null> {
     content_hash: string;
     fetch_outcome: string;
     full_text: string;
+    taken_down_at: string | null;
+    taken_down_link_kept: boolean | null;
   }>`
-    select id, url, title, captured_at::text as captured_at, content_hash, fetch_outcome, full_text
+    select id, url, title, captured_at::text as captured_at, content_hash, fetch_outcome, full_text,
+      taken_down_at::text as taken_down_at, taken_down_link_kept
     from artifact_versions
     where id = ${id} and newsroom_id = ${DEFAULT_NEWSROOM_ID} limit 1
   `;
@@ -611,6 +659,8 @@ async function loadVersion(id: number): Promise<LoadedEvidence | null> {
     url: row.url,
     full_text: row.full_text,
     version_hash: row.content_hash,
+    taken_down_at: row.taken_down_at,
+    taken_down_link_kept: row.taken_down_link_kept,
   };
   return asPublicEvidence(
     captureRow,
