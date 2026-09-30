@@ -2,6 +2,7 @@ import { assertPublicHttpUrl, fetchPublicHttp, resolveFetch } from "./fetch-url.
 import { assertHttpUrl } from "./url-guard.ts";
 import { classifySearchHtml, type SearchState } from "./fetch-outcome.ts";
 import { HaloGatewayProviderError, haloGatewaySearch } from "./halo-search.ts";
+import { boilerplatePageReason } from "./result-quality.ts";
 import { queryTokens } from "./retrieve.ts";
 
 export type WebHit = { title: string; url: string; snippet: string; provider?: string };
@@ -589,6 +590,41 @@ function mergeHits(target: WebHit[], attempt: SearchAttempt, tokens: string[]): 
   }
 }
 
+/**
+ * Drop the results that are not the article, and say which rule refused them.
+ *
+ * Unit U25, B2. A dictionary entry, an app landing page, another engine's own
+ * page or a consent wall can come back for any query, and once it is in the
+ * list the first entry is what the caller writes down as the source. Measured
+ * on the Kid City USA dig: `www.youtubekids.com` was `hits[0]` for four good
+ * queries, and Dictionary.com, Merriam-Webster and Under Armour pages were
+ * captured as records of a daycare closure.
+ *
+ * The refusal is a warning on the attempt rather than a silent drop, so a
+ * provider that answered only with boilerplate reads as such in the lineage
+ * instead of looking like a provider that found the article.
+ */
+function refuseBoilerplateHits(attempt: SearchAttempt): SearchAttempt {
+  if (!attempt.hits.length) return attempt;
+  const refused: string[] = [];
+  const hits = attempt.hits.filter((hit) => {
+    const why = boilerplatePageReason(hit.url);
+    if (why) refused.push(`${why}: ${hit.url.slice(0, 160)}`);
+    return !why;
+  });
+  if (!refused.length) return attempt;
+  const warnings = [...new Set([...(attempt.warnings ?? []), ...refused.map((r) => `REFUSED_RESULT ${r}`)])];
+  if (hits.length) return { ...attempt, hits, warnings };
+  return {
+    ...attempt,
+    hits: [],
+    warnings,
+    // A provider whose every result was refused did not find the article; it
+    // found pages that are not records. That is a zero, said out loud.
+    state: attempt.state === "SEARCH_SUCCESS_RESULTS" ? "SEARCH_SUCCESS_ZERO_RESULTS" : attempt.state,
+  };
+}
+
 export async function searchWithFallback(
   query: string,
   fallbackProviders: SearchProvider[] = [
@@ -633,7 +669,7 @@ export async function searchWithFallback(
       fn.name ??
       "search provider";
     await onProgress?.({ provider, phase: "started" });
-    const attempt = await fn(q, signal);
+    const attempt = refuseBoilerplateHits(await fn(q, signal));
     signal?.throwIfAborted();
     await onProgress?.({
       provider: attempt.provider || provider,

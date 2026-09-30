@@ -87,6 +87,61 @@ describe("worth-a-look card text (UX-003)", () => {
     assert.doesNotMatch(ocr!.why, /OCR incomplete/i);
   });
 
+  /*
+    Unit U25, C1. After the Kid City USA dig the desk's own junk came back to
+    the front page as "Signals to review · New material. Nobody has opened it
+    yet.": "Courier Delivery Service", "Dark Desk encountered this again while
+    reviewing a Jetdelivery page", "…a Californiacourierservices page", "…a
+    Englishfortheplanet page", "…a Dictionary page". None was new — the reopen
+    path treated a re-discovered page's own URL as materially new evidence.
+
+    THE MUTATION THAT MATTERS. Deleting the `resurfaceRefusalReason` guard from
+    the frontier loop in worth-a-look.ts fails "keeps the desk's own junk off
+    the front page"; deleting it for `open` items too fails the second case.
+  */
+  it("keeps the desk's own junk off the front page", () => {
+    const junk = [
+      { label: "https://dictionary.com/browse/under", title: "UNDER Definition & Meaning | Dictionary.com" },
+      { label: "https://englishfortheplanet.com/english-vocabulary/under", title: "under" },
+      { label: "https://outlook.office.com/mail", title: "Outlook" },
+    ];
+    const cards = rankWorthItems({
+      frontier: junk.map((page) => ({
+        label: page.label,
+        kind: "url",
+        why: "Fetched",
+        status: "reopened",
+        closed_reason: "Reopened from resolved: materially new evidence.",
+        evidence: page.label,
+      })),
+    }).map(presentWorthItem);
+    assert.deepEqual(cards, [], `the desk's own junk came back: ${cards.map((c) => c.title).join(", ")}`);
+  });
+
+  it("still offers a genuinely open search hit, and a real reopened one", () => {
+    const cards = rankWorthItems({
+      frontier: [
+        {
+          label: "https://cdhs.colorado.gov/child-care-facility-search",
+          kind: "url",
+          why: "Search hit for \"Kid City USA\" Colorado child care license",
+          status: "open",
+          closed_reason: null,
+          evidence: "Child care facility search",
+        },
+        {
+          label: "https://longmontcolorado.gov/minutes-2026-04",
+          kind: "url",
+          why: "Fetched",
+          status: "reopened",
+          closed_reason: "Reopened from resolved: materially new evidence.",
+          evidence: "The minutes record a vote on the daycare's conditional use permit.",
+        },
+      ],
+    }).map(presentWorthItem);
+    assert.equal(cards.length, 2, `a real item was suppressed: ${cards.map((c) => c.title).join(", ")}`);
+  });
+
   it("collapses cards that present identically instead of showing exact duplicates", () => {
     // Two separate discovery rows for the same finding — this is exactly the
     // shape the audit saw ("several cards were exact duplicates"): distinct

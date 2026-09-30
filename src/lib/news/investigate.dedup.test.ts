@@ -93,6 +93,60 @@ describe("persistDiscovery dedup (Dark Desk F4)", () => {
     assert.equal(rows2.length, 2);
   });
 
+  /*
+    Unit U25, C1. A page the desk has already fetched and parked does not come
+    back as "new material" because the same URL turned up again. The reopen
+    path hands `mergeIntoExisting` the re-discovered URL as its evidence, and
+    "≥8 characters and not seen before" is not a test of whether anything new
+    is known.
+
+    THE MUTATION THAT MATTERS. Removing `resurfaceRefused` from the
+    `newEvidence` expression fails this case, and the desk's own junk returns
+    to the Dark Desk front page.
+  */
+  it("does not reopen a parked page just because its own URL came round again", async () => {
+    const user = `dedup-reopen-${Date.now()}`;
+    const { sql, id } = await bootInv(user, "Reopen guard");
+    const page = "https://jetdelivery.com/locations/ca/orange-county";
+
+    await persistDiscovery(user, id, {
+      kind: "url",
+      label: page,
+      why: "Search hit for \"Courier Corporation\" Longmont",
+      evidence: "Same-Day Courier & Freight Delivery in Orange County",
+    });
+    await sql`
+      update frontier_items set status = ${"resolved"}, closed_reason = ${"Fetched"}
+      where investigation_id = ${id}
+    `;
+
+    // The same address, re-discovered later in the run: what the leftover-URL
+    // and attachment branches pass as `evidence`.
+    await persistDiscovery(user, id, {
+      kind: "url",
+      label: page,
+      why: "Discovered this hop — fetch next",
+      evidence: page,
+    });
+
+    const [row] = await sql<{ status: string }>`
+      select status from frontier_items where investigation_id = ${id} and label = ${page}
+    `;
+    assert.equal(row!.status, "resolved", "a page's own address was taken as new evidence");
+
+    // Real evidence about the page does reopen it -- the guard is narrow.
+    await persistDiscovery(user, id, {
+      kind: "url",
+      label: page,
+      why: "Fetched",
+      evidence: "The page now names the Longmont franchise as a closed location.",
+    });
+    const [reopened] = await sql<{ status: string }>`
+      select status from frontier_items where investigation_id = ${id} and label = ${page}
+    `;
+    assert.equal(reopened!.status, "reopened", "a genuinely new finding could not reopen the item");
+  });
+
   it("the unique index rejects a literal duplicate insert made outside persistDiscovery", async () => {
     const user = `dedup-index-${Date.now()}`;
     const { sql, id } = await bootInv(user, "Direct insert race");
@@ -109,6 +163,73 @@ describe("persistDiscovery dedup (Dark Desk F4)", () => {
       `,
       /duplicate key|unique/i,
     );
+  });
+});
+
+/**
+ * Unit U25, B4 — the editor can stop a running dig.
+ *
+ * The walkthrough scanned every button and summary on `/desk/dark` for
+ * /stop|pause|halt|cancel|abandon/ and found none, twice, during a live run: a
+ * dig ended only at its own hop, time or call limit. The seam is
+ * `throwIfCancelled`, read at each hop and each search; it must THROW, so the
+ * round leaves the loop instead of looking like a run that finished.
+ *
+ * THE MUTATION THAT MATTERS. Removing the `await opts.throwIfCancelled?.()`
+ * from the top of the hop loop runs all three hops after the stop.
+ */
+describe("stopping a running dig (Dark Desk U25 B4)", () => {
+  it("leaves the hop loop at the boundary the stop landed on", async () => {
+    const user = `stop-dig-${Date.now()}`;
+    const { id } = await bootInv(user, "Stop a dig");
+    let planned = 0;
+    let searched = 0;
+    const cancelled = new Error("Cancelled by the editor");
+
+    await assert.rejects(
+      researchLoop({
+        userId: user,
+        investigationId: id,
+        hops: 3,
+        search: async () => {
+          searched += 1;
+          return [];
+        },
+        fetch: async () => ({ ok: false, status: 404, text: "", title: "", extras: [] }),
+        planner: async () => {
+          planned += 1;
+          return { ...emptyPlan(), searches: [`query ${planned}`] };
+        },
+        archives: async () => [],
+        throwIfCancelled: async () => {
+          throw cancelled;
+        },
+      }),
+      /Cancelled by the editor/,
+    );
+    assert.equal(planned, 0, "a hop was planned after the editor stopped the run");
+    assert.equal(searched, 0, "a search ran after the editor stopped the run");
+  });
+
+  it("runs to the end when nobody asks it to stop", async () => {
+    const user = `stop-dig-quiet-${Date.now()}`;
+    const { id } = await bootInv(user, "No stop asked");
+    let planned = 0;
+    const result = await researchLoop({
+      userId: user,
+      investigationId: id,
+      hops: 2,
+      search: async () => [],
+      fetch: async () => ({ ok: false, status: 404, text: "", title: "", extras: [] }),
+      planner: async () => {
+        planned += 1;
+        return { ...emptyPlan(), searches: [`query ${planned}`] };
+      },
+      archives: async () => [],
+      throwIfCancelled: async () => undefined,
+    });
+    assert.equal(result.hops, 2);
+    assert.equal(planned, 2);
   });
 });
 

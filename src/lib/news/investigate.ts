@@ -2,13 +2,14 @@ import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import {
   grokChat,
-  parseJsonBlock,
+  parseJsonBlockSalvage,
   plannerModel,
   providerBudget,
   type EffectiveProviderChoice,
 } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
+import { resurfaceRefusalReason } from "./result-quality.ts";
 import { readableCapture } from "./html-text.ts";
 import { darkPlannerFor } from "./dark-prompt.ts";
 import { enforceSearchMinimums, tierForQuery, tierForUrl, type Place } from "./dark-gates.ts";
@@ -20,6 +21,7 @@ import {
   extractMeetingInstant,
   extractReferences,
   heuristicPlan as heuristicFromText,
+  junkQueryReason,
   leadHoursBefore,
   nthWeekday,
   structureSnapshot,
@@ -75,6 +77,28 @@ export const NEW_FRONTIER_PER_HOP = 8;
 export const OPEN_FRONTIER_CAP = 24;
 /** Matches grokPlanner's provider input ceiling; keep important context inside it. */
 export const PLANNER_INPUT_CAP = 24_000;
+
+/**
+ * The planner's own output ceiling, and the reason this is a named constant.
+ *
+ * `DARK_PLANNER` asks for eleven fields -- searches, fetch_urls, entities,
+ * relationships, hypotheses, claims, frontier, anomalies, dead_ends, questions,
+ * stop and a summary -- over a 24,000-character pack. 2,200 tokens is not
+ * enough for that on any provider, and it is nowhere near enough for a
+ * thinking model, which spends part of the same budget on `reasoning_content`
+ * before the JSON starts.
+ *
+ * Measured on the Kid City USA dig (2026-09-30, DeepSeek v4.1 Flash through
+ * Ollama): `completion_tokens` of exactly 2,200 -- this cap, hit dead on -- on
+ * all five planning hops and both post-search selection calls. The replies
+ * were cut off mid-object, `parseJsonBlock` could read nothing, and every hop
+ * reported "the plan had no next step" while running the keyword fallback.
+ *
+ * `parseJsonBlockSalvage` now recovers what a truncated reply did contain, and
+ * `grokPlanner` names the cap when it is hit; this is the size that stops a
+ * plan of the shape the prompt asks for from hitting it at all.
+ */
+export const PLANNER_OUTPUT_TOKENS = 8_000;
 const PLANNER_GRAPH_CAP = 16_000;
 const PLANNER_ARTIFACT_CAP = 6_000;
 const PLANNER_HISTORY_CAP = 700;
@@ -275,6 +299,16 @@ export type ResearchLoopOptions = {
   officialDomains?: string[];
   pressDomains?: string[];
   preferences?: import("./dark-preferences.ts").ResearchSnapshot;
+  /**
+   * The editor's Stop, asked at every boundary a run can be stopped on.
+   *
+   * Unit U25, B4. Same seam shape as `onStage` and `runBudget`: the Dark Desk
+   * passes `() => throwIfJobCancelled(job.id)` (see `performDarkRound`), and a
+   * caller that passes nothing -- every existing test -- runs exactly as
+   * before. It must THROW, not return a flag: a stopped run has to leave the
+   * hop loop, not look like a run that finished.
+   */
+  throwIfCancelled?: () => Promise<void>;
   /** Explicit opt-in; omission preserves the original batch loop. */
   executionMode?: "batch" | "responsive";
   /** Responsive model-decision cap, clamped to 1..24. Default 6. */
@@ -906,12 +940,44 @@ function numOrUndef(v: unknown): number | undefined {
 export function parsePlan(raw: unknown): HopPlan {
   const plan = emptyPlan();
   if (!raw || typeof raw !== "object") return plan;
-  const o = raw as Record<string, unknown>;
-  plan.searches = Array.isArray(o.searches) ? o.searches.map(String).slice(0, 8) : [];
-  plan.fetch_urls = sanitizePublicUrls(o.fetch_urls).slice(0, 10);
+  /*
+    Unit U25, B2: read the plan the model actually wrote, not only the shape the
+    prompt asked for.
+
+    A truncated reply can leave an inner array as the whole value (`searches`
+    being the first list in the schema, most often), and a model that answered
+    one hop's plan as a one-element list of plans is not wrong enough to throw
+    away. Both are unwrapped rather than treated as "no plan".
+
+    The next-step fields are read under the names a model reaches for when it
+    is not following the schema to the letter -- the observed replies that
+    produced searches under `queries`, `next_searches` or `search` were all
+    reported as "the plan had no next step" while carrying a usable plan.
+  */
+  const unwrapped = Array.isArray(raw)
+    ? (raw.find((entry) => entry && typeof entry === "object" && !Array.isArray(entry)) ?? null)
+    : ((raw as Record<string, unknown>).plan && typeof (raw as Record<string, unknown>).plan === "object"
+        ? (raw as Record<string, unknown>).plan
+        : raw);
+  if (!unwrapped || typeof unwrapped !== "object") return plan;
+  const o = unwrapped as Record<string, unknown>;
+  const firstList = (...keys: string[]): unknown[] => {
+    for (const key of keys) if (Array.isArray(o[key])) return o[key] as unknown[];
+    return [];
+  };
+  const searches = firstList("searches", "next_searches", "search_queries", "queries", "search");
+  plan.searches = searches
+    .map((entry) =>
+      typeof entry === "string" ? entry : String((entry as { query?: unknown })?.query ?? ""),
+    )
+    .filter(Boolean)
+    .slice(0, 8);
+  plan.fetch_urls = sanitizePublicUrls(firstList("fetch_urls", "fetch_url", "fetch", "urls")).slice(0, 10);
   plan.stop = Boolean(o.stop);
-  plan.summary = String(o.summary ?? "").slice(0, 2000);
-  plan.questions = Array.isArray(o.questions) ? o.questions.map(String).slice(0, 12) : [];
+  plan.summary = String(o.summary ?? o.editor_summary ?? "").slice(0, 2000);
+  plan.questions = firstList("questions", "open_questions")
+    .map(String)
+    .slice(0, 12);
   const arr = <T>(key: string) => (Array.isArray(o[key]) ? (o[key] as T[]) : []);
   for (const e of arr<Record<string, unknown>>("entities")) {
     if (e?.name)
@@ -1063,7 +1129,7 @@ export async function grokPlanner(
     return { ...emptyPlan(), planner_error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
   }
   if (call) await onUsage?.(runBudget!.snapshot());
-  const ai = await chat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), 2200, {
+  const ai = await chat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), PLANNER_OUTPUT_TOKENS, {
     timeoutMs: Math.max(1, Math.min(callMs, runBudget?.remainingMs() ?? callMs)),
     model: plannerModel(choice),
     choice,
@@ -1102,9 +1168,28 @@ export async function grokPlanner(
       : { city: "", state: "", officialHost: null };
     return { ...heuristicPlan(pack, new Set(), scope), planner_error: why };
   }
-  const parsed = parsePlan(parseJsonBlock<unknown>(ai.text));
+  const parsed = parsePlan(parseJsonBlockSalvage<unknown>(ai.text));
   if (!parsed.searches.length && !parsed.fetch_urls.length) {
-    return { ...parsed, planner_error: "model replied but the plan had no next step" };
+    /*
+      Say WHY there was no next step, because the two reasons need different
+      fixes and read identically otherwise.
+
+      `completion_tokens === the cap` is the provider telling us it stopped the
+      model mid-sentence: the reply had a plan in it and we could not see the
+      end of it. That is a budget problem, and the wording says so. Anything
+      else is the model genuinely writing no searches, which is a prompt
+      problem. Measured on the Kid City USA run (2026-09-30): 2,200 output
+      tokens -- exactly `PLANNER_OUTPUT_TOKENS` then -- on five of five hops.
+    */
+    const meta = "meta" in ai ? ai.meta : undefined;
+    const capped =
+      typeof meta?.outputTokens === "number" && meta.outputTokens >= PLANNER_OUTPUT_TOKENS;
+    return {
+      ...parsed,
+      planner_error: capped
+        ? `model reply hit the ${PLANNER_OUTPUT_TOKENS}-token output cap mid-plan and no next step survived it`
+        : "model replied but the plan had no next step",
+    };
   }
   return parsed;
 }
@@ -1335,7 +1420,23 @@ export async function persistDiscovery(
     // Both are echoed into the UPDATE below, so they are cleaned on the way in
     // rather than trusted.
     const priorEv = storableText(row.evidence ?? "").trim();
-    const newEvidence = incoming.length >= 8 && !priorEv.includes(incoming.slice(0, 120));
+    /*
+      Unit U25, C1: a page coming round again is not a finding about the page.
+
+      The reopen path hands this the re-discovered page's own URL as its
+      "evidence" (see the leftover-URL branch and the attachment branch below),
+      and "≥8 characters and not seen before" called that materially new. That
+      is how a Jetdelivery page, two courier sites, a dictionary page and
+      Englishfortheplanet came back to the front page as "New material. Nobody
+      has opened it yet." after the dig had already read and parked them.
+      `resurfaceRefusalReason` names the rule; a refusal leaves the item parked.
+    */
+    const resurfaceRefused = resurfaceRefusalReason({
+      url: /^https?:\/\//i.test(label) ? label : incoming,
+      evidence: incoming,
+    });
+    const newEvidence =
+      incoming.length >= 8 && !priorEv.includes(incoming.slice(0, 120)) && resurfaceRefused === null;
     const parked = ["exhausted", "dead-end", "resolved", "deferred"].includes(row.status);
     if (parked && newEvidence) {
       const merged = `${priorEv}\n${incoming}`.trim().slice(0, 2000);
@@ -2526,6 +2627,15 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   }
 
   hopLoop: for (let hop = 0; hop < hopsBudget; hop++) {
+    /*
+      Unit U25, B4: the editor's Stop, at the one place a run can be stopped
+      without losing anything. A hop is two model calls and a handful of
+      fetches; between hops the file is consistent, so this is where the
+      question is asked. It throws rather than breaking, because a stopped run
+      must not read like a finished one -- see `performDarkRound`, which writes
+      the honest summary before letting the throw through.
+    */
+    await opts.throwIfCancelled?.();
     if (opts.runBudget?.remainingMs() === 0) {
       stopReason = opts.runBudget.stopReason ?? "elapsed-time-limit";
       break;
@@ -2567,7 +2677,29 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         opts.onUsage,
         opts.reasoningEffort,
       );
-      const heur = heuristicPlan(graph, tried, scope);
+      /*
+        Unit U25, B2: what the keyword fallback is allowed to read.
+
+        It used to be handed `graph` -- the whole retrieved pack, captured page
+        text and scraped titles included -- and derived its searches from that.
+        That is where `"Under - Paducah, KY 42001 - Menu, Reviews, Hours &amp;
+        Contact — https://restaurantjump" Longmont` and `"UNDER Definition &amp;
+        Meaning - Merriam-Webster — https://merriam-webster" Longmont` came
+        from: the fallback was searching for the pages it had already fetched,
+        site names, dashes and all.
+
+        The fallback runs when the planner could not, which is the moment the
+        desk knows least. It now reads the lead itself: the investigation's own
+        headline, the records already on the open frontier, and the paper's own
+        city, state and county. Never a captured page, never a URL.
+      */
+      const leadRecords = openFrontier
+        .filter((f) => f.kind !== "url" && f.kind !== "reference")
+        .map((f) => f.label);
+      const leadContext = [investigationTitle, ...leadRecords, place.city, place.state, place.county ?? ""]
+        .filter(Boolean)
+        .join(". ");
+      const heur = heuristicPlan(leadContext, tried, scope);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;
       if (!plan.searches.length && heur.searches.length) plan.searches = heur.searches;
@@ -2670,7 +2802,32 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       plan.hypotheses.map((h) => h.text).filter(Boolean),
       place,
     ).filter((q) => !tried.has(queryFingerprint(q)));
-    const queries = [...withMinimums, ...fill].map((q) => queryWithResearchWindow(q, opts.preferences)).filter((q) => !tried.has(queryFingerprint(q))).slice(0, SEARCHES_PER_HOP);
+    /*
+      Unit U25, B2: the last gate before a provider sees a query, and the only
+      one every query passes through -- planner-written, frontier-derived,
+      minimum-filled and fallback alike. `junkQueryReason` names the rule it
+      broke, and the run file records what was dropped so a dig that searched
+      less than it planned says so instead of looking like it had nothing to do.
+
+      The window operators are applied AFTER the judgement: `after:`/`before:`
+      are the desk's own, and appending them first would let a query's own
+      address or title text hide behind a date.
+    */
+    const dropped: string[] = [];
+    const usable = [...withMinimums, ...fill].filter((q) => {
+      const reason = junkQueryReason(q);
+      if (reason) dropped.push(`${reason}: ${q.slice(0, 120)}`);
+      return !reason;
+    });
+    const queries = usable
+      .map((q) => queryWithResearchWindow(q, opts.preferences))
+      .filter((q) => !tried.has(queryFingerprint(q)))
+      .slice(0, SEARCHES_PER_HOP);
+    if (dropped.length) {
+      lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${dropped.length} query${
+        dropped.length === 1 ? "" : "s"
+      } that were not searches: ${[...new Set(dropped)].slice(0, 4).join("; ")}`;
+    }
 
     /*
       A provider startup failure is not a research hop when its fallback
@@ -2695,6 +2852,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
 
     for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
       const q = queries[queryIndex]!;
+      // Between searches: the same boundary rule, at a finer grain, because one
+      // hop of a deep dig is several provider calls long.
+      await opts.throwIfCancelled?.();
       if (opts.runBudget && !opts.runBudget.consumeSearch()) {
         stopReason = opts.runBudget.stopReason;
         break;

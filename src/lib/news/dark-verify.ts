@@ -29,6 +29,7 @@ import {
 import { grokChat, parseJsonBlock, plannerModel, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { searchWithFallback } from "./search-web.ts";
+import { boilerplatePageReason } from "./result-quality.ts";
 import { storableText } from "./storable-text.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
 import type { DarkRunBudget, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
@@ -72,8 +73,17 @@ type Row = {
   handoff: string;
 };
 
-async function defaultSearch(query: string): Promise<SearchAttempt> {
-  return searchWithFallback(query);
+async function defaultSearch(
+  query: string,
+  relevance?: { officialDomains: string[]; localityStopwords: string[] },
+): Promise<SearchAttempt> {
+  return searchWithFallback(
+    query,
+    undefined,
+    relevance
+      ? { officialDomains: relevance.officialDomains, localityStopwords: relevance.localityStopwords }
+      : undefined,
+  );
 }
 
 /**
@@ -109,9 +119,31 @@ export async function verifyRunSignals(opts: {
   summary: string;
 }> {
   const sql = await getSql();
-  const search = opts.deps?.search ?? defaultSearch;
   const official = opts.officialDomains ?? [];
   const press = opts.pressDomains ?? [];
+  /*
+    Unit U25, B2: the app's own search runs with the same relevance contract the
+    dig uses, and the same refusal list.
+
+    This used to be `searchWithFallback(query)` with no relevance options at
+    all, which returns the FIRST provider's results unfiltered -- so with the
+    scraped engines blocked in this environment every adversarial query was
+    answered by Bing's raw list, in Bing's order, and the desk wrote the first
+    entry down as the source that answered it. On the Kid City USA file that
+    was `https://www.youtubekids.com/` for four separate queries: Bing matched
+    the word "Kid" in the query and returned the landing page for a children's
+    app, and nothing between the provider and the run record asked whether a
+    landing page could answer a question about a daycare.
+
+    A reader who supplies `deps.search` (every test, and the live failover
+    path) is left exactly as they were.
+  */
+  const relevance = {
+    officialDomains: official,
+    localityStopwords: [opts.place.city, opts.place.state, opts.place.county ?? ""].filter(Boolean),
+  };
+  const search: VerifySearchFn =
+    opts.deps?.search ?? ((query: string) => defaultSearch(query, relevance));
   const allSearches: AdversarialRecord[] = [];
 
   const rows = await sql<Row>`
@@ -163,9 +195,14 @@ export async function verifyRunSignals(opts: {
       let hits: WebHit[] = [];
       let outcome = "no results found";
       let state: SearchAttempt["state"] = "SEARCH_SUCCESS_ZERO_RESULTS";
+      /** Whether the search judged its own results to be on the question. */
+      let relevanceDecision: string = "not-evaluated";
       try {
         const attempt = await search(q.query);
         hits = Array.isArray(attempt) ? attempt : attempt.hits;
+        relevanceDecision = Array.isArray(attempt)
+          ? "not-evaluated"
+          : (attempt.relevance?.decision ?? "not-evaluated");
         state = Array.isArray(attempt)
           ? hits.length
             ? "SEARCH_SUCCESS_RESULTS"
@@ -185,12 +222,42 @@ export async function verifyRunSignals(opts: {
         outcome = `search failed: ${err instanceof Error ? err.message : "unknown"}`.slice(0, 500);
       }
       if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
+      /*
+        Unit U25, B2: a result that is not the article does not get to answer
+        the query, and the run record says which rule refused it.
+
+        A dictionary entry, an app landing page or another engine's own page is
+        never the record a gate was looking for, so it is dropped by name
+        (`boilerplatePageReason`) rather than left in the list where the first
+        entry becomes "the source". When the search itself judged that nothing
+        came back on the question -- `relevance.decision === "degraded"` -- no
+        URL is recorded at all: the query ran, and it did not get an answer.
+      */
+      const refused: string[] = [];
+      hits = hits.filter((h) => {
+        const why = boilerplatePageReason(h.url);
+        if (why) refused.push(`${why} (${h.url.slice(0, 120)})`);
+        return !why;
+      });
+      const answered = relevanceDecision !== "degraded" && hits.length > 0;
+      if (state.startsWith("SEARCH_SUCCESS")) {
+        outcome = answered
+          ? `${hits.length} result(s)${relevanceDecision === "relevant" ? "" : " (not assessed for relevance)"}`
+          : hits.length && relevanceDecision === "degraded"
+            ? `${hits.length} result(s), none matching the question (kept as candidates, not as an answer)`
+            : "no results found";
+      }
+      if (refused.length)
+        outcome = `${outcome}; refused ${refused.length}: ${[...new Set(refused)].slice(0, 3).join("; ")}`.slice(
+          0,
+          500,
+        );
       hits = hits.slice(0, 6).map((h) => ({
         url: h.url.slice(0, 1000),
         title: h.title.slice(0, 300),
         snippet: h.snippet.slice(0, 800),
       }));
-      const url = hits[0]?.url ?? null;
+      const url = answered ? (hits[0]?.url ?? null) : null;
       const record: AdversarialRecord = {
         query: q.query,
         kind: q.kind,

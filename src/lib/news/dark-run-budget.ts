@@ -11,6 +11,12 @@ export type DarkRunStopReason =
   | "hop-limit"
   | "synthesis-failed"
   | "provider-failed"
+  /**
+   * The editor pressed Stop. Unit U25, B4. A run reason like the others, not a
+   * crash: `performDarkRound` writes it when `throwIfJobCancelled` is what
+   * ended the round, and the run history has its own sentence for it.
+   */
+  | "cancelled"
   | "completed";
 
 export type DarkRunBudgetLimits = {

@@ -10,6 +10,7 @@ import {
   notYetOpened,
   officialDomains,
   pressDomains,
+  rewriteSentences,
   runAbsenceGate,
   splitSentences,
   synonymVariation,
@@ -82,6 +83,51 @@ describe("tool-talk never describes the city", () => {
   it("splits sentences without losing a character", () => {
     const text = "One thing happened. Then another!\n\nA third?";
     assert.equal(splitSentences(text).join(""), text);
+  });
+
+  /**
+   * Unit U25, B3. `splitSentences` used to break after "Oct." and hand the
+   * absence gate two sentences where the story had one. Replacing the second
+   * left the first dangling -- "Until then, the specific date of Oct." followed
+   * by the rewritten sentence -- which is the broken paragraph the drafted Kid
+   * City USA story was stored with.
+   *
+   * THE MUTATION THAT MATTERS. Removing the abbreviation merge fails this case
+   * and the paragraph reads broken again.
+   */
+  it("keeps an abbreviated date inside one sentence", () => {
+    const text =
+      "Until then, the specific date of Oct. 2, 2026, is not established in the file, and the desk did not find the notice among the documents it opened.";
+    const parts = splitSentences(text);
+    assert.equal(parts.length, 1, `an abbreviation split the sentence: ${JSON.stringify(parts)}`);
+    assert.equal(parts.join(""), text);
+  });
+
+  it("still splits after an abbreviation that ends a real sentence", () => {
+    const text = "The district said no. Council met on Oct. 12. The vote carried.";
+    assert.deepEqual(splitSentences(text).map((s) => s.trim()).filter(Boolean), [
+      "The district said no.",
+      "Council met on Oct. 12.",
+      "The vote carried.",
+    ]);
+    assert.equal(splitSentences(text).join(""), text);
+  });
+
+  /**
+   * The sentence is one unit, so the rewrite takes the whole of it. That is the
+   * gate's contract -- it replaces what the story claimed with what the desk
+   * actually did -- and the point here is only that nothing is left dangling.
+   */
+  it("rewrites the whole sentence an abbreviation used to split in two", () => {
+    const rewritten = rewriteSentences(
+      "Until then, the specific date of Oct. 2, 2026, was not found in the file.",
+      (sentence) => (/not found in the file/.test(sentence) ? "TownReporter did not find it." : null),
+    );
+    assert.equal(rewritten.text, "TownReporter did not find it.");
+    assert.ok(
+      !/of Oct\.$/.test(rewritten.text),
+      "the paragraph was left with a dangling abbreviation",
+    );
   });
 });
 

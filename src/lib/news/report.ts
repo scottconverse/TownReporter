@@ -39,6 +39,7 @@ import { PAPER } from "../paper.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { sanitizePublicUrls } from "./schema.ts";
+import { usableLeadSources } from "./result-quality.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
@@ -1898,7 +1899,20 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       body: pass.body,
       integrity_notes: pass.coerced.integrity_notes,
       unanswered: unansweredFromWrite(pass),
-      openedTitles: docs.filter((d) => d.text).map((d) => d.title || d.url),
+      /*
+        Unit U25, B3: "among the documents it opened" names pages that were
+        captured AND about this lead. Measured on the drafted Kid City USA story
+        (lead 66, 2026-09-30) the sentence named "TOP Courier Services Anaheim,
+        CA | FAST & RELIABLE TEAM", a phone-water-damage guide and an Outlook
+        sign-in page -- three captures a stray query had reached, presented to
+        the reader as the documents a closure story was checked against. The
+        same judge the handoff uses, so the list on the lead and the sentence in
+        the body cannot disagree.
+      */
+      openedTitles: usableLeadSources(
+        docs.filter((d) => d.text).map((d) => ({ url: d.url, title: d.title, text: d.text })),
+        `${opts.lead.headline}\n${opts.lead.why}`,
+      ).map((d) => d.title || d.url),
       knownUrls: docs.map((d) => d.url),
       domains: cityDomains,
       pressDomains: paper.pressDomains ?? [],

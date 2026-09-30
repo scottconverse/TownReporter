@@ -1579,6 +1579,142 @@ export function parseJsonBlock<T>(raw: string): T | null {
 }
 
 /**
+ * Where a reply stopped being JSON, and what was still open there.
+ *
+ * `safe` holds the offsets just past a complete value, with the bracket stack
+ * that was open at that offset. Cutting at one of them and closing the stack
+ * turns a truncated reply back into valid JSON, losing only the unfinished
+ * tail -- which is the difference between a hop that plans and a hop that
+ * silently falls back to keyword matching.
+ */
+type JsonCutPoints = { safe: { at: number; stack: string[] }[]; openStack: string[]; inString: boolean };
+
+function jsonCutPoints(body: string): JsonCutPoints {
+  const safe: { at: number; stack: string[] }[] = [];
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  /** A bare `123`, `true`, `false` or `null` in progress, with where it began. */
+  let bare = "";
+  let bareStart = -1;
+  const endBare = () => {
+    if (bareStart >= 0 && /^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$|^(?:true|false|null)$/.test(bare))
+      safe.push({ at: bareStart + bare.length, stack: [...stack] });
+    bare = "";
+    bareStart = -1;
+  };
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') {
+        inString = false;
+        safe.push({ at: i + 1, stack: [...stack] });
+      }
+      continue;
+    }
+    if (ch === '"') {
+      endBare();
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      endBare();
+      stack.push(ch);
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      endBare();
+      stack.pop();
+      safe.push({ at: i + 1, stack: [...stack] });
+      continue;
+    }
+    if (ch.trim() === "" || ch === "," || ch === ":") {
+      endBare();
+      continue;
+    }
+    if (bareStart < 0) bareStart = i;
+    bare += ch;
+  }
+  endBare();
+  return { safe, openStack: stack, inString };
+}
+
+/**
+ * The JSON object a reply was writing when it ran out of output tokens.
+ *
+ * A thinking model handed a 2,200-token ceiling for an eleven-field plan
+ * spends it mid-object and the reply arrives unterminated. `parseJsonBlock`
+ * cannot read that at all -- `lastIndexOf("}")` lands on some inner object, or
+ * on nothing -- so the planner looked like a model that "replied but had no
+ * next step" while its `searches` array sat complete in the truncated text.
+ *
+ * Measured: `dark_runs.usage_ledger_json` for the Kid City USA run of
+ * 2026-09-30 records `completion_tokens` of exactly 2,200 -- the planner's own
+ * cap -- on all five planning hops and both post-search selection calls.
+ *
+ * The strict parse is tried first, so a reply that is already good JSON is
+ * never touched. Only then does this walk the reply, remember every offset
+ * just past a complete value, and try to close the brackets from the last one
+ * backwards. Bracket *and* string aware, so a `{` inside a quoted sentence
+ * never counts as structure.
+ */
+export function parseJsonBlockSalvage<T>(raw: string): T | null {
+  const strict = parseJsonBlock<T>(raw);
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = (fenced?.[1] ?? raw).trim();
+  const start = candidate.indexOf("{");
+  const arrayStart = candidate.indexOf("[");
+  /*
+    A reply that OPENED an object but never closed it is the trap here.
+
+    `parseJsonBlock` takes `lastIndexOf("}")`, which is -1 when the closing
+    brace was cut off, so it falls through to `lastIndexOf("]")` and hands back
+    whichever inner array happened to be the last one to close -- the planner's
+    `searches` list, most often. `parsePlan` then reads an array, finds no
+    `searches` key on it, and returns an empty plan, which is precisely the
+    "model replied but the plan had no next step" this function exists to fix.
+  */
+  const opensObject = start >= 0 && (arrayStart < 0 || start < arrayStart);
+  if (strict !== null && !(opensObject && Array.isArray(strict))) return strict;
+  if (start < 0) return strict;
+  const body = candidate.slice(start);
+  const { safe, openStack, inString } = jsonCutPoints(body);
+
+  const close = (stack: string[]) =>
+    stack
+      .slice()
+      .reverse()
+      .map((open) => (open === "{" ? "}" : "]"))
+      .join("");
+  const read = (prefix: string, stack: string[]) => {
+    // A cut can land just after `,` or `:` when the unfinished element was a
+    // value we could not see; neither is legal immediately before a close.
+    const trimmed = prefix.replace(/[\s,]*$/, "");
+    // An unterminated string is still usable as a value: close the quote.
+    const text = inString && !/"$/.test(trimmed) ? `${trimmed}"` : trimmed;
+    try {
+      return JSON.parse(`${text}${close(stack)}`) as T;
+    } catch {
+      return null;
+    }
+  };
+  if (inString) {
+    const closed = read(body, openStack);
+    if (closed !== null) return closed;
+  }
+  for (let i = safe.length - 1; i >= 0; i--) {
+    const cut = safe[i]!;
+    const closed = read(body.slice(0, cut.at), cut.stack);
+    if (closed !== null) return closed;
+  }
+  // Salvage found nothing better; the strict reader's answer -- even the inner
+  // array -- is still more than the caller would otherwise get.
+  return strict;
+}
+
+/**
  * The sentence a run reports when a model's reply cannot be read at all.
  *
  * One wording, built here, so the classifier in ./automatic-failover.ts can
