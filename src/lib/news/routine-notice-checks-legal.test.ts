@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { readFile, readdir } from "node:fs/promises";
-import { getPglite, getSql } from "../db.ts";
+import { getSql } from "../db.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import { previewLegalRemoval } from "./legal-removal-store.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 before(async () => {
-  const pg = await getPglite();
-  for (const file of (await readdir(new URL("../../../migrations/", import.meta.url)))
-    .filter((name) => name.endsWith(".sql"))
-    .sort()) {
-    await pg.exec(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
-  }
+  // The database is migrated before this file loads (U18a-1,
+  // src/lib/test-support/pglite-migrations.ts). The hand replay that stood in
+  // for Node's missing Vite migration glob is gone: a second application
+  // re-runs the unguarded seed inserts several migrations carry.
   await ensureLegalSchema();
 });
 

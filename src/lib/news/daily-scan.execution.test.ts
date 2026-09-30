@@ -10,6 +10,14 @@ import {
 } from "./daily-scan.server.ts";
 import { readDailyScanPolicy } from "./daily-scan.ts";
 import type { DeskJob } from "./jobs.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 const job: DeskJob = {
   id: 501,
@@ -67,10 +75,12 @@ async function reset() {
   );
   await sql.query("alter table desk_jobs add column if not exists failover_note text not null default ''");
   await sql.query("alter table desk_jobs add column if not exists result_json text not null default '{}'");
+  // U18a-1: `scan_runs.daily_reservation_id` is a real foreign key now, so the
+  // runs that point at a reservation have to go before the reservation does.
   for (const t of [
     "daily_commit_marker",
-    "daily_scan_reservations",
     "scan_runs",
+    "daily_scan_reservations",
     "desk_jobs",
     "newsroom_members",
     "daily_scan_policies",
@@ -78,18 +88,32 @@ async function reset() {
     "paper_settings",
   ])
     await sql.query(`delete from ${t}`);
+  // U18a-1: `daily_scan_policies` and `daily_scan_reservations` are the real
+  // tables now, so room 501's `newsroom_id` is a real foreign key and the room
+  // has to exist before anything can be written for it.
+  await sql.query("insert into newsrooms(id,name) values(501,'Test room 501') on conflict (id) do nothing");
   await sql.query(
-    "insert into daily_scan_policies values(501,true,false,null,'06:00','codex-terra',12,'[1]',1,'owner-501',now())",
+    // Column names, not positions: the real table has picked up columns
+    // (`model_effort` in 0061 among them) since the fixture's column list was
+    // written, and this insert now targets the real one.
+    "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,source_cap,selected_source_ids,revision,configured_by_user_id,updated_at) values(501,true,false,null,'06:00','codex-terra',12,'[1]',1,'owner-501',now())",
   );
-  await sql.query("insert into newsroom_members values('owner-501','owner',501)");
+  // Column names again: the real `newsroom_members` is (user_id, role,
+  // created_at, newsroom_id), so a positional three-value insert would land
+  // the newsroom id on `created_at`.
+  await sql.query(
+    "insert into newsroom_members(user_id,role,newsroom_id) values('owner-501','owner',501)",
+  );
   await sql.query(
     "insert into desk_jobs(id,newsroom_id,user_id,kind,subject_id,status,claim_token,error,finished_at) values(501,501,'owner-501','scan',601,'running','lease-current',null,null)",
   );
   await sql.query(
-    "insert into daily_scan_reservations(id,newsroom_id,local_day,scan_run_id,desk_job_id,status,policy_revision) values(701,501,'2026-09-04',601,501,'running',1)",
+    // The three snapshots are `not null` in the real table; the fixture's copy
+    // declared them nullable.
+    "insert into daily_scan_reservations(id,newsroom_id,local_day,scan_run_id,desk_job_id,status,policy_revision,policy_snapshot,source_snapshot,model_snapshot) values(701,501,'2026-09-04',601,501,'running',1,'{}','{}','{}')",
   );
   await sql.query(
-    "insert into scan_runs(id,newsroom_id,daily_reservation_id,finished_at,error) values(601,501,701,null,null)",
+    "insert into scan_runs(id,newsroom_id,user_id,daily_reservation_id,finished_at,error) values(601,501,'owner-501',701,null,null)",
   );
 }
 beforeEach(reset);
@@ -107,6 +131,9 @@ describe("daily scan refuses loudly, never silently", () => {
     it("pauses the policy with a reason when the configuring account is not the owner", async () => {
       const sql = await getSql();
       await sql.query("update newsroom_members set role='editor' where user_id='owner-501'");
+      // U18a-1: the reservations table is the real one, so the run pointing at
+      // this reservation has to go first.
+      await sql.query("delete from scan_runs where newsroom_id=501");
       await sql.query("delete from daily_scan_reservations where newsroom_id=501");
 
       const result = await tickDailyScans(new Date("2026-09-04T14:00:00Z"), {
@@ -135,11 +162,12 @@ describe("daily scan refuses loudly, never silently", () => {
         this test is NOT about.
       */
       const sql = await getSql();
+      await sql.query("delete from scan_runs");
       await sql.query("delete from daily_scan_reservations");
       await sql.query("delete from desk_jobs");
       await sql.query("delete from scan_runs");
       await sql.query("insert into paper_settings(newsroom_id,timezone) values(501,'America/Denver')");
-      await sql.query("insert into sources values(1,501,'https://example.test/source','Source','rss',1,'accepted',null,null,null)");
+      await sql.query("insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')");
 
       const runtimeSnapshot = async () => ({
         requestedRuntime: "codex-balanced" as const, requestedEffort: null, resolvedRuntime: "codex-balanced" as const, switchReason: null, switchNote: null,
@@ -207,6 +235,7 @@ describe("scheduled final commit fence", () => {
 describe("scheduled tick and policy status", () => {
   it("stores a selected custom model for the scheduled run without copying its secret", async () => {
     const sql = await getSql();
+    await sql.query("delete from scan_runs");
     await sql.query("delete from daily_scan_reservations");
     await sql.query("delete from desk_jobs");
     await sql.query("delete from scan_runs");
@@ -214,7 +243,7 @@ describe("scheduled tick and policy status", () => {
       "custom:11111111-1111-4111-8111-111111111111",
     ]);
     await sql.query(
-      "insert into sources values(1,501,'https://example.test/custom','Custom','rss',1,'accepted',null,null,null)",
+      "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/custom','Custom','rss','1','accepted')",
     );
     const snapshot = {
       requestedRuntime: "custom:11111111-1111-4111-8111-111111111111" as const, requestedEffort: null, resolvedRuntime: "custom:11111111-1111-4111-8111-111111111111" as const, switchReason: null, switchNote: null,
@@ -251,6 +280,7 @@ describe("scheduled tick and policy status", () => {
   for (const timezone of [null, "   ", "missing-row"] as const) {
     it(`uses the UI's effective timezone for ${String(timezone)} legacy settings`, async () => {
       const sql = await getSql();
+      await sql.query("delete from scan_runs");
       await sql.query("delete from daily_scan_reservations");
       await sql.query("delete from desk_jobs");
       await sql.query("delete from scan_runs");
@@ -259,7 +289,7 @@ describe("scheduled tick and policy status", () => {
           timezone,
         ]);
       await sql.query(
-        "insert into sources values(1,501,'https://example.test/source','Source','rss',1,'accepted',null,null,null)",
+        "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",
       );
       const now = new Date("2026-09-04T12:00:00Z");
       const shown = await readDailyScanPolicy(501, now);
@@ -284,6 +314,7 @@ describe("scheduled tick and policy status", () => {
   }
   it("pauses an invalid timezone without preventing another newsroom's due scan", async () => {
     const sql = await getSql();
+    await sql.query("delete from scan_runs");
     await sql.query("delete from daily_scan_reservations");
     await sql.query("delete from desk_jobs");
     await sql.query("delete from scan_runs");
@@ -291,11 +322,16 @@ describe("scheduled tick and policy status", () => {
       "insert into paper_settings(newsroom_id,timezone) values(501,'Not/AZone'),(502,'UTC')",
     );
     await sql.query(
-      "insert into daily_scan_policies values(502,true,false,null,'06:00','codex-terra',12,'[2]',1,'owner-502',now())",
+      "insert into newsrooms(id,name) values(502,'Test room 502') on conflict (id) do nothing",
     );
-    await sql.query("insert into newsroom_members values('owner-502','owner',502)");
     await sql.query(
-      "insert into sources values(2,502,'https://example.test/source','Source','rss',1,'accepted',null,null,null)",
+      "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,source_cap,selected_source_ids,revision,configured_by_user_id,updated_at) values(502,true,false,null,'06:00','codex-terra',12,'[2]',1,'owner-502',now())",
+    );
+    await sql.query(
+      "insert into newsroom_members(user_id,role,newsroom_id) values('owner-502','owner',502)",
+    );
+    await sql.query(
+      "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(2,502,'fixture','https://example.test/source','Source','rss','1','accepted')",
     );
     const probed: number[] = [];
     assert.deepEqual(
@@ -323,6 +359,7 @@ describe("scheduled tick and policy status", () => {
   });
   it("shows a due catch-up, reserves it once, then shows the next local day", async () => {
     const sql = await getSql();
+    await sql.query("delete from scan_runs");
     await sql.query("delete from daily_scan_reservations");
     await sql.query("delete from desk_jobs");
     await sql.query("delete from scan_runs");
@@ -330,7 +367,7 @@ describe("scheduled tick and policy status", () => {
       "insert into paper_settings(newsroom_id,timezone) values(501,'America/Denver')",
     );
     await sql.query(
-      "insert into sources values(1,501,'https://example.test/source','Source','rss',1,'accepted',null,null,null)",
+      "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",
     );
     const now = new Date("2026-09-04T14:00:00Z");
     const before = await readDailyScanPolicy(501, now);

@@ -6,6 +6,24 @@ import { shardArgs, shardNotice } from "./test-shard.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
 
+/**
+ * The `src/**` group's schema source. `migrations/*.sql` is the only schema
+ * this repository has -- the preview applies it through a bundler and
+ * `scripts/migrate.mjs` applies it to Postgres -- but plain `node --test` has
+ * no bundler, so `createPgliteSql`'s glob throws and applies nothing: the test
+ * PGlite used to have no `leads`, no `articles`, no `story_documents` at all,
+ * and every test declared a smaller hand-written version of what it needed.
+ * This preload reads the same directory with `node:fs` and applies it through
+ * the same routine, before the first test file is loaded.
+ *
+ * Loaded AFTER the environment guard, which is what blanks DATABASE_URL and
+ * so chooses the PGlite backend this preload has something to apply to.
+ */
+const migrationsPreload = new URL(
+  "../src/lib/test-support/pglite-migrations.ts",
+  import.meta.url,
+).href;
+
 if (process.argv.length > 2) {
   console.error(
     "npm test runs the complete suite and does not accept filtering arguments. " +
@@ -53,8 +71,18 @@ function run(args) {
 }
 
 for (const args of [
+  // The scripts group is static analysis of the scripts themselves -- it
+  // opens no database, so it gets no schema preload.
   ["--test", ...slice, "scripts/**/*.test.mjs"],
-  ["--experimental-strip-types", "--test", "--test-concurrency=1", ...slice, "src/**/*.test.ts"],
+  [
+    "--experimental-strip-types",
+    "--test",
+    "--test-concurrency=1",
+    "--import",
+    migrationsPreload,
+    ...slice,
+    "src/**/*.test.ts",
+  ],
 ]) {
   const code = await run(args);
   if (code !== 0) process.exit(code);

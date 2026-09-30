@@ -33,13 +33,19 @@ test("the src test group runs with concurrency 1", () => {
   const launcher = readFileSync(join(ROOT, "scripts/run-tests-safe.mjs"), "utf8");
   // The command that runs the strip-types src group, isolated from the scripts
   // group so a flag on the wrong half cannot pass this by accident. The safe
-  // launcher holds the argv as an array instead of a shell command.
-  const srcCommand = launcher.match(
-    /\["--experimental-strip-types",[\s\S]{0,160}?"src\/\*\*\/\*\.test\.ts"\]/,
-  );
+  // launcher holds the argv as an array instead of a shell command: take the
+  // array whose LAST element is the src glob, so a flag added to that same argv
+  // (the migrations preload, U18a-1) cannot hide the one this test is about by
+  // pushing the glob out of a fixed-size window.
+  const srcCommand = launcher.match(/\[[^[\]]*?"src\/\*\*\/\*\.test\.ts",?\s*\]/);
   assert.ok(
     srcCommand,
     `the 'test' script no longer runs the src group with strip-types; got: ${script}`,
+  );
+  assert.match(
+    srcCommand[0],
+    /--experimental-strip-types\b/,
+    "the src group no longer runs with --experimental-strip-types",
   );
   assert.match(
     srcCommand[0],

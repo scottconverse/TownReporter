@@ -86,8 +86,8 @@ describe("who owns the desk", () => {
     );
     await sql`delete from newsroom_members`;
     await sql`delete from "user" where id in (${OWNER}, ${EDITOR})`;
-    await sql`insert into "user" (id, email, name) values (${OWNER}, ${OWNER_EMAIL}, ${"Scott Converse"})`;
-    await sql`insert into "user" (id, email, name) values (${EDITOR}, ${"desk@townreporter.example"}, ${"Desk Editor"})`;
+    await sql`insert into "user" (id, email, name, "emailVerified") values (${OWNER}, ${OWNER_EMAIL}, ${"Scott Converse"}, true)`;
+    await sql`insert into "user" (id, email, name, "emailVerified") values (${EDITOR}, ${"desk@townreporter.example"}, ${"Desk Editor"}, true)`;
     await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${OWNER}, 'owner', 1)`;
 
     const access = await readNewsroomAccess(OWNER);

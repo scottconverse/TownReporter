@@ -4,6 +4,7 @@ import { getSql } from "../db.ts";
 import { grokChat } from "./ai.ts";
 import { auditDraft, findingsWithIds, type DraftAuditResult } from "./draft-audit.ts";
 import { repairInstructions } from "./draft-audit-repair.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
   DRAFT_STYLE_TIMEOUT_MS,
   draftFromReply,
@@ -11,6 +12,12 @@ import {
   styleRepairCall,
   type DraftStyleChat,
 } from "./draft-audit.server.ts";
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs applies
+// migrations/*.sql before the file loads; the postgres-integration runner runs
+// the same file WITHOUT that preload, so the fixture asks for it itself --
+// through the one shared applier, which does nothing at all when the ledger is
+// already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 const request = { findings: [{ paragraph: 1, sentence: 2, message: "Nobody is named." }], body: "Experts say the fee will rise." };
 
@@ -158,7 +165,16 @@ async function savedDraft(leadId: number, body = TICK_BODY) {
     unanswered text default '[]', research_json text default '{}', headline_source text default 'model',
     updated_at timestamptz default now())`);
   await sql.query(`create table if not exists leads (id integer primary key, newsroom_id integer)`);
-  await sql.query(`insert into leads values (${leadId}, 91) on conflict do nothing`);
+  // U18a-1: `leads` is the real table now, so the row carries the columns it
+  // declares `not null`, and `community` is declared as a section of room 91
+  // because 0045's trigger refuses a topic the newsroom does not have.
+  await sql.query(`insert into section_config(newsroom_id) values (91) on conflict do nothing`);
+  await sql.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible) values (91,'community','Community',100,true) on conflict do nothing`,
+  );
+  await sql.query(
+    `insert into leads (id,newsroom_id,user_id,headline,why,topic) values (${leadId},91,'editor','Council vote','Fixture','community') on conflict (id) do nothing`,
+  );
   await sql.query(`insert into drafts (newsroom_id,user_id,lead_id,headline,dek,body,topic,research_json)
     values (91,'editor',${leadId},'${TICK_HEADLINE}','${TICK_DEK}','${body}','community','{}')`);
   const seen: Array<{ system: string; user: string }> = [];

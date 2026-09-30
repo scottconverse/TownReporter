@@ -42,7 +42,7 @@ async function reset() {
   await sql.query(`delete from "account" where "userId" like 'recovery-%'`);
   await sql.query(`delete from "user" where id like 'recovery-%'`);
   await sql.query(
-    `insert into "user" (id, email) values ($1, 'recovery-owner@example.test') on conflict (id) do nothing`,
+    `insert into "user" (id, email, name, "emailVerified") values ($1, 'recovery-owner@example.test', 'Recovery Owner', true) on conflict (id) do nothing`,
     [OWNER_ID],
   );
   await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${OWNER_ID}, ${"owner"}, ${1})`;

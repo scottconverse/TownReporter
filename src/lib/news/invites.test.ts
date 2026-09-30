@@ -38,8 +38,8 @@ before(async () => {
   await sql`delete from editor_invites`;
   await sql`delete from newsroom_members`;
   await sql`delete from "user" where id in (${OWNER}, ${GUEST})`;
-  await sql`insert into "user" (id, email) values (${OWNER}, ${OWNER_EMAIL})`;
-  await sql`insert into "user" (id, email) values (${GUEST}, ${GUEST_EMAIL})`;
+  await sql`insert into "user" (id, email, name, "emailVerified") values (${OWNER}, ${OWNER_EMAIL}, 'Invites Owner', true)`;
+  await sql`insert into "user" (id, email, name, "emailVerified") values (${GUEST}, ${GUEST_EMAIL}, 'Invites Guest', true)`;
   await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${OWNER}, 'owner', 1)`;
 });
 

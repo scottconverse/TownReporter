@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
   loadFindingEvidenceCapture,
   loadFindingEvidenceReview,
@@ -33,10 +34,18 @@ async function reset() {
   await sql.query("delete from artifact_versions where newsroom_id in ($1,$2)", [room, otherRoom]);
   await sql.query("delete from drafts where newsroom_id in ($1,$2)", [room, otherRoom]);
   await sql.query("delete from leads where newsroom_id in ($1,$2)", [room, otherRoom]);
-  await sql.query("insert into leads(id,newsroom_id,status) values($1,$2,'drafted')", [
-    leadId,
-    room,
-  ]);
+  // U18a-1: `leads` is the real table now, so the row carries the columns it
+  // declares `not null` (`user_id`, `headline`, `why`); the fixtures above are
+  // `if not exists` and no longer stand in for it. scripts/run-tests-safe.mjs
+  // applies migrations/*.sql before this file loads, and the
+  // postgres-integration runner runs this same file without that preload, so
+  // the fixture asks for the same schema itself -- through the one applier,
+  // which does nothing when the ledger is already full.
+  await applyMigrationsToTestPglite();
+  await sql.query(
+    "insert into leads(id,newsroom_id,user_id,headline,why,status) values($1,$2,'finding-evidence','Council vote','Fixture','drafted')",
+    [leadId, room],
+  );
 }
 beforeEach(reset);
 
