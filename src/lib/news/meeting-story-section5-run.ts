@@ -1,7 +1,13 @@
 import type { Sql } from "../db.ts";
 import { primeGovDocumentsForTitle } from "./primegov.ts";
+import { primeGovOriginForNewsroom } from "./primegov-source.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
-import { fetchStructuredVotesForDate } from "./meeting-vote-sources.ts";
+import {
+  fetchStructuredVotesForDate,
+  NO_STRUCTURED_VOTE_SOURCE,
+  type StructuredVoteFetchResult,
+} from "./meeting-vote-sources.ts";
+import { structuredVoteBaseUrlForNewsroom } from "./structured-vote-source.ts";
 import {
   alignMeeting,
   chunkByAgendaItem,
@@ -17,6 +23,12 @@ import { meetingClock } from "./meeting-draft-input.ts";
 export type Section5Deps = {
   packetForTitle?: typeof primeGovDocumentsForTitle;
   packetItemsForMeeting?: typeof packetItemsForMeeting;
+  /** Test seam: which portal this newsroom watches. See ./primegov-source.ts. */
+  primeGovOrigin?: typeof primeGovOriginForNewsroom;
+  /** Test seam: which structured vote source this paper configured. See ./structured-vote-source.ts. */
+  structuredVoteBaseUrl?: typeof structuredVoteBaseUrlForNewsroom;
+  /** Test seam: the structured vote read itself, so a test never reaches a real council site. */
+  structuredVotesForDate?: typeof fetchStructuredVotesForDate;
 };
 
 export type Section5Result = {
@@ -34,6 +46,14 @@ export type Section5Result = {
   */
   items: { item: string; title: string; startSeconds: number; excerpt: string }[];
   votes: StructuredVote[];
+  /*
+    Why the structured vote read ended the way it did -- including "this paper
+    has no structured vote source configured", which is the whole of what
+    happened in that case. Carried out rather than swallowed: a run that read no
+    vote record must be able to say whether the record was missing or the paper
+    never pointed at one.
+  */
+  structuredVoteReason: string;
 };
 
 /**
@@ -74,11 +94,20 @@ export async function runSection5ForArtifact(
   const packetLookup = deps.packetForTitle ?? primeGovDocumentsForTitle;
   let packetItems: PacketItem[] = [];
   try {
-    const packet = await packetLookup(input.title);
-    if (packet?.meeting) {
-      // Real item list comes from the compiled agenda document via the parser,
-      // not from documentList template names ("Agenda"/"Packet").
-      packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting);
+    /*
+      The portal to ask comes out of this newsroom's own watch list. It used to
+      be a constant (Longmont's) inside the lookup, so every other city's tape
+      was matched against Longmont's meetings; with no portal configured there
+      is no lookup at all, which is the honest answer and not a fallback.
+    */
+    const origin = await (deps.primeGovOrigin ?? primeGovOriginForNewsroom)(sql, input.newsroomId);
+    if (origin) {
+      const packet = await packetLookup(input.title, origin);
+      if (packet?.meeting) {
+        // Real item list comes from the compiled agenda document via the parser,
+        // not from documentList template names ("Agenda"/"Packet").
+        packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting, origin);
+      }
     }
   } catch {
     packetItems = [];
@@ -87,7 +116,32 @@ export async function runSection5ForArtifact(
   const chunks = chunkByAgendaItem({ segments, packetItems });
   const alignment = alignMeeting({ segments, chunks, packetItems });
 
-  const structured = await fetchStructuredVotesForDate(input.meetingDate ?? "").catch(() => ({ found: false, reason: "structured vote lookup failed", records: [], url: "" }));
+  /*
+    The structured vote source comes out of this paper's own settings, the same
+    way the PrimeGov portal comes out of its watch list. It used to be a
+    constant inside the fetch adapter (Longmont's council site), so every
+    paper's section 5 read Longmont's motions; with no structured source
+    configured there is no lookup at all, and the result says so.
+
+    What comes back is the paper's whole setting -- path included -- not just
+    its host, so a site that publishes under a path is read under that path.
+    See ./structured-vote-source.ts.
+  */
+  const voteBase = await (deps.structuredVoteBaseUrl ?? structuredVoteBaseUrlForNewsroom)(
+    sql,
+    input.newsroomId,
+  ).catch(() => null);
+  const structured: StructuredVoteFetchResult = voteBase
+    ? await (deps.structuredVotesForDate ?? fetchStructuredVotesForDate)(
+        input.meetingDate ?? "",
+        voteBase,
+      ).catch(() => ({
+        found: false,
+        reason: `structured vote lookup failed at ${voteBase}`,
+        records: [],
+        url: "",
+      }))
+    : NO_STRUCTURED_VOTE_SOURCE;
   // Structured records are keyed by ordinance/resolution id (O-2026-46), while
   // chunks are keyed by agenda item number (9). Attach a record to the chunk
   // whose transcript span actually mentions that identifier or motion text.
@@ -171,5 +225,6 @@ export async function runSection5ForArtifact(
         .join("\n"),
     })),
     votes,
+    structuredVoteReason: structured.reason,
   };
 }

@@ -2,6 +2,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { heuristicPlan } from "./extract.ts";
+import { PAPER, SEED_SOURCES } from "../paper.ts";
+import { researchScopeOf } from "./research-scope.ts";
+
+/*
+  The keyword heuristic writes queries scoped to a ResearchScope
+  (./research-scope.ts) instead of a built-in town. These cases describe the
+  SHIPPED paper, read through the same configuration production reads.
+*/
+const SHIPPED = researchScopeOf({ city: PAPER.city, state: PAPER.state, seedSources: SEED_SOURCES });
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import {
   checkBaselines,
@@ -103,7 +112,7 @@ async function planner(pack: string): Promise<HopPlan> {
       if (q) tried.add(q);
     }
   }
-  const h = heuristicPlan(pack, tried);
+  const h = heuristicPlan(pack, tried, SHIPPED);
   const plan = emptyPlan();
   plan.searches = h.searches;
   plan.fetch_urls = h.fetch_urls;

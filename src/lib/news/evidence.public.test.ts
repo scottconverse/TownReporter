@@ -321,6 +321,151 @@ describe("public evidence publication", { timeout: 60000 }, () => {
   });
 
   /*
+    The receipt is found in the RAW capture, so its length is the raw match's.
+
+    A stored receipt arrives with its whitespace normalised to single spaces
+    (`publishedCitations`), while the passage it matches in the capture can
+    span line breaks and runs of spaces. The two are not the same length: for
+    a re-wrapped passage the raw match is longer than the quote, and measuring
+    the window with the quote's length puts its right edge INSIDE the passage
+    -- the excerpt then omits the tail of the very receipt it is showing.
+
+    The fixture is built so the two lengths differ by most of a line: the
+    passage is 536 raw characters and 404 normalised, both inside the
+    598-character window budget (600 less the two ellipses), and both shorter
+    than the diff's own 800-character receipt cap. A window sized by the
+    normalised length stops 132 characters early and loses the last quarter of
+    the passage.
+  */
+  it("shows the whole receipt when the passage spans line breaks and runs of spaces", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-raw-${Date.now()}`;
+    const url = `https://example.org/excerpt-raw-${Date.now()}`;
+    const words = Array.from({ length: 45 }, (_, i) => `clause${String(i).padStart(2, "0")}`);
+    const normalisedPassage = words.join(" ");
+    const rawPassage = words.join("\n   ");
+    assert.ok(
+      rawPassage.length <= PUBLIC_EXCERPT_MAX - 2,
+      `the fixture passage must fit the window budget, was ${rawPassage.length} raw characters`,
+    );
+    assert.ok(
+      rawPassage.length > normalisedPassage.length + 100,
+      "the fixture must re-wrap enough for the two lengths to differ",
+    );
+    const full = `${"Earlier procedural text. ".repeat(10)}${rawPassage} ${"Later procedural text. ".repeat(10)}`;
+    const [capture] = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"raw-hash"}, ${"A re-wrapped captured page"}, ${full}, ${"fetched"})
+      returning id
+    `;
+    const provenance = provenanceFromUrls(
+      [url],
+      [{ url, title: "A re-wrapped captured page", version_id: capture!.id, role: "source" }],
+    );
+    const found = serializeFindings([
+      {
+        text: "The passage spans several lines in the capture.",
+        source_urls: [url],
+        artifact_version_ids: [capture!.id],
+        capture_event_ids: [],
+        locators: [],
+        excerpt: normalisedPassage,
+      },
+    ]);
+    await sql`
+      insert into articles (
+        user_id, slug, headline, body, topic, source_urls, status, provenance_json, found_note
+      )
+      values (
+        ${user}, ${`excerpt-raw-${Date.now()}`}, ${"A re-wrapped passage"}, ${"Story"},
+        ${"council"}, ${JSON.stringify([url])}, ${"published"}, ${JSON.stringify(provenance)}, ${found}
+      )
+    `;
+
+    const pub = await loadPublicEvidence(capture!.id);
+    assert.ok(pub);
+    // The capture stores the passage re-wrapped; the reader's copy of it is
+    // compared with whitespace collapsed, which is how a person reads a page.
+    assert.ok(
+      pub!.excerpt.replace(/\s+/g, " ").includes(normalisedPassage),
+      `the excerpt cut the receipt short instead of showing all of it: ${pub!.excerpt}`,
+    );
+    assert.ok(
+      pub!.excerpt.length <= PUBLIC_EXCERPT_MAX,
+      `a centred excerpt carried ${pub!.excerpt.length} characters`,
+    );
+  });
+
+  /*
+    The same passage, quoted, with the receipt at the very edge of the budget.
+
+    Two things go wrong at once here, and both cut the receipt:
+
+    - The window's context either side is one character, and that character is
+      a quote mark glued to the passage's own first and last word. Trimming
+      a partial word off the NORMALISED window then takes `"clause00 ` with it
+      -- the receipt comes back as its middle word alone.
+    - The window is sized from the normalised length, which is 147 characters
+      short of the raw match, so its right edge lands inside the passage.
+
+    The receipt is 596 raw characters: 2 under the 598-character budget, which
+    is what makes the context one character wide. That is the shape a receipt
+    takes when a story quotes the paragraph at the end of a long page, and it
+    is the shape that has to survive.
+  */
+  it("shows a whole receipt that sits at the budget edge against quote marks", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-edge-${Date.now()}`;
+    const url = `https://example.org/excerpt-edge-${Date.now()}`;
+    const words = Array.from({ length: 50 }, (_, i) => `clause${String(i).padStart(2, "0")}`);
+    const normalisedPassage = words.join(" ");
+    const rawPassage = words.join("\n   ");
+    assert.equal(rawPassage.length, 596, "the fixture must sit 2 characters under the budget");
+    const full = `The quoted paragraph begins "${rawPassage}" and continues afterwards.`;
+    const [capture] = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"edge-hash"}, ${"A quoted captured page"}, ${full}, ${"fetched"})
+      returning id
+    `;
+    const provenance = provenanceFromUrls(
+      [url],
+      [{ url, title: "A quoted captured page", version_id: capture!.id, role: "source" }],
+    );
+    const found = serializeFindings([
+      {
+        text: "The passage is quoted in the capture.",
+        source_urls: [url],
+        artifact_version_ids: [capture!.id],
+        capture_event_ids: [],
+        locators: [],
+        excerpt: normalisedPassage,
+      },
+    ]);
+    await sql`
+      insert into articles (
+        user_id, slug, headline, body, topic, source_urls, status, provenance_json, found_note
+      )
+      values (
+        ${user}, ${`excerpt-edge-${Date.now()}`}, ${"A quoted passage"}, ${"Story"},
+        ${"council"}, ${JSON.stringify([url])}, ${"published"}, ${JSON.stringify(provenance)}, ${found}
+      )
+    `;
+
+    const pub = await loadPublicEvidence(capture!.id);
+    assert.ok(pub);
+    assert.ok(
+      pub!.excerpt.replace(/\s+/g, " ").includes(normalisedPassage),
+      `the excerpt cut the receipt short instead of showing all of it: ${pub!.excerpt}`,
+    );
+    assert.ok(
+      pub!.excerpt.length <= PUBLIC_EXCERPT_MAX,
+      `a centred excerpt carried ${pub!.excerpt.length} characters`,
+    );
+  });
+
+  /*
     Counts and a few sentences, never the diff of two articles.
 
     The budget is ONE budget. A cap per side would let a comparison hand back

@@ -1,4 +1,5 @@
 import { withTransaction } from "../db.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import { audit } from "./ops.ts";
 import { completePublishedMeetingReviewWithCorrection } from "./meeting-article-revision.ts";
 import { bodyEditRecord } from "./correction-wording.ts";
@@ -38,6 +39,31 @@ export async function performAddCorrection(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const body = input.body.trim();
   if (body.length < 8) return { ok: false, error: "Write the correction." };
+  /*
+    An editor may not write the machine's byline.
+
+    `/corrections` and the story page mark a correction as automatic when it
+    opens with `correction-origin.ts`'s prefix, which is the only signal the
+    `corrections` table carries -- there is no column for it. An editor who
+    typed that sentence into the box would therefore be handed the label, and
+    a reader would be told a person did not write a row a person wrote. The
+    desk's own correction form is the only caller, so this is a rule about
+    what the desk accepts, not a security boundary; it is enforced here, in
+    the write every caller goes through, rather than in the form, so a second
+    caller cannot miss it.
+
+    It is checked before the transaction, with the length rule, so the refusal
+    costs a sentence and no database work. `startsWith` and not `includes`:
+    the marker is the row's OPENING, so a correction that discusses a routine
+    update in its own words ("A reader asked about the routine edition
+    update:") is an ordinary correction and stays allowed.
+  */
+  if (body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX)) {
+    return {
+      ok: false,
+      error: "Start the correction with your own words. That opening line is how the desk marks a correction it wrote by itself, so a person cannot use it.",
+    };
+  }
   /*
     The body is checked before the transaction so a fix with nothing in it is
     refused in a sentence, not by an empty story page. A body edit needs a

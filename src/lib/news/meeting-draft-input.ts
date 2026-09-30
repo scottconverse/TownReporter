@@ -1,4 +1,5 @@
 import type { ReportingNotes } from "./notes.ts";
+import { voteSourceLabel } from "./meeting-story-section5.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 
 /**
@@ -91,7 +92,7 @@ export function meetingEvidenceBlock(material: MeetingDraftMaterial): string {
         v.seconder ? `seconded by ${v.seconder}` : "",
         v.tally ? `tally ${v.tally}` : "",
         v.result ? `result: ${v.result}` : "",
-        v.source ? `source: ${v.source}` : "source: not named in the record",
+        v.source ? `source: ${voteSourceLabel(v.source)}` : "source: not named in the record",
       ].filter(Boolean);
       out.push(`- ${bits.join("; ")}`);
     }

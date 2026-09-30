@@ -375,7 +375,7 @@ Rules the app enforces, not conventions:
 - The path must be absolute. A relative path is refused.
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
-- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input. Research runs as its own step before writing; a Codex writing call gets no web search.
+- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input. Research runs as its own step before writing; the writing call gets no web search and no other tools, so the pass holding the voice cannot reach the network.
 - For explicit Local model, TownReporter reads the validated file and sends
   its text as a system message to the selected model server. It does not enter
   command-line arguments. Saved custom connections similarly receive the voice through their selected API endpoint.
@@ -657,7 +657,9 @@ Set the paper name, tagline, city, state and IANA timezone. The save derives the
 reader-facing kicker and deck from those choices, changes the public clock and
 meeting-cadence math, and rewrites the seeded welcome article for the city.
 Optional council-votes and editor-contact fields may be left blank; blank means
-the corresponding public link or address is not shown.
+the corresponding public link or address is not shown, and a blank council-votes
+field also means section 5 reads no structured vote record for this paper — it
+does not read another city's.
 
 ### 2. Watch list
 
@@ -755,7 +757,27 @@ If the city uses PrimeGov, add the public portal:
 https://{tenant}.primegov.com/public/portal
 ```
 
+**Accept** the row once it is on the watch list. The first accepted source whose
+host ends in `.primegov.com` is the portal this newsroom reads — that is the
+only place the portal is configured, and there is no built-in city to fall back
+on. With no PrimeGov source accepted, meeting videos are ingested without a
+packet lookup rather than against some other city’s portal; if you have more
+than one portal accepted, only the first is read.
+
 Ingest uses `ListUpcomingMeetings` / `ListArchivedMeetings?year=` and `CompiledDocument?meetingTemplateId=…` (template id, not row id). Home `/` on PrimeGov redirects to login; the public catalog is `/public/portal`. You do not need Crawl4AI.
+
+A meeting video joins a portal meeting only when the tape's date and the
+meeting's date agree **and** the two titles share a body name (`city council`,
+`planning`, `zoning`, `school board`, …). A shared date alone is not enough —
+several bodies meet on the same night — so a tape whose title carries no date
+and no body name is written without a packet rather than joined to the nearest
+meeting.
+
+If the portal answers with a failure on both of its meeting lists (a 5xx, a
+timeout or a block), the source is recorded as "Could not check" with the reason
+and no catalog is stored. If only one list fails, the catalog is stored with a
+`PARTIAL` line naming the list that could not be read. An outage is never
+recorded as a portal with no meetings.
 
 If the city uses Legistar, Granicus, CivicClerk, BoardDocs, or Municode instead, add those URLs as official sources. The Playwright render path already knows those hosts.
 

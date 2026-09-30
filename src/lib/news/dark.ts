@@ -1717,6 +1717,24 @@ async function synthesizeSignals(
 }
 
 /**
+ * The desk's place, straight out of the paper's own configuration.
+ *
+ * Both fields used to carry a second, built-in answer (`cfg?.city ||
+ * "Longmont"`, `cfg?.state || "Colorado"`), so a paper whose configuration
+ * named no city was read as the shipped paper's town and every search, prompt
+ * and label that follows was scoped to Longmont. `getPaperConfig` already
+ * merges the shipped constants column by column, so whatever arrives here IS
+ * the configuration; a blank one means the paper has not said, and the honest
+ * answer is to leave it blank rather than invent a place.
+ *
+ * Pure and exported so a test can pin that (see dark-place.test.ts): an
+ * unconfigured paper yields no city and no state at all.
+ */
+export function darkPlaceFromConfig(cfg: { city: string; state: string }): Pick<Place, "city" | "state"> {
+  return { city: cfg.city.trim(), state: cfg.state.trim() };
+}
+
+/**
  * Where this desk is searching, and whose records count as official.
  *
  * The Dark Signal Desk's searches are location-scoped by default — the
@@ -1738,17 +1756,16 @@ export async function readDarkPlace(newsroomId: number): Promise<{
   const srcs = await sql<{ url: string; tier: string | null }>`
     select url, tier from sources where newsroom_id = ${newsroomId} order by id asc limit 60
   `.catch(() => [] as { url: string; tier: string | null }[]);
-  const city = cfg?.city || "Longmont";
+  const configured = darkPlaceFromConfig(cfg);
   const official = officialDomains(
-    city,
+    configured.city,
     srcs.map((s) => s.url),
     srcs.filter((s) => (s.tier ?? "").toUpperCase() === "A").map((s) => s.url),
   );
   const press = pressDomainsOf(srcs);
   return {
     place: {
-      city,
-      state: cfg?.state || "Colorado",
+      ...configured,
       county: county[0]?.county?.trim() || null,
     },
     official,

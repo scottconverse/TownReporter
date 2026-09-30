@@ -8,6 +8,7 @@ import {
   type WebHit,
 } from "./search-web.ts";
 import { dropListingUrls, namedSubjects, preferPrimaryUrls } from "./extract.ts";
+import { researchScopeOf } from "./research-scope.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import {
   appendScratch,
@@ -591,6 +592,7 @@ async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<Pull
   const memo = parseNotes(rows[0].notes_json);
   const subjects = namedSubjects(
     [rows[0].headline, memo.news, memo.angle, memo.why, receipt.query].filter(Boolean).join("\n"),
+    researchScopeOf(paper),
   );
   const watched = await sql<{ url: string }>`
     select url from sources where newsroom_id = ${job.newsroom_id}

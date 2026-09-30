@@ -160,7 +160,7 @@ export function MeetingCaptureSettings() {
             <input
               className={inputClass}
               aria-label="New meeting channel URL"
-              placeholder="https://www.youtube.com/@CityofLongmont"
+              placeholder="https://www.youtube.com/@YourCityChannel"
               value={newChannel}
               onChange={(e) => setNewChannel(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChannel(); } }}

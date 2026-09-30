@@ -241,9 +241,9 @@ export async function claudeCodeChat(opts: {
   systemPromptFile?: string;
   /**
    * Tools the call may use. Empty by default — most desk calls are text in,
-   * text out. The editorial writer needs WebSearch and WebFetch because its
-   * whole posture is receipts, and without them it is instructed to drop its
-   * own claims appendix.
+   * text out. The Opinion gathering pass needs WebSearch and WebFetch because
+   * its whole posture is receipts; the writing pass that follows it gets
+   * `noTools` instead, because that is the call holding the private voice.
    */
   allowedTools?: string[];
   /**
@@ -272,7 +272,9 @@ export async function claudeCodeChat(opts: {
   /** Per-run Claude CLI effort. Only values advertised by this installed CLI are accepted. */
   reasoningEffort?: ModelEffort | null;
 }): Promise<ClaudeCodeResult> {
-  // Research capability is selected by the caller, including editorial writing.
+  // Research capability is selected by the caller — and the caller is
+  // responsible for never asking one call to carry both the private voice and
+  // an outbound fetch tool (SEC-3; see editorial.server.ts's writing call).
   /*
     A long prompt must never become an argument, no matter which caller
     forgot to plan for it.
@@ -307,9 +309,9 @@ export async function claudeCodeChat(opts: {
     });
   };
 
-  // The editor authorizes research with the editorial voice loaded. A prompt
-  // file is a transport mechanism, not a reason to remove requested web tools.
-  // Fetched pages remain untrusted evidence, never instructions.
+  // Two separate calls, never one: the pass that reads fetched pages holds no
+  // voice, and the pass that holds the voice holds no tools. Fetched pages
+  // remain untrusted evidence, never instructions.
 
   if (opts.noTools && (opts.allowedTools?.length ?? 0) > 0) {
     cleanupTempDir();
@@ -370,7 +372,8 @@ export async function claudeCodeChat(opts: {
     "--setting-sources",
     "",
     // No file access and no bash, ever. Web tools only when the caller asks:
-    // the editorial writer needs them, the planner and synthesis do not.
+    // the Opinion gathering pass needs them, the planner and synthesis do not,
+    // and the voice-loaded writing pass must not have them at all.
     //
     // `noTools` hides the surface (`--tools ""`) instead of denying an empty
     // allow-list (`--allowed-tools ""`) — see the `noTools` doc comment
@@ -483,8 +486,9 @@ export async function claudeCodeChat(opts: {
  *
  * This is intentionally a separate, narrower function rather than a new
  * flag on `claudeCodeChat`: that function's whole contract is "no live
- * tool, ever, except the editorial writer's explicit `allowedTools`", and
- * page transcription has a different input contract. This call never takes a `systemPromptFile` and
+ * tool, ever, except the `allowedTools` a caller names" — today only the
+ * Opinion gathering pass — and page transcription has a different input
+ * contract. This call never takes a `systemPromptFile` and
  * never takes `allowedTools` — it has exactly one tool, exposed on
  * purpose, for exactly one file.
  */

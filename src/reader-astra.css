@@ -955,6 +955,27 @@
   gap: 12px;
   align-items: start;
 }
+/*
+  The mark on a correction the routine-notice worker appended by itself
+  (src/lib/news/correction-origin.ts). A chip rather than a second .eyebrow:
+  the date directly above it is already an eyebrow at this size, and two
+  identical-looking lines would read as a date and a date. Same type size as
+  the eyebrow it sits under, so this is a label and not fine print, and only
+  tokens the reader theme already defines in both themes -- --line for the
+  edge, --teal for the words, which is the ink colour (.eyebrow uses it too).
+*/
+.reader .sourcecard .correctionauto {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
+  border: 1px solid var(--line);
+  line-height: 1.4;
+  padding: 2px 8px;
+  margin-bottom: 10px;
+}
 .reader .sourcecard h3 {
   font-size: 15px;
   font-weight: 700;

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PaperShell } from "@/components/paper-chrome";
 import { CorrectionForm } from "@/components/correction-form";
+import { CorrectionOriginMark } from "@/components/correction-origin-mark";
 import { listPublicCorrections } from "@/lib/news/public";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
@@ -54,6 +55,24 @@ function Corrections() {
           query.data.map((c) => (
             <section className="sourcecard" key={c.id}>
               <span className="eyebrow">{formatShortDate(c.created_at)}</span>
+              {/*
+                A correction the routine-notice worker appended says so, so it
+                is not read as a correction an editor decided on. Same card,
+                same date, same words, plus one chip above the headline that
+                an editor's row does not carry.
+
+                The distinction is read off the row's own text rather than
+                sent as a flag by `listPublicCorrections`, because the read
+                cannot be exercised without the framework's request runtime:
+                `public.ts`'s server functions throw outside it (see
+                public-surfaces.no-leak.test.ts). The rule is the shared one in
+                `correction-origin.ts`, the chip is the shared one in
+                `components/correction-origin-mark.tsx` -- so this page and the
+                story page cannot label the same row differently -- and
+                scripts/corrections-automatic-render.test.mjs renders this
+                route against both.
+              */}
+              <CorrectionOriginMark body={c.body} />
               <h3>{c.headline}</h3>
               <p>{c.body}</p>
               {"slug" in c && typeof c.slug === "string" && (

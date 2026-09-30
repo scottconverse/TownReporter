@@ -69,6 +69,7 @@ function runWorkerWith(env: NodeJS.ProcessEnv) {
             chunkCount: 0,
             voteCount: 0,
             unalignedLead: null,
+            structuredVoteReason: "test: no vote record is read in the speech-to-text unit",
             citations: [],
             items: [],
             votes: [],

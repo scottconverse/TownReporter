@@ -12,6 +12,7 @@ import {
   type HopPlan,
 } from "./investigate.ts";
 import { remainingStrategies } from "./strategies.ts";
+import { NO_RESEARCH_SCOPE } from "./research-scope.ts";
 
 async function bootInv(user: string, title: string) {
   await ensureInvestigateSchema();
@@ -445,7 +446,9 @@ describe("investigative freedom", { timeout: 120000 }, () => {
     assert.notEqual(row[0]!.status, "exhausted");
     assert.ok((row[0]!.search_zero_count ?? 0) >= 1);
     const tried = JSON.parse(row[0]!.strategies_tried || "[]") as string[];
-    const remaining = remainingStrategies("company", label, tried);
+    // A paper that has configured nothing still has strategies; none of them
+    // names a town (see ./research-scope.ts).
+    const remaining = remainingStrategies("company", label, tried, NO_RESEARCH_SCOPE);
     assert.ok(remaining.length > 0, `remaining should be non-empty, tried=${tried.join(",")}`);
     assert.ok(row[0]!.next_steps.length > 0);
   });
@@ -599,7 +602,7 @@ describe("planner failure is never silent", () => {
    */
   it("carries a reason on the plan type", async () => {
     const mod = await import("./investigate.ts");
-    const plan = mod.heuristicPlan("Longmont city council packet", new Set());
+    const plan = mod.heuristicPlan("Longmont city council packet", new Set(), NO_RESEARCH_SCOPE);
     const marked = { ...plan, planner_error: "Claude Code request timed out" };
     assert.equal(marked.planner_error, "Claude Code request timed out");
     assert.ok(Array.isArray(marked.searches));

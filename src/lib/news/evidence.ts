@@ -71,6 +71,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** The matched passage in the capture: where it starts and where it ends. */
+type ReceiptSpan = { start: number; end: number };
+
 /**
  * Where a stored receipt sits in a capture, whitespace-insensitively.
  *
@@ -78,12 +81,20 @@ function escapeRegExp(value: string): string {
  * between fetches and a sentence can acquire a newline in the middle. Matching
  * word-by-word lets the passage be found without normalising a whole document
  * just to look for it.
+ *
+ * The END is the raw match's end, and that is the whole point: the stored
+ * quote arrives with its whitespace normalised to single spaces, so it is
+ * SHORTER than the passage it matches whenever that passage spans a line
+ * break or a run of spaces. The window is built from this span, never from
+ * `quote.length` -- a normalised length used as though it were the raw match
+ * length puts the window's right edge inside the very passage it is meant to
+ * show, and the reader gets a receipt with its tail cut off.
  */
-function receiptOffset(text: string, quote: string): number {
+function receiptSpan(text: string, quote: string): ReceiptSpan | null {
   const words = quote.split(/\s+/).filter(Boolean).map(escapeRegExp);
-  if (!words.length) return -1;
+  if (!words.length) return null;
   const match = new RegExp(words.join("\\s+"), "i").exec(text);
-  return match ? match.index : -1;
+  return match ? { start: match.index, end: match.index + match[0].length } : null;
 }
 
 /** The opening of a capture, cut at a word boundary. */
@@ -97,24 +108,41 @@ function openingExcerpt(text: string, max: number): string {
  * Falls back to null when the receipt is not in this capture at all (a story
  * may cite an earlier version than the one being read) or is too long to fit,
  * so the caller can take the capture's opening instead.
+ *
+ * Everything here is measured in RAW capture offsets, because that is what
+ * `text.slice` and the budget are measured in. The span's own length, not the
+ * normalised quote's, is what the passage costs.
  */
 function excerptAroundReceipt(text: string, quote: string): string | null {
-  const at = receiptOffset(text, quote);
-  if (at < 0) return null;
+  const span = receiptSpan(text, quote);
+  if (!span) return null;
+  const length = span.end - span.start;
   // Room for the passage and for an ellipsis on either side.
   const budget = PUBLIC_EXCERPT_MAX - ELLIPSIS.length * 2;
-  if (quote.length > budget) return null;
-  const spare = budget - quote.length;
-  const before = Math.min(at, Math.floor(spare / 2));
-  const after = Math.min(text.length - (at + quote.length), spare - before);
-  const start = at - before;
-  const end = at + quote.length + after;
-  let out = text.slice(start, end).replace(/\s+/g, " ").trim();
-  // Trim partial words at an edge that falls inside a word. Never inside the
-  // passage itself: `before`/`after` are zero exactly when the edge is the
-  // passage's own boundary, which the match already put on a word bound.
-  if (before > 0) out = out.replace(/^\S*\s+/, "");
-  if (after > 0) out = out.replace(/\s+\S*$/, "");
+  if (length > budget) return null;
+  const spare = budget - length;
+  const before = Math.min(span.start, Math.floor(spare / 2));
+  const after = Math.min(text.length - span.end, spare - before);
+  let start = span.start - before;
+  let end = span.end + after;
+  /*
+    Each edge is trimmed back to a whole word, and never at the passage's
+    expense: the match put the passage's own edges on word boundaries, so a
+    trim with no boundary to stop at is one that would reach across
+    `span.start` / `span.end` -- and there the window simply begins (or ends)
+    at the passage instead. Trimming the already-normalised text is what made
+    a receipt that opened after a quote mark and closed before one come back
+    as its middle word alone.
+  */
+  if (before > 0) {
+    const gap = text.slice(start, span.start).search(/\s/);
+    start = gap >= 0 ? start + gap + 1 : span.start;
+  }
+  if (after > 0) {
+    const gap = text.slice(span.end, end).search(/\s\S*$/);
+    end = gap >= 0 ? span.end + gap : span.end;
+  }
+  const out = text.slice(start, end).replace(/\s+/g, " ").trim();
   return `${start > 0 ? ELLIPSIS : ""}${out}${end < text.length ? ELLIPSIS : ""}`;
 }
 

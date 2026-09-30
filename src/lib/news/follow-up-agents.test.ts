@@ -29,6 +29,7 @@ import {
 import { JobCancelledError, enqueueJob, ensureJobsSchema, requestJobCancel } from "./jobs.ts";
 import { parseNotes } from "./notes.ts";
 import { createDarkRunBudget } from "./dark-run-budget.ts";
+import { setFetchImplForTests } from "./fetch-url.ts";
 
 /**
  * The three AI follow-up agents, and the worker that runs one.
@@ -348,6 +349,28 @@ describe("agenda, on a meeting body's portal", () => {
     });
     assert.equal(empty.state, "could-not-check");
     assert.match(empty.finding.reason ?? "", /listed no meetings/);
+  });
+
+  it("calls a real portal outage could-not-check, not an empty portal", async () => {
+    /*
+      The live read, not an injected one: `fetchPrimeGovMeetings` is the real
+      function against a fake 503. It used to swallow both API failures into an
+      empty list, and this agent then reported "the portal listed no meetings"
+      -- a portal that answered nothing at all, described as a portal that has
+      nothing. That reading is what makes an outage look like evidence.
+    */
+    setFetchImplForTests(async () => new Response("gateway down", { status: 503 }));
+    try {
+      const outcome = await runAgendaAgent(
+        input({ targets: ["https://longmont.primegov.com/public/portal"] }),
+      );
+      assert.equal(outcome.state, "could-not-check");
+      assert.match(outcome.finding.reason ?? "", /503/);
+      assert.doesNotMatch(outcome.finding.reason ?? "", /listed no meetings/);
+      assert.match(outcome.finding.reason ?? "", /longmont\.primegov\.com/);
+    } finally {
+      setFetchImplForTests(null);
+    }
   });
 
   it("says so when no meeting has a document posted yet", async () => {

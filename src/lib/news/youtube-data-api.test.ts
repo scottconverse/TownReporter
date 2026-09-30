@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 import { getSql } from "../db.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
+import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 import {
   buildApiVideos,
   classifyYouTubeApiFailure,
@@ -341,6 +342,9 @@ describe("YouTube Data API: the calls", () => {
     const sql = await getSql();
     await sql.query("delete from youtube_api_settings where newsroom_id = 73").catch(() => undefined);
     await sql.query("delete from youtube_api_usage where newsroom_id = 73").catch(() => undefined);
+    // No paper_settings row means the shipped configuration, which is what a
+    // fresh install reads; a test that needs another city's writes its own.
+    await sql.query("delete from paper_settings where newsroom_id = 73").catch(() => undefined);
     setYouTubeTransportForTests(null);
   });
 
@@ -591,9 +595,12 @@ describe("YouTube Data API: the calls", () => {
   it("tests a typed key without storing it, and names the channel Google answered for", async () => {
     fakeGoogle({
       channels: (url) => {
-        // No meeting channels are configured for newsroom 73, so the desk asks
-        // about the channel TownReporter ships with -- a real channel is the
-        // only honest test.
+        /*
+          Newsroom 73 has written no paper_settings row, so its channels are the
+          shipped configuration's (src/lib/paper.ts) -- read through the same
+          setting every other city uses. There is no built-in channel in the
+          code to fall back to.
+        */
         assert.equal(url.searchParams.get("forHandle"), "@CityofLongmont");
         return json(200, CHANNEL_BODY);
       },
@@ -611,6 +618,57 @@ describe("YouTube Data API: the calls", () => {
     assert.equal(rows[0]?.encrypted_api_key ?? null, null, "a tested key is not saved");
     // The unit spent by the test is counted like any other.
     assert.equal(await readYouTubeUnits(NEWSROOM, TODAY), 1);
+  });
+
+  it("tests against the channel the configured paper watches, never the shipped paper's", async () => {
+    await ensurePaperSettingsSchema();
+    const sql = await getSql();
+    await sql.query(
+      `insert into paper_settings(newsroom_id,onboarded,city,youtube_channels)
+       values(73,true,'Riverbend','["https://www.youtube.com/@RiverbendCity"]'::jsonb)
+       on conflict(newsroom_id) do update set youtube_channels=excluded.youtube_channels`,
+    );
+    const asked: string[] = [];
+    fakeGoogle({
+      channels: (url) => {
+        asked.push(url.searchParams.get("forHandle") ?? "");
+        return json(200, { items: [{ ...CHANNEL_BODY.items[0], snippet: { title: "Riverbend City" } }] });
+      },
+    });
+    const result = await testYouTubeApiKey(EDITOR, "AIzaTYPED-key-for-another-city", TODAY);
+    assert.deepEqual(asked, ["@RiverbendCity"]);
+    assert.deepEqual(result, {
+      ok: true,
+      message: "Key works. Google answered for the channel Riverbend City.",
+    });
+    assert.equal(
+      hits.some((hit) => /longmont/i.test(hit.url)),
+      false,
+      "another city's paper must not have its key tested against the shipped paper's channel",
+    );
+  });
+
+  it("makes no request at all when the paper has no meeting channel configured", async () => {
+    /*
+      The honest answer for a paper with no channel. This used to reach for the
+      handle TownReporter ships with, so the Test button reported a green light
+      for a channel the paper does not watch. Restore that fallback and this
+      test fails on both assertions: the message and the empty request list.
+    */
+    await ensurePaperSettingsSchema();
+    const sql = await getSql();
+    await sql.query(
+      `insert into paper_settings(newsroom_id,onboarded,city,youtube_channels)
+       values(73,true,'Riverbend','[]'::jsonb)
+       on conflict(newsroom_id) do update set youtube_channels=excluded.youtube_channels`,
+    );
+    fakeGoogle({ channels: () => json(200, CHANNEL_BODY) });
+    const result = await testYouTubeApiKey(EDITOR, "AIzaTYPED-key-with-nothing-to-read", TODAY);
+    assert.equal(result.ok, false);
+    assert.match(result.message, /no meeting channel is configured for this paper/i);
+    assert.doesNotMatch(result.message, /longmont/i);
+    assert.equal(hits.length, 0, "no channel configured means no lookup at all");
+    assert.equal(await readYouTubeUnits(NEWSROOM, TODAY), 0, "and no unit spent");
   });
 
   it("reports a rejected key in plain words and never stores it either", async () => {

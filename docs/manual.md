@@ -1088,7 +1088,7 @@ flowchart LR
 
 ![The Opinion desk and its voice handoff](diagrams/opinion-voice-handoff.svg)
 
-The diagram shows both subscription writers. Claude and Codex receive the complete voice through their native instruction-file options. The writing pass retains research tools.
+The diagram shows both subscription writers. Claude and Codex receive the complete voice through their native instruction-file options. The research pass holds the web tools and never the voice; the writing pass that follows holds the voice and no tools.
 The explicit Local model alternative reads the validated voice into a system
 message for the selected model server and uses the supplied material without
 a separate research pass. None of these paths places the voice text in argv. A relative path, or any path inside the public

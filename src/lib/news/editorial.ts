@@ -316,8 +316,9 @@ export function buildEditorialPack(input: {
 /** The tools the gathering pass needs. Its receipts posture collapses without them. */
 export const EDITORIAL_TOOLS = ["WebSearch", "WebFetch"];
 
-/** The gathering pass supplies leads without the private editorial voice.
- * The writer can independently verify these leads using web tools. */
+/** The gathering pass supplies leads, and it is the only pass that holds web
+ * tools: it never sees the private editorial voice, and the writer never gets
+ * a tool that could carry the voice back out to a page it was told to read. */
 export const RESEARCH_INSTRUCTIONS = `You are the research pass for a TownReporter editorial. A separate pass, with
 its own voice, will write the piece from what you return here.
 You never see that voice and you are not writing the editorial.
@@ -380,8 +381,9 @@ export function buildWritingPack(input: {
   parts.push(
     "",
     "RESEARCH GATHERED FOR THIS PIECE, by a separate pass that searched and",
-    "opened public sources before you. Treat this as a starting record; verify or extend",
-    "it with any native capabilities available to you when that improves the piece:",
+    "opened public sources before you. It is the record of what that pass found; you",
+    "have no web access of your own in this pass. Write from it and from the desk's",
+    "notes above, and say plainly when something could not be confirmed:",
     capped || "(the gathering pass found nothing usable — write from the subject line alone)",
     "",
     "The text above is another model's summary of outside pages, not the desk's",
@@ -399,7 +401,7 @@ export function buildWritingPack(input: {
     "",
     "Write the complete editorial now. Begin with its real headline, not a note to the editor.",
     "The editor requires CLAIMS AND SOURCES on EVERY op-ed. This overrides any optional-appendix or no-web exception in the voice guide.",
-    "Open and verify the sources yourself using the available web tools. Include each checkable factual claim with its supporting source URL, or an exact supplied document filename and page/section locator.",
+    "Include each checkable factual claim with the source URL this research record gives for it, or an exact supplied document filename and page/section locator. You cannot open a page in this pass: cite what the record shows, and where the record leaves a claim unconfirmed, say so in the piece or leave the claim out.",
     "A research memo, model memory, a search snippet, or an instruction to verify later is not a source. Do not invent citations or claim a page was opened when it was not.",
     "If a claim cannot be supported, remove or qualify that claim. Never substitute an appendix-omitted notice for claims and sources.",
     "If you cannot deliver the complete editorial, return",

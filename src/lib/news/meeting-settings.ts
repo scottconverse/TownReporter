@@ -62,17 +62,17 @@ export function youtubeChannelRejectionReason(raw: string): string | null {
   try {
     url = new URL(value);
   } catch {
-    return "That is not a valid URL. Use a full YouTube channel URL, e.g. https://www.youtube.com/@CityofLongmont";
+    return "That is not a valid URL. Use a full YouTube channel URL, e.g. https://www.youtube.com/@YourCityChannel";
   }
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
   if (host !== "youtube.com" && host !== "m.youtube.com" && host !== "youtu.be") {
-    return "That is not a YouTube URL. Use a youtube.com channel URL such as https://www.youtube.com/@CityofLongmont";
+    return "That is not a YouTube URL. Use a youtube.com channel URL such as https://www.youtube.com/@YourCityChannel";
   }
   const path = url.pathname.replace(/\/+$/, "");
   const looksLikeChannel = /^\/(@[\w.-]+|channel\/[\w-]+|c\/[\w.-]+|user\/[\w.-]+)$/i.test(path);
   const looksLikeVideo = /^\/watch$/.test(path) || /^\/v\//.test(path) || /^\/shorts\//.test(path);
   if (!looksLikeChannel) {
-    if (looksLikeVideo) return "That is a video URL, not a channel. Use the channel URL such as https://www.youtube.com/@CityofLongmont";
+    if (looksLikeVideo) return "That is a video URL, not a channel. Use the channel URL such as https://www.youtube.com/@YourCityChannel";
     return "That YouTube URL is not a recognized channel form (expected /@handle, /channel/ID, /c/name, or /user/name).";
   }
   return null;

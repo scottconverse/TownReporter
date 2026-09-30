@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import { performAddCorrection } from "./corrections.ts";
 
 async function ensureFixtureTables() {
@@ -84,5 +85,60 @@ describe("corrections stay inside the editor's newsroom", () => {
       select id from audit_events where user_id = ${editorA} and newsroom_id = ${newsroomA} and action = 'correction'
     `;
     assert.equal(audits.length, 2, "rejected slugs must not write audit events");
+  });
+});
+
+/*
+  A different boundary, in the same write path: what the desk lets an editor
+  put in the box. The `corrections` table has no column saying who wrote a row,
+  so `/corrections` and the story page decide it from the row's opening words
+  (src/lib/news/correction-origin.ts). An editor who typed those words would
+  wear the machine's byline, so `performAddCorrection` refuses the marker --
+  the row's opening, not any mention of the phrase -- before it opens a
+  transaction. Exercised here rather than in the form because this is the
+  function every caller goes through.
+*/
+describe("an editor's correction cannot wear the machine's marker", () => {
+  it("refuses the marker, writes nothing, and still accepts a note that merely mentions it", async () => {
+    const sql = await ensureFixtureTables();
+    const stamp = `${Date.now()}-${Math.random()}`;
+    const newsroom = 820_003;
+    const editor = `correction-editor-marker-${stamp}`;
+    const slug = `own-published-${stamp}`;
+    await sql`
+      insert into articles (newsroom_id, user_id, slug, headline, status)
+      values (${newsroom}, ${editor}, ${slug}, ${"Own published story"}, 'published')
+    `;
+
+    const marker = await performAddCorrection(
+      { userId: editor, newsroomId: newsroom },
+      { articleSlug: slug, body: `${ROUTINE_EDITION_UPDATE_PREFIX}\n\nThe concert moved.` },
+    );
+    assert.deepEqual(marker, {
+      ok: false,
+      error:
+        "Start the correction with your own words. That opening line is how the desk marks a correction it wrote by itself, so a person cannot use it.",
+    });
+
+    // The prefix is the row's OPENING. A correction that talks about a routine
+    // update in its own words is an ordinary correction and posts.
+    const mentions = await performAddCorrection(
+      { userId: editor, newsroomId: newsroom },
+      {
+        articleSlug: slug,
+        body: "A reader asked about the routine edition update: the concert start time was right.",
+      },
+    );
+    assert.deepEqual(mentions, { ok: true });
+
+    const written = await sql<{ body: string }>`
+      select body from corrections where user_id = ${editor} and newsroom_id = ${newsroom}
+    `;
+    assert.equal(written.length, 1, "the refused marker must not have reached the table");
+    assert.ok(!written[0]!.body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX));
+    const audits = await sql<{ id: number }>`
+      select id from audit_events where user_id = ${editor} and newsroom_id = ${newsroom} and action = 'correction'
+    `;
+    assert.equal(audits.length, 1, "a refused correction must not write an audit event");
   });
 });

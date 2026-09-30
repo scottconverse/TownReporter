@@ -29,6 +29,29 @@ export function portalOrigin(url: URL): string {
   return `${url.protocol}//${url.hostname}`;
 }
 
+/**
+ * The portal a newsroom watches, from its own watch-list source URLs: the first
+ * accepted source whose host is a PrimeGov tenant.
+ *
+ * This used to be a constant (`https://longmont.primegov.com`) inside this
+ * module, so a second city's meeting tape was matched against Longmont's
+ * meetings. The portal comes from configuration now, and "no portal
+ * configured" is a real answer: callers skip the lookup rather than query
+ * somebody else's city.
+ */
+export function primeGovOriginFromSources(urls: readonly string[]): string | null {
+  for (const raw of urls) {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue; // a watch-list row that is not a link
+    }
+    if (isPrimeGovUrl(url)) return portalOrigin(url);
+  }
+  return null;
+}
+
 export function compiledDocumentUrl(origin: string, doc: PrimeGovDocument): string {
   if (doc.link) return doc.link;
   const param = `meetingTemplateId=${doc.templateId || doc.id}`;
@@ -51,27 +74,107 @@ export function preferredDocuments(meeting: PrimeGovMeeting): PrimeGovDocument[]
   return [...docs].sort((a, b) => rank(a.templateName) - rank(b.templateName));
 }
 
-export function scoreMeetingMatch(videoTitle: string, meeting: PrimeGovMeeting): number {
+/**
+ * The civic bodies a meeting title can name. Two tapes that agree on the date
+ * but not on the body are two different meetings -- a city holds several on the
+ * same night -- so agreeing on one of these is what makes a date mean anything.
+ *
+ * SINGLE WORDS, because that is what the match below compares: `norm` splits a
+ * title into words and this set is intersected with both, so a two-word entry
+ * could never match anything. A "study session" is therefore recognised by
+ * `study`, a "work session" by `work` -- not by `session`, which on its own is
+ * true of a study session and an executive session and would join two meetings
+ * a council held the same night. `workshop` and `hearing` name their own kind
+ * of meeting. (Missing these was why "Longmont Study Session 09/09/2026" and a
+ * portal row titled "Study Session" stopped being joined: no body word agreed
+ * and the titles are not identical.)
+ */
+const MEETING_BODIES = new Set([
+  "council",
+  "commission",
+  "committee",
+  "board",
+  "trustees",
+  "aldermen",
+  "supervisors",
+  "selectmen",
+  "planning",
+  "zoning",
+  "school",
+  "authority",
+  "district",
+  "study",
+  "work",
+  "workshop",
+  "hearing",
+]);
+
+/** The body names both titles carry, in the body list's order. */
+export function sharedBodyNames(videoTitle: string, meeting: PrimeGovMeeting): string[] {
+  const v = new Set(norm(videoTitle).split(" "));
+  const m = new Set(norm(meeting.title).split(" "));
+  return [...MEETING_BODIES].filter((body) => v.has(body) && m.has(body));
+}
+
+/** The two dates agree, day for day. */
+export function datesAgree(videoTitle: string, meeting: PrimeGovMeeting): boolean {
+  const vDate = dateFromTitle(videoTitle);
+  const mDate = dateFromTitle(`${meeting.date} ${meeting.dateTime}`) ?? dateFromTitle(meeting.date);
+  return Boolean(vDate && mDate && vDate === mDate);
+}
+
+/**
+ * Do these two titles name the same meeting?
+ *
+ * The dates have to agree, always -- that is what picks WHICH instance of a
+ * recurring meeting this is -- and on top of that either the body names have to
+ * agree or the whole title has to be identical. A date on its own is not an
+ * identification: it used to score 40, and 40 was the acceptance floor, so a
+ * date coincidence was enough to attach one city's agenda to another city's
+ * tape. The old `/206/` and `/pharaoh|pharoah/` bonuses were fixture-specific
+ * (one Longmont address, one project name) and are gone with them.
+ */
+export function sameMeetingTitle(videoTitle: string, meeting: PrimeGovMeeting): boolean {
   const v = norm(videoTitle);
   const m = norm(meeting.title);
-  if (!v || !m) return 0;
-  let score = 0;
+  if (!v || !m) return false;
+  if (!datesAgree(videoTitle, meeting)) return false;
+  // An identical title is a title agreement in full, and it is the only way a
+  // meeting that names no body ("Neighborhood Meeting Notice - Avis Car
+  // Rental") can ever be identified. The date above still has to agree: two
+  // such notices a month apart are two different meetings.
+  return v === m || sharedBodyNames(videoTitle, meeting).length > 0;
+}
+
+/**
+ * How strong the agreement is, for ranking candidates. **0 means "not the same
+ * meeting"** -- `sameMeetingTitle` is the gate, and this is only ever asked
+ * about titles that passed it.
+ */
+export function scoreMeetingMatch(videoTitle: string, meeting: PrimeGovMeeting): number {
+  if (!sameMeetingTitle(videoTitle, meeting)) return 0;
+  const v = norm(videoTitle);
+  const m = norm(meeting.title);
   if (v === m) return 100;
-  const vDate = dateFromTitle(videoTitle) ?? "";
-  const mDate = dateFromTitle(`${meeting.date} ${meeting.dateTime}`) ?? dateFromTitle(meeting.date) ?? "";
-  if (vDate && mDate && vDate === mDate) score += 40;
+  // The gate above has already established the date; the tokens below decide
+  // which of that day's meetings this is.
+  let score = 40;
   const tokens = v.split(" ").filter((t) => t.length > 3 && !STOP.has(t));
   let hits = 0;
   for (const t of tokens) {
     if (m.includes(t)) hits += 1;
   }
   score += hits * 8;
-  if (/206/.test(v) && /206/.test(m)) score += 30;
-  if (/pharaoh|pharoah/.test(v) && /pharaoh|pharoah/.test(m)) score += 30;
   if (/council/.test(v) && /council/.test(m) && /regular/.test(v) && /regular/.test(m)) score += 20;
   return score;
 }
 
+/*
+  Words that appear in nearly every meeting title of any city, so agreement on
+  one is not evidence. "longmont" is here because this file's shipped example
+  city is Longmont and its name is in every one of its own titles; a name from
+  another city is simply not a stop word.
+*/
 const STOP = new Set(["meeting", "notice", "virtual", "street", "longmont", "city", "session", "with", "from"]);
 
 function norm(s: string): string {
@@ -116,6 +219,7 @@ export function dateFromTitle(raw: string): string | null {
   return null;
 }
 
+/** The best candidate, or null when no candidate is the same meeting at all. */
 export function bestMeetingMatch(
   videoTitle: string,
   meetings: PrimeGovMeeting[],
@@ -129,7 +233,7 @@ export function bestMeetingMatch(
       best = m;
     }
   }
-  return score >= 40 ? best : null;
+  return score > 0 ? best : null;
 }
 
 function asMeeting(row: Record<string, unknown>): PrimeGovMeeting {
@@ -155,29 +259,119 @@ function asMeeting(row: Record<string, unknown>): PrimeGovMeeting {
   };
 }
 
-async function getJson(url: string): Promise<unknown> {
-  const res = await fetchPublicHttp(new URL(url));
-  if (!res.ok) throw new Error(`PrimeGov ${res.status}`);
-  return res.json();
+/**
+ * A portal that answered with a failure, or did not answer at all.
+ *
+ * Carries the status so an ingest can record what the portal said (503, a
+ * timeout) rather than only that something went wrong, and so callers that
+ * already have a place to write a reason -- the follow-up agents, the scan's
+ * source errors -- can use the portal's own words.
+ */
+export class PrimeGovPortalError extends Error {
+  readonly status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.name = "PrimeGovPortalError";
+    this.status = status;
+  }
 }
 
-export async function fetchPrimeGovMeetings(origin: string): Promise<PrimeGovMeeting[]> {
+async function getJson(url: string): Promise<unknown> {
+  const res = await fetchPublicHttp(new URL(url));
+  if (!res.ok) {
+    throw new PrimeGovPortalError(`the portal answered ${res.status}`, res.status);
+  }
+  try {
+    return await res.json();
+  } catch {
+    throw new PrimeGovPortalError("the portal's answer was not a meeting list", res.status);
+  }
+}
+
+type PortalCall =
+  | { ok: true; rows: unknown[] }
+  | { ok: false; detail: string; status: number };
+
+/** One portal call. A failure is a value here: the two lists are independent,
+ *  and one of them answering is still worth reporting. */
+async function listMeetingsAt(url: string): Promise<PortalCall> {
+  try {
+    const body = await getJson(url);
+    return { ok: true, rows: Array.isArray(body) ? body : [] };
+  } catch (error) {
+    if (error instanceof PrimeGovPortalError) {
+      return { ok: false, detail: error.message, status: error.status };
+    }
+    const message = error instanceof Error ? error.message : "the portal could not be read";
+    return /timeout|aborted/i.test(message)
+      ? { ok: false, detail: "the portal timed out", status: 0 }
+      : { ok: false, detail: message, status: 0 };
+  }
+}
+
+export type PrimeGovPortalRead = {
+  /** Every meeting the lists that answered carried. */
+  meetings: PrimeGovMeeting[];
+  /** false when NEITHER list answered: nothing was read at all. */
+  ok: boolean;
+  /** The status of the first call that failed, for recording. 0 when none did. */
+  status: number;
+  /** Which list failed and why; null when both answered. */
+  failure: string | null;
+};
+
+/**
+ * Read a portal's two meeting lists.
+ *
+ * A failure is carried out of here, never swallowed into an empty list. An
+ * empty catalog reads as evidence that a meeting or a document does not exist,
+ * and a 5xx, a timeout or a block must not be able to buy that evidence: both
+ * lists failing is `ok: false` with the reason, and one failing keeps the
+ * other's meetings and names the failure so the catalog can say it is partial.
+ */
+export async function readPrimeGovPortal(origin: string): Promise<PrimeGovPortalRead> {
   const year = new Date().getFullYear();
   const [upcoming, archived] = await Promise.all([
-    getJson(`${origin}/api/v2/PublicPortal/ListUpcomingMeetings`).catch(() => []),
-    getJson(`${origin}/api/v2/PublicPortal/ListArchivedMeetings?year=${year}`).catch(() => []),
+    listMeetingsAt(`${origin}/api/v2/PublicPortal/ListUpcomingMeetings`),
+    listMeetingsAt(`${origin}/api/v2/PublicPortal/ListArchivedMeetings?year=${year}`),
   ]);
-  const rows = [...(Array.isArray(upcoming) ? upcoming : []), ...(Array.isArray(archived) ? archived : [])];
+  const rows = [
+    ...(upcoming.ok ? upcoming.rows : []),
+    ...(archived.ok ? archived.rows : []),
+  ];
   const seen = new Set<number>();
-  const out: PrimeGovMeeting[] = [];
+  const meetings: PrimeGovMeeting[] = [];
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const m = asMeeting(row as Record<string, unknown>);
     if (!m.id || seen.has(m.id)) continue;
     seen.add(m.id);
-    out.push(m);
+    meetings.push(m);
   }
-  return out;
+  const failed = [
+    ...(upcoming.ok ? [] : [{ label: "upcoming", detail: upcoming.detail, status: upcoming.status }]),
+    ...(archived.ok ? [] : [{ label: "archived", detail: archived.detail, status: archived.status }]),
+  ];
+  return {
+    meetings,
+    ok: upcoming.ok || archived.ok,
+    status: failed[0]?.status ?? 0,
+    failure: failed.length ? failed.map((f) => `${f.label}: ${f.detail}`).join(" · ") : null,
+  };
+}
+
+/**
+ * The portal's meetings, or a throw naming why it could not be read. The throw
+ * is the point: every caller of this one has somewhere honest to put a reason
+ * (the scan's source errors, a follow-up's "could not check"), and none of them
+ * may see an outage as an empty portal.
+ */
+export async function fetchPrimeGovMeetings(origin: string): Promise<PrimeGovMeeting[]> {
+  const read = await readPrimeGovPortal(origin);
+  if (!read.ok) {
+    throw new PrimeGovPortalError(read.failure ?? "the portal could not be read", read.status);
+  }
+  return read.meetings;
 }
 
 function isRecent(meeting: PrimeGovMeeting, days = 45): boolean {
@@ -202,11 +396,20 @@ export function minutesGap(meeting: PrimeGovMeeting, now = new Date()): string |
 export function catalogAndExtras(
   origin: string,
   meetings: PrimeGovMeeting[],
+  partialFailure: string | null = null,
 ): { text: string; extras: string[] } {
   const windowed = meetings.filter((m) => isRecent(m)).sort((a, b) => (a.dateTime < b.dateTime ? 1 : -1));
   const lines = [
     `PrimeGov portal ${origin}/public/portal`,
     `${meetings.length} meetings on file this year; showing ${windowed.length} from the last 45 days plus upcoming.`,
+    /*
+      One list answering and one failing is a partial catalog, and it has to
+      read as one. Without this line a block on the archived endpoint would
+      look exactly like a year with no archived meetings.
+    */
+    ...(partialFailure
+      ? [`PARTIAL: one of the portal's two meeting lists could not be read (${partialFailure}). The list below is incomplete.`]
+      : []),
     "Packets and minutes are separate records (the CompiledDocument links). This catalog does not replace them.",
     "",
   ];
@@ -236,21 +439,36 @@ export async function ingestPrimeGov(url: URL): Promise<{ text: string; title: s
   if (/\/Public\/CompiledDocument/i.test(url.pathname) || /\/Portal\/Meeting/i.test(url.pathname)) {
     return null;
   }
-  const meetings = await fetchPrimeGovMeetings(origin);
-  const { text, extras } = catalogAndExtras(origin, meetings);
+  const read = await readPrimeGovPortal(origin);
+  // An outage is a failed read with the portal's own reason, thrown rather than
+  // returned as an empty catalog: "0 meetings on file" is a reading of the
+  // portal, and this is not one.
+  if (!read.ok) {
+    throw new PrimeGovPortalError(read.failure ?? "the portal could not be read", read.status);
+  }
+  const { text, extras } = catalogAndExtras(origin, read.meetings, read.failure);
   return {
     text,
-    title: "Longmont agendas, packets, and minutes (PrimeGov)",
+    title: `${new URL(origin).hostname} agendas, packets, and minutes (PrimeGov)`,
     extras,
   };
 }
 
+/**
+ * The documents for the meeting a video title names, from the portal the
+ * caller passed in. There is no default portal: the origin comes from the
+ * newsroom's own watch list (`primeGovOriginForNewsroom`), and a caller with
+ * no configured portal must skip the lookup rather than ask another city.
+ */
 export async function primeGovDocumentsForTitle(
   videoTitle: string,
-  origin = "https://longmont.primegov.com",
+  origin: string,
 ): Promise<{ meeting: PrimeGovMeeting; urls: string[] } | null> {
-  const meetings = await fetchPrimeGovMeetings(origin);
-  const hit = bestMeetingMatch(videoTitle, meetings);
+  const read = await readPrimeGovPortal(origin);
+  if (!read.ok) {
+    throw new PrimeGovPortalError(read.failure ?? "the portal could not be read", read.status);
+  }
+  const hit = bestMeetingMatch(videoTitle, read.meetings);
   if (!hit) return null;
   const urls: string[] = [];
   for (const d of preferredDocuments(hit)) {

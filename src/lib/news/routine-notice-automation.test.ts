@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { before, beforeEach, test } from "node:test";
 import { getPglite, getSql } from "../db.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import {
   ensureRoutineNoticePolicySchema,
   saveRoutineNoticePolicyFor,
@@ -245,6 +246,22 @@ test("actual scheduled worker atomically publishes one logistics-only article an
   assert.equal(afterCorrection?.corrections, 1);
   assert.equal(afterCorrection?.articles, 2);
   assert.notDeepEqual(JSON.parse(afterCorrection!.candidate_keys_json), []);
+  /*
+    The correction the worker appended carries the mark the public page reads
+    to tell an automatic row from an editor's (unit U14). Writer and reader
+    share one constant, `correction-origin.ts`; this is the writer half, and
+    `scripts/corrections-automatic-render.test.mjs` is the reader half. It was
+    a bare string literal here before, which is exactly how the two could have
+    drifted apart silently.
+  */
+  const [automatic] = await sql.query<{ body: string }>(
+    "select body from corrections where newsroom_id=$1",
+    [room],
+  );
+  assert.ok(
+    automatic!.body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX),
+    `a machine-appended correction must open with the shared marker, got: ${automatic!.body.slice(0, 60)}`,
+  );
 
   await sql.query("update articles set body='Editor changed this edition.' where newsroom_id=$1", [room]);
   eventTitle = "Concert — final time";

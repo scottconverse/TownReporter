@@ -5,7 +5,7 @@ import { extractArticleText, extractSiteNotices } from "./article-extract.ts";
 import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
-import { ingestPrimeGov } from "./primegov.ts";
+import { ingestPrimeGov, PrimeGovPortalError } from "./primegov.ts";
 import { FetchResponseRefusal, limitFor, readBodyCapped } from "./body-limit.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
@@ -903,6 +903,23 @@ async function ingestDocumentRaw(
         contentType: err.contentType,
         redirectChain: responseChain.length ? responseChain : err.redirectChain,
         extractionMethod: err.reason,
+      });
+    }
+    /*
+      A PrimeGov portal that answered with a failure, or did not answer at all,
+      is a failed read carrying the portal's own status and reason -- not an
+      empty catalog. This branch is before the generic one below, which would
+      flatten a 503 to status 0 and lose the reason an editor needs.
+    */
+    if (err instanceof PrimeGovPortalError) {
+      return empty({
+        ok: false,
+        status: err.status,
+        outcome: "fetch-failed",
+        text: err.message,
+        title: raw,
+        redirectChain: [raw],
+        extractionMethod: "primegov",
       });
     }
     const msg = err instanceof Error ? err.message : "fetch failed";

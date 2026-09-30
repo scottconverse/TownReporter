@@ -1,6 +1,7 @@
 export type ExtractedRef = { kind: string; value: string };
 
 import { PAPER } from "../paper.ts";
+import { scopedQuery, type ResearchScope } from "./research-scope.ts";
 
 const LLC_RE =
   /\b([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,5}\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?))\b/g;
@@ -58,13 +59,25 @@ const SUBJECT_VERBS =
   /\s+(?:opens?|announces?|plans?|files?|launches?|builds?|breaks?|wins?|hires?|expands?|moves?|relocates?)\b/i;
 
 /** Names in a headline that are not LLC-suffixed — "Ursa Major" from "Ursa Major opens …". */
-export function namedSubjects(text: string): string[] {
+export function namedSubjects(text: string, scope: ResearchScope): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
+  /*
+    The paper's own city and state are places a story is about, not subjects of
+    it: "Longmont City Council" and "Colorado regulators" are the desk's own
+    beat, and a subject would put them in a quoted search. They come from the
+    configured place, so another city's paper suppresses its own town's name --
+    this list used to name the shipped paper's, and nothing else.
+  */
+  const stopWords = new Set([
+    "the", "a", "an", "this", "city", "county", "new",
+    ...[scope.city, scope.state].flatMap((name) => name.trim().toLowerCase().split(/\s+/)),
+  ]);
   const push = (raw: string) => {
     const t = raw.replace(/\s+/g, " ").trim();
     if (t.length < 4 || t.length > 80) return;
-    if (/^(the|a|an|this|city|county|longmont|colorado|new)\b/i.test(t)) return;
+    const first = t.split(/\s+/)[0]!.toLowerCase();
+    if (stopWords.has(first)) return;
     const key = t.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
@@ -78,15 +91,20 @@ export function namedSubjects(text: string): string[] {
   }
   const runs = text.match(/\b([A-Z][A-Za-z0-9&.-]+(?:\s+[A-Z][A-Za-z0-9&.-]+){1,3})\b/g) ?? [];
   for (const run of runs.slice(0, 8)) {
-    if (/^(Longmont|Colorado|City Council|United States)\b/i.test(run)) continue;
+    if (/^(City Council|United States)\b/i.test(run)) continue;
     push(run);
   }
   return out.slice(0, 6);
 }
 
-export function primarySourceQueries(headline: string, subjects: string[], city = "Longmont"): string[] {
+export function primarySourceQueries(
+  headline: string,
+  subjects: string[],
+  scope: ResearchScope,
+): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  const city = scope.city.trim();
   const add = (q: string) => {
     const t = q.replace(/\s+/g, " ").trim();
     if (t.length < 8) return;
@@ -98,7 +116,7 @@ export function primarySourceQueries(headline: string, subjects: string[], city 
   if (!subjects.length) return out;
   add(`${headline} press release`);
   for (const s of subjects.slice(0, 4)) {
-    add(`"${s}" ${city} press release OR announcement OR newsroom`);
+    add(scopedQuery([`"${s}"`, city, "press release OR announcement OR newsroom"]));
     add(`"${s}" press-release OR /media/ OR /newsroom`);
   }
   return out.slice(0, 6);
@@ -129,44 +147,47 @@ export function preferPrimaryUrls(urls: string[], subjects: string[]): string[] 
   return [...urls].sort((a, b) => primarySourceScore(b, subjects) - primarySourceScore(a, subjects) || b.length - a.length);
 }
 
-export function queriesForRef(ref: ExtractedRef, city = "Longmont"): string[] {
+export function queriesForRef(ref: ExtractedRef, scope: ResearchScope): string[] {
   const v = ref.value;
+  const city = scope.city.trim();
+  const state = scope.state.trim();
   switch (ref.kind) {
     case "company":
       return [
-        `"${v}" ${city} press release OR announcement OR newsroom`,
-        `"${v}" ${city}`,
-        `"${v}" "registered agent" Colorado`,
+        scopedQuery([`"${v}"`, city, "press release OR announcement OR newsroom"]),
+        scopedQuery([`"${v}"`, city]),
+        scopedQuery([`"${v}"`, `"registered agent"`, state]),
         `"${v}" campaign contribution`,
         `"${v}" contract OR RFP OR bid`,
       ];
     case "contract":
-      return [`"${v}" ${city} contract`, `"${v}" RFP`];
+      return [scopedQuery([`"${v}"`, city, "contract"]), `"${v}" RFP`];
     case "rfp":
-      return [`${v} ${city}`, `${v} proposal`];
+      return [scopedQuery([v, city]), `${v} proposal`];
     case "parcel":
-      return [`parcel ${v} ${city}`, `${v} assessor ${city}`];
+      return [scopedQuery(["parcel", v, city]), scopedQuery([v, "assessor", city])];
     case "legislation":
-      return [`${v} ${city}`, `${v} minutes`];
+      return [scopedQuery([v, city]), `${v} minutes`];
     case "person":
       return [
-        `"${v}" ${city}`,
-        `"${v}" "registered agent" Colorado`,
+        scopedQuery([`"${v}"`, city]),
+        scopedQuery([`"${v}"`, `"registered agent"`, state]),
         `"${v}" campaign contribution`,
         `"${v}" planning`,
       ];
     case "planning":
-      return [`${v} ${city}`, `${v} planning`, `${v} campaign contribution`];
+      return [scopedQuery([v, city]), `${v} planning`, `${v} campaign contribution`];
     case "url":
       return [];
     default:
-      return [`"${v}" ${city}`];
+      return [scopedQuery([`"${v}"`, city])];
   }
 }
 
 export function heuristicPlan(
   text: string,
   tried: Set<string>,
+  scope: ResearchScope,
   searchesPerHop = 3,
   fetchesPerHop = 4,
 ): {
@@ -193,9 +214,9 @@ export function heuristicPlan(
         kind: ref.kind,
         why: "Referenced in evidence; not yet searched",
         priority: ref.kind === "company" || ref.kind === "contract" ? 9 : 6,
-        queries: queriesForRef(ref),
+        queries: queriesForRef(ref, scope),
       });
-      for (const q of queriesForRef(ref)) {
+      for (const q of queriesForRef(ref, scope)) {
         if (!tried.has(q)) searches.push(q);
       }
     }

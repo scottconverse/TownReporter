@@ -60,16 +60,112 @@ describe("meeting section 5 real vote source adapter (Finding B)", () => {
     assert.equal(votes[0]?.tally, "7-0");
     assert.equal(votes[0]?.mover, "Matthew Popkin");
     assert.equal(votes[0]?.result, "Passed");
-    assert.equal(votes[0]?.source, "longmontcitycouncil.org");
+    assert.equal(votes[0]?.source, "structured-record");
   });
 
   it("records an explicit per-source availability reason instead of a silent null", async () => {
     const { voteSourceAvailability } = await import("./meeting-vote-sources.ts");
-    const availability = voteSourceAvailability({ structuredRecordFound: false, minutesFound: false, packetFound: false, transcriptFound: true });
+    const availability = voteSourceAvailability({ structuredSource: "example.test", structuredRecordFound: false, minutesFound: false, packetFound: false, transcriptFound: true });
     assert.match(availability.structuredRecord, /not available/i);
     assert.match(availability.minutes, /not available/i);
     assert.match(availability.packet, /not available/i);
     assert.match(availability.transcript, /corroboration/i);
+  });
+
+  it("reports no structured source at all when the paper has configured none", async () => {
+    const { voteSourceAvailability } = await import("./meeting-vote-sources.ts");
+    const availability = voteSourceAvailability({
+      structuredSource: null,
+      structuredRecordFound: false,
+      minutesFound: false,
+      packetFound: false,
+      transcriptFound: false,
+    });
+    assert.match(availability.structuredRecord, /no structured vote source configured/i);
+    assert.equal(/longmont/i.test(availability.structuredRecord), false);
+  });
+
+  it("takes the structured vote base URL from the paper's own setting, path included", async () => {
+    const { structuredVoteBaseUrlFromSetting } = await import("./structured-vote-source.ts");
+    assert.equal(structuredVoteBaseUrlFromSetting("https://council.example.test/"), "https://council.example.test/");
+    // The whole setting, not just its host: a paper whose records live under a
+    // path configured that path for a reason.
+    assert.equal(
+      structuredVoteBaseUrlFromSetting("  https://city.example/council/votes/  "),
+      "https://city.example/council/votes/",
+    );
+    // Exactly one trailing slash, whichever way the editor typed it.
+    assert.equal(
+      structuredVoteBaseUrlFromSetting("https://city.example/council/votes"),
+      "https://city.example/council/votes/",
+    );
+    assert.equal(
+      structuredVoteBaseUrlFromSetting("https://city.example/council/votes///"),
+      "https://city.example/council/votes/",
+    );
+    // Blank is a real answer: this paper has no structured vote record.
+    assert.equal(structuredVoteBaseUrlFromSetting(""), null);
+    assert.equal(structuredVoteBaseUrlFromSetting("   "), null);
+    assert.equal(structuredVoteBaseUrlFromSetting(null), null);
+    assert.equal(structuredVoteBaseUrlFromSetting("javascript:alert(1)"), null);
+    assert.equal(structuredVoteBaseUrlFromSetting("not a url"), null);
+  });
+
+  it("reads the meeting page under the configured path, never at its host alone", async () => {
+    const { structuredVoteMeetingUrl } = await import("./meeting-vote-sources.ts");
+    const { structuredVoteBaseUrlFromSetting } = await import("./structured-vote-source.ts");
+    const meetingUrl = (setting: string, date = "2026-07-28") => {
+      const base = structuredVoteBaseUrlFromSetting(setting);
+      assert.ok(base, `expected a usable base URL for ${setting}`);
+      return structuredVoteMeetingUrl(base, date);
+    };
+
+    /*
+      The shipped site is at a root, and its URLs are byte-for-byte the ones
+      the origin-only code produced: `https://longmontcitycouncil.org` +
+      `/meetings/<date>/`. Written out in full rather than assembled from the
+      constant, so a change to this string is a change a reader has to see.
+    */
+    assert.equal(
+      meetingUrl("https://longmontcitycouncil.org/"),
+      "https://longmontcitycouncil.org/meetings/2026-07-28/",
+    );
+    assert.equal(
+      meetingUrl("https://longmontcitycouncil.org"),
+      "https://longmontcitycouncil.org/meetings/2026-07-28/",
+      "a setting with no trailing slash reaches the same URL",
+    );
+    assert.equal(
+      meetingUrl("https://longmontcitycouncil.org/", "a date the desk could not read"),
+      "https://longmontcitycouncil.org/meetings/",
+    );
+
+    // The bug this pins: reducing the setting to its origin asked
+    // `https://city.example/meetings/2026-07-28/`, a page that has never
+    // existed, for every meeting of every paper configured this way.
+    assert.equal(
+      meetingUrl("https://city.example/council/votes/"),
+      "https://city.example/council/votes/meetings/2026-07-28/",
+    );
+    assert.equal(
+      meetingUrl("https://city.example/council/votes", "a date the desk could not read"),
+      "https://city.example/council/votes/meetings/",
+    );
+
+    // One slash between the two parts, however many the setting had.
+    for (const setting of [
+      "https://longmontcitycouncil.org/",
+      "https://longmontcitycouncil.org",
+      "https://city.example/council/votes/",
+      "https://city.example/council/votes///",
+    ]) {
+      const built = meetingUrl(setting);
+      assert.equal(
+        built.slice("https://".length).includes("//"),
+        false,
+        `${setting} must not build a doubled slash: ${built}`,
+      );
+    }
   });
 
   it("never infers a tally when only transcript corroboration exists", async () => {

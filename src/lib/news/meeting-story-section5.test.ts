@@ -79,13 +79,13 @@ describe("meeting section 5 structured vote extraction", () => {
     const { extractStructuredVote } = await import("./meeting-story-section5.ts");
     const vote = extractStructuredVote({
       item: "R-2026-51",
-      structuredRecord: { motion: "Approve the resolution", mover: "Popkin", seconder: "Coloffer", tally: "7-0", result: "Passed", source: "longmontcitycouncil.org" },
+      structuredRecord: { motion: "Approve the resolution", mover: "Popkin", seconder: "Coloffer", tally: "7-0", result: "Passed", source: "structured-record" },
       minutes: { motion: "Approve the resolution", mover: "Popkin", seconder: "Coloffer", tally: "7-0", result: "Passed", source: "minutes" },
       packet: null,
       transcript: { excerpt: "motion carried", source: "transcript" },
     });
     assert.equal(vote.established, true);
-    assert.equal(vote.source, "longmontcitycouncil.org");
+    assert.equal(vote.source, "structured-record");
     assert.equal(vote.tally, "7-0");
     assert.equal(vote.mover, "Popkin");
     assert.equal(vote.seconder, "Coloffer");
@@ -130,7 +130,7 @@ describe("meeting section 5 structured vote extraction", () => {
     const { extractStructuredVote } = await import("./meeting-story-section5.ts");
     const vote = extractStructuredVote({
       item: "R-2026-51",
-      structuredRecord: { motion: "Approve", mover: "A", seconder: "B", tally: "7-0", result: "Passed", source: "longmontcitycouncil.org" },
+      structuredRecord: { motion: "Approve", mover: "A", seconder: "B", tally: "7-0", result: "Passed", source: "structured-record" },
       minutes: { motion: "Approve", mover: "A", seconder: "B", tally: "6-1", result: "Passed", source: "minutes" },
       packet: null,
       transcript: null,

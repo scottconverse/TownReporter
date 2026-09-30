@@ -1,4 +1,5 @@
 import { sanitizePublicUrls } from "./schema.ts";
+import { storableText } from "./storable-text.ts";
 import {
   findMatchingLead,
   matchStrength,
@@ -160,11 +161,54 @@ export async function fileScanLeads(
   const insertedThisRun: MatchCandidateLead[] = [];
 
   for (const lead of aiLeads) {
-    if (!lead.headline?.trim()) continue;
+    /*
+      Sanitize ONCE, at the top, and read from these locals for the rest of the
+      loop -- matching included.
+
+      These are the fields a model wrote, and the insert at the bottom of this
+      loop is where they become Postgres `text`. A NUL in any one of them does
+      not spoil one field: Postgres refuses the whole statement with "invalid
+      byte sequence for encoding UTF8: 0x00", that fails the transaction, and
+      the entire scan -- every lead it found, every source it touched -- is lost
+      to one stray byte the model emitted. SCAN-001.
+
+      Doing it here rather than at the insert matters for the matching too: the
+      candidates this loop compares against (`existing`) were read back from
+      the database and are therefore already clean, so a candidate still
+      carrying its NUL is not the same string the desk matched on.
+
+      `storableText`, not `postgresText`: this is model-written editorial text,
+      not captured evidence, so the byte is dropped rather than turned into a
+      visible U+FFFD. See storable-text.ts for the policy.
+    */
+    const headline = storableText(lead.headline);
+    const why = storableText(lead.why ?? "");
+    const topic = storableText(lead.topic ?? "council");
+    const evidence = storableText(lead.evidence ?? "");
     const candidateUrls = sanitizePublicUrls(lead.source_urls);
 
+    /*
+      The headline is judged AFTER cleaning, not before.
+
+      A headline the model wrote out of C0 bytes alone -- a NUL and a BEL, two
+      characters rather than none -- is not empty, so the trim check that used
+      to sit at the top of this loop passed it. `storableText` then dropped
+      both bytes, so the row filed below carried headline `""`: a lead on the
+      Queue with nothing to read, counted as one the run found. Nothing about
+      such a candidate is usable, so it is skipped the way every other unusable
+      model lead is skipped -- no row, no count, nothing for an editor to open.
+
+      This is SCAN-001's sibling. The NUL is gone either way; here the whole
+      candidate was nothing but NUL.
+
+      It also has to be `headline` and not `lead.headline`: the string matched
+      against `existing` a few lines below must be the string that would be
+      stored.
+    */
+    if (!headline.trim()) continue;
+
     const sibling = insertedThisRun.find((prior) =>
-      sameStoryForMerge({ headline: lead.headline!, source_urls: candidateUrls }, prior),
+      sameStoryForMerge({ headline, source_urls: candidateUrls }, prior),
     );
     if (sibling) {
       const merged = mergeSourceUrls(sibling.source_urls, candidateUrls);
@@ -179,7 +223,7 @@ export async function fileScanLeads(
       continue;
     }
 
-    const matchId = findMatchingLead({ headline: lead.headline, source_urls: candidateUrls }, existing);
+    const matchId = findMatchingLead({ headline, source_urls: candidateUrls }, existing);
 
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
@@ -187,7 +231,7 @@ export async function fileScanLeads(
     if (matchId != null) {
       const matched = existing.find((l) => l.id === matchId)!;
       const strength = matchStrength(
-        { headline: lead.headline, source_urls: candidateUrls },
+        { headline, source_urls: candidateUrls },
         { headline: matched.headline, source_urls: matched.source_urls },
       );
       if (strength === "strong") {
@@ -198,7 +242,7 @@ export async function fileScanLeads(
         // the killed row's "came back" count stays true).
         const killedWithNewFacts =
           matched.status === "killed" &&
-          newFactsIn({ why: lead.why, evidence: lead.evidence }, matched);
+          newFactsIn({ why, evidence }, matched);
         await sql`
             update leads
             set resurfaced_count = resurfaced_count + 1,
@@ -214,7 +258,7 @@ export async function fileScanLeads(
         } else {
           if (matched.status === "killed") resurfacedKilled += 1;
           else resurfacedOpen += 1;
-          firstDiscardedHeadline ??= lead.headline;
+          firstDiscardedHeadline ??= headline;
           continue;
         }
       } else {
@@ -232,11 +276,11 @@ export async function fileScanLeads(
     const inserted = await sql<{ id: number; status: string; headline: string }>`
         insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen, dup_kind)
         values (
-          ${context.userId}, ${newsroomId}, ${runId}, ${lead.headline.slice(0, 180)},
-          ${String(lead.why ?? "").slice(0, 800)},
-          ${String(lead.topic ?? "council").slice(0, 40)},
+          ${context.userId}, ${newsroomId}, ${runId}, ${headline.slice(0, 180)},
+          ${why.slice(0, 800)},
+          ${topic.slice(0, 40)},
           ${urls},
-          ${String(lead.evidence ?? "").slice(0, 2000)},
+          ${evidence.slice(0, 2000)},
           ${Number(lead.newsworthiness) || 0},
           ${initialStatus},
           ${possibleDuplicateOf},
@@ -252,8 +296,10 @@ export async function fileScanLeads(
       headline: inserted[0]!.headline,
       source_urls: candidateUrls,
       created_at: new Date().toISOString(),
-      why: lead.why ?? null,
-      evidence: lead.evidence ?? null,
+      // `== null` rather than the sanitized "" on purpose: a model that wrote
+      // no `why` at all must still read as absent here, exactly as before.
+      why: lead.why == null ? null : why,
+      evidence: lead.evidence == null ? null : evidence,
     };
     existing.push(insertedRow);
     insertedThisRun.push(insertedRow);
