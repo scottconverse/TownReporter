@@ -3699,8 +3699,8 @@
 /* BF3, defect 2: ONE line at 1280, drawn order -- the tab strip at the left,
    then search, Sort and Section at the right -- with the words inside the
    controls ("Sort: Best first", "Section: All") rather than as labels above
-   them. Measured at 1280: all six share one top y. Nothing here wraps above
-   the phone width; the @media block at the foot of this file stacks them. */
+   them. Measured at 1280: all six share one top y. At 701–1279px, the filters
+   wrap below the strip; the phone media block at the foot stacks them. */
 .desk-ltr.astra .queue-controls {
   display: flex;
   flex-wrap: nowrap;
@@ -3743,19 +3743,20 @@
   color: var(--fg2);
   font: 400 calc(15px * var(--ts)) var(--fb);
   flex: 1 1 200px;
-  min-width: 0;
+  min-width: 100px;
+  box-sizing: border-box;
 }
 .desk-ltr.astra .queue-sel {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-height: 46px;
-  padding: 0 12px;
+  padding: 0 4px;
   border: 1px solid var(--fg);
   background: none;
   white-space: nowrap;
   font: 700 calc(15px * var(--ts)) var(--fd);
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
 }
 .desk-ltr.astra .queue-sel .queue-lab {
@@ -3773,6 +3774,39 @@
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.desk-ltr.astra .queue-sel select[aria-label="Sort"] {
+  min-width: 6em;
+}
+.desk-ltr.astra .queue-sel select[aria-label="Section"] {
+  min-width: 2.75em;
+}
+/* Large-text filters move below the tabs before their controls get crowded. */
+@media (min-width: 701px) and (max-width: 1279px) {
+  .desk-ltr.astra .queue-controls {
+    flex-wrap: wrap;
+  }
+  .desk-ltr.astra .queue-tabs {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .desk-ltr.astra .queue-filters {
+    flex-wrap: wrap;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
+/* Keep the compact one-line layout at desktop widths. The editor drawing's
+   tab labels fit with this modest padding reduction, leaving enough room for
+   the populated Section selector and its selected value at 1280px. */
+@media (min-width: 1280px) and (max-width: 1339px) {
+  .desk-ltr.astra .queue-controls .queue-tabs > button {
+    padding-inline: 7px;
+  }
+  .desk-ltr.astra .queue-filters {
+    gap: 10px;
+  }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
@@ -6033,6 +6067,26 @@
 .desk-ltr.astra .astra-panel-open > [role="alert"],
 .desk-ltr.astra .astra-panel-open > [role="status"] {
   position: relative;
+}
+
+/* The scan scope chooser needs room for its label and native select before the
+   scan page's two-column layout reaches its one-column breakpoint. */
+@media (max-width: 1099px) {
+  .desk-ltr.astra .astra-panel.hot .astra-toolbar > label {
+    display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .desk-ltr.astra .astra-panel.hot .astra-toolbar > label select {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+  .desk-ltr.astra .scan-bar .model-picker > .model-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */

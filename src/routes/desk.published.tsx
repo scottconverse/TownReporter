@@ -1237,7 +1237,7 @@ function PublishedPage() {
             {/* A header-only table read as broken, not empty (UX-002). */}
             {(memory.data ?? []).length === 0 ? (
               <tr>
-                <td className="td-meta" colSpan={3}>
+                <td className="td-meta wide" colSpan={3}>
                   Nothing tracked yet. Beat memory fills in once a story publishes and mentions an
                   entity.
                 </td>

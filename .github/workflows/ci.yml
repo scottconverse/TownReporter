@@ -173,6 +173,7 @@ jobs:
           PORT: "3000"
           HOST: 127.0.0.1
           SMOKE_BASE_URL: http://127.0.0.1:3000
+          TOWNREPORTER_DATA_ROOT: ${{ runner.temp }}/townreporter-test003-data
           # No provider, on purpose: the first-run state a new operator meets.
           TOWNREPORTER_CLAUDE_CODE: "0"
         run: |
@@ -193,6 +194,19 @@ jobs:
         env:
           SECURITY_HEADERS_BASE_URL: http://127.0.0.1:3000
         run: node scripts/security-headers-e2e.mjs
+      - name: Walk the rendered desk and reader design matrix
+        env:
+          UIWALK_BASE_URL: http://127.0.0.1:3000
+          UIWALK_ARTIFACT_DIR: desk-uiux-walk-artifacts
+          TOWNREPORTER_DATA_ROOT: ${{ runner.temp }}/townreporter-test003-data
+        run: node scripts/desk-uiux-walk.mjs
+      - name: Preserve rendered design walk evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desk-uiux-walk-artifacts
+          path: desk-uiux-walk-artifacts/
+          if-no-files-found: ignore
 
   smoke-dev:
     name: Documented dev path works in a browser
