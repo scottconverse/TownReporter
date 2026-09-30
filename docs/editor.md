@@ -1036,8 +1036,9 @@ Shows anonymous page loads, not unique people or completed reads — no cookies,
 no fingerprinting, just a count of how many times an instrumented page loaded.
 Alongside that it shows a **daily visitor estimate** and a **where readers are**
 panel: a city and a country derived by Cloudflare from the reader's IP address,
-counted by the day and printed only once at least 25 visits have landed there in
-the range — smaller places on a finished day are added together into "other
+counted by the day and once per reader rather than per page load, and printed by
+name only on days when at least 25 readers were counted in it — its quieter
+days, and every smaller place on a finished day, are added together into "other
 places" by the hourly check rather than kept individually. The visitors figure
 is built from a value the server keeps in memory only, discarded at midnight and
 on restart. No address, user-agent string or place is ever stored as a value,

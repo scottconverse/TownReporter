@@ -555,12 +555,16 @@ The **city and country** are derived by Cloudflare from the reader's IP address
 and passed to the app as headers; they are believed only when the request
 arrived over loopback, which is where the tunnel daemon connects from, so a
 direct connection cannot forge them. The app keeps only a per-day count per
-place, never the address, and prints a place only once at least 25 visits have
-landed there in the selected range. **Today's counts are kept per place until
-the day ends**; once a day has finished, the hourly check adds every place under
-25 visits together into that day's "other places" row and deletes the individual
-rows. So a place with one visit does not stay in the database — but it is there
-until the day closes, and **a backup taken before the fold still holds it**.
+place, never the address, and that count is of **readers, not page loads** —
+each reader is counted once in a place on a day, so reloading or reading on
+cannot push a town over the line on its own. A place is printed by name only on
+days when at least 25 readers were counted in it; its quieter days, and every
+place that never reached 25, appear as "other places" for that day instead.
+**Today's counts are kept per place until the day ends**; once a day has
+finished, the hourly check adds every place under 25 readers together into that
+day's "other places" row and deletes the individual rows. So a place with one
+reader does not stay in the database — but it is there until the day closes, and
+**a backup taken before the fold still holds it**.
 The **requesting address and
 the browser's type** (a few words such as "phone", never the user-agent string)
 are read for one moment, inside a one-way code that changes every day, purely to

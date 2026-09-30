@@ -555,11 +555,25 @@ describe("C. a place is read coarsely, or not at all", () => {
     assert.equal(rows[0]?.city, SENTINEL_CITY);
     assert.equal(Number(rows[0]?.visits), 1);
 
-    // A country with no city is still a place, folded so it cannot be mistaken
-    // for a real name.
+    /*
+      A country with no city is still a place, folded so it cannot be mistaken
+      for a real name.
+
+      The address is required now, and it is here rather than absent on purpose:
+      a place is counted for a READER (unit U23), and a request with no address
+      is not a reader this server can count, so it writes no place either. What
+      this half is about is the missing CITY -- there is no `cf-ipcity` -- and
+      the fold that a country-only arrival lands in. That a request with no
+      address counts nothing at all is pinned in
+      src/lib/news/reading.server.test.ts, on the real write path.
+    */
     const countryOnly = new Request("http://test.local/api/read", {
       method: "POST",
-      headers: { "content-type": "application/json", "cf-ipcountry": "de" },
+      headers: {
+        "content-type": "application/json",
+        "cf-ipcountry": "de",
+        "cf-connecting-ip": "198.51.100.42",
+      },
       body: JSON.stringify({ kind: "load", path: "/", refClass: "direct", device: "computer" }),
     });
     assert.equal((await withPeer("127.0.0.1", () => readBeaconHandler(countryOnly))).status, 204);

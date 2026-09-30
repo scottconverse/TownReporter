@@ -48,7 +48,11 @@ import {
   recordReadBeacon,
   recordTrustCount,
 } from "./reading.server.ts";
-import { FOLDED_CITY, LOCATION_MIN_VISITS } from "./stats-privacy.ts";
+import {
+  FOLDED_CITY,
+  LOCATION_MIN_READERS,
+  beaconContextFromHeaders,
+} from "./stats-privacy.ts";
 import { liveSnapshot, noteLiveBeat, resetLiveWindow } from "./reading-live.ts";
 
 /** Same bootstrap as views.test.ts -- `articles` is migrations-only. */
@@ -1039,6 +1043,235 @@ describe("where readers are, and how many", () => {
 });
 
 /*
+  Unit U23, first finding: A PLACE IS COUNTED FOR A READER, NOT FOR A LOAD.
+
+  The counter used to move on every `load`, before anything had asked whether
+  this was someone new, so one reader reloading a page -- or reading thirty of
+  them -- could carry a town they were the only reader of over the threshold on
+  their own, and the Stats page then printed it by name. That is a row about one
+  person, which is the entire thing the threshold exists to prevent, and the
+  at-rest fold could not catch it because the number was already over the line.
+
+  The mutation that matters: put the `location_daily` insert back in front of
+  `noteVisitor`'s answer -- count a place on every load again -- and the first
+  case below fails, because thirty loads from one reader becomes 30 readers.
+
+  These cases drive the real write path (`recordReadBeacon` with a context built
+  by `beaconContextFromHeaders`, exactly as the route builds it) and then read
+  it back through the real page query, so "not named" is a statement about what
+  an editor would see rather than about a row count.
+*/
+describe("a place is counted for a reader, not for a page load", () => {
+  const newsroomId = 9605;
+  const userId = `reading-per-reader-owner-${Date.now()}`;
+  const city = "Niwot";
+  const loadPath = "/";
+
+  /** The context the route builds for a tunnel request from `ip` in `city`. */
+  const contextFor = (ip: string) =>
+    beaconContextFromHeaders(
+      new Headers({
+        "cf-ipcity": city,
+        "cf-ipcountry": "US",
+        "cf-connecting-ip": ip,
+        "user-agent": "PerReaderProbe/1.0",
+      }),
+      { fromTunnel: true },
+    );
+
+  const load = (ip: string) =>
+    recordReadBeacon(
+      { kind: "load", path: loadPath, refClass: "direct", device: "computer" },
+      newsroomId,
+      contextFor(ip),
+    );
+
+  /** What is stored for this city: the number the threshold is applied to. */
+  async function counted() {
+    const sql = await getSql();
+    const [row] = await sql<{ visits: string }>`
+      select visits from location_daily
+      where newsroom_id = ${newsroomId} and city = ${city}
+    `;
+    return Number(row?.visits ?? 0);
+  }
+
+  /** Page loads are a different counter and must not have moved with it. */
+  async function loadsOnThePath() {
+    const sql = await getSql();
+    const [row] = await sql<{ loads: string }>`
+      select coalesce(sum(loads), 0) as loads from read_hourly
+      where newsroom_id = ${newsroomId} and path = ${loadPath} and ref_class = ${"direct"}
+    `;
+    return Number(row?.loads ?? 0);
+  }
+
+  /** Clear this paper's rows, so one case cannot carry into the next. */
+  async function forget() {
+    const sql = await getSql();
+    await sql`delete from location_daily where newsroom_id = ${newsroomId}`;
+    await sql`delete from visitor_daily where newsroom_id = ${newsroomId}`;
+  }
+
+  before(async () => {
+    await ensureNewsroomSchema();
+    await ensureReadingSchema();
+    const sql = await getSql();
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${userId}, 'owner', ${newsroomId})
+    `;
+    await forget();
+  });
+
+  it("thirty loads from one reader are one reader, and no place", async () => {
+    const loadsBefore = await loadsOnThePath();
+    for (let i = 0; i < 30; i += 1) {
+      const outcome = await load("198.18.0.1");
+      assert.equal(outcome.accepted, true, "the load itself is always accepted");
+    }
+
+    assert.equal(await counted(), 1, "one reader is one, however many pages they opened");
+    assert.equal(
+      (await loadsOnThePath()) - loadsBefore,
+      30,
+      "the page-view counters are untouched by the rule",
+    );
+
+    const stats = await getReadingStats(userId, "7d");
+    assert.deepEqual(stats.locations, [], "one reader is never a place");
+    assert.equal(stats.otherVisits, 1, "and their reader is still accounted for, under Other places");
+    assert.ok(
+      !JSON.stringify(stats).includes(city),
+      "the city must not reach the browser at all: this is the leak the finding was about",
+    );
+    assert.equal(stats.visitors.today, 1, "and the day's readers count them once");
+  });
+
+  it("twenty-five readers are a place, at exactly twenty-five", async () => {
+    await forget();
+    for (let i = 1; i <= LOCATION_MIN_READERS; i += 1) {
+      await load(`198.18.1.${i}`);
+    }
+
+    assert.equal(await counted(), LOCATION_MIN_READERS, "a reader each, and not one more");
+    const stats = await getReadingStats(userId, "7d");
+    assert.deepEqual(
+      stats.locations.map((row) => row.city),
+      [city],
+      "twenty-five readers is what the threshold asks for, and it is named",
+    );
+    assert.equal(stats.locations[0]?.visits, LOCATION_MIN_READERS);
+    assert.equal(stats.otherVisits, 0, "nothing was left over");
+  });
+
+  it("a load that carried a place but no address counts neither", async () => {
+    /*
+      The place and the reader are one question now, and a request with no
+      address cannot answer it. Every request the tunnel passes on carries
+      `cf-connecting-ip`, so this shape is not real traffic -- and of the two
+      ways to be wrong, not counting a place is the one that can never print a
+      town one reader was in.
+    */
+    await forget();
+    const loadsBefore = await loadsOnThePath();
+    const outcome = await recordReadBeacon(
+      { kind: "load", path: loadPath, refClass: "direct", device: "computer" },
+      newsroomId,
+      beaconContextFromHeaders(
+        new Headers({ "cf-ipcity": city, "cf-ipcountry": "US" }),
+        { fromTunnel: true },
+      ),
+    );
+    assert.equal(outcome.accepted, true, "the load still lands");
+    assert.equal(await counted(), 0, "and no place is written for a reader we cannot count");
+    assert.equal((await loadsOnThePath()) - loadsBefore, 1, "the load itself is counted as before");
+  });
+});
+
+/*
+  Unit U23, third finding: THE PLACE THRESHOLD IS A DAY'S THRESHOLD.
+
+  A row of `location_daily` is one (day, place), so "25 readers" is asked of a
+  day. Asking it of the selected range instead would let a week of ten readers a
+  day print a name -- the same number, and not the fact the threshold promises.
+  The fold at rest settles each day as it closes, which is what keeps a small
+  day from ever accumulating into a name; this case pins the read that has to
+  agree with it.
+*/
+describe("the place threshold is per day, and so is a place's total", () => {
+  const newsroomId = 9606;
+  const userId = `reading-per-day-owner-${Date.now()}`;
+
+  async function seedPlace(daysAgo: number, city: string, readers: number) {
+    const sql = await getSql();
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits) values
+        (${newsroomId}, current_date - ${daysAgo}::int, ${"US"}, ${city}, ${readers})
+      on conflict (newsroom_id, day, country, city) do update set
+        visits = location_daily.visits + excluded.visits
+    `;
+  }
+
+  before(async () => {
+    await ensureNewsroomSchema();
+    await ensureReadingSchema();
+    const sql = await getSql();
+    await sql`
+      insert into newsroom_members (user_id, role, newsroom_id)
+      values (${userId}, 'owner', ${newsroomId})
+    `;
+    /*
+      One city with a day over the line and two under it, one city that is under
+      it every day it appears, and one run of four days that adds up to well over
+      25 without any single day reaching it -- the case the range-sum rule got
+      wrong.
+    */
+    await seedPlace(0, "Longmont", LOCATION_MIN_READERS);
+    await seedPlace(1, "Longmont", 10);
+    await seedPlace(2, "Longmont", 10);
+    await seedPlace(1, "Berthoud", 20);
+    for (const daysAgo of [1, 2, 3, 4]) await seedPlace(daysAgo, "Hygiene", 10);
+  });
+
+  it("names a place only for its days at the threshold, and totals only those days", async () => {
+    const stats = await getReadingStats(userId, "7d");
+
+    assert.deepEqual(
+      stats.locations.map((row) => row.city),
+      ["Longmont"],
+      "only the city with a day over the line is drawn",
+    );
+    assert.equal(
+      stats.locations[0]?.visits,
+      LOCATION_MIN_READERS,
+      "and its total is the day that earned the name, not the whole range's 50",
+    );
+    assert.equal(
+      stats.otherVisits,
+      20 + 20 + 10 * 4,
+      "Longmont's quiet days, Berthoud, and Hygiene's four days are Other places",
+    );
+    assert.equal(
+      stats.locations[0]?.share,
+      LOCATION_MIN_READERS / (LOCATION_MIN_READERS + 20 + 20 + 40),
+      "the bar is over every located reader in the range, named days and Other places together",
+    );
+  });
+
+  it("never lets a week of small days add up into a name", async () => {
+    const stats = await getReadingStats(userId, "7d");
+    // Four days of ten is forty readers -- over the threshold -- and not a
+    // place, because no day of it was.
+    assert.ok(
+      !JSON.stringify(stats).includes("Hygiene"),
+      "four small days must not become a named row",
+    );
+    assert.ok(!JSON.stringify(stats).includes("Berthoud"), "and neither must one day of twenty");
+  });
+});
+
+/*
   Unit U17c: a finished day's small places are folded at rest, not only on the
   screen. Its own newsroom, and assertions scoped to it -- `foldSmallPlaces()`
   is deliberately global (it is a table-wide cleanup on a clock, not a per-paper
@@ -1126,7 +1359,7 @@ describe("a finished day's small places are folded, not kept", () => {
     /*
       The case that would otherwise print a bar with no name on it: a country
       whose small places add up past the threshold. 60 visits, over
-      LOCATION_MIN_VISITS, and still not a place.
+      LOCATION_MIN_READERS, and still not a place.
     */
     const sql = await getSql();
     const newsroom = 9604;
@@ -1137,8 +1370,8 @@ describe("a finished day's small places are folded, not kept", () => {
     `;
     await sql`
       insert into location_daily (newsroom_id, day, country, city, visits) values
-        (${newsroom}, current_date, 'US', ${FOLDED_CITY}, ${LOCATION_MIN_VISITS + 35}),
-        (${newsroom}, current_date, 'US', 'Longmont', ${LOCATION_MIN_VISITS + 100})
+        (${newsroom}, current_date, 'US', ${FOLDED_CITY}, ${LOCATION_MIN_READERS + 35}),
+        (${newsroom}, current_date, 'US', 'Longmont', ${LOCATION_MIN_READERS + 100})
     `;
     try {
       const stats = await getReadingStats(userId, "7d");
@@ -1149,7 +1382,7 @@ describe("a finished day's small places are folded, not kept", () => {
       );
       assert.equal(
         stats.otherVisits,
-        LOCATION_MIN_VISITS + 35,
+        LOCATION_MIN_READERS + 35,
         "its visits are still accounted for, under Other places",
       );
       // NOT `!JSON.stringify(...).includes(FOLDED_CITY)`: FOLDED_CITY is the

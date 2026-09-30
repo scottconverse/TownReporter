@@ -7,7 +7,7 @@
   into something worth counting, and how a user-agent is reduced to a class
   before it is ever used as input to anything.
 
-  WHY IT IS SHARED AND PURE. The Stats screen imports LOCATION_MIN_VISITS and
+  WHY IT IS SHARED AND PURE. The Stats screen imports LOCATION_MIN_READERS and
   LOCATION_OTHER_LABEL to draw its panel and its note, so this module is
   reachable from the client bundle: it therefore has no `node:` import, no
   database and no state. The stateful half -- the daily salt and the handle set
@@ -62,23 +62,35 @@ export const IP_HEADERS = ["cf-connecting-ip", "x-forwarded-for"] as const;
 export const USER_AGENT_HEADER = "user-agent";
 
 /**
- * How many visits a place needs, in the selected range, before the Stats page
- * prints it as its own row. Below it the visits are folded into "Other
- * places".
+ * How many READERS a place needs, on one day, before the Stats page prints it
+ * as its own row. Below it the readers are folded into "Other places".
+ *
+ * THE UNIT IS A READER, NOT A PAGE LOAD (unit U23). The server counts a place
+ * once per reader per day, so this number and the "visitors" figure beside it
+ * are the same kind of quantity -- see `noteLoadExtras` in
+ * src/lib/news/reading.server.ts. It used to be fed by page loads, which let
+ * one reader reload their way over it.
+ *
+ * THE GRAIN IS ONE DAY, NOT THE SELECTED RANGE. A row of `location_daily` is
+ * one (day, place), so the threshold is applied to a day: a place is named only
+ * on the days it had this many readers, the total shown for it is those days
+ * only, and its smaller days count under "Other places" like any other. Ten
+ * readers a day for a week is 70 in the range and still not a place, because
+ * the fold at rest moves each day's ten out of the named rows as the day ends.
  *
  * The number is a privacy threshold, not a display preference: a city row with
  * a count of 1 is a statement about one person, and a small paper's
  * neighbouring towns produce exactly that. 25 is the value the owner's
  * acceptance decision fixed; changing it changes what the page may print.
  */
-export const LOCATION_MIN_VISITS = 25;
+export const LOCATION_MIN_READERS = 25;
 
-/** The row that stands in for every place under {@link LOCATION_MIN_VISITS}. */
+/** The row that stands in for every place under {@link LOCATION_MIN_READERS}. */
 export const LOCATION_OTHER_LABEL = "Other places";
 
 /**
  * The `city` value of a folded row: the sum of a finished day's places that
- * were under {@link LOCATION_MIN_VISITS}, one row per country (unit U17c).
+ * were under {@link LOCATION_MIN_READERS}, one row per country (unit U17c).
  *
  * It is the empty string and not a word like "other", on purpose. A word could
  * be sent in `cf-ipcity` and counted as a place; the empty string cannot --

@@ -31,7 +31,7 @@ import {
   readStatsReportFn,
 } from "@/lib/news/stats-reports";
 import {
-  LOCATION_MIN_VISITS,
+  LOCATION_MIN_READERS,
   LOCATION_OTHER_LABEL,
   UNKNOWN_CITY,
 } from "@/lib/news/stats-privacy";
@@ -130,10 +130,12 @@ const DEVICE_INK = ["var(--bg)", "#111111", "var(--fg)"];
  * WHAT THE OWNER'S 2026-09-30 DECISION ADDED (unit U17b): a place, and a daily
  * visitor count, and nothing else. Both are drawn in the "Where readers are"
  * panel -- the panel answers both questions about the same readers -- and both
- * are honest about what they are: a place is printed only above a threshold, is
- * a city and never a finer grain, and is never believed at all unless the
- * request came over the tunnel's loopback connection; and the visitor figure is
- * labelled an estimate that can be wrong in BOTH directions -- the value that
+ * are honest about what they are: a place is counted once per reader per day
+ * (unit U23 -- not once per page load), is printed only for the days it reached
+ * the threshold, is a city and never a finer grain, and is never believed at
+ * all unless the request came over the tunnel's loopback connection; and the
+ * visitor figure is labelled an estimate that can be wrong in BOTH directions
+ * -- the value that
  * tells two readers apart lives in memory, so it dies at midnight and can be
  * lost earlier on a day busy enough to evict it (counting a reader twice), while
  * one shared address is one handle (counting a household once). See
@@ -436,13 +438,16 @@ function StatsPage() {
                 src/lib/news/stats-privacy.ts for the allowlist and
                 migrations/0109_stats_location.sql for what is kept.
 
-                The threshold is applied on the server, so a place under it
-                never reaches this page: a city with one visit is a statement
-                about one reader.
+                The threshold is applied on the server, and it is applied to a
+                DAY: a place is named only for the days at least
+                LOCATION_MIN_READERS readers were counted in it, and the total
+                beside it is those days. A city with one reader is a statement
+                about one person, and a week of ten a day is the same statement
+                spread out -- so neither is a name here.
               */}
               {data.locations.length === 0 && data.otherVisits === 0 ? (
                 <p className="st-panel-body">
-                  No visit in this range carried a place. A place is read only as a city and a
+                  No load in this range carried a place. A place is read only as a city and a
                   country, from the network this paper is served through — an installation that is
                   not behind Cloudflare has none at all, and the address itself is never stored.
                 </p>
@@ -477,14 +482,17 @@ function StatsPage() {
                 </>
               )}
               <p className="st-note">
-                City and country only, counted by the day. A place is printed once{" "}
-                {formatCount(LOCATION_MIN_VISITS)} visits have been counted there in this range;
-                everything under that is {LOCATION_OTHER_LABEL}, so no row can be about one reader.
-                Today&rsquo;s counts are kept per place until the day ends. Once a day has finished,
-                places under the threshold are added together in the stored counts too, so they are
-                not kept one by one to be read later — but they are still there until the day
-                closes, and a backup taken before then still holds them. Read from this paper&rsquo;s
-                own network, and only when the request came through it.
+                City and country only, counted by the day, and one count per reader rather than per
+                page they opened. A place is printed by name only on days when{" "}
+                {formatCount(LOCATION_MIN_READERS)} readers were counted there — the number beside
+                it is those days only, and every other day of it, like every place that never
+                reached {formatCount(LOCATION_MIN_READERS)}, is {LOCATION_OTHER_LABEL}. So no row
+                can be about one reader, and a quiet week cannot add up into one. Today&rsquo;s
+                counts are kept per place until the day ends. Once a day has finished, that
+                day&rsquo;s places under the threshold are added together in the stored counts too,
+                so they are not kept one by one to be read later — but they are still there until
+                the day closes, and a backup taken before then still holds them. Read from this
+                paper&rsquo;s own network, and only when the request came through it.
               </p>
 
               {/*

@@ -15,9 +15,13 @@ value. The **city and country** are derived by Cloudflare from the reader's IP
 address and arrive as request headers; they are believed only when the request
 came over loopback, where the tunnel daemon connects from, so a direct
 connection cannot forge them. What is kept is a per-day count per place, never
-the address, and a place is printed only once at least 25 visits have landed
-there in the selected range. **Today's counts are kept per place until the day
-ends**; on a finished day, the hourly check adds every place under 25 visits
+the address, and it counts **readers, not page loads**: each reader is counted
+once in a place on a day, so opening twenty-five pages cannot make a town look
+busier than it was. A place is printed by name only on days when at least 25
+readers were counted in it, and the number beside it is those days only — the
+city's quieter days, and every place that never reached 25, are "other places"
+for that day instead. **Today's counts are kept per place until the day
+ends**; on a finished day, the hourly check adds every place under 25 readers
 together into that day's "other places" row and deletes the individual rows, so
 they are not kept individually beyond the day — and a backup taken before the
 fold still holds them. The **requesting address and the browser's type** (a few words

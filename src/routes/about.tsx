@@ -69,11 +69,13 @@ function About() {
             <strong>Where you are, roughly.</strong> This site is served through Cloudflare, which
             works out a city and a country from your IP address and passes those two facts to us
             with the request. We keep only a daily count for each place — never the address, and
-            only ever a city or a country, never anything finer. A place is shown to the editor
-            only once enough visits have landed there that the row cannot be one reader, and small
-            places on a finished day are added together into &ldquo;other places&rdquo; rather than
-            kept individually. We run no location database of our own: the city and country come
-            from Cloudflare&rsquo;s network, worked out from your address there.
+            only ever a city or a country, never anything finer. Each reader is counted once a
+            day, so reloading a page cannot make a town look busier than it was. A place is shown
+            to the editor only on days when at least 25 readers were counted in it, so the row
+            cannot be about one person; a day&rsquo;s readers below that, and small places on a
+            finished day, are added together into &ldquo;other places&rdquo; rather than kept
+            individually. We run no location database of our own: the city and country come from
+            Cloudflare&rsquo;s network, worked out from your address there.
           </p>
           <p>
             <strong>Counting you once, without remembering you.</strong> We also read the address

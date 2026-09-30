@@ -6,14 +6,14 @@
 --
 -- WHY TWO TABLES AND NOT A COLUMN ON read_hourly.
 --
---   location_daily  A reader's city, counted once per day. It cannot live on
---                   read_hourly: that table is keyed by the HOUR, and an hour
---                   bucket for a small town holds one or two readers -- which
---                   migrations/0103_read_hourly.sql:15 refuses in as many
---                   words. A day is the coarsest grain that still draws the
---                   accepted "where readers are" panel, and the panel only
---                   prints a place at all once LOCATION_MIN_VISITS (25) visits
---                   have been counted there in the selected range.
+--   location_daily  A reader's city, counted once per reader per day. It
+--                   cannot live on read_hourly: that table is keyed by the
+--                   HOUR, and an hour bucket for a small town holds one or two
+--                   readers -- which migrations/0103_read_hourly.sql:15 refuses
+--                   in as many words. A day is the coarsest grain that still
+--                   draws the accepted "where readers are" panel, and the panel
+--                   only prints a place at all on days when
+--                   LOCATION_MIN_READERS (25) readers were counted there.
 --
 --   visitor_daily   One integer per day: how many distinct readers the server
 --                   could tell apart that day. It is a per-day property, so it
@@ -57,7 +57,10 @@ create table if not exists location_daily (
   -- query. "unknown" is the fold for a country that arrived with no usable
   -- city beside it.
   city text not null,
-  -- Arrivals filed under this (day, country, city). Not readers.
+  -- READERS filed under this (day, country, city): one per reader per day, not
+  -- one per arrival (unit U23 -- the column keeps the name it was created
+  -- with). Never an address: see src/lib/news/reading.server.ts's
+  -- noteLoadExtras for what feeds it.
   visits bigint not null default 0,
   primary key (newsroom_id, day, country, city)
 );

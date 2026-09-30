@@ -14,6 +14,12 @@ import {
 import { InkButton } from "@/components/desk-chrome";
 import { EvidenceCheckList } from "@/components/evidence-check-list";
 import { TAKEDOWN_REASON_MAX, takeDownEvidenceCapture } from "@/lib/news/evidence-takedown";
+import {
+  blankTakeDownForm,
+  takeDownConfirmText,
+  takeDownFormForCapture,
+  type TakeDownForm,
+} from "@/lib/news/evidence-takedown-form";
 import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 import { groupDisplayCaptures } from "@/lib/news/finding-evidence-display";
@@ -574,14 +580,32 @@ export function FindingEvidenceReviewPanel({
     flag, not a `<details>`: the review page's shut disclosures are enumerated
     by position in `scripts/delete-corrections-e2e.mjs`, and a new one inside
     the opened-capture pane would move those indices under it.
+
+    Unit U23: it is ONE form, ABOUT ONE CAPTURE. `takeDownFormForCapture` is
+    applied below on every render and every edit, so a form that was filled in
+    for a capture the pane has since moved away from -- or that the pane has
+    closed -- is handed back blank rather than carrying a reason written about a
+    different record into a press that destroys this one. The alternative (an
+    effect that reset it after the fact) would leave the first paint of the new
+    capture showing the previous capture's reason. The rule and the tests are in
+    src/lib/news/evidence-takedown-form.ts.
   */
-  const [takeDownOpen, setTakeDownOpen] = useState(false);
-  const [takeDownReason, setTakeDownReason] = useState("");
-  const [takeDownRemoveLink, setTakeDownRemoveLink] = useState(false);
+  const [takeDownState, setTakeDownState] = useState<TakeDownForm>(() => blankTakeDownForm(null));
   const [takeDownFeedback, setTakeDownFeedback] = useState<{
     kind: "ok" | "err";
     text: string;
   } | null>(null);
+  /*
+    The form as it applies to the capture the pane is showing now -- the only
+    thing the pane below reads -- and the only way to change it. Both fold the
+    open capture in first, so neither a render nor a keystroke can land on a
+    form that still belongs to the capture before this one.
+  */
+  const openedVersionId =
+    openedCapture && openedCapture.ok ? openedCapture.capture.versionId : null;
+  const takeDownForm = takeDownFormForCapture(takeDownState, openedVersionId);
+  const editTakeDown = (update: (current: TakeDownForm) => TakeDownForm) =>
+    setTakeDownState((current) => update(takeDownFormForCapture(current, openedVersionId)));
   const [manualClaim, setManualClaim] = useState<ManualClaimForm>(blankManualClaim);
   const [recordToAdd, setRecordToAdd] = useState("");
   const [recordRelation, setRecordRelation] = useState<ManualClaimReferenceRelation>("corroborating");
@@ -681,6 +705,10 @@ export function FindingEvidenceReviewPanel({
     old text is no longer current -- so the press reloads the review rather
     than leaving the page showing a capture that no longer reads the way it
     did. The pane closes: what it was showing is what just came down.
+
+    Closing the pane is also what discards the form (unit U23): with no capture
+    open there is no form, so the reason and the tick go with it rather than
+    waiting here for the next record the owner opens.
   */
   const takeDown = useMutation({
     mutationFn: (input: { versionId: number; reason: string; removeLink: boolean }) =>
@@ -691,9 +719,6 @@ export function FindingEvidenceReviewPanel({
         return;
       }
       setOpenedCapture(null);
-      setTakeDownOpen(false);
-      setTakeDownReason("");
-      setTakeDownRemoveLink(false);
       setTakeDownFeedback({
         kind: "ok",
         text:
@@ -1489,9 +1514,19 @@ export function FindingEvidenceReviewPanel({
               */}
               {isOwner && !openedCapture.capture.takenDown ? (
                 <div className="mt-4 border-t border-rule pt-3">
-                  {takeDownOpen ? (
+                  {takeDownForm.open ? (
                     <>
-                      <p className="max-w-3xl text-sm text-muted">
+                      {/*
+                        Unit U23: the press below cannot be undone, so the line
+                        above it names the one capture it would take down --
+                        title and address. It is built by
+                        `takeDownConfirmText` (src/lib/news/evidence-takedown-form.ts)
+                        rather than assembled here, so the words are tested.
+                      */}
+                      <p className="max-w-3xl text-sm font-medium text-ink">
+                        {takeDownConfirmText(openedCapture.capture)}
+                      </p>
+                      <p className="mt-3 max-w-3xl text-sm text-muted">
                         This deletes the excerpt, the extracted text and the original file stored
                         for this capture, and the desk’s own working copies of it — the Dark Desk
                         artifact and the passages recorded on claims and relationships from this
@@ -1511,9 +1546,11 @@ export function FindingEvidenceReviewPanel({
                         id="capture-takedown-reason"
                         className="mt-1 min-h-20 w-full border border-rule bg-paper p-3 text-sm"
                         maxLength={TAKEDOWN_REASON_MAX}
-                        value={takeDownReason}
+                        value={takeDownForm.reason}
                         disabled={takeDown.isPending}
-                        onChange={(event) => setTakeDownReason(event.target.value)}
+                        onChange={(event) =>
+                          editTakeDown((current) => ({ ...current, reason: event.target.value }))
+                        }
                       />
                       <label
                         className="mt-3 flex items-start gap-2 text-sm text-ink"
@@ -1523,9 +1560,14 @@ export function FindingEvidenceReviewPanel({
                           id="capture-takedown-remove-link"
                           type="checkbox"
                           className="mt-1"
-                          checked={takeDownRemoveLink}
+                          checked={takeDownForm.removeLink}
                           disabled={takeDown.isPending}
-                          onChange={(event) => setTakeDownRemoveLink(event.target.checked)}
+                          onChange={(event) =>
+                            editTakeDown((current) => ({
+                              ...current,
+                              removeLink: event.target.checked,
+                            }))
+                          }
                         />
                         <span>
                           Remove the link to the original too. Left unticked, the public notice
@@ -1536,12 +1578,12 @@ export function FindingEvidenceReviewPanel({
                         <InkButton
                           tone="danger"
                           small
-                          disabled={!takeDownReason.trim() || takeDown.isPending}
+                          disabled={!takeDownForm.reason.trim() || takeDown.isPending}
                           onClick={() =>
                             takeDown.mutate({
                               versionId: openedCapture.capture.versionId,
-                              reason: takeDownReason,
-                              removeLink: takeDownRemoveLink,
+                              reason: takeDownForm.reason,
+                              removeLink: takeDownForm.removeLink,
                             })
                           }
                         >
@@ -1551,11 +1593,7 @@ export function FindingEvidenceReviewPanel({
                           tone="quiet"
                           small
                           disabled={takeDown.isPending}
-                          onClick={() => {
-                            setTakeDownOpen(false);
-                            setTakeDownReason("");
-                            setTakeDownRemoveLink(false);
-                          }}
+                          onClick={() => editTakeDown(() => blankTakeDownForm(openedVersionId))}
                         >
                           Cancel takedown
                         </InkButton>
@@ -1571,7 +1609,7 @@ export function FindingEvidenceReviewPanel({
                       disabled={disabled}
                       onClick={() => {
                         setTakeDownFeedback(null);
-                        setTakeDownOpen(true);
+                        editTakeDown((current) => ({ ...current, open: true }));
                       }}
                     >
                       Take down this capture

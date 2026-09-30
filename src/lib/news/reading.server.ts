@@ -30,8 +30,9 @@
               per-DAY counter (migrations/0109_stats_location.sql). No IP is
               stored, no latitude, longitude, region, postal code or timezone is
               read at all, and a request that carries no such header writes no
-              row. A place is printed on the Stats page only once
-              LOCATION_MIN_VISITS visits have been counted there, so a row can
+              row. A place is counted once per READER per day -- not once per
+              load (unit U23) -- and is printed on the Stats page only on days
+              when LOCATION_MIN_READERS readers were counted there, so a row can
               never be a statement about one reader.
 
     visitors  a daily integer. The server tells two readers apart for one day
@@ -102,7 +103,7 @@ import {
   BEACON_HEADER_ALLOWLIST,
   EMPTY_BEACON_CONTEXT,
   FOLDED_CITY,
-  LOCATION_MIN_VISITS,
+  LOCATION_MIN_READERS,
   beaconContextFromHeaders,
   locationRowFor,
 } from "./stats-privacy.ts";
@@ -387,29 +388,43 @@ async function recordLoad(
 }
 
 /**
- * The location counter and the visitor count for one load, both keyed by the
- * database's `current_date` so they land on the same calendar `page_views.day`
- * is written on.
+ * The place counter and the visitor count for one load -- and both are counted
+ * for a READER, not for a load (unit U23). One call each per reader per day.
+ * Keyed by the database's `current_date`, so they land on the same calendar
+ * `page_views.day` is written on.
+ *
+ * WHY THE PLACE COUNTER HAD TO MOVE BEHIND `noteVisitor`. It used to be
+ * incremented on every `load`, before anything had asked whether this was
+ * someone new. So one reader -- reloading a page, or reading twenty-five of
+ * them -- pushed a town they were the only reader of to the threshold on their
+ * own, and the Stats page then printed it by name: a row about one person,
+ * which is the exact thing the threshold exists to prevent, and which the
+ * at-rest fold could not catch because the number was already over it. The
+ * threshold's promise is "at least this many READERS were here"; a counter fed
+ * by page loads never made that promise, however many visits it reached.
+ *
+ * So both writes hang off the one answer that is about a person, and there is
+ * no path to either that does not ask for it. The column is still called
+ * `visits` -- the schema is what it is, and migrations/0109 documents the name
+ * -- but the number in it is readers counted once each, the same estimate
+ * `visitor_daily` holds, broken out by place.
+ *
+ * AN ADDRESS IS NOW THE PRICE OF A PLACE. A load carrying a country and a city
+ * but no usable address counts neither the place nor the reader. Every request
+ * the tunnel passes on carries `cf-connecting-ip`, so that is not a shape real
+ * traffic has; and of the two possible errors, not counting a place is the one
+ * that can never print a town one reader was in.
  *
  * THIS IS THE ONLY FUNCTION THAT SEES `context.ip`, and it does not keep it:
  * the address goes into `noteVisitor` as HMAC input and the only thing that
- * comes back is a yes/no, which becomes the integer in `visitor_daily`. It is
- * never a query parameter, never a log line, never returned to a caller.
+ * comes back is a yes/no, which becomes the one increment in `location_daily`
+ * and the integer in `visitor_daily`. It is never a query parameter, never a
+ * log line, never returned to a caller.
  */
 async function noteLoadExtras(newsroomId: number, context: BeaconContext): Promise<void> {
-  const location = locationRowFor(context);
-  if (location) {
-    const sql = await getSql();
-    await sql`
-      insert into location_daily (newsroom_id, day, country, city, visits)
-      values (${newsroomId}, current_date, ${location.country}, ${location.city}, 1)
-      on conflict (newsroom_id, day, country, city) do update set
-        visits = location_daily.visits + 1
-    `;
-  }
-
-  // No address, no visitor count. A reader whose request carried neither
-  // header is simply not counted -- never counted some other way.
+  // No address, no reader, and nothing that follows from a reader. A reader
+  // whose request carried neither header is simply not counted -- never
+  // counted some other way.
   if (!context.ip) return;
   /*
     Checked and marked before the write, so two loads racing in the same
@@ -418,7 +433,17 @@ async function noteLoadExtras(newsroomId: number, context: BeaconContext): Promi
     which is the direction an estimate under this rule should err.
   */
   if (!noteVisitor({ ip: context.ip, uaClass: context.uaClass })) return;
+
   const sql = await getSql();
+  const location = locationRowFor(context);
+  if (location) {
+    await sql`
+      insert into location_daily (newsroom_id, day, country, city, visits)
+      values (${newsroomId}, current_date, ${location.country}, ${location.city}, 1)
+      on conflict (newsroom_id, day, country, city) do update set
+        visits = location_daily.visits + 1
+    `;
+  }
   await sql`
     insert into visitor_daily (newsroom_id, day, visitors)
     values (${newsroomId}, current_date, 1)
@@ -633,8 +658,13 @@ export type ReadingSectionRow = { topic: string; label: string; seconds: number;
 export type ReadingLocationRow = {
   city: string;
   country: string;
+  /**
+   * The readers counted in this place on the days it is named for (unit U23):
+   * each day of it that reached LOCATION_MIN_READERS, not the whole range's
+   * total. Its quieter days are in `otherVisits`.
+   */
   visits: number;
-  /** Share of the located visits in the range -- the bar's width. */
+  /** Share of the located readers in the range -- the bar's width. */
   share: number;
 };
 
@@ -676,10 +706,13 @@ export type ReadingStats = {
   sources: ReadingSourceRow[];
   sections: ReadingSectionRow[];
   /**
-   * Places with at least LOCATION_MIN_VISITS visits in the range, busiest
-   * first. Everything under the threshold is summed into `otherVisits` instead
-   * of being printed row by row: a place with one visit is a statement about
-   * one reader, which is what the threshold exists to prevent.
+   * Places named on at least one day in the range, busiest first, each with the
+   * readers counted on the days it is named for (`visits`). A place is named
+   * only for the days that reached LOCATION_MIN_READERS, so this is not a sum
+   * over the whole range; everything else -- its smaller days, every place that
+   * never reached the threshold, and the fold -- is summed into `otherVisits`
+   * instead of being printed row by row. A place with one reader is a statement
+   * about one person, which is what the threshold exists to prevent.
    */
   locations: ReadingLocationRow[];
   otherVisits: number;
@@ -930,13 +963,43 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
     behind Cloudflare, or whose zone does not emit the visitor-location
     headers, and that is not a failure -- the panel says so instead of drawing
     an empty chart it cannot fill.
+
+    THE THRESHOLD IS PER DAY AND IS APPLIED IN THE SQL, ON THE ROW (unit U23).
+    A row of `location_daily` is one day at one place, so `visits >=
+    LOCATION_MIN_READERS` selects NAMED DAYS, not named cities: a place that had
+    30 readers on Monday and 5 on Tuesday is drawn with 30 and the Tuesday 5
+    joins "Other places" with every other small day. Summing a city's range
+    total first and testing that instead would print a name for a week of ten
+    readers a day -- the same number, and not the fact the threshold promises,
+    which is that the row being named is about at least 25 people on a day that
+    was counted.
+
+    Two statements rather than one, because the two halves are two different
+    shapes: the named days grouped per place, and everything else as one figure.
+    The named query also never selects a row under the threshold, so a small
+    place cannot reach the browser at all -- the property is kept where the rows
+    are read, not fixed up afterwards in JavaScript.
+
+    A FOLDED ROW (`city = FOLDED_CITY`) is never a place whatever its size: it
+    can be over the threshold -- a hundred towns with two readers each -- and
+    drawing it would print a bar with no name on it, or worse, invite someone to
+    supply one.
   */
   const locationRows = await sql.query<{ country: string; city: string; visits: number | null }>(
     `select country, city, coalesce(sum(visits), 0) as visits from location_daily
      where newsroom_id = $1 and day >= current_date - $2::int
+       and city <> $3
+       and visits >= $4::bigint
      group by country, city
      order by visits desc, city asc`,
-    [newsroomId, days - 1],
+    [newsroomId, days - 1, FOLDED_CITY, LOCATION_MIN_READERS],
+  );
+
+  const [otherLocations] = await sql.query<{ visits: number | null }>(
+    `select coalesce(sum(visits), 0) as visits from location_daily
+     where newsroom_id = $1 and day >= current_date - $2::int
+       and (city = $3 or visits < $4::bigint)`,
+    [newsroomId, days - 1, FOLDED_CITY, LOCATION_MIN_READERS],
   );
 
   const [visitorRow] = await sql.query<{ today: number | null; yesterday: number | null }>(
@@ -999,37 +1062,23 @@ export async function getReadingStats(userId: string, range: ReadingRange): Prom
     .sort((a, b) => b.visits - a.visits || a.refClass.localeCompare(b.refClass));
 
   /*
-    The threshold is applied here, on the server, and not in the page: a place
-    under it must not reach the browser at all. Everything below it is summed
-    into one "Other places" figure, so the panel still accounts for every
-    located visit without naming a place that only one reader was in.
-
-    TWO KINDS OF ROW ARE NOT A PLACE, and both go to "Other places" whatever
-    their size:
-
-      - a row under LOCATION_MIN_VISITS, which is what the threshold has always
-        meant, and which is all that is left of a day still in progress (the
-        hourly fold only touches days that have finished);
-      - a row whose city is FOLDED_CITY, the sum of a finished day's small
-        places. It can easily be OVER the threshold -- a hundred towns with two
-        readers each -- and drawing it would print a bar with no name on it, or
-        worse, invite someone to name it. It is a fold, not a place, so it is
-        never drawn as one.
+    The two halves above are read together: every named day-row is a place, and
+    everything the named query left behind -- small days, and the folded rows --
+    is "Other places". The panel then accounts for every located reader without
+    naming a place that fewer than the threshold were in, and the share beside a
+    place is over the same total it always was.
   */
-  const located = locationRows.map((row) => ({
+  const otherVisits = Number(otherLocations?.visits ?? 0);
+  const locatedTotal = locationRows.reduce(
+    (sum, row) => sum + Number(row.visits ?? 0),
+    otherVisits,
+  );
+  const locations: ReadingLocationRow[] = locationRows.map((row) => ({
     city: row.city,
     country: row.country,
     visits: Number(row.visits ?? 0),
+    share: share(Number(row.visits ?? 0), locatedTotal),
   }));
-  const locatedTotal = located.reduce((sum, row) => sum + row.visits, 0);
-  const drawsAsAPlace = (row: { city: string; visits: number }) =>
-    row.city !== FOLDED_CITY && row.visits >= LOCATION_MIN_VISITS;
-  const locations: ReadingLocationRow[] = located
-    .filter(drawsAsAPlace)
-    .map((row) => ({ ...row, share: share(row.visits, locatedTotal) }));
-  const otherVisits = located
-    .filter((row) => !drawsAsAPlace(row))
-    .reduce((sum, row) => sum + row.visits, 0);
   const visitors: ReadingVisitors = {
     today: Number(visitorRow?.today ?? 0),
     yesterday: Number(visitorRow?.yesterday ?? 0),
@@ -1331,7 +1380,7 @@ export async function pruneLocationDaily(): Promise<number> {
  * Fold a finished day's small places into that day's per-country "other" row
  * (unit U17c).
  *
- * WHY THIS EXISTS AT ALL. The 25-visit threshold used to live only on the
+ * WHY THIS EXISTS AT ALL. The 25-reader threshold used to live only on the
  * screen. A row like `(today - 3, 'SmallTown', visits = 1)` therefore sat in
  * `location_daily` for twelve months, went out in every `pg_dump`, and -- read
  * beside `read_hourly` for the same day -- is one reader's visit, recorded as a
@@ -1339,8 +1388,14 @@ export async function pruneLocationDaily(): Promise<number> {
  * it did not stop it existing. This is the same rule applied where the data
  * actually rests, which is what the owner's decision is about.
  *
+ * IT IS ALSO WHAT MAKES THE THRESHOLD A DAY'S THRESHOLD. Every finished day is
+ * settled on its own: a place is named only on a day it reached
+ * {@link LOCATION_MIN_READERS}, and a run of smaller days never accumulates
+ * into a name, because each small day leaves the named rows as it closes rather
+ * than waiting to see what the week adds up to.
+ *
  * WHAT IT DOES. For every row on a FINISHED day whose `visits` is under
- * {@link LOCATION_MIN_VISITS}, it adds the visits to that day's
+ * {@link LOCATION_MIN_READERS}, it adds the visits to that day's
  * `(newsroom, country, city = FOLDED_CITY)` row and deletes the small row. One
  * statement, so one transaction: the sum and the delete cannot come apart, and
  * an interrupted run leaves the table exactly as it was.
@@ -1368,9 +1423,9 @@ export async function pruneLocationDaily(): Promise<number> {
  * were folded, for the tick's log line and the test.
  *
  * A COUNTRIES' WORTH OF SMALL PLACES CAN EXCEED THE THRESHOLD, which is fine
- * and deliberate: the folded row is never drawn as a place
- * (src/lib/news/reading.server.ts's `drawsAsAPlace`), so its size does not
- * matter. What matters is that no single-reader place survives.
+ * and deliberate: the fold is never drawn as a place (the `city <> FOLDED_CITY`
+ * in `getReadingStats`'s named-days query), so its size does not matter. What
+ * matters is that no single-reader place survives.
  */
 export async function foldSmallPlaces(): Promise<number> {
   await ensureReadingSchema();
@@ -1379,7 +1434,7 @@ export async function foldSmallPlaces(): Promise<number> {
     with folded_rows as (
       delete from location_daily
       where day < current_date
-        and visits < ${LOCATION_MIN_VISITS}::bigint
+        and visits < ${LOCATION_MIN_READERS}::bigint
         and city <> ${FOLDED_CITY}
       returning newsroom_id, day, country, visits
     ),
