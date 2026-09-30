@@ -11,7 +11,9 @@ import {
   PUBLIC_EXCERPT_MAX,
   PUBLIC_CHANGE_SNIPPETS_MAX,
   PUBLIC_CHANGE_SNIPPET_MAX,
+  PUBLIC_CHANGE_CHARS_MAX,
 } from "./evidence.ts";
+import { CHANGE_SENTENCES_MAX } from "./retrieve.ts";
 import {
   parseFindings,
   provenanceFromUrls,
@@ -320,8 +322,15 @@ describe("public evidence publication", { timeout: 60000 }, () => {
 
   /*
     Counts and a few sentences, never the diff of two articles.
+
+    The budget is ONE budget. A cap per side would let a comparison hand back
+    six snippets of 200 characters -- 1,200 characters of two third-party
+    pages, twice the evidence page's own 600-character excerpt -- so the caps
+    that matter are on the whole payload: at most three snippets together and
+    at most 600 characters together, spent removed-first so the set is stable
+    between two identical requests.
   */
-  it("never returns more than three changed snippets of at most 200 characters", async () => {
+  it("never returns more than three changed snippets or 600 characters in total", async () => {
     await ensureArticlesSchema();
     const sql = await getSql();
     const user = `excerpt-diff-${Date.now()}`;
@@ -348,17 +357,76 @@ describe("public evidence publication", { timeout: 60000 }, () => {
     assert.ok(compared);
     assert.ok(compared!.changes.added_total >= 5, "the diff should have seen all five sentences");
     assert.ok(compared!.changes.removed_total >= 5);
-    assert.equal(compared!.changes.added.length, PUBLIC_CHANGE_SNIPPETS_MAX);
-    assert.equal(compared!.changes.removed.length, PUBLIC_CHANGE_SNIPPETS_MAX);
-    for (const snippet of [...compared!.changes.added, ...compared!.changes.removed]) {
+
+    const snippets = [...compared!.changes.removed, ...compared!.changes.added];
+    assert.equal(
+      snippets.length,
+      PUBLIC_CHANGE_SNIPPETS_MAX,
+      `a comparison returned ${snippets.length} snippets in total`,
+    );
+    const characters = snippets.reduce((sum, snippet) => sum + snippet.length, 0);
+    assert.ok(
+      characters <= PUBLIC_CHANGE_CHARS_MAX,
+      `a comparison returned ${characters} characters of changed text in total`,
+    );
+    for (const snippet of snippets) {
       assert.ok(
         snippet.length <= PUBLIC_CHANGE_SNIPPET_MAX + 1,
         `a changed snippet carried ${snippet.length} characters`,
       );
     }
-    // The fourth and fifth sentences are the ones that were cut, so they must
-    // not be anywhere in what the reader receives.
-    assert.doesNotMatch(JSON.stringify(compared), /echo |juliett /);
+
+    // Removed first: the whole budget went to the side that comes first, and
+    // the side that got nothing still reports its own count honestly.
+    assert.equal(compared!.changes.removed.length, PUBLIC_CHANGE_SNIPPETS_MAX);
+    assert.deepEqual(compared!.changes.added, []);
+    assert.ok(compared!.changes.added_total >= 5);
+    assert.ok(!compared!.changes.added_total_at_least, "five is below the diff's own cap");
+
+    // The sentences the budget cut must not be in the diff that is sent. (The
+    // records' own excerpts legitimately open with some of these words, so the
+    // assertion is about `changes`, which is the diff.)
+    assert.doesNotMatch(JSON.stringify(compared!.changes), /echo |golf |juliett /);
+  });
+
+  /*
+    A total that sits on the diff's cap is a floor, not a count.
+
+    `describeTextChanges` stops counting at 24 sentences a side, so a
+    comparison of two long captures reports "24" for a difference that may be
+    hundreds of sentences long. The public payload has to carry that
+    uncertainty, or the compare page prints a number it does not know as
+    though it were exact.
+  */
+  it("says a total that reached the diff's own cap is a floor", async () => {
+    await ensureArticlesSchema();
+    const sql = await getSql();
+    const user = `excerpt-floor-${Date.now()}`;
+    const url = `https://example.org/excerpt-floor-${Date.now()}`;
+    const sentence = (word: string) => `${word} ${"padding words ".repeat(12)}the end.`;
+    const words = (prefix: string) =>
+      Array.from({ length: 30 }, (_, i) => `${prefix}${i + 1}`).map(sentence).join(" ");
+    const vOlder = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"floor-older"}, ${"Old state"}, ${words("old")}, ${"fetched"})
+      returning id
+    `;
+    const vNewer = await sql<{ id: number }>`
+      insert into artifact_versions (user_id, url, content_hash, title, full_text, fetch_outcome)
+      values (${user}, ${url}, ${"floor-newer"}, ${"New state"}, ${words("new")}, ${"fetched"})
+      returning id
+    `;
+    await sql`
+      insert into articles (user_id, slug, headline, body, topic, source_urls, status)
+      values (${user}, ${`excerpt-floor-${Date.now()}`}, ${"Long changed page"}, ${"Story"}, ${"council"}, ${JSON.stringify([url])}, ${"published"})
+    `;
+
+    const compared = await comparePublishedEvidence({ a: vOlder[0]!.id, b: vNewer[0]!.id });
+    assert.ok(compared);
+    assert.equal(compared!.changes.removed_total, CHANGE_SENTENCES_MAX);
+    assert.equal(compared!.changes.added_total, CHANGE_SENTENCES_MAX);
+    assert.equal(compared!.changes.removed_total_at_least, true);
+    assert.equal(compared!.changes.added_total_at_least, true);
   });
 });
 

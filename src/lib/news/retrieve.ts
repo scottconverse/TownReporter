@@ -198,6 +198,15 @@ function normPhrase(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Sentences per side this diff will report before it stops counting.
+ *
+ * Exported because a caller that prints a total has to know a total sitting on
+ * this number is a floor, not a count: a comparison that returns 24 removed
+ * sentences saw at least 24, and may have seen hundreds.
+ */
+export const CHANGE_SENTENCES_MAX = 24;
+
 /** Human-readable sentence changes between two captures. */
 export function describeTextChanges(older: string, newer: string): VersionDiff {
   if (normPhrase(older) === normPhrase(newer)) return { added: [], removed: [] };
@@ -206,7 +215,7 @@ export function describeTextChanges(older: string, newer: string): VersionDiff {
   const A = new Set(a.map(normPhrase));
   const B = new Set(b.map(normPhrase));
   return {
-    removed: a.filter((s) => !B.has(normPhrase(s))).slice(0, 24),
-    added: b.filter((s) => !A.has(normPhrase(s))).slice(0, 24),
+    removed: a.filter((s) => !B.has(normPhrase(s))).slice(0, CHANGE_SENTENCES_MAX),
+    added: b.filter((s) => !A.has(normPhrase(s))).slice(0, CHANGE_SENTENCES_MAX),
   };
 }

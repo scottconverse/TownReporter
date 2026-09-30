@@ -73,6 +73,15 @@ function ComparePage() {
   const unchanged =
     older.content_hash === newer.content_hash ||
     (!changes.added.length && !changes.removed.length);
+  /*
+    A total that sits on the server-side diff's own cap is a floor, not a
+    count: `describeTextChanges` stops counting at 24 sentences a side, so a
+    comparison of two long captures reports "24" for what may be hundreds. A
+    bare number would be the page stating something it does not know.
+  */
+  const shown = changes.removed.length + changes.added.length;
+  const totalFloor = changes.removed_total + changes.added_total;
+  const totalIsFloor = changes.removed_total_at_least || changes.added_total_at_least;
 
   return (
     <PaperShell compact>
@@ -144,7 +153,10 @@ function ComparePage() {
                 {changes.removed.length ? (
                   changes.removed.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
                 ) : (
-                  <li>None detected.</li>
+                  /* "None detected" is a claim about the two captures. It is
+                     only true when this side's own total is zero -- the shared
+                     snippet budget can leave a side with changes unshown. */
+                  <li>{changes.removed_total ? "None shown." : "None detected."}</li>
                 )}
               </ul>
             </div>
@@ -154,7 +166,7 @@ function ComparePage() {
                 {changes.added.length ? (
                   changes.added.map((s) => <li key={s.slice(0, 80)}>{s}</li>)
                 ) : (
-                  <li>None detected.</li>
+                  <li>{changes.added_total ? "None shown." : "None detected."}</li>
                 )}
               </ul>
             </div>
@@ -163,11 +175,10 @@ function ComparePage() {
             A comparison is of two captured pages, so the full difference is
             the pages. The reader gets the count and the first few sentences.
           */}
-          {changes.removed_total > changes.removed.length ||
-          changes.added_total > changes.added.length ? (
+          {shown < totalFloor || totalIsFloor ? (
             <p className="mt-4 max-w-2xl text-sm text-muted">
-              Showing the first {changes.removed.length + changes.added.length} of{" "}
-              {changes.removed_total + changes.added_total} changed passages.
+              Showing {shown} of {totalIsFloor ? "at least " : ""}
+              {totalFloor} changed passages.
             </p>
           ) : null}
         </>

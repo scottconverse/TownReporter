@@ -1239,7 +1239,7 @@ masked name reads stiffly ("an unidentified speaker"). YouTube can rate-limit a 
 | `/articles/:slug`                            | A story                                                                                    |
 | `/about` · `/how-we-report` · `/corrections` | Masthead pages                                                                             |
 | `/feed` · `/sitemap.xml` · `/robots.txt`     | Machines                                                                                   |
-| `/evidence/:versionId`                       | The captured copy of a source a printed story cited                                        |
+| `/evidence/:versionId`                       | An excerpt of the captured record a printed story cited                                    |
 | `/evidence/compare`                          | Two captures of the same URL, side by side                                                 |
 | `/get-the-code` · `/TownReporter.zip`        | Download this newsroom's own source                                                        |
 | `/login`                                     | Create an editor account, or sign in                                                       |

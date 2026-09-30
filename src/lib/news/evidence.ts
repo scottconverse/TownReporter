@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import type { ProvenanceItem } from "./findings.ts";
 
-import { describeTextChanges, type VersionDiff } from "./retrieve.ts";
+import { CHANGE_SENTENCES_MAX, describeTextChanges, type VersionDiff } from "./retrieve.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { parseFindings } from "./findings.ts";
@@ -22,10 +22,19 @@ import { evidenceUrl, evidenceCompareInput, rowId } from "./request-input.ts";
  */
 export const PUBLIC_EXCERPT_MAX = 600;
 
-/** Changed snippets a public comparison may show: at most this many... */
+/**
+ * Bounds on what a public comparison may show, across BOTH sides: at most
+ * `PUBLIC_CHANGE_SNIPPETS_MAX` snippets in total, each at most
+ * `PUBLIC_CHANGE_SNIPPET_MAX` characters, and all of them together at most
+ * `PUBLIC_CHANGE_CHARS_MAX`.
+ *
+ * The caps are on the whole payload, not per side. Three per side would let a
+ * comparison hand back six snippets of 200 characters -- 1,200 characters of
+ * two third-party pages, twice the evidence page's own 600-character excerpt.
+ */
 export const PUBLIC_CHANGE_SNIPPETS_MAX = 3;
-/** ...each at most this many characters. */
 export const PUBLIC_CHANGE_SNIPPET_MAX = 200;
+export const PUBLIC_CHANGE_CHARS_MAX = 600;
 
 const ELLIPSIS = "…";
 
@@ -36,12 +45,17 @@ const ELLIPSIS = "…";
  * point of the comparison -- but a diff of two articles is the articles back.
  * The reader gets the counts and the first few changed sentences, cut at a
  * word boundary, and no more.
+ *
+ * `*_total_at_least` says the server-side diff stopped counting at its own cap
+ * (`CHANGE_SENTENCES_MAX`), so the total beside it is a floor.
  */
 export type PublicVersionDiff = {
   added: string[];
   removed: string[];
   added_total: number;
   removed_total: number;
+  added_total_at_least: boolean;
+  removed_total_at_least: boolean;
 };
 
 /** Cut to at most `max` characters, ending on a word boundary. */
@@ -118,15 +132,43 @@ function publicExcerpt(fullText: string, receipts: string[]): string {
   return openingExcerpt(fullText, PUBLIC_EXCERPT_MAX);
 }
 
-/** Bound what a public comparison shows. */
+/**
+ * Bound what a public comparison shows.
+ *
+ * One budget, spent in a fixed order -- removed first, then added. The reader
+ * sees what the page lost before what it gained, and two identical requests
+ * return the same snippet set, which a per-side cap decided by map order would
+ * not guarantee.
+ *
+ * `cutAtWord` is asked for the smaller of the per-snippet cap and what is left
+ * of the budget, so the character cap holds even if the other constants move.
+ * It cannot actually bite today: three snippets of at most 200 characters is
+ * exactly 600, so a free slot always has a full 200 characters behind it and
+ * no snippet is ever cut to a stub.
+ */
 export function publicVersionDiff(diff: VersionDiff): PublicVersionDiff {
-  const bound = (rows: string[]) =>
-    rows.slice(0, PUBLIC_CHANGE_SNIPPETS_MAX).map((row) => cutAtWord(row, PUBLIC_CHANGE_SNIPPET_MAX));
+  let snippets = PUBLIC_CHANGE_SNIPPETS_MAX;
+  let characters = PUBLIC_CHANGE_CHARS_MAX;
+  const take = (rows: string[]): string[] => {
+    const out: string[] = [];
+    for (const row of rows) {
+      if (snippets <= 0 || characters <= 0) break;
+      const snippet = cutAtWord(row, Math.min(PUBLIC_CHANGE_SNIPPET_MAX, characters));
+      out.push(snippet);
+      snippets -= 1;
+      characters -= snippet.length;
+    }
+    return out;
+  };
+  const removed = take(diff.removed);
+  const added = take(diff.added);
   return {
-    added: bound(diff.added),
-    removed: bound(diff.removed),
-    added_total: diff.added.length,
+    removed,
+    added,
     removed_total: diff.removed.length,
+    added_total: diff.added.length,
+    removed_total_at_least: diff.removed.length >= CHANGE_SENTENCES_MAX,
+    added_total_at_least: diff.added.length >= CHANGE_SENTENCES_MAX,
   };
 }
 
