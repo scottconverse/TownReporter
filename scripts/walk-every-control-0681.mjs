@@ -1077,7 +1077,7 @@ step(`the built server is answering on ${base}`);
 pg = await db();
 step("the in-memory database has stopped migrating");
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ["--disable-external-protocol-requests"] });
 const readerCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const ownerCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const editorCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -1493,65 +1493,64 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
       .first()
       .getAttribute("href")
       .catch(() => null);
-    await reader.getByLabel("What needs correcting? (required)").fill("The rate figure is wrong.");
+    const correctionText = "The rate figure is wrong.";
+    const correctionField = reader.getByLabel("What needs correcting? (required)");
+    const openCorrectionEmail = reader.getByRole("button", { name: "Open correction email" });
+    let readyBeforeFill = false;
+    try {
+      await reader.waitForFunction(
+        () => {
+          const button = document.querySelector("#correctionform button[type='submit']");
+          return button instanceof HTMLButtonElement && !button.disabled;
+        },
+        null,
+        { timeout: 20_000 },
+      );
+      readyBeforeFill = await openCorrectionEmail.isEnabled();
+    } catch {
+      /* The row below records that the form never became ready. */
+    }
+    let valueBeforeClick = "";
+    if (readyBeforeFill) {
+      await correctionField.fill(correctionText);
+      valueBeforeClick = await correctionField.inputValue();
+    }
     const owed = reader.getByText(/Finish sending in your email app/);
-    await reader.getByRole("button", { name: "Open correction email" }).click();
-    /*
-      The submit handler sets `opened` and then points `window.location` at a
-      `mailto:` (src/components/correction-form.tsx:54-61). A mailto navigation
-      has no handler in a headless browser, so the question this wait answers is
-      whether the page still paints its own sentence afterwards. If it does not,
-      the page text is recorded -- "the sentence never rendered" and "the page
-      was replaced by the browser's protocol notice" are different findings and
-      the row should say which one happened.
-    */
-    let ok = await owed
-      .waitFor({ timeout: 8_000 })
-      .then(() => true)
-      .catch(() => false);
-    let pageText = "";
-    let why = "";
-    if (!ok) {
-      /*
-        Three ways the sentence can be missing, and a bare "did not show" tells
-        them apart from nothing: the render never committed (the textarea still
-        holds what the walk typed), the document was replaced and re-mounted
-        (the textarea is empty again), or the paragraph is in the DOM but not
-        visible. The first two are different findings, so the row records which
-        one happened before it reports a failure.
-      */
-      const before = (await reader.locator("body").innerText().catch(() => ""))
-        .replace(/\s+/g, " ")
-        .slice(0, 300);
-      why = `after the first press: url=${reader.url()} ` +
-        `typed-text-still-in-form=${JSON.stringify(await reader.locator("#correction-details").inputValue().catch(() => null))} ` +
-        `status-paragraphs-in-DOM=${await reader.locator('p[role="status"]').count().catch(() => -1)} ` +
-        `the page read: "${before}"`;
-      // A second press: the first assignment may have eaten the render without
-      // the click ever failing.
-      await reader
-        .getByRole("button", { name: "Open correction email" })
-        .click()
-        .catch(() => {});
+    let ok = false;
+    let why = `ready-before-fill=${readyBeforeFill}; textarea-before-click=${JSON.stringify(valueBeforeClick)}`;
+    let preparedEmailHasText = false;
+    if (readyBeforeFill && valueBeforeClick === correctionText) {
+      // One click only. The flag above prevents a local browser from launching
+      // an external mail client; the form still renders the prepared mailto link.
+      await openCorrectionEmail.click();
       ok = await owed
         .waitFor({ timeout: 8_000 })
         .then(() => true)
         .catch(() => false);
-      pageText = (await reader.locator("body").innerText().catch(() => ""))
-        .replace(/\s+/g, " ")
-        .slice(0, 300);
+      const preparedEmail = reader.locator('#correctionform p[role="status"] a[href^="mailto:"]');
+      const preparedHref = await preparedEmail.getAttribute("href").catch(() => null);
+      preparedEmailHasText = Boolean(preparedHref?.includes(encodeURIComponent(correctionText)));
+      if (!ok) {
+        const after = (await reader.locator("body").innerText().catch(() => ""))
+          .replace(/\s+/g, " ")
+          .slice(0, 300);
+        why += `; after one press: url=${reader.url()} textarea=${JSON.stringify(await correctionField.inputValue().catch(() => null))} ` +
+          `status-paragraphs-in-DOM=${await reader.locator('p[role="status"]').count().catch(() => -1)} page="${after}"`;
+      }
+    } else {
+      failures.push(`the correction field was not ready and populated before its single press; ${why}`);
     }
     formRows.push({
       form: "corrections: write to the editor",
-      submitted: "yes",
+      submitted: readyBeforeFill && valueBeforeClick === correctionText ? "one click" : "no -- readiness/value check failed",
       result: ok
-        ? `shows the sentence it owes, addressed to ${to ?? "(no address on the page)"}`
+        ? `ready and populated before one click; shows the sentence and prepared email contains the text, addressed to ${to ?? "(no address on the page)"}`
         : `no sentence on screen; ${why}`,
     });
     if (!ok)
-      failures.push(
-        `the corrections form did not show its post-submit sentence; ${why}; after a second press: "${pageText}"`,
-      );
+      failures.push(`the corrections form did not show its post-submit sentence after one click; ${why}`);
+    if (ok && !preparedEmailHasText)
+      failures.push("the prepared correction email did not contain the text retained in the field before the click");
     if (to !== `mailto:${PAPER_EDITOR_ADDRESS}`) {
       failures.push(`the correction form is addressed to ${to}, not the paper's own editor address`);
     }
