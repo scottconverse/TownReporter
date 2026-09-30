@@ -13,6 +13,8 @@ const LIVE_DOCS = [
   "docs/setup.md",
   "docs/index.html",
   ".env.example",
+  "SECURITY.md",
+  "docs/windows-install.md",
 ];
 
 test("live documentation does not claim TownReporter Codex calls inherit full operator access", () => {
