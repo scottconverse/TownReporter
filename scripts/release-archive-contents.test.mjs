@@ -4,13 +4,12 @@
   scripts/package-windows.mjs builds the Windows ZIP with `git archive`, so
   whatever `.gitattributes` does not mark `export-ignore` is exactly what a
   publisher downloads. This repository was scaffolded inside the Grok App
-  Builder sandbox and still carries the sandbox's material: the agent contract
-  (AGENTS.md, which tells any agent to follow AGENTS.project.md), the skill
-  trees, references and status files under .grok/, the dated and session
-  handoffs, the dated audit reports under artifacts/, and startup.sh. A release
-  that includes them hands a reader a runbook for uploading the source tree to
-  public file hosts, 88 files of game and sprite skills, and an AGENTS.md that
-  reads as product documentation.
+  Builder sandbox; the sandbox's own material -- its agent contract, the .grok/
+  skill trees, its startup.sh and the preview host bridge -- has since been
+  deleted outright, and scripts/no-grok-scaffold.test.mjs fails the build if
+  any of it comes back. What is still on disk but is not the product is the
+  dated and session handoffs and the dated audit reports under artifacts/: kept
+  as history, and excluded here so a publisher never receives them.
 
   HANDOFF-NEXT-AGENT.md is the exception among the handoffs: it is the current
   takeover document and seven live documents link it (SELF-HOSTING.md,
@@ -31,7 +30,8 @@
         reporting that some entry reappeared.
 
   Measured 2026-09-30 before the exclusions: 1788 tar entries, 187 of them
-  scaffold paths.
+  scaffold paths (the .grok/ trees and startup.sh were most of that 187 and
+  have since been deleted).
 */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -43,16 +43,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const git = (args, options = {}) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8", ...options });
 
-/** Scaffold that must never reach a release archive. */
-const SCAFFOLD_DIRS = [".grok", "artifacts"];
-const SCAFFOLD_FILES = ["AGENTS.md", "AGENTS.project.md", "startup.sh"];
+/** History that must never reach a release archive. */
+const SCAFFOLD_DIRS = ["artifacts"];
 /** Dated and session handoffs. HANDOFF-NEXT-AGENT.md is current and ships. */
 const SCAFFOLD_HANDOFF = /^HANDOFF-(?:2026-.*|SESSION-.*|BUILD-LIST)\.md$/;
 
 function isScaffoldPath(name) {
   return (
     SCAFFOLD_DIRS.some((dir) => name === dir || name.startsWith(`${dir}/`)) ||
-    SCAFFOLD_FILES.includes(name) ||
     SCAFFOLD_HANDOFF.test(name)
   );
 }
@@ -149,10 +147,6 @@ test("the release archive keeps the product files a publisher needs", () => {
 test("every tracked scaffold path is marked export-ignore in the working tree", () => {
   const candidates = trackedFiles().filter(isScaffoldPath);
   assert.ok(candidates.length >= 10, `scaffold paths to exclude (${candidates.length})`);
-  assert.ok(
-    candidates.some((name) => name.startsWith(".grok/")),
-    "the .grok/ skill trees are still tracked and must be excluded",
-  );
   assert.ok(
     candidates.some((name) => name.startsWith("artifacts/")),
     "the archived audit reports are still tracked and must be excluded",

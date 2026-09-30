@@ -35,30 +35,6 @@ TownReporter uses `@earendil-works/pi-ai` version `0.82.1` for provider-owned
 xAI OAuth login, credential refresh, and inference. pi-ai is MIT licensed,
 copyright Mario Zechner. Source: <https://github.com/badlogic/pi-mono>.
 
-## In the source repository only (excluded from release archives)
-
-Three skill trees under `.grok/skills/` are vendored third-party code rather
-than TownReporter's own:
-
-- `.grok/skills/generate2dmap/`
-- `.grok/skills/generate2dsprite/`
-- `.grok/skills/video2dsprite/`
-
-Each is MIT licensed, Copyright (c) 2026 0x0funky, vendored from
-[agent-sprite-forge](https://github.com/0x0funky/agent-sprite-forge) at commit
-`53dce6055984c610d833e77887939cbd0fb1c92b` — the origin is recorded in that
-tree's own `SOURCE.md`, and the complete licence text sits beside it as
-`LICENSE`.
-
-The rest of `.grok/` — its `references/`, the `auth`, `neon`, `og`, `xai-api`
-and game-building skills, `app-env.json` and `status` — is Grok App Builder
-scaffold material kept in this repository as history. It is not TownReporter's
-work and not TownReporter documentation.
-
-`.gitattributes` marks `.grok/` `export-ignore`, so none of this material
-reaches a release archive: no Windows package a publisher downloads contains
-any of it. It is restated here because the repository itself is public.
-
 ## Downloaded at install time (not in the source archive)
 
 The Windows installation package provisions three runtimes that are not part

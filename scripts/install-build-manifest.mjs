@@ -22,7 +22,6 @@ export function sourceDigest(root) {
     "migrations",
     "public",
     "server",
-    ".grok",
     "package.json",
     "package-lock.json",
     "vite.config.ts",

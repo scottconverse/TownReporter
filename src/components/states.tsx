@@ -456,19 +456,3 @@ export function ScreenError({
   );
 }
 
-export function GrokStatusNotice({
-  available,
-  message,
-  night = false,
-}: {
-  available?: boolean;
-  message?: string;
-  night?: boolean;
-}) {
-  if (available !== false) return null;
-  return (
-    <Notice kind="warn" night={night}>
-      {message || "Grok isn't connected in this preview."}
-    </Notice>
-  );
-}

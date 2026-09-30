@@ -267,19 +267,20 @@ jobs:
         env:
           DIALOG_BASE_URL: http://127.0.0.1:8080
         run: node scripts/astra-dialog-e2e.mjs
-      # `npm run check:auth` compares what the RUNNING dev server resolved for
-      # VITE_AUTH_ENABLED with what the next build will be handed. Only a live
-      # dev server can settle that, so it runs here on the server the first
-      # step already booted (it is the same server the dialog step above uses).
-      # Exit 0 agree, 1 diverged, 2 could not observe.
+      # `npm run check:auth` loads /login from the RUNNING server in a browser
+      # and asserts an editor gets a form: an email field, a password field and
+      # the submit button. Only a live server can settle that, so it runs here
+      # on the server the first step already booted (the same one the dialog
+      # step above uses). Exit 0 renders, 1 missing, 2 could not observe.
       #
-      # Nothing ran it. It is not a `*.test.mjs` file and no job invoked it, so
-      # the documented failure -- "sign-in visible in the live preview and
-      # absent from the built output, or the reverse" after starting vite
-      # outside scripts/with-app-env.mjs -- had a guard and no machine watching
-      # it. Run against a deliberately diverged build it exits 1 and names the
-      # cause, which is how this step was shown to be falsifiable. ~1s.
-      - name: The dev server and the next build agree about sign-in
+      # It reads a browser rather than `fetch` because the served HTML for
+      # /login is the desk's "Opening…" placeholder -- the form is rendered once
+      # the claim query resolves on the client -- so a fetch could never fail
+      # for the reason this check exists: a 200 whose client bundle throws.
+      # Pointed at a 200 that renders no form it exits 1 and names what it saw,
+      # which is how this step was shown to be falsifiable. Chromium is already
+      # installed above for this job's dialog step. ~5s.
+      - name: The dev server serves a working sign-in form
         run: npm run check:auth
 
   # The unit suite runs against PGLite, which has no pg_trgm and no admin

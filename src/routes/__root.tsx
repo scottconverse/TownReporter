@@ -1,7 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/lib/auth/provider";
-import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { siteUrl } from "@/lib/paper";
 import { DEFAULT_PAPER_IDENTITY, resolvePaperIdentity } from "@/lib/paper-identity";
 import { PaperProvider } from "@/lib/paper-context";
@@ -233,7 +232,6 @@ function Root() {
               'if(e)document.documentElement.setAttribute("data-stranded","");},8000);',
           }}
         />
-        <PreviewHostBridge />
         {/*
           Outermost of the app providers, so every screen -- the desk shell,
           the pending/error screens that render outside it, and the public

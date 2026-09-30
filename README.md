@@ -354,18 +354,18 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | `/feed`                                      | RSS                                                                                                                       |
 | `/login`                                     | Create account / sign in                                                                                                  |
 
-`AGENTS.md`, `AGENTS.project.md`, `.grok/`, and the dated `HANDOFF-*.md` session
-records at the repo root are not TownReporter documentation — they are the
-build-tool contract, the skill trees and the personal handoff notes from the
-App Builder sandbox this repo was originally scaffolded with. They stay in this
-repository as history and are excluded from every release archive
-(`.gitattributes` marks them `export-ignore`), so an installed copy never
-carries them. (`HANDOFF-NEXT-AGENT.md` is the current handoff, is linked from
-`SELF-HOSTING.md` and the release guides, and does ship.) They carry nothing at
-runtime either: `.grok/app-env.json` holds no `VITE_`-prefixed keys, and
-`scripts/with-app-env.mjs` keeps only those, treating a missing file as an
-empty environment. If you are here to understand the newspaper, start at the
-top of this file, not there.
+The dated `HANDOFF-*.md` session records at the repo root are not TownReporter
+documentation — they are personal handoff notes from the App Builder sandbox
+this repo was originally scaffolded with. They stay in this repository as
+history and are excluded from every release archive (`.gitattributes` marks
+them `export-ignore`), so an installed copy never carries them.
+(`HANDOFF-NEXT-AGENT.md` is the current handoff, is linked from
+`SELF-HOSTING.md` and the release guides, and does ship.) The sandbox's own
+material — its agent contract (`AGENTS.md`, `AGENTS.project.md`), the `.grok/`
+skill trees, its `startup.sh` and its preview host bridge — has been deleted
+outright, and `scripts/no-grok-scaffold.test.mjs` fails if any of it comes
+back. If you are here to understand the newspaper, start at the top of this
+file, not in the handoffs.
 
 ---
 

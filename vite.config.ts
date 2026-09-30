@@ -8,8 +8,6 @@ import tailwindcss from "@tailwindcss/vite";
 import { nitro } from "nitro/vite";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appPwaPlugin } from "./scripts/app-chrome-plugin.mjs";
-// @ts-expect-error JS plugin alongside the TS vite config
-import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
@@ -364,8 +362,7 @@ function stubServerOnlyOnClient(): Plugin {
 // --host 0.0.0.0 for phone/LAN testing. Keep this in sync with the
 // `dev`/`dev:lan` scripts in package.json — the CLI --host flag overrides
 // this value, but they should always agree.
-// The dev server starts once `src/router.tsx` and `src/routes/` exist — see
-// AGENTS.md § "First scaffold".
+// The dev server starts once `src/router.tsx` and `src/routes/` exist.
 export default defineConfig(({ command, isPreview }) => ({
   server: {
     host: "127.0.0.1",
@@ -394,8 +391,6 @@ export default defineConfig(({ command, isPreview }) => ({
     darkDeskMonitorPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
-    // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
-    appEnvPlugin(),
     // App head chrome (manifest, touch icon, share-card metas); runs before Start/Nitro.
     appPwaPlugin(),
     stubServerOnlyOnClient(),
