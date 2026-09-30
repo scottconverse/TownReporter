@@ -281,7 +281,12 @@ export async function readProviderOverrides(
   } catch {
     // Discovery failed (should not happen -- it never throws -- but this is
     // a budgets read used by every draft/scan/dig, and it must never fail a
-    // run over a local-model lookup nobody may even be using).
+    // run over a local-model lookup nobody may even be using). Fail closed:
+    // the row read above was never checked against the address rule, so it
+    // must not survive into the run.
+    if (out[LOCAL_MODEL_PROVIDER_ID]) {
+      out[LOCAL_MODEL_PROVIDER_ID] = { ...out[LOCAL_MODEL_PROVIDER_ID], localModel: null };
+    }
   }
   return out;
 }
