@@ -1217,15 +1217,15 @@ export const JOB_STAGE_LISTS: Record<JobKind, readonly string[]> = {
   */
   brief: ["Reading the file", "Writing editor brief"],
   /*
-    The editorial is the slow one, and these are the three things it does in
-    order: research the piece, write it, check the names. The document-reader
-    sentences (`Interpreting notes.pdf: part 2 of 7`) move the step line.
+    FB6: a second `editorial` key sat here (three chips: research, write, check
+    the names) and, being the LAST key of that name in the object literal, it
+    silently won -- so the desk drew three chips for a job whose worker really
+    writes four, and the "Researching with the desk" stage the subscription
+    writers arrive on had no chip to light. `tsc` calls a duplicate key an error
+    (TS1117), which is how this was found; the list above is the one the
+    workers actually write (`DESK_RESEARCH_STAGE`, editorial-research.server.ts)
+    and is now the only one.
   */
-  editorial: [
-    "Researching the editorial",
-    "Writing the editorial",
-    "Checking names and spellings",
-  ],
   /*
     The retained-PDF read: open it and count the pages, read them a batch at a
     time, save. `Reading batch 1 of 8 · PDF pages 1-6 · 0 of 47 already saved…`

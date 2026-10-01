@@ -3101,7 +3101,18 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  min-width: 232px;
+  /* FB6, owner report 7c: 232px was measured against the drawn menu's own
+     rows and is too narrow for the widest one it can hold. The lead menu's
+     block rows carry a BUTTON (`Start an AI follow-up`, `Draft with a chosen
+     model`), and `.btn` is 14px bold with 12px of padding either side inside a
+     row that is already 16px in from each edge -- so the label ran out of width
+     and wrapped onto two lines, which is what the owner saw. 264px fits the
+     longest of them on one line at both text sizes; the block's own buttons are
+     `nowrap` (`.btn` has always been), so a narrower menu can no longer wrap the
+     words either -- it would only crowd them. The phone rule below drops this
+     to `min-width: 0` and lets the menu take the row's width, where a 390px
+     frame has ~342px to spend and the same label has room to spare. */
+  min-width: 264px;
   background: var(--bg);
   border: 2px solid var(--fg);
 }
@@ -3169,6 +3180,17 @@
 .desk-ltr.astra .more-menu .more-block .dup-kill-note,
 .desk-ltr.astra .more-menu .more-block .queue-draft-controls {
   margin: 0;
+}
+/* FB6, owner report 7c: "Start an AI follow-up" wrapped onto two lines in the
+   lead menu. The cause is not the menu's width alone -- `.btn` is
+   `white-space: normal` in this stylesheet (line 511, deliberately, so a button
+   in a narrow grid cell can wrap) -- so a menu ROW, which is a label rather than
+   a layout-filling control, has to say otherwise. Both halves are needed: the
+   label will not break here, and the menu is wide enough that it does not have
+   to. Nothing else in the menu is affected: the text rows are `.more-item`
+   buttons and always were one line. */
+.desk-ltr.astra .more-menu .more-block :is(.btn, .document-add-button) {
+  white-space: nowrap;
 }
 
 /* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a
@@ -3487,7 +3509,7 @@
   background: var(--fg);
   color: var(--bg);
 }
-.desk-ltr.astra .today-legend {
+.desk-ltr.astra :is(.today-legend, .queue-legend) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 16px;
@@ -3497,11 +3519,11 @@
   font-size: calc(14px * var(--ts));
   color: var(--fg2);
 }
-.desk-ltr.astra .today-legend-label {
+.desk-ltr.astra :is(.today-legend, .queue-legend) .today-legend-label {
   font-weight: 800;
   color: var(--fg);
 }
-.desk-ltr.astra .today-legend kbd {
+.desk-ltr.astra :is(.today-legend, .queue-legend) kbd {
   font: 800 calc(14px * var(--ts)) var(--fd);
   color: var(--fg);
 }
@@ -4074,6 +4096,39 @@
 }
 .desk-ltr.astra .lead-list.roomy .lead-row.picked {
   background: var(--surface);
+}
+/* FB6, item 4: the keyboard cursor on the Queue's table.
+   Today's rows draw the cursor as `.today-lead.sel` -- a surface fill and a
+   4px inset bar in `--sel`, which is ink in light and gold in dark (the same
+   token the selected tab uses). The Queue's rows are the same rows in a
+   different box, so the cursor is the same statement, and the inset keeps the
+   lead text exactly where it was when the cursor moves down the list. */
+.desk-ltr.astra .lead-list.roomy .lead-row.sel {
+  background: var(--surface);
+  box-shadow: inset 4px 0 0 0 var(--sel);
+}
+/* FB6, item 3: the scan's card, under the press that started it, on both
+   screens. The same spacing the rails give their other blocks. */
+.desk-ltr.astra .wire-scan-card,
+.desk-ltr.astra .queue-scan-card {
+  margin-top: 10px;
+}
+/* FB6, item 2: the one-reason box a bulk Kill asks for, laid out like the bulk
+   Delete confirm it sits beside. */
+.desk-ltr.astra .queue-bulk-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: calc(14px * var(--ts));
+}
+.desk-ltr.astra .queue-bulk-reason input {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 2px solid var(--fg);
+  background: var(--bg);
+  color: var(--fg);
+  font: 500 calc(14px * var(--ts)) var(--fb);
+  min-width: 22rem;
 }
 .desk-ltr.astra .lead-list.roomy .lead-chips {
   display: flex;

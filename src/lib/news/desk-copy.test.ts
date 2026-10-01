@@ -511,9 +511,18 @@ describe("Worth a Look presentation", () => {
       { status: "published" },
     ];
     assert.equal(workingLeads(rows).length, 4);
-    assert.equal(openLeads(rows).length, 3);
+    /*
+      FB6, owner report 7a. This was 3 (held counted as open work). A held lead
+      is set aside, not being worked, and the owner could see it in the Open
+      count on both Today and the Queue.
+    */
+    assert.equal(openLeads(rows).length, 2);
     assert.ok(workingLeads(rows).every((l) => l.status !== "published"));
-    assert.ok(openLeads(rows).every((l) => l.status !== "published" && l.status !== "killed"));
+    assert.ok(
+      openLeads(rows).every(
+        (l) => l.status !== "published" && l.status !== "killed" && l.status !== "held",
+      ),
+    );
   });
 
   it("does not say run the first scan after a timed-out writing pass", () => {

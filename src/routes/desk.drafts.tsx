@@ -277,9 +277,18 @@ function DraftsPage() {
                         being written -- a stand-in bar would be the one thing
                         this screen is not allowed to invent. */}
                     {liveJob ? (
+                      /*
+                        FB6, item 6: NOT `compact`. The compact card drops the
+                        stage chip row (JobCard.tsx: `!compact && job.stages`),
+                        and the whole of the report's finding on this row was
+                        "no chips, no bar, no Cancel" -- a row that is one per
+                        story, full width, has the room the compact card exists
+                        to save. So this is the drawn card at full size: the
+                        stages it is working through, the percent, the bar, the
+                        step in words, and Cancel.
+                      */
                       <DeskJobCard
                         job={liveJob}
-                        compact
                         viewLabel="Open your story"
                         onNavigate={() => openWorkbench(row.lead_id)}
                       />

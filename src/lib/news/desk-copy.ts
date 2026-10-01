@@ -433,9 +433,24 @@ export function workingLeads<T extends { status: string }>(leads: readonly T[]):
   return leads.filter((l) => l.status !== "published");
 }
 
-/** Open work for the command center: not published, not killed. */
+/**
+ * Open work for the command center: not published, not killed, NOT HELD.
+ *
+ * FB6, owner report 2026-09-30 (7a): "Held leads appear under the Open
+ * filter/count on Today/Queue — they must not." They did, because this only
+ * excluded the two ways a lead LEAVES the desk and not the one way it is set
+ * aside: Hold is "not now", it has its own tab and its own count on both
+ * screens, and a lead sitting in Held is not work the desk is still doing. It
+ * was counted in "Open · N" on Today, in the Queue's Open tab and its badge,
+ * and — the visible half — drawn in both lists while held.
+ *
+ * Held is still ON the desk: `workingLeads` above keeps it, which is what the
+ * Held tab and Today's own Held segment read.
+ */
 export function openLeads<T extends { status: string }>(leads: readonly T[]): T[] {
-  return leads.filter((l) => l.status !== "killed" && l.status !== "published");
+  return leads.filter(
+    (l) => l.status !== "killed" && l.status !== "published" && l.status !== "held",
+  );
 }
 
 export function mergeFocusSelection(

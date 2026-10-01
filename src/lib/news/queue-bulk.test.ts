@@ -32,18 +32,18 @@ describe("the sentence a bulk press shows", () => {
   it("says how many landed", () => {
     assert.equal(
       bulkStatusSummary({ status: "held", done: 12, failures: [] }),
-      "Held 12.",
+      "Held 12 leads.",
     );
     assert.equal(
       bulkStatusSummary({ status: "killed", done: 1, failures: [] }),
-      "Killed 1.",
+      "Killed 1 lead.",
     );
   });
 
   it("carries the reason when one did not", () => {
     assert.equal(
       bulkStatusSummary({ status: "held", done: 11, failures: ["the desk was busy"] }),
-      "Held 11. 1 failed: the desk was busy",
+      "Held 11 leads. 1 failed: the desk was busy",
     );
     assert.equal(
       bulkStatusSummary({
@@ -51,7 +51,7 @@ describe("the sentence a bulk press shows", () => {
         done: 10,
         failures: ["the desk was busy", "the desk was busy"],
       }),
-      "Killed 10. 2 failed: the desk was busy",
+      "Killed 10 leads. 2 failed: the desk was busy",
     );
   });
 
@@ -63,7 +63,7 @@ describe("the sentence a bulk press shows", () => {
     */
     assert.equal(
       bulkStatusSummary({ status: "held", done: 0, failures: ["nothing was signed in"] }),
-      "Held 0. 1 failed: nothing was signed in",
+      "Held 0 leads. 1 failed: nothing was signed in",
     );
   });
 });

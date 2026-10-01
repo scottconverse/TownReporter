@@ -19,6 +19,8 @@ import {
   leadOrigin,
 } from "@/components/desk-chrome-utils";
 import { useDeskMutation } from "@/components/desk-action";
+import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
+import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadFlags } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
@@ -82,6 +84,7 @@ import {
   sourceErrorKind,
   suggestedByLabel,
   workingQueueEmptyCopy,
+  workingLeads,
   worthItemOnDesk,
 } from "@/lib/news/desk-copy";
 import {
@@ -122,24 +125,7 @@ function deskDateLine(nowMs: number, timezone: string): string {
   }
 }
 
-/**
- * The triage keys the drawn legend bar prints under the list (README "1.
- * Today"): "J/K next/previous · S start story · H hold · X kill · U undo ·
- * Enter open lead". The words are the drawing's, and every one of them is a
- * key the window listener below actually acts on.
- *
- * N, ⌘S and ? are bound too, and are in the "?" sheet rather than in this
- * bar: ⌘S is the story workbench's save and not this screen's, and the bar is
- * the drawing's, so it carries the drawing's six.
- */
-const TRIAGE_KEYS: [string, string][] = [
-  ["J / K", "next / previous"],
-  ["S", "start story"],
-  ["H", "hold"],
-  ["X", "kill"],
-  ["U", "undo"],
-  ["Enter", "open lead"],
-];
+
 
 /**
  * The two ways into the desk that used to be panels stacked on Today and are
@@ -314,6 +300,13 @@ function DeskHome() {
   const setStatus = useDeskMutation({
     mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
       setLeadStatus({ data: input }),
+    /*
+      FB6, item 2 (README:484). The row moves in the same paint as the press and
+      moves back if the write does not take -- see `desk-lead-status.ts` for why
+      the way back is the lead's own previous status rather than a snapshot of
+      the whole cache.
+    */
+    ...leadStatusOptimistic(qc),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Saving…",
     done: (_result, input) =>
@@ -340,22 +333,51 @@ function DeskHome() {
           },
     failedLead: "Could not change that lead. ",
   });
-  const srcStatus = useMutation({
+  /*
+    FB6, item 1: `Accept` and `Drop` on a suggested source were DEAD and a
+    SILENT FAIL at once (FB0-Report Table B) -- pressing one changed nothing on
+    screen until the sources list happened to refetch, a failure said nothing
+    at all, and a second press before the first answered was accepted. They go
+    through the shared family now: the pending state is per SOURCE (both of that
+    row's presses stand down together, so an Accept and a Drop cannot be in
+    flight on the same row), a refusal is reported with the server's own reason,
+    and the done sentence names which way the source went.
+  */
+  const srcStatus = useDeskMutation({
     mutationFn: (input: { id: number; status: "accepted" | "rejected" }) =>
       setSourceStatus({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
+    after: () => qc.invalidateQueries({ queryKey: ["sources"] }),
+    pending: "Saving…",
+    done: (_result, input) =>
+      input.status === "accepted"
+        ? "Watching it now — the next scan reads it."
+        : "Dropped. It will not be watched.",
+    failedLead: "Could not change that source. ",
+    what: "change that source",
   });
-  const scan = useMutation({
+  /*
+    FB6, item 3: `Run scan now` was a LAZY BAR and a SILENT FAIL (FB0-Report
+    Table B). The button swapped its own word to "Scanning…" and that was the
+    whole of the feedback -- no stage, no count, no way to stop it -- and a scan
+    that refused to start said nothing at all. It goes through the shared family
+    now and Today draws the scan's own JobCard under the press, from the one
+    `["desk-jobs"]` query every other card on this desk already reads.
+  */
+  const scan = useDeskMutation({
     mutationFn: () => runScan(),
-    onSuccess: () => {
+    after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
       // FB1: the card for the scan that was just queued. Without this the
-      // Running box and Running now wait out the 30 s idle poll, and the press
-      // looks like it did nothing.
+      // Running box, Running now and the card below this button all wait out
+      // the 30 s idle poll, and the press looks like it did nothing.
       invalidateDeskJobs(qc);
     },
+    pending: "Starting the scan…",
+    done: () => "The scan is running. Watch its stages under the button.",
+    failedLead: "Could not start the scan. ",
+    what: "start the scan",
   });
   const [darkErr, setDarkErr] = useState<string | null>(null);
   const startDark = useMutation({
@@ -705,9 +727,21 @@ function DeskHome() {
   const inProgress = (deskJobs.data ?? [])
     .filter((row) => row.leadId > 0 && (row.kind === "draft" || row.kind === "reconcile"))
     .slice(0, 5);
+  /*
+    THE SCAN'S OWN CARD (FB6, item 3). The open scan, if there is one, read from
+    the same one job query. A scan whose row has not been written yet (the press
+    has gone out and the worker has not claimed it) draws nothing -- the button's
+    own pending label is the feedback for that half-second, and inventing a card
+    for a job that does not exist yet is the one thing this rail must not do.
+  */
+  const scanJob =
+    (deskJobs.data ?? []).find(
+      (row) => row.kind === "scan" && (row.status === "queued" || row.status === "running"),
+    ) ?? null;
   const today = formatDate(new Date(nowMs));
   const newToday = allLeads.filter((l) => formatDate(l.created_at) === today).length;
-  const heldCount = allLeads.filter((l) => l.status === "held").length;
+  /* FB6, 7a: the held pile is read ONCE, below (`heldQueue`), and both the
+     Held segment's count and its rows come from it so the two cannot disagree. */
   const sectionName = (topic: string | null) =>
     (topic && sectionQuery.sections.find((s) => s.key === topic)?.name) || topic || "";
 
@@ -803,35 +837,26 @@ function DeskHome() {
     .sort((a, b) => Number(b.state.key === "ready") - Number(a.state.key === "ready"))
     .slice(0, 3);
 
-  const startDraft = useMutation({
+  /*
+    FB6, item 1: `Start story` and `S` were DEAD and a SILENT FAIL (FB0-Report
+    Table B Today, ":1786"): the press disabled nothing, showed no pending
+    label, and a start that refused said so only in the screen reader's region.
+    It goes through the shared family now, so the button draws "Starting…" and
+    stands down for the whole press, a refusal carries the server's own reason
+    in a red bar, and the card for the draft it just started appears within a
+    second (`invalidateDeskJobs`, FB1) rather than waiting out the 30 s poll.
+  */
+  const startDraft = useDeskMutation({
     mutationFn: (leadId: number) =>
       draftLead({ data: { leadId, modelChoice: "auto", modelEffort: defaultModelEffort("auto") } }),
-    onSuccess: (res) => {
-      /*
-        FB5: the two answers are announced with their own tone rather than one
-        ternary with the default. "Draft queued" is a finished press and gets
-        the yellow bar; a refusal is a failure and gets the danger one, so the
-        reason is never painted as the next step.
-      */
-      if (res?.ok) announceToDesk("Draft queued — it is writing now.");
-      else
-        announceToDesk(
-          (res && "error" in res && res.error) || "That draft did not start.",
-          "err",
-        );
+    after: () => {
       void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
     },
-    /*
-      B7R, item 4: the same tone rule as the refusal above. A draft that never
-      started is not a finished press, and it was announced in the accent that
-      means it was.
-    */
-    onError: (err) =>
-      announceToDesk(
-        err instanceof Error ? err.message : "That draft did not start.",
-        "err",
-      ),
+    pending: "Starting…",
+    done: () => "Draft queued — it is writing now. Watch it under Running now.",
+    failedLead: "Could not start that draft. ",
+    what: "start that draft",
   });
 
   /*
@@ -851,79 +876,73 @@ function DeskHome() {
     index, the cursor and the row actions all keep meaning the same thing.
   */
   const [leadSeg, setLeadSeg] = useState<"open" | "held">("open");
-  const newLeads = (
-    leadSeg === "held"
-      ? queue.filter((l) => l.status === "held")
-      : queue.filter((l) => l.status !== "held")
-  ).slice(0, 8);
+  /*
+    FB6, owner report 7a. `queue` used to be `openLeads(allLeads)`, which kept
+    held leads, and the two segments were cut from it here -- so the "Open · N"
+    count was right by arithmetic while the row list, the Queue's own tab and
+    the nav badge all still counted a held lead as open work. `openLeads` now
+    excludes Held, so this reads the two piles directly: the open one from it,
+    and the held one from `workingLeads` (held is still ON the desk, which is
+    what gives the second segment any rows at all).
+  */
+  const heldQueue = workingLeads(allLeads).filter((l) => l.status === "held");
+  const newLeads = (leadSeg === "held" ? heldQueue : queue).slice(0, 8);
 
   const [cursor, setCursor] = useState(0);
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const el = e.target as HTMLElement | null;
-      const typing =
-        el?.isContentEditable === true ||
-        (el ? /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) : false);
-      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      const at = (i: number) => newLeads[Math.max(0, Math.min(i, newLeads.length - 1))];
-      const move = (next: number) => {
-        if (newLeads.length === 0) return;
-        const i = Math.max(0, Math.min(next, newLeads.length - 1));
-        setCursor(i);
+  /*
+    The triage keys are `desk-triage.ts` now -- the same rule the Queue binds,
+    so J means the same thing on both screens and a key added to one is added to
+    both. Today's own stand-downs (typing, modifiers) live there with it.
+  */
+  useTriageKeys((action) => {
+    const lead = newLeads[movedIndex(cursor, 0, newLeads.length)];
+    const move = (next: number) => {
+      if (newLeads.length === 0) return;
+      const i = movedIndex(next, 0, newLeads.length);
+      setCursor(i);
+      /*
+        FB5: spoken, not drawn. Moving the cursor is not the outcome of a
+        press — J and K fire on every keypress — so it goes through
+        `announceOnly`, which writes the desk's sr-only region and shows
+        nothing. A toast per keystroke would be noise, not feedback.
+      */
+      announceOnly(`Selected: ${newLeads[i]!.headline}`);
+    };
+    switch (action.kind) {
+      case "move":
+        move(cursor + action.delta);
+        break;
+      case "start":
+        if (lead) startDraft.mutate(lead.id);
+        break;
+      case "hold":
+        // The drawn dialog, not the bare write: H and the row's Hold H are the
+        // same press, and it asks for the reason the desk learns from.
+        if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
+        break;
+      case "kill":
+        // Unit BW, item 2: X and the row's Kill button are the same press, so
+        // both open the drawn dialog. The reason the desk learns from is what
+        // this key was missing when it wrote the status outright.
+        if (lead) setKillLead({ id: lead.id, headline: lead.headline });
+        break;
+      case "undo":
+        if (lead) setStatus.mutate({ id: lead.id, status: "new" });
+        break;
+      case "open":
+        if (lead) void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
+        break;
+      case "new":
         /*
-          FB5: spoken, not drawn. Moving the cursor is not the outcome of a
-          press — J and K fire on every keypress — so it goes through
-          `announceOnly`, which writes the desk's sr-only region and shows
-          nothing. A toast per keystroke would be noise, not feedback.
+          Unit BN2, item 6: N is the same press as the header's "+ New story",
+          so it opens the same dialog. It no longer writes the hash: the hash
+          is the deep link to the composer, and setting it here would open
+          that dialog behind this one.
         */
-        announceOnly(`Selected: ${newLeads[i]!.headline}`);
-      };
-      const lead = at(cursor);
-      switch (e.key.toLowerCase()) {
-        case "j":
-          move(cursor + 1);
-          break;
-        case "k":
-          move(cursor - 1);
-          break;
-        case "s":
-          if (lead) startDraft.mutate(lead.id);
-          break;
-        case "h":
-          // The drawn dialog, not the bare write: H and the row's Hold H are
-          // the same press, and it asks for the reason the desk learns from.
-          if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
-          break;
-        case "x":
-          // Unit BW, item 2: X and the row's Kill button are the same press, so
-          // both open the drawn dialog. The reason the desk learns from is what
-          // this key was missing when it wrote the status outright.
-          if (lead) setKillLead({ id: lead.id, headline: lead.headline });
-          break;
-        case "u":
-          if (lead) setStatus.mutate({ id: lead.id, status: "new" });
-          break;
-        case "enter":
-          if (lead)
-            void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
-          break;
-        case "n":
-          /*
-            Unit BN2, item 6: N is the same press as the header's "+ New story",
-            so it opens the same dialog. It no longer writes the hash: the hash
-            is the deep link to the composer, and setting it here would open
-            that dialog behind this one.
-          */
-          closePanel();
-          setNewStoryOpen(true);
-          break;
-        default:
-          return;
-      }
-      e.preventDefault();
+        closePanel();
+        setNewStoryOpen(true);
+        break;
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
   });
 
   /*
@@ -1043,7 +1062,24 @@ function DeskHome() {
             more, and the hash is no longer where this button points. The
             reason is written out on `desk.queue.tsx` and in `questions/BN.md`.
           */}
-          <AddLeadButton label="+ Add a lead" />
+          {/*
+            FB6, owner report 7d. The dialog has always told its screen when it
+            filed a lead (`onDone`); this mount did not pass one, so the lead
+            was written and Today's `["leads"]` was never invalidated -- and
+            with `refetchOnWindowFocus: false` (root.tsx) nothing else would
+            ever refetch it either, so a lead filed from this very dialog did
+            not appear on this very screen until a reload. The invalidation is
+            the missing half; `desk-jobs` comes with it because a lead filed
+            "and drafting now" starts a job whose card belongs under Running
+            now.
+          */}
+          <AddLeadButton
+            label="+ Add a lead"
+            onDone={() => {
+              void qc.invalidateQueries({ queryKey: ["leads"] });
+              invalidateDeskJobs(qc);
+            }}
+          />
           {/*
             Unit BN2, item 6: "+ New story" opens the drawn New-story dialog
             (phase 4's three tabs) instead of jumping to `#story-composer`, and
@@ -1757,7 +1793,7 @@ function DeskHome() {
                         setCursor(0);
                       }}
                     >
-                      Open · {queue.length - heldCount}
+                      Open · {queue.length}
                     </button>
                     <button
                       type="button"
@@ -1768,11 +1804,16 @@ function DeskHome() {
                         setCursor(0);
                       }}
                     >
-                      Held · {heldCount}
+                      Held · {heldQueue.length}
                     </button>
                   </div>
                 </div>
-                {queue.length === 0 ? (
+                {/*
+                  FB6, 7a: "empty" means neither pile has anything in it. Held
+                  left `queue` when the Open count stopped including it, and a
+                  desk whose only lead is on hold is not a desk with no leads.
+                */}
+                {queue.length === 0 && heldQueue.length === 0 ? (
                   !last && publishedCount === 0 ? (
                     <p className="wire-sum">
                       Queue is empty —{" "}
@@ -1820,7 +1861,7 @@ function DeskHome() {
                   */}
                     <p className="today-legend" aria-label="Keys for this list">
                       <span className="today-legend-label">Keyboard</span>
-                      {TRIAGE_KEYS.map(([key, what]) => (
+                      {TRIAGE_LEGEND.map(([key, what]) => (
                         <span key={key}>
                           <kbd>{key}</kbd> {what}
                         </span>
@@ -1858,6 +1899,17 @@ function DeskHome() {
                         dropped rather than invented, exactly as on the Queue.
                       */
                       const sources = parseUrlList(l.source_urls).length;
+                      /*
+                        FB6, item 1: the pending state is THIS lead's, not the
+                        screen's. Eight rows share one mutation, and a pending
+                        flag that came off `isPending` alone would draw
+                        "Starting…" on all eight the moment any one was pressed.
+                      */
+                      const startingThis = startDraft.isPending && startDraft.variables === l.id;
+                      const undoingThis =
+                        setStatus.isPending &&
+                        setStatus.variables?.id === l.id &&
+                        setStatus.variables?.status === "new";
                       return (
                         /*
                         The drawn compact row: `52px | 1fr | auto` -- score
@@ -1938,6 +1990,15 @@ function DeskHome() {
                                 </span>
                                 <InkButton
                                   tone="quiet"
+                                  /*
+                                    FB6, item 1: `Undo`/`U` was the report's
+                                    SILENT FAIL -- "the row stays dimmed with no
+                                    message" -- and it now says so while it is
+                                    happening too, so a slow write is not a
+                                    second dead press.
+                                  */
+                                  pending={undoingThis}
+                                  pendingLabel="Putting it back…"
                                   onClick={() => setStatus.mutate({ id: l.id, status: "new" })}
                                 >
                                   Undo <kbd>U</kbd>
@@ -1945,7 +2006,11 @@ function DeskHome() {
                               </>
                             ) : (
                               <>
-                                <InkButton onClick={() => startDraft.mutate(l.id)}>
+                                <InkButton
+                                  pending={startingThis}
+                                  pendingLabel="Starting…"
+                                  onClick={() => startDraft.mutate(l.id)}
+                                >
                                   Start story <kbd>S</kbd>
                                 </InkButton>
                                 <InkButton
@@ -2090,7 +2155,18 @@ function DeskHome() {
 
           <section className="nightpanel gc-darkdesk">
             <SecHead title="Dark Desk" sub="Never prints on its own" />
-            {darkErr ? <p className="note err">{darkErr}</p> : null}
+            {/*
+              FB6, item 1: "Start digging" had a visible failure line and no
+              ROLE on it (FB0-Report Table B, Today ":1993" -- "no role"), so
+              the one thing an editor needs when the press does not work was
+              drawn for the eye and silent to a screen reader. It is the desk's
+              alert now, like every other failure sentence.
+            */}
+            {darkErr ? (
+              <p className="note err" role="alert">
+                {darkErr}
+              </p>
+            ) : null}
             {/*
                 CY item 3. The piles by their drawn names, each a label, the
                 sentence that says what is in it, and the count:
@@ -2155,6 +2231,8 @@ function DeskHome() {
                       <InkButton
                         tone="invert"
                         small
+                        pending={startDark.isPending}
+                        pendingLabel="Opening…"
                         disabled={startDark.isPending}
                         onClick={() => startDark.mutate({ seed: item.seed, title: item.title })}
                       >
@@ -2233,13 +2311,38 @@ function DeskHome() {
               {writeStory.isPending ? "writing now" : "ready"}
             </p>
             <div className="wire-acts">
-              <InkButton onClick={() => scan.mutate()} disabled={scanning}>
+              <InkButton
+                onClick={() => scan.mutate()}
+                disabled={scanning}
+                pending={scan.isPending}
+                pendingLabel="Starting the scan…"
+              >
                 {scanning ? "Scanning…" : "Run scan now"}
               </InkButton>
               <Link to="/desk/sources" className="btn quiet">
                 All sources
               </Link>
             </div>
+            {/*
+              FB6, item 3. `Run scan now` used to be a label swap and nothing
+              else: the button said "Scanning…" and the rail above it kept
+              showing the PREVIOUS run's line, so there was no stage, no count
+              and no way to stop the thing. The scan's own card is drawn here
+              now, from the same `["desk-jobs"]` query every other card on this
+              desk reads -- so it carries the stage list, the running count, the
+              elapsed clock and the stall rule's Keep waiting, exactly as the
+              scan screen's own card does.
+            */}
+            {scanJob ? (
+              <div className="wire-scan-card">
+                <DeskJobCard
+                  job={scanJob}
+                  compact
+                  onNavigate={openJob(scanJob, navigate)?.go}
+                  viewLabel={openJob(scanJob, navigate)?.label}
+                />
+              </div>
+            ) : null}
             <details className="wire-more">
               <summary>More from the wire</summary>
               {last ? (
@@ -2315,9 +2418,18 @@ function DeskHome() {
                           room for the reason; the list on Sources carries it. */}
                       <span className="meta-inline">{suggestedByLabel(s.proposed_by)}</span>
                       <span className="wire-proposed-acts">
+                        {/*
+                          FB6, item 1: the pending state is per source and covers
+                          BOTH of that row's presses, so an Accept and a Drop
+                          cannot be in flight on the same row at once, and the
+                          row says which way it is going rather than looking
+                          dead for the length of the write.
+                        */}
                         <InkButton
                           tone="quiet"
                           small
+                          pending={srcStatus.isPending && srcStatus.variables?.id === s.id}
+                          pendingLabel={srcStatus.variables?.status === "rejected" ? "Dropping…" : "Adding…"}
                           onClick={() => srcStatus.mutate({ id: s.id, status: "accepted" })}
                         >
                           Accept
@@ -2325,6 +2437,8 @@ function DeskHome() {
                         <InkButton
                           tone="quiet"
                           small
+                          pending={srcStatus.isPending && srcStatus.variables?.id === s.id}
+                          pendingLabel="Dropping…"
                           onClick={() => srcStatus.mutate({ id: s.id, status: "rejected" })}
                         >
                           Drop
@@ -2398,7 +2512,16 @@ function DeskHome() {
           headline={holdLead.headline}
           open
           onClose={() => setHoldLead(null)}
-          onDone={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+          onDone={() => {
+            /*
+              FB6, item 2: the H key and the row's Hold both open this dialog,
+              and the row used to sit unchanged until its refetch came back.
+              The dialog's answer means the write took, so the row moves on the
+              spot.
+            */
+            moveLeadStatusNow(qc, holdLead.id, "held");
+            void qc.invalidateQueries({ queryKey: ["leads"] });
+          }}
         />
       ) : null}
 
@@ -2416,7 +2539,10 @@ function DeskHome() {
           onOpenChange={(open) => {
             if (!open) setKillLead(null);
           }}
-          onKilled={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+          onKilled={() => {
+            moveLeadStatusNow(qc, killLead.id, "killed");
+            void qc.invalidateQueries({ queryKey: ["leads"] });
+          }}
         />
       ) : null}
     </DeskShell>
