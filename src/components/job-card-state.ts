@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { listStoryJobProgress, type JobProgressView } from "@/lib/news/job-progress";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { listDeskJobs, type JobProgressView } from "@/lib/news/job-progress";
 
 /*
   The job card's state rule and its data hook, apart from the card's markup.
@@ -32,11 +32,38 @@ const IDLE_POLL_MS = 30_000;
 const anyOpen = (rows: JobProgressView[] | undefined) =>
   Boolean(rows?.some((row) => row.status === "queued" || row.status === "running"));
 
+/** The one key. Exported so a press that STARTS a job can refresh it. */
+export const DESK_JOBS_KEY = ["desk-jobs"] as const;
+
 /**
- * Every story job the desk can show, newest first, polled fast while any of
- * them is open and slowly when none is. One query for the whole screen: the
- * card takes a job, not a query, so a screen with several cards still makes one
- * request per tick.
+ * Call this after ANY press that starts a job (FB1, unit 3).
+ *
+ * The report's finding: starting a story invalidated `["leads"]` and the old
+ * `["recent-story-work"]` but NOT `["desk-jobs"]`, so the card the editor had
+ * just asked for arrived up to 30 s late -- the idle poll interval -- and in
+ * the meantime the screen looked like the press had done nothing. Every
+ * job-starting mutation on the desk calls this now, and it is one function so
+ * the next one cannot forget the key.
+ *
+ * `refetchType: "active"` (the default) is what makes it cheap: a screen that
+ * is not mounted does not refetch, it just marks the entry stale.
+ */
+export function invalidateDeskJobs(qc: QueryClient): void {
+  void qc.invalidateQueries({ queryKey: DESK_JOBS_KEY });
+}
+
+/**
+ * Every job the desk can show, of every kind, open ones first. Polled fast
+ * while any of them is open and slowly when none is. One query for the whole
+ * screen: the card takes a job, not a query, so a screen with several cards
+ * still makes one request per tick.
+ *
+ * FB1, unit 3: this is THE reader. The shell's Running box, Today's running
+ * strip and its drafts strip, the story page and the Drafts list all read this
+ * one key -- which is also why a write that starts a job invalidates
+ * `["desk-jobs"]` and not a key of its own. The report's finding was that
+ * starting a story left the card up to 30 s late because `["desk-jobs"]` was
+ * never invalidated; see the presses that now do.
  *
  * `initial` is the row a route's own loader already has. It is only the first
  * paint -- the query replaces it on its first tick.
@@ -44,7 +71,7 @@ const anyOpen = (rows: JobProgressView[] | undefined) =>
 export function useDeskJobs(initial?: JobProgressView[] | null) {
   return useQuery({
     queryKey: ["desk-jobs"],
-    queryFn: () => listStoryJobProgress(),
+    queryFn: () => listDeskJobs(),
     ...(initial && initial.length
       ? { initialData: initial, initialDataUpdatedAt: Date.now() }
       : {}),

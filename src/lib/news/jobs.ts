@@ -27,6 +27,40 @@ export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "b
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
+ * Every kind, as a runtime list. The type above is erased, so this is the only
+ * thing a TEST can loop over -- and the brief's rule is that every kind has a
+ * stage list whose phrases its worker really writes, which is a claim about all
+ * eleven, not about the three that happened to have one.
+ *
+ * `kindCoverage` below is what keeps the two in step: it will not compile if
+ * `JobKind` grows a member this list is missing, so the test that loops this
+ * array cannot quietly stop covering a new kind.
+ */
+export const JOB_KINDS = [
+  "scan",
+  "draft",
+  "reconcile",
+  "dark",
+  "editorial",
+  "brief",
+  "routine-notice",
+  "artifact-ocr",
+  "pull",
+  "audio-transcribe",
+  "follow-up",
+] as const satisfies readonly JobKind[];
+
+/**
+ * A compile-time assertion, never called. Assigning a `JobKind` to the element
+ * type of `JOB_KINDS` fails to typecheck the moment the union and the list
+ * disagree -- which is the drift a runtime test over a hand-written list could
+ * never catch.
+ */
+export function kindCoverage(kind: JobKind): (typeof JOB_KINDS)[number] {
+  return kind;
+}
+
+/**
  * Two lanes, not one. Audit finding ENG-105: a single serial drainer meant a
  * 40-minute editorial held `draining` true for the whole run, so a Scan or
  * Draft queued behind it did not start until the editorial finished.
@@ -467,8 +501,46 @@ export function kickJobs() {
 
 export async function setJobStage(id: number, stage: string) {
   const sql = await getSql();
+  /*
+    THE CHIP ROW MOVES FROM HERE TOO (FB1, unit 2).
+
+    This used to write `stage` and nothing else, so a worker that called it --
+    dark, editorial, pull, artifact-ocr, brief, and every failover note in the
+    app -- could never move `stage_index` even once the kind had a stage list.
+    The alternative was editing sixty call sites to hand each one a row it does
+    not always hold; this resolves the index where the list already is, in the
+    same statement, so no boundary can forget.
+
+    It is the SAME rule `stageIndexFor` applies in JS -- exact match on the
+    phrase, no match means "leave the chip where it was" -- expressed in SQL
+    because this function was handed an id and not a row. Exact match is what
+    keeps a failover sentence ("Switched to Codex Sol: …") from landing on a
+    chip, and what keeps a counted step ("Reading batch 2 of 7") from moving the
+    bar backwards.
+
+    The `~ '^\s*\['` guard is because `stages_json` is text: casting a
+    non-array to jsonb raises, and while this app is the only writer, a
+    malformed value must cost a chip row rather than fail the stage boundary
+    that was trying to report.
+
+    A worker that holds its own row should still use `progressReporterFor(job)`:
+    it resolves the index without a subquery and carries `pct` with it.
+  */
   await sql`
-    update desk_jobs set stage = ${stage}, updated_at = now() where id = ${id}
+    update desk_jobs
+    set stage = ${stage},
+        updated_at = now(),
+        stage_index = case
+          when stages_json is not null and stages_json ~ '^\s*\['
+            then coalesce((
+              select t.ordinality - 1
+              from jsonb_array_elements_text(stages_json::jsonb) with ordinality as t(label, ordinality)
+              where t.label = ${stage}
+              limit 1
+            ), stage_index)
+          else stage_index
+        end
+    where id = ${id}
   `;
   /*
     Every stage boundary in the app already funnels through this function --
@@ -478,10 +550,6 @@ export async function setJobStage(id: number, stage: string) {
     delegation here is what makes "called at every existing stage boundary" true
     of the whole job surface at once, instead of sixty edits that the next new
     worker would forget to copy.
-
-    A worker that holds its own job row should use `progressReporterFor(job)`
-    instead: same delegation, plus the stage index that sentence implies, which
-    this function cannot know because it was handed an id and not a row.
   */
   await reportProgress(id, { step: stage });
 }
@@ -1055,8 +1123,25 @@ export function jobStages(
  *
  * A kind with no entry reports its step and heartbeats exactly like the others;
  * it simply has no chip row, which is what `stages_json` null means everywhere.
+ *
+ * THE TABLE IS NOW TOTAL (FB1, unit 2). Every kind the desk can run has a list,
+ * because before this eight of the eleven had none and `executeJob` seeded
+ * `stages_json` from here at claim -- so a Scan, a Dark Desk round, a brief, a
+ * PDF read, a Pull, a transcription and a routine edition could never light a
+ * chip no matter how much they reported. The type is `Record<JobKind, ...>` and
+ * not `Partial<...>` for the same reason: a new kind must decide its stages, and
+ * `tsc` is what asks.
+ *
+ * A PHRASE THAT IS ONLY EVER SKIPPED IS STILL A PHRASE THE WORKER WRITES. Some
+ * arrivals are conditional -- "Looking for primary sources" is not reported when
+ * the editor supplied the material, "Checking for meeting material" is a scan on
+ * a paper with no channels configured. That is fine and deliberate: the card
+ * treats every chip before the current index as done, so a skipped arrival costs
+ * a chip that lights a moment early, never a chip that never lights at all. What
+ * is NOT fine is a phrase nothing writes, which is what
+ * `job-stage-lists.test.ts` is the evidence against.
  */
-export const JOB_STAGE_LISTS: Partial<Record<JobKind, readonly string[]>> = {
+export const JOB_STAGE_LISTS: Record<JobKind, readonly string[]> = {
   /*
     The follow-up list is deliberately two arrivals long and method-agnostic:
     the three agents under this one kind (re-check, search, agenda) share the
@@ -1079,6 +1164,92 @@ export const JOB_STAGE_LISTS: Partial<Record<JobKind, readonly string[]>> = {
   reconcile: [
     "Checking the saved draft against the evidence",
     "Reconciling the draft with the saved evidence",
+  ],
+  /*
+    The scan's four arrivals. The two long passes under them are the ones the
+    owner could never see: the source fetch (up to 200 pages) and the model
+    batches. Both now report a counted step -- `Reading sources — 83 of 201`,
+    `Reading the sources with a model — batch 2 of 5` -- so the chip row moves
+    at the arrivals and the "Now:" line moves inside them, which is the same
+    division of labour the draft's list uses.
+  */
+  scan: [
+    "Checking for meeting material",
+    "Reading the sources",
+    "Reading the sources with a model",
+    "Filing the leads",
+  ],
+  /*
+    The round's four arrivals, in the order `performDarkRound` walks them:
+    research (the hop loop), synthesis, the four-question review, then the
+    brief. The hop and search sentences inside research -- `Researching hop 2/5`,
+    `Searching 3/3 on hop 2` -- move the step line without moving the chip.
+  */
+  dark: [
+    "Researching the file",
+    "Synthesizing signals",
+    "Testing explanations",
+    "Writing editor brief",
+  ],
+  /*
+    A brief reads the file it was opened for and then makes one model call. Two
+    chips, both arrivals, both written by `performBriefWork`.
+  */
+  brief: ["Reading the file", "Writing editor brief"],
+  /*
+    The editorial is the slow one, and these are the three things it does in
+    order: research the piece, write it, check the names. The document-reader
+    sentences (`Interpreting notes.pdf: part 2 of 7`) move the step line.
+  */
+  editorial: [
+    "Researching the editorial",
+    "Writing the editorial",
+    "Checking names and spellings",
+  ],
+  /*
+    The retained-PDF read: open it and count the pages, read them a batch at a
+    time, save. `Reading batch 1 of 8 · PDF pages 1-6 · 0 of 47 already saved…`
+    stays the step line inside the second chip.
+  */
+  "artifact-ocr": [
+    "Opening the retained PDF",
+    "Reading the pages with a model",
+    "Saving the pages",
+  ],
+  /*
+    Pull's six arrivals, in pipeline order. Its per-phase counted sentences
+    (`Searching 2 of 6`, `Checking official document pages · 3 of 12`) are the
+    step line inside the matching chip.
+  */
+  pull: [
+    "Opening the source page",
+    "Preparing the searches",
+    "Searching the public record",
+    "Checking official document pages",
+    "Opening candidate documents",
+    "Saving the documents",
+  ],
+  /*
+    The one kind whose work is a single external command with nothing countable
+    inside it, which is why its middle chip says what is actually happening
+    rather than inventing a batch number. See the note in
+    `textflowkit-transcribe.server.ts` for why `pct` stays null here.
+  */
+  "audio-transcribe": [
+    "Checking the retained audio",
+    "Transcribing the audio with textflowkit",
+    "Saving the transcript",
+  ],
+  /*
+    The routine edition: read the twelve-or-fewer sources, decide what today's
+    issue is, file the notices. Before FB1 this kind reported NOTHING -- no
+    stage, no step, and no heartbeat at all -- so its card would have read
+    "stalled" at 60s on a job that was working perfectly.
+  */
+  "routine-notice": [
+    "Reading the routine sources",
+    "Planning the edition",
+    "Filing the notices",
   ],
 };
 
@@ -1110,8 +1281,128 @@ export function stageIndexFor(
  */
 export function progressReporterFor(
   job: DeskJob,
-): (step: string) => Promise<void> {
-  return (step) => reportProgress(job.id, { step, stageIndex: stageIndexFor(job, step) });
+  opts: {
+    /**
+     * How often a COUNTED tick may be written. Stage arrivals and ordinary
+     * sentences are never throttled -- see the body.
+     */
+    minWriteMs?: number;
+    /** Injection seam for the throttle's clock, so a test need not wait a second. */
+    now?: () => number;
+    /**
+     * Give every arrival a percentage of its own, from its position in the
+     * stage list: "Writing the draft" is the fourth of six, so 50%.
+     *
+     * OFF BY DEFAULT, and deliberately not on for every kind. A kind that has a
+     * real count -- a scan reading 201 sources, a PDF reading 47 pages -- passes
+     * that count instead, and a bar that took the larger of "1 of 4 stages" and
+     * "12 of 201 sources" would sit still through the whole first quarter of the
+     * work. For a kind with NO countable work inside it (a draft's six
+     * arrivals, an editorial's three) the stage position is the only honest
+     * number there is, and something determinate beats the sliding segment the
+     * owner called lazy.
+     */
+    stagePct?: boolean;
+  } = {},
+): JobStepReporter {
+  const minWriteMs = opts.minWriteMs ?? PROGRESS_WRITE_MIN_MS;
+  const now = opts.now ?? (() => Date.now());
+  const stages = jobStages(job);
+  let lastWriteAt = Number.NEGATIVE_INFINITY;
+  return async (step, pct) => {
+    const stageIndex = stageIndexFor(job, step);
+    if (pct === undefined && opts.stagePct && stageIndex !== undefined && stages) {
+      pct = pctFor(stageIndex, stages.length);
+    }
+    /*
+      WHAT IS THROTTLED, AND WHAT IS NOT.
+
+      The counted tick is the one that fires per source, per page, per chunk --
+      up to two hundred times in a scan -- and it is the one that must not
+      become two hundred UPDATEs a second. So a call that carries a `pct` and is
+      NOT a stage arrival waits for the window.
+
+      An arrival is never dropped: `stageIndexFor` found it in the list, which
+      means it moves the chip row, and a chip that skips under load is a lie
+      about where the job is. An un-counted sentence (a failover note, a
+      "Switched to …") is never dropped either: those are rare and each one is
+      the only account the editor gets of something that already happened.
+    */
+    const counted = pct !== undefined && pct !== null;
+    if (counted && stageIndex === undefined && now() - lastWriteAt < minWriteMs) return;
+    lastWriteAt = now();
+    await reportProgress(job.id, { step, stageIndex, pct });
+  };
+}
+
+/**
+ * A worker's own reporter: a sentence, and optionally how far along it is.
+ *
+ * The second argument is optional on purpose. A worker that cannot count (`the
+ * brief`, a model call with no denominator) keeps writing
+ * `report("Writing editor brief")` exactly as it did, and the card draws the
+ * indeterminate bar for it; a worker that can count passes `pctFor(done,
+ * total)` and the bar becomes real. Nothing has to be threaded through the
+ * existing call sites to make the first case keep working.
+ */
+export type JobStepReporter = (step: string, pct?: number | null) => Promise<void>;
+
+/**
+ * How long a counted tick must wait before the next one. One second is the
+ * design's own figure, and it is chosen against the card rather than against
+ * the database: the card polls at 2s while anything is open, so a rate faster
+ * than one per second buys the editor nothing they can see.
+ */
+export const PROGRESS_WRITE_MIN_MS = 1000;
+
+/**
+ * Percent from a count, clamped, or null when there is nothing to divide by.
+ *
+ * `total <= 0` is null and NOT 100: a worker that has not yet learned how many
+ * pages a PDF has is not "finished", it is a worker with no denominator, and
+ * the card's honest answer for that is the indeterminate bar. Zero as a
+ * denominator would otherwise be Infinity and paint a full bar over a job that
+ * has not started.
+ */
+export function pctFor(done: number, total: number): number | null {
+  return spanPct(done, total, 0, 100);
+}
+
+/**
+ * Percent for ONE PHASE of a longer job: `done / total` mapped into the slice
+ * of the bar that phase owns.
+ *
+ * A scan has four phases and only the middle two can count, so `3 of 201
+ * sources` is not 1% of the scan -- it is a fraction of the fetch's own slice.
+ * Without this the bar would read 100% at the end of the fetch and then sit
+ * there through the model batches and the filing, which is exactly the kind of
+ * confident wrong number the indeterminate bar exists to avoid.
+ *
+ * The slice bounds are the worker's own judgement about how long each phase
+ * takes, and they are deliberately round numbers rather than measurements
+ * dressed up as facts. What they buy is a bar that only ever moves forwards.
+ */
+export function spanPct(
+  done: number,
+  total: number,
+  from: number,
+  to: number,
+): number | null {
+  if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return null;
+  const within = Math.max(0, Math.min(1, done / total));
+  return clampPct(from + (to - from) * within);
+}
+
+/**
+ * The counted step, in plain words: "Reading sources — 83 of 201".
+ *
+ * One helper rather than a template literal at each of the forty call sites, so
+ * every counted line on the desk reads the same way -- including the em dash,
+ * which the design's own copy uses and which is easy to get wrong one site at a
+ * time.
+ */
+export function countedStep(label: string, done: number, total: number): string {
+  return `${label} — ${done} of ${total}`;
 }
 
 /**

@@ -8,6 +8,8 @@ import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn,
 import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskAction } from "@/components/desk-action";
+import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
+import { DeskJobCard } from "@/components/JobCard";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -141,6 +143,8 @@ function ScanPage() {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      // FB1: the card for the scan just queued. See invalidateDeskJobs.
+      invalidateDeskJobs(qc);
     },
   });
 
@@ -156,6 +160,19 @@ function ScanPage() {
     newestRunId: last?.id ?? null,
     reportBeforePress,
   });
+  /*
+    THE RUNNING SCAN'S JOB ROW, from the one desk-jobs query (FB1, unit 4).
+
+    The page polls `scan_runs` (the run record) because that is what the history
+    list and the coverage accounting are; the CARD reads `desk_jobs`, because
+    that is where the stage list, the step, the percentage and the heartbeat
+    live. Two rows, one run -- and the job is the one the card can draw.
+  */
+  const deskJobs = useDeskJobs();
+  const scanJob =
+    (deskJobs.data ?? []).find(
+      (job) => job.kind === "scan" && (job.status === "queued" || job.status === "running"),
+    ) ?? null;
 
   return (
     <DeskShell title="Scan" kicker="Reporter pass">
@@ -254,8 +271,30 @@ function ScanPage() {
               Scans file leads only. They never draft or publish.
             </p>
           </div>
-      {scanning ? (
-        <Busy label="Fetching accepted sources, then one pass for leads. Stay on this page." />
+      {/*
+        FB1, unit 4: THE SCAN'S OWN CARD, on the screen that spends the money.
+
+        This was one shimmering `Busy` sentence -- "Fetching accepted sources,
+        then one pass for leads. Stay on this page." -- with no stage, no count,
+        no elapsed clock, no stall flag and no way to stop it, on the longest
+        and most expensive job the desk runs. The job row has carried a stage
+        list, a step and a heartbeat since FB1's unit 1; this is the card that
+        reads them.
+
+        "Stay on this page" is gone with it. It was advice the desk could not
+        keep (the job is durable and survives navigation) and it was the only
+        thing the sentence said about the wait.
+
+        Until the query answers there is a `Busy` line, because a scan can be
+        queued before its row arrives -- but it promises nothing and it names no
+        stage it does not know.
+      */}
+      {scanJob ? (
+        <div className="scan-job-card">
+          <DeskJobCard job={scanJob} />
+        </div>
+      ) : scanning ? (
+        <Busy label="Starting the scan…" />
       ) : null}
       {!scanning && stalled ? <Notice kind="err">{stalledRunCopy("scan")}</Notice> : null}
       {!scanning && !stalled && last && !last.error && last.leads_created > 0 ? (

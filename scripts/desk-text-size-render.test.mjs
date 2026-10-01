@@ -251,6 +251,18 @@ const { DeskShell } = await import(
 
       "@/components/desk-toaster": deskToasterStub,
       "@/components/desk-jobs": deskJobsUrl,
+      /*
+        FB1 units 3-4: the shell's Running box and the In-progress strip draw
+        the real card from the one job query, so both specifiers have to
+        resolve here. Neither is ever rendered by these static renders -- they
+        have no job rows -- but the module graph is what has to load.
+      */
+      "@/components/JobCard": inlineModule(
+        "export function DeskJobCard() { return null; } export function JobCard() { return null; }",
+      ),
+      "@/components/job-card-state": inlineModule(
+        "export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}",
+      ),
       "@/lib/appearance-context": appearanceContextStub,
       "@/components/dialog": dialogStub,
       "@/components/dialogs": newStoryStub,

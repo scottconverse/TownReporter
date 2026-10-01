@@ -1,6 +1,12 @@
 import { getSql, withTransaction } from "../db.ts";
 import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
-import { ensureJobsSchema, type DeskJob } from "./jobs.ts";
+import {
+  countedStep,
+  ensureJobsSchema,
+  progressReporterFor,
+  spanPct,
+  type DeskJob,
+} from "./jobs.ts";
 import { ensureRoutineNoticeAutomationSchema } from "./routine-notice-automation.ts";
 import {
   assertRoutineNoticeCheckStillBound,
@@ -195,8 +201,23 @@ export async function performRoutineNoticeWorkWith(
     throw new Error("Routine edition source selection is unavailable.");
   const groups: RoutineNoticeCheckGroup[] = [];
   const check = deps.check ?? checkRoutineNoticeSourceForOwner;
-  for (const source of sources) {
+  /*
+    FB1, unit 2: this worker used to say NOTHING at all while it ran.
+
+    No stage, no step, and -- because `beat_at` is only written by
+    `reportProgress` -- no heartbeat either. Its card would have called a
+    perfectly healthy routine edition "stalled" at sixty seconds and offered the
+    editor "Retry on next model" for a job that was mid-fetch. Twelve sources,
+    each one a real network read, is not instant and is not invisible any more.
+  */
+  const report = progressReporterFor(job);
+  await report("Reading the routine sources", spanPct(0, sources.length, 0, 60));
+  for (const [sourceIndex, source] of sources.entries()) {
     await assertRoutineRunCanContinue(job, run);
+    await report(
+      countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
+      spanPct(sourceIndex + 1, sources.length, 0, 60),
+    );
     const result = await check(
       { userId: run.actor, newsroomId: run.newsroom_id },
       {
@@ -210,6 +231,7 @@ export async function performRoutineNoticeWorkWith(
     groups.push(result.check);
   }
   await deps.beforeCommit?.();
+  await report("Planning the edition", 70);
   const notices: StructurallyValidRoutineNotice[] = [];
   for (const group of groups) {
     const source = sources.find(
@@ -284,6 +306,7 @@ export async function performRoutineNoticeWorkWith(
   let plans = planRoutineEditions(planned.eligible, localDate);
   if (new Date(`${localDate}T12:00:00Z`).getUTCDay() !== 5)
     plans = plans.filter((p) => p.channel !== "weekend");
+  await report("Filing the notices", 90);
   await withTransaction(async (tx) => {
     const [claim] = await tx.query<{ claim_token: string | null; status: string }>(
       "select claim_token,status from desk_jobs where id=$1 and newsroom_id=$2 for update",

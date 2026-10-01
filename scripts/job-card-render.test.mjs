@@ -46,7 +46,7 @@ const inlineModule = (source) =>
 
 const jobProgressStub = inlineModule(`
   export async function cancelStoryJob() { throw new Error("not used in a render test"); }
-  export async function listStoryJobProgress() { return []; }
+  export async function listDeskJobs() { return []; }
   export async function retryStoryJob() { throw new Error("not used in a render test"); }
 `);
 
@@ -284,4 +284,77 @@ test("queued is a running job that has not started yet", () => {
 test("a model switch on the way past is reported, not hidden", () => {
   const html = render({ job: job({ failoverNote: "Codex hit its usage limit" }) });
   assert.match(html, /Model switch: Codex hit its usage limit/);
+});
+
+/*
+  FB1, unit 4: THE SCAN'S CARD.
+
+  The kind the owner was actually complaining about. Before FB1 a scan had no
+  stage list seeded at claim, no step, no percentage and no heartbeat, so this
+  card could only ever draw its indeterminate segment with an empty chip row --
+  and on the Scan screen there was no card at all, only the sentence "Fetching
+  accepted sources, then one pass for leads. Stay on this page."
+
+  These two tests render what the scan worker now reports: a counted step inside
+  its own slice of the bar, the four scan arrivals, and the stall state when the
+  worker goes quiet.
+*/
+const scanJob = (over = {}) =>
+  job({
+    id: 77,
+    leadId: 0,
+    kind: "scan",
+    title: "Scanning the watch list",
+    headline: null,
+    stages: [
+      "Checking for meeting material",
+      "Reading the sources",
+      "Reading the sources with a model",
+      "Filing the leads",
+    ],
+    stageIndex: 1,
+    pct: 43,
+    step: "Reading sources — 6 of 8",
+    doneText: "The scan is done",
+    openLabel: "Open the scan",
+    canRetry: false,
+    ...over,
+  });
+
+test("a running scan shows its live count on a determinate bar", () => {
+  const html = render({ job: scanJob() });
+  assert.match(html, /Scanning the watch list/);
+  assert.match(html, /Now: Reading sources — 6 of 8/);
+  // The count is a real percentage of the scan, so the bar is determinate.
+  assert.match(html, /class="job-card-fill" style="width:43%"/);
+  assert.doesNotMatch(html, /indeterminate/);
+  // The chips the report found unreachable for this kind: eight of the eleven
+  // kinds were seeded with no list at all, so no scan ever lit one.
+  assert.match(html, /job-card-chip done">✓ Checking for meeting material/);
+  assert.match(html, /job-card-chip cur">Reading the sources/);
+  assert.match(html, /job-card-chip">Filing the leads/);
+  assert.match(html, />Cancel</);
+  assert.doesNotMatch(html, />Retry</);
+});
+
+test("a scan whose worker has gone quiet offers the stall box and Cancel", () => {
+  const html = render({ job: scanJob({ beatAt: at(74), step: "Reading sources — 6 of 8" }) });
+  assert.match(html, /job-card state-stalled/);
+  assert.match(html, /No activity for 1:14\./);
+  assert.match(html, />Keep waiting</);
+  assert.match(html, />Cancel</);
+});
+
+test("a scan that failed with the editor's reason offers no phantom Retry", () => {
+  const html = render({
+    job: scanJob({ status: "failed", error: "Cancelled by the editor", endedAt: at(3) }),
+    onRetry: undefined,
+    onRetryNext: undefined,
+  });
+  assert.match(html, /job-card state-failed/);
+  assert.match(html, /Cancelled by the editor/);
+  // `canRetry` is false for every kind whose request is not the row itself, and
+  // a scan is one of them -- so a failed scan gets the honest reason and no
+  // button that would re-run something the editor did not ask for.
+  assert.doesNotMatch(html, />Retry/);
 });

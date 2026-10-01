@@ -1,8 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { DeskMoreMenu, DeskShell, JobSlot } from "@/components/desk-chrome";
-import { useNowMs, type RunningJob } from "@/components/desk-jobs";
+import { DeskMoreMenu, DeskShell } from "@/components/desk-chrome";
+import { DeskJobCard } from "@/components/JobCard";
+import { useDeskJobs } from "@/components/job-card-state";
+import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
 import {
@@ -32,9 +34,12 @@ export const Route = createFileRoute("/desk/drafts")({ component: DraftsPage });
   the rule and a wrong word here tells an editor a story is further along than
   it is.
 
-  A running row shows the job's own live detail inline. That slot is lane 2's
-  Job card (`JobSlot` in desk-chrome.tsx): this screen hands it the job and
-  renders nothing else, so the swap is one line when lane 2 lands.
+  A running row shows the job's own live detail inline -- the DRAWN compact Job
+  card, FB1, from the one `useDeskJobs()` query. It used to draw `JobSlot`, a
+  dashed stand-in whose own comment said it was a placeholder: a title, an
+  elapsed clock and the `stage` text, with no bar, no chips and -- the report's
+  finding -- no Cancel, so a draft started from this screen could only be
+  stopped from its story page.
 */
 
 type DraftRow = Awaited<ReturnType<typeof listDraftsDesk>>[number];
@@ -121,6 +126,19 @@ function DraftsPage() {
   const counts = query.data?.counts;
   const anyRunning = rows.some((row) => row.job_status === "running" || row.job_status === "queued");
   const nowMs = useNowMs(anyRunning);
+  /*
+    THE ONE JOB QUERY (FB1, unit 3). The list rows carry their own snapshot of
+    the job (`job_status`, `job_stage`, ...), which is what decides the row's
+    state chip; the LIVE card inside a running row is drawn from the same
+    `useDeskJobs()` every other screen reads, so the bar, the chips, the stall
+    rule and Cancel are the drawn card's and not a second rendering of the same
+    row. Keyed by lead, because that is the unit this screen lists.
+  */
+  const deskJobs = useDeskJobs();
+  const liveJobFor = (leadId: number) =>
+    (deskJobs.data ?? []).find(
+      (job) => job.leadId === leadId && (job.kind === "draft" || job.kind === "reconcile"),
+    ) ?? null;
 
   // The window has narrowed the list already, so every row that arrives is
   // shown; the elapsed time is read here only for the rows on screen.
@@ -206,14 +224,7 @@ function DraftsPage() {
       ) : (
         <div>
           {shown.map(({ row, state }) => {
-            const job: RunningJob = {
-              id: row.lead_id,
-              headline: row.headline,
-              status: String(row.job_status ?? ""),
-              stage: String(row.job_stage ?? ""),
-              started_at: row.job_started_at,
-              updated_at: row.job_updated_at ?? row.updated_at,
-            };
+            const liveJob = liveJobFor(row.lead_id);
             const action = deskDraftAction(state);
             const primary = state.key === "ready" || state.key === "failed";
             return (
@@ -260,10 +271,19 @@ function DraftsPage() {
                 </span>
                 {state.running ? (
                   <div className="drafts-job">
-                    {/* LANE-2 SLOT: today this is the dashed stand-in in
-                        desk-chrome.tsx; lane 2's compact Job card replaces its
-                        body and nothing here changes. */}
-                    <JobSlot job={job} nowMs={nowMs} compact />
+                    {/* The drawn compact card, from `useDeskJobs()`. When the
+                        query has not answered yet there is nothing to draw, and
+                        the row's own state chip above already says the draft is
+                        being written -- a stand-in bar would be the one thing
+                        this screen is not allowed to invent. */}
+                    {liveJob ? (
+                      <DeskJobCard
+                        job={liveJob}
+                        compact
+                        viewLabel="Open your story"
+                        onNavigate={() => openWorkbench(row.lead_id)}
+                      />
+                    ) : null}
                   </div>
                 ) : null}
               </div>

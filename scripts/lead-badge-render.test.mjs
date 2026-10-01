@@ -720,6 +720,17 @@ const { Chip } = await import(
 
       "@/components/desk-toaster": deskToasterStub,
       "@/components/desk-jobs": deskJobsUrl,
+      /*
+        FB1 units 3-4: the shell's Running box draws the real card from the one
+        job query, so both specifiers have to resolve for desk-chrome.tsx to
+        load. Nothing here starts or renders a job.
+      */
+      "@/components/JobCard": inlineModule(
+        "export function DeskJobCard() { return null; } export function JobCard() { return null; }",
+      ),
+      "@/components/job-card-state": inlineModule(
+        "export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}",
+      ),
       "@/lib/appearance-context": appearanceContextStub,
       /*
         Redesign phase 2a: the shell's shortcut sheet ("?") is the phase 0
@@ -743,7 +754,7 @@ const { Chip } = await import(
       ),
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
-        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; } export async function listFollowUps() { return []; }",
+        "export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       /*

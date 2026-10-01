@@ -161,11 +161,14 @@ import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text"
 import {
   annotateScanRowsWithStallStatus,
   enqueueJob,
+  countedStep,
   findOpenJob,
   kickJobs,
   latestJob,
+  PROGRESS_WRITE_MIN_MS,
   progressReporterFor,
   runLooksStalled,
+  spanPct,
   setJobFailoverNote,
   setJobModelChoice,
   setJobModelRuntime,
@@ -1343,6 +1346,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   const meetingChannels = paperConfig.youtubeChannels ?? [];
+  /*
+    FB1: the scan's first arrival, and the honest sentence even when the paper
+    has no channels configured -- the worker does look, finds nothing to look
+    at, and moves on. Before this the whole kind had no stage list at all, so
+    the run that spends the most money on the desk drew no chip row.
+  */
+  await reportStage("Checking for meeting material");
   if (meetingChannels.length > 0) {
     try {
       const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
@@ -1486,6 +1496,54 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   `;
   const expandForScope = sectionSnapshot !== null || scopeHistory.has_section_scans;
 
+  /*
+    FB1, unit 1: the fetch pass is the scan's longest silence.
+
+    Up to two hundred pages, six at a time, and until this the whole pass
+    reported nothing at all -- not a stage, not a count, not a heartbeat. The
+    card could only say "Working…" for as long as it took, which on a real watch
+    list is minutes, and the run row in the database kept reading zero fetched
+    until the very end (see `noteSourceProgress`).
+
+    Two writes, deliberately: `reportStage` is the throttled job progress (the
+    card's bar and "Now:" line), and the run-row write below is what the Scan
+    and Sources screens poll -- they read `scan_runs`, not `desk_jobs`.
+  */
+  let attemptedCount = 0;
+  let lastLiveWriteAt = 0;
+  const noteSourceProgress = async () => {
+    attemptedCount += 1;
+    /*
+      The fetch is the scan's second arrival, so its count fills 5-55 of the
+      bar and not 0-100: the model batches and the filing come after it, and a
+      bar that filled the moment the last page was read would be lying about
+      the part of the scan that spends the money.
+    */
+    await reportStage(
+      countedStep("Reading sources", attemptedCount, watchSlice.length),
+      spanPct(attemptedCount, watchSlice.length, 5, 55),
+    );
+    const at = Date.now();
+    if (at - lastLiveWriteAt < PROGRESS_WRITE_MIN_MS) return;
+    lastLiveWriteAt = at;
+    /*
+      THE LIVE COUNT ON THE RUN ROW.
+
+      The owner's complaint was that a working scan read "0 fetched · No
+      sources were fetched" -- `scanCountsLine`/`scanZeroWhy` off the row that
+      is only written when the run finishes. The count is already in this
+      process (`fetchedCount`), so the run says it as it goes. Guarded on
+      `finished_at is null` so a receipt that has already settled is never
+      reopened, and throttled with the progress write above rather than on its
+      own clock.
+    */
+    await sql`
+      update scan_runs
+      set sources_attempted = ${watchSlice.length}, sources_fetched = ${fetchedCount}
+      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+    `.catch(() => undefined);
+  };
+  await reportStage("Reading the sources");
   await mapLimit(watchSlice, 6, async (src) => {
     await deps.scheduledGuard?.();
     try {
@@ -1530,6 +1588,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         extras,
         changed,
       });
+      await noteSourceProgress();
     } catch (err) {
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
@@ -1561,6 +1620,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             )
             .catch(() => undefined);
       }
+      // A source that failed was still a source read: the count moves for it
+      // too, or a watch list of dead links would look like no progress at all
+      // right up to the failure.
+      await noteSourceProgress();
     }
   });
 
@@ -1642,8 +1705,19 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const batchResults: import("./schema.ts").ParsedScanResult[] = [];
   let batchesFailed = 0;
   let lastBatchError: string | null = null;
-  for (const batch of batches) {
+  /*
+    The second countable pass. `buildScanBatches` has already split the fetched
+    text into bounded batches, so the model phase knows exactly how many calls
+    it is going to make -- which is the one place in a scan where a percentage
+    is a real fraction of the work rather than a guess.
+  */
+  await reportStage("Reading the sources with a model", 55);
+  for (const [batchIndex, batch] of batches.entries()) {
     await deps.scheduledGuard?.();
+    await reportStage(
+      countedStep("Reading the sources with a model", batchIndex + 1, batches.length),
+      spanPct(batchIndex + 1, batches.length, 55, 92),
+    );
     /*
       Between batch boundaries is where a scan can be stopped: the batches
       already read are committed, and stopping here leaves the job's real
@@ -2003,6 +2077,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     return { leadsCreated };
   };
 
+  /*
+    The last arrival, and the one that spends the most time in the database:
+    matching every returned lead against the existing ones, writing the new
+    leads, filing the proposed sources and recording the snapshots. It runs
+    inside one transaction, so nothing inside it can report -- the chip is what
+    the editor has for this stretch.
+  */
+  await reportStage("Filing the leads", 95);
   let committed: { leadsCreated: number };
   try {
     await deps.beforeScheduledCommit?.();
@@ -2110,7 +2192,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     argument is redundant here rather than ignored -- and it is the row, not the
     id, that carries the stage list.
   */
-  const reportStage = progressReporterFor(job);
+  /*
+    FB1: `stagePct` is on for the draft because its six arrivals are the only
+    counts a draft has. Its per-document sentences ("Interpreting notes.pdf:
+    part 2 of 7") and its failover notes are not arrivals and pass no
+    percentage, so the bar holds where the last arrival put it rather than
+    jumping around between packet boundaries.
+  */
+  const reportStage = progressReporterFor(job, { stagePct: true });
   const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
   const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
@@ -3003,45 +3092,20 @@ export const draftLead = createServerFn({ method: "POST" })
     });
   });
 
-/**
- * "Write a story" — the one-box path on the Desk landing page, mirroring
- * Opinion's single textarea instead of the Queue's four-field form. Any
- * editor may use it, exactly like `fileLead` and `draftLead`: it parses the
- * pasted text into a lead (see `write-story.ts`), files it with the full
- * text kept as Reporting notes scratch so the draft reads it as evidence,
- * then hands off to the same commit boundary Story uses so a provider
- * refusal comes back structured and nothing is spent.
- */
-export const listRecentStoryWork = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const { ensureJobsSchema } = await import("./jobs.ts");
-    await ensureJobsSchema();
-    const sql = await getSql();
-    return sql<{
-      id: number;
-      lead_id: number;
-      headline: string;
-      status: string;
-      stage: string;
-      /*
-        `started_at` is read so the nav's Running box can show elapsed time
-        (redesign phase 2a, README "Shell for all desk screens"). It is set
-        when a worker claims the job and is null while the job is still queued,
-        so callers fall back to `updated_at` for the queued case. Read-only:
-        no column is added or changed here.
-      */
-      started_at: string | null;
-      updated_at: string;
-    }>`
-      select * from (
-        select distinct on (j.subject_id) j.id, j.subject_id as lead_id, coalesce((select nullif(d.headline, '') from drafts d where d.lead_id=l.id and d.newsroom_id=l.newsroom_id order by d.updated_at desc,d.id desc limit 1), l.headline) as headline, j.status, j.stage, j.started_at, j.updated_at
-        from desk_jobs j join leads l on l.id=j.subject_id and l.newsroom_id=j.newsroom_id
-        where j.newsroom_id=${owned(context)} and j.kind='draft' and l.status in ('new','drafted','held')
-        order by j.subject_id,j.id desc
-      ) recent order by updated_at desc limit 5
-    `;
-  });
+/*
+  `listRecentStoryWork` USED TO LIVE HERE, and it is gone (FB1, unit 3).
+
+  It returned at most five `kind='draft'` rows joined to leads, and it was the
+  shell's Running box and Today's "In progress" strip. Three things were wrong
+  with it, and the report measured all three: it could not see ten of the eleven
+  kinds, so a running scan or dig showed no card anywhere; it drew the same rows
+  the phase 3 `desk_jobs` query was already polling, on a 5 s clock of its own;
+  and its `order by updated_at desc limit 5` meant a long-running draft could be
+  pushed out of the window by five recently-touched finished ones.
+
+  `listDeskJobs` in ./job-progress.ts is the replacement -- every kind, open
+  rows first, one reader for the whole desk -- and both callers now use it.
+*/
 
 /*
   The drafts screen's list (redesign phase 2a, README "4. Drafts").

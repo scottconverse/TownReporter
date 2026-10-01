@@ -27,7 +27,7 @@ import {
   siteOwnDocLinks,
 } from "./pull-plan.ts";
 import { audit } from "./ops.ts";
-import { setJobStage, throwIfJobCancelled, type DeskJob } from "./jobs.ts";
+import { pctFor, progressReporterFor, throwIfJobCancelled, type DeskJob } from "./jobs.ts";
 
 export const PULL_RUN_DEADLINE_MS = 120_000;
 
@@ -227,7 +227,11 @@ export type PullPipelineDeps = {
     stage exists at these boundaries already and the desk just was not being
     told about it. Optional so the pipeline's own tests need not supply a job.
   */
-  reportStage?: (stage: string) => Promise<void>;
+  /**
+   * FB1: the second argument is the pull's percentage. Optional, so every
+   * existing stub and caller keeps compiling and working unchanged.
+   */
+  reportStage?: (stage: string, pct?: number | null) => Promise<void>;
   /*
     The desk's Cancel, as a check the caller owns: this pipeline has no job row
     of its own to read (`runPullPipeline` is driven by receipts, and its tests
@@ -256,15 +260,28 @@ export async function runPullPipeline(
   receipt.startedAt = receipt.startedAt ?? new Date(now()).toISOString();
   let terminal = false;
 
-  const save = async (stage: string) => {
+  const save = async (stage: string, pct?: number | null) => {
     // A provider callback can arrive after withinDeadline() has returned.
     // Never let that late callback overwrite a terminal deadline/stop receipt.
     if (terminal) return;
     receipt.stage = stage;
     receipt.updatedAt = new Date(now()).toISOString();
     await deps.saveReceipt(receipt);
-    await deps.reportStage?.(stage);
+    await deps.reportStage?.(stage, pct);
   };
+  /*
+    FB1: Pull already knew every denominator -- it prints "Searching 2 of 6" on
+    the step line -- so the percentage is read off the same numbers rather than
+    a second count kept alongside them.
+
+    Three phases, each a third of the bar: the searches, the official document
+    pages, then the candidate documents. `within` is capped at 1 so a phase that
+    runs past its own list (a resumed run, a break at the 12-page cap) cannot
+    push the bar into the next phase's territory, and the phases run in a fixed
+    order, so the bar only ever moves forwards.
+  */
+  const phasePct = (phase: 0 | 1 | 2, done: number, total: number) =>
+    pctFor(phase + (total > 0 ? Math.min(1, done / total) : 0), 3);
   const checkpoint = receipt.checkpoint;
   const queryResults = (checkpoint.queryResults ??= []);
   const indexPageResults = (checkpoint.indexPageResults ??= []);
@@ -352,8 +369,10 @@ export async function runPullPipeline(
     );
   }
 
+  await save("Preparing the searches");
   await save(`Preparing ${receipt.checkpoint.queries.length} searches`);
   try {
+    await save("Searching the public record", phasePct(0, 0, receipt.checkpoint.queries.length));
     while (receipt.checkpoint.queryIndex < receipt.checkpoint.queries.length) {
       if (await shouldStop()) {
         return finish("stopped", stoppedStage("editor"));
@@ -367,7 +386,10 @@ export async function runPullPipeline(
         continue;
       }
       receipt.counters.searchesAttempted += 1;
-      await save(`Searching ${current + 1} of ${receipt.checkpoint.queries.length}`);
+      await save(
+        `Searching ${current + 1} of ${receipt.checkpoint.queries.length}`,
+        phasePct(0, current + 1, receipt.checkpoint.queries.length),
+      );
       try {
         const attempt = await withinDeadline(
           (signal) =>
@@ -425,6 +447,7 @@ export async function runPullPipeline(
       receipt.checkpoint.indexPages = docIndexPages(hosts);
       receipt.checkpoint.indexPagesPrepared = true;
       fillMarkers(indexPageResults, receipt.checkpoint.indexPages.length);
+      await save("Checking official document pages", phasePct(1, 0, receipt.checkpoint.indexPages.length));
       await save(`Checking official document pages · 0 of ${receipt.checkpoint.indexPages.length}`);
     }
     fillMarkers(indexPageResults, receipt.checkpoint.indexPages.length);
@@ -447,6 +470,7 @@ export async function runPullPipeline(
       receipt.counters.indexPagesChecked += 1;
       await save(
         `Checking official document pages · ${current + 1} of ${receipt.checkpoint.indexPages.length}`,
+        phasePct(1, current + 1, receipt.checkpoint.indexPages.length),
       );
       try {
         const got = await withinDeadline((signal) => deps.ingest(page, signal), deadlineAt, now);
@@ -485,6 +509,7 @@ export async function runPullPipeline(
       ).slice(0, 8);
       receipt.checkpoint.rankedPrepared = true;
       fillMarkers(documentOutcomes, receipt.checkpoint.rankedUrls.length);
+      await save("Opening candidate documents", phasePct(2, 0, receipt.checkpoint.rankedUrls.length));
       await save(`Opening candidate documents · 0 of ${receipt.checkpoint.rankedUrls.length}`);
     }
     fillMarkers(documentOutcomes, receipt.checkpoint.rankedUrls.length);
@@ -508,6 +533,7 @@ export async function runPullPipeline(
       receipt.counters.documentsOpened += 1;
       await save(
         `Opening candidate document · ${current + 1} of ${receipt.checkpoint.rankedUrls.length}`,
+        phasePct(2, current + 1, receipt.checkpoint.rankedUrls.length),
       );
       try {
         const got = await withinDeadline((signal) => deps.ingest(url, signal), deadlineAt, now);
@@ -555,6 +581,9 @@ export async function runPullPipeline(
       await save(`Checked candidate ${current + 1} of ${receipt.checkpoint.rankedUrls.length}`);
     }
 
+    // The last arrival: everything the pull found is written under the story
+    // here, and on a slow disk that is long enough to be worth a chip.
+    await save("Saving the documents", phasePct(2, 1, 1));
     return finish(
       "completed",
       receipt.checkpoint.documents.length
@@ -761,6 +790,13 @@ export async function performPullWork(job: DeskJob) {
   `;
   const receipt = parsePullReceipt(stored[0]?.result_json);
   if (!receipt) throw new Error("Pull job is missing its saved request");
+  /*
+    FB1: Pull had the best progress text on the desk and no card to draw it on.
+    The reporter carries both halves now -- the sentence (which resolves against
+    JOB_STAGE_LISTS.pull, so the arrival phrases light their chips) and the
+    percentage -- through the one seam the pipeline already reports on.
+  */
+  const reportPull = progressReporterFor(job);
   try {
     receipt.checkpoint ??= await loadPullContext(job, receipt);
     const final = await runPullPipeline(receipt as PullReceipt & { checkpoint: PullCheckpoint }, {
@@ -772,7 +808,7 @@ export async function performPullWork(job: DeskJob) {
       saveReceipt: (next) => saveJobReceipt(job, next),
       // Every receipt boundary is also a beat: the search loop, the index
       // pages and the document fetches all pass through `save`.
-      reportStage: (stage) => setJobStage(job.id, stage),
+      reportStage: (stage, pct) => reportPull(stage, pct),
       // The editor's Cancel ends the job with "Cancelled by the editor" like
       // every other kind, so the card shows one state for one act.
       assertNotCancelled: () => throwIfJobCancelled(job.id),
